@@ -46,13 +46,13 @@ final class AiDimensionGuidancePlanner
         if (!$requestedActions && ($intent['needs_metric_choice'] ?? false) === true) $metric = null;
         $terms = $projection['date_terms'] ?? [];
         if (count($terms) > 1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
-        // Dimensions bypass the generic workflow compiler, so they must
-        // apply the same neutral first-answer time policy themselves. A
-        // missing period means the current business day; an explicit or
-        // ambiguous period was already validated above and is never replaced.
+        // Dimensions bypass the generic compiler but preserve its decision:
+        // a broad first question keeps its missing period for guidance, while
+        // a precise question can use the registered current-day default.
         $range = $terms
             ? (new AiWorkflowPlanner())->normalizePeriod($terms[0], $today)
-            : (new AiWorkflowPlanner())->normalizePeriod(['code'=>'TODAY'], $today);
+            : (!empty($projection['require_period_clarification']) ? null
+                : (new AiWorkflowPlanner())->normalizePeriod(['code'=>'TODAY'], $today));
         // Result shape belongs to the model's generic language understanding,
         // not to a project/member/person phrase table or a business scene.
         $ranking=$intent['ranking']??null;
@@ -76,7 +76,8 @@ final class AiDimensionGuidancePlanner
             (array)($intent['metric_choice_candidates']??[]),array_keys($candidates)
         )),0,3));
         return $this->next(['object_kind'=>$objectKind,'metric'=>$metric,'candidates'=>$candidates,'range'=>$range,
-            'direction'=>$direction,'limit'=>$limit,'format'=>$format,'today'=>$today,'recommended_metric_codes'=>$recommended]);
+            'direction'=>$direction,'limit'=>$limit,'format'=>$format,'today'=>$today,'recommended_metric_codes'=>$recommended,
+            'no_filler_guidance'=>($projection['no_filler_guidance']??null)!==false]);
     }
 
     public function choose(array $envelope, array $choices): array
@@ -120,7 +121,7 @@ final class AiDimensionGuidancePlanner
             }
             // A short candidate set is a reason to offer correction actions,
             // not to guess another business measurement or publish an empty card.
-            $options=AiSemanticRecommendationPlanner::completeCardOptions($options);
+            $options=AiSemanticRecommendationPlanner::completeCardOptions($options,empty($state['no_filler_guidance']));
             foreach ($state['candidates'] as $code=>$candidate) if (!in_array($code,$recommended,true)) {
                 $options[]=['value'=>$code,'label'=>$candidate['name'].'：'.$candidate['summary'],'recommended'=>false];
             }

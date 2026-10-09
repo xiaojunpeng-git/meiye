@@ -14,57 +14,53 @@ final class MemberAnalysisObjectServices
     public function __construct(callable $queryFactory, callable $authorize)
     { $this->query=$queryFactory; $this->authorize=$authorize; }
 
-    /** @return array{objects:array<int,array<string,mixed>>,scope:array<string,mixed>} */
-    public function mentioned(string $question, array $metrics): array
+    /** Find only the authorized labels present in the wording before the
+     * external model call. Grouping by label prevents a common name with many
+     * members from exhausting the former 32-identity catalogue. No UID or
+     * phone crosses this masking boundary. */
+    public function maskingLabelsConversation(array $questions): array
     {
-        return $this->mentionedConversation([$question],$metrics);
+        $scope=$this->scope();$terms=$this->conversationTerms($questions);
+        if ($terms===[]) return [];
+        $labels=[];
+        foreach (['real_name','nickname'] as $column) {
+            $rows=$this->members($scope)->whereIn('u.'.$column,$terms)
+                ->field('u.'.$column)->group('u.'.$column)->limit(129)->select()->toArray();
+            if (count($rows)>128) throw new \RuntimeException('AI_OBJECT_SCOPE_TOO_LARGE');
+            foreach ($rows as $row) {
+                $label=trim((string)($row[$column]??''));
+                if ($label!=='' && in_array($label,$terms,true)) $labels[$label]=true;
+            }
+            if (count($labels)>128) throw new \RuntimeException('AI_OBJECT_SCOPE_TOO_LARGE');
+        }
+        if (call_user_func($this->authorize)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
+        return array_keys($labels);
     }
 
-    /**
-     * Resolves labels across one bounded conversation with a single
-     * permission-scoped query.  The former caller queried once per historical
-     * turn, so response time grew linearly even when none of those turns named
-     * a member.  Combining only exact fragments changes no matching or access
-     * rule; it removes duplicate scans while retaining one final authority
-     * recheck for the whole frozen catalogue.
-     *
-     * @param array<int,string> $questions
-     * @return array{objects:array<int,array<string,mixed>>,scope:array<string,mixed>}
-     */
-    public function mentionedConversation(array $questions, array $metrics): array
+    /** Bind one exact local name, optionally narrowed by a full phone. Two
+     * matching authorized rows are enough to prove ambiguity; never return a
+     * directory or guessed identity to the model or customer. */
+    public function exactCandidates(string $name,array $metrics,?string $phone=null): array
     {
         $scope=$this->scope();
-        if (!$metrics) return ['objects'=>[],'scope'=>$scope];
-        // The gateway exposes at most six historical questions plus the
-        // current one. Enforce the same privacy/performance boundary here so
-        // another caller cannot turn this helper into a directory scan.
-        if (count($questions)>7) $questions=array_slice($questions,-7);
-        $all=[];
-        foreach ($questions as $question) {
-            if (!is_string($question) || $question==='') continue;
-            foreach ($this->terms($question) as $term) {
-                $all[$term]=true;
-                if (count($all)>=512) break 2;
-            }
+        if ($name==='' || mb_strlen($name,'UTF-8')>24 || ($phone!==null && preg_match('/^1[3-9][0-9]{9}$/D',$phone)!==1)) {
+            throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
         }
-        $terms=array_keys($all);sort($terms,SORT_STRING);
-        if (!$terms) return ['objects'=>[],'scope'=>$scope];
-        $query=$this->members($scope)->where(function($where)use($terms):void {
-            $where->whereIn('u.real_name',$terms)->whereOr('u.nickname','in',$terms);
-        })->field('u.uid,u.real_name,u.nickname')->order('u.uid','asc')->limit(33);
-        $rows=$query->select()->toArray();
-        if (count($rows)>32) throw new \RuntimeException('AI_OBJECT_SCOPE_TOO_LARGE');
+        $query=$this->members($scope)->where(function($where)use($name):void {
+            $where->where('u.real_name',$name)->whereOr('u.nickname',$name);
+        });
+        if ($phone!==null) $query->where('u.phone',$phone);
+        $rows=$query->field('u.uid,u.real_name,u.nickname')->order('u.uid','asc')->limit(2)->select()->toArray();
+        if (call_user_func($this->authorize)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
         $objects=[];
         foreach ($rows as $row) {
             $uid=(int)($row['uid']??0);$real=trim((string)($row['real_name']??''));$nickname=trim((string)($row['nickname']??''));
+            if ($uid<1 || $real!==$name && $nickname!==$name) continue;
             $label=$real!==''?$real:$nickname;
-            if ($uid<1 || $label==='' || !in_array($label,$terms,true) && !in_array($nickname,$terms,true)) continue;
-            $aliases=[]; if ($nickname!=='' && $nickname!==$label) $aliases[]=$nickname;
-            $objects['member:'.$uid]=['ref'=>'member:'.$uid,'kind'=>'member','label'=>$label,'aliases'=>$aliases,
+            $objects[]=['ref'=>'member:'.$uid,'kind'=>'member','label'=>$label,'aliases'=>$nickname!==''&&$nickname!==$label?[$nickname]:[],
                 'version'=>hash('sha256',$uid."\0".$real."\0".$nickname),'relations'=>array_values($metrics)];
         }
-        if (call_user_func($this->authorize)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
-        return ['objects'=>array_values($objects),'scope'=>$scope];
+        return $objects;
     }
 
     /** Rebuilds the current authoritative member/store relation for a frozen reference. */
@@ -138,6 +134,21 @@ final class MemberAnalysisObjectServices
             ->whereIn('u.uid',function($relation)use($scope):void {
                 $relation->name('store_user')->where('status',1)->whereIn('store_id',$scope['store_ids'])->field('uid');
             });
+    }
+
+    /** Shared bounded fragment extraction for masking and legacy catalogues. */
+    private function conversationTerms(array $questions): array
+    {
+        if (count($questions)>7) $questions=array_slice($questions,-7);
+        $all=[];
+        foreach ($questions as $question) {
+            if (!is_string($question) || $question==='') continue;
+            foreach ($this->terms($question) as $term) {
+                $all[$term]=true;
+                if (count($all)>=512) break 2;
+            }
+        }
+        $terms=array_keys($all);sort($terms,SORT_STRING);return $terms;
     }
 
     /**

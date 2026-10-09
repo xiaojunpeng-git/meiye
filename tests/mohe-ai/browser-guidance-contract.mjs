@@ -15,11 +15,11 @@ function step(round, max, fields = [metric], extra = {}) {
     max_clarification_rounds: max, question: '请选择第 ' + round + ' 项条件', fields,
     confirmed_summary: [{ label: '范围', value: '本店' }, { label: '期间', value: '今天' }], revisable_steps: [], ...extra };
 }
-function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, delayedClarify = false, delayedExecute = false, revisable = false, partial = false, failureCard = false, failureReason = 'AI_INTENT_PARTIAL', disabled = false, createError = null } = {}) {
+function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, delayedClarify = false, delayedExecute = false, revisable = false, partial = false, failureCard = false, failureReason = 'AI_INTENT_PARTIAL', disabled = false, createError = null, presentation = 'drawer', expireAfterDraft = false, lateExpiry = false } = {}) {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://guidance-fixture.test' });
   dom.window.HTMLElement.prototype.attachShadow = function () { const root = dom.window.document.createElement('section'); this.appendChild(root); Object.defineProperty(this, 'shadowRoot', { value: root }); return root; };
   globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.crypto = webcrypto;
-  const calls = []; let state, count = 0, release, first = true;
+  const calls = []; let state, count = 0, release, first = true, restarted = false;
   function guided(round) {
     const extra = revisable && round > 1 ? { revisable_steps: [{ id: 'step-1', question: '修改最初指标', fields: [metric], choices: { metric_code: 'cash_performance' } }] } : {};
     const c = step(round, rounds, fields || [metric], extra);
@@ -29,19 +29,24 @@ function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, d
   const request = async (method, path, payload) => {
     calls.push({ method, path, payload: payload ? JSON.parse(JSON.stringify(payload)) : null });
     if (path === '/bootstrap') return { enabled: !disabled, can_configure: true, disabled_reason: disabled ? 'AI_NOT_CONFIGURED' : '', identity_key: 'fixture:store:manager', window_token: 'window', guidance_schema_version: GUIDANCE_SCHEMA, max_clarification_rounds: rounds, capabilities: { metric_codes: ['cash_performance', 'consume_amount'], output_formats: ['screen'] } };
-    if (path === '/runs') { if (createError) throw Object.assign(new Error(createError), { responseKnown: true }); return state = { run_id: 'run', generation: 1, version: 1, run_delivery_token: 'delivery', status: 'RECEIVED' }; }
+    if (path === '/runs') { restarted = !!payload.clarification_restart; if (createError) throw Object.assign(new Error(createError), { responseKnown: true }); return state = { run_id: restarted ? 'restart-run' : 'run', generation: 1, version: 1, run_delivery_token: 'delivery', status: 'RECEIVED' }; }
     if (path.endsWith('/execute')) {
+      if (restarted) return state = { ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '恢复查询完成' } };
       if (partial) return state = { ...state, version: state.version + 1, status: 'FAILED', reason: failureReason, message: failureCard ? '这次没能给出可靠结果。请选择一种方式继续。' : '请补充查询意思。',
         ...(failureCard ? { failure_guidance: { options: [
           {value:'retry_original',label:'按原问题再查一次'}, {value:'edit_original',label:'修改原问题后查询'},
           {value:'new_conversation',label:'开启新对话'}], supplement_label:'我来补充描述' } } : {}) };
       state = guided(1);
+      if (expireAfterDraft) state = { ...state, server_time: 1000, clarification_deadline_at: 1030 };
       if (delayedExecute) { const stale = state; state = guided(2); return new Promise(resolve => { release = () => resolve(stale); }); }
       return state;
     }
     if (path.endsWith('/cancel')) return state = { ...state, version: state.version + 1, status: 'CANCELLED' };
-    if (method === 'GET') return state;
+    const expired = () => ({ ...state, status: 'FAILED', reason: 'CLARIFICATION_EXPIRED', version: state.version + 1,
+      failure_guidance: { kind: 'clarification_expired', question: '补充等待已超时，尚未执行查询。已确认条件已保留，可继续原查询。' } });
+    if (method === 'GET') return state = expireAfterDraft && !restarted ? expired() : state;
     if (path.endsWith('/clarify')) {
+      if (lateExpiry) return state = expired();
       if (unknownFirst && first) { first = false; throw new Error('uncertain connection'); }
       count++;
       const response = count < rounds ? guided(count + 1) : { ...state, version: state.version + 1, status: 'COMPLETED', answer: { summary: '已校验双指标', cards: [{ metric_name: '现金业绩', display_value: '123', unit: '元' }, { metric_name: '消耗业绩', display_value: '456', unit: '元' }] } };
@@ -50,13 +55,13 @@ function setup({ rounds = 3, fields = null, bad = false, unknownFirst = false, d
     }
     throw new Error('unexpected fixture request');
   };
-  const dispose = mountMoheAi({ request });
+  let dispose = mountMoheAi({ request, presentation });
   const root = () => document.querySelector('[data-mohe-ai]').shadowRoot;
   const click = text => { const button = [...root().querySelectorAll('button')].find(node => node.textContent === text); assert.ok(button, text); button.click(); };
   const area = () => root().querySelector('[data-guidance=step]');
   const choose = () => { const radio = area().querySelector('input[type=radio]'); if (radio) radio.click(); else area().querySelectorAll('input[type=date]').forEach(input => { input.value = '2026-09-09'; }); };
   const start = async () => { await flush(); click('魔核 AI'); await flush(); root().querySelector('textarea').value = '需要确认条件的测试问题'; click('发送'); await flush(); };
-  return { root, click, area, choose, start, calls, dispose, release: () => release() };
+  return { root, click, area, choose, start, calls, dispose: () => dispose(), remount: async () => { dispose(); dispose = mountMoheAi({ request, presentation }); await flush(); click('魔核 AI'); await flush(); }, release: () => release() };
 }
 // A disabled local service and a configuration change after bootstrap are
 // technical boundaries, not failed natural-language understanding.
@@ -78,6 +83,47 @@ for (const reason of ['AI_INTENT_UNRESOLVED','AI_CAPABILITY_CHANGED']) {
   const f = setup({ partial: true, failureReason: reason }); await f.start();
   eq(f.root().textContent.includes('今天的现金业绩'), true);
   eq(f.root().textContent.includes('需要确认条件的测试问题'), true);
+  eq(f.root().querySelector('[data-failure-guidance]'), null);
+  eq(f.calls.filter(call => call.path === '/runs').length, 1);
+  f.dispose();
+}
+{
+  const f = setup({ partial: true, failureCard: true, presentation: 'workspace' }); await f.start();
+  eq(f.root().querySelector('[data-failure-guidance]'), null);
+  eq(f.root().textContent.includes('请稍后重试'), true);
+  eq(f.root().textContent.includes('检查条件'), false);
+  f.dispose();
+}
+// Expiry is distinct from a semantic failure. The server's deadline prompts
+// one status read; a draft survives the terminal transition and reload. One
+// explicit click creates one fresh admission with opaque source + choices.
+for (const deadlineDriven of [true, false]) {
+  const f = setup({ presentation: 'workspace', expireAfterDraft: deadlineDriven, lateExpiry: !deadlineDriven });
+  await f.start(); f.choose();
+  f.area().querySelector('input[type=radio]').dispatchEvent(new window.Event('change', { bubbles: true }));
+  if (deadlineDriven) { await f.remount(); await new Promise(resolve => setTimeout(resolve, 170)); }
+  else { f.click('确认并继续'); await flush(); }
+  eq(f.root().textContent.includes('补充等待已超时'), true);
+  eq(f.root().textContent.includes('检查条件'), false);
+  eq(f.root().querySelector('[data-failure-guidance]'), null);
+  eq(f.area().querySelector('input[type=radio]').checked, true);
+  await f.remount(); f.click('需要确认条件的测试问题'); await flush();
+  eq(f.area().querySelector('input[type=radio]').checked, true);
+  f.click('继续原查询'); await flush(); await flush();
+  const starts = f.calls.filter(call => call.path === '/runs');
+  eq(starts.length, 2);
+  eq(starts[1].payload.question, '需要确认条件的测试问题');
+  eq(starts[1].payload.clarification_restart.run_id, 'run');
+  eq(starts[1].payload.clarification_restart.choices, { metric_code: 'cash_performance' });
+  eq(f.root().textContent.includes('恢复查询完成'), true);
+  f.dispose();
+}
+// A transport outage has no accepted semantic result. It must not ask the
+// customer to change business conditions or create an irrelevant choice card.
+{
+  const f = setup({ partial: true, failureCard: true, failureReason: 'AI_MODEL_RESULT_UNKNOWN', presentation: 'workspace' }); await f.start();
+  eq(f.root().textContent.includes('AI 服务暂时未返回结果，请稍后重试。'), true);
+  eq(f.root().textContent.includes('检查条件'), false);
   eq(f.root().querySelector('[data-failure-guidance]'), null);
   eq(f.calls.filter(call => call.path === '/runs').length, 1);
   f.dispose();
@@ -142,8 +188,8 @@ for (const rounds of [3, 4, 5]) {
   const f = setup({ fields: [{ ...metric, options: [...metric.options,
     { label: '退款业绩', value: 'refund_performance' }, { label: '销售人业绩', value: 'staff_sales' }] }] });
   await f.start();
-  eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1']);
-  eq(f.area().querySelector('input[value=__supplement__]') !== null, true);
+  eq(f.area().querySelectorAll('select').length, 1);
+  eq([...f.area().querySelectorAll('option')].some(option => option.value === '__supplement__'), true);
   f.dispose();
 }
 {

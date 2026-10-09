@@ -17,6 +17,15 @@ if (!hash_equals(AiExecutionEnvelope::hash('execute',$input,$key),AiExecutionEnv
 $clarify=['clarification_id'=>'clarification','choices'=>['store'=>'A'],'schema_version'=>'mohe-clarification-v2','step_revision'=>1,'intent_revision'=>1,'client_submission_id'=>'submission','run_delivery_token'=>'delivery'];
 if (array_key_exists('run_delivery_token',AiExecutionEnvelope::project('clarify',$clarify))) throw new RuntimeException('clarification envelope retained delivery credential');
 if (!preg_match('/^[a-f0-9]{64}$/D',AiExecutionEnvelope::hash('clarify',$clarify,$key))) throw new RuntimeException('clarification envelope hash is not keyed sha256');
+// A restart proof and its choices must survive encrypted worker handoff and
+// participate in the keyed hash. They are never copied to the Redis message.
+$restart=$input+['clarification_restart'=>['run_id'=>str_repeat('a',48),'generation'=>1,
+    'client_session_id'=>'source-device','run_delivery_token'=>'scoped-proof','clarification_id'=>'source-step',
+    'choices'=>['semantic_reply'=>'__supplement__','supplement_text'=>'synthetic reply']]];
+$projectedRestart=AiExecutionEnvelope::project('execute',$restart);
+if (($projectedRestart['clarification_restart']??null)!==$restart['clarification_restart']) throw new RuntimeException('worker lost restart source or choices');
+$changed=$restart;$changed['clarification_restart']['choices']['supplement_text']='different reply';
+if (hash_equals(AiExecutionEnvelope::hash('execute',$restart,$key),AiExecutionEnvelope::hash('execute',$changed,$key))) throw new RuntimeException('restart choices are absent from admission hash');
 $directory=sys_get_temp_dir().'/mohe-ai-envelope-'.bin2hex(random_bytes(8));
 $private=new AiPrivateStorage($directory); $ref=$private->put('request',['input'=>'temporary'],time()+60);
 $private->discard($ref);

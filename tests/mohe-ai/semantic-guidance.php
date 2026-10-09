@@ -50,12 +50,22 @@ verify($r['plan']['workflow_code']==='wf_performance_summary' && !isset($r['plan
 $r=build('今天服务业绩多少');verify($r['kind']==='clarification' && count($r['fields'][0]['options'])>=2,'service meaning ambiguity remains');
 $serviceOptions=$r['fields'][0]['options'];$serviceLast=end($serviceOptions);
 verify($serviceLast['action']==='stop','unknown meaning is not silently replaced');
-rejected(static function()use($planner,$r){$planner->choose($r,['metric_code'=>'other_registered_metric']);},'AI_CAPABILITY_NOT_READY');
+rejected(static function()use($planner,$r){$planner->choose($r,['metric_code'=>'other_registered_metric']);},'AI_CLARIFICATION_INVALID');
 $r=build('今天现金和服务业绩多少');$r=$planner->choose($r,['metric_code'=>'consume_amount']);verify($r['plan']['query']['metric_codes']===['cash_performance','consume_amount'],'explicit joint metric not replaced by clarification');
 $r=build('现金和消耗多少');verify($r['kind']==='plan'
     &&[$r['plan']['query']['start_date'],$r['plan']['query']['end_date']]===['2026-10-09','2026-10-09'],
     'a complete joint goal without a stated time uses the documented current-day first-answer baseline');
 verify(count($r['plan']['query']['metric_codes'])===2,'joint metrics survive the default first-answer period');
+// A broad first turn must keep the missing time after the customer selects
+// a registered metric; no visual filler or hidden TODAY choice may complete it.
+$broad=$parser->project('业绩多少');$broad['require_period_clarification']=true;$broad['no_filler_guidance']=true;
+$guided=$planner->compile($broad,['decision'=>'clarify','metric_codes'=>[],'query_shape'=>'summary','date_code'=>'UNSPECIFIED'],
+    $cap,'screen','2026-10-09');
+verify($guided['guidance_step']==='metric_code' && !in_array('__retry_original__',array_column($guided['fields'][0]['options'],'value'),true),
+    'broad first turn asks only a real metric');
+$guided=$planner->choose($guided,['metric_code'=>'cash_performance']);
+verify($guided['kind']==='clarification' && $guided['guidance_step']==='start_date',
+    'a selected metric does not silently set the broad query to today');
 // Multi-step state is separate from root Run counters; no hidden new Run/model call.
 $r=build('哪几家店需要关注');$steps=[];
 foreach([['metric_code'=>'cash_performance'],['rank_direction'=>'bottom']] as $choice) {

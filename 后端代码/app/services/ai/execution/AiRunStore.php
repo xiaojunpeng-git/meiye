@@ -618,7 +618,9 @@ final class AiRunStore
             $counts=json_decode($r['counters_json'],true);
             if (!is_array($counts)) { throw new RuntimeException('AI_COUNTER_CORRUPT'); }
             $counts[$counter]=($counts[$counter]??0)+1;
-            if ($counts[$counter]>($kind==='model'?5:8)) { throw new RuntimeException('AI_COUNTER_EXHAUSTED'); }
+            // Attempt creation and explicit reservation share the same fixed
+            // model ceiling, including a second clarification's final review.
+            if ($counts[$counter]>($kind==='model'?6:8)) { throw new RuntimeException('AI_COUNTER_EXHAUSTED'); }
             if ($kind==='model' && $counts[$counter]>($counts['stage_count']??0)+($counts['model_recovery_count']??0)) { throw new RuntimeException('AI_COUNTER_SEQUENCE'); }
             $counts['attempt_kinds']=$counts['attempt_kinds']??[];
             $counts['attempt_kinds'][$attemptCode]=$kind;
@@ -761,7 +763,9 @@ final class AiRunStore
     /** Reserve BEFORE any external send; retries cannot reset these counters. */
     public function reserve(array $owner,string $runId,int $generation,string $workerToken,string $counter,int $amount=1): int
     {
-        $limits=['stage_count'=>5,'model_attempt_count'=>5,'model_recovery_count'=>1,'failover_count'=>1,'supplement_count'=>1,'workflow_transition_count'=>16,'skill_execution_count'=>8,'tool_call_count'=>8,'node_visit_count'=>12,'input_tokens'=>96000,'output_tokens'=>6000];
+        // Match the pure budget policy: two separately missing conditions
+        // remain inside fixed round, stage, model and token ceilings.
+        $limits=['stage_count'=>6,'model_attempt_count'=>6,'model_recovery_count'=>1,'failover_count'=>1,'supplement_count'=>2,'workflow_transition_count'=>16,'skill_execution_count'=>8,'tool_call_count'=>8,'node_visit_count'=>12,'input_tokens'=>96000,'output_tokens'=>7200];
         if (!isset($limits[$counter]) || $amount<1) { throw new RuntimeException('AI_COUNTER_INVALID'); }
         return $this->transaction(function () use ($owner,$runId,$generation,$workerToken,$counter,$amount,$limits) {
             $r=$this->read($owner,$runId,$generation); $this->worker($r,$workerToken); $this->live($r);
@@ -1415,17 +1419,35 @@ final class AiRunStore
         );
     }
 
-    /** Any unknown provider attempt blocks guidance, export and publication. */
+    /** Unresolved I/O blocks publication. A successful, separately reserved
+     * replay may replace only the platform's no-response language timeout;
+     * its original UNKNOWN receipt and unknown usage are never rewritten.
+     * Tools, binding, other failures and unfinished retries remain blocking. */
     private function hasUnresolvedAttempt(string $runId): bool
     {
-        $rows=$this->rows('SELECT attempt_code,state FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
-        $states=[];
+        $rows=$this->rows('SELECT attempt_code,state,kind,target_code,payload_hash FROM '.$this->table('attempt').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+        $attempts=[];
         foreach ($rows as $row) {
-            $states[$row['attempt_code']]=$row['state'];
+            $attempts[$row['attempt_code']]=$row;
             if (in_array($row['state'],['PREPARED','IN_FLIGHT'],true)) return true;
         }
-        foreach ($states as $code=>$state) {
-            if ($state!=='UNKNOWN') continue;
+        foreach ($attempts as $code=>$row) {
+            if ($row['state']!=='UNKNOWN') continue;
+            if ($row['kind']==='model' && preg_match('/^understand_meaning(_reply[1-5])?$/D',$code,$matches)) {
+                // Require durable matching receipts and the original bounded
+                // transport diagnostic. A successful unrelated model or tool
+                // call cannot clear this publication fence.
+                $retry=$attempts['understand_transport_retry'.($matches[1]??'')]??null;
+                if (is_array($retry) && $retry['state']==='SUCCEEDED' && $retry['kind']==='model'
+                    && $row['target_code']===$retry['target_code'] && hash_equals($row['payload_hash'],$retry['payload_hash'])) {
+                    $run=$this->one('SELECT terminal,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND run_id=?',[$this->instance,$runId]);
+                    $counts=json_decode($run['counters_json']??'',true)?:[];
+                    $diagnostic=$counts['model_diagnostics'][$code]??[];
+                    if (($run['terminal']??null)==='platform' && ($counts['model_recovery_count']??null)===1
+                        && ($diagnostic['stage']??null)==='transport' && ($diagnostic['predicate']??null)==='timeout'
+                        && ($diagnostic['transport_errno']??null)===28 && ($diagnostic['http_status']??null)===0) continue;
+                }
+            }
             return true;
         }
         return false;
@@ -1442,6 +1464,10 @@ final class AiRunStore
         $out['clarification_count']=(int)$r['clarification_count'];
         $out['clarification_accepted_count']=(int)($counts['clarification_accepted_count']??0);
         $out['clarification_wait_ms']=(int)($counts['clarification_wait_ms']??0);
+        // Expose the existing cumulative wait boundary. Clients may schedule
+        // a status refresh, but only this store decides whether work expired.
+        $out['clarification_deadline_at']=$r['status']==='WAITING_CLARIFICATION'
+            ?min((int)$r['expires_at'],(int)$r['pause_at']+max(0,600000-$out['clarification_wait_ms'])):null;
         $out['clarification_rejected']=($r['clarification_ref']??'')!=='' && ($counts['clarification_rejected_ref']??'')===$r['clarification_ref'];
         $out['execution_mode']=($counts['execution_mode']??'')==='async'?'async':'compatibility';
         $out['topic_boundary']=($counts['topic_boundary']??null)==='reset'?'reset':null;

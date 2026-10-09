@@ -12,16 +12,21 @@ namespace app\services\ai\execution;
 class AiRunBudgetPolicy
 {
     private const COUNTER_CAPS = [
-        'stage_count' => 5, 'model_attempt_count' => 5,
+        // Two missing conditions can require one final binding review after
+        // the second reply; six stages remain the hard ceiling for that Run.
+        'stage_count' => 6, 'model_attempt_count' => 6,
         'model_recovery_count' => 1, 'failover_count' => 1,
-        'clarification_count' => 5, 'supplement_count' => 1,
+        // Two distinct missing slots (for example, measurement then private
+        // identity) may be answered in one Run. The round and model caps still
+        // bound repeated attempts and prevent an open-ended chat loop.
+        'clarification_count' => 5, 'supplement_count' => 2,
         'node_visit_count' => 12, 'skill_execution_count' => 8,
         'tool_call_count' => 8, 'workflow_transition_count' => 16,
         // Understanding, binding and independent semantic admission normally
         // use three stages. One bounded binding recovery may then need one
         // final independent admission review before any Reader call.
         // This is a hard per-Run reservation ceiling, not a normal-path target.
-        'model_input_tokens' => 96000, 'model_output_tokens' => 6000,
+        'model_input_tokens' => 96000, 'model_output_tokens' => 7200,
     ];
 
     public static function defaults(): array

@@ -24,19 +24,69 @@ final class MemberFixtureQuery {
 $scope=['member_authorized'=>true,'store_ids'=>[1,2],'scope_mode'=>'stores','permission_version'=>'member-fixture-v1'];
 $factory=static function(string $table){return new MemberFixtureQuery($table);};
 $members=new MemberAnalysisObjectServices($factory,static function()use(&$scope){return $scope;});
-$numericMentions=$members->mentioned('本月累计实际收款销售额达到1000元的客户有多少？',['member_period_spend_threshold']);
-maCheck($numericMentions['objects']===[]&&array_intersect(['10','00','100','1000'],MemberFixtureQuery::$lastTermCandidates)===[],'pure numeric amount fragments never become named-member candidates');
-$mentions=$members->mentioned('王湘英今天花了多少钱？',['sales_collected_amount']);
-maCheck(count($mentions['objects'])===1&&$mentions['objects'][0]['ref']==='member:19','only exact authorized question fragment becomes a member reference');
-maCheck($mentions['objects'][0]['aliases']===['香香'],'the alternate authoritative label is masked too');
+$numericLabels=$members->maskingLabelsConversation(['本月累计实际收款销售额达到1000元的客户有多少？']);
+maCheck($numericLabels===[]&&array_intersect(['10','00','100','1000'],MemberFixtureQuery::$lastTermCandidates)===[],'pure numeric amount fragments never become named-member candidates');
+$mentions=$members->exactCandidates('王湘英',['sales_collected_amount']);
+maCheck(count($mentions)===1&&$mentions[0]['ref']==='member:19','only exact authorized name becomes a member reference');
+maCheck($mentions[0]['aliases']===['香香'],'the alternate authoritative label remains local');
 MemberFixtureQuery::$calls=[];
-$conversationMentions=$members->mentionedConversation(['昨天没有点名会员','王湘英今天花了多少钱？','香香呢？'],['sales_collected_amount']);
+$conversationLabels=$members->maskingLabelsConversation(['昨天没有点名会员','王湘英今天花了多少钱？','香香呢？']);
 $userQueries=count(array_filter(MemberFixtureQuery::$calls,static function(array $call):bool {
     return ($call[0]??null)==='table'&&($call[1]??null)==='user';
 }));
-maCheck(count($conversationMentions['objects'])===1&&$userQueries===1,
-    'bounded conversation labels use one permission-scoped member query instead of one scan per turn');
-$catalog=new AnalysisObjectCatalog($mentions['objects'],static function(){return true;});
+maCheck($conversationLabels===['王湘英','香香']&&$userQueries===2,
+    'bounded conversation labels use one grouped query per name column rather than per history turn');
+// A common authorized name must remain maskable without building a member
+// directory. The full phone narrows the same exact-name lookup locally.
+final class DuplicateMemberFixtureQuery {
+    private $table; private $field=''; private $phone=null;
+    public function __construct(string $table){$this->table=$table;}
+    public function __call($name,$args){
+        if ($name==='field') $this->field=(string)($args[0]??'');
+        if ($name==='where' && ($args[0]??null)==='u.phone') $this->phone=$args[1]??null;
+        foreach ($args as $arg) if (is_callable($arg)) $arg($this);
+        return $this;
+    }
+    public function select(){return $this;}
+    public function toArray(){
+        if ($this->table!=='user') return [];
+        if ($this->field==='u.real_name') return [['real_name'=>'王丽']];
+        if ($this->field==='u.nickname') return [];
+        $rows=[['uid'=>19,'real_name'=>'王丽','nickname'=>''],['uid'=>20,'real_name'=>'王丽','nickname'=>'']];
+        return $this->phone==='13800000000'?[$rows[0]]:($this->phone!==null?[]:$rows);
+    }
+}
+$duplicates=new MemberAnalysisObjectServices(static fn(string $table)=>new DuplicateMemberFixtureQuery($table),
+    static fn()=>['member_authorized'=>true,'store_ids'=>[1,2],'scope_mode'=>'stores','permission_version'=>'duplicate-fixture-v1']);
+maCheck($duplicates->maskingLabelsConversation(['会员王丽上个月消费多少'])===['王丽'],
+    'same-name membership contributes one private mask without a directory cap');
+maCheck(count($duplicates->exactCandidates('王丽',['sales_collected_amount']))===2,
+    'same-name identities remain ambiguous before a fact read');
+maCheck(($duplicates->exactCandidates('王丽',['sales_collected_amount'],'13800000000')[0]['ref']??null)==='member:19',
+    'full phone narrows only the authorized exact-name relation');
+maCheck($duplicates->exactCandidates('王丽',['sales_collected_amount'],'13900000000')===[],
+    'an unmatched phone cannot fall back to a guessed same-name identity');
+$mask=(new \app\services\ai\model\AiSafeQuestionProjector())->project('王丽 13800000000 上个月消费多少',[
+    'enabled'=>true,'external_processing_authorized'=>true,'external_scope_supported'=>true,
+    'external_scope_version'=>\app\services\ai\config\AiConfigStore::QUESTION_SCOPE],['王丽']);
+maCheck(strpos($mask['outbound']['question'],'王丽')===false
+    && strpos($mask['outbound']['question'],'13800000000')===false,
+    'name and full-phone clarification remain local before model understanding');
+// One-pass masking preserves a direct local map even when an earlier turn
+// already owns the first identity. Never create a token whose value is a token.
+maCheck(count($mask['reference_values']??$mask['local_conditions'])===2
+    && !str_contains($mask['outbound']['question'],'[['),
+    'phone and name each have one direct opaque identity carrier');
+$sensitiveText='13800000000 fixture@example.test sk-fixture_only_123456789 [local_condition_99]';
+$maskedSensitive=(new \app\services\ai\model\AiSafeQuestionProjector())->project($sensitiveText,[
+    'enabled'=>true,'external_processing_authorized'=>true,'external_scope_supported'=>true,
+    'external_scope_version'=>\app\services\ai\config\AiConfigStore::QUESTION_SCOPE]);
+foreach(['13800000000','fixture@example.test','sk-fixture_only_123456789','local_condition_99'] as $raw) {
+    maCheck(!str_contains($maskedSensitive['outbound']['question'],$raw)
+        && in_array($raw,$maskedSensitive['local_conditions'],true),
+        'sensitive raw span is masked once without trusting customer-written tokens');
+}
+$catalog=new AnalysisObjectCatalog($mentions,static function(){return true;});
 maCheck(($catalog->resolve('香香','member','sales_collected_amount')['objects'][0]['ref']??null)==='member:19','nickname resolves only through the local exact catalogue');
 maCheck($members->selection('member:19')['member_id']===19,'selection rechecks current member relation before a fact read');
 MemberFixtureQuery::$calls=[];

@@ -93,9 +93,7 @@ checkRuntime('model transport timeout never exceeds stage or configured cap', Bu
 checkRuntime('binding uses the same bounded model window as other semantic stages', Budget::callTimeout($spent, 'model', 30000, 22000) === 30000);
 $gatewaySource = file_get_contents(dirname(__DIR__, 2) . '/后端代码/app/services/ai/AiGatewayServices.php');
 checkRuntime('gateway derives model transport timeout at each provider send boundary', is_string($gatewaySource)
-    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 6
-    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_PRIMARY_LIMIT_MS)') === 1
-    && strpos($gatewaySource, 'private const UNDERSTANDING_PRIMARY_LIMIT_MS = 30000;') !== false
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 7
     && strpos($gatewaySource, 'UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS') === false
     && strpos($gatewaySource, 'BIND_INITIAL_STAGE_LIMIT_MS') === false
     && strpos($gatewaySource, 'BIND_RECOVERY_STAGE_LIMIT_MS') === false
@@ -148,7 +146,7 @@ rejectsRuntime('24h expiry hard boundary', function () use ($initial) {
     Budget::consume($initial, 86401000);
 }, 'RUN_EXPIRED');
 foreach (['tool_call_count' => 8, 'skill_execution_count' => 8, 'node_visit_count' => 12,
-    'workflow_transition_count' => 16, 'supplement_count' => 1, 'stage_count' => 5,
+    'workflow_transition_count' => 16, 'supplement_count' => 2, 'stage_count' => 6,
     'model_recovery_count' => 1] as $counter => $cap) {
     $state = $initial;
     for ($i = 0; $i < $cap; $i++) {
@@ -186,10 +184,14 @@ $model = Budget::reserve($model, 'model_attempt_count');
 $model = Budget::reserve($model, 'stage_count');
 $model = Budget::reserve($model, 'model_attempt_count');
 checkRuntime('one bounded recovery may receive a final independent admission review', $model['counters']['model_attempt_count'] === 5);
-rejectsRuntime('sixth model attempt blocked', function () use ($model) {
+// The second clarification may need one independent binding review. It still
+// cannot spend a seventh stage on an unbounded retry.
+$model = Budget::reserve($model, 'stage_count');
+$model = Budget::reserve($model, 'model_attempt_count');
+rejectsRuntime('seventh model attempt blocked', function () use ($model) {
     Budget::reserve($model, 'model_attempt_count');
 }, 'COUNTER_BUDGET_EXHAUSTED');
-foreach (['model_input_tokens' => 96000, 'model_output_tokens' => 6000] as $counter => $cap) {
+foreach (['model_input_tokens' => 96000, 'model_output_tokens' => 7200] as $counter => $cap) {
     $tokenState = Budget::reserve($initial, $counter, $cap);
     rejectsRuntime('token hard cap ' . $counter, function () use ($tokenState, $counter) {
         Budget::reserve($tokenState, $counter);

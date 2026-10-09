@@ -70,8 +70,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // A clarification POST is durably accepted before the worker can change the
   // public Run status.  Keep polling that same step instead of rendering its
   // old controls again or treating WAITING_CLARIFICATION as an idle state.
-  let clarificationArea = null, clarificationId = null, clarificationSubmittedId = null, activeGuidanceSchema = null, guidanceSubmission = null;
-  function clearClarification() { if (clarificationArea) clarificationArea.remove(); clarificationArea = null; clarificationId = null; }
+  let clarificationArea = null, clarificationId = null, clarificationSubmittedId = null, activeGuidanceSchema = null, guidanceSubmission = null, guidanceDraft = null, clarificationTimer = null;
+  function clearClarification() { clearTimeout(clarificationTimer); clarificationTimer = null; if (clarificationArea) clarificationArea.remove(); clarificationArea = null; clarificationId = null; }
   // Rendering a message must never decide where the customer is reading. The
   // reading anchor is set only for a newly submitted turn, so history browsing
   // and asynchronous results cannot repeatedly pull the viewport to the end.
@@ -93,6 +93,14 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // result; the gateway rechecks the signed reference and current permission.
   function renderFailureCard(questionText, presentation, turn) {
     const guidance = presentation.failure_guidance;
+    // Expiry is a recoverable clarification boundary. Reuse the same fields
+    // and private source proof, with one explicit fresh-query action.
+    if (guidance && guidance.kind === 'clarification_expired' && presentation.clarification_restart) {
+      renderClarification(presentation.expired_clarification, {
+        ...presentation.clarification_restart, question: questionText
+      }, presentation.clarification_choices || {}, turn);
+      return;
+    }
     const options = guidance && guidance.options;
     if (!Array.isArray(options) || options.length !== 3 || options.some(item => !item || typeof item.label !== 'string'
       || !['retry_original', 'edit_original', 'new_conversation'].includes(item.value))) return;
@@ -128,6 +136,21 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // Staged server/client versions may differ. Keep one safe customer card for
   // every confirmed failure, but never turn a failed Run into a data answer.
   function safeFailureGuidance(value, reason = '') {
+    if (presentation === 'workspace' && reason === 'CLARIFICATION_EXPIRED') return {
+      kind: 'clarification_expired', question: '补充等待已超时，尚未执行查询。已确认条件已保留，可继续原查询。'
+    };
+    // The platform asks for missing business conditions inside the live Run.
+    // A terminal technical/authority failure cannot be repaired by a generic
+    // four-action card, so keep it as a short explanation in that workspace.
+    if (presentation === 'workspace' && reason !== 'AI_INTENT_UNRESOLVED' && reason !== 'AI_CAPABILITY_CHANGED') {
+      // A model transport failure has not evaluated the business conditions.
+      // Do not ask the customer to change those conditions to repair an outage.
+      if (reason === 'AI_MODEL_RESULT_UNKNOWN') return { kind: 'capability_help',
+        question: 'AI 服务暂时未返回结果，请稍后重试。' };
+      return { kind: 'capability_help', question: value && typeof value.question === 'string'
+        ? value.question.replace('请选择一种方式继续。', '请稍后重试。')
+        : '这次暂时未能完成查询，请稍后重试。' };
+    }
     // A server-confirmed absence of business-query meaning needs a short
     // capability explanation, not three ways to repeat an unrelated question.
     // Capability drift fails before understanding; do not pretend it classified
@@ -355,7 +378,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if ((!run && !pendingCreate) || isTerminal(run && run.status)) { sessions.clearRuntime(); return; }
     sessions.saveRuntime({ created_at: Date.now(), session_id: clientSession, conversation_id: conversation, question,
       close_requested: closeRequested, queued_clarification_id: clarificationSubmittedId,
-      guidance_submission: guidanceSubmission, client_delivery_started_at: clientDeliveryStartedAt,
+      guidance_submission: guidanceSubmission, guidance_draft: guidanceDraft, client_delivery_started_at: clientDeliveryStartedAt,
       run, pending_create: pendingCreate });
   }
   function activeRuntimeBelongsToThisEntry() {
@@ -557,6 +580,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const serverProgress = typeof run.progress === 'string' ? run.progress : (run.progress && run.progress.message) || '正在处理';
     if (!setActiveRunState('正在思考')) progress.textContent = serverProgress;
     if (isTerminal(run.status)) {
+      // Capture a late submitted value before the terminal projection removes
+      // its controls. Drafts stay in this device's existing 24-hour transcript.
+      const expiredChoices = guidanceSubmission && guidanceSubmission.choices || guidanceDraft && guidanceDraft.choices || {};
       clarificationSubmittedId = null; guidanceSubmission = null; clearClarification();
       clearTimeout(pollTimer); cancelling = false; send.disabled = false;
       if (['COMPLETED', 'PARTIAL_SUCCEEDED'].includes(run.status) && run.answer) {
@@ -597,7 +623,13 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         if (safeGuidance) {
           failurePresentation.failure_guidance = safeGuidance;
         }
-        if (safeGuidance && safeGuidance.kind !== 'capability_help') {
+        if (safeGuidance && safeGuidance.kind === 'clarification_expired' && run.clarification) {
+          failurePresentation.expired_clarification = run.clarification;
+          failurePresentation.clarification_restart = { conversation_id: conversation,
+            source: { run_id: run.run_id, ...deliveryBinding(run), clarification_id: run.clarification.id } };
+          failurePresentation.clarification_choices = expiredChoices;
+          renderFailureCard(deliveredQuestion, failurePresentation, answerTurn);
+        } else if (safeGuidance && safeGuidance.kind !== 'capability_help') {
           // A remounted task can retain its Run and visible original question
           // after the admission envelope was retired. No newer turn can enter
           // this active conversation, so its stored transcript is the same
@@ -666,7 +698,19 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       compatibilityExecuting = false;
     }
   }
-  function renderClarification(c) {
+  // Schedule one status read at the server's cumulative deadline. Browser
+  // clocks do not decide expiry, and there is no polling while a user types.
+  function scheduleClarificationExpiry(source) {
+    clearTimeout(clarificationTimer); clarificationTimer = null;
+    if (presentation !== 'workspace' || !source || source.status !== 'WAITING_CLARIFICATION'
+      || !Number.isSafeInteger(source.clarification_deadline_at) || !Number.isSafeInteger(source.server_time)) return;
+    clarificationTimer = setTimeout(() => {
+      if (disposed || !run || run.run_id !== source.run_id || run.status !== 'WAITING_CLARIFICATION') return;
+      if (clarificationArea) clarificationArea.querySelectorAll('button,input,select,textarea').forEach(control => { control.disabled = true; });
+      void poll();
+    }, Math.max(0, source.clarification_deadline_at - source.server_time) + 100);
+  }
+  function renderClarification(c, restart = null, restoredChoices = {}, target = null) {
     try { validateClarification(c, activeGuidanceSchema); } catch (error) { clearClarification(); progress.textContent = error.message; return; }
     if (c.schema_version === GUIDANCE_SCHEMA) activeGuidanceSchema = GUIDANCE_SCHEMA;
     const key = clarificationKey(c);
@@ -677,8 +721,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     clearClarification();
     const area = el('div', null, 'card guidance-card'); area.dataset.guidance = 'step';
     clarificationArea = area; clarificationId = key;
-    const heading = el('div', null, 'guidance-heading'); heading.appendChild(el('span', '请确认'));
-    const cancel = el('button', '取消查询', 'guidance-cancel'); cancel.onclick = () => { if (!cancel.disabled) void stop(); }; heading.appendChild(cancel); area.appendChild(heading);
+    const heading = el('div', null, 'guidance-heading'); heading.appendChild(el('span', restart ? '继续原查询' : '请确认'));
+    const cancel = el('button', '取消查询', 'guidance-cancel'); cancel.onclick = () => { if (!cancel.disabled) void stop(); }; if (!restart) heading.appendChild(cancel); area.appendChild(heading);
     if (c.schema_version === GUIDANCE_SCHEMA) {
       area.appendChild(el('div', `第 ${c.round_no} 步`, 'muted'));
       if (c.confirmed_summary.length) {
@@ -687,13 +731,17 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       }
     }
     const form = el('div'); area.appendChild(form);
-    let pendingSubmission = validGuidanceSubmission(guidanceSubmission) && guidanceSubmission.clarification_id === c.id
+    let pendingSubmission = !restart && validGuidanceSubmission(guidanceSubmission) && guidanceSubmission.clarification_id === c.id
       && (c.schema_version !== GUIDANCE_SCHEMA || (guidanceSubmission.schema_version === GUIDANCE_SCHEMA
         && guidanceSubmission.intent_revision === c.intent_revision && guidanceSubmission.step_revision === c.step_revision))
       ? guidanceSubmission : null;
     let submitting = false, controls = [], reviseId = pendingSubmission && pendingSubmission.revise_clarification_id || null;
     const editing = [];
-    function current() { return !disposed && clarificationArea === area && clarificationId === key && run && run.status === 'WAITING_CLARIFICATION' && !cancelling; }
+    function current() {
+      return !disposed && clarificationArea === area && clarificationId === key && !cancelling
+        && (restart ? conversation === restart.conversation_id && !pendingCreate && (!run || isTerminal(run.status))
+          : run && run.status === 'WAITING_CLARIFICATION');
+    }
     function setDisabled(value) { cancel.disabled = value; controls.forEach(item => item.elements.forEach(control => { control.disabled = value; })); editing.forEach(button => { button.disabled = value; }); }
     function renderFields(fields, initial, title) {
       if (submitting) return;
@@ -713,14 +761,34 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
           // A recommendation must be one of the server's executable options.
           // The fourth entry collects a corrected full question; it is never
           // sent as a metric code or silently substituted into the old Run.
-          const executable = field.options.filter(option => option.action !== 'stop');
+          const executable = field.options.filter(option => option.action !== 'stop' && option.value !== '__supplement__');
           const recommended = (executable.length <= 3 ? executable : executable.filter(option => option.recommended === true)).slice(0, 3);
+          const supplementOption = field.options.find(option => option.value === '__supplement__');
+          if (recommended.length === 0 && executable.length > 3) {
+            // No model-ranked suggestion is evidence for highlighting the
+            // first catalogue entries. Show the registered choices neutrally.
+            const control = el('select'); control.setAttribute('aria-label', field.label);
+            const empty = el('option', '请选择已登记指标或补充问题'); empty.value = ''; control.appendChild(empty);
+            executable.forEach(option => { const item = el('option', option.label); item.value = option.value; control.appendChild(item); });
+            const other = el('option', supplementOption ? supplementOption.label : '我来补充描述'); other.value = '__supplement__'; control.appendChild(other);
+            control.value = typeof initial[field.key] === 'string' ? initial[field.key] : '';
+            const supplementText = el('textarea', null, 'guidance-supplement'); supplementText.maxLength = 1000;
+            supplementText.setAttribute('aria-label', '补充描述'); supplementText.placeholder = '请补充或改写您的问题';
+            supplementText.hidden = control.value !== '__supplement__';
+            supplementText.value = typeof initial.supplement_text === 'string' ? initial.supplement_text : '';
+            control.addEventListener('change', () => { supplementText.hidden = control.value !== '__supplement__'; });
+            form.append(control, supplementText);
+            controls.push({ field, elements: [control, supplementText], supplementText, read: () => control.value });
+            return;
+          }
           recommended.forEach((option, index) => { const optionLabel = el('label', null, 'guidance-option'); const control = el('input'); control.type = 'radio'; control.name = name; control.value = option.value; control.checked = initial[field.key] === option.value; optionLabel.append(control, el('span', String(index + 1), 'guidance-number'), el('span', option.label, 'guidance-option-label')); group.appendChild(optionLabel); inputs.push(control); });
           const supplementLabel = el('label', null, 'guidance-option');
           const supplementChoice = el('input'); supplementChoice.type = 'radio'; supplementChoice.name = name; supplementChoice.value = '__supplement__';
-          supplementLabel.append(supplementChoice, el('span', String(inputs.length + 1), 'guidance-number'), el('span', '我来补充描述', 'guidance-option-label'));
+          supplementLabel.append(supplementChoice, el('span', String(inputs.length + 1), 'guidance-number'), el('span', supplementOption ? supplementOption.label : '我来补充描述', 'guidance-option-label'));
           group.appendChild(supplementLabel); inputs.push(supplementChoice);
-          const supplementText = el('textarea', null, 'guidance-supplement'); supplementText.maxLength = 1000; supplementText.setAttribute('aria-label', '补充描述'); supplementText.placeholder = '请补充或改写您的问题'; supplementText.hidden = true;
+          const supplementText = el('textarea', null, 'guidance-supplement'); supplementText.maxLength = 1000; supplementText.setAttribute('aria-label', '补充描述'); supplementText.placeholder = '请补充或改写您的问题'; supplementChoice.checked = initial[field.key] === '__supplement__';
+          supplementText.hidden = !supplementChoice.checked;
+          supplementText.value = typeof initial.supplement_text === 'string' ? initial.supplement_text : '';
           supplementChoice.addEventListener('change', () => { supplementText.hidden = false; });
           inputs.slice(0, -1).forEach(control => control.addEventListener('change', () => { supplementText.hidden = true; }));
           form.append(group, supplementText);
@@ -736,12 +804,30 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
           control.value = typeof initial[field.key] === 'string' ? initial[field.key] : ''; form.appendChild(control); controls.push({ field, elements: [control], read: () => control.value });
         }
       });
+      const readChoices = () => {
+        const choices = {}; controls.forEach(item => { choices[item.field.key] = item.read();
+          if (item.supplementText && choices[item.field.key] === '__supplement__') choices.supplement_text = item.supplementText.value.trim(); });
+        return choices;
+      };
+      // Preserve what was typed across refresh or an expiry response, without
+      // treating an unfinished draft as an accepted semantic condition.
+      form.oninput = form.onchange = () => {
+        if (submitting) return;
+        guidanceDraft = { id: c.id, choices: readChoices() };
+        if (restart && sessions) {
+          // An expired card is immutable history, but its local input draft
+          // can still be edited. Keep it in the same retained conversation.
+          const saved = sessions.load(); const session = saved.find(item => item.id === conversation);
+          const row = session && session.rounds.find(item => item.run_id === restart.source.run_id);
+          if (row && row.presentation) { row.presentation.clarification_choices = guidanceDraft.choices; sessions.save(saved); }
+        } else persistActive();
+      };
       form.appendChild(hint);
-      const confirm = el('button', c.schema_version === GUIDANCE_SCHEMA ? '确认并继续' : '确认查询', 'primary guidance-confirm');
+      const confirm = el('button', restart ? '继续原查询' : c.schema_version === GUIDANCE_SCHEMA ? '确认并继续' : '确认查询', 'primary guidance-confirm');
       confirm.onclick = async () => {
         if (!current() || submitting) return;
         if (!pendingSubmission) {
-          const choices = {}; controls.forEach(item => { choices[item.field.key] = item.read(); });
+          const choices = readChoices();
           if (controls.some(item => !choices[item.field.key] || item.elements.some(control => control.type === 'date' && typeof control.checkValidity === 'function' && !control.checkValidity()))) { hint.textContent = '请完成当前选择或填写有效日期。'; return; }
           const supplement = controls.find(item => choices[item.field.key] === '__supplement__');
           if (supplement) {
@@ -751,6 +837,14 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
             // wording. The server owns original conditions and merges changes;
             // the browser must not cancel, concatenate or recreate the query.
             choices.supplement_text = detail;
+          }
+          if (restart) {
+            // A fresh admission carries only opaque source proof and choices.
+            // The server restores private meaning and rechecks current rights;
+            // no client text concatenation or executable-plan replay occurs.
+            recoveryDraft = { conversation_id: conversation, history: [], context_ref: null,
+              clarification_restart: { ...restart.source, choices } };
+            input.value = restart.question; clearClarification(); void submitQuestion(); return;
           }
           // The platform build chain does not transpile this shared module;
           // read the selected recovery action without optional-chain syntax.
@@ -771,7 +865,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
             return;
           }
           pendingSubmission = { ...binding(), ...clarificationSubmission(c, choices, newId(), reviseId) };
-          guidanceSubmission = pendingSubmission; persistActive();
+          guidanceSubmission = pendingSubmission; guidanceDraft = { id: c.id, choices }; persistActive();
         }
         const submitted = pendingSubmission; submitting = true; confirm.disabled = true; setDisabled(true); hint.textContent = '';
         try {
@@ -817,8 +911,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       };
       form.appendChild(confirm);
     }
-    renderFields(c.fields, pendingSubmission ? pendingSubmission.choices : {}, c.question);
-    if (c.schema_version === GUIDANCE_SCHEMA && (c.revisable_steps || []).length) {
+    const draft = guidanceDraft && guidanceDraft.id === c.id ? guidanceDraft.choices : restoredChoices;
+    guidanceDraft = { id: c.id, choices: draft };
+    renderFields(c.fields, pendingSubmission ? pendingSubmission.choices : draft, c.question);
+    if (!restart && c.schema_version === GUIDANCE_SCHEMA && (c.revisable_steps || []).length) {
       const details = el('details'); details.appendChild(el('summary', '修改已确认条件'));
       c.revisable_steps.forEach(step => { const button = el('button', step.question); button.onclick = () => { if (!current() || submitting || pendingSubmission) return; reviseId = step.id; renderFields(step.fields, step.choices, '修改：' + step.question); }; details.appendChild(button); editing.push(button); });
       const back = el('button', '返回当前问题'); back.onclick = () => { if (!current() || submitting || pendingSubmission) return; reviseId = null; renderFields(c.fields, {}, c.question); }; details.appendChild(back); editing.push(back); area.appendChild(details);
@@ -826,7 +922,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     // Clarification belongs to the customer turn that caused it. Keeping it
     // there avoids an orphaned form at the end of the transcript and preserves
     // the reader's manual scroll position while the server is deciding.
-    (activeConversationTurn() || body).appendChild(area);
+    (target || activeConversationTurn() || body).appendChild(area);
+    if (!restart) scheduleClarificationExpiry(run);
     // 仅新确认步骤滚到卡片，不在状态轮询中反复抢走用户的滚动位置。
     if (typeof area.scrollIntoView === 'function') area.scrollIntoView({ block: 'nearest', behavior: 'auto' });
     // Restore an interrupted submission only when it still targets the exact
@@ -854,7 +951,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         window_token: boot.window_token, question, history: source ? source.history : sessions.history(conversation), output_format: 'screen' };
       if (activeGuidanceSchema === GUIDANCE_SCHEMA) pendingCreate.guidance_schema_version = GUIDANCE_SCHEMA;
       const contextRef = source ? source.context_ref : sessions.contextRef(conversation); if (contextRef) pendingCreate.context_ref = contextRef;
-      recoveryDraft = null;
+      if (source && source.clarification_restart) pendingCreate.clarification_restart = source.clarification_restart;
+      recoveryDraft = null; guidanceDraft = null; guidanceSubmission = null;
       // The workspace header is customer-facing context, so show the actual
       // submitted wording instead of a generic title as soon as it is durable.
       updateWorkspaceTitle({ rounds: [{ question }] }); renderWorkspaceHistory();
@@ -924,6 +1022,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     showActiveQuestion();
     clarificationSubmittedId = typeof record.queued_clarification_id === 'string' ? record.queued_clarification_id : null;
     guidanceSubmission = validGuidanceSubmission(record.guidance_submission) ? record.guidance_submission : null;
+    guidanceDraft = record.guidance_draft && typeof record.guidance_draft.id === 'string'
+      && record.guidance_draft.choices && typeof record.guidance_draft.choices === 'object' ? record.guidance_draft : null;
     closeRequested = record.close_requested === true;
     if (!run) {
       if (!pendingCreate) { clearActive(); return; }
@@ -944,7 +1044,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       // its current clarification instead of treating it as an idle task.
       if (run === before && current && typeof current.progress === 'string') progress.textContent = current.progress;
       if (run && !isTerminal(run.status) && !closeRequested) {
-        if (run.status === 'WAITING_CLARIFICATION' && run.clarification && !cancelling && clarificationSubmittedId !== run.clarification.id) renderClarification(run.clarification);
+        if (run.status === 'WAITING_CLARIFICATION' && run.clarification && !cancelling && clarificationSubmittedId !== run.clarification.id) { renderClarification(run.clarification); scheduleClarificationExpiry(current); }
         else { clearClarification(); clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1000); }
       }
       if (closeRequested) { await stop(); return; }
@@ -1063,7 +1163,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // its signed delivery session and continue polling. The visible buttons are
   // the only cancellation path.
   const unload = () => { persistActive(); }; window.addEventListener('pagehide', unload); window.addEventListener('beforeunload', unload);
-  const dispose = () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearTimeout(admissionRetryTimer); clearInterval(expiryTimer); finishActiveRunStatus(); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); host.remove(); };
+  const dispose = () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearTimeout(admissionRetryTimer); clearTimeout(clarificationTimer); clearInterval(expiryTimer); finishActiveRunStatus(); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); host.remove(); };
   host.__moheAiDispose = dispose;
   return dispose;
 }

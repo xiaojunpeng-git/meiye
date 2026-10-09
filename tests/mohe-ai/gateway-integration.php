@@ -19,7 +19,25 @@ use app\services\query\metric\GroupPerformanceMetricReadServices;
 $checks=0;
 function verifyGateway($value,$label){global $checks;if(!$value)throw new RuntimeException('FAIL '.$label);$checks++;}
 function rejectGateway(callable $call,$code){try{$call();}catch(Throwable $e){verifyGateway($e->getMessage()===$code,'expected '.$code.' got '.$e->getMessage());return;}throw new RuntimeException('Missing error '.$code);}
-class GatewayFactFixture { private $day;private $table;public function __construct($table){$this->table=$table;}public function __call($name,$args){if($name==='whereExists')$args[0]($this);if($name==='whereBetween')$this->day=$args[1][0];return $this;}public function find(){return ['amount_cents'=>$this->table==='cashier_v3_payment_fact'?'10000':'12345'];}public function column(){return [1=>'测试门店'];}public function toArray(){return [['store_id'=>'1','business_date'=>$this->day,'amount_cents'=>$this->table==='cashier_v3_payment_fact'?'10000':'12345']];} }
+/**
+ * Positive-only fact fixture. A refund-only predicate must return no amount;
+ * otherwise the fake adapter invents positive cash for a negative fact query.
+ * Real SQL accounting is covered by the metric reader tests, not this adapter.
+ */
+class GatewayFactFixture {
+ private $day; private $table; private $negativeOnly=false;
+ public function __construct($table){$this->table=$table;}
+ public function __call($name,$args){
+  if($name==='whereExists')$args[0]($this);
+  if($name==='whereBetween')$this->day=$args[1][0];
+  if($name==='where' && $args===['p.amount_cents','<',0])$this->negativeOnly=true;
+  return $this;
+ }
+ private function amount(){return $this->negativeOnly?'0':($this->table==='cashier_v3_payment_fact'?'10000':'12345');}
+ public function find(){return ['amount_cents'=>$this->amount()];}
+ public function column(){return [1=>'测试门店'];}
+ public function toArray(){return [['store_id'=>'1','business_date'=>$this->day,'amount_cents'=>$this->amount()]];}
+}
 $db=new PDO('sqlite::memory:');
 foreach ([
  'CREATE TABLE mohe_ai_mutex (instance_id TEXT PRIMARY KEY,quarantined_slots INTEGER NOT NULL DEFAULT 0)',
@@ -525,7 +543,8 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  $omittedWaiting=$gateway->handle('execute',$semanticContext,$omittedBinding+$omittedInput,$omittedRun['run_id']);
  $omittedOptions=$omittedWaiting['clarification']['fields'][0]['options']??[];
  verifyGateway($omittedWaiting['status']==='WAITING_CLARIFICATION'
-     && count($omittedOptions)===1 && ($omittedOptions[0]['action']??null)==='stop'
+     && count($omittedOptions)===3
+     && array_column($omittedOptions,'action')===['edit_original','retry_original','new_conversation']
      && $queries===$beforeOmittedQueries,
      'an omitted explicit member subject cannot become three store recommendations');
  // Recommendation validation must not invent a store when the understood
@@ -536,12 +555,15 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  ],'clarification_suggestions'=>['查看充值本金','查看余额扣款','查看会员剩余项目金额']];
  $recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,
      ['outbound'=>['question'=>'这个月会员那个金额'],'reference_values'=>[]],['question'=>'这个月会员那个金额']);
- verifyGateway(count($recommendationCard['fields'][0]['options'])===1 && isset($recommendationCard['fields'][0]['options'][0]['action']),
+ // This fixture is the existing store drawer: recovery actions may remain,
+ // but none may masquerade as an executable business suggestion.
+ verifyGateway(array_column($recommendationCard['fields'][0]['options'],'action')===['edit_original','retry_original','new_conversation']
+     && $recommendationCard['_semantic_recommendations']===[],
      'unverified historical language suggestions cannot promise executable recommendations');
  $recommendationMeaning['clarification_suggestions']=['查看本月的数据','改看上个月的数据','按天列出来'];
  $recommendationCard=$recommendationMethod->invoke($gateway,$recommendationMeaning,
      ['outbound'=>['question'=>'那个金额'],'reference_values'=>[]],['question'=>'那个金额']);
- verifyGateway(count($recommendationCard['fields'][0]['options'])===1 && $queries===$beforeReplayQueries,
+ verifyGateway($recommendationCard['_semantic_recommendations']===[] && $queries===$beforeReplayQueries,
      'historical text suggestions perform no query and leave free supplementation available');
  $newTopicInput=$semanticInput;$newTopicInput['client_request_id']='r59-partial-new-topic';
  $newTopicInput['context_ref']=$semanticAnswer['answer']['context_ref'];

@@ -7,14 +7,15 @@ use RuntimeException;
  * The queue boundary has one deliberately small, canonical request shape.
  * It is not an intent grammar: the model still interprets the customer's
  * language.  It only removes HTTP/session credentials that a trusted worker
- * must never inherit.
+ * must never inherit. A clarification restart keeps only its scoped source
+ * proof inside this encrypted input, like context_ref; Redis sees a Run ID.
  */
 final class AiExecutionEnvelope
 {
     public static function project(string $operation,array $input): array
     {
         $keys=[
-            'execute'=>['question','history','output_format','guidance_schema_version','context_ref'],
+            'execute'=>['question','history','output_format','guidance_schema_version','context_ref','clarification_restart'],
             'clarify'=>['clarification_id','choices','schema_version','step_revision','intent_revision','client_submission_id','revise_clarification_id'],
         ][$operation]??null;
         if ($keys===null) throw new RuntimeException('AI_OPERATION_INVALID');

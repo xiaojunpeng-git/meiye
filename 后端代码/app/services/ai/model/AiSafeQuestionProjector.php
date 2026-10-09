@@ -106,12 +106,18 @@ final class AiSafeQuestionProjector
             $local[$ref]=$value;
             return '['.$ref.']';
         };
-        foreach ([
-            '/\bsk-[A-Za-z0-9_-]{12,}\b/u',
-            '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/iu',
-            '/(?<![0-9])1[3-9][0-9]{9}(?![0-9])/u',
-            '/(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9_-]{15,}(?![A-Za-z0-9])/u',
-        ] as $pattern) $safe=preg_replace_callback($pattern,static function(array $match) use($reference):string{return $reference($match[0]);},$safe);
+        // Match raw sensitive spans in one pass. Sequential replacements let
+        // the generic identifier rule redact our own local_condition token,
+        // breaking its identity mapping (especially a phone-only reply).
+        // Literal customer-written tokens are still treated as raw input;
+        // this is not an exemption from masking or a trusted-token allowlist.
+        $sensitivePattern='/\\bsk-[A-Za-z0-9_-]{12,}\\b'
+            .'|[A-Z0-9._%+\\-]+@[A-Z0-9.\\-]+\\.[A-Z]{2,}'
+            .'|(?<![0-9])1[3-9][0-9]{9}(?![0-9])'
+            .'|(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9_-]{15,}(?![A-Za-z0-9])/iu';
+        $safe=preg_replace_callback($sensitivePattern,static function(array $match) use($reference):string {
+            return $reference($match[0]);
+        },$safe);
         // A complete registered measurement is public capability vocabulary,
         // even where it contains a private object alias such as a position.
         // Shield its full exact span while local aliases are de-identified,

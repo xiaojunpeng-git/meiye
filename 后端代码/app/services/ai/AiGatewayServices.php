@@ -35,10 +35,6 @@ final class AiGatewayServices
     // call bounded, but leave enough room for that single semantic stage so a
     // valid request is not reported as failed before any Reader is executed.
     private const MODEL_STAGE_LIMIT_MS = 30000;
-    // Give the first semantic request its full bounded window. Replaying the
-    // same large prompt in a shorter remainder was slower and did not recover
-    // provider timeouts in the observed fresh-chat path.
-    private const UNDERSTANDING_PRIMARY_LIMIT_MS = 30000;
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
     private $management; private $managementDocument; private $managementRevision='source';
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
@@ -116,8 +112,8 @@ final class AiGatewayServices
     {
         $schemas=[
             'bootstrap'=>['client_session_id'],
-            'create'=>['client_request_id','conversation_id','client_session_id','window_token','question','history','output_format','guidance_schema_version','context_ref'],
-            'execute'=>['client_request_id','conversation_id','client_session_id','window_token','question','history','output_format','generation','run_delivery_token','guidance_schema_version','context_ref'],
+            'create'=>['client_request_id','conversation_id','client_session_id','window_token','question','history','output_format','guidance_schema_version','context_ref','clarification_restart'],
+            'execute'=>['client_request_id','conversation_id','client_session_id','window_token','question','history','output_format','generation','run_delivery_token','guidance_schema_version','context_ref','clarification_restart'],
             'status'=>['client_session_id','generation','run_delivery_token'], 'delivery'=>['client_session_id','generation','run_delivery_token','client_elapsed_ms'], 'cancel'=>['client_session_id','generation','run_delivery_token'],
             'export'=>['client_session_id','generation','run_delivery_token'],
             'export_create'=>['client_session_id','generation','run_delivery_token'],
@@ -165,7 +161,7 @@ final class AiGatewayServices
             $session=$this->identifier($input['client_session_id']??null);
             $this->verifyToken($input['window_token']??'', $context,$session,'window');
             $owner=['account_id'=>(int)$context['account_id'],'terminal'=>$context['terminal'],'conversation_id'=>$this->identifier($input['conversation_id']??null),'window_id'=>$session];
-            $body=$this->conversation($input);
+            $body=$this->conversation($input,$context,$owner);
             $limits=$this->limits();
             // A queued Run is executed under a freshly reconstructed trusted
             // principal, not the mutable HTTP request context.  Freeze its
@@ -263,7 +259,7 @@ final class AiGatewayServices
                 // Compatibility trigger for an older client.  Creation already
                 // persisted the same body, so never replace it with a second
                 // client copy or run work inside this HTTP request.
-                $body=$this->conversation($input); $this->runs->assertRequest($owner,$runId,$generation,$this->bodyHash($body));
+                $body=$this->conversation($input,$context,$owner); $this->runs->assertRequest($owner,$runId,$generation,$this->bodyHash($body));
                 try { \app\services\ai\execution\AiRunExecutionQueue::push($this->instance,$runId); } catch (\Throwable $ignored) {}
                 return $this->present($context,$owner,$this->runs->get($owner,$runId,$generation));
             }
@@ -365,13 +361,19 @@ final class AiGatewayServices
             $frozen=$this->runs->snapshot($owner,$id,$generation);
             $this->loadManagement($frozen['management_revision']??'source');
             if ($operation==='execute') {
-                $body=$this->conversation($input); $this->runs->assertRequest($owner,$id,$generation,$this->bodyHash($body));
+                $body=$this->conversation($input,$context,$owner); $this->runs->assertRequest($owner,$id,$generation,$this->bodyHash($body));
                 $current=$this->runs->get($owner,$id,$generation);
                 if (in_array($current['status'],['COMPLETED','PARTIAL_SUCCEEDED','CANCELLED','FAILED','WAITING_CLARIFICATION','WAITING_EXPORT'],true)) return $this->present($context,$owner,$current);
                 if (!$this->runs->claim($owner,$id,$generation,$worker)) return $this->present($context,$owner,$this->runs->get($owner,$id,$generation));
                 $claimed=true;
             } else {
                 $r=$this->runs->get($owner,$id,$generation);
+                // Compatibility HTTP execution has the same late-submit
+                // boundary as the async queue: show the confirmed terminal
+                // reason instead of trying to resume an expired task.
+                if (in_array($r['status'],['COMPLETED','PARTIAL_SUCCEEDED','CANCELLED','FAILED'],true)) {
+                    return $this->present($context,$owner,$r);
+                }
                 if ($r['guidance_schema_version']==='mohe-clarification-v2') {
                     if (($input['schema_version']??'')!=='mohe-clarification-v2') throw new RuntimeException('AI_CLIENT_UPGRADE_REQUIRED');
                     $submission=['request_id'=>$this->identifier($input['client_submission_id']??null),'request_hash'=>$this->executionHash('clarify',$input),
@@ -400,14 +402,23 @@ final class AiGatewayServices
                 // natural-language understanding. A model failure never
                 // falls back to the old approximate parser.
                 if (!AiConfigStore::allowsSanitizedQuestion($configuration)) throw new RuntimeException('AI_MODEL_CONFIG_UPGRADE_REQUIRED');
-                $projection=['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
-                $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration);
-                $compiled=$this->decorateGuidance($compiled);
+                if (isset($body['clarification_restart'])) {
+                    // An explicit restart gets ordinary fresh admission and
+                    // budgets. The old expired Run is never revived or edited.
+                    $restart=$body['clarification_restart'];
+                    $stored=$this->expiredClarificationSource($context,$owner,$restart);
+                    [$compiled,$steps,$guidanceRequiresSemanticContext]=$this->compileGuidanceChoice(
+                        $context,$owner,$id,$generation,$worker,$stored,['choices'=>$restart['choices']],$configuration,$body,false);
+                } else {
+                    $projection=['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
+                    $compiled=$this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration);
+                    $compiled=$this->decorateGuidance($compiled);
+                }
                 if ($compiled['kind']==='clarification') {
                     // Preserve the compiler's topic-cleared private carrier;
                     // the original HTTP body must not revive discarded context.
                     $compiled['_request_body']=$compiled['_request_body']??$body;
-                    $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$compiled,[]); $paused=true;
+                    $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$stored['origin']??$compiled,$steps??[]); $paused=true;
                     return $this->present($context,$owner,$r);
                 }
             } else {
@@ -417,37 +428,9 @@ final class AiGatewayServices
                 // from a context choice into a dimension choice (or the other
                 // way around), so checking planner-specific state here would
                 // let the accepted meaning disappear before the final query.
-                $guidanceRequiresSemanticContext=array_key_exists('_semantic_context',$stored['envelope']);
                 try {
-                    $selected=$this->semanticRecommendationChoice($stored['envelope'],$input);
-                    $reply=$selected===null?$this->semanticClarificationReply($stored['envelope'],$input):null;
-                    if ($selected!==null) {
-                        // The option was compiled before the card was issued.
-                        // Current capability/config/authority snapshots were
-                        // checked above; execution still recompiles and guards
-                        // every Reader call. No model reinterprets the label.
-                        $compiled=$selected;$steps=[];$guidanceRequiresSemanticContext=false;
-                        $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_recommendation_selected');
-                    } elseif ($reply!==null) {
-                        $this->runs->scopeSemanticContinuation($owner,$id,$generation,$worker);
-                        // Resume the same durable Run. The original meaning is
-                        // private context, not a new browser-authored scope.
-                        $body=$stored['envelope']['_request_body'];
-                        $body['_clarification_context']=$stored['envelope']['_semantic_reply_state'];
-                        $body['question']=$reply;
-                        $projection=['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
-                        $compiled=$this->decorateGuidance($this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration));
-                        $guidanceRequiresSemanticContext=false;
-                        $steps=[];
-                    } else {
-                        [$compiled,$steps]=$this->advanceGuidance($stored,$r['clarification_ref'],$input);
-                    }
-                    if (($compiled['kind']??null)==='clarification') {
-                        $compiled['_request_body']=$compiled['_request_body']??$body??($stored['envelope']['_request_body']??null);
-                        if (!isset($compiled['_semantic_reply_state']) && isset($stored['envelope']['_semantic_reply_state'])) {
-                            $compiled['_semantic_reply_state']=$stored['envelope']['_semantic_reply_state'];
-                        }
-                    }
+                    [$compiled,$steps,$guidanceRequiresSemanticContext]=$this->compileGuidanceChoice(
+                        $context,$owner,$id,$generation,$worker,$stored+['envelope_ref'=>$r['clarification_ref']],$input,$configuration,$body,true);
                 }
                 catch (\Throwable $error) {
                     if (!in_array($error->getMessage(),['AI_CLARIFICATION_INVALID','AI_DATE_INVALID'],true)) throw $error;
@@ -460,12 +443,6 @@ final class AiGatewayServices
                     $response=$this->present($context,$owner,$r); $response['message']='所选条件格式不完整，请检查后重新确认。'; return $response;
                 }
                 if ($submission!==null) $this->runs->acceptClarification($owner,$id,$generation,$worker,$submission['request_id']);
-                if (isset($stored['envelope']['_member_detail_request'])) {
-                    $compiled['_member_detail_request']=$stored['envelope']['_member_detail_request'];
-                }
-                if (isset($stored['envelope']['_ranking_detail_request'])) {
-                    $compiled=$this->attachPopulationDetail($compiled,$stored['envelope']['_ranking_detail_request']);
-                }
                 if ($compiled['kind']==='clarification') {
                     $r=$this->issueGuidance($owner,$id,$generation,$worker,$compiled,$stored['origin']??$stored['envelope'],$steps); $paused=true;
                     return $this->present($context,$owner,$r);
@@ -898,14 +875,73 @@ final class AiGatewayServices
             $options[]=['value'=>$value,'label'=>$candidate['label'],'recommended'=>true];
             $plans[$value]=$candidate['compiled'];
         }
-        // The language model may propose fewer than three safe alternatives.
-        // Preserve those plans and fill only the remaining visible positions
-        // with customer actions; no arbitrary registry metric becomes advice.
-        $options=\app\services\ai\execution\AiSemanticRecommendationPlanner::completeCardOptions($options);
+        // A missing executable suggestion leaves one honest free-text path in
+        // the same Run. Never pad the question with unrelated retry actions.
+        $options=\app\services\ai\execution\AiSemanticRecommendationPlanner::completeCardOptions($options,
+            empty($body['_platform_guidance']));
+        if ($options===[]) $options[]=['value'=>'__supplement__','label'=>'补充查询条件'];
         return ['kind'=>'clarification','question'=>'我已理解部分条件，请选择您想查询的内容，或补充描述。',
             'fields'=>[['key'=>'semantic_reply','type'=>'select','label'=>'查询内容','options'=>$options]],
             '_request_body'=>$body,'_semantic_reply_state'=>$this->semanticReplyState($understanding,$safe,$body),
             '_semantic_recommendations'=>$plans];
+    }
+
+    /** A selected member cannot use aggregate recommendation plans before
+     * identity is resolved. Ask for the missing measurement using only the
+     * authorized registry; the private name and stated period stay in the
+     * signed same-Run clarification state. A registry label is an example of
+     * an available meaning, never an automatic interpretation of broad prose. */
+    private function selectedMemberMetricClarification(array $understanding,array $safe,array $body,array $memberMetrics): ?array
+    {
+        if (empty($body['_platform_guidance']) || $memberMetrics===[]) return null;
+        $selected=false;$terms=[];
+        foreach ($understanding['requirements'] as $requirement) {
+            $values=$requirement['values'];
+            if (($values['object_kind']??null)==='member' && ($values['object_relation']??null)==='selection') $selected=true;
+            foreach ((array)($values['metric_terms']??[]) as $term) $terms[]=$term;
+        }
+        if (!$selected || \app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms($terms,array_keys($memberMetrics))!==null) return null;
+        $guidance=$this->semanticClarification($understanding,$safe,$body);
+        $options=[];$replies=[];
+        foreach (array_slice(array_values($memberMetrics),0,3) as $metric) {
+            $value='member_metric_'.(count($options)+1);
+            $options[]=['value'=>$value,'label'=>$metric['name'],'recommended'=>true];
+            $replies[$value]=$metric['name'];
+        }
+        $options[]=['value'=>'__supplement__','label'=>'说明其他统计口径'];
+        $guidance['question']='你想查询这位会员的哪项指标？请选择当前可查询的指标，或说明其他统计口径。';
+        $guidance['fields'][0]['options']=$options;
+        // These labels come from the authorized catalog and resume normal
+        // understanding; a click is customer confirmation, not a plan or a
+        // guessed interpretation of the original broad wording.
+        $guidance['_member_metric_replies']=$replies;
+        return $guidance;
+    }
+
+    /** A model-suggested first view does not make an object-only question
+     * executable. Only the customer's accepted measurement/result request or
+     * signed predecessor can supply that missing meaning. */
+    private function needsStoreGoalGuidance(array $understanding,?array $sourceQuery,array $caps): bool
+    {
+        if ($sourceQuery!==null || ($understanding['topic_relation']??null)==='continuation') return false;
+        $store=false;$hasResultRequest=false;
+        foreach ($understanding['requirements'] as $requirement) {
+            $values=$requirement['values'];
+            if (($values['object_kind']??null)==='store') $store=true;
+            // A metric definition is a metadata question, not a dated fact
+            // query. Its registered definition selector owns clarification.
+            if (($values['operation']??null)==='definition') return false;
+            if (!empty($values['metric_terms'])) {
+                $hasResultRequest=$hasResultRequest || \app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms(
+                    $values['metric_terms'],$caps['metric_codes']??[])!==null;
+            }
+            // A presentation form such as summary or ranking still leaves
+            // the requested measurement unknown. Only a bound condition or
+            // explicit object detail supplies a result without a metric term.
+            if (isset($values['aggregate_condition']) || isset($values['condition_update'])
+                || isset($values['object_detail'])) $hasResultRequest=true;
+        }
+        return $store && !$hasResultRequest;
     }
 
     /** Preflight shares the production compiler and performs no fact query.
@@ -947,11 +983,19 @@ final class AiGatewayServices
         }
         $compiler=new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;});
         $pool=$planner->candidates($understanding,$caps,$today,$body['output_format'],
-            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery,$currentStoreId);
-        if (count($pool)<3) {
+            static function(array $plan)use($compiler,$caps):void{$compiler->compile($plan,$caps);},$labels,$sourceQuery,$currentStoreId,
+            !empty($body['_platform_guidance']));
+        if ($pool===[]) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_pool_empty');
+            return $this->semanticClarification($understanding,$safe,$body);
+        }
+        if (count($pool)<3 && empty($body['_platform_guidance'])) {
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_pool_insufficient');
             return $this->semanticClarification($understanding,$safe,$body);
         }
+        // Every member of a small pool is already registered and preflighted;
+        // a ranking model cannot add meaning when there are at most three.
+        if (count($pool)<=3) return $this->semanticClarification($understanding,$safe,$body,$pool);
         $metadata=[];
         foreach ($pool as $key=>$candidate) $metadata[]=['id'=>$key,'label'=>$candidate['label'],
             'meaning'=>$candidate['meaning'],'object_kind'=>$candidate['object_kind'],'query_shape'=>$candidate['query_shape']];
@@ -990,6 +1034,9 @@ final class AiGatewayServices
         if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         $value=$choices['semantic_reply']??null;
         if ($value==='__supplement__') return null;
+        // A selected-member metric is a catalog-owned reply, not a plan:
+        // identity still needs local resolution before any Reader call.
+        if (is_string($value) && isset($envelope['_member_metric_replies'][$value])) return null;
         if (array_keys($choices)!==['semantic_reply'] || !is_string($value)
             || isset($input['revise_clarification_id']) || !isset($envelope['_semantic_recommendations'][$value])) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         return $envelope['_semantic_recommendations'][$value];
@@ -1031,7 +1078,9 @@ final class AiGatewayServices
         $previous=$body['_clarification_context']??null;
         $text=$safe['outbound']['question'];$original=$body['question'];
         if (is_array($previous)) {
-            $text=$previous['safe_question']."\n补充：".$text;
+            // Evidence messages forbid control characters. A second answer
+            // must remain valid model input while keeping earlier meaning.
+            $text=$previous['safe_question'].'；补充：'.$text;
             $original=$previous['original_question']."\n".$original;
         }
         return ['safe_question'=>$text,'understanding'=>$understanding,'original_question'=>$original,
@@ -1104,10 +1153,117 @@ final class AiGatewayServices
                 || preg_match('//u',$reply)!==1 || preg_match('/[\x00-\x08\x0b\x0c\x0e-\x1f]/',$reply)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
             return trim($reply);
         }
+        if ($semantic && is_string($value) && isset($envelope['_member_metric_replies'][$value])) {
+            if (array_keys($choices)!==[$key]) throw new RuntimeException('AI_CLARIFICATION_INVALID');
+            // Resume natural-language understanding with the exact confirmed
+            // registered label; the browser cannot supply an executable code.
+            return $envelope['_member_metric_replies'][$value];
+        }
         if (array_keys($choices)!==[$key]) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         // Recommended choices use the validated carrier above. Only free text
         // reaches this method; old string labels cannot restart model binding.
         throw new RuntimeException('AI_CLARIFICATION_INVALID');
+    }
+
+    /** Share ordinary clarification compilation with an explicit restart.
+     * All interpretation, private identity masking and Reader guards remain
+     * on the same path; a browser cannot submit an executable business plan. */
+    private function compileGuidanceChoice(array $context,array $owner,string $id,int $generation,string $worker,
+        array $stored,array $input,array $configuration,?array &$body,bool $continuation): array
+    {
+        $requiresSemanticContext=array_key_exists('_semantic_context',$stored['envelope']);
+        $selected=$this->semanticRecommendationChoice($stored['envelope'],$input);
+        $reply=$selected===null?$this->semanticClarificationReply($stored['envelope'],$input):null;
+        $identity=$reply!==null?$this->confirmedMemberIdentityChoice($context,$stored['envelope'],$reply):null;
+        if ($identity!==null) {
+            // A complete phone answers a server-issued identity slot only;
+            // no language model may reinterpret already accepted conditions.
+            $compiled=$identity;$steps=[];$requiresSemanticContext=false;
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                $compiled['kind']==='plan'?'member_identity_locally_confirmed':'member_identity_not_found');
+        } elseif ($selected!==null) {
+            // The option was compiled before the card was issued.
+            // Current capability/config/authority snapshots were
+            // checked above; execution still recompiles and guards
+            // every Reader call. No model reinterprets the label.
+            $compiled=$this->decorateGuidance($selected);$steps=[];$requiresSemanticContext=false;
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'verified_recommendation_selected');
+        } elseif ($reply!==null) {
+            if ($continuation) $this->runs->scopeSemanticContinuation($owner,$id,$generation,$worker);
+            // Interpret the reply against server-owned original meaning;
+            // a fresh recovery Run uses the same private merge boundary.
+            $body=$stored['envelope']['_request_body'];
+            $body['_clarification_context']=$stored['envelope']['_semantic_reply_state'];
+            $body['question']=$reply;
+            $projection=['dates'=>[],'date_terms'=>[],'signals'=>[],'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
+            $compiled=$this->decorateGuidance($this->understandAnalysis($context,$owner,$id,$generation,$worker,$body,$projection,$configuration));
+            $requiresSemanticContext=false;
+            $steps=[];
+        } else {
+            [$compiled,$steps]=$this->advanceGuidance($stored,$stored['envelope_ref'],$input);
+        }
+        if (($compiled['kind']??null)==='clarification') {
+            $compiled['_request_body']=$compiled['_request_body']??$body??($stored['envelope']['_request_body']??null);
+            if (!isset($compiled['_semantic_reply_state']) && isset($stored['envelope']['_semantic_reply_state'])) {
+                $compiled['_semantic_reply_state']=$stored['envelope']['_semantic_reply_state'];
+            }
+        }
+        if (isset($stored['envelope']['_member_detail_request'])) {
+            $compiled['_member_detail_request']=$stored['envelope']['_member_detail_request'];
+        }
+        if (isset($stored['envelope']['_ranking_detail_request'])) {
+            $compiled=$this->attachPopulationDetail($compiled,$stored['envelope']['_ranking_detail_request']);
+        }
+        return [$compiled,$steps,$requiresSemanticContext];
+    }
+
+    /** Resolve only a full-phone reply to our encrypted identity request.
+     * The frozen plan already owns metric/date/store meaning. Current local
+     * member scope, followed by the ordinary compiler and Reader guards,
+     * owns identity and facts. Other prose still uses semantic understanding. */
+    private function confirmedMemberIdentityChoice(array $context,array $envelope,string $reply): ?array
+    {
+        $pending=$envelope['_member_identity_request']??null;
+        if (!is_array($pending) || preg_match('/^1[3-9][0-9]{9}$/D',$reply)!==1) return null;
+        $compiled=$pending['compiled'];$query=$compiled['plan']['query'];$metric=$query['metric_codes'][0];
+        $available=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($this->capabilities($context),'member','summary');
+        if (!isset($available[$metric])) throw new RuntimeException('AI_CAPABILITY_CHANGED');
+        $matches=$this->memberObjects($context)->exactCandidates($pending['name'],[$metric],$reply);
+        if (count($matches)>1) throw new RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+        if ($matches===[]) {
+            // Keep every accepted slot and ask for a corrected identifier;
+            // zero exact matches is never an empty consumption result.
+            $envelope['question']='未找到与该姓名和手机号同时匹配的会员。请核对完整手机号。';
+            return $envelope;
+        }
+        $compiled['plan']['query']['business_filters']['selection_ref']=$matches[0]['ref'];
+        return $compiled;
+    }
+
+    /** Authenticate an expired, retained source under the current principal.
+     * Reuse immutable private guidance only while its capability, permission
+     * and model snapshots still match; no raw transcript or ID leaves here. */
+    private function expiredClarificationSource(array $context,array $owner,$source): array
+    {
+        if (($context['terminal']??null)!=='platform' || !is_array($source)
+            || array_diff(array_keys($source),['run_id','generation','client_session_id','run_delivery_token','clarification_id','choices'])
+            || !is_array($source['choices']??null) || $source['choices']===[]) throw new RuntimeException('AI_CLARIFICATION_STALE');
+        $id=$this->identifier($source['run_id']??null);$session=$this->identifier($source['client_session_id']??null);
+        $generation=$source['generation']??null;
+        $proof=$this->verifyToken($source['run_delivery_token']??'',$context,$session,'run');
+        if (!is_int($generation) || $generation<1 || ($proof['run']??null)!==$id || ($proof['generation']??null)!==$generation
+            || ($proof['conversation']??null)!==$owner['conversation_id']) throw new RuntimeException('AI_DELIVERY_INVALID');
+        $sourceOwner=$owner;$sourceOwner['window_id']=$session;
+        $run=$this->runs->get($sourceOwner,$id,$generation);
+        if ($run['status']!=='FAILED' || $run['reason']!=='CLARIFICATION_EXPIRED'
+            || ($source['clarification_id']??null)!==$run['clarification_ref']) throw new RuntimeException('AI_CLARIFICATION_STALE');
+        $snapshot=$this->runs->snapshot($sourceOwner,$id,$generation);$configuration=$this->config->read();$fresh=$this->fresh($context);
+        if (empty($fresh['can_use']) || ($snapshot['authorization_version']??null)!==$this->permissionHash($fresh)
+            || ($snapshot['model_config_version']??null)!==(string)$configuration['version']) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+        if (($snapshot['capability_snapshot_ref']??null)!==$this->registryHash($context)
+            || ($snapshot['capability_snapshot_hash']??null)!==hash('sha256',json_encode($this->capabilities($context)))) throw new RuntimeException('AI_CAPABILITY_CHANGED');
+        $stored=$this->private->read($run['clarification_ref']);$this->assertBinding($stored,$sourceOwner,$id,$generation);
+        return $stored+['envelope_ref'=>$run['clarification_ref']];
     }
 
     private function issueGuidance(array $owner,string $id,int $generation,string $worker,array $envelope,array $origin,array $steps): array
@@ -1201,12 +1357,19 @@ final class AiGatewayServices
     {
         $freshContext=$this->fresh($context);
         if ($this->permissionHash($freshContext)!==$this->permissionHash($context)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+        // Workspace guidance is terminal-scoped; the approved cashier drawer
+        // continues to receive its original card options.
+        $body['_platform_guidance']=($context['terminal']??null)==='platform';
+        $projection['no_filler_guidance']=$body['_platform_guidance'];
         $caps=$this->capabilities($freshContext);
         $checkpoint=function()use($context,$owner,$id,$generation,$worker,$configuration):void {
             $this->runs->checkpoint($owner,$id,$generation,$worker);
             $current=$this->config->read();
+            // Losing AI use permission may leave the data-scope hash intact.
+            // Check it explicitly before any initial or recovery model send.
+            $fresh=$this->fresh($context);
             if ($current['version']!==$configuration['version'] || !AiConfigStore::allowsSanitizedQuestion($current)
-                || $this->permissionHash($this->fresh($context))!==$this->permissionHash($context)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
+                || empty($fresh['can_use']) || $this->permissionHash($fresh)!==$this->permissionHash($context)) throw new RuntimeException('AI_AUTHORIZATION_CHANGED');
         };
         $createdAt=$this->runs->get($owner,$id,$generation)['created_at'];
         $today=(new \DateTimeImmutable('@'.intdiv($createdAt,1000)))->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d');
@@ -1419,7 +1582,7 @@ final class AiGatewayServices
         // definition alone therefore never becomes an executable AI choice.
         $personMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'person');
         $memberMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'member','summary');
-        $localCatalogs=[];$memberCatalog=['objects'=>[]];$privateLabels=[];$privateKinds=[];$privateKindsByReference=[];
+        $localCatalogs=[];$memberLabels=[];$privateLabels=[];$privateKinds=[];$privateKindsByReference=[];
         if ($personMetrics) {
             // Pre-plan metadata discovery is a bounded, server-owned catalog read,
             // not a model-authored business query or an extra executable workflow.
@@ -1455,24 +1618,22 @@ final class AiGatewayServices
             }
             $questions[]=$body['question'];
             if (isset($body['_clarification_context']['original_question'])) $questions[]=$body['_clarification_context']['original_question'];
-            // Resolve the bounded conversation in one permission-scoped read.
-            // This preserves exact private-label masking while preventing the
-            // same large member table from being scanned once per history turn.
+            // Mask distinct authorized labels before the model call. Identity
+            // binding waits until the model has confirmed member intent, so
+            // many members sharing one name cannot fail the understanding step.
             $this->runs->prepareAttempt($owner,$id,$generation,$worker,'analysis_members','tool',
                 hash('sha256',json_encode([count($questions),array_keys($memberMetrics)])),'member_catalog_read');
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'analysis_members');
             try {
                 $checkpoint();
-                $matched=$this->memberObjects($context)->mentionedConversation($questions,array_keys($memberMetrics));
-                foreach ($matched['objects'] as $object) $memberCatalog['objects'][$object['ref']]=$object;
+                $memberLabels=$this->memberObjects($context)->maskingLabelsConversation($questions);
                 $checkpoint();
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_members','SUCCEEDED');
             } catch (\Throwable $error) {
                 $this->runs->finishAttempt($owner,$id,$generation,$worker,'analysis_members','FAILED');
                 throw $error;
             }
-            $memberCatalog['objects']=array_values($memberCatalog['objects']);
-            foreach ($memberCatalog['objects'] as $object) foreach(array_merge([$object['label']],(array)($object['aliases']??[])) as $label) {
+            foreach ($memberLabels as $label) {
                 $privateLabels[]=$label;$privateKinds[$label]['member']=true;
             }
         }
@@ -1662,7 +1823,7 @@ final class AiGatewayServices
             $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_meaning');
             try {
             $checkpoint();
-            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::UNDERSTANDING_PRIMARY_LIMIT_MS) : null;
+            $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
             $meaningReply=$this->model
                 ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,null,'understanding')
                 : (new SiliconFlowClient($configuration['provider']))->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,null,$objectVocabulary,$measurementVocabulary);
@@ -1672,26 +1833,49 @@ final class AiGatewayServices
             if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,'understand_meaning');
             $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
             $repairPredicate=$diagnostic['predicate']??null;
-            // A timed-out understanding request has no usable meaning. Keep
-            // its outcome UNKNOWN and do not replay the same large prompt in
-            // a shorter window; the full 30-second limit belongs to the
-            // original request, before any business data is queried.
+            // A timeout supplies no accepted meaning. Preserve UNKNOWN and
+            // unknown token usage even if a separately reserved read-only
+            // recovery later succeeds; it must never masquerade as no cost.
             $firstState=in_array($error->getMessage(),
                 ['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED';
             $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_meaning',$firstState);
             if ($repairPredicate==='binding_requirement_unavailable') {
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
-            if (!($error instanceof AiContractException) || $error->getMessage()!=='AI_MODEL_INTENT_CONTRACT_INVALID'
-                || !\app\services\ai\contract\AiIntentUnderstandingContract::repairable($repairPredicate)) throw $error;
+            // Only the platform's first language stage may recover the
+            // observed no-response timeout. No credentials, provider switch,
+            // binding replay or inferred business condition is involved.
+            // Cancellation, authority drift and other transport failures
+            // remain terminal rather than being treated as missing meaning.
+            $transportRecovery=($owner['terminal']??null)==='platform'
+                && $error instanceof AiContractException && $error->getMessage()==='AI_MODEL_RESULT_UNKNOWN'
+                && ($diagnostic['stage']??null)==='transport' && $repairPredicate==='timeout'
+                && ($diagnostic['transport_errno']??null)===28 && ($diagnostic['http_status']??null)===0;
+            if (!$transportRecovery && (!($error instanceof AiContractException) || $error->getMessage()!=='AI_MODEL_INTENT_CONTRACT_INVALID'
+                || !\app\services\ai\contract\AiIntentUnderstandingContract::repairable($repairPredicate))) throw $error;
+            $recoveryAttempt=$transportRecovery?'understand_transport_retry':'understand_repair';
+            // A transport retry changes no semantic instruction. Its accepted
+            // result still passes the same understanding and binding checks.
+            if ($transportRecovery) $repairPredicate=null;
             // There is only one recovery reservation for the whole Run.  If
             // this correction is used here, a later binding defect is reported
             // honestly instead of issuing an unbounded chain of model calls.
-            $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+            try {
+                $this->runs->reserve($owner,$id,$generation,$worker,'model_recovery_count');
+            } catch (\RuntimeException $reservationError) {
+                // A previous clarification may have consumed the shared
+                // recovery. Keep the actual outage as the terminal reason.
+                if ($transportRecovery && $reservationError->getMessage()==='AI_COUNTER_EXHAUSTED') throw $error;
+                throw $reservationError;
+            }
             $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$runtimeSkills,$objectVocabulary,$measurementVocabulary,$repairPredicate],1536));
             $this->runs->reserve($owner,$id,$generation,$worker,'output_tokens',1200);
-            $this->runs->prepareAttempt($owner,$id,$generation,$worker,'understand_repair','model',hash('sha256',json_encode([$safe['outbound'],$runtimeSkills,$objectVocabulary,$measurementVocabulary,$repairPredicate])),'siliconflow');
-            $this->runs->sendAttempt($owner,$id,$generation,$worker,'understand_repair');
+            // Identical transport recovery has the original request hash;
+            // only a protocol correction adds its new repair instruction.
+            $recoveryPayload=[$safe['outbound'],$runtimeSkills,$objectVocabulary,$measurementVocabulary];
+            if (!$transportRecovery) $recoveryPayload[]=$repairPredicate;
+            $this->runs->prepareAttempt($owner,$id,$generation,$worker,$recoveryAttempt,'model',hash('sha256',json_encode($recoveryPayload)),'siliconflow');
+            $this->runs->sendAttempt($owner,$id,$generation,$worker,$recoveryAttempt);
             try {
                 $checkpoint();
                 $modelTimeout=$this->model===null ? $this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS) : null;
@@ -1699,10 +1883,10 @@ final class AiGatewayServices
                     ? call_user_func($this->model,$safe['outbound'],[],$configuration,$checkpoint,$repairPredicate,'understanding')
                     : (new SiliconFlowClient($configuration['provider']))->understandMeaning($safe['outbound'],$configuration['model'],$configuration['api_key'],$modelTimeout,$checkpoint,$runtimeSkills,$repairPredicate,$objectVocabulary,$measurementVocabulary);
                 $understanding=\app\services\ai\contract\AiIntentUnderstandingContract::normalize($meaningReply['understanding']??null,$safe['outbound']);
-                $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair','SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,$recoveryAttempt,'SUCCEEDED',$meaningReply['usage']['input_tokens']??null,$meaningReply['usage']['output_tokens']??null);
             } catch (\Throwable $repairError) {
-                if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError,'understand_repair');
-                $this->runs->finishAttempt($owner,$id,$generation,$worker,'understand_repair',in_array($repairError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
+                if ($repairError instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$repairError,$recoveryAttempt);
+                $this->runs->finishAttempt($owner,$id,$generation,$worker,$recoveryAttempt,in_array($repairError->getMessage(),['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
                 // Some providers can repeat the same unsafe reduction even
                 // after being told that a complete dated business question
                 // is not a pure calendar continuation. After both bounded
@@ -1713,7 +1897,7 @@ final class AiGatewayServices
                 // this fallback neither copies the prior query nor chooses a
                 // metric, object identity, result or customer-specific rule.
                 $repairDiagnostic=$repairError instanceof AiContractException?$repairError->diagnostic():[];
-                $understanding=($repairDiagnostic['predicate']??null)==='period_only_business_residue'
+                $understanding=!$transportRecovery && ($repairDiagnostic['predicate']??null)==='period_only_business_residue'
                     ?$this->registeredOpenOverviewUnderstanding($safe['outbound'],$today,$caps):null;
                 if ($understanding!==null) {
                     $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'registered_open_overview_understanding_recovered');
@@ -1755,6 +1939,16 @@ final class AiGatewayServices
             // A paused new topic must not carry the discarded signed query
             // into its later supplement merely because the browser sent it.
             unset($body['context_ref']);$body['history']=[];
+        }
+        // A missing selected-member metric is a specific question. Keep the
+        // member reference and time in the private reply state; never relabel
+        // a broad word as the sole available metric merely to execute.
+        $memberMetricGuidance=$this->selectedMemberMetricClarification($understanding,$safe,$body,$memberMetrics);
+        if ($memberMetricGuidance!==null) return $memberMetricGuidance;
+        if (($context['terminal']??null)==='platform'
+            && $this->needsStoreGoalGuidance($understanding,$sourceQuery,$caps)) {
+            return $this->verifiedSemanticClarification($owner,$id,$generation,$worker,$understanding,$safe,$body,$caps,$today,$configuration,$checkpoint,$sourceQuery,
+                \app\services\ai\execution\AiAuthority::currentStoreId($freshContext));
         }
         if (($understanding['status']??null)==='needs_clarification') {
             // Incomplete meaning is a waiting task, not a failed execution.
@@ -2764,6 +2958,30 @@ final class AiGatewayServices
             try { $this->runs->recordDiagnostic($owner,$id,$generation,$worker,['stage'=>'intent_contract','predicate'=>'object_term_not_verbatim']); } catch (\Throwable $ignored) {}
         }
         $term=$intent['object_term'];
+        // A metric-only supplement may leave object_term empty even though
+        // the signed clarification has one selected member. Restore only that
+        // exact encrypted reference; a different topic, ambiguous member
+        // references or an unselected member dimension cannot use this path.
+        $previous=$body['_clarification_context']??null;
+        if ($term==='' && ($intent['object_kind']??null)==='member'
+            && ($intent['object_relation']??null)==='selection' && is_array($previous)
+            && ($understanding['topic_relation']??null)!=='new_topic') {
+            $previousSelected=false;
+            foreach ((array)($previous['understanding']['requirements']??[]) as $requirement) {
+                $values=(array)($requirement['values']??[]);
+                if (($values['object_kind']??null)==='member'
+                    && ($values['object_relation']??null)==='selection') $previousSelected=true;
+            }
+            if ($previousSelected) {
+                $eligible=[];
+                foreach ((array)($safe['reference_values']??[]) as $reference=>$value) {
+                    if (!in_array($value,$memberLabels,true)
+                        || strpos((string)($previous['safe_question']??''),'['.$reference.']')===false) continue;
+                    $eligible[]=$reference;
+                }
+                if (count($eligible)===1) $term=$intent['object_term']='['.$eligible[0].']';
+            }
+        }
         // A protected local catalogue label can denote an analytical class
         // (for example, a registered position) rather than one selected
         // private identity. If the language model independently bound that
@@ -2801,6 +3019,27 @@ final class AiGatewayServices
                 throw new RuntimeException('AI_CAPABILITY_NOT_READY');
             }
         }
+        // Only a full phone supplied in this turn can narrow one already
+        // masked member name. Consume its opaque model fragment locally before
+        // generic ambiguity handling; every other fragment remains blocking.
+        $memberPhone=null;$memberPhoneName=null;
+        if (($intent['object_kind']??null)==='member') {
+            $current=(string)($body['question']??'');
+            $original=(string)($body['_clarification_context']['original_question']??'');
+            if (preg_match('/(?<![0-9])1[3-9][0-9]{9}(?![0-9])/u',$current,$phoneMatch)) {
+                $names=array_values(array_filter($memberLabels,static function(string $name)use($current,$original):bool {
+                    return mb_strpos($current,$name,0,'UTF-8')!==false || mb_strpos($original,$name,0,'UTF-8')!==false;
+                }));
+                if (count($names)===1) {
+                    $memberPhone=$phoneMatch[0];$memberPhoneName=$names[0];$phoneReferences=[];
+                    foreach ((array)($safe['local_conditions']??[]) as $reference=>$value) if ($value===$memberPhone) {
+                        $phoneReferences[]='['.$reference.']';unset($safe['local_conditions'][$reference]);
+                    }
+                    $intent['unresolved_fragments']=array_values(array_filter($intent['unresolved_fragments'],
+                        static fn($fragment):bool=>!in_array($fragment,$phoneReferences,true)));
+                }
+            }
+        }
         // A partially understood request must not be described as total
         // incomprehension. Accepted typed meaning owns that distinction;
         // neither branch may discard the unresolved customer condition.
@@ -2820,8 +3059,24 @@ final class AiGatewayServices
             // remains strict and can never be silently removed.
             $currentToken='['.$match[1].']';
             $currentQuestion=(string)($safe['outbound']['question']??'');
+            $previous=$body['_clarification_context']??null;
+            $sameRunMemberSelection=false;
+            if (($intent['object_kind']??null)==='member' && is_array($previous)
+                && ($understanding['topic_relation']??null)!=='new_topic'
+                && strpos((string)($previous['safe_question']??''),$currentToken)!==false) {
+                foreach ((array)($previous['understanding']['requirements']??[]) as $requirement) {
+                    $values=(array)($requirement['values']??[]);
+                    if (($values['object_kind']??null)==='member'
+                        && ($values['object_relation']??null)==='selection') $sameRunMemberSelection=true;
+                }
+            }
+            // A metric-only reply in this signed Run still refers to its
+            // selected member. Ordinary new turns must drop stale names, but
+            // this encrypted clarification state explicitly preserves that
+            // private selection until identity and metric are both resolved.
             if (strpos($currentQuestion,$currentToken)===false
-                && !in_array($intent['object_kind']??null,['person','position'],true)) {
+                && !in_array($intent['object_kind']??null,['person','position'],true)
+                && !$sameRunMemberSelection) {
                 $localTerm=null;$term='';$intent['object_term']='';$intent['object_relation']='analysis';
             }
         }
@@ -2849,6 +3104,12 @@ final class AiGatewayServices
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'local_object_reference_bound');
             }
         }
+        if ($memberPhoneName!==null) {
+            $localTerm=$memberPhoneName;$term=$localTerm;
+            foreach ((array)($safe['local_conditions']??[]) as $reference=>$value) {
+                if ($value===$localTerm) unset($safe['local_conditions'][$reference]);
+            }
+        }
         // All remaining opaque conditions are meaningful. Never query a reduced request.
         if ($safe['local_conditions']) {
             // Keep only protocol kinds in diagnostics: an unresolved private
@@ -2867,6 +3128,15 @@ final class AiGatewayServices
         if ($intent['periods']!==[]) {
             $projection['dates']=[];
             $projection['date_terms']=$this->naturalPeriodTerms($intent['periods'],$today);
+        }
+        // A broad platform question without a metric and period has no
+        // customer-confirmed time meaning. Keep the missing slot through the
+        // existing guidance state; a precise named metric can still use the
+        // published current-day default, and signed context remains intact.
+        if (($context['terminal']??null)==='platform' && $sourceQuery===null
+            && $intent['periods']===[] && ($projection['date_terms']??[])===[]
+            && ($intent['metric_codes']===[] || !empty($intent['needs_metric_choice']))) {
+            $projection['require_period_clarification']=true;
         }
         if ($intent['_scope_supplied'] && $intent['scope']==='current_store') {
             if (\app\services\ai\execution\AiAuthority::currentStoreId($context)===null) throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
@@ -2989,6 +3259,23 @@ final class AiGatewayServices
             && !$intent['needs_metric_choice'] && $intent['unresolved_fragments']===[] && !$merged['pending']) {
             return $this->semanticClarification($understanding,$safe,$body);
         }
+        // Binding repair can introduce a model-selected metric after the
+        // first candidate check, whether or not it marks that suggestion as
+        // initial_observation. Gate the final intent before any plan: a model
+        // cannot supply an unstated measurement and time on the customer's
+        // behalf. A stated period or exact metric keeps the direct-answer path.
+        $customerPeriod=false;
+        foreach ($understanding['requirements'] as $requirement) {
+            if (!empty($requirement['values']['periods'])) $customerPeriod=true;
+        }
+        if (($context['terminal']??null)==='platform' && $sourceQuery===null
+            && ($intent['object_kind']??null)==='store' && ($intent['operation']??null)==='summary'
+            && !$customerPeriod
+            && \app\services\query\metric\MetricSemanticCatalog::uniqueTermInText(
+                (string)($safe['outbound']['question']??''),$caps['metric_codes']??[])===null) {
+            return $this->verifiedSemanticClarification($owner,$id,$generation,$worker,$understanding,$safe,$body,$caps,$today,$configuration,$checkpoint,$sourceQuery,
+                \app\services\ai\execution\AiAuthority::currentStoreId($freshContext));
+        }
         // `initial_observation` is semantic admission only.  Its provisional
         // model candidates are deliberately replaced here by the complete
         // source-owned profile for the understood object.  Registry metadata,
@@ -3012,18 +3299,44 @@ final class AiGatewayServices
                     'analysis_member_metric_unavailable',[],'member_metric_probe');
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             }
-            $catalog=new \app\services\query\metric\AnalysisObjectCatalog($memberCatalog['objects'],static function(){return true;});
-            $resolved=$catalog->resolve($localTerm,'member',$metric);
-            if (($resolved['status']??null)!=='resolved' || count($resolved['objects']??[])!==1) {
+            $period=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod(($projection['date_terms']??[['code'=>'TODAY']])[0],$today);
+            // A null selection is a private, non-executable identity slot.
+            // It is replaced only after one authorized exact match is proved.
+            $query=['query_shape'=>'summary','metric_codes'=>[$metric],
+                'start_date'=>$period['start'],'end_date'=>$period['end'],
+                'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'member','selection_ref'=>null],
+                'ranking'=>null,'aggregate_condition'=>null];
+            // A full phone, when supplied, is matched only in the authorized
+            // local relation. The projector masks it before any model request.
+            $matches=$this->memberObjects($context)->exactCandidates($localTerm,[$metric],$memberPhone);
+            // A full phone that still matches multiple active members is a
+            // data-quality conflict, not another question the user can solve.
+            if ($memberPhone!==null && count($matches)>1) throw new RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+            if (($context['terminal']??null)==='platform'
+                && (count($matches)>1 || ($memberPhone!==null && $matches===[]))) {
+                // The same durable Run requests only the missing identity;
+                // never list lookalike members or submit a guessed reference.
+                $guidance=$this->semanticClarification($understanding,$safe,$body);
+                $guidance['question']=$matches===[]
+                    ?'未找到与该姓名和手机号同时匹配的会员。请核对完整手机号。'
+                    :'有多位同名会员。请补充该会员的完整手机号后继续查询。';
+                $guidance['fields'][0]['options']=[['value'=>'__supplement__','label'=>'补充会员完整手机号']];
+                if ($merged['pending']===[] && !$merged['replacement_confirmation']) {
+                    // Freeze only a fully resolved business request. Applying
+                    // the same finishing path preserves explicit store scope
+                    // and inherited constraints; unresolved requests still
+                    // follow normal understanding after the identity reply.
+                    $pending=$finish(['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_summary','query'=>$query,'output_format'=>$body['output_format']]]);
+                    if (($pending['kind']??null)==='plan') $guidance['_member_identity_request']=['name'=>$localTerm,'compiled'=>$pending];
+                }
+                return $guidance;
+            }
+            if (count($matches)!==1) {
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                     'analysis_member_object_unavailable',[],'member_object_probe');
                 throw new RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
             }
-            $query=['query_shape'=>'summary','metric_codes'=>[$metric],
-                'start_date'=>(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod(($projection['date_terms']??[['code'=>'TODAY']])[0],$today)['start'],
-                'end_date'=>(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod(($projection['date_terms']??[['code'=>'TODAY']])[0],$today)['end'],
-                'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'member','selection_ref'=>$resolved['objects'][0]['ref']],
-                'ranking'=>null,'aggregate_condition'=>null];
+            $query['business_filters']['selection_ref']=$matches[0]['ref'];
             return $finish(['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_summary','query'=>$query,'output_format'=>$body['output_format']]]);
         }
         // Population conditions are object contracts, not a personnel-only
@@ -6939,7 +7252,7 @@ final class AiGatewayServices
         if (!in_array($values['max_clarification_rounds'],[3,4,5],true)) throw new RuntimeException('AI_GUIDANCE_PROFILE_INVALID');
         return $values;
     }
-    private function conversation(array $input): array
+    private function conversation(array $input,?array $context=null,?array $owner=null): array
     {
         $body=(new AiModelInputProjector())->validateConversation($input['question']??null,$input['history']??null);
         $format=$input['output_format']??'screen'; if (!in_array($format,['screen','screen_and_xlsx'],true)) throw new RuntimeException('AI_OUTPUT_FORMAT_INVALID');
@@ -6947,7 +7260,15 @@ final class AiGatewayServices
             if (!is_string($input['context_ref']) || strlen($input['context_ref'])>2048 || substr_count($input['context_ref'],'.')!==1) throw new RuntimeException('AI_CONTEXT_REQUIRED');
             $body['context_ref']=$input['context_ref'];
         }
-        $body['output_format']=$format; return $body;
+        $body['output_format']=$format;
+        if (array_key_exists('clarification_restart',$input)) {
+            if ($context===null || $owner===null) throw new RuntimeException('AI_CLARIFICATION_STALE');
+            $this->expiredClarificationSource($context,$owner,$input['clarification_restart']);
+            // Only the signed source and new choices cross the queue. Private
+            // meaning stays server-owned and participates in admission hashing.
+            $body['clarification_restart']=$input['clarification_restart'];
+        }
+        return $body;
     }
     private function bodyHash(array $body): string
     {
@@ -7024,8 +7345,10 @@ final class AiGatewayServices
             'progress'=>$this->progressText($run),'message'=>$this->progressText($run),'run_delivery_token'=>$this->token(['type'=>'run','identity'=>$this->identity($context),'window'=>$owner['window_id'],
                 'conversation'=>$owner['conversation_id'],'run'=>$run['run_id'],'generation'=>$run['generation'],'expires'=>intdiv($run['expires_at'],1000)]),
             'execution_mode'=>$run['execution_mode']??'compatibility',
-            'topic_boundary'=>$run['topic_boundary']??null];
-        if ($run['status']==='WAITING_CLARIFICATION') {
+            'topic_boundary'=>$run['topic_boundary']??null,
+            'server_time'=>(int)floor(microtime(true)*1000),
+            'clarification_deadline_at'=>$run['clarification_deadline_at']??null];
+        if ($run['status']==='WAITING_CLARIFICATION' || ($context['terminal']==='platform' && $run['status']==='FAILED' && $run['reason']==='CLARIFICATION_EXPIRED')) {
             $stored=$this->private->read($run['clarification_ref']); $this->assertBinding($stored,$owner,$run['run_id'],$run['generation']);
             $result['clarification']=['id'=>$run['clarification_ref'],'question'=>$stored['envelope']['question']??'请确认这一项查询条件','fields'=>$stored['envelope']['fields']];
             // This flag contains no business data; it only tells a polling
@@ -7060,6 +7383,10 @@ final class AiGatewayServices
         }
         if ($run['status']==='FAILED') {
             $result['failure_guidance']=$this->failureGuidance($run['reason']);
+            if ($context['terminal']==='platform' && $run['reason']==='CLARIFICATION_EXPIRED') {
+                $result['message']=$result['progress']='补充等待已超时，尚未执行查询。已确认条件已保留，可继续原查询。';
+                $result['failure_guidance']=['kind'=>'clarification_expired','question'=>$result['message']];
+            }
             // A wholly unrelated question receives capability help and ends
             // the prior analysis topic. Without this boundary, device clients
             // may revive the last signed business result for a later bare

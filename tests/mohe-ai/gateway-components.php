@@ -61,12 +61,12 @@ namespace {
     check($envelope['kind']==='clarification' && count($envelope['fields'])===1,'only current semantic question displayed');
     $suggested=$planner->compile($projector->project('业绩多少？'),$selection+['metric_choice_candidates'=>['consume_amount','cash_performance']],$cap,'screen','2026-09-08');
     $suggestions=array_values(array_filter($suggested['fields'][0]['options'],static function(array $option):bool{return ($option['recommended']??false)===true;}));
-    check(array_column($suggestions,'value')===['consume_amount','cash_performance','__edit_original__'],
-        'two model-proposed metrics stay visible and a correction action fills the third slot');
+    check(array_column($suggestions,'value')===['consume_amount','cash_performance'],
+        'two model-proposed metrics remain visible without filler actions');
     check(array_column(array_values(array_filter($envelope['fields'][0]['options'],
         static fn(array $option):bool=>($option['recommended']??false)===true)),'value')===
-        ['__edit_original__','__retry_original__','__new_conversation__'],
-        'no semantic candidates yields three honest customer actions rather than an empty card');
+        [],
+        'no semantic candidates leaves registered choices neutral without filler recommendations');
     // The current server date is already a verified default in this legacy
     // planner fixture, so choosing the only unresolved metric completes the
     // plan directly instead of manufacturing a second date question.
@@ -258,6 +258,11 @@ namespace {
         'binding keeps the business Skill but does not resend the language Skill after typed understanding is accepted');
     check(strpos($bindingText,'requirement_bindings contains only accepted requirements carrying metric_codes')!==false,
         'binding prompt keeps a model-selected professional first answer separate from customer metric requirements');
+    // Masked identity remains a machine-only carrier. Both model phases must
+    // preserve it while the local resolver owns the private value and scope.
+    check(strpos($bindingText,'copy that exact token into object_term')!==false
+        && strpos($bindingText,'expose [local_condition_N]')===false,
+        'binding can preserve a selected private object without disclosing its value');
     $multiObjectCapabilities=array_merge($meanings,[['metric_code'=>'cash_performance','name'=>'现金业绩','summary'=>'已收成功金额','object_contracts'=>[['object_kind'=>'store','action_codes'=>['sale']]]]]);
     $GLOBALS['sfResponse']=$response(json_encode($intent));
     $client->understand($safeQuestion,$multiObjectCapabilities,$understood['understanding'],'fixture/model','fixture-key',1000,function(){},$skills);

@@ -8,11 +8,9 @@ use app\services\query\metric\MetricSemanticCatalog;
  * alter a locked condition or turn an unavailable metric into a recommendation. */
 final class AiSemanticRecommendationPlanner
 {
-    /** Complete a four-choice question card without inventing a metric.
-     * The first three slots keep genuine executable suggestions, then use
-     * customer actions for any missing slots; the client owns the fourth
-     * free-text supplement and never submits these actions as metric codes. */
-    public static function completeCardOptions(array $suggestions): array
+    /** Keep distinct executable suggestions. The platform opts out of legacy
+     * visual padding; the existing cashier drawer keeps its approved card. */
+    public static function completeCardOptions(array $suggestions,bool $allowRecoveryActions=false): array
     {
         $options=[];$seen=[];
         foreach ($suggestions as $suggestion) {
@@ -20,7 +18,9 @@ final class AiSemanticRecommendationPlanner
             if (!is_string($value) || $value==='' || isset($seen[$value]) || count($options)>=3) continue;
             $seen[$value]=true;$suggestion['recommended']=true;$options[]=$suggestion;
         }
-        foreach ([
+        // Keep existing cashier drawer cards until that terminal's page
+        // interaction is approved separately. Platform workspaces opt out.
+        if ($allowRecoveryActions) foreach ([
             ['value'=>'__edit_original__','label'=>'修改原问题后查询','action'=>'edit_original'],
             ['value'=>'__retry_original__','label'=>'按原问题再查一次','action'=>'retry_original'],
             ['value'=>'__new_conversation__','label'=>'开启新对话','action'=>'new_conversation'],
@@ -31,7 +31,10 @@ final class AiSemanticRecommendationPlanner
         return $options;
     }
 
-    public function candidates(array $meaning,array $capabilities,string $today,string $format,callable $preflight,array $labels,?array $source=null,?int $currentStoreId=null): array
+    /** Build bounded registry candidates from accepted meaning. Preflight
+     * proves executability; requirePeriod returns a date step after selection
+     * rather than publishing the preflight's temporary TODAY as user intent. */
+    public function candidates(array $meaning,array $capabilities,string $today,string $format,callable $preflight,array $labels,?array $source=null,?int $currentStoreId=null,bool $requirePeriod=false): array
     {
         if (!empty($meaning['groups'])) return [];
         $values=[];
@@ -113,8 +116,9 @@ final class AiSemanticRecommendationPlanner
                     $projection=['dates'=>[],'date_terms'=>$dates,'signals'=>[$code,$shape],
                         'semantic_intent'=>['constraints'=>[]],'blocking_reason'=>null,'unresolved_condition'=>false];
                     try {
-                        $compiled=$planner->compile($projection,['decision'=>'query','query_shape'=>$shape,
-                            'metric_codes'=>[$code],'object_kind'=>$kind,'ranking'=>$ranking],$capabilities,$format,$today);
+                        $selection=['decision'=>'query','query_shape'=>$shape,
+                            'metric_codes'=>[$code],'object_kind'=>$kind,'ranking'=>$ranking];
+                        $compiled=$planner->compile($projection,$selection,$capabilities,$format,$today);
                         if (($compiled['kind']??null)!=='plan') continue;
                         // The generic planner's store ranking has no business
                         // filter. Keep the selected dimension explicit before
@@ -146,6 +150,19 @@ final class AiSemanticRecommendationPlanner
                             $compiled['plan']['query']['store_ids']=[$currentStoreId];
                         }
                         $preflight($compiled['plan']);
+                        // A broad platform question cannot turn candidate
+                        // preflight's temporary TODAY into customer intent.
+                        // Publish the same verified metric as a date step;
+                        // choosing it still resumes the current Run.
+                        if ($requirePeriod && $source===null && $scope!=='current_store'
+                            && $kind==='store' && $periods===[] && $timeSemantics!=='current_state') {
+                            $withDateStep=$projection;
+                            $withDateStep['require_period_clarification']=true;
+                            $guided=$planner->compile($withDateStep,$selection,$capabilities,$format,$today);
+                            if (($guided['kind']??null)!=='clarification'
+                                || ($guided['fields'][0]['key']??null)!=='start_date') continue;
+                            $compiled=$guided;
+                        }
                     } catch (\app\services\ai\contract\AiContractException $error) { continue;
                     } catch (\app\services\query\metric\MetricQueryContractException $error) { continue;
                     } catch (\RuntimeException $error) {
@@ -158,6 +175,7 @@ final class AiSemanticRecommendationPlanner
                     $objectLabel=$labels[$kind];
                     $forms=['summary'=>'合计','breakdown'=>'逐个明细','ranking'=>'排名','trend'=>'按日变化','comparison'=>'期间对比'];
                     $label=$objectLabel.'的'.$metric['name'].'（'.$forms[$shape].'）';
+                    if (($compiled['kind']??null)==='clarification') $label.='，需确认时间';
                     if ($timeSemantics==='current_state') $label='当前'.$label;
                     if ($ranking!==null) $label=$objectLabel.'的'.$metric['name'].'（'.($ranking['direction']==='bottom'?'最低':($ranking['direction']==='top_and_bottom'?'最高和最低':'最高')).($ranking['limit']??20).'名）';
                     $pool[$id]=['label'=>$label,'meaning'=>$metric['summary'],'object_kind'=>$kind,

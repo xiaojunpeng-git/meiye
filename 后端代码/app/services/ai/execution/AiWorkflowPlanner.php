@@ -82,15 +82,13 @@ final class AiWorkflowPlanner
                 $dateCode === 'LAST_MONTH' ? $date->format('Y-m-t') : $date->format('Y-m-d'));
         }
         }
-        // A complete analytical request may omit a time expression.  The
-        // platform's neutral first-answer policy is the current business day:
-        // it is a system default, not an inferred customer period, and it is
-        // applied only when no period was supplied or inherited. Explicit or
-        // ambiguous multi-period meanings above remain untouched, while a
-        // comparison still requires both customer periods.
+        // A precise analytical request may use the published current-day
+        // default. Broad first turns carry require_period_clarification so a
+        // metric choice cannot silently also choose a time period for the user.
         if (!$definition && $shape!=='comparison' && $range===null
             && count((array)($projection['date_terms']??[]))===0
-            && empty($projection['date_grouping_ambiguous'])) {
+            && empty($projection['date_grouping_ambiguous'])
+            && empty($projection['require_period_clarification'])) {
             $range=$this->period(['code'=>'TODAY'],$today);
         }
         $ranking=null;
@@ -130,7 +128,8 @@ final class AiWorkflowPlanner
                 foreach ($recommended as $code) if (isset($byCode[$code])) $selected[]=$byCode[$code];
                 // Preserve every explicit executable alternative. Remaining
                 // positions become correction actions, never guessed metrics.
-                $selected=AiSemanticRecommendationPlanner::completeCardOptions($selected);
+                $selected=AiSemanticRecommendationPlanner::completeCardOptions($selected,
+                    ($projection['no_filler_guidance']??null)===false);
                 foreach ($options as &$option) $option['recommended']=false;
                 unset($option);
                 $options=array_merge($selected,array_values(array_filter($options,

@@ -58,17 +58,15 @@ final class AiAnalysisGuidancePlanner
             $periods=$intent['periods'];
         }
         if (count($periods)>1 || !empty($projection['date_grouping_ambiguous'])) throw new \RuntimeException('AI_ANALYSIS_PERSON_PERIOD_COMBINATION_UNAVAILABLE');
-        // Person-grain rankings use the same first-answer baseline as every
-        // other registered query path. When no date is expressed, compile the
-        // current business day instead of asking a redundant date question;
-        // explicit and ambiguous date meaning has already been preserved or
-        // rejected above and is never overwritten here.
+        // Person-grain guidance respects a broad first turn's missing period.
+        // Precise questions still use the registered current-day baseline.
         $periodPlanner=new AiWorkflowPlanner();
         $range=$periods
             ?(isset($periods[0]['kind'])
                 ?$periodPlanner->normalizeNaturalPeriod($periods[0],$today)
                 :$periodPlanner->normalizePeriod($periods[0],$today))
-            :$periodPlanner->normalizePeriod(['code'=>'TODAY'],$today);
+            :(!empty($projection['require_period_clarification'])?null
+                :$periodPlanner->normalizePeriod(['code'=>'TODAY'],$today));
         $ranking=$intent['ranking']??null;
         $rankingKeys=is_array($ranking)?array_keys($ranking):[];sort($rankingKeys);
         if (!is_array($ranking) || $rankingKeys!==['direction','limit']
