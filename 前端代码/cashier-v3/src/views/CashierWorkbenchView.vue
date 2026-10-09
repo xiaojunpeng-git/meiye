@@ -743,6 +743,10 @@ function recalculateLocalCashierDraft(draft) {
     if (Array.isArray(localPersonnel.salesManagerSelections)) next.salesManagerSelections = clonePlain(localPersonnel.salesManagerSelections)
     return next
   })
+  // Freeze the merged browser selections on the draft itself, not only in
+  // summary calculations. Entitlement rows have no sale-only flag override
+  // later: returning the original lines would silently lose experience tags.
+  draft.lines = lines
   // Existing entitlement services remain in the cart and checkout preview, but
   // only new sales contribute to the amount payable in this checkout.
   const saleLines = lines.filter((line) => cartLineRole(line) === 'sale')
