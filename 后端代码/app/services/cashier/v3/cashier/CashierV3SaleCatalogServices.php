@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3ResourceVersionServices;
 use think\facade\Db;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\product\product\StoreProductSaleUsagePolicy;
 
 /** 门店销售目录、购物车 sale 行及结账来源的统一服务端口径。 */
 final class CashierV3SaleCatalogServices
@@ -52,6 +53,14 @@ final class CashierV3SaleCatalogServices
         $catalogItems = [];
         $categories = [];
         foreach ($rows as $row) {
+            // 适配器和注入的 authority 都必须遵守同一新销售用途边界；不按名称去重。
+            if (StoreProductSaleUsagePolicy::isHistoricalCarrier([
+                'type' => $row['product_type'] ?? 0,
+                'relation_id' => $row['product_relation_id'] ?? 0,
+                'keyword' => $row['product_keyword'] ?? '',
+            ])) {
+                continue;
+            }
             // The browser owns the only checkout snapshot, so every card
             // directory item must already contain its complete component
             // definition before it can be selected. Final confirmation must
@@ -2082,6 +2091,20 @@ final class CashierV3SaleCatalogServices
      * or hidden catalog item blocks new sales, never existing entitlements. */
     public static function assertNewSaleAvailability(array $row, int $skuId): void
     {
+        // 历史记录即使处于上架状态，也只能承载已有权益；旧草稿和伪造 SKU 不得新卖。
+        // 仅销售路径调用本守卫，不能将此限制扩散到已购权益核销/历史退款。
+        if (StoreProductSaleUsagePolicy::isHistoricalCarrier([
+            'type' => $row['product_type'] ?? 0,
+            'relation_id' => $row['product_relation_id'] ?? 0,
+            'keyword' => $row['product_keyword'] ?? '',
+        ])) {
+            throw self::failure(
+                CashierV3ResultCode::RESOURCE_NOT_FOUND,
+                '该记录仅供历史权益使用，请重新选择在售商品。',
+                'cashier_catalog_historical_carrier',
+                ['item_id' => $skuId]
+            );
+        }
         $offShelf = (int)($row['product_is_del'] ?? 0) !== 0
             || (int)($row['product_is_show'] ?? 1) !== 1
             || (int)($row['sku_is_show'] ?? 1) !== 1;
@@ -2126,7 +2149,7 @@ final class CashierV3SaleCatalogServices
                 ->where('id', $productId)
                 ->where('type', 1)
                 ->where('relation_id', $dataScope->forcedStoreId())
-                ->field('id,pid,product_type,store_name,is_del,is_show,is_verify')
+                ->field('id,pid,type,relation_id,keyword,product_type,store_name,is_del,is_show,is_verify')
                 ->lock(true)
                 ->find();
             if (!$product) {
@@ -2151,6 +2174,9 @@ final class CashierV3SaleCatalogServices
                     && ((int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
                         || (int)$product['pid'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID);
                 self::assertNewSaleAvailability([
+                    'product_type' => $product['type'],
+                    'product_relation_id' => $product['relation_id'],
+                    'product_keyword' => $product['keyword'],
                     'product_store_name' => $product['store_name'],
                     'product_is_del' => $product['is_del'],
                     'product_is_show' => $customCardShell ? 1 : $product['is_show'],

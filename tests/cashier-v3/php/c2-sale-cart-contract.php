@@ -18,6 +18,8 @@ require_once $backendRoot . '/app/services/cashier/v3/CashierV3DataScopeContext.
 require_once $backendRoot . '/app/services/cashier/v3/cashier/CashierV3CashierReadinessGuard.php';
 require_once $backendRoot . '/app/services/cashier/v3/cashier/CashierV3SaleCatalogAuthority.php';
 require_once $backendRoot . '/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php';
+// 目录服务的新用途边界是显式依赖；数据库无关夹具仍保留正常销售行为。
+require_once $backendRoot . '/app/services/product/product/StoreProductSaleUsagePolicy.php';
 require_once $backendRoot . '/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php';
 
 use app\services\cashier\v3\CashierV3DataScopeContext;

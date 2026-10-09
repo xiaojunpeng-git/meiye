@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\cashier;
 
 use app\services\cashier\v3\CashierV3ResourceKindCatalog;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\product\product\StoreProductSaleUsagePolicy;
 use think\facade\Db;
 
 /** 旧商品主表在收银 V3 的只读/行锁适配器。 */
@@ -28,7 +29,7 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
         if ($storeId <= 0) {
             return [];
         }
-        $rows = Db::name('store_product_attr_value')->alias('sku')
+        $query = Db::name('store_product_attr_value')->alias('sku')
             ->join('store_product p', 'p.id=sku.product_id')
             ->where('p.type', 1)
             ->where('p.relation_id', $storeId)
@@ -38,7 +39,9 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
             ->whereIn('p.product_type', [0, 4, 5, 6])
             ->where('sku.type', 0)
             ->where('sku.is_show', 1)
-            ->field($this->joinedFields())
+            ->field($this->joinedFields());
+        // 新销售目录隐藏历史承载，但单行读取/锁定仍保留，供既有权益追溯使用。
+        $rows = StoreProductSaleUsagePolicy::excludeHistoricalCarriers($query, 'p')
             ->order('p.sort desc,p.id desc,sku.id asc')
             ->limit(self::LIST_LIMIT_WITH_SENTINEL)
             ->select();
@@ -150,7 +153,7 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
             ->where('p.relation_id', $storeId)
             ->whereIn('p.product_type', [0, 4, 5, 6])
             ->where('sku.type', 0)
-            ->field('p.id product_id,p.pid product_pid,p.store_name product_store_name,p.product_type product_product_type,p.type product_type,p.relation_id product_relation_id,p.is_del product_is_del,p.is_show product_is_show,p.is_verify product_is_verify,sku.id sku_id,sku.product_id sku_product_id,sku.product_type sku_product_type,sku.type sku_type,sku.is_show sku_is_show')
+            ->field('p.id product_id,p.pid product_pid,p.keyword product_keyword,p.store_name product_store_name,p.product_type product_product_type,p.type product_type,p.relation_id product_relation_id,p.is_del product_is_del,p.is_show product_is_show,p.is_verify product_is_verify,sku.id sku_id,sku.product_id sku_product_id,sku.product_type sku_product_type,sku.type sku_type,sku.is_show sku_is_show')
             ->find();
     }
 

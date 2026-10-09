@@ -27,6 +27,7 @@ use app\services\product\product\StoreProductRelationServices;
 use app\services\product\product\StoreProductReplyCommentServices;
 use app\services\product\product\StoreProductReplyServices;
 use app\services\product\product\StoreProductServices;
+use app\services\product\product\StoreProductSaleUsagePolicy;
 use app\services\product\sku\StoreProductAttrResultServices;
 use app\services\product\sku\StoreProductAttrServices;
 use app\services\product\sku\StoreProductAttrValueServices;
@@ -39,6 +40,7 @@ use app\services\user\UserServices;
 use mohe\exceptions\AdminException;
 use mohe\traits\ServicesTrait;
 use think\exception\ValidateException;
+use think\facade\Db;
 
 final class StoreBranchProductSyncPlanChangedException extends \RuntimeException
 {
@@ -766,7 +768,7 @@ class StoreBranchProductServices extends BaseServices
         $description = $description ?: '';
         /** @var StoreProductReservationTimeServices $productReservationTimeServices */
         $productReservationTimeServices = app()->make(StoreProductReservationTimeServices::class);
-        $branchProductInfo = $this->dao->get(['pid' => $product_id, 'type' => 1, 'relation_id' => $store_id]);
+        $branchProductInfo = $this->readSyncSaleProduct($product_id, $store_id);
         $sourceCardRelated = [];
         $targetRefs = [];
         $explicitCardIds = $card_product_id > 0 ? [$card_product_id] : [];
@@ -805,11 +807,7 @@ class StoreBranchProductServices extends BaseServices
             $currentProduct = $currentProduct ? $currentProduct->toArray() : [];
             $this->assertSyncSnapshotUnchanged('平台商品', $sourceProductSnapshot, $currentProduct);
 
-            $currentBranchProductInfo = $this->dao->get([
-                'pid' => $product_id,
-                'type' => 1,
-                'relation_id' => $store_id,
-            ]);
+            $currentBranchProductInfo = $this->readSyncSaleProduct($product_id, $store_id);
             $plannedBranchId = $branchProductInfo ? (int)$branchProductInfo['id'] : 0;
             $currentBranchId = $currentBranchProductInfo ? (int)$currentBranchProductInfo['id'] : 0;
             if ($plannedBranchId !== $currentBranchId) {
@@ -1001,6 +999,17 @@ class StoreBranchProductServices extends BaseServices
         $this->dao->cacheTag()->clear();
         $productAttrServices->cacheTag()->clear();
         return true;
+    }
+
+    /** 正常同步只能复用销售副本，不能清掉历史承载标记或改写其权益关联。
+     * 规划及事务内重检共用该查询；同名/多规格及历史引用均不合并。
+     */
+    private function readSyncSaleProduct(int $productId, int $storeId): array
+    {
+        $query = Db::name('store_product')->alias('p')
+            ->where('p.pid', $productId)->where('p.type', 1)->where('p.relation_id', $storeId);
+        return (array)(StoreProductSaleUsagePolicy::excludeHistoricalCarriers($query, 'p')
+            ->order('p.id asc')->find() ?: []);
     }
 
     private function assertSyncSnapshotUnchanged(string $label, $planned, $current): void
