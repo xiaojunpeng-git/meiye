@@ -190,10 +190,16 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
 
     private function countRows(string $tenantId, int $storeId, array $locationIds, bool $canViewCost, array $context): array
     {
+        // 列表“差异项”仅统计实际盈亏行；持平盘点仍有完整明细，不能把全部明细条数当成差异。
+        // 门店仓优先保留已有门店名称快照，旧空快照才按仓库所属门店 ID 补读；总部仓仍显示其仓名。
+        // 不修改原 location_name，也不使用当前登录门店替代行归属；已确认单据与草稿复用同一表达式。
+        $storeName = "CASE WHEN p.location_type='HQ' THEN p.location_name ELSE COALESCE(NULLIF(p.store_name_snapshot, ''), s.name, '') END";
         $rows = Db::name('inventory_stock_count_document')->alias('d')->leftJoin('inventory_stock_count_line l', 'l.document_id=d.id')->leftJoin('inventory_location p', 'p.id=d.location_id')
+            ->leftJoin('system_store s', 's.id=p.store_id')
             ->where('d.tenant_id', $tenantId)->whereIn('d.location_id', $locationIds)
-            ->field(['d.id', 'd.count_no' => 'order_sn', 'd.document_status' => 'status_name', 'd.business_date', 'd.confirmed_at', 'd.recorded_at' => 'add_time', 'd.confirmed_at' => 'operation_at', 'd.operator_name_snapshot' => 'operator_name', 'd.location_id', 'p.location_name', 'COUNT(l.id)' => 'detail_count'])
-            ->group('d.id,d.count_no,d.document_status,d.business_date,d.confirmed_at,d.recorded_at,d.location_id,p.location_name')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+            ->field(['d.id', 'd.count_no' => 'order_sn', 'd.document_status' => 'status_name', 'd.business_date', 'd.confirmed_at', 'd.recorded_at' => 'add_time', 'd.confirmed_at' => 'operation_at', 'd.operator_name_snapshot' => 'operator_name', 'd.location_id', 'p.location_name', 'SUM(CASE WHEN l.difference_quantity_units <> 0 THEN 1 ELSE 0 END)' => 'detail_count'])
+            ->fieldRaw($storeName . ' AS store_name')
+            ->group('d.id,d.count_no,d.document_status,d.business_date,d.confirmed_at,d.recorded_at,d.location_id,p.location_name,p.location_type,p.store_name_snapshot,s.name')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         // 已确认单据只用服务端完成时间形成盘点日期；草稿不借用保存日伪造完成日期。
         foreach ($rows as &$row) {
             $row['count_date'] = InventoryStockCountDate::fromConfirmedAt((int)$row['confirmed_at']);
@@ -211,12 +217,14 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         if ((string)($context['inventory_count_operator_type'] ?? '') !== '') {
             $drafts = Db::name('inventory_stock_count_draft')->alias('d')
                 ->leftJoin('inventory_location p', 'p.id=d.location_id')
+                ->leftJoin('system_store s', 's.id=p.store_id')
                 ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)
                 ->whereIn('d.location_id', $locationIds)
                 ->where('d.operator_id', (int)($context['inventory_count_creator_id'] ?? 0))
                 ->where('d.operator_type', (string)$context['inventory_count_operator_type'])
                 ->where('d.document_status', 'DRAFT')
                 ->field('d.id draft_id,d.business_date,d.updated_at operation_at,d.updated_at add_time,d.location_id,d.line_count detail_count,p.location_name')
+                ->fieldRaw($storeName . ' AS store_name')
                 ->order('d.updated_at desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
             foreach ($drafts as $draft) {
                 $rows[] = [
@@ -226,6 +234,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
                     'count_date' => '',
                     'add_time' => (int)$draft['add_time'], 'location_id' => (int)$draft['location_id'],
                     'location_name' => (string)$draft['location_name'], 'detail_count' => (int)$draft['detail_count'],
+                    'store_name' => (string)$draft['store_name'],
                     'change_amount_cents' => null,
                     'operator_name' => (string)($context['inventory_count_operator_name'] ?? ''),
                 ];

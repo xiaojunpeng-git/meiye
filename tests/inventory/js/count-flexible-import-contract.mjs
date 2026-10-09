@@ -8,11 +8,12 @@ const ExcelJS = require('exceljs')
 const source = readFileSync(new URL('../../../前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue', import.meta.url), 'utf8')
 // 执行真实组件导入方法，模拟只读目录，不调用保存/完成盘点接口或修改真实库存。
 const importer = source.slice(source.indexOf('async function importCountRows('), source.indexOf('async function loadSupplyParties('))
-const factory = new Function('props', 'countLoading', 'catalogError', 'countProgress', 'selectedRows', 'parseCountXlsx', 'allCountCatalog', 'countDraftRow', 'matchCountProduct', `${importer}; return importCountRows`)
+// 导入器已共用总部/门店范围，夹具显式提供门店上下文，不能因缺少组件依赖把回归误报成业务失败。
+const factory = new Function('props', 'countLoading', 'catalogError', 'countProgress', 'selectedRows', 'parseCountXlsx', 'allCountCatalog', 'countDraftRow', 'matchCountProduct', 'isPlatformHeadquarters', `${importer}; return importCountRows`)
 const selectedRows = { value: [{ sku_id: 99, product_id: 99, counted_quantity: '7' }] }
 const countLoading = { value: false }, catalogError = { value: '' }, countProgress = { value: '' }
 const catalog = [{ product_id: 601720, sku_id: 77, product_name: '系统名称', sku_name: '默认', stock_unit: '瓶', available_quantity: 100, count_batches: [{ batch_no: 'A', quantity: 5 }] }]
-const run = factory({ pageKey: 'count' }, countLoading, catalogError, countProgress, selectedRows, parseCountXlsx, async () => catalog, (sku) => ({ ...sku }), matchCountProduct)
+const run = factory({ pageKey: 'count' }, countLoading, catalogError, countProgress, selectedRows, parseCountXlsx, async () => catalog, (sku) => ({ ...sku }), matchCountProduct, { value: false })
 async function importRows(rows, batch = false) {
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('用户自己的表格')

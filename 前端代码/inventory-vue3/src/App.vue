@@ -189,7 +189,8 @@ const operationalQueryPages = {
   // 入出库列表不展示商品摘要；商品仍保留在权威单据明细中供“查看”追溯。
   inbound: { pageCode: 'inventory_inbound', fields: [['order_sn', '入库单号'], ['business_date', '入库日期', 'date'], ['order_type_name', '入库类型'], ['location_name', '入库仓/门店'], ['detail_count', '入库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   outbound: { pageCode: 'inventory_outbound', fields: [['order_sn', '出库单号'], ['business_date', '出库日期', 'date'], ['order_type_name', '出库类型'], ['location_name', '出库仓/门店'], ['detail_count', '出库项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
-  count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['location_name', '盘点主体'], ['detail_count', '差异项', 'integer'], ['count_date', '盘点日期', 'date'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
+  // 门店名称由服务端按单据所属仓的门店归属返回，不以当前页面门店或仓库名替代。
+  count: { pageCode: 'inventory_count', fields: [['order_sn', '盘点单号'], ['store_name', '门店名称'], ['detail_count', '差异项', 'integer'], ['count_date', '盘点日期', 'date'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   request: { pageCode: 'inventory_request', fields: [['order_sn', '请货单号'], ['business_date', '请货日期', 'date'], ['request_party_name', '请货方'], ['supply_party_name', '供货方'], ['acceptance_party_name', '受理部门'], ['detail_count', '商品项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   transfer: { pageCode: 'inventory_transfer', fields: [['order_sn', '调拨单号'], ['business_date', '调拨日期', 'date'], ['from_party_name', '调出方'], ['to_party_name', '调入方'], ['detail_count', '商品项数', 'integer'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
   usage: { pageCode: 'inventory_salon_usage', fields: [['order_sn', '业务单号'], ['business_date', '领退日期', 'date'], ['operation_name', '领退类型'], ['project_name_snapshot', '关联项目'], ['detail_count', '耗材项数', 'integer'], ['remark', '备注'], ['status_name', '状态'], ['operation_at', '操作日期', 'datetime'], ['operator_name', '操作人']] },
@@ -335,7 +336,7 @@ const pages = {
     crumb: '库存管理 / 库存盘点',
     filters: ['盘点状态', '盘点单号', '盘点日期', '创建时间'],
     action: '新建盘点单',
-    columns: ['盘点单号', '盘点主体', '盘点范围', '差异项', '盈亏金额', '盘点日期', '状态', '操作日期', '操作人']
+    columns: ['盘点单号', '门店名称', '盘点范围', '差异项', '盈亏金额', '盘点日期', '状态', '操作日期', '操作人']
   },
   request: {
     title: '请货管理',
@@ -912,7 +913,8 @@ function mapApiRow(page, row) {
     case 'stock': return row.available_quantity !== undefined
       ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
       : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
-    case 'count': return [text(row.order_sn), text(row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), countStatusName(row.status_name), operationTime(row.operation_at), text(row.operator_name)]
+    // 只展示该行的权威名称；缺失时留空占位，避免将仓库或当前筛选范围冒充单据门店。
+    case 'count': return [text(row.order_sn), text(row.store_name), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), countStatusName(row.status_name), operationTime(row.operation_at), text(row.operator_name)]
     case 'request': return [text(row.order_sn), text(row.request_date || row.business_date), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.acceptance_party_name), text(row.detail_count), inventoryStatusLabel(row.status_name), operationTime(row.operation_at), text(row.operator_name || row.operator_name_snapshot)]
     case 'transfer': return [text(row.order_sn), text(row.business_date), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), inventoryStatusLabel(row.status_name), operationTime(row.operation_at), text(row.operator_name)]
     // 项目为空是合法的院装领退单据；列表须明确显示未关联，不能误认为缺失数据。

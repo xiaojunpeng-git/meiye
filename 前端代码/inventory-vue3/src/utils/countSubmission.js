@@ -41,7 +41,8 @@ export function missingCountSurplusMessage(rows, rowIndex) {
 
 /**
  * 在请求服务端前定位首条不可结算的盘点明细。
- * 商品总量盘点的正数实盘行均需具备批次、成本和有效期资料；不依赖可能过期的账面快照。
+ * 按页面快照预计盘盈的总量行预检批次资料；持平和盘亏不强迫补造入库批次。
+ * 快照不决定最终盈亏：期间库存变化导致真实盘盈时，由服务端锁定库存后补充行级校验。
  * 既有批次盘点可由服务端按已锁定批次补成本和日期，仍单独校验批号身份。
  */
 export function validateCountSubmissionRows(rows) {
@@ -73,8 +74,10 @@ export function validateCountSubmissionRows(rows) {
     if (!quantityPattern.test(counted)) {
       return { valid: false, rowIndex, message: `第 ${rowIndex + 1} 行「${productName}」的实盘库存填写不正确，暂时无法完成盘点。请填写有效数量后再试。` }
     }
-    // 正数总量可能因期间出入库变成盘盈；零实盘无需创建新批次，批次模式保留服务端已有批次资料口径。
+    // 此处只减少无调整行的录入负担，不过滤提交行，也不替代服务端实时盘盈校验。
     if (mode !== 'SKU' || Number(counted) === 0) continue
+    const book = String(row.book_quantity ?? '').trim()
+    if (quantityPattern.test(book) && Number(counted) <= Number(book)) continue
 
     const missing = []
     const batchNo = String(row.surplus_batch_no || '').trim()

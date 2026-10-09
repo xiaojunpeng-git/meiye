@@ -67,6 +67,18 @@ try {
     $input = ['draft_id' => 0, 'expected_version' => 0, 'business_date' => '2026-10-02', 'remark' => 'TEST-HQ草稿', 'lines' => [$line]];
     $drafts = new InventoryStockCountDraftServices(); $counts = new InventoryStockCountServices();
     $factsBefore = (int)Db::name('inventory_batch_movement_fact')->count();
+    // 总部与门店共享零差异口径：保留确认明细，但不能因为确认而新建零库存或流水。
+    $zeroLine = ['product_id' => $productId, 'sku_id' => $skuId, 'sku_unique' => $suffix,
+        'counted_quantity' => '0', 'surplus_batch_no' => '', 'surplus_unit_cost' => '',
+        'surplus_manufactured_date' => '', 'surplus_expire_date' => '', 'expected_book_quantity' => '0'];
+    $zeroCommand = ['idempotency_key' => $suffix . '-zero', 'business_date' => '2026-10-02', 'remark' => 'TEST-HQ零差异', 'lines' => [$zeroLine]];
+    $zero = $counts->confirmForHeadquarters($admin, $locationId, $zeroCommand);
+    $zeroReplay = $counts->confirmForHeadquarters($admin, $locationId, $zeroCommand);
+    hqCheck('HQ zero count persists once without stock or movements', $zeroReplay['idempotent'] === true
+        && $zero['count_document_id'] === $zeroReplay['count_document_id']
+        && (int)Db::name('inventory_stock_count_line')->where('document_id', $zero['count_document_id'])->count() === 1
+        && !Db::name('inventory_stock')->where('consumable_product_id', $productId)->find()
+        && (int)Db::name('inventory_batch_movement_fact')->count() === $factsBefore);
     $saved = $drafts->saveForHeadquarters($admin, $locationId, $input); $draftId = (int)$saved['draft_id'];
     $detail = $drafts->detailForHeadquarters($admin, $locationId, $draftId);
     hqCheck('HQ draft restores entered fields and remains outside settled stock', $detail['version'] === 1 && $detail['lines'][0]['counted_quantity'] === '2'
@@ -82,6 +94,9 @@ try {
         'scope_dimensions' => ['location_id' => [$locationId]], 'permissions' => []];
     $rows = $source->invoke($provider, $context);
     hqCheck('HQ list includes own draft without inventing settled cost', count(array_filter($rows, fn($row) => (int)($row['draft_id'] ?? 0) === $draftId && $row['change_amount_cents'] === null)) === 1);
+    // 总部没有门店 ID；不能把门店端名称修复错误套成某家门店。
+    hqCheck('HQ count draft retains its headquarters warehouse identity', count(array_filter($rows,
+        fn($row) => (int)($row['draft_id'] ?? 0) === $draftId && $row['store_name'] === $location['location_name'])) === 1);
     $context['inventory_count_creator_id'] = $otherId;
     hqCheck('HQ list excludes another creator draft', count(array_filter($source->invoke($provider, $context), fn($row) => (int)($row['draft_id'] ?? 0) === $draftId)) === 0);
     $input['draft_id'] = $draftId; $input['expected_version'] = 1;

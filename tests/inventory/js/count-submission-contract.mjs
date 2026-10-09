@@ -50,18 +50,13 @@ assert.equal(validateCountSubmissionRows(batchRows).valid, true)
 assert.equal(validateCountSubmissionRows([...batchRows, { ...batchRows[0] }]).rowIndex, 2)
 assert.equal(validateCountSubmissionRows([{ ...batchRows[0], surplus_batch_no: '' }]).rowIndex, 0)
 
-// 正数总量行不按旧账面区分盈亏；零实盘免填，批号 000 和零单价均有效。
+// 持平、盘亏不强迫填写盘盈资料；预计盘盈仍提前定位缺失信息，真实盈亏由服务端裁定。
 const validationRows = [
   { product_id: 1, product_name: '无差异', book_quantity: '2', counted_quantity: '2' },
-  { product_id: 2, product_name: '盘亏商品', book_quantity: '2', counted_quantity: '1', ...completeBatch },
+  { product_id: 2, product_name: '盘亏商品', book_quantity: '2', counted_quantity: '1' },
   { product_id: 3, product_name: '爱尔菲娜防晒霜', book_quantity: '0', counted_quantity: '3', surplus_batch_no: '31', surplus_unit_cost: '228', surplus_manufactured_date: '2025-04-27', surplus_expire_date: '' },
 ]
 assert.deepEqual(validateCountSubmissionRows(validationRows), {
-  valid: false,
-  rowIndex: 0,
-  message: '第 1 行「无差异」未填写批次号、单价、生产日期、到期日，暂时无法完成盘点。请补充后再试。',
-})
-assert.deepEqual(validateCountSubmissionRows([{ ...validationRows[0], ...completeBatch }, validationRows[1], validationRows[2]]), {
   valid: false,
   rowIndex: 2,
   message: '第 3 行「爱尔菲娜防晒霜」未填写到期日，暂时无法完成盘点。请补充后再试。',
@@ -69,7 +64,10 @@ assert.deepEqual(validateCountSubmissionRows([{ ...validationRows[0], ...complet
 assert.equal(validateCountSubmissionRows([{ ...validationRows[0], ...completeBatch }, validationRows[1], { ...validationRows[2], surplus_expire_date: '2028-04-28' }]).valid, true)
 assert.equal(validateCountSubmissionRows([{ product_id: 4, product_name: '零实盘', book_quantity: '10', counted_quantity: '0' }]).valid, true)
 assert.equal(validateCountSubmissionRows([{ product_id: 5, product_name: '未盘', book_quantity: '10', counted_quantity: '' }]).valid, true)
-assert.equal(validateCountSubmissionRows([{ product_id: 6, product_name: '旧账面较高', book_quantity: '10', counted_quantity: '1' }]).rowIndex, 0)
+assert.equal(validateCountSubmissionRows([{ product_id: 6, product_name: '旧账面较高', book_quantity: '10', counted_quantity: '1' }]).valid, true)
+assert.equal(validateCountSubmissionRows([{ product_id: 7, product_name: '正数持平', book_quantity: '2.00', counted_quantity: '2' }]).valid, true)
+assert.equal(validateCountSubmissionRows([{ product_id: 8, product_name: '零库存持平', book_quantity: '0', counted_quantity: '0' }]).valid, true)
+assert.equal(validateCountSubmissionRows([{ product_id: 9, product_name: '未知账面', counted_quantity: '1' }]).valid, false)
 
 // 服务端一次返回所有失效目录身份；前端必须按草稿行序定位、显示名称并高亮全部问题行。
 const catalogRows = [

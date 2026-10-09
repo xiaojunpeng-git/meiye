@@ -52,6 +52,10 @@ function catalogFixture(string $table, array $identity, array $row): void
     Db::name($table)->insert($row);
 }
 
+// 夹具重置和盘点确认置于外层事务；历史测试可能遗留另一默认仓，只在本次事务内隔离。
+Db::startTrans();
+try {
+Db::name('inventory_location')->where('store_id', 99190)->where('id', '<>', 991900)->update(['is_default' => 0]);
 catalogFixture('system_store', ['id' => 99190], ['id' => 99190, 'name' => 'TEST-盘点失效目录门店', 'is_del' => 0, 'is_show' => 1]);
 catalogFixture('system_store_staff', ['id' => 991900], ['id' => 991900, 'store_id' => 99190, 'status' => 1, 'is_del' => 0]);
 catalogFixture('organization', ['id' => 99190], ['id' => 99190, 'pid' => 99000, 'name' => 'TEST-盘点失效目录组织', 'is_del' => 0]);
@@ -177,7 +181,8 @@ $retiredResult = (new InventoryStockCountServices())->confirm(99190, 991900, [
     'lines' => [retiredLine('2', 'TEST-RETIRED-A'), retiredLine('2', 'TEST-RETIRED-B')],
 ], $countSession);
 if ((int)Db::name('inventory_stock')->where('id', 9919010)->value('available_quantity_units') !== 4
-    || (int)Db::name('inventory_stock_count_line')->where('document_id', $retiredResult['count_document_id'])->count() !== 1) {
+    || (int)Db::name('inventory_stock_count_line')->where('document_id', $retiredResult['count_document_id'])->count() !== 2
+    || (int)Db::name('inventory_batch_movement_fact')->where('source_id', $retiredResult['count_no'])->count() !== 1) {
     throw new RuntimeException('stock_count_retired_unchanged_or_loss_failed');
 }
 $orphanLine = ['product_id' => 991903, 'sku_id' => 9919031, 'sku_unique' => 'orphan-sku-9919031',
@@ -200,3 +205,4 @@ if ($detail['lines'][2]['product_name'] !== 'TEST-目录缺失库存') {
 }
 
 echo "STOCK_COUNT_CATALOG_VALIDATION_INTEGRATION_OK\n";
+} finally { Db::rollback(); echo "ROLLBACK catalog validation fixtures and count events\n"; }

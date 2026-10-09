@@ -29,6 +29,8 @@ final class InventoryOperationalUnifiedQueryContract
         ];
         if ($pageCode === 'inventory_count') {
             $common[] = UnifiedQueryPageRegistry::field('count_date', '盘点日期', 'date', true, true);
+            // 旧查询偏好和冻结计划仍可读取真实仓名；默认不展示，不将仓名改写为门店名。
+            $common[] = UnifiedQueryPageRegistry::field('location_name', '盘点仓库', 'text', false, false);
         }
         $specific = [
             'inventory_inbound' => [
@@ -44,7 +46,8 @@ final class InventoryOperationalUnifiedQueryContract
                 ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_count' => [
-                ['location_name', '盘点主体', 'text', ''], ['detail_count', '差异项', 'integer', ''],
+                // 门店名称与仓库名称分开，筛选、排序和导出读取同一后端投影。
+                ['store_name', '门店名称', 'text', ''], ['detail_count', '差异项', 'integer', ''],
                 ['change_amount_cents', '盈亏金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
                 ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],

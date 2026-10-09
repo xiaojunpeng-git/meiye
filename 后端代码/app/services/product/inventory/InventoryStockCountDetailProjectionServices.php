@@ -21,7 +21,8 @@ final class InventoryStockCountDetailProjectionServices
             // 历史目录缺失时从所盘批次快照还原名称，不能把真实盘亏单显示成匿名“已停用商品”。
             ->leftJoin('inventory_batch b', 'b.stock_id=l.stock_id AND b.batch_no=l.surplus_batch_no')
             ->where('l.document_id', (int)$document['id'])
-            ->field("l.id,l.line_no,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.book_quantity_units,l.counted_quantity_units,l.difference_quantity_units,l.surplus_batch_no,l.surplus_unit_cost_cents,l.surplus_manufactured_date,l.surplus_expire_date,COALESCE(NULLIF(p.store_name,''),b.product_name_snapshot) product_name,COALESCE(NULLIF(p.code,''),b.product_code_snapshot) product_code,COALESCE(NULLIF(a.suk,''),b.sku_name_snapshot) sku_name,COALESCE(NULLIF(a.bar_code,''),b.barcode_snapshot) barcode,s.stock_unit")
+            // 零库存持平行允许没有库存主体，单位从关联 SKU 补充，不能为展示单位创建空库存。
+            ->field("l.id,l.line_no,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.book_quantity_units,l.counted_quantity_units,l.difference_quantity_units,l.surplus_batch_no,l.surplus_unit_cost_cents,l.surplus_manufactured_date,l.surplus_expire_date,COALESCE(NULLIF(p.store_name,''),b.product_name_snapshot) product_name,COALESCE(NULLIF(p.code,''),b.product_code_snapshot) product_code,COALESCE(NULLIF(a.suk,''),b.sku_name_snapshot) sku_name,COALESCE(NULLIF(a.bar_code,''),b.barcode_snapshot) barcode,COALESCE(s.stock_unit,a.stock_unit) stock_unit")
             ->order('l.line_no asc')->select()->toArray();
         // 金额必须取已结算批次流水；盘亏可能跨多个成本批次，不能用实盘差额乘盘盈单价推算。
         $amountByLine = $canViewCost ? $this->settledAmountByLine($document, $location) : [];
@@ -36,6 +37,8 @@ final class InventoryStockCountDetailProjectionServices
             $line['stock_unit'] = (string)($line['stock_unit'] ?: '');
             $line['change_amount_cents'] = $canViewCost && array_key_exists((int)$line['line_no'], $amountByLine)
                 ? $amountByLine[(int)$line['line_no']] : null;
+            // 持平记录没有移动流水，其库存调整金额明确为零；成本权限不足仍不返回金额。
+            if ($canViewCost && (int)$line['difference_quantity_units'] === 0) $line['change_amount_cents'] = 0;
             // 按批次盘亏同样保存批次快照；旧按总量盘亏无单一批次，保持原展示。
             if ((int)$line['difference_quantity_units'] <= 0 && (string)$line['surplus_batch_no'] === '') {
                 $line['surplus_batch_no'] = '';

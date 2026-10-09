@@ -72,7 +72,7 @@ final class InventoryStockCountServices
             ];
             if (($line['count_mode'] ?? '') === 'BATCH') $changed[count($changed) - 1]['count_mode'] = 'BATCH';
         }
-        if (!$changed) throw new \RuntimeException('inventory_stock_count_no_difference');
+        if (!$changed) throw new \InvalidArgumentException('inventory_stock_count_input_invalid');
         $savedCommand = $this->normalize([
             'idempotency_key' => $command['key'], 'business_date' => (string)$draft['business_date'],
             'remark' => (string)$draft['remark'], 'lines' => $changed,
@@ -119,6 +119,7 @@ final class InventoryStockCountServices
         });
     }
 
+    /** 已填写的实盘均形成盘点记录；库存调整仅由逐行锁定后的真实差异触发。 */
     private function confirmAtScope(array $scope, array $location, array $command): array
     {
             $operatorId = (int)$scope['operatorId'];
@@ -139,12 +140,9 @@ final class InventoryStockCountServices
             ]);
             $document = Db::name('inventory_stock_count_document')->where('id', $documentId)->lock(true)->find();
             $ordered = $command['lines']; usort($ordered, static fn(array $a, array $b): int => [$a['productId'], $a['skuId'], $a['unique'], $a['index']] <=> [$b['productId'], $b['skuId'], $b['unique'], $b['index']]);
-            $changed = 0;
             foreach ($ordered as $line) {
-                if ($this->confirmLine($scope, $location, $document, $line, $command)) $changed++;
+                $this->confirmLine($scope, $location, $document, $line, $command);
             }
-            // 全部等于账面数时回滚单头及任何中间写入，不留下空盘点单。
-            if ($changed === 0) throw new \RuntimeException('inventory_stock_count_no_difference');
             return ['count_document_id' => $documentId, 'count_no' => (string)$document['count_no'], 'idempotent' => false];
     }
 
@@ -199,8 +197,8 @@ final class InventoryStockCountServices
         ];
     }
 
-    /** 实盘为最终数量；锁定当前账面计算调整，零差异不创建明细或移动事实。 */
-    private function confirmLine(array $scope, array $location, array $document, array $line, array $command): bool
+    /** 实盘为最终数量；零差异保留盘点快照，但不建库存主体、批次或进出库移动事实。 */
+    private function confirmLine(array $scope, array $location, array $document, array $line, array $command): void
     {
         $stock = $this->countableStock($scope, $location, $line, $command['now'], false);
         if ((int)$stock['quantity_scale'] < 0 || (int)$stock['quantity_scale'] > 4) throw new \RuntimeException('inventory_stock_count_stock_not_found');
@@ -214,27 +212,28 @@ final class InventoryStockCountServices
             $difference = $counted - $book;
             // 无成本查看权限时导入不泄露单价；已有批次调整使用服务端权威成本和日期。
             if ($batch) {
-                if (!$line['costProvided'] || $difference < 0) $line['cost'] = (int)$batch['unit_cost_cents'];
+                if (!$line['costProvided'] || $difference <= 0) $line['cost'] = (int)$batch['unit_cost_cents'];
                 if (!$line['manufacturedDate']) $line['manufacturedDate'] = $batch['manufactured_date'];
                 if (!$line['expireDate']) $line['expireDate'] = $batch['expire_date'];
-                if ($difference < 0) { $line['manufacturedDate'] = $batch['manufactured_date']; $line['expireDate'] = $batch['expire_date']; }
+                if ($difference <= 0) { $line['manufacturedDate'] = $batch['manufactured_date']; $line['expireDate'] = $batch['expire_date']; }
             }
             if (!$batch && $difference > 0 && !$line['costProvided']) throw new InventoryStockCountLineException('inventory_stock_count_surplus_batch_required', $line['index'] + 1);
         }
         // 产品口径：即使导出/草稿后的库存变化，也以本次实盘为最终数。
         // expectedBook 仅保留命令指纹兼容，不作为并发库存门禁；事务锁与幂等仍有效。
-        if ($difference === 0) return false;
-        if ((int)$stock['id'] === 0) $stock = $this->countableStock($scope, $location, $line, $command['now']);
+        if ($difference !== 0 && (int)$stock['id'] === 0) $stock = $this->countableStock($scope, $location, $line, $command['now']);
         $surplus = ['batchNo' => '', 'cost' => 0, 'manufacturedDate' => null, 'expireDate' => null];
         if ($difference < 0) $this->countLoss($scope, $location, $stock, -$difference, $document, $line, $command);
         if ($difference > 0) $surplus = $this->countGain($scope, $location, $stock, $difference, $document, $line, $command);
-        // 复用既有批次快照列保存按批次盘亏的身份，历史查询仍从移动事实取得真实成本。
-        if (($line['countMode'] ?? '') === 'BATCH' && $difference < 0) $surplus = ['batchNo' => $line['batchNo'], 'cost' => $line['cost'], 'manufacturedDate' => $line['manufacturedDate'], 'expireDate' => $line['expireDate']];
+        // 持平或盘亏也保留所盘批次身份；不存在的零数量批次只记批号，不虚构成本和日期。
+        if (($line['countMode'] ?? '') === 'BATCH' && $difference <= 0) $surplus = [
+            'batchNo' => $line['batchNo'], 'cost' => (int)($batch['unit_cost_cents'] ?? 0),
+            'manufacturedDate' => $batch['manufactured_date'] ?? null, 'expireDate' => $batch['expire_date'] ?? null,
+        ];
         Db::name('inventory_stock_count_line')->insert([
             'document_id' => (int)$document['id'], 'line_no' => $line['index'], 'stock_id' => (int)$stock['id'], 'product_id' => $line['productId'], 'sku_id' => $line['skuId'], 'sku_unique' => $line['unique'], 'quantity_scale' => $scale,
             'book_quantity_units' => $book, 'counted_quantity_units' => $counted, 'difference_quantity_units' => $difference, 'surplus_batch_no' => $surplus['batchNo'], 'surplus_unit_cost_cents' => $surplus['cost'], 'surplus_manufactured_date' => $surplus['manufacturedDate'], 'surplus_expire_date' => $surplus['expireDate'], 'created_at' => $command['now'],
         ]);
-        return true;
     }
 
     /** Physical and book counts may be zero; quantity precision and overflow remain governed by the inventory contract. */
@@ -248,7 +247,7 @@ final class InventoryStockCountServices
         }
     }
 
-    /** A catalog SKU with no historical stock is still countable; its zero authority is created only on final confirmation. */
+    /** 未建库存主体的有效 SKU 账面为零；仅发生真实调整时创建主体，持平盘点只记录商品身份。 */
     private function countableStock(array $scope, array $location, array $line, int $now, bool $createMissing = true): array
     {
         $catalog = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')

@@ -113,7 +113,7 @@ check('store inventory scope derives its displayed store name from the trusted w
 check('inventory rows no longer forge a store operator and transfer is explicitly cross-store',
   !inventoryApp.includes('王晓雯')
     && !inventoryApp.includes("text(row.operator_name || row.admin_name || row.staff_name, '—')")
-    && inventoryApp.includes('row.store_name_label || row.store_name || row.store_name_snapshot || row.location_name || scopeName.value')
+    && inventoryApp.includes("case 'count': return [text(row.order_sn), text(row.store_name),")
     && inventoryModal.includes('调入方')
     && inventoryModal.includes('收货时入账')
     && inventoryModal.includes('crossTransferIncomingRequests'))
