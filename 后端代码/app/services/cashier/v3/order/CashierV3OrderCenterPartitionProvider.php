@@ -8,7 +8,7 @@ use app\services\cashier\v3\projection\CashierV3RootPartitionProvider;
 use think\facade\Db;
 use think\facade\Log;
 
-/** 七类订单记录的 orderCenter 根分区提供者。 */
+/** 订单中心根分区只提供入口元数据，业务记录由各页签按需查询。 */
 final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartitionProvider
 {
     /** @var CashierV3SalesOrderQueryServices */
@@ -39,7 +39,7 @@ final class CashierV3OrderCenterPartitionProvider implements CashierV3RootPartit
     ): array {
         try {
             $payload = $this->recordQueries->augmentInitialPartition(
-                $this->queries->initialPartition($operatorScope, $dataScope, $hints),
+                $this->queries->initialPartitionMetadata(),
                 $operatorScope,
                 $dataScope
             );

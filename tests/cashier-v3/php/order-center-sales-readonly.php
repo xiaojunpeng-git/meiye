@@ -14,6 +14,7 @@ require $backendRoot . '/app/services/cashier/v3/CashierV3OperatorScope.php';
 require $backendRoot . '/app/services/cashier/v3/CashierV3DataScopeContext.php';
 require $backendRoot . '/app/services/cashier/v3/projection/CashierV3RootPartitionProvider.php';
 require $backendRoot . '/app/services/cashier/v3/order/CashierV3SalesOrderCursorCodec.php';
+require $backendRoot . '/app/services/cashier/v3/order/CashierV3EntitlementCheckoutIdentity.php';
 require $backendRoot . '/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php';
 require $backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php';
 require $backendRoot . '/app/services/cashier/v3/order/CashierV3OrderCenterPartitionProvider.php';
@@ -434,7 +435,7 @@ $partiallyRefunded = $service->querySalesOrders(['status' => 'partially_refunded
 $cancelled = $service->querySalesOrders(['status' => 'cancelled'], $operator, $storesScope);
 $voided = $service->querySalesOrders(['status' => 'voided'], $operator, $storesScope);
 orderOk('退款申请与退款中通过 businessStatus 进入互斥筛选', array_column($refundPending['records'], 'orderStatus') === ['申请退款', '退款中'], $refundPending);
-orderOk('退款历史保留且明确标记', array_column($refunded['records'], 'orderStatus') === ['已退款'], $refunded);
+orderOk('退款历史保留且明确标记', array_column($refunded['records'], 'orderStatus') === ['已退款作废'], $refunded);
 orderOk('历史部分退款不再冒充正常订单', array_column($partiallyRefunded['records'], 'orderStatus') === ['部分退款'], $partiallyRefunded);
 orderOk('取消历史保留且明确标记', array_column($cancelled['records'], 'orderStatus') === ['已取消'], $cancelled);
 orderOk('作废优先级高于退款且各筛选严格互斥', array_column($voided['records'], 'orderStatus') === ['已作废', '已作废'] && !in_array(110, array_column($refunded['records'], 'orderId'), true), [$voided, $refunded]);
@@ -505,16 +506,21 @@ $recordQueries = new CashierV3OrderCenterRecordQueryServices(function (string $o
 });
 $provider = new CashierV3OrderCenterPartitionProvider($service, $recordQueries);
 $partition = $provider->readPartition('ctx:test', '1', $operator, $storesScope);
-orderOk('orderCenter provider 返回八类正式记录入口但不返回导航数量', $provider->partitionKey() === 'orderCenter'
+orderOk('orderCenter 根快照只返回八类入口，不预读无日期订单', $provider->partitionKey() === 'orderCenter'
     && ($partition['ready'] ?? false) === true
     && isset($partition['payload']['recordsByType']['sales'])
     && count($partition['payload']['businessTypes'] ?? []) === 8
+    && ($partition['payload']['availability']['dataLoaded'] ?? true) === false
+    && ($partition['payload']['pagesByType']['sales']['dataStatus'] ?? '') === 'not_loaded'
+    && ($partition['payload']['recordsByType']['sales'] ?? null) === []
+    && ($partition['payload']['salesOrders'] ?? null) === []
     && !isset($partition['payload']['countsByType']), $partition);
 $brokenProvider = new CashierV3OrderCenterPartitionProvider(new CashierV3SalesOrderQueryServices(function (): array {
-    throw new RuntimeException('database unavailable');
+    throw new RuntimeException('root partition must not query sales orders');
 }), $recordQueries);
 $broken = $brokenProvider->readPartition('ctx:test', '2', $operator, $storesScope);
-orderOk('数据源异常时根分区 ready=false，禁止空壳冒充', ($broken['ready'] ?? true) === false && array_key_exists('payload', $broken) && $broken['payload'] === null, $broken);
+orderOk('销售查询读取器异常也不会被登录根快照调用', ($broken['ready'] ?? false) === true
+    && ($broken['payload']['recordsByType']['sales'] ?? null) === [], $broken);
 
 $moduleSource = file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3OrderQueryModule.php');
 $querySource = file_get_contents($backendRoot . '/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php');

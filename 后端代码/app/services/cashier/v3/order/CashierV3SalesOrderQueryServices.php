@@ -139,59 +139,40 @@ final class CashierV3SalesOrderQueryServices
         );
     }
 
-    public function initialPartition(
-        CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope,
-        array $hints = []
-    ): array {
-        $payload = is_array($hints['salesQuery'] ?? null) ? $hints['salesQuery'] : [];
-        // 订单中心首次进入默认展示正常数据；全部数据必须由工具栏显式发空状态。
-        $scope = $this->scalarString($payload['dataScope'] ?? $payload['data_scope'] ?? '');
-        $businessStatus = $this->scalarString($payload['businessStatus'] ?? $payload['business_status'] ?? '');
-        if ($scope === 'all') {
-            // 全部数据只能由工具栏显式选择；其业务状态为空时保留全量。
-            $payload['status'] = $businessStatus;
-        } elseif ($this->scalarString($payload['status'] ?? '') === '') {
-            // 根快照或旧调用即使带了空 status，也不能绕过正常范围。
-            $payload['status'] = $businessStatus !== '' ? $businessStatus : 'normal';
-        }
-        $payload['page'] = max(1, (int)($payload['page'] ?? 1));
-        $payload['pageSize'] = max(1, (int)($payload['pageSize'] ?? 20));
-        $page = $this->querySalesOrders($payload, $operatorScope, $dataScope);
-
+    /** 根快照只声明订单中心入口；记录由当前页签按默认当天或指定日期按需读取。 */
+    public function initialPartitionMetadata(): array
+    {
+        $statusOptions = $this->statusOptions();
         return [
             'contractVersion' => self::CONTRACT_VERSION,
-            'dataStatus' => $page['dataStatus'],
-            'dataAsOf' => $page['dataAsOf'],
-            'businessTimezone' => $page['businessTimezone'],
-            'paginationMode' => $page['paginationMode'],
-            'paginationCursor' => $page['paginationCursor'],
-            'hasMore' => $page['hasMore'],
-            'freshnessPolicy' => $page['freshnessPolicy'],
-            'performancePolicy' => $page['performancePolicy'],
+            'availability' => [
+                'contractVersion' => self::CONTRACT_VERSION,
+                'status' => 'on_demand',
+                'dataLoaded' => false,
+                'businessFactsIncluded' => false,
+            ],
+            'dataStatus' => 'not_loaded',
             'businessTypes' => [[
                 'key' => 'sales',
-                'label' => '销售订单',
+                'label' => '消费订单',
                 'ready' => true,
             ]],
-            'statusOptions' => $page['statusOptions'],
-            'statusOptionsByType' => ['sales' => $page['statusOptions']],
-            'salesOrders' => $page['records'],
-            'recordsByType' => ['sales' => $page['records']],
+            'statusOptions' => $statusOptions,
+            'statusOptionsByType' => ['sales' => $statusOptions],
+            'salesOrders' => [],
+            'recordsByType' => ['sales' => []],
             'pagesByType' => [
                 'sales' => [
-                    'total' => $page['total'],
-                    'page' => $page['page'],
-                    'pageSize' => $page['pageSize'],
-                    'dataStatus' => $page['dataStatus'],
-                    'paginationMode' => $page['paginationMode'],
-                    'paginationCursor' => $page['paginationCursor'],
-                    'hasMore' => $page['hasMore'],
+                    'total' => 0,
+                    'page' => 1,
+                    'pageSize' => 20,
+                    'dataStatus' => 'not_loaded',
+                    'hasMore' => false,
                 ],
             ],
-            'total' => $page['total'],
-            'page' => $page['page'],
-            'pageSize' => $page['pageSize'],
+            'total' => 0,
+            'page' => 1,
+            'pageSize' => 20,
             'salesOrderDetail' => null,
         ];
     }
