@@ -163,7 +163,7 @@ final class CashierV3OrderAttributionCorrectionServices
         }
     }
 
-    /** 只接受权威主键；纯服务单以结账请求定位整组，展示服务号不能代替写入标识。 */
+    /** 纯服务以已落库的权益组标识定位；来源关联不是预约写命令，展示 FW 号也不能代替主键。 */
     private function identity(array $payload): array
     {
         $type = trim((string)($payload['recordType'] ?? ''));
@@ -174,7 +174,7 @@ final class CashierV3OrderAttributionCorrectionServices
         if (!in_array($type, ['sales', 'service', 'recharge', 'supplement', 'refund'], true) || $id === ''
             || ($type === 'recharge' && !preg_match('/^[1-9][0-9]*$/D', $id))
             || ($type === 'sales' && !preg_match('/^CSO-[a-f0-9]{40}$/Di', $id))
-            || ($type === 'service' && !preg_match('/^CKR-[a-f0-9]{40}$/Di', $id))
+            || ($type === 'service' && !CashierV3EntitlementCheckoutIdentity::isValidRequestId($id))
             || ($type === 'supplement' && !preg_match('/^(?:DRP|RRP)-[a-f0-9]{40}$/Di', $id))
             || ($type === 'refund' && !preg_match('/^OLO-[a-f0-9]{40}$/Di', $id))) {
             throw CashierV3CommandException::invalidContext('记录标识无效，请刷新列表后重试。');
@@ -189,6 +189,11 @@ final class CashierV3OrderAttributionCorrectionServices
             $query = Db::name('cashier_v3_sales_order')->where('order_id', $id)->where('tenant_id', $scope->tenantId())
                 ->where('store_id', $operator->storeId())->where('order_direction', 'forward')->where('order_status', 'settled');
         } elseif ($type === 'service') {
+            // 直通核销没有普通结账请求或完成凭证。其日期由已完成的权益服务事实负责，
+            // reservation: 仅保留来源关联；不得读取、锁定或更改预约及预约占用。
+            if (strpos($id, 'reservation:') === 0) {
+                return $this->serviceFactRecord($id, $operator, $scope, $lock);
+            }
             // 纯权益结账可能生成多条 FW 服务记录；更正只能作用于同一已完成请求的整组。
             $query = Db::name('cashier_v3_checkout_request')->where('request_id', $id)
                 ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())
@@ -238,6 +243,48 @@ final class CashierV3OrderAttributionCorrectionServices
         $row = $lock ? $query->lock(true)->find() : $query->find();
         if (!$row) throw CashierV3CommandException::invalidContext('找不到当前门店的可更正记录。');
         return (array)$row;
+    }
+
+    /**
+     * 无结账主单的权益组以同租户、同门店的完成事实为权威，按稳定行序加锁。
+     * 必须同一完成事件、会员及业务日，防止把无关核销或后续调整当作同次服务移动。
+     */
+    private function serviceFactRecord(string $id, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, bool $lock): array
+    {
+        $sale = Db::name('cashier_v3_sales_order')->where('tenant_id', $scope->tenantId())
+            ->where('checkout_request_id', $id);
+        if ($lock) $sale->lock(true);
+        if ($sale->find()) throw CashierV3CommandException::invalidContext('此结账已有销售主单，请从销售单更正。');
+        $query = Db::name('cashier_v3_entitlement_service_fact')->where('tenant_id', $scope->tenantId())
+            ->where('store_id', $operator->storeId())->where('checkout_request_id', $id)
+            ->order('id', 'asc')->limit(1001);
+        $rows = ($lock ? $query->lock(true) : $query)->select()->toArray();
+        if ($rows === [] || count($rows) > 1000) {
+            throw CashierV3CommandException::invalidContext('找不到当前门店的可更正权益服务记录。');
+        }
+        $first = $rows[0];
+        $eventNo = trim((string)$first['business_event_no']);
+        foreach ($rows as $row) {
+            if ($eventNo === '' || (string)$row['service_status'] !== 'completed'
+                || (string)$row['business_date'] !== (string)$first['business_date']
+                || (string)$row['business_event_no'] !== $eventNo
+                || (int)$row['member_id'] !== (int)$first['member_id']) {
+                throw CashierV3CommandException::invalidContext('权益服务记录状态或日期不一致，暂不能整组更正。');
+            }
+        }
+        // 只校验原完成事件的核销/业绩事实；后续作废和人员调整保留独立事件和日期。
+        foreach (['cashier_v3_entitlement_writeoff_fact', 'cashier_v3_performance_fact'] as $table) {
+            $related = Db::name($table)->where('tenant_id', $scope->tenantId())
+                ->where('store_id', $operator->storeId())->where('checkout_request_id', $id)
+                ->where('business_event_no', $eventNo)->order('id', 'asc');
+            $facts = ($lock ? $related->lock(true) : $related)->field('business_date')->select()->toArray();
+            foreach ($facts as $fact) {
+                if ((string)$fact['business_date'] !== (string)$first['business_date']) {
+                    throw CashierV3CommandException::invalidContext('权益核销或业绩日期不一致，请先核对记录。');
+                }
+            }
+        }
+        return $first;
     }
 
     private function lockRelatedDebts(string $type, string $id, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, string $field): void
@@ -416,20 +463,24 @@ final class CashierV3OrderAttributionCorrectionServices
             return;
         }
         if ($type === 'service') {
-            // 纯服务仅允许改业务日期。请求、完成凭证、服务/核销/业绩事实及到店生命周期
-            // 同属原结账事件；实际发生时间、后续独立调整事件和来源选择一概不动。
+            // 纯服务只移动原完成事件的业务日期，不重新核销或改权益余额/有效期。
+            // 直通核销由服务事实负责，不依赖或补造结账凭证，更不能改预约数据。
             $eventNo = (string)$record['business_event_no'];
-            Db::name('cashier_v3_checkout_request')->where('tenant_id', $tenant)->where('request_id', $id)
-                ->update(['business_date' => $newDate]);
-            Db::name('cashier_v3_entitlement_completion_receipt')->where('tenant_id', $tenant)
-                ->where('checkout_request_id', $id)->where('business_event_no', $eventNo)
-                ->update(['business_date' => $newDate]);
+            if (strpos($id, 'reservation:') !== 0) {
+                Db::name('cashier_v3_checkout_request')->where('tenant_id', $tenant)->where('request_id', $id)
+                    ->update(['business_date' => $newDate]);
+                Db::name('cashier_v3_entitlement_completion_receipt')->where('tenant_id', $tenant)
+                    ->where('checkout_request_id', $id)->where('business_event_no', $eventNo)
+                    ->update(['business_date' => $newDate]);
+            }
             foreach (['cashier_v3_entitlement_service_fact', 'cashier_v3_entitlement_writeoff_fact',
                 'cashier_v3_performance_fact'] as $table) {
-                Db::name($table)->where('tenant_id', $tenant)->where('checkout_request_id', $id)
+                Db::name($table)->where('tenant_id', $tenant)->where('store_id', (int)$record['store_id'])
+                    ->where('checkout_request_id', $id)
                     ->where('business_event_no', $eventNo)->update(['business_date' => $newDate]);
             }
             Db::name('cashier_v3_customer_lifecycle_fact')->where('tenant_id', $tenant)
+                ->where('store_id', (int)$record['store_id'])
                 ->where('natural_key', 'service-visit:' . $id)->where('event_type', 'service_completed')
                 ->update(['business_date' => $newDate]);
             return;
