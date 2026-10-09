@@ -146,6 +146,42 @@ ok('旧结账快照适配器兼容完整快照', () => {
   assert.equal(receipt.paymentDetails[0].name, '微信')
 })
 
+ok('小票只保留应付与实收汇总，并在有欠款时紧随应付显示欠款合计', () => {
+  const html = buildSalesOrderReceiptHtml({
+    amountSummary: {
+      originalAmount: 1980,
+      discountAmount: 80,
+      payableAmount: 1400,
+      debtAmount: 500,
+      actualReceivedAmount: 1400
+    }
+  })
+  const summary = html.match(/<div class="summary">([\s\S]*?)<\/div>\s*<div class="tear-guide"/)?.[1] || ''
+  assert.match(summary, /应付金额<\/span><strong>¥1,400<\/strong>/)
+  assert.match(summary, /欠款合计<\/span><strong>¥500<\/strong>/)
+  assert.match(summary, /应付金额[\s\S]*欠款合计[\s\S]*实收金额/)
+  assert.doesNotMatch(summary, /原价合计|优惠合计/)
+
+  const noDebt = buildSalesOrderReceiptHtml({ amountSummary: { payableAmount: 100, debtAmount: 0 } })
+  assert.doesNotMatch(noDebt, /欠款合计/)
+})
+
+ok('收银成功页小票搬运结账快照欠款，不用应付与实收差额推算', () => {
+  const receipt = salesOrderReceiptFromCheckout({
+    summary: { receivableAmount: 1400, originalAmount: 1980, discountAmount: 80 },
+    debtAmount: 500,
+    payment: { resultLines: [{ name: '现金', amount: 1400 }] }
+  })
+  assert.equal(receipt.amountSummary.debtAmount, 500)
+  assert.match(buildSalesOrderReceiptHtml(receipt), /欠款合计<\/span><strong>¥500<\/strong>/)
+
+  const withoutDebt = salesOrderReceiptFromCheckout({
+    summary: { receivableAmount: 100 },
+    payment: { resultLines: [{ name: '现金', amount: 80 }] }
+  })
+  assert.doesNotMatch(buildSalesOrderReceiptHtml(withoutDebt), /欠款合计/)
+})
+
 ok('纯权益订单小票只展示服务区块', () => {
   const html = buildSalesOrderReceiptHtml({ receiptMode: 'service', serviceRecords: [{
     serviceRecordNo: 'FW-1001',

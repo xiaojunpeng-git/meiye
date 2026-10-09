@@ -254,10 +254,10 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   const paymentRows = payments.length
     ? payments.map((line) => `<tr><td>${escapeHtml(paymentName(line))}</td><td class="right">${escapeHtml(displayAmount(paymentAmount(line)))}</td></tr>`).join('')
     : '<tr><td colspan="2" class="empty">暂无收款明细</td></tr>'
+  const debtAmount = summaryValue(source, ['debtAmount', 'debt_amount'])
   const summaryRows = receiptRows([
-    { label: '原价合计', value: summaryValue(source, ['originalAmount', 'originalTotalAmount', 'listAmount']) },
-    { label: '优惠合计', value: summaryValue(source, ['discountAmount', 'couponDiscountAmount', 'otherDiscountAmount']) },
     { label: '应付金额', value: summaryValue(source, ['payableAmount', 'receivableAmount', 'amountDue']) },
+    ...(Number(debtAmount) > 0 ? [{ label: '欠款合计', value: debtAmount }] : []),
     { label: '实收金额', value: summaryValue(source, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) }
   ])
 
@@ -399,6 +399,9 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
     }))
   const amountSummary = [source.amountSummary, source.summary, source.orderSummary, snapshot.summary, snapshot.amountSummary]
     .find((value) => value && typeof value === 'object' && !Array.isArray(value)) || {}
+  // 本次结账快照将欠款保存在顶层；小票摘要只搬运该冻结值，不根据收款反推欠款。
+  const debtAmount = summaryValue(source, ['debtAmount', 'debt_amount'])
+    ?? pickValue(snapshot, ['debtAmount', 'debt_amount'])
   return {
     ...snapshot,
     salesOrderNo: pickValue(source, ['salesOrderNo', 'orderNo']) || pickValue(snapshot, ['salesOrderNo', 'orderNo']),
@@ -420,7 +423,7 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
       : firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments']).length
         ? firstNonEmptyList(snapshot, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
         : paymentLines,
-    amountSummary
+    amountSummary: hasValue(debtAmount) ? { ...amountSummary, debtAmount } : amountSummary
   }
 }
 
