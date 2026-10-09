@@ -1,0 +1,28 @@
+{
+    "read_only": true,
+    "database": "ruihao",
+    "store_id": 132,
+    "generated_at": "2026-10-09T17:28:15+08:00",
+    "catalog_item_count": 175,
+    "project_items": [
+        {
+            "id": 354890,
+            "kind": "项目",
+            "name": "通(背\/腿)",
+            "price": "158.00"
+        },
+        {
+            "id": 95163,
+            "kind": "项目",
+            "name": "通(背\/腿)",
+            "price": "158.00"
+        }
+    ],
+    "sample_data_sha256": "37f012792c5fc0bb2698f79d51745ea1ff6594ce4c04391b87e28a7e7a9ed58d",
+    "historical_reference_count": 6,
+    "historical_member_count": 5,
+    "historical_project_matches": null,
+    "rights_projection_note": "Not executed online: legacy debt read uses SELECT FOR UPDATE; keep READ ONLY transaction. Local projection comparison passed.",
+    "historical_readable": true,
+    "migration_id": 215
+}

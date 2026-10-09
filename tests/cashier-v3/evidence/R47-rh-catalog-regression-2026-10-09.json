@@ -1,0 +1,56 @@
+{
+    "read_only": true,
+    "active_historical_rows_excluded": {
+        "copies": 3142,
+        "stores": 102
+    },
+    "remaining_normal_duplicate_groups": 0,
+    "store132_historical_leaks": 0,
+    "sample_rows": [
+        {
+            "product_id": 96884,
+            "sku_id": 95163,
+            "name": "通(背\/腿)",
+            "kind_code": 6
+        },
+        {
+            "product_id": 96883,
+            "sku_id": 95162,
+            "name": "舒缓灸",
+            "kind_code": 6
+        },
+        {
+            "product_id": 96878,
+            "sku_id": 95157,
+            "name": "背部spa",
+            "kind_code": 6
+        },
+        {
+            "product_id": 93704,
+            "sku_id": 91983,
+            "name": "通(背\/腿)",
+            "kind_code": 5
+        },
+        {
+            "product_id": 93602,
+            "sku_id": 91881,
+            "name": "舒缓灸",
+            "kind_code": 5
+        },
+        {
+            "product_id": 92780,
+            "sku_id": 91059,
+            "name": "背部spa",
+            "kind_code": 5
+        },
+        {
+            "product_id": 57031,
+            "sku_id": 46939,
+            "name": "花园SPA测试套",
+            "kind_code": 0
+        }
+    ],
+    "direct_historical_new_sale_rejected": true,
+    "cross_store_access_denied": true,
+    "passed": true
+}
