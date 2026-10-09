@@ -61,8 +61,9 @@ final class CashierV3OrderCenterVoidServices
         $existing = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('command_idempotency_key', $key)->lock(true)->find();
         if ($existing) {
-            // A command key cannot be replayed for a different record or action.
-            if ((in_array($action, ['void-order-center-project-replacement', 'void-order-center-refund'], true)
+            // A command key cannot be replayed for a different record/action;
+            // gift replays must also stay in the original handling store.
+            if ((in_array($action, ['void-order-center-project-replacement', 'void-order-center-refund', 'void-order-center-gift'], true)
                     && (int)$existing['store_id'] !== $operator->storeId())
                 || (string)$existing['record_id'] !== $recordId || (string)$existing['source_kind'] !== $this->voidSourceKind($action, $recordId)
                 || (string)$existing['status'] !== 'succeeded') {
@@ -73,7 +74,8 @@ final class CashierV3OrderCenterVoidServices
         $recordOperation = Db::name(self::OPERATION_TABLE)->where('tenant_id', $dataScope->tenantId())
             ->where('record_id', $recordId)->where('status', 'succeeded')->lock(true)->find();
         if ($recordOperation) {
-            if ((in_array($action, ['void-order-center-project-replacement', 'void-order-center-refund'], true)
+            // Changing the command key cannot bypass the gift's store boundary.
+            if ((in_array($action, ['void-order-center-project-replacement', 'void-order-center-refund', 'void-order-center-gift'], true)
                     && (int)$recordOperation['store_id'] !== $operator->storeId())
                 || (string)$recordOperation['source_kind'] !== $this->voidSourceKind($action, $recordId)) {
                 throw self::failure('记录作废类型不一致。', 'order_center_void_kind_mismatch');
@@ -185,6 +187,10 @@ final class CashierV3OrderCenterVoidServices
         return ['data' => ['void' => ['operationNo' => $operation['operation_no'], 'replayed' => false]], 'business_no' => $operation['operation_no'], 'touched' => ['supplement_record'], 'message' => '补交记录已取消，欠款已恢复。'];
     }
 
+    /**
+     * 只撤回当前门店独立赠送的这一条内容；权益变更、作废操作和反向事实共用外层事务。
+     * 优惠券按发放时保存的券 ID 撤回，不按券名称或会员名下同模板的其他券猜测关联。
+     */
     private function voidGift(string $recordId, string $reason, string $key, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, CashierV3BusinessEventRecorder $recorder, CashierV3BusinessEventExecution $execution, array $contract): array
     {
         if (strpos($recordId, 'v3-direct-gift:') !== 0) throw self::failure('该赠送记录暂不支持作废，请使用V3独立赠送记录。', 'gift_not_reversible');
@@ -221,10 +227,10 @@ final class CashierV3OrderCenterVoidServices
                 || Db::name('cashier_v3_card_operation')->where('tenant_id', $scope->tenantId())->where('source_card_holder_id', (int)($item['card_holder_id'] ?? 0))->count() > 0)) {
                 throw self::failure('赠送项目已有核销、服务、预约或卡操作记录，当前版本暂不能安全作废。', 'gift_project_usage_exists');
             }
-        } elseif ($kind === 'coupon') {
-            throw self::failure('优惠券赠送作废暂只支持未核销记录。', 'gift_coupon_reversal_not_supported');
         }
         $now = time();
+        $couponRevocation = [];
+        if ($kind === 'coupon') $couponRevocation = $this->revokeUnusedDirectCoupons($item, $fact, $authority);
         if ($kind === 'project') $this->revokeUnusedDirectProject($item, (int)$fact['member_id'], $scope, $now);
         $operation = $this->operation($scope, $operator, $key, $recordId, 'gift', (string)$fact['gift_fact_id'], $reason, $now);
         if ($kind === 'product' && $claims !== []) {
@@ -249,8 +255,14 @@ final class CashierV3OrderCenterVoidServices
         $reverse['gift_fact_id'] = 'GFR-' . strtoupper(substr(hash('sha256', $factId . '|' . $operation['operation_id']), 0, 40));
         $reverse['natural_key'] = 'direct_gift_void:' . hash('sha256', $factId . '|' . $operation['operation_id']);
         $reverse['status'] = 'voided'; $reverse['reversal_of'] = $factId;
+        if ($kind === 'coupon') {
+            // 原赠送事实不可覆盖；反向事实记录本次作废的操作人、请求与业务日。
+            $reverse['command_idempotency_key'] = $key;
+            $reverse['operator_id'] = $operator->operatorId();
+            $reverse['business_date'] = date('Y-m-d', $now);
+        }
         $reverse['occurred_at'] = $now; $reverse['settled_at'] = $now; $reverse['recorded_at'] = $now; $reverse['created_at'] = $now; $reverse['updated_at'] = $now;
-        $event = $recorder->recordInTx($execution, $contract, ['event_type' => 'gift.voided', 'aggregate_type' => 'direct_gift', 'aggregate_id' => (string)$fact['source_id'], 'aggregate_version' => 2, 'event_version' => 1, 'detail_id' => $factId, 'source_type' => 'void-order-center-gift', 'source_id' => $operation['operation_id'], 'reversal_of' => (string)$fact['business_event_no'], 'member_id' => (int)$fact['member_id'], 'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'aggregate_name_snapshot' => (string)$fact['content_name_snapshot'], 'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'), 'payload' => ['recordId' => $recordId, 'giftKind' => $kind, 'reason' => $reason]]);
+        $event = $recorder->recordInTx($execution, $contract, ['event_type' => 'gift.voided', 'aggregate_type' => 'direct_gift', 'aggregate_id' => (string)$fact['source_id'], 'aggregate_version' => 2, 'event_version' => 1, 'detail_id' => $factId, 'source_type' => 'void-order-center-gift', 'source_id' => $operation['operation_id'], 'reversal_of' => (string)$fact['business_event_no'], 'member_id' => (int)$fact['member_id'], 'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'aggregate_name_snapshot' => (string)$fact['content_name_snapshot'], 'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'), 'payload' => array_merge(['recordId' => $recordId, 'giftKind' => $kind, 'reason' => $reason], $couponRevocation)]);
         $reverse['business_event_no'] = (string)$event['event_no'];
         Db::name('cashier_v3_gift_fact')->insert($reverse);
         Db::name(self::OPERATION_TABLE)->where('id', (int)$operation['id'])->update(['business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'updated_at' => $now]);
@@ -419,6 +431,57 @@ final class CashierV3OrderCenterVoidServices
             return strpos($recordId, 'v3-sales-supplement:') === 0 ? 'sales_supplement' : 'recharge_supplement';
         }
         throw self::failure('暂不支持该订单中心作废类型。', 'order_center_void_action_invalid');
+    }
+
+    /**
+     * 撤回独立赠送的全部未使用券，并恢复限量发券额度；任一券已使用/转赠/资料不全则整笔失败。
+     * 先锁模板、再按券 ID 排序加锁，与发券顺序一致；核销和转赠共用券行锁及未使用 CAS。
+     * 发券流水仍是发生过的历史，不删除、不猜测流水 ID；券 ID 和恢复数量写入作废事件追溯。
+     */
+    private function revokeUnusedDirectCoupons(array $item, array $fact, array $authority): array
+    {
+        $ids = json_decode((string)($item['coupon_user_ids_json'] ?? ''), true);
+        $quantity = (int)($item['quantity'] ?? 0);
+        $issueId = (int)($item['coupon_issue_id'] ?? 0);
+        $memberId = (int)($authority['member_id'] ?? 0);
+        if (!is_array($ids) || $quantity <= 0 || $quantity > 999 || count($ids) !== $quantity
+            || array_keys($ids) !== range(0, $quantity - 1) || $issueId <= 0 || $memberId <= 0
+            || (string)$fact['tenant_id'] !== (string)$authority['tenant_id']
+            || (int)$fact['store_id'] !== (int)$authority['store_id']
+            || (int)$fact['member_id'] !== $memberId || (string)$fact['gift_kind'] !== 'coupon'
+            || (int)$fact['quantity'] !== $quantity || (int)$fact['coupon_issue_id'] !== $issueId) {
+            throw self::failure('赠送优惠券关联资料不完整，作废未提交。', 'gift_coupon_projection_invalid');
+        }
+        foreach ($ids as $id) {
+            if (!is_int($id) || $id <= 0) throw self::failure('赠送优惠券标识无效，作废未提交。', 'gift_coupon_identity_invalid');
+        }
+        if (count(array_unique($ids)) !== $quantity) throw self::failure('赠送优惠券标识重复，作废未提交。', 'gift_coupon_identity_duplicate');
+        sort($ids, SORT_NUMERIC);
+        // 模板下架不影响撤回已发券，但模板缺失或额度异常时不得凭空恢复库存。
+        $issue = (array)Db::name('store_coupon_issue')->where('id', $issueId)->lock(true)->find();
+        if (!$issue) throw self::failure('优惠券发放资料缺失，作废未提交。', 'gift_coupon_issue_missing');
+        $coupons = Db::name('store_coupon_user')->whereIn('id', $ids)->order('id', 'asc')->lock(true)->select()->toArray();
+        if (count($coupons) !== $quantity) throw self::failure('赠送优惠券资料缺失，作废未提交。', 'gift_coupon_user_missing');
+        foreach ($coupons as $coupon) {
+            if ((int)$coupon['uid'] !== $memberId || (int)$coupon['cid'] !== $issueId
+                || (string)$coupon['type'] !== 'cashier_v3_direct_gift'
+                || (int)$coupon['status'] !== 0 || (int)$coupon['is_fail'] !== 0
+                || (int)$coupon['use_time'] !== 0 || (int)$coupon['oid'] !== 0) {
+                throw self::failure('赠送优惠券已使用、转赠或状态已变化，不能作废。', 'gift_coupon_already_changed');
+            }
+        }
+        $finite = (int)$issue['total_count'] > 0;
+        if ($finite && ((int)$issue['remain_count'] < 0 || (int)$issue['remain_count'] + $quantity > (int)$issue['total_count'])) {
+            throw self::failure('优惠券发放额度异常，作废未提交，请联系管理员核对。', 'gift_coupon_inventory_invalid');
+        }
+        $affected = Db::name('store_coupon_user')->whereIn('id', $ids)->where('uid', $memberId)->where('cid', $issueId)
+            ->where('type', 'cashier_v3_direct_gift')->where('status', 0)->where('is_fail', 0)->where('use_time', 0)->where('oid', 0)
+            ->update(['status' => 2, 'is_fail' => 1]);
+        if ((int)$affected !== $quantity) throw self::failure('优惠券状态并发变化，作废未提交。', 'gift_coupon_revoke_race');
+        if ($finite && (int)Db::name('store_coupon_issue')->where('id', $issueId)->inc('remain_count', $quantity)->update() !== 1) {
+            throw self::failure('优惠券发放额度恢复失败，作废未提交。', 'gift_coupon_inventory_restore_failed');
+        }
+        return ['couponUserIds' => $ids, 'couponIssueId' => $issueId, 'restoredCouponInventoryCount' => $finite ? $quantity : 0];
     }
 
     private function revokeUnusedDirectProject(array $item, int $memberId, CashierV3DataScopeContext $scope, int $now): void
