@@ -13,6 +13,19 @@ const integrationBuild = readFileSync(resolve(sourceRoot, 'scripts/build-local-8
 for (const text of ['收支单录入', '收支台账', '费用统计与专项报表', "active==='settings'", '撤销审核', '冲销']) {
   if (!app.includes(text)) throw new Error(`资金 Vue3 工作台缺少功能：${text}`)
 }
+// 门店移除冲销入口，但共享工程的既有平台操作仍保留。
+if (!app.includes('v-if="platform&&r.document_status===\'APPROVED\'" class="btn danger" @click="reverse(r)"')) throw new Error('冲销入口必须只在平台端保留')
+// 门店编辑入口随服务端审核状态显隐，平台既有入口不随本轮变化。
+const editVisibility = app.match(/<button v-if="([^"]+)" class="btn light" @click="edit\(r\)">编辑<\/button>/)?.[1]
+if (!editVisibility) throw new Error('编辑按钮缺少审核状态控制')
+const showEdit = new Function('platform', 'r', `return ${editVisibility}`)
+for (const [platform, status, expected] of [[false,'DRAFT',true],[false,'APPROVED',false],[true,'DRAFT',true],[true,'APPROVED',true]]) {
+  if (showEdit(platform, { document_status: status }) !== expected) throw new Error(`编辑按钮边界错误：${platform}/${status}`)
+}
+// 删除仅对门店未审核单据开放，确认后调用后端，不在页面直接伪造删除结果。
+if (!app.includes('v-if="!platform&&r.document_status===\'DRAFT\'"') || !app.includes('@click="deleteDraft(r)"') || !app.includes('aria-label="删除未审核收支单"')) throw new Error('未审核单据删除入口缺失或边界错误')
+if (!app.includes('@click="deleteDraft(r)">删除</button>')) throw new Error('单据删除按钮应显示删除两个字')
+if (!app.includes("confirm('删除这张未审核收支单？')") || !app.includes("{method:'DELETE'}")) throw new Error('删除缺少确认或真实 DELETE 请求')
 if (!app.includes("v-if=\"platform\"")) throw new Error('平台专属设置未隔离')
 if (!app.includes("'Authori-zation':")) throw new Error('资金 Vue3 工作台未传递系统认证请求头')
 if (!app.includes("sessionStorage.getItem('cashier-v3:session-token')")) throw new Error('资金 Vue3 工作台未复用门店会话')

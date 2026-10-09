@@ -1,0 +1,257 @@
+{
+  "version": "R46-fund-approved-hide-edit-20261009",
+  "date": "2026-10-09",
+  "status": "pm_accepted_pending_commit_and_deployment",
+  "product_manager_acceptance": {
+    "date": "2026-10-09",
+    "message": "我测试没有问题,本轮commit,部署瑞昊,push",
+    "accepted_version": "R46-fund-approved-hide-edit-20261009",
+    "target_instance": "rh",
+    "deployment_and_push_authorized": true
+  },
+  "baseline_head": "b07fcf4f549b7c52edcc197a2e92901a53350bca",
+  "head_at_freeze": "b07fcf4f549b7c52edcc197a2e92901a53350bca",
+  "supersedes": "R46-fund-edit-save-20261009",
+  "files": [
+    {
+      "path": "前端代码/fund-vue3/src/App.vue",
+      "sha256": "c26624b4ebb3a2dc6f13487d2fa64998cd51148e5cdf912067f1ab934dba3e40"
+    },
+    {
+      "path": "后端代码/app/controller/store/fund/StoreFund.php",
+      "sha256": "81f361e461fa40c38dcb6f2ca60084ea6f7e953ce29ec6091eb05130149e1554"
+    },
+    {
+      "path": "后端代码/app/services/fund/StoreFundServices.php",
+      "sha256": "dd98185f573c29a6a4f61247bd341bb1194297ff190b8e9da4ed94694eccc2ce"
+    },
+    {
+      "path": "后端代码/route/store.php",
+      "sha256": "35ad34cd7b36dc7b5c0557dd6afcc04b3dead992ee40f533ac54c9c7d109bed9"
+    },
+    {
+      "path": "tests/fund-management/js/fund-vue3-contract.mjs",
+      "sha256": "dc4d0a9667349f3de5af905e1b4496458947bb771c1fb6c04d274ba0801c55d5"
+    },
+    {
+      "path": "tests/fund-management/php/revoke-audit-local-integration.php",
+      "sha256": "bf336be10e11df975213894730a8ed8d76cea36da09ab06fbc8827c45a102693"
+    },
+    {
+      "path": "tests/fund-management/R46-draft-delete-selftest-2026-10-09.md",
+      "sha256": "5839bb610e6ced79ed67a69974f208322774d10d7188cd7fd544371da7b0d9bc"
+    },
+    {
+      "path": "tests/fund-management/R46-draft-delete-before-2026-10-09.png",
+      "sha256": "99da8f421b140d6f3eb1d017d02d4b064c4a13dec6c9219b32f4e673f48a365b"
+    },
+    {
+      "path": "tests/fund-management/R46-draft-delete-after-2026-10-09.png",
+      "sha256": "1bccbf9a973ef504c9c2ffdce5de3d8ba2433c0715a66ce6bf8f6cd85adb16df"
+    },
+    {
+      "path": "tests/fund-management/R46-revoke-audit-local-2026-10-09.png",
+      "sha256": "c0015acf0b70ee6dfe0d9a4b0f6fc7fd36f5d68645c75c62d7b3a26e8d29153f"
+    },
+    {
+      "path": "tests/fund-management/R46-delete-text-local-2026-10-09.png",
+      "sha256": "77d0aef37205981314dbc60f28b37395309f5f04a786eb17f7188448337b83b7"
+    },
+    {
+      "path": "tests/fund-management/R46-approve-local-2026-10-09.png",
+      "sha256": "1b8d5c6e083a69fe4c53a45c961f1564041a651ed718c3f15a59ff2205357684"
+    },
+    {
+      "path": "tests/fund-management/R46-edit-save-local-2026-10-09.png",
+      "sha256": "c4679eb8b46fb8faf2ac738c12504e1ec60d48b99df657a1be47cd3bc0376b83"
+    },
+    {
+      "path": "tests/fund-management/R46-approved-hide-edit-local-2026-10-09.png",
+      "sha256": "152d5e9c3bd93e1836651fce5a27fd769a26ebb218efba97ba98b77a5fa94740"
+    }
+  ],
+  "tracked_patch_sha256": "e8c7df096f2be0edd65e142b1fddccb3308e7802b3da82d2f1d5840394e474d0",
+  "patch_note": "New integration test and evidence are independently covered by per-file SHA-256.",
+  "build": [
+    {
+      "path": "前端代码/fund-vue3/dist/index.html",
+      "sha256": "6e3708c37857664f08337b28f1d5b9b5b4506da7ae80b23db2ff1ec8640a030f"
+    },
+    {
+      "path": "前端代码/fund-vue3/dist/assets/index-228d4b8a.js",
+      "sha256": "d937a94eab534adbac9111ceb52fa93895d904249d171a3f9f261410910bd6ea"
+    },
+    {
+      "path": "前端代码/fund-vue3/dist/assets/index-4638cc3d.css",
+      "sha256": "4638cc3dd321101e1835697fca046bd342754072d1655753faca1edd1fe94b55"
+    }
+  ],
+  "tests": {
+    "php_integration": {
+      "checks": 78,
+      "result": "PASS",
+      "transaction_rollback": true
+    },
+    "frontend_contract": "PASS",
+    "backend_contract": "PASS",
+    "fund_build": "PASS",
+    "php_syntax": "PASS",
+    "scoped_diff_check": "PASS"
+  },
+  "delete_permission": "own_documents_only_pending_broader_authorization",
+  "local_ui": {
+    "deleted_test_document": "F202610091553058090",
+    "document_id": 1833,
+    "status": "DELETED",
+    "amount_cents": 100,
+    "detail_retained": true,
+    "refresh_verified": true,
+    "rows_before": 4,
+    "rows_after": 3
+  },
+  "remote_operations": false,
+  "committed": false,
+  "text_change_verification": {
+    "label": "删除",
+    "frontend_contract": "PASS",
+    "fund_build": "PASS",
+    "browser_verified": true,
+    "no_business_writes": true
+  },
+  "audit_permission": "authorized_own_store_documents_including_other_creators",
+  "approval_ui_verification": {
+    "before": {
+      "id": 381,
+      "document_no": "F202610021703082883",
+      "status": "DRAFT",
+      "revision": 4,
+      "creator": 1200,
+      "auditor": 0,
+      "line_count": 32,
+      "line_sha256": "1d13ffb1487209029253085e9fc84f01cc49d4b48c3274da151388c2e61aa49e",
+      "amount_cents": 125233,
+      "report": {
+        "income_amount_cents": 0,
+        "expense_amount_cents": 0,
+        "net_amount_cents": 0,
+        "income_amount": "0.00",
+        "expense_amount": "0.00",
+        "net_amount": "0.00",
+        "line_count": 0
+      },
+      "ledger_balance": 150000
+    },
+    "after": {
+      "id": 381,
+      "document_no": "F202610021703082883",
+      "status": "APPROVED",
+      "revision": 5,
+      "creator": 1200,
+      "auditor": 179,
+      "line_count": 32,
+      "line_sha256": "1d13ffb1487209029253085e9fc84f01cc49d4b48c3274da151388c2e61aa49e",
+      "amount_cents": 125233,
+      "report": {
+        "income_amount_cents": 0,
+        "expense_amount_cents": 125233,
+        "net_amount_cents": -125233,
+        "income_amount": "0.00",
+        "expense_amount": "1252.33",
+        "net_amount": "-1252.33",
+        "line_count": 32
+      },
+      "ledger_balance": 24767
+    },
+    "refresh_verified": true,
+    "untouched_first_document": 1720,
+    "reconciliation": "PASS"
+  },
+  "edit_permission": "authorized_own_store_drafts_including_other_creators",
+  "edit_revision_guard": "explicit_audit_revision_required_and_compared_under_row_lock",
+  "edit_ui_verification": {
+    "before": {
+      "id": 1720,
+      "document_no": "F202610081202240997",
+      "status": "DRAFT",
+      "revision": 4,
+      "creator": 1200,
+      "date": "2026-10-08",
+      "summary": "欧尚店团建费",
+      "lines": [
+        {
+          "id": 3620,
+          "document_id": 1720,
+          "line_no": 1,
+          "subject_id": 1,
+          "subject_code_snapshot": "TEAM_BUILDING",
+          "subject_name_snapshot": "团建费",
+          "subject_type_snapshot": "SPECIAL",
+          "amount_cents": 36415,
+          "summary": "",
+          "remark": "",
+          "created_at": "2026-10-08 12:02:24",
+          "updated_at": "2026-10-08 12:02:24"
+        }
+      ],
+      "report": {
+        "income_amount_cents": 0,
+        "expense_amount_cents": 125233,
+        "net_amount_cents": -125233,
+        "income_amount": "0.00",
+        "expense_amount": "1252.33",
+        "net_amount": "-1252.33",
+        "line_count": 32
+      },
+      "ledger_balance": 24767
+    },
+    "after": {
+      "id": 1720,
+      "document_no": "F202610081202240997",
+      "status": "DRAFT",
+      "revision": 5,
+      "creator": 1200,
+      "date": "2026-10-08",
+      "summary": "欧尚店团建费",
+      "lines": [
+        {
+          "id": 3755,
+          "document_id": 1720,
+          "line_no": 1,
+          "subject_id": 1,
+          "subject_code_snapshot": "TEAM_BUILDING",
+          "subject_name_snapshot": "团建费",
+          "subject_type_snapshot": "SPECIAL",
+          "amount_cents": 36415,
+          "summary": "222",
+          "remark": "",
+          "created_at": "2026-10-09 16:19:30",
+          "updated_at": "2026-10-09 16:19:30"
+        }
+      ],
+      "report": {
+        "income_amount_cents": 0,
+        "expense_amount_cents": 125233,
+        "net_amount_cents": -125233,
+        "income_amount": "0.00",
+        "expense_amount": "1252.33",
+        "net_amount": "-1252.33",
+        "line_count": 32
+      },
+      "ledger_balance": 24767
+    },
+    "refresh_and_reopen_verified": true,
+    "saved_user_line_summary": "222",
+    "reconciliation": "PASS",
+    "no_frontend_changes": true
+  },
+  "approved_hide_edit_verification": {
+    "store_draft_edit_count": 1,
+    "store_approved_edit_count": 0,
+    "store_approved_revoke_count": 1,
+    "platform_behavior_unchanged": true,
+    "visibility_truth_table": "PASS",
+    "browser_verified": true,
+    "no_business_writes": true,
+    "fund_build": "PASS"
+  }
+}

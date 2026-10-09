@@ -27,10 +27,11 @@ final class StoreFundServices
         return (array)Db::name('store_fund_subject')->where('id',$id)->find();
     }
 
+    /** 已逻辑删除的单据不进入任何状态筛选或分页总数，原单及明细仍保留。 */
     public function listDocuments(array $scope, array $filters): array
     {
         $query = Db::name('store_fund_document')->alias('d')->leftJoin('system_store s','s.id=d.store_id')
-            ->field('d.*,s.name as store_name');
+            ->field('d.*,s.name as store_name')->where('d.document_status','<>','DELETED');
         $this->applyScope($query, $scope); $this->applyFilters($query, $filters, false);
         if (!empty($filters['subject_id'])) $query->whereExists(function ($sub) use ($filters) { $sub->name('store_fund_document_line')->whereRaw('document_id=d.id')->where('subject_id',(int)$filters['subject_id']); });
         $page=max(1,(int)($filters['page']??1)); $limit=min(100,max(1,(int)($filters['limit']??20)));
@@ -40,14 +41,19 @@ final class StoreFundServices
         return ['list'=>$rows,'count'=>$count,'page'=>$page,'limit'=>$limit];
     }
 
+    /** 对外详情不重新开放已删除单据；审计仍可从保留的业务记录追溯。 */
     public function detail(array $scope, int $id): array
     {
         $query=Db::name('store_fund_document')->where('id',$id); $this->applyScope($query,$scope); $document=(array)$query->find();
-        if (!$document) throw new \RuntimeException('fund_document_not_found');
+        if (!$document || $document['document_status'] === 'DELETED') throw new \RuntimeException('fund_document_not_found');
         $document['lines']=Db::name('store_fund_document_line')->where('document_id',$id)->order('line_no')->select()->toArray();
         return $document;
     }
 
+    /**
+     * 保存仅修改未审核主单及明细，不产生台账事实、不改原录入人和单号。
+     * 本店他人单据编辑须有服务端授权，并携带详情修订计数防止旧表单覆盖新内容。
+     */
     public function save(array $scope, array $actor, array $input): array
     {
         $id=(int)($input['id']??0); $storeId=$this->scopeStoreId($scope,$input); $direction=strtoupper(trim((string)($input['direction']??'')));
@@ -55,28 +61,84 @@ final class StoreFundServices
         if (!in_array($direction,['INCOME','EXPENSE'],true) || !$this->validDate($date) || !is_array($lines) || !$lines) throw new \InvalidArgumentException('fund_document_input_invalid');
         return Db::transaction(function () use($id,$storeId,$direction,$date,$lines,$input,$actor,$scope) {
             $now=date('Y-m-d H:i:s');
+            $revisionUpdate = [];
             if ($id) {
                 $existingQuery=Db::name('store_fund_document')->where('id',$id)->lock(true); $this->applyScope($existingQuery,$scope); $existing=(array)$existingQuery->find();
                 if (!$existing || $existing['document_status']!=='DRAFT') throw new \RuntimeException('fund_document_not_editable');
-                $this->assertDocumentOperator($existing,$actor);
+                $canEditStoreDocument = ($scope['mode'] ?? '') === 'store'
+                    && (int)($scope['store_id'] ?? 0) > 0
+                    && (int)$existing['store_id'] === (int)$scope['store_id']
+                    && ($actor['type'] ?? '') === 'STORE_STAFF' && (int)($actor['id'] ?? 0) > 0
+                    && ($actor['can_edit_store_documents'] ?? false) === true;
+                if (!$canEditStoreDocument) $this->assertDocumentOperator($existing,$actor);
+                if ($canEditStoreDocument) {
+                    // audit_revision 是既有零基修订计数，必须明确携带；0 不表示跳过校验。
+                    $expectedRevision = filter_var($input['audit_revision'] ?? null, FILTER_VALIDATE_INT, ['options'=>['min_range'=>0]]);
+                    if ($expectedRevision === false || $expectedRevision !== (int)$existing['audit_revision']) {
+                        throw new \RuntimeException('fund_document_revision_conflict');
+                    }
+                    $revisionUpdate = ['audit_revision'=>(int)$existing['audit_revision']+1];
+                }
             }
             else { $id=(int)Db::name('store_fund_document')->insertGetId(['document_no'=>$this->documentNo(),'store_id'=>$storeId,'business_date'=>$date,'direction'=>$direction,'document_status'=>'DRAFT','summary'=>'','remark'=>'','attachments_json'=>'[]','source_document_id'=>0,'created_by_type'=>$actor['type'],'created_by_id'=>$actor['id'],'created_by_name_snapshot'=>$actor['name'],'created_at'=>$now,'updated_at'=>$now]); }
-            Db::name('store_fund_document')->where('id',$id)->update(['store_id'=>$storeId,'business_date'=>$date,'direction'=>$direction,'summary'=>trim((string)($input['summary']??'')),'remark'=>trim((string)($input['remark']??'')),'attachments_json'=>json_encode(array_values((array)($input['attachments']??[])),JSON_UNESCAPED_UNICODE),'updated_at'=>$now]);
+            Db::name('store_fund_document')->where('id',$id)->update($revisionUpdate + ['store_id'=>$storeId,'business_date'=>$date,'direction'=>$direction,'summary'=>trim((string)($input['summary']??'')),'remark'=>trim((string)($input['remark']??'')),'attachments_json'=>json_encode(array_values((array)($input['attachments']??[])),JSON_UNESCAPED_UNICODE),'updated_at'=>$now]);
+            // 未审核明细沿用原事务内替换流程；任一科目或金额无效会连同主单更新全部回滚。
             Db::name('store_fund_document_line')->where('document_id',$id)->delete();
             foreach ($lines as $index=>$line) $this->insertLine($id,$index+1,(array)$line,$now);
             return $this->detail(['mode'=>'platform','store_ids'=>[$storeId]],$id);
         });
     }
 
+    /**
+     * 单据状态决定既有台账生效范围；撤销不删明细、不改金额或科目快照。
+     * 本店审核与撤销授权仅接受控制器判权后的 actor 标记；平台操作仍限录入人。
+     */
     public function audit(array $scope, array $actor, int $id, bool $audited): array
     {
         return Db::transaction(function () use($scope,$actor,$id,$audited) {
             $query=Db::name('store_fund_document')->where('id',$id)->lock(true); $this->applyScope($query,$scope); $row=(array)$query->find();
-            if (!$row) throw new \RuntimeException('fund_document_not_found');
-            $this->assertDocumentOperator($row,$actor);
+            // 删除终态不能通过旧客户端的审核或撤销请求复活。
+            if (!$row || $row['document_status'] === 'DELETED') throw new \RuntimeException('fund_document_not_found');
+            $canAuditStoreDocument = ($scope['mode'] ?? '') === 'store'
+                && (int)($scope['store_id'] ?? 0) > 0
+                && (int)$row['store_id'] === (int)$scope['store_id']
+                && ($actor['type'] ?? '') === 'STORE_STAFF' && (int)($actor['id'] ?? 0) > 0
+                && ($actor['can_audit_store_documents'] ?? false) === true;
+            if (!$canAuditStoreDocument) $this->assertDocumentOperator($row,$actor);
             $status=$audited?'APPROVED':'DRAFT';
+            // 行锁串行化本店审核和撤销；同目标重试不增加修订号，平台原有行为保持不变。
+            if ($canAuditStoreDocument && $row['document_status'] === $status) return $this->detail($scope,$id);
             Db::name('store_fund_document')->where('id',$id)->update(['document_status'=>$status,'audited_by_type'=>$audited?$actor['type']:'','audited_by_id'=>$audited?$actor['id']:0,'audited_at'=>$audited?date('Y-m-d H:i:s'):null,'audit_revision'=>(int)$row['audit_revision']+1,'updated_at'=>date('Y-m-d H:i:s')]);
             return $this->detail($scope,$id);
+        });
+    }
+
+    /**
+     * 未审核单据逻辑删除：与审核共用原单行锁，不删除历史金额、明细或关联。
+     * 门店范围及操作权限由服务端提供；删除权限尚未另行放宽，继续限原录入人。
+     */
+    public function deleteDraft(array $scope, array $actor, int $id): array
+    {
+        // 当前仅门店端开放删除，不借此增加平台或无门店上下文的写入口。
+        if (($scope['mode'] ?? '') !== 'store' || (int)($scope['store_id'] ?? 0) <= 0
+            || ($actor['type'] ?? '') !== 'STORE_STAFF' || (int)($actor['id'] ?? 0) <= 0) {
+            throw new \RuntimeException('fund_document_operator_forbidden');
+        }
+        return Db::transaction(function () use ($scope, $actor, $id) {
+            $query = Db::name('store_fund_document')->where('id', $id)->lock(true);
+            $this->applyScope($query, $scope);
+            $row = (array)$query->find();
+            if (!$row) throw new \RuntimeException('fund_document_not_found');
+            $this->assertDocumentOperator($row, $actor);
+            // 重复删除返回同一终态；已审核单必须先按既有规则撤销，不能直接删除。
+            if ($row['document_status'] !== 'DELETED') {
+                if ($row['document_status'] !== 'DRAFT') throw new \RuntimeException('fund_document_delete_requires_draft');
+                Db::name('store_fund_document')->where('id', $id)->update([
+                    'document_status' => 'DELETED', 'audit_revision' => (int)$row['audit_revision'] + 1,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
+            return ['id' => $id, 'deleted' => true];
         });
     }
 

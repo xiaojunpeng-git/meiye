@@ -1117,6 +1117,8 @@ Route::group('storeapi', function () {
         Route::get('documents/:id', 'fund.StoreFund/detail')->option(['real_name' => '费用收支单详情']);
         Route::post('documents', 'fund.StoreFund/save')->option(['real_name' => '保存费用收支单']);
         Route::post('documents/:id/audit', 'fund.StoreFund/audit')->option(['real_name' => '审核费用收支单']);
+        // 未审核费用单逻辑删除；权限与最终状态必须由控制器和事务内行锁复核。
+        Route::delete('documents/:id', 'fund.StoreFund/deleteDraft')->option(['real_name' => '删除未审核费用收支单']);
         Route::post('documents/:id/reverse', 'fund.StoreFund/reverse')->option(['real_name' => '冲销费用收支单']);
         Route::get('ledger', 'fund.StoreFund/ledger')->option(['real_name' => '费用收支台账']);
         Route::get('report', 'fund.StoreFund/report')->option(['real_name' => '费用专项报表']);

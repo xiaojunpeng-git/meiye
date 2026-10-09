@@ -1,0 +1,77 @@
+{
+  "version": "R46-fund-revoke-20261009",
+  "date": "2026-10-09",
+  "status": "selftest_passed_pending_pm_acceptance",
+  "baseline_head": "6b51131be97826e8cc0c9d74f183277079623493",
+  "head_at_freeze": "2274ca5a877e8e536f03167a6b8fe556fd78c805",
+  "files": [
+    {
+      "path": "前端代码/fund-vue3/src/App.vue",
+      "sha256": "5400e2b614eb683d2d51a9285b0f75698cebe5eca99519b3862c4e6d6de2829d"
+    },
+    {
+      "path": "后端代码/app/controller/store/fund/StoreFund.php",
+      "sha256": "b71cd3ba2417e4c553cd9d5d40b79237a2bb9303474abc512692b16faf531690"
+    },
+    {
+      "path": "后端代码/app/services/fund/StoreFundServices.php",
+      "sha256": "9b36dc06cef404b76933156acb84d097e8b116ae925d61f198d5d4f1f1d56bcd"
+    },
+    {
+      "path": "tests/fund-management/js/fund-vue3-contract.mjs",
+      "sha256": "966d8d36b681d3c2dcf972be2d687d762ce96df20fad45e8e7fe84bdbd1077d3"
+    },
+    {
+      "path": "tests/fund-management/php/revoke-audit-local-integration.php",
+      "sha256": "41ade773a5e6001efa5ed4c8bff8a02133ead3372ed606598613ac9327fd13b0"
+    },
+    {
+      "path": "tests/fund-management/R46-revoke-audit-selftest-2026-10-09.md",
+      "sha256": "a32d953531b8f1339e6a43295cf3e0eca446d5925b10dece57f821d899aa658f"
+    },
+    {
+      "path": "tests/fund-management/R46-revoke-audit-local-2026-10-09.png",
+      "sha256": "c0015acf0b70ee6dfe0d9a4b0f6fc7fd36f5d68645c75c62d7b3a26e8d29153f"
+    }
+  ],
+  "tracked_patch_sha256": "a40981ec406afe240efb769cc40327699ab3148a2e41587ab870b5246547e91c",
+  "patch_note": "Tracked-file diff only; new integration test and evidence are independently covered by per-file SHA-256.",
+  "build": [
+    {
+      "path": "前端代码/fund-vue3/dist/index.html",
+      "sha256": "f229a1ddf537225797eea5bf51a4566ebcc632f815cbe782a0a8227a121168c3"
+    },
+    {
+      "path": "前端代码/fund-vue3/dist/assets/index-2031f5cf.js",
+      "sha256": "3811e338805a87975f8a08c7ea5ae11ec3fef763d2ba5f14692e37f3824335f4"
+    },
+    {
+      "path": "前端代码/fund-vue3/dist/assets/index-4638cc3d.css",
+      "sha256": "4638cc3dd321101e1835697fca046bd342754072d1655753faca1edd1fe94b55"
+    }
+  ],
+  "tests": {
+    "php_integration": {
+      "checks": 25,
+      "result": "PASS",
+      "transaction_rollback": true
+    },
+    "frontend_contract": "PASS",
+    "backend_contract": "PASS",
+    "fund_build": "PASS",
+    "php_syntax": "PASS",
+    "scoped_diff_check": "PASS"
+  },
+  "local_ui": {
+    "document_no": "F202610081202240997",
+    "document_id": 1720,
+    "store_id": 23,
+    "status": "DRAFT",
+    "audit_revision": 2,
+    "amount_cents": 36415,
+    "refresh_verified": true,
+    "store_reverse_button_removed": true
+  },
+  "remote_operations": false,
+  "committed": false
+}
