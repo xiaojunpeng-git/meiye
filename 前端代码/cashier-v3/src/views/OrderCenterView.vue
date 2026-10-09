@@ -3226,8 +3226,13 @@ onBeforeUnmount(() => {
               <span class="sales-order-query-item-cell__line">
                 <!-- 购买/权益和商品类型统一放在名称前，仍使用原字段，不重算商品类型。 -->
                 <small v-if="item.businessTag" class="sales-order-query-item-cell__business-tag" :class="`is-${item.businessTag === '权益' ? 'entitlement' : 'purchase'}`">{{ item.businessTag }}</small>
-                <small v-if="item.itemType" class="sales-order-query-item-cell__type">{{ item.itemType }}</small>
+                <!-- 类型展示称为产品，保留接口商品值供预售、出库等业务判断使用。 -->
+                <small v-if="item.itemType" class="sales-order-query-item-cell__type">{{ item.itemType === '商品' ? '产品' : item.itemType }}</small>
                 <strong class="sales-order-query-item-cell__name">{{ item.name || '未命名商品' }}</strong>
+                <!-- 预售只展示正式商品行的结账快照，不能给同名普通购买或权益服务追加标签。 -->
+                <small v-if="item.itemType === '商品' && item.isPresale === true" class="sales-order-query-item-cell__service-tag">预售</small>
+                <!-- 预售已含不出库语义；普通商品只按正式明细标记展示，不从库存流水反推。 -->
+                <small v-else-if="item.itemType === '商品' && item.isNoOutbound === true" class="sales-order-query-item-cell__service-tag">不出库</small>
                 <small v-if="item.itemType === '项目' && item.isExperience" class="sales-order-query-item-cell__service-tag">体验</small>
                 <small v-if="salesOrderItemCustomerTag(item)" class="sales-order-query-item-cell__service-tag is-customer">{{ salesOrderItemCustomerTag(item) }}</small>
               </span>

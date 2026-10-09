@@ -342,13 +342,14 @@ final class CashierV3SaleInventorySettlementServices
         ];
     }
 
-    /** @return array<int,array> */
+    /** Lock only physical-sale SKUs, then allocate only those exact eligible rows. */
     private function lockInventorySaleLines(array $salesLines, array $context): array
     {
         if (!$salesLines || count($salesLines) > self::MAX_LINES) {
             throw $this->failure('sale_inventory_order_lines_invalid');
         }
         $candidates = [];
+        $outboundLines = [];
         foreach ($salesLines as $line) {
             if (!is_array($line)
                 || (string)($line['tenant_id'] ?? '') !== $context['tenantId']
@@ -368,6 +369,9 @@ final class CashierV3SaleInventorySettlementServices
             if ((int)($line['inventory_outbound_required'] ?? 1) !== 1) {
                 continue;
             }
+            // Preserve the row-level outbound decision through the SKU lock pass.
+            // A shared SKU is not permission to deduct a neighbouring presale row.
+            $outboundLines[] = $line;
             $productId = $this->positiveInt($line['item_id'] ?? null, 'sale_inventory_product_invalid');
             $skuId = $this->positiveInt($line['catalog_sku_id'] ?? null, 'sale_inventory_sku_id_invalid');
             $unique = $this->token((string)($line['item_code_snapshot'] ?? ''), 64, 'sale_inventory_sku_unique_invalid');
@@ -439,7 +443,7 @@ final class CashierV3SaleInventorySettlementServices
         }
 
         $lines = [];
-        foreach ($salesLines as $line) {
+        foreach ($outboundLines as $line) {
             $productId = (int)$line['item_id'];
             $skuId = (int)($line['catalog_sku_id'] ?? 0);
             $unique = (string)$line['item_code_snapshot'];

@@ -1173,7 +1173,7 @@ final class CashierV3SalesOrderQueryServices
             ->where('line_direction', 'forward')
             ->field(
                 'order_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,'
-                . 'checkout_line_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,craftsmen_snapshot_json,quantity,'
+                . 'checkout_line_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,is_presale,inventory_outbound_required,craftsmen_snapshot_json,quantity,'
                 . 'original_amount_cents,discount_amount_cents,sale_amount_cents,card_purchase_snapshot_json,line_version'
             )
             ->select()
@@ -1366,7 +1366,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('order_id', $orderIds)
             ->where('line_status', 'settled')
             ->where('line_direction', 'forward')
-            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
+            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,is_presale,inventory_outbound_required,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
@@ -2018,6 +2018,12 @@ final class CashierV3SalesOrderQueryServices
             'serviceRecipientType' => (string)($line['service_object'] ?? ''),
             'friendCountsAsCustomer' => (int)($line['friend_counts_as_customer'] ?? 1) === 1,
             'isExperience' => (int)($line['is_experience'] ?? 0) === 1,
+            // Product presale is a frozen sales-line choice, not a product-name
+            // property or the current claim balance; sibling lines stay independent.
+            'isPresale' => $type === '商品' && (int)($line['is_presale'] ?? 0) === 1,
+            // Only an explicit frozen zero means no outbound. Missing history,
+            // non-products and later stock/claim activity cannot imply this label.
+            'isNoOutbound' => $type === '商品' && in_array($line['inventory_outbound_required'] ?? null, [0, '0'], true),
             'detailRemark' => (string)($line['detail_remark_snapshot'] ?? ''),
             'salespeople' => array_map(function (array $person): array {
                 return ['id' => (string)$person['fact_id'], 'employeeId' => (int)$person['employee_id'], 'name' => (string)$person['employee_name_snapshot'],
@@ -2542,6 +2548,12 @@ final class CashierV3SalesOrderQueryServices
             'serviceRecipientType' => $v3Ready ? (string)($authority['service_object'] ?? '') : '',
             'friendCountsAsCustomer' => $v3Ready ? (int)($authority['friend_counts_as_customer'] ?? 1) === 1 : null,
             'isExperience' => $v3Ready && (int)($authority['is_experience'] ?? 0) === 1,
+            // Legacy rows may display presale only when linked to a formal V3
+            // line. Missing snapshots must not be guessed from cart/catalog data.
+            'isPresale' => $v3Ready && $type === '商品' && (int)($authority['is_presale'] ?? 0) === 1,
+            // Legacy rows need a formal V3 snapshot; never infer from cart data
+            // or the absence of stock movements for the current product.
+            'isNoOutbound' => $v3Ready && $type === '商品' && in_array($authority['inventory_outbound_required'] ?? null, [0, '0'], true),
             'economicsDataStatus' => $v3Ready ? 'ready' : self::ECONOMICS_STATUS,
             'snapshotStatus' => $name === '' ? 'invalid' : 'ready',
             'salespeople' => $salespeople,

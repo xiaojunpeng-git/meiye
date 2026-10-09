@@ -211,25 +211,6 @@ function formatQuantity(units, scale = 0) {
   return Number.isInteger(value) ? String(value) : value.toFixed(Number(scale || 0)).replace(/0+$/, '').replace(/\.$/, '')
 }
 
-function movementTypeName(sourceType) {
-  return {
-    manual_inbound: '手工入库',
-    manual_inbound_reversal: '手工入库作废',
-    manual_outbound: '手工出库',
-    manual_outbound_reversal: '手工出库作废',
-    cross_transfer_in: '调拨入库',
-    cross_transfer_out: '调拨出库',
-    cross_transfer_in_reversal: '调拨入库冲销',
-    cross_transfer_out_reversal: '调拨出库冲销',
-    stock_count_gain: '盘盈入库',
-    stock_count_loss: '盘亏出库',
-    salon_usage_out: '院装领用出库',
-    salon_usage_return: '院装退回入库',
-    presale_claim_outbound: '预售领用出库',
-    presale_claim_void: '预售领用作废退库'
-  }[String(sourceType || '')] || '库存调整'
-}
-
 function allocationStatus(allocation) {
   if (Number(allocation?.received_at || 0) > 0) return '已收货'
   if (Number(allocation?.dispatched_at || 0) > 0) return '在途'
@@ -1287,7 +1268,8 @@ function submitPrimaryEditor() {
             <template v-else-if="pageKey === 'stock' && detail?.product">
               <div class="detail-meta"><span>商品：<b>{{ detail.product.product_name }}</b></span><span>单位：{{ detail.product.stock_unit }}</span><span>规格：{{ detail.product.sku_name || '默认规格' }}</span><span>总可用库存：<b>{{ detail.total_available_quantity }} {{ detail.product.stock_unit }}</b></span><span>库存对账：{{ detail.reconciliation?.status === 'MATCHED' ? '正常' : '异常' }}</span></div>
               <section class="line-section"><header><div><h3>当前批次库存</h3><p>总可用库存由服务端按当前有效批次余额汇总并完成对账。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>仓库</th><th>批号</th><th>当前剩余库存</th><th>正式入库日</th><th>生产日期</th><th>到期日</th><th>单位成本</th><th>库存金额</th></tr></thead><tbody><tr v-if="!detail.batches?.length"><td colspan="8" class="modal-empty">暂无批次库存</td></tr><tr v-for="batch in detail.batches" :key="batch.batch_id"><td>{{ batch.location_name }}</td><td>{{ batch.batch_no || '-' }}</td><td>{{ batch.available_quantity }} {{ batch.stock_unit }}</td><td>{{ batch.received_date || '-' }}</td><td>{{ batch.manufactured_date || '-' }}</td><td>{{ batch.expire_date || '-' }}</td><td>{{ batch.unit_cost === null ? '-' : `¥${batch.unit_cost}` }}</td><td>{{ batch.inventory_amount_cents === null ? '-' : `¥${(Number(batch.inventory_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
-              <section class="line-section"><header><div><h3>出入库流水</h3><p>仅展示当前商品最近 200 条已结算批次事实；冲销流水保留原流水编号。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>业务日期</th><th>单据号</th><th>批号</th><th>生产日期</th><th>到期日</th><th>业务类型</th><th>方向</th><th>数量</th><th>单位</th><th>来源明细</th><th>冲销关系</th><th>单位成本</th><th>发生仓库</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.movements?.length"><td colspan="14" class="modal-empty">暂无出入库流水</td></tr><tr v-for="movement in detail.movements" :key="movement.id"><td>{{ movement.business_date }}</td><td>{{ movement.order_sn }}</td><td>{{ movement.batch_no || '-' }}</td><td>{{ movement.manufactured_date || '-' }}</td><td>{{ movement.expire_date || '-' }}</td><td>{{ movementTypeName(movement.source_type) }}</td><td>{{ Number(movement.direction) > 0 ? '入库' : '出库' }}</td><td>{{ formatQuantity(movement.quantity_units, movement.quantity_scale) }}</td><td>{{ movement.stock_unit || detail.product.stock_unit }}</td><td>{{ movement.source_detail_id || '-' }}</td><td>{{ Number(movement.reversal_of || 0) > 0 ? `冲销流水 #${movement.reversal_of}` : '-' }}</td><td>{{ movement.unit_cost_cents === null ? '-' : `¥${(Number(movement.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ movement.location_name }}</td><td>{{ movement.cost_amount_cents === null ? '-' : `¥${(Number(movement.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <!-- 流水标签由后端按已授权业务快照解析；技术来源 ID 仅用于追溯，不作为中文明细展示。 -->
+              <section class="line-section"><header><div><h3>出入库流水</h3><p>仅展示当前商品最近 200 条已结算批次事实；冲销流水保留原流水编号。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>业务日期</th><th>单据号</th><th>批号</th><th>生产日期</th><th>到期日</th><th>业务类型</th><th>方向</th><th>数量</th><th>单位</th><th>来源明细</th><th>冲销关系</th><th>单位成本</th><th>发生仓库</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.movements?.length"><td colspan="14" class="modal-empty">暂无出入库流水</td></tr><tr v-for="movement in detail.movements" :key="movement.id"><td>{{ movement.business_date }}</td><td>{{ movement.order_sn }}</td><td>{{ movement.batch_no || '-' }}</td><td>{{ movement.manufactured_date || '-' }}</td><td>{{ movement.expire_date || '-' }}</td><td>{{ movement.source_type_name || '其他库存业务' }}</td><td>{{ Number(movement.direction) > 0 ? '入库' : '出库' }}</td><td>{{ formatQuantity(movement.quantity_units, movement.quantity_scale) }}</td><td>{{ movement.stock_unit || detail.product.stock_unit }}</td><td>{{ movement.source_detail_name || '历史业务明细' }}</td><td>{{ Number(movement.reversal_of || 0) > 0 ? `冲销流水 #${movement.reversal_of}` : '-' }}</td><td>{{ movement.unit_cost_cents === null ? '-' : `¥${(Number(movement.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ movement.location_name }}</td><td>{{ movement.cost_amount_cents === null ? '-' : `¥${(Number(movement.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'request' && detail?.document">
               <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span v-if="String(detail.document.supply_party_type) === 'HQ'">受理部门：{{ detail.document.acceptance_party_name_snapshot || '历史单据未设置' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>

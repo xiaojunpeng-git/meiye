@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\settlement\CashierV3PresaleStockRepairServices;
 use app\services\product\inventory\completion\InventoryBatchMovementFactServices;
 use app\services\product\inventory\completion\InventoryCompletionContractException;
 use think\facade\Db;
@@ -25,7 +26,7 @@ final class CashierV3SalesOrderInventoryReversalServices
 {
     private const RECEIPT_TABLE = 'cashier_v3_sale_inventory_receipt';
 
-    /** @return array{restoredAllocationCount:int,restoredQuantityUnits:int} */
+    /** Restore outstanding allocations only; exact presale corrections are already net zero. */
     public function reverseForVoidInTx(
         array $source,
         string $operationId,
@@ -66,14 +67,35 @@ final class CashierV3SalesOrderInventoryReversalServices
         }
 
         $factIds = array_map(static function (array $fact): int { return (int)$fact['id']; }, $facts);
-        $alreadyReversed = (int)Db::name('inventory_batch_movement_fact')
+        $reversals = Db::name('inventory_batch_movement_fact')
             ->where('tenant_id', $scope->tenantId())
             ->whereIn('reversal_of', $factIds)
             ->lock(true)
-            ->count();
-        if ($alreadyReversed > 0) {
-            throw self::failure('sales_void_inventory_already_reversed');
+            ->select()->toArray();
+        // An explicitly corrected presale deduction has already been returned.
+        // Keep receipt completeness checks on all originals, but restore only
+        // outstanding ordinary allocations. Other/duplicate reversals still deny.
+        $originalMap = array_column($facts, null, 'id');
+        $correctedIds = [];
+        foreach ($reversals as $reverse) {
+            $id = (int)$reverse['reversal_of'];
+            $original = $originalMap[$id];
+            if (isset($correctedIds[$id])
+                || !CashierV3PresaleStockRepairServices::isExactCorrection($original, $reverse)) {
+                throw self::failure('sales_void_inventory_already_reversed');
+            }
+            $presale = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
+                ->where('store_id', $operator->storeId())->where('order_id', (string)$source['sourceId'])
+                ->where('order_line_id', (string)$original['source_detail_id'])->where('item_type', 'product')
+                ->where('line_direction', 'forward')->where('is_presale', 1)->where('inventory_outbound_required', 0)->find();
+            if (!$presale) {
+                throw self::failure('sales_void_inventory_already_reversed');
+            }
+            $correctedIds[$id] = true;
         }
+        $facts = array_values(array_filter($facts, static function (array $fact) use ($correctedIds): bool {
+            return !isset($correctedIds[(int)$fact['id']]);
+        }));
 
         $stockQuantities = [];
         $batchQuantities = [];

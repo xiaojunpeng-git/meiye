@@ -144,6 +144,30 @@ $request = saleInventoryRequest($requestId);
 $order = saleInventoryOrder($requestId, $orderId, $commandKey);
 $lines = [saleInventoryLine($orderId, 501, 601, 'SKU-501', 3, 1)];
 
+// Same-SKU presales must not re-enter the physical plan through an ordinary
+// row's SKU lock. Presale quantity intentionally exceeds the remaining stock.
+$presale = array_merge(saleInventoryLine($orderId, 501, 601, 'SKU-501', 30, 2), [
+    'is_presale' => 1, 'inventory_outbound_required' => 0,
+]);
+foreach ([[$lines[0], $presale], [$presale, $lines[0]], [$presale]] as $probeLines) {
+    Db::startTrans();
+    try {
+        if (count($probeLines) === 1) {
+            // Pure presale has no physical dispatch and must not require a warehouse.
+            Db::name('inventory_location')->where('id', 71)->update(['location_status' => 'INACTIVE']);
+        }
+        $probe = $provider->planInTx($request, $order, $probeLines, $operator, $dataScope);
+        $probeResult = $provider->persistInTx($probe);
+        $expected = count($probeLines) === 1 ? 0 : 3;
+        saleInventoryDbOk('mixed/pure presale only deducts ordinary quantities',
+            (int)Db::name('inventory_stock')->where('id', 701)->value('available_quantity_units') === 5 - $expected
+            && array_sum(array_column($probeResult['eventAllocations'], 'quantityUnits')) === $expected
+            && !in_array($presale['order_line_id'], array_column($probeResult['eventAllocations'], 'salesOrderLineId'), true));
+    } finally {
+        Db::rollback();
+    }
+}
+
 Db::startTrans();
 try {
     $plan = $provider->planInTx($request, $order, $lines, $operator, $dataScope);
