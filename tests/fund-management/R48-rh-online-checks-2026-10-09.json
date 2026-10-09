@@ -152,8 +152,14 @@
     "concurrent_load_test": false
   },
   "push": {
-    "status": "Pending remote publication boundary check",
+    "status": "PASS",
     "remote": "origin",
-    "branch": "release/store-cashier-c14-main"
+    "branch": "release/store-cashier-c14-main",
+    "functional_commit": "8dcd17708a083e0ea31933ad968cb5eb24346373",
+    "verified_published_tip": "b8c83466",
+    "prior_remote_tip": "68911c81",
+    "pushed_scope": "R48 deployment evidence only; functional commit was already an ancestor of the fetched remote tip",
+    "github_pushed": false,
+    "force_push": false
   }
 }
