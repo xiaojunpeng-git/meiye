@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "mode": "production-read-only",
+  "candidate": false,
+  "checks": {
+    "realEntitlementIdentityAccepted": true,
+    "storeDenied": true,
+    "tenantDenied": true,
+    "readOnlyDenied": true,
+    "realOrderQueryHasDateOnlyAction": true,
+    "targetFactsUnchanged": true
+  },
+  "targetDate": "2026-10-04",
+  "historyCount": 0,
+  "factBaseline": {
+    "cashier_v3_entitlement_service_fact": {
+      "count": 1,
+      "sha256": "71a39e14185dc8980f6c6aa9a37f3776497e8e95e416b84ca97de7bd184c2991"
+    },
+    "cashier_v3_entitlement_writeoff_fact": {
+      "count": 1,
+      "sha256": "d88b7d4bb7b750401432e7f46b8dc44cae958dde8d97838b64d822bded791079"
+    },
+    "cashier_v3_performance_fact": {
+      "count": 2,
+      "sha256": "ae435e13fc37960a36abc46e7cfccd4155f338fab6feb4bc671ef60c6b70b457"
+    }
+  },
+  "migrationVersion": "20261009-002-r32-unlinked-catalog-refund"
+}

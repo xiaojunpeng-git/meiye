@@ -1,0 +1,22 @@
+[
+  {
+    "url": "https://rh.cc3798.com/view_cashier_v3/",
+    "status": 200,
+    "bytes": 484,
+    "sha256": "0a85b709b00a96b990e87e2c2b1cad840fcc8c2e633e7c0c7d6d5dfa81585939"
+  },
+  {
+    "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/",
+    "status": 200,
+    "bytes": 510,
+    "sha256": "4ef1b95f8651242974d383561c42b8e3a4fe68db109e5491439cc2a84f971cf0"
+  },
+  {
+    "url": "https://rh.cc3798.com/cashierapi/config",
+    "status": 200,
+    "bytes": 45,
+    "sha256": "fd923c61fde18733544508dd766554ba12cc7313e4c22babe1bfdf421b27db98",
+    "businessStatus": 410000,
+    "message": "请登录"
+  }
+]
