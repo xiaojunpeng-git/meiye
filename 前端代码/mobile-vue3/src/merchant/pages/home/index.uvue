@@ -6,7 +6,16 @@
 				<view v-if="message.length > 0" class="merchant-home-page__error"><text>{{ message }}</text><view class="merchant-home-page__error-retry" @tap="reload"><text>重新加载</text></view></view>
 
 				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">经营概览</text><text class="merchant-home-page__section-note">统一业绩事实汇总</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看数仓 ›</text></view>
-				<view class="merchant-home-page__metric-grid"><view v-for="metric in overviewMetrics" :key="metric.key" class="merchant-home-page__metric-card" :class="'merchant-home-page__metric-card--' + metric.tone"><view class="merchant-home-page__metric-icon"><text>{{ metric.icon }}</text></view><text class="merchant-home-page__metric-label">{{ metric.label }}</text><text class="merchant-home-page__metric-value">{{ metric.value }}</text><text class="merchant-home-page__metric-source">{{ metric.source }}</text></view></view>
+				<view class="merchant-home-page__metric-grid">
+					<view v-for="metric in overviewMetrics" :key="metric.key" class="merchant-home-page__metric-card" :class="'merchant-home-page__metric-card--' + metric.tone">
+						<view class="merchant-home-page__metric-head">
+							<view class="merchant-home-page__metric-icon"><text>{{ metric.icon }}</text></view>
+							<text class="merchant-home-page__metric-label">{{ metric.label }}</text>
+						</view>
+						<text class="merchant-home-page__metric-value">{{ metric.value }}</text>
+						<text class="merchant-home-page__metric-source">{{ metric.source }}</text>
+					</view>
+				</view>
 
 				<view class="merchant-home-page__trend-card"><view class="merchant-home-page__card-head"><view><text class="merchant-home-page__card-title">经营趋势</text><text class="merchant-home-page__card-note">实际业绩与消耗业绩</text></view><text class="merchant-home-page__card-badge">{{ selectedPeriodLabel }}</text></view><view v-if="loading" class="merchant-home-page__inline-state"><text>正在加载趋势数据</text></view><view v-else-if="trendPoints().length > 0" class="merchant-home-page__trend-ready"><image v-if="platformUsesNativeCanvas && nativeTrendImage.length > 0" :src="nativeTrendImage" mode="scaleToFill" class="merchant-home-page__trend-canvas"></image><canvas v-else canvas-id="merchant-home-trend" id="merchant-home-trend" width="720" height="228" class="merchant-home-page__trend-canvas"></canvas><view class="merchant-home-page__trend-legend"><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--actual"></text><text>实际业绩</text></view><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--consume"></text><text>消耗业绩</text></view></view></view><view v-else class="merchant-home-page__trend-empty"><view class="merchant-home-page__trend-grid"><view v-for="line in 4" :key="line" class="merchant-home-page__trend-line"></view></view><text>暂无趋势数据</text><text>当前日期范围没有已完成事实</text></view></view>
 
@@ -201,12 +210,14 @@
 	.merchant-home-page__metric-card--actual { border-top-color: #4c9a8b; }
 	.merchant-home-page__metric-card--consume { border-top-color: #c28a34; }
 	.merchant-home-page__metric-card--target { border-top-color: #8276bd; }
-	.merchant-home-page__metric-icon { display: flex; width: 25px; height: 25px; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf4fd; font-size: 11px; font-weight: 800; color: #2778ba; }
+	/* 四项经营指标共用同一标题结构，保证图标和指标名在窄屏卡片内始终成组对齐。 */
+	.merchant-home-page__metric-head { display: flex; min-width: 0; flex-direction: row; align-items: center; }
+	.merchant-home-page__metric-icon { display: flex; width: 25px; height: 25px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf4fd; font-size: 11px; font-weight: 800; color: #2778ba; }
 	.merchant-home-page__metric-card--actual .merchant-home-page__metric-icon { background-color: #e9f6f2; color: #3d887b; }
 	.merchant-home-page__metric-card--consume .merchant-home-page__metric-icon { background-color: #fff5df; color: #ae751d; }
 	.merchant-home-page__metric-card--target .merchant-home-page__metric-icon { background-color: #f0edff; color: #7164a9; }
-	.merchant-home-page__metric-label { margin-top: 8px; font-size: 11px; line-height: 15px; color: #718397; }
-	.merchant-home-page__metric-value { margin-top: 3px; font-size: 21px; font-weight: 800; line-height: 26px; color: #1f5f8b; }
+	.merchant-home-page__metric-label { min-width: 0; margin-left: 8px; font-size: 11px; line-height: 15px; color: #718397; white-space: nowrap; }
+	.merchant-home-page__metric-value { margin-top: 8px; font-size: 21px; font-weight: 800; line-height: 26px; color: #1f5f8b; }
 	.merchant-home-page__metric-card--actual .merchant-home-page__metric-value { color: #357a72; }
 	.merchant-home-page__metric-card--consume .merchant-home-page__metric-value { color: #a66d13; }
 	.merchant-home-page__metric-card--target .merchant-home-page__metric-value { color: #6659a0; }
