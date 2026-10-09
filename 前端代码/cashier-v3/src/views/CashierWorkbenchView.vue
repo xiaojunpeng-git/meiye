@@ -675,6 +675,32 @@ function localDraftBase() {
   }
 }
 
+function mutableLocalCashierDraft() {
+  const fallback = localDraftBase()
+  const snapshot = isRecord(localCashierDraft.value) ? clonePlain(localCashierDraft.value) : {}
+  // A long-lived cashier tab can retain an older root-shaped snapshot after a
+  // hot update, member switch or interrupted selector request. Normalize that
+  // snapshot at the mutation boundary so card upgrades do not try to push into
+  // a missing `lines` array; current sale rows remain the preferred authority.
+  const lines = Array.isArray(snapshot.lines)
+    ? snapshot.lines
+    : Array.isArray(snapshot.cart?.lines)
+      ? clonePlain(snapshot.cart.lines)
+      : Array.isArray(fallback.lines)
+        ? fallback.lines
+        : []
+  return {
+    ...fallback,
+    ...snapshot,
+    lines,
+    summary: isRecord(snapshot.summary) ? snapshot.summary : fallback.summary,
+    checkoutComposition: isRecord(snapshot.checkoutComposition)
+      ? snapshot.checkoutComposition
+      : fallback.checkoutComposition,
+    supplement: isRecord(snapshot.supplement) ? snapshot.supplement : fallback.supplement
+  }
+}
+
 function moneyToCents(value) {
   const amount = Number(value)
   return Number.isFinite(amount) ? Math.max(0, Math.round(amount * 100)) : 0
@@ -976,7 +1002,7 @@ function commitLocalCashierDraft(draft) {
 }
 
 function appendLocalCashierDraftOperation(operation, mutate) {
-  const draft = clonePlain(localCashierDraft.value || localDraftBase())
+  const draft = mutableLocalCashierDraft()
   mutate(draft)
   commitLocalCashierDraft(draft)
   localCashierDraftOperations.value = [...localCashierDraftOperations.value, clonePlain(operation)]
@@ -2037,18 +2063,34 @@ async function selectCatalogItem(item) {
     }
     previewCardOperation.value = { ...operation, target, awaitingTarget: false }
     if (['card-upgrade', 'project-upgrade'].includes(operation.mode)) {
+      const failureFallback = operation.mode === 'card-upgrade'
+        ? '升级卡项加入购物车失败，请重新选择。'
+        : '升级项目加入购物车失败，请重新选择。'
       let result
       try {
         result = await confirmPreviewCardOperation()
       } catch (error) {
-        result = { status: 'failed', message: error?.message || '加入购物车失败，请重试。' }
-        reportEntitlementContractError(result)
+        // Unexpected browser errors must remain visible for diagnosis. Return
+        // here after restoring target selection so the generic result branch
+        // cannot immediately overwrite the actual failure with a second dialog.
+        const failureMessage = String(error?.message || '').trim() || failureFallback
+        console.error('[cashier-v3-upgrade-cart-add-failed]', error)
+        reportEntitlementContractError({ status: 'failed', message: failureMessage })
+        if (previewCardOperation.value) {
+          previewCardOperation.value = { ...previewCardOperation.value, target: null, awaitingTarget: true }
+        }
+        return
       }
       if (!['success', 'succeeded'].includes(resultStatus(result)) && previewCardOperation.value) {
-        reportEntitlementContractError({
-          code: result?.result?.code || result?.code || 'CARD_OPERATION_ADD_FAILED',
-          message: resultMessage(result, '升级项目加入购物车失败，请重新选择。')
-        })
+        // Local card-upgrade validation reports the precise business reason at
+        // the point where it is detected. Do not replace it with a generic cart
+        // message after control returns to the catalogue-selection boundary.
+        if (result?.result?.uiErrorReported !== true) {
+          reportEntitlementContractError({
+            code: result?.result?.code || result?.code || 'CARD_OPERATION_ADD_FAILED',
+            message: resultMessage(result, failureFallback)
+          })
+        }
         previewCardOperation.value = { ...previewCardOperation.value, target: null, awaitingTarget: true }
       }
     }
@@ -2908,18 +2950,21 @@ async function appendMultiCardUpgradeTarget(operation = {}) {
   const target = operation.target || {}
   const sourceSnapshots = (operation.sources || []).map(multiCardUpgradeSourceSnapshot)
   if (!sourceSnapshots.length || sourceSnapshots.some((source) => source.cardHolderId <= 0)) {
-    reportEntitlementContractError({ message: '请至少选择一张完整的原卡。' })
-    return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_SOURCE_MISSING' } }
+    const message = '请至少选择一张完整的原卡。'
+    reportEntitlementContractError({ message })
+    return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_SOURCE_MISSING', message, uiErrorReported: true } }
   }
   // 购物车阶段先提示操作员；正式结账仍以锁定后的原卡债务终态为准。
   if (sourceSnapshots.some((source) => source.outstandingDebtCents > 0)) {
-    reportEntitlementContractError({ message: '请先补交原卡的欠款或者取消原卡的欠款，才能升级。' })
-    return { result: { status: 'failed', code: 'CARD_UPGRADE_ORIGIN_DEBT_PENDING' } }
+    const message = '请先补交原卡的欠款或者取消原卡的欠款，才能升级。'
+    reportEntitlementContractError({ message })
+    return { result: { status: 'failed', code: 'CARD_UPGRADE_ORIGIN_DEBT_PENDING', message, uiErrorReported: true } }
   }
   const targetId = Number(target.catalogItemId ?? target.productId ?? target.id ?? 0)
   if (target.kind !== '卡项' || targetId <= 0) {
-    reportEntitlementContractError({ message: '请选择一张目标卡。' })
-    return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_TARGET_MISSING' } }
+    const message = '请选择一张目标卡。'
+    reportEntitlementContractError({ message })
+    return { result: { status: 'failed', code: 'MULTI_CARD_UPGRADE_TARGET_MISSING', message, uiErrorReported: true } }
   }
   const targetAmountCents = moneyToCents(Math.max(0, Number(target.price || target.amount || 0)))
   const sourceRemainingValueCents = sourceSnapshots.reduce((total, item) => total + item.remainingValueCents, 0)

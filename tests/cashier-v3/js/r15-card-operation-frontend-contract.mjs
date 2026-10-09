@@ -56,6 +56,18 @@ assert.match(workbench, /const hidesCheckoutBarForCardOperation = computed\(\(\)
 assert.match(workbench, /<footer v-if="!hidesCheckoutBarForCardOperation" class="cashier-checkout-bar">/, '卡转让和项目替换预览期间必须隐藏整条收银结账栏')
 assert.match(selector, /operationMode === 'card-upgrade' && operationSourceSelected\(source\)[\s\S]*?'已选择'[\s\S]*?operationMode === 'card-upgrade' && selectedOperationSourceIds\.length[\s\S]*?'添加'/)
 assert.match(workbench, /if \(\['card-upgrade', 'project-upgrade'\]\.includes\(operation\.mode\)\) \{[\s\S]*?result = await confirmPreviewCardOperation\(\)[\s\S]*?catch \(error\)[\s\S]*?awaitingTarget: true/)
+assert.match(workbench, /function mutableLocalCashierDraft\(\)[\s\S]*?Array\.isArray\(snapshot\.lines\)[\s\S]*?Array\.isArray\(snapshot\.cart\?\.lines\)[\s\S]*?lines,/,
+  '旧版根快照或中断状态必须在购物车写入前归一化为带 lines 的本地草稿')
+assert.match(workbench, /function appendLocalCashierDraftOperation\(operation, mutate\) \{\s*const draft = mutableLocalCashierDraft\(\)/,
+  '所有本地购物车操作必须复用草稿归一化入口')
+assert.match(workbench, /operation\.mode === 'card-upgrade'\s*\? '升级卡项加入购物车失败，请重新选择。'\s*:\s*'升级项目加入购物车失败，请重新选择。'/,
+  '卡升级与项目升级必须使用各自准确的失败文案')
+assert.match(workbench, /catch \(error\) \{[\s\S]*?cashier-v3-upgrade-cart-add-failed[\s\S]*?reportEntitlementContractError[\s\S]*?awaitingTarget: true[\s\S]*?return\s*\}/,
+  '浏览器异常必须保留真实原因、恢复目标选择并阻止通用提示二次覆盖')
+assert.match(workbench, /if \(result\?\.result\?\.uiErrorReported !== true\) \{[\s\S]*?resultMessage\(result, failureFallback\)/,
+  '卡升级本地校验已提示具体原因时不得被外层通用失败文案覆盖')
+assert.match(workbench, /CARD_UPGRADE_ORIGIN_DEBT_PENDING[\s\S]*?message,[\s\S]*?uiErrorReported: true/,
+  '原卡存在欠款时必须保留明确的欠款处理提示')
 assert.match(workbench, /async function closeSucceededCheckoutAndRefreshWorkbench[\s\S]*?const committedDraft = responseDataBlock\(submissionResponse\)\.cashierDraft[\s\S]*?await requestAction\('open-cashier-workbench', \{ silent: true \}\)/)
 assert.doesNotMatch(workbench, /确认后生成升级补价/)
 assert.doesNotMatch(workbench, /确认升级并去收款/)
