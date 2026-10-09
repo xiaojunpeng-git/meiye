@@ -336,11 +336,8 @@ const paymentAmountValidation = computed(() => {
   if (requiresPaymentMethodSelection.value && selectedPaymentLines.value.length === 0) {
     return { state: 'invalid', message: '请至少选择一种收款方式。' }
   }
-  // 充值的每一笔记账收款都必须为正数；合计碰巧相等也不能把 0 元
-  // 组合行带到最终确认，否则服务端会按无效收款拒绝整笔充值。
-  if (isRechargeCheckout.value && selectedPaymentLines.value.some((line) => Number(line.amount) <= 0)) {
-    return { state: 'invalid', message: '请为每种已选择的收款方式填写大于 0 的金额。' }
-  }
+  // 充值的 0 元收款方式仅留在页面快照中；最终提交会剔除它，
+  // 此处只校验实际收款合计与应收是否相等。
   const delta = receivable - selected
   if (delta > 0) return { state: 'underpaid', message: `还差 ${formatMoney(delta)}` }
   if (delta < 0) return { state: 'overpaid', message: `超出 ${formatMoney(Math.abs(delta))}` }
@@ -802,10 +799,11 @@ function savePaymentLineAmount(line, amount) {
     clearPaymentLineAmountDraft(key)
     return
   }
-  // A new bookkeeping payment starts at the server-calculated remaining
-  // receivable. An explicit zero remains useful while typing, but a saved
-  // payment must be a positive whole yuan.
-  if (!/^[1-9]\d*$/.test(normalizedAmount)) {
+  // 充值记账收款允许保留 0 元占位，余额抵扣和其他收银收款仍须为正整数。
+  const validAmount = isRechargeCheckout.value
+    ? /^(0|[1-9]\d*)$/.test(normalizedAmount)
+    : /^[1-9]\d*$/.test(normalizedAmount)
+  if (!validAmount) {
     paymentLineAmountDrafts.value = {
       ...paymentLineAmountDrafts.value,
       [key]: { ...draft, value: normalizedAmount, pending: false }

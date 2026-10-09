@@ -165,7 +165,7 @@ export function useRechargeCheckout() {
       if (action === 'remove-payment-line') lines.splice(index, 1)
       else {
         const amount = Number(payload.amount)
-        if (!Number.isSafeInteger(amount) || amount <= 0) return null
+        if (!Number.isSafeInteger(amount) || amount < 0) return null
         lines[index].amount = amount
         lines[index].externalTransactionNo = String(payload.externalTransactionNo || '')
       }
@@ -207,7 +207,8 @@ export function useRechargeCheckout() {
           checkoutSnapshot: {
             ...clonePlain(snapshot.rechargeTerms),
             businessType: 'recharge',
-            paymentLines: snapshot.payment.selectedLines.map((line) => ({
+            // 0 元方式只用于页面展示；收款事实只提交实际到账的正数明细。
+            paymentLines: snapshot.payment.selectedLines.filter((line) => Number(line.amount) > 0).map((line) => ({
               paymentMethod: line.method, amount: String(line.amount),
               collectionReference: line.externalTransactionNo || ''
             }))
