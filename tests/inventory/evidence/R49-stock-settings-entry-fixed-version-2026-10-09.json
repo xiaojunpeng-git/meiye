@@ -1,0 +1,44 @@
+{
+  "task": "R49-00001",
+  "baselineHead": "b9547566d0a35db9fdff83e8c84fa77eefbc3fa5",
+  "status": "implementation_and_scoped_selftest_complete_pending_product_manager_acceptance",
+  "files": [
+    {
+      "path": "前端代码/inventory-vue3/src/App.vue",
+      "sha256": "c49cd31ac2f55042d5f943baae96c9bf717f37d2402e1ec7f7d8229fd292cc6f"
+    },
+    {
+      "path": "tests/inventory/js/store-menu-contract.mjs",
+      "sha256": "c36015f16442f44e405efa405486ca904b30c345903b502e5725d2eea6d9efb7"
+    },
+    {
+      "path": "tests/inventory/js/stock-settings-entry-contract.mjs",
+      "sha256": "7df2a2a337654a9c3e2c8f77cef5b813a5ad42c33e5a963c5a3120749f865e9d"
+    }
+  ],
+  "trackedPatchSha256": "e6938dfb4b2d53bd68afad6a6b8730fd88d6846db1ae436a67ff363f67e7d71b",
+  "untrackedTestIncludedByFileHash": true,
+  "evidence": [
+    {
+      "path": "tests/inventory/evidence/R49-stock-settings-entry-selftest-2026-10-09.md",
+      "sha256": "ce50c501c9c674655bece01e714a38387bcb9bc6e4a1495d47aaa35db3b05bad"
+    },
+    {
+      "path": "tests/inventory/evidence/R49-stock-settings-entry-2026-10-09.png",
+      "sha256": "82793f7836f93805a780bc40b553fbbd55f4bb4e22df3ee20fbeaa9e5570a1fa"
+    }
+  ],
+  "build": {
+    "source": "前端代码/inventory-vue3",
+    "command": "npm run build",
+    "result": "PASS",
+    "release8080": false
+  },
+  "knownIssues": [
+    "Quantity range query reports malformed bccomp argument; not fixed in this scope.",
+    "Three existing broad contract failures reproduced with HEAD sources."
+  ],
+  "commit": false,
+  "deployed": false,
+  "pushed": false
+}

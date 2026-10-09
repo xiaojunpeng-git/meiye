@@ -14,10 +14,11 @@ final class InventoryProductStockSummaryServices
     {
         $groups = [];
         foreach ($batchRows as $row) {
+            $batchId = (int)($row['batch_balance_id'] ?? 0);
             $productId = (int)($row['product_id'] ?? 0);
             $skuId = (int)($row['sku_id'] ?? 0);
             $scale = (int)($row['quantity_scale'] ?? -1);
-            if ($productId <= 0 || $skuId <= 0 || $scale < 0 || $scale > 4) {
+            if ($batchId <= 0 || $productId <= 0 || $skuId <= 0 || $scale < 0 || $scale > 4) {
                 throw new \RuntimeException('inventory_product_summary_row_invalid');
             }
             $key = $productId . ':' . $skuId;
@@ -26,11 +27,15 @@ final class InventoryProductStockSummaryServices
                     'quantity_units' => 0,
                     'inventory_amount_cents' => ($row['inventory_amount'] ?? null) === null ? null : 0,
                 ];
-                $groups[$key]['batch_balance_id'] = 'product-summary-' . $key;
+                // 统一查询将稳定键声明为整数；汇总行使用最小来源批次 ID 排序，
+                // 不能注入文本复合键导致 bccomp 失败。商品/SKU 身份仍由原字段保留。
+                $groups[$key]['batch_balance_id'] = $batchId;
                 $groups[$key]['quantity_units'] = 0;
             } elseif ((int)$groups[$key]['quantity_scale'] !== $scale) {
                 throw new \RuntimeException('inventory_product_quantity_scale_mismatch');
             }
+
+            $groups[$key]['batch_balance_id'] = min((int)$groups[$key]['batch_balance_id'], $batchId);
 
             $groups[$key]['quantity_units'] += $this->decimalUnits((string)($row['batch_balance_quantity'] ?? ''), $scale);
             if ($groups[$key]['inventory_amount_cents'] !== null) {

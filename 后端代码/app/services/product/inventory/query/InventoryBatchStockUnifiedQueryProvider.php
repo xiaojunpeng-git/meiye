@@ -133,12 +133,15 @@ final class InventoryBatchStockUnifiedQueryProvider implements UnifiedQueryProvi
     private function execute(array $context, array $payload, array $definitions): array
     {
         $scope = $this->dataScope($context);
+        // 显式数量筛选必须先读入零结存，再按商品/SKU 总量筛选；否则等于0/全部永远漏零库存。
+        // 未使用数量筛选的既有查询保留仅正库存源窗口，权限仍由服务端仓库范围强制裁剪。
+        $hasQuantityFilter = $this->hasQuantityRangeTopFilter($payload);
         $rows = $this->source->sourceRows([
             'queryCutoffDate' => (string)$context['query_cutoff_date'],
             'locationIds' => $scope->locationIds(),
-            'includeZero' => false,
+            'includeZero' => $hasQuantityFilter,
         ], $scope);
-        if ($this->hasQuantityRangeTopFilter($payload)) {
+        if ($hasQuantityFilter) {
             // The stock page displays one row per product/SKU. A quantity range
             // must therefore be applied to that total, never to individual
             // batches before the browser adds them again.

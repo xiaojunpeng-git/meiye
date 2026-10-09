@@ -121,12 +121,13 @@ check('unimplemented exports are not exposed as clickable actions',
   !inventoryApp.includes('>导出当前报表</button>')
     && !inventoryApp.includes('>导出</button>')
     && inventoryApp.includes('导出将在对应权威导出任务接入后开放'))
-check('inventory stock settings are owned by the shared toolbar and the stock subject stays in the same query region',
+// 门店库存查询取消设置入口，不更改平台按钮或其他页面的共享工具栏默认行为。
+check('inventory stock hides store settings while preserving platform settings and the same query region',
   inventoryApp.includes('<div class="heading-actions"><button v-if="currentPage.action"')
     && !inventoryApp.includes('active === \'stock\' || (mode === \'store\' && operationalQueryPage)')
-    && inventoryApp.includes('ref="stockQueryToolbar"')
+    && !inventoryApp.includes('stockQueryToolbar')
     && inventoryApp.includes(':show-keyword-search="false"')
-    && inventoryApp.includes(':show-settings-button="true"')
+    && inventoryApp.includes(':show-settings-button="mode === \'platform\'"')
     && inventoryApp.includes('<template #context-actions>')
     && inventoryApp.includes('<div v-if="mode === \'platform\'" class="inventory-query-subject">')
     && inventoryOperationalToolbar.includes('defineExpose({ openSettings })')

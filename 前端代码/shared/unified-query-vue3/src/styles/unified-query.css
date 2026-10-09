@@ -306,6 +306,88 @@
   white-space: nowrap;
 }
 
+/* 显式启用的页面将操作紧跟字段；窄屏整组换行，查询与重置始终相邻。 */
+.unified-query-toolbar--actions-after-fields .unified-query-top-field:has(.unified-query-top-field__range) {
+  /* 范围控件占用真实双输入宽度，防止最大值溢出旧单字段宽度后遮住查询按钮。 */
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  grid-template-columns: max-content max-content;
+}
+
+.unified-query-toolbar--actions-after-fields .unified-query-top-field__range {
+  grid-template-columns: 92px auto 92px;
+}
+
+.unified-query-toolbar__field-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.unified-query-toolbar__field-actions > .button {
+  flex: none;
+  height: 38px;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+/* 数量快捷模式只由声明 quickRangePresets 的字段呈现；普通查询字段布局保持不变。 */
+.unified-query-toolbar--actions-after-fields .unified-query-top-field:has(.unified-query-number-control) {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.unified-query-number-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.unified-query-number-presets {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  grid-template-columns: repeat(4, 64px);
+  height: 36px;
+  padding: 2px;
+  border: 1px solid #d7e0ea;
+  border-radius: 6px;
+  background: #f2f4f7;
+}
+
+.unified-query-number-presets__thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: 64px;
+  border-radius: 4px;
+  background: #176fd1;
+  transition: transform .18s ease;
+}
+
+.unified-query-number-presets button {
+  position: relative;
+  min-width: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #526071;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.unified-query-number-presets button[aria-pressed='true'] { color: #fff; }
+.unified-query-number-presets button:focus-visible { outline: 2px solid #1890ff; outline-offset: 2px; }
+
 .unified-query-scope {
   position: relative;
   display: grid;

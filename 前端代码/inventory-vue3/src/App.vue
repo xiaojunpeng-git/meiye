@@ -107,7 +107,6 @@ const dashboard = ref({ stock_amount_cents: null, stock_product_count: 0, expiri
 const dashboardLoading = ref(false)
 const dashboardError = ref('')
 const selectedDetail = ref(null)
-const stockQueryToolbar = ref(null)
 const statisticsQueryToolbar = ref(null)
 const statisticsInitialQuery = ref({})
 const transferActionConfirmation = ref(null)
@@ -271,6 +270,10 @@ const visibleStockQueryFields = computed(() => {
     : stockQueryFields.value
   return fields.map((field) => ({
     ...field,
+    // 本轮只调整门店库存数量快捷筛选，平台标签与普通区间保持原约定。
+    ...(mode.value === 'store' && field.key === 'available_quantity'
+      ? { label: '库存数量', quickRangePresets: true }
+      : {}),
     defaultQuick: ['product_name', 'available_quantity'].includes(field.key),
     quickRange: field.key === 'available_quantity'
   }))
@@ -648,8 +651,8 @@ function openEditor(kind = active.value, row = null) {
 }
 
 function openCurrentQuerySettings() {
-  if (active.value === 'stock') stockQueryToolbar.value?.openSettings()
-  else if (active.value === 'statistics') statisticsQueryToolbar.value?.openSettings()
+  // 门店库存查询已移除设置入口；统计页仍保留原有标题区入口。
+  if (active.value === 'statistics') statisticsQueryToolbar.value?.openSettings()
 }
 
 /** Carry only the request identity; the transfer editor reloads permitted remaining lines. */
@@ -1642,12 +1645,14 @@ onBeforeUnmount(() => {
         <template v-else>
           <div class="page-heading"><div><p>{{ currentPage.crumb }}</p><h1>{{ currentPage.title }}</h1><span v-if="statusFocus" class="focus-hint"><Clock3 :size="14" />当前从首页进入：{{ statusFocus }}</span></div><div class="heading-actions"><button v-if="currentPage.action" class="primary-button" :disabled="(platformActionRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresStore && !platformUsageStoreId)" @click="active === 'recipe' ? openRecipeEditor() : openEditor()"><Plus :size="17" />{{ currentPage.action }}</button><button v-if="mode === 'store' && operationalQueryPage" class="secondary-button" @click="openCurrentQuerySettings"><SlidersHorizontal :size="16" />查询设置</button></div></div>
           <section v-if="active === 'stock'" class="inventory-unified-query" aria-label="库存统一查询">
+            <!-- 仅门店库存查询使用单行：筛选后为查询、重置、导出，不保留原首行及收起入口。 -->
             <UnifiedQueryToolbar
-              ref="stockQueryToolbar"
               settings-button-label="查询设置"
               :show-keyword-search="false"
               :show-data-scope="false"
-              :show-settings-button="true"
+              :show-settings-button="mode === 'platform'"
+              :query-actions-after-quick-fields="mode === 'store'"
+              :single-row-quick-query="mode === 'store'"
               :fields="visibleStockQueryFields"
               page-code="inventory_batch_stock"
               page-name="库存查询"
