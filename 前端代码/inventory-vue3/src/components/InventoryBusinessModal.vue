@@ -87,7 +87,7 @@ const transferSourceSelection = ref(props.detail?.transfer_request_id ? `${props
 const transferCounterparties = ref([])
 const transferTargetSelection = ref('')
 const incomingRequests = ref([])
-const requestDocumentId = ref(0)
+const requestDocumentId = ref(Number(props.modalKind === 'transfer-edit' ? props.detail?.request_document_id || 0 : 0))
 let transferRequestSeedPending = Number(props.detail?.transfer_request_id || 0) > 0
 const transferStaffOptions = ref([])
 const transferStaffId = ref(0)
@@ -115,6 +115,7 @@ const requestEditIdempotencyKey = ref('')
 const isDetail = computed(() => props.modalKind.endsWith('-detail'))
 const isInboundOutboundDetail = computed(() => props.modalKind === 'inbound-outbound-detail')
 const isRequestEdit = computed(() => props.modalKind === 'request-edit')
+const isTransferEdit = computed(() => props.modalKind === 'transfer-edit')
 const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
 const isImport = computed(() => props.modalKind === 'import')
@@ -162,6 +163,7 @@ const title = computed(() => {
   if (isDetail.value) return `${pageLabel.value}详情`
   if (isCountEdit.value) return '编辑盘点草稿'
   if (isRequestEdit.value) return '编辑请货单'
+  if (isTransferEdit.value) return '编辑调拨草稿'
   return {
     inbound: '添加入库单', outbound: '添加出库单', count: '添加盘点单',
     request: '新建请货单', transfer: '新建跨门店调拨', usage: '院装耗材领用', warehouse: '新建仓库', recipe: '新建配方'
@@ -182,7 +184,7 @@ const primarySubmitDisabled = computed(() => {
 const primarySubmitLabel = computed(() => {
   if (submitting.value) return '提交中'
   if (props.pageKey === 'request') return isRequestEdit.value ? '保存修改' : '确认申请'
-  if (props.pageKey === 'transfer') return '保存调拨草稿'
+  if (props.pageKey === 'transfer') return isTransferEdit.value ? '保存修改' : '保存调拨草稿'
   if (props.pageKey === 'usage') return '确认领用'
   if (props.pageKey === 'warehouse') return '创建仓库'
   return '保存'
@@ -397,6 +399,24 @@ async function hydrateRequestEditor(detail) {
 }
 
 watch(() => props.detail, (detail) => { hydrateRequestEditor(detail) }, { immediate: true })
+
+/** Resume only the source-store draft snapshot; dispatch still rechecks stock and request fulfillment. */
+function hydrateTransferEditor(detail) {
+  if (!isTransferEdit.value || !detail?.can_edit) return
+  transferDate.value = String(detail.business_date || transferDate.value)
+  transferRemark.value = String(detail.remark || '')
+  transferTargetSelection.value = `${String(detail.to_party_type || 'STORE')}:${Number(detail.to_party_id || 0)}`
+  requestDocumentId.value = Number(detail.request_document_id || 0)
+  selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({
+    product_id: Number(line.from_product_id), sku_id: Number(line.from_sku_id),
+    sku_unique: String(line.from_sku_unique || ''), product_name: String(line.product_name_snapshot || ''),
+    sku_name: String(line.sku_name_snapshot || ''), stock_unit: String(line.stock_unit_snapshot || ''),
+    quantity: formatQuantity(line.requested_quantity_units, line.quantity_scale),
+    request_line_id: Number(line.request_line_id || 0), detail_remark: String(line.detail_remark || ''),
+  }))
+}
+
+watch(() => props.detail, hydrateTransferEditor, { immediate: true })
 
 /** Resume the exact selected SKU set and entered quantities; final confirmation still rechecks live stock. */
 watch([() => props.detail, isCountEdit], ([detail]) => {
@@ -1149,7 +1169,7 @@ async function submitTransfer() {
   submitting.value = true; submitError.value = ''
   try {
     // A failed shortcut lookup must never submit an unrelated manual transfer.
-    if (Number(requestDocumentId.value) > 0 && !incomingRequests.value.some((item) => Number(item.id) === Number(requestDocumentId.value))) {
+    if (!isTransferEdit.value && Number(requestDocumentId.value) > 0 && !incomingRequests.value.some((item) => Number(item.id) === Number(requestDocumentId.value))) {
       throw new Error('关联请货单已无可调拨商品或不在当前供货权限内，请返回列表刷新。')
     }
     const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, request_document_id: Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: Number(row.request_line_id || 0), detail_remark: String(row.detail_remark || '') })) }
@@ -1157,8 +1177,10 @@ async function submitTransfer() {
       if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
       const [type, rawId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
       await platformInventoryApi.createHqCrossTransfer({ ...commonPayload, source_party_type: type, source_store_id: Number(rawId || 0), transfer_staff_id: Number(transferStaffId.value), hq_location_id: Number(props.hqLocationId) })
+    } else if (isTransferEdit.value) {
+      await inventoryApi.updateCrossTransfer(Number(props.detail?.id), { ...commonPayload, expected_edit_token: String(props.detail?.edit_token || '') })
     } else await inventoryApi.createCrossTransfer(commonPayload)
-    emit('saved'); close()
+    emit('saved', { businessDate: transferDate.value }); close()
   } catch (error) { submitError.value = error instanceof Error ? error.message : '调拨提交失败。' } finally { submitting.value = false }
 }
 
@@ -1297,8 +1319,8 @@ function submitPrimaryEditor() {
             </section>
 
             <section v-else-if="pageKey === 'transfer'" class="form-grid">
-              <label class="form-grid__inline"><span class="field-label">调出方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="scopeName" disabled /></label><label class="form-grid__inline"><span class="field-label">调入方<i>*</i></span><InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
-              <label class="form-grid__inline form-grid__full"><span class="field-label">关联请货单</span><select v-model.number="requestDocumentId" @focus="loadTransferContext" @change="applyIncomingRequest"><option :value="0">不关联请货单</option><option v-for="request in incomingRequests" :key="request.id" :value="Number(request.id)">{{ request.request_no }} · {{ request.request_party_name_snapshot || request.request_store_name || '总部仓' }}</option></select></label>
+              <label class="form-grid__inline"><span class="field-label">调出方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="scopeName" disabled /></label><label class="form-grid__inline"><span class="field-label">调入方<i>*</i></span><InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" :disabled="isTransferEdit && requestDocumentId > 0" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
+              <label class="form-grid__inline form-grid__full"><span class="field-label">关联请货单</span><input v-if="isTransferEdit" :value="requestDocumentId > 0 ? `请货单 #${requestDocumentId}` : '不关联请货单'" disabled /><select v-else v-model.number="requestDocumentId" @focus="loadTransferContext" @change="applyIncomingRequest"><option :value="0">不关联请货单</option><option v-for="request in incomingRequests" :key="request.id" :value="Number(request.id)">{{ request.request_no }} · {{ request.request_party_name_snapshot || request.request_store_name || '总部仓' }}</option></select></label>
               <label class="form-grid__inline"><span class="field-label">调拨日期<i>*</i></span><input v-model="transferDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">{{ isPlatformHeadquarters ? '调拨人' : '当前操作人' }}<i v-if="isPlatformHeadquarters">*</i></span><select v-if="isPlatformHeadquarters" v-model.number="transferStaffId" :disabled="!transferTargetSelection || !transferStaffOptions.length"><option v-if="!transferStaffOptions.length" :value="0">{{ transferTargetSelection ? '暂无可选调拨人' : '请先选择调入方' }}</option><option v-for="staff in transferStaffOptions" :key="staff.id" :value="Number(staff.id)">{{ staff.employee_name || staff.staff_name }}（{{ staff.store_name || staff.store_name_snapshot || '平台账号' }}）{{ staff.is_current ? ' · 当前账户' : '' }}</option></select><input v-else value="当前登录人员" disabled /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="transferRemark" placeholder="请输入备注" /></label>
             </section>

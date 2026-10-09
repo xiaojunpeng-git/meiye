@@ -294,6 +294,8 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             $row['location_id'] = $fromCurrentStore ? (int)$row['from_location_id'] : (int)$row['to_location_id'];
             $row['status_name'] = $this->transferStatusName((string)$row['document_status']);
             $row['can_dispatch'] = (string)$row['document_status'] === 'DRAFT' && $fromCurrentStore;
+            $row['can_edit'] = $row['can_dispatch'];
+            $row['can_delete'] = $row['can_edit'];
             $row['can_receive'] = (string)$row['document_status'] === 'DISPATCHED' && $toCurrentStore;
             // 调拨状态与历史冲销记录仍可查询；当前业务入口不再允许作废调拨。
             $row['can_cancel'] = false;

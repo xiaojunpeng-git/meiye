@@ -48,6 +48,33 @@ final class InventoryStoreAccessPolicy
             'name' => mb_substr(trim((string)$staff['staff_name']), 0, 128)];
     }
 
+    /**
+     * 调拨单按产品确认的“能进入即能操作”口径开放查看模式；仅限令牌选店，
+     * 操作者仍落真实员工身份，其他库存写入继续使用 writableActor 的只读门禁。
+     * @return array{type:string,id:int,name:string}
+     */
+    public function transferActor(int $storeId, int $sessionId): array
+    {
+        $profile = (array)(request()->storeStaffInfo ?? []);
+        if (empty($profile['_cashier_v3_delegated'])) {
+            return $this->writableActor($storeId, $sessionId, 'cashier.v3.inventory.transfer');
+        }
+        if ($storeId <= 0 || $sessionId <= 0 || (int)($profile['id'] ?? 0) !== $sessionId
+            || (int)($profile['store_id'] ?? 0) !== $storeId
+            || (int)($profile['employee_id'] ?? 0) <= 0
+            || ($profile['session_mode'] ?? '') !== 'store_read_only'
+            || !in_array('cashier.v3.inventory.transfer', app()->make(CashierV3FeatureResolver::class)->resolveVisibleFeatures($profile), true)) {
+            throw new \RuntimeException('inventory_store_actor_denied');
+        }
+        $employee = Db::name('employee')->where('id', (int)$profile['employee_id'])
+            ->where('status', 1)->where('is_del', 0)->field('id,name')->find();
+        if (!$employee || trim((string)$employee['name']) === '') {
+            throw new \RuntimeException('inventory_store_actor_denied');
+        }
+        return ['type' => 'EMPLOYEE', 'id' => (int)$employee['id'],
+            'name' => mb_substr(trim((string)$employee['name']), 0, 128)];
+    }
+
     /** @return string[] */
     public function features(int $storeId, int $operatorId, string $featureCode = ''): array
     {

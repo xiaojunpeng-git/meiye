@@ -55,6 +55,16 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
                 }
                 return $next($request);
             }
+            // 查看模式原本只有菜单可见性；产品单独确认调拨可操作，
+            // 仅对调拨写路由放行旧角色门禁，实际令牌选店和员工审计由调拨服务复核。
+            if (!empty($staffInfo['_cashier_v3_delegated'])
+                && $this->isDelegatedTransferCommand((string)$request->pathinfo(), strtoupper((string)$request->method()))) {
+                $visible = app()->make(CashierV3FeatureResolver::class)->resolveVisibleFeatures($staffInfo);
+                if (!in_array('cashier.v3.inventory.transfer', $visible, true)) {
+                    throw new AuthException('当前账号无法进入调拨功能。', 403);
+                }
+                return $next($request);
+            }
         }
 
         if ($staffInfo['level']) {
@@ -64,6 +74,15 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
         }
 
         return $next($request);
+    }
+
+    /** Delegated transfer mode can act only on the selected store's transfer command routes. */
+    private function isDelegatedTransferCommand(string $path, string $method): bool
+    {
+        if ($method !== 'POST') return false;
+        $path = ltrim($path, '/');
+        return $path === 'storeapi/product/inventory/v3/cross-transfer'
+            || preg_match('#^storeapi/product/inventory/v3/cross-transfer/[0-9]+/(?:update|delete-draft|dispatch|receive)$#D', $path) === 1;
     }
 
     /**

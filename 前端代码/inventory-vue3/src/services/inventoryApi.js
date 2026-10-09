@@ -280,6 +280,8 @@ export function createInventoryApi(options = {}) {
     crossTransferIncomingRequests() { return request('/v3/cross-transfer/incoming-requests') },
     crossTransferDetail(id) { return request(`/v3/cross-transfer/${Number(id)}/detail`) },
     createCrossTransfer(body) { return request('/v3/cross-transfer', { method: 'POST', body }) },
+    updateCrossTransfer(id, body) { return request(`/v3/cross-transfer/${Number(id)}/update`, { method: 'POST', body }) },
+    deleteCrossTransferDraft(id, body) { return request(`/v3/cross-transfer/${Number(id)}/delete-draft`, { method: 'POST', body }) },
     dispatchCrossTransfer(id) { return request(`/v3/cross-transfer/${Number(id)}/dispatch`, { method: 'POST', body: {} }) },
     receiveCrossTransfer(id) { return request(`/v3/cross-transfer/${Number(id)}/receive`, { method: 'POST', body: {} }) },
     salonUsageProjects(query = {}) { return request('/v3/salon-usage/projects', { query }) },

@@ -41,6 +41,23 @@ final class InventoryCrossSubjectTransfer extends AuthController
         return $this->run(fn (): array => $this->services->createDraftForStore((int)$this->storeId, (int)$this->storeStaffId, $input), '跨店调拨草稿已保存。');
     }
 
+    /** Only the authenticated source store can replace a still-unshipped draft at its observed token. */
+    public function update(int $id)
+    {
+        $input = $this->request->postMore([
+            ['expected_edit_token', ''], ['idempotency_key', ''], ['business_date', ''], ['remark', ''],
+            ['target_party_type', 'STORE'], ['target_store_id', 0], ['request_document_id', 0], ['lines', []],
+        ]);
+        return $this->run(fn (): array => $this->services->updateDraftForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input), '调拨草稿已更新。');
+    }
+
+    /** Draft removal is source-store only and requires the version shown in the confirmation dialog. */
+    public function deleteDraft(int $id)
+    {
+        $input = $this->request->postMore([['expected_edit_token', '']]);
+        return $this->run(fn (): array => $this->services->deleteDraftForStore((int)$this->storeId, (int)$this->storeStaffId, $id, (string)$input['expected_edit_token']), '调拨草稿已永久删除。');
+    }
+
     public function dispatch(int $id)
     {
         return $this->run(fn (): array => $this->services->dispatchForStore((int)$this->storeId, (int)$this->storeStaffId, $id), '调拨已发货，正在等待收货。');
@@ -83,6 +100,7 @@ final class InventoryCrossSubjectTransfer extends AuthController
     {
         return [
             'inventory_cross_transfer_not_found' => '未找到当前门店可查看的调拨单。',
+            'inventory_cross_transfer_scope_denied' => '当前账号没有本门店的调拨操作权限，请切换有权限的账号或门店。',
             'inventory_cross_transfer_stock_insufficient' => '调出门店库存不足，无法发货。',
             'inventory_cross_transfer_target_sku_unavailable' => '调入门店缺少对应商品，请先同步商品后再调拨。',
             'inventory_cross_transfer_request_unavailable' => '关联请货单当前不可履约。',
@@ -90,6 +108,11 @@ final class InventoryCrossSubjectTransfer extends AuthController
             'inventory_cross_transfer_request_quantity_exceeded' => '调拨数量超过请货单剩余数量。',
             'inventory_cross_transfer_dispatch_state_invalid' => '当前调拨单不可发货。',
             'inventory_cross_transfer_receive_state_invalid' => '当前调拨单不可收货。',
+            'inventory_cross_transfer_edit_state_invalid' => '该调拨单已不再是可编辑草稿，请刷新列表。',
+            'inventory_cross_transfer_delete_state_invalid' => '该调拨单不是当前调出门店的未发货草稿，不能删除。',
+            'inventory_cross_transfer_delete_facts_exist' => '该调拨单已关联库存流水或请货履约，不能删除。',
+            'inventory_cross_transfer_draft_changed' => '调拨草稿已被其他操作修改，请重新打开后编辑。',
+            'inventory_cross_transfer_request_target_locked' => '关联请货单的调入方不能更改。',
             'inventory_cross_transfer_target_scope_denied' => '只能向同一组织范围内的门店调拨。',
             'inventory_cross_transfer_target_invalid' => '调入方不合法，不能调拨给当前库存主体。',
             'inventory_cross_transfer_hq_location_missing' => '当前组织尚未配置可用总部仓。',

@@ -42,6 +42,8 @@ final class InventoryCrossSubjectTransferServices
             $row['transfer_amount_cents'] = $canViewCost ? $amount : null;
             $row['status_name'] = $this->statusName((string)$row['status_name']);
             $row['can_dispatch'] = (string)$row['document_status'] === 'DRAFT' && (int)$row['from_party_id'] === $scope['storeId'];
+            $row['can_edit'] = $row['can_dispatch'];
+            $row['can_delete'] = $row['can_edit'];
             $row['can_receive'] = (string)$row['document_status'] === 'DISPATCHED' && (int)$row['to_party_id'] === $scope['storeId'];
             // 历史调拨及冲销事实仍可读；当前业务不开放草稿取消或库存冲销入口。
             $row['can_cancel'] = false;
@@ -56,6 +58,10 @@ final class InventoryCrossSubjectTransferServices
         $scope = $this->scope($storeId, $operatorId, false);
         $document = $this->lockedStoreDocument($scope, $documentId, false);
         $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->select()->toArray();
+        $document['edit_token'] = $this->draftEditToken($document, $lines);
+        $document['can_edit'] = (string)$document['document_status'] === 'DRAFT'
+            && (string)$document['from_party_type'] === 'STORE' && (int)$document['from_party_id'] === $scope['storeId'];
+        $document['can_delete'] = $document['can_edit'];
         foreach ($lines as &$line) {
             $allocations = Db::name('inventory_cross_transfer_batch_allocation')->where('line_id', (int)$line['id'])->order('id asc')->select()->toArray();
             if (!$canViewCost) foreach ($allocations as &$allocation) $allocation['unit_cost_cents'] = null;
@@ -129,7 +135,73 @@ final class InventoryCrossSubjectTransferServices
         $command = $this->normalize($input);
         return Db::transaction(function () use ($storeId, $operatorId, $command): array {
             $sourceScope = $this->scope($storeId, $operatorId, true);
-            return $this->createDraft($sourceScope, $this->targetForStore($sourceScope, $command), $command);
+            $target = $this->targetForStore($sourceScope, $command);
+            // 目录只展示同组织调入方，但服务端仍需防止直接构造跨组织写请求。
+            if (!$this->sameOrganizationRoot($sourceScope, $target)) throw new \RuntimeException('inventory_cross_transfer_target_scope_denied');
+            return $this->createDraft($sourceScope, $target, $command);
+        });
+    }
+
+    /** Replace an unshipped source-store draft under its document lock; no stock, allocation or fact is changed. */
+    public function updateDraftForStore(int $storeId, int $operatorId, int $documentId, array $input): array
+    {
+        $expectedToken = strtolower(trim((string)($input['expected_edit_token'] ?? '')));
+        if (preg_match('/^[a-f0-9]{64}$/D', $expectedToken) !== 1) throw new \InvalidArgumentException('inventory_cross_transfer_edit_token_invalid');
+        unset($input['expected_edit_token']);
+        $command = $this->normalize($input);
+        return Db::transaction(function () use ($storeId, $operatorId, $documentId, $command, $expectedToken): array {
+            $source = $this->scope($storeId, $operatorId, true);
+            $document = $this->lockedStoreDocument($source, $documentId, true);
+            if ((string)$document['document_status'] !== 'DRAFT' || (string)$document['from_party_type'] !== 'STORE'
+                || (int)$document['from_party_id'] !== $storeId) throw new \RuntimeException('inventory_cross_transfer_edit_state_invalid');
+            $previousLines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->lock(true)->select()->toArray();
+            if (!hash_equals($this->draftEditToken($document, $previousLines), $expectedToken)) throw new \RuntimeException('inventory_cross_transfer_draft_changed');
+            if (Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->lock(true)->find()) throw new \RuntimeException('inventory_cross_transfer_edit_state_invalid');
+
+            $target = $this->targetForStore($source, $command);
+            if (!$this->sameOrganizationRoot($source, $target)
+                || ($source['partyType'] === $target['partyType'] && (int)$source['partyId'] === (int)$target['partyId'])) throw new \RuntimeException('inventory_cross_transfer_target_scope_denied');
+            // A request-backed transfer must still belong to the same request and receiving subject.
+            if ((int)$document['request_document_id'] !== (int)$command['requestDocumentId']
+                || ((int)$document['request_document_id'] > 0 && ((string)$document['to_party_type'] !== $target['partyType']
+                    || (int)$document['to_party_id'] !== (int)$target['partyId']))) throw new \RuntimeException('inventory_cross_transfer_request_target_locked');
+            $request = $this->requestDocument($target, $command['requestDocumentId'], $source);
+            $targetLocation = $this->subjectLocation($target, $command['now']);
+            Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->delete();
+            $this->persistDraftLines($source, $target, $request, $command, $documentId);
+            Db::name('inventory_cross_transfer_document')->where('id', $documentId)->update([
+                'to_party_type' => $target['partyType'], 'to_party_id' => (int)$target['partyId'],
+                'to_party_name_snapshot' => $target['partyName'], 'to_location_id' => (int)$targetLocation['id'],
+                'business_date' => $command['date'], 'remark' => $command['remark'],
+            ]);
+            return ['transfer_id' => $documentId, 'transfer_no' => (string)$document['transfer_no'], 'document_status' => 'DRAFT'];
+        });
+    }
+
+    /** Permanently remove only an unchanged source-store draft with no stock or request fulfillment facts. */
+    public function deleteDraftForStore(int $storeId, int $operatorId, int $documentId, string $expectedToken): array
+    {
+        $expectedToken = strtolower(trim($expectedToken));
+        if (preg_match('/^[a-f0-9]{64}$/D', $expectedToken) !== 1) throw new \InvalidArgumentException('inventory_cross_transfer_edit_token_invalid');
+        return Db::transaction(function () use ($storeId, $operatorId, $documentId, $expectedToken): array {
+            $source = $this->scope($storeId, $operatorId, true);
+            $document = $this->lockedStoreDocument($source, $documentId, true);
+            if ((string)$document['document_status'] !== 'DRAFT' || (string)$document['from_party_type'] !== 'STORE'
+                || (int)$document['from_party_id'] !== $storeId) throw new \RuntimeException('inventory_cross_transfer_delete_state_invalid');
+            $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->lock(true)->select()->toArray();
+            if (!hash_equals($this->draftEditToken($document, $lines), $expectedToken)) throw new \RuntimeException('inventory_cross_transfer_draft_changed');
+            // Draft deletion is safe only before dispatch or receipt has left any independent fact.
+            if (Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->lock(true)->find()
+                || Db::name('inventory_stock_request_fulfillment')->where('transfer_document_id', $documentId)->lock(true)->find()
+                || Db::name('inventory_cross_transfer_reversal_operation')->where('transfer_document_id', $documentId)->lock(true)->find()
+                || Db::name('inventory_batch_movement_fact')->where('tenant_id', (string)$document['tenant_id'])->where('source_id', (string)$document['transfer_no'])->whereLike('source_type', 'cross_transfer_%')->lock(true)->find()) {
+                throw new \RuntimeException('inventory_cross_transfer_delete_facts_exist');
+            }
+            Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->delete();
+            if (Db::name('inventory_cross_transfer_document')->where('id', $documentId)->where('document_status', 'DRAFT')->delete() !== 1) {
+                throw new \RuntimeException('inventory_cross_transfer_delete_state_invalid');
+            }
+            return ['transfer_id' => $documentId, 'deleted' => true];
         });
     }
 
@@ -376,6 +448,13 @@ final class InventoryCrossSubjectTransferServices
             'created_by_operator_id' => (int)$source['operatorId'], 'created_by_operator_name_snapshot' => (string)($source['operatorName'] ?? ''),
             'document_status' => 'DRAFT', 'remark' => $command['remark'], 'business_date' => $command['date'], 'recorded_at' => $command['now'],
         ]);
+        $this->persistDraftLines($source, $target, $request, $command, $documentId);
+        return ['transfer_id' => $documentId, 'transfer_no' => $transferNo, 'document_status' => 'DRAFT', 'idempotent' => false];
+    }
+
+    /** Validate each source/target SKU and any request line before persisting a draft's replaceable lines. */
+    private function persistDraftLines(array $source, array $target, ?array $request, array $command, int $documentId): void
+    {
         foreach ($command['lines'] as $line) {
             $catalog = $this->crossCatalog($source, $target, $line);
             $requestLine = $this->requestLine($request, $line['requestLineId'], $catalog, $line['quantity']);
@@ -387,7 +466,12 @@ final class InventoryCrossSubjectTransferServices
                 'sku_name_snapshot' => $catalog['skuName'], 'stock_unit_snapshot' => $catalog['stockUnit'], 'detail_remark' => (string)($line['detailRemark'] ?? ''), 'created_at' => $command['now'],
             ]);
         }
-        return ['transfer_id' => $documentId, 'transfer_no' => $transferNo, 'document_status' => 'DRAFT', 'idempotent' => false];
+    }
+
+    /** The token covers persisted draft content, so stale tabs cannot overwrite another edit or dispatch. */
+    private function draftEditToken(array $document, array $lines): string
+    {
+        return hash('sha256', (string)json_encode([$document, $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
     private function dispatch(array $scope, int $documentId): array
@@ -541,11 +625,18 @@ final class InventoryCrossSubjectTransferServices
     private function scope(int $storeId, int $operatorId, bool $requireOperator): array
     {
         $store = Db::name('system_store')->where('id', $storeId)->where('is_del', 0)->where('is_show', 1)->field('id,name')->lock(true)->find();
-        $operator = $requireOperator ? Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)->where('status', 1)->where('is_del', 0)->field('id,staff_name')->lock(true)->find() : null;
-        if ($requireOperator && !$operator) throw new \RuntimeException('inventory_cross_transfer_scope_denied');
+        // 组织员工的选店会话 ID 不是门店员工 ID；调拨专用策略将真实员工
+        // 身份写入审计，并仅在令牌选店内执行产品确认的查看模式调拨操作。
+        try {
+            $actor = $requireOperator
+                ? (new InventoryStoreAccessPolicy())->transferActor($storeId, $operatorId)
+                : null;
+        } catch (\RuntimeException $exception) {
+            throw new \RuntimeException('inventory_cross_transfer_scope_denied', 0, $exception);
+        }
         $organizationId = (int)Db::name('organization_store')->where('store_id', $storeId)->value('org_id');
         if (!$store || $organizationId <= 0) throw new \RuntimeException('inventory_cross_transfer_scope_denied');
-        return ['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'organizationId' => (string)$organizationId, 'organizationPath' => $this->organizationPath($organizationId), 'storeId' => $storeId, 'storeName' => mb_substr(trim((string)$store['name']), 0, 100), 'operatorId' => $operatorId, 'operatorType' => 'STORE_STAFF', 'operatorName' => mb_substr(trim((string)($operator['staff_name'] ?? '')), 0, 128), 'partyType' => 'STORE', 'partyId' => $storeId, 'partyName' => mb_substr(trim((string)$store['name']), 0, 100)];
+        return ['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'organizationId' => (string)$organizationId, 'organizationPath' => $this->organizationPath($organizationId), 'storeId' => $storeId, 'storeName' => mb_substr(trim((string)$store['name']), 0, 100), 'operatorId' => (int)($actor['id'] ?? $operatorId), 'operatorType' => (string)($actor['type'] ?? 'STORE_STAFF'), 'operatorName' => mb_substr(trim((string)($actor['name'] ?? '')), 0, 128), 'partyType' => 'STORE', 'partyId' => $storeId, 'partyName' => mb_substr(trim((string)$store['name']), 0, 100)];
     }
 
     private function organizationPath(int $organizationId): string
