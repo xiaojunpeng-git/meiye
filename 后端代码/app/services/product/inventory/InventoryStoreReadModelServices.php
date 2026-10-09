@@ -87,14 +87,19 @@ final class InventoryStoreReadModelServices
         ];
     }
 
+    /** Read a scoped product with settled history even when depleted; absence of facts still fails closed. */
     public function productDetail(int $storeId, int $operatorId, int $productId, bool $canViewCost): array
     {
         if ($productId <= 0) throw new \InvalidArgumentException('inventory_product_id_invalid');
         $scope = $this->scope($storeId, $operatorId, $canViewCost);
-        $rows = array_values(array_filter($this->rowsForScope($scope), static fn(array $row): bool => (int)$row['product_id'] === $productId));
+        // Zero/all query results can point to exhausted products. Resolve their identity from settled
+        // zero-balance facts, without creating stock from the catalog or weakening scope/reconciliation.
+        $rows = array_values(array_filter($this->rowsForScope($scope, null, true), static fn(array $row): bool => (int)$row['product_id'] === $productId));
         if (!$rows) throw new \RuntimeException('inventory_product_stock_not_found');
         $first = $rows[0];
         $reconciliation = $this->reconcileProductBalance($scope, $productId, $rows);
+        // The current-batch section retains its positive-stock meaning; exhausted batches remain in history.
+        $currentBatches = array_values(array_filter($rows, static fn(array $row): bool => bccomp((string)$row['batch_balance_quantity'], '0', (int)$row['quantity_scale']) > 0));
         $batches = array_map(function (array $row) use ($canViewCost): array {
             return [
                 'batch_id' => (int)$row['batch_balance_id'], 'batch_no' => (string)$row['batch_no'],
@@ -104,7 +109,7 @@ final class InventoryStoreReadModelServices
                 'unit_cost' => $canViewCost ? $row['batch_unit_cost'] : null,
                 'inventory_amount_cents' => $canViewCost ? $this->amountCents($row['inventory_amount'] ?? null) : null,
             ];
-        }, $rows);
+        }, $currentBatches);
         // 当前批次只用于余额展示；已耗尽批次的历史流水仍属于该商品，不能用当前正库存批次 ID 过滤。
         // 同时约束事实仓库和库存所属仓库，保持详情与门店授权范围一致。
         $facts = Db::name('inventory_batch_movement_fact')->alias('f')->join('inventory_stock s', 's.id=f.stock_id')
@@ -137,10 +142,12 @@ final class InventoryStoreReadModelServices
         return $this->rowsForScope($this->scope($storeId, $operatorId, $canViewCost), $cutoffDate);
     }
 
-    /** @return array<int,array<string,mixed>> */
-    private function rowsForScope(InventoryBatchStockDataScope $scope, ?string $cutoffDate = null): array
+    /** Details may include exhausted settled batches; dashboards and legacy summaries remain positive-only.
+     * @return array<int,array<string,mixed>>
+     */
+    private function rowsForScope(InventoryBatchStockDataScope $scope, ?string $cutoffDate = null, bool $includeZero = false): array
     {
-        return (new InventoryBatchStockQueryProvider())->sourceRows(['queryCutoffDate' => $cutoffDate ?: date('Y-m-d'), 'locationIds' => [], 'includeZero' => false], $scope);
+        return (new InventoryBatchStockQueryProvider())->sourceRows(['queryCutoffDate' => $cutoffDate ?: date('Y-m-d'), 'locationIds' => [], 'includeZero' => $includeZero], $scope);
     }
 
     /** @param array<int,array<string,mixed>> $batchRows */
