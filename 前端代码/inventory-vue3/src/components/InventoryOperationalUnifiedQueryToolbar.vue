@@ -56,6 +56,7 @@ watch(() => props.pageCode, async () => { unifiedQuery.reset(); await unifiedQue
       :search-placeholder="`搜索${pageName}记录`"
       settings-button-label="查询设置"
       :show-settings-button="false"
+      :show-data-scope="false"
       :fields="queryFields"
       :page-code="pageCode"
       :page-name="pageName"

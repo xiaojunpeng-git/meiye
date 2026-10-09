@@ -79,7 +79,6 @@ const statisticsDateRange = ref(statisticsMonthRange())
 const statisticsExecutedQuery = ref({})
 const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage', 'import'])
 const usesBusinessDatePeriod = (page = active.value) => businessDatePages.has(page) && (page !== 'import' || mode.value === 'store')
-const storeOperationalDataScope = ref('normal')
 const storeOperationalStatus = ref('')
 const recipeStatus = ref('')
 const recipeKeyword = ref('')
@@ -1157,7 +1156,8 @@ async function loadCurrentList(unifiedQuery = null) {
       ? await inventoryApi.unifiedOperationalQuery({
           ...query,
           pageCode: operationalQueryPage.value.pageCode,
-          dataScope: String(query.dataScope || storeOperationalDataScope.value || 'normal'),
+          // 库存业务范围由服务端仓库权限决定；无效的通用范围选项不参与列表筛选。
+          dataScope: 'normal',
           topFilterConditions: [
             ...(Array.isArray(query.topFilterConditions) ? query.topFilterConditions : []),
             ...(operationalStatusFilterValue() ? [{ field: 'status_name', operator: 'eq', value: operationalStatusFilterValue() }] : []),
@@ -1219,14 +1219,9 @@ async function queryBatchStock(query) {
   await loadCurrentList({ ...(query && typeof query === 'object' ? query : {}), keyword: keyword.value })
 }
 
-async function queryOperationalPage(query) {
-  await loadCurrentList(query && typeof query === 'object' ? query : {})
-}
-
 async function queryStoreOperationalPage() {
   await loadCurrentList({
     keyword: keyword.value.trim(),
-    dataScope: storeOperationalDataScope.value,
     page: 1,
     limit: 100
   })
@@ -1651,6 +1646,7 @@ onBeforeUnmount(() => {
               ref="stockQueryToolbar"
               settings-button-label="查询设置"
               :show-keyword-search="false"
+              :show-data-scope="false"
               :show-settings-button="true"
               :fields="visibleStockQueryFields"
               page-code="inventory_batch_stock"
@@ -1691,7 +1687,6 @@ onBeforeUnmount(() => {
           </section>
           <section v-if="operationalQueryPage && mode === 'store'" class="filter-card">
             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="queryStoreOperationalPage" /></div>
-            <label>数据范围<select v-model="storeOperationalDataScope" @change="queryStoreOperationalPage"><option value="normal">正常数据</option><option value="all">全部数据</option></select></label>
             <label>状态<select v-model="storeOperationalStatus" @change="onStoreOperationalStatusChanged"><option value="">全部</option><option v-for="status in storeOperationalStatusOptions" :key="status" :value="status">{{ status }}</option></select></label>
             <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
