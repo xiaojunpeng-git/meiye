@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-09",
+  "target": "rh.cc3798.com",
+  "source_commit": "4cf87e84d09e640e5cd3fb7a9d712f12694edcd6",
+  "deployment_completed_at": "2026-10-09T16:33:02+08:00",
+  "public_https": {
+    "result": "PASS",
+    "scope": "public_https_entries_and_asset_hashes_only",
+    "checked_at": "2026-10-09T08:36:41.343Z",
+    "results": [
+      {
+        "entry": "https://rh.cc3798.com/view_fund_v3/?release=r46-4cf87e84",
+        "status": 200,
+        "html_sha256": "6e3708c37857664f08337b28f1d5b9b5b4506da7ae80b23db2ff1ec8640a030f",
+        "assets": [
+          {
+            "url": "https://rh.cc3798.com/view_fund_v3/assets/index-228d4b8a.js",
+            "status": 200,
+            "sha256": "d937a94eab534adbac9111ceb52fa93895d904249d171a3f9f261410910bd6ea"
+          },
+          {
+            "url": "https://rh.cc3798.com/view_fund_v3/assets/index-4638cc3d.css",
+            "status": 200,
+            "sha256": "4638cc3dd321101e1835697fca046bd342754072d1655753faca1edd1fe94b55"
+          }
+        ]
+      },
+      {
+        "entry": "https://rh.cc3798.com/preview-8080/view_fund_v3/?release=r46-4cf87e84",
+        "status": 200,
+        "html_sha256": "41809769dab5f7aa4f2a6c4ec3292d1058095b79264b64e060e36e89271a14cc",
+        "assets": [
+          {
+            "url": "https://rh.cc3798.com/preview-8080/view_fund_v3/assets/index-228d4b8a.js",
+            "status": 200,
+            "sha256": "d937a94eab534adbac9111ceb52fa93895d904249d171a3f9f261410910bd6ea"
+          },
+          {
+            "url": "https://rh.cc3798.com/preview-8080/view_fund_v3/assets/index-4638cc3d.css",
+            "status": 200,
+            "sha256": "4638cc3dd321101e1835697fca046bd342754072d1655753faca1edd1fe94b55"
+          }
+        ]
+      }
+    ]
+  },
+  "read_only_service": {
+    "result": "PASS",
+    "store_id": 23,
+    "document_count": 2,
+    "income_amount_cents": 36415,
+    "expense_amount_cents": 125233,
+    "net_amount_cents": -88818,
+    "line_count": 33,
+    "ledger_balance_cents": 61182,
+    "deleted_filter_count": 0,
+    "delete_controller_loaded": true,
+    "migration_latest_id": 215,
+    "status_counts_before_and_after": {
+      "APPROVED": 989,
+      "DRAFT": 359
+    }
+  },
+  "read_only_permission_resolution": {
+    "employee_id": 490,
+    "store_id": 23,
+    "fee_feature_granted": true,
+    "delegated_fee_feature_granted": false,
+    "note": "Existing organization-profile conditions resolved against live role data; not an authenticated HTTP write test."
+  },
+  "runtime": {
+    "manager_count": 1,
+    "manager_pid": 8342,
+    "port": 20800
+  },
+  "limitations": {
+    "production_business_writes": false,
+    "authenticated_browser_test": false,
+    "existing_checkout_draft_preserved": true,
+    "new_tab_redirected_to_login": true,
+    "anonymous_probe": {
+      "response": {
+        "status": 400,
+        "msg": "Undefined offset: 1"
+      },
+      "introduced_by_this_release": false,
+      "unchanged_auth_middleware_sha256": "6789e45f8f160e80bf602bfc003b0a7cc69e7b25a3965ffc049b225af647372f",
+      "explanation": "Existing middleware destructures an empty parsed-token result; two diagnostic requests logged this error. Not treated as successful business-flow validation."
+    }
+  },
+  "push": {
+    "remote": "origin",
+    "branch": "release/store-cashier-c14-main",
+    "functional_commit_verified": "4cf87e84d09e640e5cd3fb7a9d712f12694edcd6"
+  }
+}
