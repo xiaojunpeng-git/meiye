@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace app\services\report;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
+use app\services\cashier\v3\settlement\CashierV3DebtRepaymentServices;
 use think\facade\Db;
 
 /**
@@ -366,6 +368,22 @@ final class StoreUnifiedReportPhaseSixServices
                     if($requestId==='' || $number==='')continue;
                     $references[$storeId.'|'.$requestId]=['number'=>$number,'id'=>'service:'.$requestId];
                 }
+                // 补交业绩使用补交单自己的请求号，不得冒充原销售单。
+                // 报表只显示可审计单号；该单不是销售订单，因此不生成销售详情链接。
+                foreach ([
+                    ['table'=>'cashier_v3_debt_repayment','type'=>'debt_repayment'],
+                    ['table'=>'cashier_v3_recharge_debt_repayment','type'=>'recharge_debt_repayment'],
+                ] as $supplementSource) {
+                    $supplements=Db::name($supplementSource['table'])
+                        ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                        ->where('store_id',(int)$storeId)->whereIn('repayment_id',$serviceRequests)
+                        ->where('status','succeeded')->field('repayment_id,repayment_no')->select()->toArray();
+                    foreach($supplements as $supplement){
+                        $requestId=(string)$supplement['repayment_id'];
+                        $number=trim((string)$supplement['repayment_no']);
+                        if($requestId!==''&&$number!=='')$references[$storeId.'|'.$requestId]=['number'=>$number,'id'=>''];
+                    }
+                }
                 // 退款工资行属于独立退款单，不冒充原销售单；明细展示退款单号。
                 $refunds=Db::name('cashier_v3_order_lifecycle_operation')
                     ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
@@ -656,6 +674,177 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /**
+     * Enrich salesperson facts created by debt repayments. These facts correctly
+     * carry employee and cash amounts but intentionally have no synthetic sale line;
+     * product dimensions must therefore be reconstructed from the immutable repayment
+     * authority and debt items without writing back or inventing a sale fact.
+     */
+    private function salarySupplementSalesRows(array $rows): array
+    {
+        $salesIds=[];$rechargeIds=[];
+        foreach($rows as $row){
+            if(trim((string)($row['sale_fact_id']??''))!=='')continue;
+            $id=trim((string)($row['order_id']??''));
+            if($id==='')continue;
+            $type=(string)($row['source_document_type']??'');
+            if($type==='debt_repayment')$salesIds[$id]=true;
+            elseif($type==='recharge_debt_repayment')$rechargeIds[$id]=true;
+        }
+        if($salesIds===[]&&$rechargeIds===[])return $rows;
+
+        $dimensions=[];$debtIds=[];
+        if($salesIds!==[]){
+            $repayments=Db::name('cashier_v3_debt_repayment')
+                ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('repayment_id',array_keys($salesIds))->where('status','succeeded')
+                ->field('repayment_id,debt_id,repayment_amount_cents,debt_repaid_before_cents,debt_repaid_after_cents')
+                ->select()->toArray();
+            foreach($repayments as $repayment){
+                $id=(string)$repayment['repayment_id'];$debtId=(int)$repayment['debt_id'];
+                if(!isset($salesIds[$id])||$debtId<=0)continue;
+                $dimensions[$id]=['debt_id'=>$debtId,'amount_cents'=>(int)$repayment['repayment_amount_cents'],
+                    'before_cents'=>(int)$repayment['debt_repaid_before_cents'],'after_cents'=>(int)$repayment['debt_repaid_after_cents']];
+                $debtIds[$debtId]=true;
+            }
+        }
+        if($rechargeIds!==[]){
+            $repayments=Db::name('cashier_v3_recharge_debt_repayment')
+                ->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('repayment_id',array_keys($rechargeIds))->where('status','succeeded')
+                ->field('repayment_id,amount_cents')->select()->toArray();
+            foreach($repayments as $repayment){
+                $id=(string)$repayment['repayment_id'];
+                if(isset($rechargeIds[$id]))$dimensions[$id]=['item_name'=>'储值充值',
+                    'category_weights'=>[0=>max(1,(int)$repayment['amount_cents'])],'category_paths'=>[0=>'']];
+            }
+        }
+        if($debtIds!==[])$dimensions=$this->salarySalesDebtSupplementDimensions($dimensions,array_keys($debtIds));
+
+        foreach($rows as &$row){
+            $id=trim((string)($row['order_id']??''));
+            $dimension=$dimensions[$id]??[];
+            if($dimension===[]||trim((string)($row['sale_fact_id']??''))!=='')continue;
+            // The performance fact owns repayment-store/member snapshots. Debt items
+            // only provide product identity and cannot move this business to its source store.
+            $row['member_id']=(int)($row['pf_member_id']??0);
+            $row['member_name']=(string)($row['pf_member_name']??'');
+            $row['store_name']=(string)($row['pf_store_name']??'');
+            $row['company_name']=(string)($row['pf_company_name']??'');
+            $row['source_type']=(string)($row['source_document_type']??'');
+            $row['product_id']=0;
+            $row['item_name']=(string)($dimension['item_name']??'销售欠款补交');
+            $row['supplement_category_weights']=(array)($dimension['category_weights']??[0=>1]);
+            $row['supplement_category_paths']=(array)($dimension['category_paths']??[0=>'']);
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /**
+     * Reconstruct one sales-debt repayment's item proportions from its cumulative
+     * before/after amounts. Historical cards use their real component products;
+     * a card's outer category must not replace the categories of its projects.
+     */
+    private function salarySalesDebtSupplementDimensions(array $dimensions,array $debtIds):array
+    {
+        $items=Db::name('store_debt_item')->alias('i')
+            ->leftJoin('store_product p','p.id=i.product_id AND p.is_del=0')
+            ->whereIn('i.debt_id',$debtIds)
+            ->field('i.id,i.debt_id,i.order_id,i.product_id,i.product_type,i.debt_amount,p.type product_scope_type,p.relation_id product_store_id')
+            ->order('i.id asc')->select()->toArray();
+        $itemsByDebt=[];$categoryLinks=[];$cardOrderIds=[];$cardItemsByOrder=[];
+        foreach($items as $item){
+            $debtId=(int)$item['debt_id'];$itemId=(int)$item['id'];
+            $itemsByDebt[$debtId][]=$item;
+            if((int)$item['product_type']===5){
+                $orderId=(int)$item['order_id'];
+                if($orderId>0){$cardOrderIds[$orderId]=true;$cardItemsByOrder[$orderId]=($cardItemsByOrder[$orderId]??0)+1;}
+            }elseif((int)$item['product_id']>0){
+                $categoryLinks['item:'.$itemId]=['product_id'=>(int)$item['product_id'],
+                    'store_id'=>(int)($item['product_store_id']??0)];
+            }
+        }
+        $componentsByOrder=[];
+        if($cardOrderIds!==[]){
+            $components=Db::name('store_order_cart_info')->alias('c')
+                ->leftJoin('store_product p','p.id=c.product_id AND p.is_del=0')
+                ->whereIn('c.oid',array_keys($cardOrderIds))->where('c.cart_type',2)->where('c.product_type',6)
+                ->field('c.id,c.oid,c.product_id,c.total_price,c.pay_price,p.relation_id product_store_id')
+                ->order('c.id asc')->select()->toArray();
+            foreach($components as $component){
+                $componentsByOrder[(int)$component['oid']][]=$component;
+                $categoryLinks['component:'.(int)$component['id']]=['product_id'=>(int)$component['product_id'],
+                    'store_id'=>(int)($component['product_store_id']??0)];
+            }
+        }
+        $categories=$this->salaryCurrentProductCategories($categoryLinks);
+        $names=(new CashierV3MemberDebtProjectionServices())->summariesForDebts($debtIds);
+
+        foreach($dimensions as $repaymentId=>&$dimension){
+            $debtId=(int)($dimension['debt_id']??0);
+            if($debtId<=0)continue;
+            $debtItems=$itemsByDebt[$debtId]??[];
+            if($debtItems===[]){$dimension['item_name']=$names[$debtId]??'销售欠款补交';$dimension['category_weights']=[0=>1];$dimension['category_paths']=[0=>''];continue;}
+            $before=CashierV3DebtRepaymentServices::proportionalCumulativeAllocation((int)$dimension['before_cents'],$debtItems);
+            $after=CashierV3DebtRepaymentServices::proportionalCumulativeAllocation((int)$dimension['after_cents'],$debtItems);
+            $weights=[];$paths=[];
+            foreach($debtItems as $item){
+                $itemId=(int)$item['id'];$itemAmount=(int)($after[$itemId]??0)-(int)($before[$itemId]??0);
+                if($itemAmount<=0)continue;
+                if((int)$item['product_type']!==5){
+                    $category=$categories['item:'.$itemId]??[];$categoryId=(int)($category['id']??0);
+                    $weights[$categoryId]=($weights[$categoryId]??0)+$itemAmount;$paths[$categoryId]=(string)($category['path']??'');
+                    continue;
+                }
+                $orderId=(int)$item['order_id'];
+                // An old order containing several cards has no immutable component-to-card
+                // link. Keep it unclassified instead of assigning another card's projects.
+                $components=($cardItemsByOrder[$orderId]??0)===1?($componentsByOrder[$orderId]??[]):[];
+                $componentWeights=[];$componentPaths=[];
+                foreach($components as $component){
+                    $key='component:'.(int)$component['id'];$category=$categories[$key]??[];
+                    $categoryId=(int)($category['id']??0);
+                    $weight=$this->cents((string)($component['total_price']??'0'));
+                    if($weight<=0)$weight=$this->cents((string)($component['pay_price']??'0'));
+                    if($weight<=0)$weight=1;
+                    $componentWeights[$categoryId]=($componentWeights[$categoryId]??0)+$weight;
+                    $componentPaths[$categoryId]=(string)($category['path']??'');
+                }
+                $parts=$this->salaryCategoryAllocationFromWeights($itemAmount,$componentWeights,$componentPaths);
+                foreach($parts as $categoryId=>$part){
+                    $weights[$categoryId]=($weights[$categoryId]??0)+(int)$part['cents'];
+                    $paths[$categoryId]=(string)$part['path'];
+                }
+            }
+            $dimension['item_name']=$names[$debtId]??'销售欠款补交';
+            $dimension['category_weights']=$weights?:[0=>max(1,(int)($dimension['amount_cents']??1))];
+            $dimension['category_paths']=$paths?:[0=>''];
+        }
+        unset($dimension);
+        return $dimensions;
+    }
+
+    /** Allocate signed employee cents by stable category weights; every cent remains auditable. */
+    private function salaryCategoryAllocationFromWeights(int $amount,array $weights,array $paths):array
+    {
+        $weights=array_filter(array_map('intval',$weights),static fn(int $weight):bool=>$weight>0);
+        if($weights===[])return [0=>['cents'=>$amount,'path'=>'']];
+        ksort($weights,SORT_NUMERIC);$total=array_sum($weights);$absolute=abs($amount);$sign=$amount<0?-1:1;
+        $allocated=0;$remainders=[];$result=[];
+        foreach($weights as $categoryId=>$weight){
+            $product=$absolute*$weight;$part=intdiv($product,$total);$allocated+=$part;
+            $remainders[(int)$categoryId]=$product%$total;
+            $result[(int)$categoryId]=['cents'=>$sign*$part,'path'=>(string)($paths[$categoryId]??'')];
+        }
+        $ids=array_keys($weights);
+        usort($ids,static function(int $left,int $right)use($remainders):int{
+            $cmp=$remainders[$right]<=>$remainders[$left];return $cmp!==0?$cmp:$left<=>$right;
+        });
+        for($index=0;$index<$absolute-$allocated;$index++)$result[$ids[$index]]['cents']+=$sign;
+        ksort($result,SORT_NUMERIC);return $result;
+    }
+
+    /**
      * Current visible categories define zero-sales columns; hidden or unsplit current
      * categories retain their stable legacy column keys. No historical snapshot supplies classification.
      *
@@ -814,21 +1003,28 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
             ->where('pf.employee_id','>',0)
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,s.item_id product_id,d.item_name_snapshot item_name')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.order_id,pf.source_document_type,pf.source_line_id,pf.amount_cents,pf.member_id pf_member_id,pf.member_name_snapshot pf_member_name,pf.store_name_snapshot pf_store_name,pf.organization_name_snapshot pf_company_name,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,s.item_id product_id,d.item_name_snapshot item_name')
             ->order('pf.id','asc');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
         $normal->excludeVoidedRechargeOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
         $normal->excludeVoidedSupplementPaymentFacts($salesQuery, 'pf.tenant_id', 'pf.store_id', 'pf.order_id');
-        $salesRows=$salesQuery->select()->toArray();
+        $salesRows=$this->salarySupplementSalesRows($salesQuery->select()->toArray());
         $salesRows=$this->salaryCurrentSaleCategories($salesRows);
         $cardAllocations=$this->salaryCardCategoryAllocations($salesRows);
         $salesReversed=$this->reversedPerformanceFactIds($salesRows);
         $salesGrouped=[];
         foreach($salesRows as $sale){
             if((string)$sale['fact_direction']!=='forward'||isset($salesReversed[(string)$sale['fact_id']]))continue;
-            $allocation=$this->salarySaleCategoryAmounts($sale,$cardAllocations[(string)($sale['sale_fact_id']??'')]??[]);
-            if((string)$sale['source_type']==='card')$sale['category_path']=$this->salaryAllocationCategoryPath($allocation);
+            $allocation=isset($sale['supplement_category_weights'])
+                ? $this->salaryCategoryAllocationFromWeights(
+                    (int)$sale['amount_cents'],
+                    (array)$sale['supplement_category_weights'],
+                    (array)($sale['supplement_category_paths']??[])
+                )
+                : $this->salarySaleCategoryAmounts($sale,$cardAllocations[(string)($sale['sale_fact_id']??'')]??[]);
+            if((string)$sale['source_type']==='card'||isset($sale['supplement_category_weights']))
+                $sale['category_path']=$this->salaryAllocationCategoryPath($allocation);
             $salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'];
             if(!isset($salesGrouped[$salesKey])){$salesGrouped[$salesKey]=$sale;$salesGrouped[$salesKey]['amount_cents']=0;$salesGrouped[$salesKey]['sales_category_cents']=[];$salesGrouped[$salesKey]['sales_category_paths']=[];}
             $salesGrouped[$salesKey]['amount_cents']+=(int)$sale['amount_cents'];

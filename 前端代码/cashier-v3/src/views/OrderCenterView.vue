@@ -274,7 +274,7 @@ const ORDER_TABS = [
     fields: [
       field('supplement_order_no', '补交单号', 'text', { quickFilterHidden: true }), field('source', '客户来源'),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
-      field('member_name', '会员姓名'), field('phone', '手机号'), field('debt_summary', '欠款摘要'),
+      field('member_name', '会员姓名'), field('phone', '手机号'), field('debt_summary', '欠款摘要'), field('product_category', '商品分类'), field('product_name', '商品名称'),
       field('salesperson', '销售人', 'person'), field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
       field('store', '补交门店', 'store'), field('operator', '操作人', 'person'),
       field('payment_status', '支付状态', 'status'), field('payment_completed_at', '支付完成时间', 'date'),
@@ -331,7 +331,7 @@ const FIELD_ALIASES = {
   occurred_at: ['occurredAt'], payment_completed_at: ['paymentCompletedAt', 'completedAt'], recharge_order_no: ['rechargeOrderNo', 'orderNo'],
   recharge_plan: ['rechargePlan', 'planName'], recharge_amount: ['rechargeAmount'], gift_amount: ['giftAmount'],
   operator: ['operatorName', 'operator'], supplement_order_no: ['supplementOrderNo', 'repayNo', 'orderNo'],
-  debt_no: ['debtNo'], source_order_no: ['sourceOrderNo'], product_name: ['productName'], debt_summary: ['debtSummary', 'summary'],
+  debt_no: ['debtNo'], source_order_no: ['sourceOrderNo'], product_category: ['productCategory'], product_name: ['productName'], debt_summary: ['debtSummary', 'summary'],
   supplement_amount: ['supplementAmount', 'repayAmount'], refund_order_no: ['refundOrderNo', 'refundNo'],
   refund_summary: ['refundSummary', 'summary'], refund_amount: ['refundAmount'], refund_method: ['refundMethod'],
   refund_status: ['refundStatus', 'statusLabel'], refund_completed_at: ['refundCompletedAt', 'completedAt'],
@@ -527,6 +527,16 @@ const visibleFields = computed(() => {
     }
     const recordNoIndex = fields.findIndex((item) => item.key === 'service_record_no')
     fields.splice(recordNoIndex >= 0 ? recordNoIndex + 1 : 0, 0, available.get('source'), available.get('sales_order_no'))
+  }
+  if (activeTabKey.value === 'supplement') {
+    // 商品名称来自欠款历史快照，分类则跟随平台端当前商品档案。
+    // 旧账号可能缺少新列，因此将两列固定恢复到欠款摘要右侧。
+    for (const key of ['product_category', 'product_name']) {
+      const index = fields.findIndex((item) => item.key === key)
+      if (index >= 0) fields.splice(index, 1)
+    }
+    const summaryIndex = fields.findIndex((item) => item.key === 'debt_summary')
+    fields.splice(summaryIndex >= 0 ? summaryIndex + 1 : 0, 0, available.get('product_category'), available.get('product_name'))
   }
   // 销售人是充值/补交金额的归属字段，固定显示在金额左侧；旧版保存的
   // 查询设置可能仍把它排在金额后面，这里只纠正这两个字段的相对位置。

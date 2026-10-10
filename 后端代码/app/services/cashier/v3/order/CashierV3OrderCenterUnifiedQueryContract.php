@@ -72,7 +72,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
             'supplement' => ['补交记录', [
                 ['supplement_order_no', '补交单号', 'text', true, true], ['source', '客户来源'], ['business_date', '业务日期', 'date', true, true],
                 ['debt_no', '欠款编号'], ['source_order_no', '来源订单号'], ['member_name', '会员姓名'], ['phone', '手机号'],
-                ['debt_summary', '欠款摘要'], ['salesperson', '销售人'], ['supplement_amount', '补交金额', 'amount'], ['payment_method', '收款方式'], ['store', '补交门店'],
+                ['debt_summary', '欠款摘要'], ['product_category', '商品分类'], ['product_name', '商品名称'], ['salesperson', '销售人'], ['supplement_amount', '补交金额', 'amount'], ['payment_method', '收款方式'], ['store', '补交门店'],
                 ['operator', '操作人'], ['payment_status', '支付状态'], ['payment_completed_at', '支付完成时间', 'datetime'],
             ], ['supplement_order_no', 'debt_no', 'source_order_no', 'member_name', 'phone']],
             'gift' => ['赠送记录', [

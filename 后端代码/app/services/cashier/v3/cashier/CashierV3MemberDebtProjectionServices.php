@@ -226,6 +226,83 @@ final class CashierV3MemberDebtProjectionServices
         return $summaries;
     }
 
+    /**
+     * Read each debt item's current platform product category for order-center display.
+     * Categories are deliberately not frozen on a repayment: platform category changes
+     * must be reflected on the next query, while missing/deleted categories stay explicit.
+     *
+     * @param array<int,int> $debtIds IDs already constrained by the caller's data scope
+     * @return array<int,string>
+     */
+    public function categorySummariesForDebts(array $debtIds): array
+    {
+        $debtIds = array_values(array_unique(array_filter(array_map('intval', $debtIds))));
+        if ($debtIds === []) return [];
+
+        $items = $this->rows(Db::name('store_debt_item')->alias('i')
+            ->leftJoin('store_product p', 'p.id=i.product_id AND p.is_del=0')
+            ->leftJoin('store_product parent', 'parent.id=p.pid AND parent.type=0 AND parent.is_del=0')
+            ->whereIn('i.debt_id', $debtIds)
+            ->field('i.debt_id,i.id debt_item_id,p.id product_id,p.cate_id,parent.cate_id parent_cate_id')
+            ->order('i.id asc')->select());
+        $categories = [];
+        foreach ($this->rows(Db::name('store_product_category')
+            ->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name')->select()) as $category) {
+            $categories[(int)$category['id']] = $category;
+        }
+
+        $pathsByDebt = [];
+        foreach ($items as $item) {
+            $debtId = (int)($item['debt_id'] ?? 0);
+            if ($debtId <= 0) continue;
+            $rawIds = trim((string)($item['cate_id'] ?? ''));
+            if ($rawIds === '') $rawIds = trim((string)($item['parent_cate_id'] ?? ''));
+            $itemPaths = [];
+            foreach (explode(',', $rawIds) as $rawId) {
+                $rawId = trim($rawId);
+                if (preg_match('/^[1-9][0-9]*$/D', $rawId) !== 1) continue;
+                $path = $this->categoryPath((int)$rawId, $categories);
+                if ($path !== '') $itemPaths[$path] = true;
+            }
+            // One debt can contain several goods. Preserve an unclassified item instead
+            // of silently making the classified siblings appear to cover the whole debt.
+            if ($itemPaths === []) $pathsByDebt[$debtId]['未分类'] = true;
+            else foreach (array_keys($itemPaths) as $path) $pathsByDebt[$debtId][$path] = true;
+        }
+
+        $summaries = [];
+        foreach ($pathsByDebt as $debtId => $paths) {
+            $labels = array_keys($paths);
+            // Platform data may store both an ancestor and its descendant. Keep the
+            // deepest visible path so the same category is not displayed twice.
+            $labels = array_values(array_filter($labels, static function (string $label) use ($labels): bool {
+                foreach ($labels as $other) {
+                    if ($other !== $label && str_starts_with($other, $label . '/')) return false;
+                }
+                return true;
+            }));
+            $summaries[(int)$debtId] = implode('、', array_slice($labels, 0, 2))
+                . (count($labels) > 2 ? '等' : '');
+        }
+        return $summaries;
+    }
+
+    /** A broken, cyclic or deleted category chain has no trustworthy display path. */
+    private function categoryPath(int $categoryId, array $categories): string
+    {
+        $names = [];
+        $seen = [];
+        while ($categoryId > 0 && isset($categories[$categoryId]) && !isset($seen[$categoryId]) && count($names) < 12) {
+            $seen[$categoryId] = true;
+            $name = trim((string)($categories[$categoryId]['cate_name'] ?? ''));
+            if ($name === '') return '';
+            $names[] = $name;
+            $categoryId = (int)($categories[$categoryId]['pid'] ?? 0);
+        }
+        return $categoryId === 0 ? implode('/', array_reverse($names)) : '';
+    }
+
     /** @return array<int,array<int,string>> */
     private function itemsByDebt(array $debtIds): array
     {

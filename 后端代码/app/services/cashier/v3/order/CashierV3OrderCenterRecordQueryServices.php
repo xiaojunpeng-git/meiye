@@ -508,7 +508,7 @@ final class CashierV3OrderCenterRecordQueryServices
 
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
-            'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_no',
+            'r.id', 'r.repayment_id', 'r.repayment_no', 'r.debt_id', 'r.debt_no',
             'r.sales_order_no_snapshot', 'r.repayment_amount_cents', 'r.status',
             'r.business_source_primary_id', 'r.business_source_secondary_id',
             'r.business_source_primary_name_snapshot', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
@@ -533,7 +533,9 @@ final class CashierV3OrderCenterRecordQueryServices
             }
         }
 
-        return [array_map(function (array $row) use ($paymentMethods, $salespeople): array {
+        $productNames = $this->supplementDebtProductNames($rows);
+        $productCategories = $this->supplementDebtProductCategories($rows);
+        return [array_map(function (array $row) use ($paymentMethods, $salespeople, $productNames, $productCategories): array {
             $repaymentId = (string)$row['repayment_id'];
             return [
                 'id' => 'v3-sales-supplement:' . $repaymentId,
@@ -549,6 +551,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'debtSummary' => '销售欠款补交',
+                'productCategory' => (string)($productCategories[(int)$row['debt_id']] ?? '未分类'),
+                'productName' => (string)($productNames[(int)$row['debt_id']] ?? '销售订单欠款'),
                 'supplementAmount' => $this->centsToMoney((int)$row['repayment_amount_cents']),
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
@@ -624,6 +628,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'debtSummary' => '充值欠款补交',
+                'productCategory' => '未分类',
+                'productName' => '储值充值',
                 'supplementAmount' => $this->centsToMoney((int)$row['amount_cents']),
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
@@ -652,11 +658,13 @@ final class CashierV3OrderCenterRecordQueryServices
         $total = (int)(clone $query)->count('r.id');
         $limit = $criteria['page'] * $criteria['pageSize'];
         $rows = $query->field(implode(',', [
-            'r.id', 'COALESCE(bd.document_no, r.repay_no) AS repay_no', 'r.order_sn', 'r.repay_amount', 'r.pay_type',
+            'r.id', 'r.debt_id', 'COALESCE(bd.document_no, r.repay_no) AS repay_no', 'r.order_sn', 'r.repay_amount', 'r.pay_type',
             'r.pay_store_id', 'r.uid', 'r.staff_id', 'r.add_time', 'd.debt_no',
             'u.real_name', 'u.nickname', 'u.phone', 's.name AS store_name', 'st.staff_name',
         ]))->order('r.add_time', 'desc')->order('r.id', 'desc')->limit($limit)->select()->toArray();
-        return [array_map(function (array $row): array {
+        $productNames = $this->supplementDebtProductNames($rows);
+        $productCategories = $this->supplementDebtProductCategories($rows);
+        return [array_map(function (array $row) use ($productNames, $productCategories): array {
             return [
                 'id' => 'legacy-supplement:' . $row['id'],
                 'supplementOrderNo' => (string)$row['repay_no'],
@@ -667,6 +675,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'debtSummary' => '欠款补交',
+                'productCategory' => (string)($productCategories[(int)$row['debt_id']] ?? '未分类'),
+                'productName' => (string)($productNames[(int)$row['debt_id']] ?? '销售订单欠款'),
                 'supplementAmount' => (string)$row['repay_amount'],
                 'paymentMethod' => $this->paymentLabel((string)$row['pay_type']),
                 'storeName' => (string)$row['store_name'],
@@ -676,6 +686,40 @@ final class CashierV3OrderCenterRecordQueryServices
                 '_sortTime' => (int)$row['add_time'],
             ];
         }, $rows), $total];
+    }
+
+    /**
+     * 补交列表与欠款列表共用同一份发卡/商品历史快照。
+     * 参数只能传入已经门店权限和日期过滤的补交行，避免投影服务扩大读取范围。
+     *
+     * @param array<int,array<string,mixed>> $rows
+     * @return array<int,string>
+     */
+    private function supplementDebtProductNames(array $rows): array
+    {
+        $debtIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['debt_id'] ?? 0);
+        }, $rows))));
+        return $debtIds === []
+            ? []
+            : (new CashierV3MemberDebtProjectionServices())->summariesForDebts($debtIds);
+    }
+
+    /**
+     * Resolve current platform categories only for the supplement rows already
+     * filtered by this query. The result is shared by screen and export output.
+     *
+     * @param array<int,array<string,mixed>> $rows
+     * @return array<int,string>
+     */
+    private function supplementDebtProductCategories(array $rows): array
+    {
+        $debtIds = array_values(array_unique(array_filter(array_map(static function (array $row): int {
+            return (int)($row['debt_id'] ?? 0);
+        }, $rows))));
+        return $debtIds === []
+            ? []
+            : (new CashierV3MemberDebtProjectionServices())->categorySummariesForDebts($debtIds);
     }
 
     /** @return array<string,string> keyed by repayment id */
