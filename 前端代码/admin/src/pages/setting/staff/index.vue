@@ -70,7 +70,8 @@
                 {{ { commission: '消耗业绩', labor: '手工费', commission_labor: '消耗业绩+手工费' }[row.craftsman_performance_type] || '消耗业绩' }}
               </template>
               <template slot-scope="{ row }" slot="employment_type_code">
-                {{ { internal: '内部员工', partner: '合作方', outsourced: '外包' }[row.employment_type_code] || '内部员工' }}
+                <!-- 主档空类型与编辑弹窗一致显示未分类，不能把默认文案当成保存结果。 -->
+                {{ { internal: '内部员工', partner: '合作方', outsourced: '外包' }[row.employment_type_code] || '未分类' }}
               </template>
               <template slot-scope="{ row }" slot="mobile_enabled">
                 {{ row.mobile_enabled == 1 ? '开启' : '关闭' }}

@@ -6,10 +6,54 @@ use mohe\exceptions\AdminException;
 use think\facade\Db;
 
 /**
- * I2 单店任职期间：停职 / 复职 / 软删除
+ * I2 单店任职期间：停职 / 复职 / 清空当前门店 / 软删除
  */
 class StaffTenureServices extends BaseServices
 {
+    /**
+     * 完整人员保存专用内核，必须由调用方幂等事务包裹。
+     * 仅结束指定当前任职并撤销其来源权限，不做员工全局离职、不改历史门店身份。
+     * 授权投影及会话失效由完整保存末尾统一执行，禁止嵌套公开幂等命令。
+     */
+    public function clearCurrentStoreInTx(
+        int $employeeId,
+        int $staffId,
+        int $expectedStoreId,
+        int $expectedAuthVersion,
+        array $adminInfo,
+        array $auditMeta
+    ): void {
+        if (!Db::connect()->getPdo()->inTransaction()) {
+            throw new AdminException('结束当前任职必须在完整保存事务内执行');
+        }
+        $staff = $this->lockStaffForEmployee($employeeId, $staffId);
+        $employee = Db::name('employee')->where('id', $employeeId)->field('auth_version,status')->find();
+        if ((int)$employee['auth_version'] !== $expectedAuthVersion || (int)$employee['status'] !== 1
+            || (int)$staff['store_id'] !== $expectedStoreId
+            || (int)$staff['status'] !== 1 || $expectedStoreId <= 0) {
+            throw new AdminException('当前任职已发生变化，请刷新员工档案后重试');
+        }
+        $now = time();
+        $opId = (int)($auditMeta['operator_id'] ?? $adminInfo['id'] ?? 0);
+        $opName = (string)($auditMeta['operator_name'] ?? $adminInfo['real_name'] ?? '');
+        $token = (string)($auditMeta['request_token'] ?? '');
+        $reason = '人员编辑清空当前任职门店';
+        Db::name('system_store_staff')->where('id', $staffId)->update([
+            'status' => 0, 'roles' => '', 'order_status' => 0, 'is_cashier' => 0,
+            'is_manager' => 0, 'is_butler' => 0, 'is_store' => 0,
+        ]);
+        $this->closeChannelEntries($staffId, $now, $opId, $opName, $token, $reason);
+        $this->endActiveJobs($staffId, $now, $opId, $opName, $reason);
+        // clear 与 leave 分开记录，结束任职不能冒充全局离职或计入员工流失。
+        $this->endActiveTenure($staffId, $now, $opId, $opName, 'clear', $reason, $token);
+        app()->make(EmployeeDataScopeServices::class)
+            ->revokeStoreSourceScope($employeeId, $expectedStoreId, $auditMeta);
+        $this->writeAudit($employeeId, 'staff_current_store_clear', $staffId, [
+            'staff_id' => $staffId, 'store_id' => $expectedStoreId, 'status' => 0,
+            'employee_preserved' => true, 'history_preserved' => true,
+        ], $adminInfo, $auditMeta, $reason);
+    }
+
     /**
      * @return array{msg:string,data:array,replay:bool}
      */
@@ -426,7 +470,7 @@ class StaffTenureServices extends BaseServices
             ]);
         }
         // 若无进行中期间，补一条已结束期间便于审计
-        if (!$active && in_array($action, ['suspend', 'delete'], true)) {
+        if (!$active && in_array($action, ['suspend', 'delete', 'clear'], true)) {
             $staff = Db::name('system_store_staff')->where('id', $staffId)->find();
             if ($staff) {
                 Db::name('staff_tenure_period')->insert([

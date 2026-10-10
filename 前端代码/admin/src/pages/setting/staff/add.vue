@@ -43,7 +43,13 @@
                     v-if="storeLocked"
                     :value="storeLockedLabel"
                     readonly
-                  />
+                  >
+                    <Tooltip slot="suffix" :content="clearCurrentStore ? '撤销清空' : '清空当前任职门店'">
+                      <Button type="text" :icon="clearCurrentStore ? 'ios-undo' : 'ios-close-circle'"
+                        :aria-label="clearCurrentStore ? '撤销清空' : '清空当前任职门店'"
+                        @click="toggleClearCurrentStore" />
+                    </Tooltip>
+                  </Input>
                   <OrganizationStoreScopePicker
                     v-else
                     v-model="appointmentStorePickerIds"
@@ -55,7 +61,7 @@
                     @change="onAppointmentStoreScopePick"
                   />
                   <div class="form-tip">
-                    {{ storeLocked ? '已有任职门店时，调店请走调店流程。' : '可不选。选择门店后，所属组织会自动更新为该门店所在组织。' }}
+                    {{ clearCurrentStore ? '保存后结束当前门店任职，保留员工档案及历史记录。' : (storeLocked ? '调店请走调店流程；清空仅结束当前门店任职。' : '可不选。选择门店后，所属组织会自动更新为该门店所在组织。') }}
                   </div>
                 </FormItem>
               </Col>
@@ -106,6 +112,7 @@
                 <FormItem label="岗位：" prop="position_ids">
                   <Select
                     v-model="formInline.position_ids"
+                    :disabled="clearCurrentStore"
                     multiple
                     clearable
                     filterable
@@ -179,7 +186,7 @@
             <Row :gutter="24">
               <Col :span="12">
                 <FormItem label="在职状态：">
-                  <i-switch v-model="formInline.status" :true-value="1" :false-value="0" size="large">
+                  <i-switch v-model="formInline.status" :true-value="1" :false-value="0" size="large" :disabled="clearCurrentStore">
                     <span slot="open">在职</span>
                     <span slot="close">离职</span>
                   </i-switch>
@@ -726,6 +733,10 @@ export default {
       // 判断锁定，否则无店直属员工本次选店后会被立即误锁定。
       originalStoreId: 0,
       originalStoreName: '',
+      // 清空是显式任职结束命令；不把普通 store_id=0 当作关闭任职。
+      clearCurrentStore: false,
+      currentStoreVersion: 0,
+      originalPositionIds: [],
       organizationMemberships: [],
       /** 固定 Vue2 组织/门店选择控件的本地投影；保存只使用 org_id/store_id。 */
       organizationPickerStoreIds: [],
@@ -814,6 +825,7 @@ export default {
         && Number(this.originalStoreId) > 0;
     },
     storeLockedLabel() {
+      if (this.clearCurrentStore) return '无任职门店';
       const sid = Number(this.originalStoreId || this.formInline.store_id || 0);
       return sid > 0 ? (this.originalStoreName || `门店 #${sid}`) : '-';
     },
@@ -947,6 +959,9 @@ export default {
       this.originalEducation = '';
       this.originalStoreId = 0;
       this.originalStoreName = '';
+      this.clearCurrentStore = false;
+      this.currentStoreVersion = 0;
+      this.originalPositionIds = [];
       this.organizationMemberships = [];
       this.organizationPickerStoreIds = [];
       this.organizationPickerLabel = '';
@@ -1013,7 +1028,11 @@ export default {
         }
       } else if (scope.nodeType === 'store' && Number(scope.storeId) > 0) {
         // 固定控件选择门店时，按门店所在组织回写，并同步当前任职门店。
-        this.onStorePick(scope.storeId, { org_id: Number(scope.orgId || 0) });
+        if (this.storeLocked) {
+          this.formInline.org_id = Number(scope.orgId || 0);
+        } else {
+          this.onStorePick(scope.storeId, { org_id: Number(scope.orgId || 0) });
+        }
       } else {
         this.formInline.org_id = 0;
         if (!this.storeLocked) this.formInline.store_id = '';
@@ -1027,6 +1046,23 @@ export default {
         return;
       }
       if (scope.nodeType === 'all') this.onStorePick(0, {});
+    },
+    /** 暂存/撤销任职结束；禁止同时把门店岗位迁成无店总部岗位。 */
+    toggleClearCurrentStore() {
+      // 清空只结束当前任职；员工全局离职必须单独提交，避免混用生命周期命令。
+      if (!this.clearCurrentStore && Number(this.formInline.status) !== 1) {
+        this.$Message.warning('清空任职不能同时办理离职，请分别保存。');
+        return;
+      }
+      // Select 回显也会发 on-change，须比较权威快照，不能把回显误当人工修改。
+      const selected = [...new Set((this.formInline.position_ids || []).map(Number))].sort((a, b) => a - b);
+      const original = [...new Set(this.originalPositionIds)].sort((a, b) => a - b);
+      if (JSON.stringify(selected) !== JSON.stringify(original)) {
+        this.$Message.warning('请先保存岗位修改，再清空当前任职门店。');
+        return;
+      }
+      this.clearCurrentStore = !this.clearCurrentStore;
+      this.formInline.store_id = this.clearCurrentStore ? '' : this.originalStoreId;
     },
     onScopeOrganizationsPick(scope = {}) {
       if (scope.nodeType === 'org' || scope.nodeType === 'all') {
@@ -1077,6 +1113,8 @@ export default {
       const storeId = Number((data && data.store_id) || 0);
       this.originalStoreId = storeId;
       this.originalStoreName = String((data && data.store_name) || '').trim();
+      this.clearCurrentStore = false;
+      this.currentStoreVersion = Number((data && data.current_store_version) || 0);
       this.organizationMemberships = Array.isArray(data && data.organization_memberships)
         ? data.organization_memberships.map((item) => ({
           org_id: Number(item.org_id || 0),
@@ -1159,6 +1197,7 @@ export default {
       this.mobileAuthLoaded = mobileAuthLoaded;
       this.mobileEnabledTouched = false;
       this.positionIdsTouched = false;
+      this.originalPositionIds = this.formInline.position_ids.slice();
       this.originalInternalAccount = String((data && data.account) || base.account || '');
       DATE_FIELDS.forEach((field) => {
         this.formInline[field] = this.normalizeDate(this.formInline[field]);
@@ -1391,6 +1430,12 @@ export default {
 
       payload.org_id = Number(this.formInline.org_id) || 0;
       payload.store_id = Number(this.formInline.store_id) || 0;
+      if (this.clearCurrentStore) {
+        payload.clear_current_store = 1;
+        payload.clear_store_staff_id = Number(this.formInline.staff_id);
+        payload.clear_store_id = Number(this.originalStoreId);
+        payload.current_store_version = this.currentStoreVersion;
+      }
       payload.staff_name = String(this.formInline.staff_name || '').trim();
       payload.phone = String(this.formInline.phone || '').trim();
       payload.account = String(this.formInline.account || '').trim();
@@ -1399,7 +1444,7 @@ export default {
         // 账号未改：后端保留现有统一账号，完整资料保存不触发账号/密码写入。
         delete payload.account;
       }
-      if (Number(this.editId) > 0 && !this.positionIdsTouched) {
+      if (this.clearCurrentStore || (Number(this.editId) > 0 && !this.positionIdsTouched)) {
         // 岗位未在本次编辑中触碰时，不让不完整的历史回显撤销既有岗位投影。
         delete payload.position_ids;
       } else {
@@ -1465,7 +1510,11 @@ export default {
         this.$Message.required('请选择人员类型');
         return;
       }
-      const first = findFirstRequiredError(REQUIRED_CHECK_ORDER, this.formInline);
+      // 已结束的门店岗位不转为总部岗位，清空任职不要求额外选择一个新岗位。
+      const requiredOrder = this.clearCurrentStore
+        ? REQUIRED_CHECK_ORDER.filter((item) => item.key !== 'position_ids')
+        : REQUIRED_CHECK_ORDER;
+      const first = findFirstRequiredError(requiredOrder, this.formInline);
       if (first) {
         if (first.tab) this.activeTab = first.tab;
         this.$Message.required(first.message);
