@@ -113,12 +113,17 @@ final class CashierV3SupplementSalespersonAdjustmentServices
         $old = $this->effectivePerformanceFacts($data->tenantId(), $source['repaymentId'], $source['sourceDocumentType']);
         if ($old === []) throw self::failure('supplement_personnel_sales_fact_missing');
         $salesFacts = array_values(array_filter($old, static fn(array $row): bool => (string)($row['performance_type'] ?? '') === 'sales_performance_allocated'));
+        $actual = array_values(array_filter($old, static fn(array $row): bool => (string)($row['performance_type'] ?? '') === 'actual_performance_recorded'));
         // 每个独立核算组各自以本次补交金额为业绩基数；不能把所有已分配
         // 事实金额相加后再按全局比例重分，否则“店长 100% + 普通组 100%”
         // 会让普通组被放大、独立组被吞掉。
         $baseAmount = (int)($source['repaymentAmountCents'] ?? 0);
         if ($baseAmount <= 0) throw self::failure('supplement_personnel_base_invalid');
-        $template = $salesFacts[0]; $operationId = 'SPA-' . strtoupper(substr(hash('sha256', $data->tenantId() . '|' . $source['repaymentId'] . '|' . $key), 0, 40));
+        // 补交可以在结账时未选销售人，此时仅有实际业绩事实。首次分配
+        // 必须以同一补交单的实际业绩行作为结构模板，不能访问空的销售人事实。
+        $template = $salesFacts[0] ?? $actual[0] ?? null;
+        if (!$template) throw self::failure('supplement_personnel_fact_template_missing');
+        $operationId = 'SPA-' . strtoupper(substr(hash('sha256', $data->tenantId() . '|' . $source['repaymentId'] . '|' . $key), 0, 40));
         $operationNo = 'RY' . date('ymd') . strtoupper(substr(hash('sha256', $operationId), 0, 5)); $now = time();
         $event = $recorder->recordInTx($execution, (array)($scope['event_contract'] ?? []), [
             'event_type' => 'supplement.personnel_adjusted', 'aggregate_type' => 'debt_repayment', 'aggregate_id' => $source['repaymentId'],
@@ -166,7 +171,6 @@ final class CashierV3SupplementSalespersonAdjustmentServices
             if (in_array($person['employeeTypeCodeSnapshot'], ['partner', 'outsourced'], true)) $external += $share;
             $this->insertForward($template, $source, $person, $share, $operationId, $key, (array)$event, $operator, $now, 'sales_performance_allocated', $index + 1);
         }
-        $actual = array_values(array_filter($old, static fn(array $row): bool => (string)($row['performance_type'] ?? '') === 'actual_performance_recorded'));
         if ($actual !== []) $this->insertForward($actual[0], $source, ['employeeId' => 0, 'name' => '', 'employeeTypeCodeSnapshot' => '', 'employeeTypeAuthorityVersion' => 0, 'allocationWeight' => 0], $baseAmount - $external, $operationId, $key, (array)$event, $operator, $now, 'actual_performance_recorded', 0);
         Db::name(self::OPERATION_TABLE)->insert(['operation_id' => $operationId, 'operation_no' => $operationNo, 'tenant_id' => $data->tenantId(), 'store_id' => $operator->storeId(), 'member_id' => $source['memberId'], 'operator_id' => $operator->operatorId(), 'source_type' => 'debt_repayment', 'source_order_id' => $source['repaymentId'], 'source_order_no_snapshot' => $source['repaymentNo'], 'operation_type' => 'personnel_adjustment', 'command_idempotency_key' => $key, 'immutable_fingerprint' => $fingerprint, 'reason_snapshot' => trim((string)($payload['reason'] ?? '销售人调整')), 'request_json' => json_encode(['personnel' => $personnel], JSON_UNESCAPED_UNICODE), 'business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'version' => 1, 'business_date' => date('Y-m-d', $now), 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now, 'created_at' => $now, 'updated_at' => $now]);
         return ['operationNo' => $operationNo, 'replayed' => false, 'personnelCount' => count($personnel), 'message' => '补交销售人已更新。'];

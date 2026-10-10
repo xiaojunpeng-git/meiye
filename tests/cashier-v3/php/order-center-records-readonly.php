@@ -262,6 +262,16 @@ recordOk('补交记录同时读取销售与充值 V3 权威补交和旧兼容记
     && strpos($source, "readLegacySupplements") !== false
     && strpos($source, "不写入旧 store_debt_repay") !== false
     && strpos($source, "不得为订单中心展示而回写旧 store_debt_repay") !== false);
+recordOk('补交商品名称复用欠款历史快照，充值欠款使用固定业务名称',
+    strpos($source, 'private function supplementDebtProductNames') !== false
+    && strpos($source, 'summariesForDebts($debtIds)') !== false
+    && substr_count($source, "'productName' => (string)(\$productNames") === 2
+    && strpos($source, "'productName' => '储值充值'") !== false);
+recordOk('补交商品分类实时读取平台当前档案',
+    strpos($source, 'private function supplementDebtProductCategories') !== false
+    && strpos($source, 'categorySummariesForDebts($debtIds)') !== false
+    && substr_count($source, "'productCategory' => (string)(\$productCategories") === 2
+    && strpos($source, "'productCategory' => '未分类'") !== false);
 recordOk('欠款管理直接读取欠款主表和 V3 权威映射，不从销售订单拼算余额', strpos($source, 'private function readDebts') !== false
     && strpos($source, "Db::name('store_debt')") !== false
     && strpos($source, "cashier_v3_debt_authority") !== false

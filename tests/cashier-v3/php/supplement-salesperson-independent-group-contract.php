@@ -12,6 +12,8 @@ foreach ([
     "'supplement_personnel_group_weight_invalid'",
     "\$groups[(string)\$person['allocationGroupKey']][] = \$index",
     "\$baseAmount = (int)(\$source['repaymentAmountCents'] ?? 0)",
+    "\$template = \$salesFacts[0] ?? \$actual[0] ?? null",
+    "'supplement_personnel_fact_template_missing'",
     "'repaymentAmountCents' => max(0, (int)(\$row[\$definition[1]] ?? 0))",
     "'performanceAmountManual' => \$performanceAmountManual",
     "'performanceAmountCents' => \$performanceAmountCents",

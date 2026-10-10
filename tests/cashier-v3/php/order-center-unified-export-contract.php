@@ -112,6 +112,13 @@ exportOk('服务记录固定显示来源及同次销售单号，列表与导出�
     && strpos($view, "field('service_record_no', '服务记录号', 'text', { quickFilterHidden: true }),\n      field('source', '来源'), field('sales_order_no', '销售单号'),") !== false
     && strpos($recordQuery, "'source' => \$this->serviceBusinessSourceLabel(\$row)") !== false
     && strpos($recordQuery, "'salesOrderNo' => (string)(\$row['sales_order_no'] ?? '')") !== false);
+exportOk('补交记录在欠款摘要右侧固定显示当前分类和商品名称',
+    strpos($contract, "['debt_summary', '欠款摘要'], ['product_category', '商品分类'], ['product_name', '商品名称']") !== false
+    && strpos($view, "field('debt_summary', '欠款摘要'), field('product_category', '商品分类'), field('product_name', '商品名称')") !== false
+    && strpos($view, "activeTabKey.value === 'supplement'") !== false
+    && strpos($recordQuery, 'supplementDebtProductNames($rows)') !== false
+    && strpos($recordQuery, 'supplementDebtProductCategories($rows)') !== false
+    && strpos($recordQuery, "'productName' => '储值充值'") !== false);
 exportOk('退款记录来源固定为 K 且列表与导出读取同一投影',
     strpos($contract, "['refund_order_no', '退款单号', 'text', true, true], ['source', '来源'], ['business_date'") !== false
     && strpos($view, "field('refund_order_no', '退款单号', 'text', { quickFilterHidden: true }),\n      field('source', '来源'),") !== false
