@@ -1447,8 +1447,11 @@ Route::group('adminapi', function () {
         Route::get('staff/list', 'v1.merchant.SystemStoreStaff/getStoreStaffList')->option(['real_name' => '获取门店店员列表']);
         //获取门店店员下拉（轻量）
         Route::get('staff/select', 'v1.merchant.SystemStoreStaff/getStaffSelect')->option(['real_name' => '获取门店店员下拉']);
-        //获取店员专属客户
-        Route::get('staff/customer/:id', 'v1.merchant.SystemStoreStaff/getStoreStaffCustomer')->option(['real_name' => '获取店员专属客户']);
+        // 专属会员读取档案服务人关系，保留原 URL 以兼容既有入口。
+        Route::get('staff/customer/:id', 'v1.merchant.SystemStoreStaff/getStoreStaffCustomer')->option(['real_name' => '获取店员专属会员']);
+        // 人员管理专属会员关系转移；不复用会改变员工任职的 staff/transfer。
+        Route::get('staff/exclusive-transfer/:id', 'v1.merchant.SystemStoreStaff/prepareExclusiveMemberTransfer')->option(['real_name' => '预览专属会员转移']);
+        Route::post('staff/exclusive-transfer/:id', 'v1.merchant.SystemStoreStaff/transferExclusiveMembers')->option(['real_name' => '转移专属会员']);
         //获取店员业绩列表
         Route::get('staff/performance/:id', 'v1.merchant.SystemStoreStaff/getStaffPerformance')->option(['real_name' => '获取店员业绩列表']);
         //门店端员工功能权限（仅维护当前任职的权限覆盖，不改变组织/门店关系）

@@ -12,6 +12,7 @@ namespace app\controller\admin\v1\merchant;
 
 use app\services\organization\OrganizationScopeService;
 use app\services\store\StoreStaffTransferServices;
+use app\services\store\StaffExclusiveMemberServices;
 use app\services\store\SystemStoreServices;
 use app\services\store\SystemStoreStaffServices;
 use app\services\store\finance\StaffFlowingWaterServices;
@@ -157,23 +158,57 @@ class SystemStoreStaff extends AuthController
         return $this->success($this->services->getSelectList($where));
     }
 
-    /**
-     * 获取店员专属客户
-     * @param UserServices $userServices
-     * @param $id
-     * @return mixed
-     */
-    public function getStoreStaffCustomer(UserServices $userServices, $id)
+    /** 平台专属会员只读会员档案绑定，不调用旧销售人业绩查询。 */
+    public function getStoreStaffCustomer($id)
     {
         $where = $this->request->getMore([
             ['keyword', ''],
-            ['data', ''],
+            ['date_from', ''], ['date_to', ''], ['page', 1], ['limit', 20],
         ]);
-        if (!$id) {
-            return $this->fail('参数有误！');
+        try {
+            return $this->success(app()->make(StaffExclusiveMemberServices::class)
+                ->members($this->exclusiveStaffId($id), $where, $this->adminInfo));
+        } catch (\RuntimeException $e) {
+            return $this->fail($e->getMessage());
         }
-        $where['salesman_id'] = $id;
-        return $this->success($userServices->getStaffCustomerList($where));
+    }
+
+    /** 接收范围及版本由后端生成；客户端不能通过换门店参数扩大范围。 */
+    public function prepareExclusiveMemberTransfer($id)
+    {
+        try {
+            return $this->success(app()->make(StaffExclusiveMemberServices::class)
+                ->prepare($this->exclusiveStaffId($id), $this->adminInfo));
+        } catch (\RuntimeException $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
+    /** 独立于员工调店，只提交专属服务人关系的原子替换命令。 */
+    public function transferExclusiveMembers($id)
+    {
+        $payload = $this->request->postMore([
+            ['recipient_ids', []], ['snapshot', ''], ['request_token', ''],
+        ]);
+        try {
+            $result = app()->make(StaffExclusiveMemberServices::class)
+                ->transfer($this->exclusiveStaffId($id), $payload, $this->adminInfo);
+            return $this->success($result['msg'], $result['data']);
+        } catch (\think\db\exception\DbException $e) {
+            // SQL/锁异常不得把内部表名和参数返回浏览器；事务编排已经整体回滚。
+            return $this->fail('专属会员转移失败，本次未保存，请刷新后重试');
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage());
+        }
+    }
+
+    /** 门店任职 ID 必须是正整数，不能把直属人员负 ID 或畸形路径截断成另一人。 */
+    private function exclusiveStaffId($id): int
+    {
+        if ((!is_string($id) && !is_int($id)) || preg_match('/^[1-9][0-9]*$/D', (string)$id) !== 1) {
+            throw new \RuntimeException('员工标识无效，请刷新列表后重试');
+        }
+        return (int)$id;
     }
 
     /**

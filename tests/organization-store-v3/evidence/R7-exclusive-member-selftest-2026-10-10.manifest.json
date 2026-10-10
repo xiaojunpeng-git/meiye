@@ -1,0 +1,77 @@
+{
+  "baseline": "e0509aac8d30e5072fe3dd74f1aa4dccbbf7774c",
+  "patch_sha256": "b566a86962beff697b369da1e46b11f71016191be0a13ccef05a4b87c5f80b03",
+  "fixed_version_sha256": "47b9c72cb3fc54768dab810e321d9f414f231d8074852009ef5ec8342005a4e8",
+  "staged_sha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "staged_count": 9,
+  "files": [
+    {
+      "path": "前端代码/admin/src/api/setting.js",
+      "status": "present",
+      "sha256": "c46a2ba8dde1c6e6b2adb3f38ec29dd3f87163e50970947253f6f9f9749a0b9f"
+    },
+    {
+      "path": "前端代码/admin/src/api/staff.js",
+      "status": "present",
+      "sha256": "87f576e02bfb7b13ac9c6bf54a44e2df6445677c3b654cf01a7435fc52063b5f"
+    },
+    {
+      "path": "前端代码/admin/src/pages/setting/staff/index.vue",
+      "status": "present",
+      "sha256": "db7bf2da1441c662a6e68e9ebb8ede65617b9e886213d9f13b9738c51221869f"
+    },
+    {
+      "path": "前端代码/admin/src/pages/setting/staff/components/StaffFeaturePermissionModal.vue",
+      "status": "deleted",
+      "sha256": null
+    },
+    {
+      "path": "前端代码/admin/src/pages/setting/staff/components/ExclusiveMemberTransferModal.vue",
+      "status": "present",
+      "sha256": "0cb4c72a96110696e4e39e15c00b19689cf73eb7f43f04e498bf8027ff84dd19"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/merchant/SystemStoreStaff.php",
+      "status": "present",
+      "sha256": "87404260628bc3b945d5adea4ec59f8911ce8a44870289b3f14aaf3ee4d538ef"
+    },
+    {
+      "path": "后端代码/app/services/store/StaffExclusiveMemberServices.php",
+      "status": "present",
+      "sha256": "87ee6561d7d7db20f8e7cc8dafbcb7ffb599186afb1795d97530f26baba37c1b"
+    },
+    {
+      "path": "后端代码/route/admin.php",
+      "status": "present",
+      "sha256": "ca578524868a83ae955c4a6460abb87dcb874fd090d04d695e717fe91754982a"
+    },
+    {
+      "path": "tests/organization-store-v3/php/exclusive-member-transfer-local.php",
+      "status": "present",
+      "sha256": "ee06d314ef001ec3c6cb0cc754d5d66ae83db35203a41705b0ee59b6ccd80264"
+    },
+    {
+      "path": "tests/organization-store-v3/js/exclusive-member-transfer.mjs",
+      "status": "present",
+      "sha256": "24c5151fdfc60709d91c317948f5653b4150f65ca0a156a54bcdb112c1e56729"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "tests/organization-store-v3/evidence/R7-exclusive-member-transfer-desktop-2026-10-10.png",
+      "sha256": "f6deaf927b431091b9f77cfeaa8459a26df3e8fa7d21569eb5e53de5801c6b21"
+    },
+    {
+      "path": "tests/organization-store-v3/evidence/R7-exclusive-member-transfer-mobile-2026-10-10.png",
+      "sha256": "2d9f0e3cf0ce9db1f28778bafd4dbe7bf181490b7f28aa7e2735f65e53e467cd"
+    }
+  ],
+  "status": "development-and-selftest-complete-pending-product-manager-acceptance",
+  "task": "R7-exclusive-member-transfer",
+  "date": "2026-10-10",
+  "fingerprint_definition": {
+    "patch_sha256": "git diff --binary HEAD -- <files>; excludes untracked contents",
+    "fixed_version_sha256": "SHA-256 of JSON.stringify(files) in listed order; includes untracked file SHA-256 and explicit deletion",
+    "self_reference": "Evidence Markdown/JSON excluded from source fingerprint"
+  }
+}
