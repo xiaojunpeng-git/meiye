@@ -200,8 +200,10 @@ const FIELD_LOGIC = Object.freeze({
   order_no_snapshot: '结账成功后生成的业务单据编号。',
   dimension: '成交时选择并保存的来源渠道。',
   walk_in: '运营人员对该笔业务手动登记的进店次数；未登记时为 0。',
-  visits: '该会员在当前查询日期内已完成护理的次数。',
-  effective_people: '同一门店、同一来源下，当前查询日期内累计现金业绩达到门槛的不同会员数；A 类来源为 1000 元，其他来源为 500 元。',
+  // K 人次的依据是有效退款，不能在后端说明缺失时退回护理次数解释。
+  visits: 'K退款顾客按同一门店、同一天、同一会员有有效退款计 1 次，多笔退款不重复；其他来源沿用已完成的非体验服务人次。',
+  // 后端说明优先；旧响应缺少说明时仍按每日达标解释，不能退回周期去重口径。
+  effective_people: '按门店、业务日期、来源和会员每天独立判断净记账收款是否达标：A 类来源为 1000 元，其他来源为 500 元。同日多笔合并，不跨天凑门槛；合计为每日达标会员数之和。',
   amount: '本行成交明细分摊到的成功记账收款金额。',
   registered_date: '该笔业务归入报表的经营日期。',
   reviewer: '该笔业务的审核人员；未审核时显示“-”。',
@@ -265,7 +267,8 @@ function fieldLogic(column) {
   if (FIELD_LOGIC[key]) return FIELD_LOGIC[key]
   if (key.startsWith('payment_')) return `本单使用“${label}”且成功记账的金额；未使用或未成功记账时显示 0。`
   if (key.startsWith('partner_category_')) return `普通商品和项目按自身成交分类归集；卡项按卡内项目的成交分类归集，卡内有多个分类时按各项目配置金额分摊。该分类的现金业绩乘以成交时设置的合作方默认比例，得到“${label}”；后续修改分类或比例不会改写已成交数据。`
-  if (/^channel_\d+_effective$/.test(key)) return '同一门店、同一渠道中，在当前日期内累计现金业绩达到有效门槛的不同会员人数：A 类渠道为 1000 元，其他渠道为 500 元。点击后仅显示这些会员的成交明细。'
+  // 动态来源列只提供同口径说明，不在前端判定或重算达标人员。
+  if (/^channel_\d+_effective$/.test(key)) return '同一门店、同一来源的会员按业务日期每天独立达标后累计：A 类来源每天为 1000 元，其他来源每天为 500 元。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计。点击后仅显示达标当天的会员明细。'
   if (/^day_\d+_consume$/.test(key)) return `${label.replace('消耗', '')}该手艺人按项目分配到的劳动业绩合计。`
   if (/^day_\d+_labor$/.test(key)) return `${label.replace('手工', '')}该手艺人按项目分配到的手工费合计；手工费和劳动业绩可以不同。`
   if (/^day_\d+_performance$/.test(key)) return `${label.replace('业绩', '')}该销售人按成交项目分配到的销售业绩合计。`

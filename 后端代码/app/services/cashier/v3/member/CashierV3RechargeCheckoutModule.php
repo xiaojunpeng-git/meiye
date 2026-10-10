@@ -78,7 +78,10 @@ final class CashierV3RechargeCheckoutModule
         $balance = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx($input['memberId'], $operator, $data);
         $balanceVersion = (int)($balance['accountVersion'] ?? 0);
         if ($balanceVersion <= 0) throw self::invalid('recharge_checkout_balance_unavailable', '会员余额资料无效，请重新选择会员后重试。');
-        $source = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot(
+        // 充值复用顶部来源选择；旧页面或挂单快照同样不得提交退款专用 K 来源。
+        $sourceConfig = new CashierV3BusinessConfigServices();
+        $sourceConfig->assertCheckoutSourceAllowed((int)$input['businessSource']['primarySourceId']);
+        $source = $sourceConfig->resolveSourceSnapshot(
             (int)$input['businessSource']['primarySourceId'],
             (int)$input['businessSource']['secondarySourceId'],
             true

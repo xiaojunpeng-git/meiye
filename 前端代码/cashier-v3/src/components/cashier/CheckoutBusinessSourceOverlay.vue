@@ -15,15 +15,16 @@ const secondaryId = ref(0)
 const validationMessage = ref('')
 const rewardAmount = ref('0')
 
-const roots = computed(() => Array.isArray(props.sources) ? props.sources.filter((item) => Number(item?.id) > 0) : [])
+// 后端目录已过滤 K；这里同步排除旧页面缓存，不允许旧选中值继续确认。
+const roots = computed(() => Array.isArray(props.sources) ? props.sources.filter((item) => Number(item?.id) > 0 && !/^K(?:\s|退款|$)/u.test(String(item?.name || '').trim())) : [])
 const selectedPrimary = computed(() => roots.value.find((item) => Number(item.id) === Number(primaryId.value)) || null)
 const children = computed(() => Array.isArray(selectedPrimary.value?.children) ? selectedPrimary.value.children.filter((item) => Number(item?.id) > 0) : [])
 const requiresSecondary = computed(() => selectedPrimary.value?.requireSecondary === true || Number(selectedPrimary.value?.requireSecondary) === 1)
 const isCrossIndustry = computed(() => /^G(?:\s|异业|$)/u.test(String(selectedPrimary.value?.name || '').trim()))
 
 watch(() => [props.primarySourceId, props.secondarySourceId, props.rewardAmountCents, props.sources], () => {
-  primaryId.value = Number(props.primarySourceId) || 0
-  secondaryId.value = Number(props.secondarySourceId) || 0
+  primaryId.value = roots.value.some((item) => Number(item.id) === Number(props.primarySourceId)) ? Number(props.primarySourceId) : 0
+  secondaryId.value = primaryId.value ? Number(props.secondarySourceId) || 0 : 0
   validationMessage.value = ''
   rewardAmount.value = (Number(props.rewardAmountCents || 0) / 100).toFixed(2).replace(/\.00$/, '')
 }, { immediate: true, deep: true })
@@ -35,7 +36,7 @@ function choosePrimary(id) {
 }
 
 function confirm() {
-  if (!primaryId.value) {
+  if (!selectedPrimary.value) {
     validationMessage.value = '请选择一级来源。'
     return
   }

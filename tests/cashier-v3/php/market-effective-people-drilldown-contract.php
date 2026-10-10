@@ -9,10 +9,12 @@ $marketDetail = substr($source, strpos($source, 'private function marketDetail')
 
 $checks = [
     'effective-people click forwards the metric filter' => strpos($marketPerformance, "\$params['metric_code'] = 'effective_people'") !== false,
-    'detail filter reuses the already-loaded detail records' => strpos($marketDetail, "\$this->marketEffectiveMemberKeys(\$rows)") !== false,
+    // 汇总和明细必须复用原始收款的每日资格，不能从退款已转 K 的展示行另算。
+    'summary and detail share member-day eligibility' => strpos($marketPerformance, '$this->marketEffectiveMemberKeys($stores, $range)') !== false
+        && strpos($marketDetail, '$this->marketEffectiveMemberKeys($stores, $range, $method)') !== false,
     'detail excludes non-effective members before pagination' => strpos($marketDetail, "if (\$metricCode === 'effective_people')") !== false && strpos($marketDetail, 'array_filter($rows') !== false,
     'effective threshold is fixed by source type' => strpos($source, "\$this->sourcePrefix(\$source) === 'A' ? 100000 : 50000") !== false,
-    'field guide explains effective-person drilldown' => strpos($view, "key)) return '同一门店、同一渠道中，在当前日期内累计现金业绩达到有效门槛") !== false,
+    'field guide explains daily qualification and drilldown' => strpos($view, '不跨天凑门槛') !== false && strpos($view, '仅显示达标当天的会员明细') !== false,
 ];
 
 $passed = 0;
