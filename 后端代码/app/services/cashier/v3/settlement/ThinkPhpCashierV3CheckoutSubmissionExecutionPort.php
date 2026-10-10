@@ -1436,15 +1436,17 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 ? (array)$exception->detail()
                 : [];
             $detail['reason'] = $reason;
+            // 只翻译已知库存原因，保留原有冲突状态和事务回滚结果。
+            $inventoryMessage = CashierV3CheckoutInventoryFailureMessage::forReason($reason);
             if (preg_match('/(?:conflict|changed|stale|version)/', $reason) === 1) {
                 throw CashierV3CommandException::versionConflict(
-                    '结账资料刚刚发生变化，本次操作已回滚，请刷新后重试。',
+                    $inventoryMessage ?? '结账资料刚刚发生变化，本次操作已回滚，请刷新后重试。',
                     $detail
                 );
             }
             throw new CashierV3CommandException(
                 CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                '正式结账未能完整落账，本次操作已全部回滚，请重试。',
+                $inventoryMessage ?? '正式结账未能完整落账，本次操作已全部回滚，请重试。',
                 CashierV3ResultCode::STATUS_FAILED,
                 $detail
             );

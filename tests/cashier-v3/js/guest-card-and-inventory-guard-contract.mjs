@@ -10,6 +10,7 @@ const module = readFileSync(resolve(root, '后端代码/app/services/cashier/v3/
 const catalog = readFileSync(resolve(root, '后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php'), 'utf8')
 const customCard = readFileSync(resolve(root, '后端代码/app/services/cashier/v3/card/CashierV3CustomCardConfigurationServices.php'), 'utf8')
 const settlement = readFileSync(resolve(root, '后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php'), 'utf8')
+const inventoryFailureMessage = readFileSync(resolve(root, '后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutInventoryFailureMessage.php'), 'utf8')
 const cashierShell = readFileSync(resolve(root, '前端代码/cashier-v3/src/layouts/CashierShell.vue'), 'utf8')
 
 const memberMessage = '请先创建会员档案，再购买卡项。'
@@ -47,12 +48,13 @@ assert.match(catalog, /库存不足，当前可用库存为 %s，不能销售 %s
 assert.match(workbench, /cartQuantityValidationError = ref\(''\)/)
 assert.match(workbench, /CASHIER_CART_QUANTITY_INVALID/)
 assert.match(workbench, /reportCartQuantityFailure/)
-assert.match(settlement, /sale_inventory_stock_not_ready/)
-assert.match(settlement, /当前门店库存已变化或不足，本次结账未提交。请完成入库后重新结账。/)
+assert.match(settlement, /CashierV3CheckoutInventoryFailureMessage::forReason\(\$reason\)/)
+assert.match(inventoryFailureMessage, /sale_inventory_stock_not_ready/)
+assert.match(inventoryFailureMessage, /库存不足，未完成结账。/)
 
 console.log('PASS guest card and custom card are blocked before draft mutation')
 console.log('PASS member-list creation opens the full creator with the same permission gate')
 console.log('PASS backend repeats the guest card rule without trusting the UI')
 console.log('PASS inventory-managed products preflight default location, stock, and batch balance')
 console.log('PASS catalog stock text uses the same V3 stock and batch balance as checkout')
-console.log('PASS final checkout keeps a specific inventory failure for concurrent stock changes')
+console.log('PASS final checkout presents known inventory failures without hiding unrelated failures')
