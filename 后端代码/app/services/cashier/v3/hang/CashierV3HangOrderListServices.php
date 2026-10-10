@@ -91,7 +91,11 @@ final class CashierV3HangOrderListServices
                 'hangOrderNo' => (string)($row['hang_order_no'] ?? ''),
                 'hangAt' => $this->timeLabel((int)($row['occurred_at'] ?? $row['recorded_at'] ?? 0)),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
-                'phone' => '',
+                // 仅展示创建挂单时冻结的联系方式；旧单缺失快照保持空值。
+                'phone' => CashierV3HangMemberPhoneSnapshot::displayFromJson(
+                    $row['local_draft_snapshot_json'] ?? '',
+                    (int)($row['member_id'] ?? 0)
+                ),
                 // 来源只取挂单时冻结的名称；旧挂单不回查会员现值，避免历史显示漂移。
                 'source' => CashierV3HangCheckoutSourceSnapshot::displayLabelFromJson(
                     $row['local_draft_snapshot_json'] ?? '',
