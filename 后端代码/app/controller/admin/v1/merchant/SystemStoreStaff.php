@@ -454,12 +454,15 @@ class SystemStoreStaff extends AuthController
      * 组织工作台人员完整保存：路径 ID 明确为 employee_id。
      * 不允许 employee_id 数值碰撞到不相关的 system_store_staff.id。
      *
-     * @param int $employeeId employee_id；新建传 0
+     * 路由占位符为 :id，形参必须同名；否则框架会使用默认零，误走手机号复用
+     * 的新建路径，并忽略编辑页明确选择的人员类型。
+     *
+     * @param int $id employee_id；新建传 0
      * @return mixed
      */
-    public function savePersonComplete($employeeId = 0)
+    public function savePersonComplete($id = 0)
     {
-        return $this->saveStaffByIdentity((int)$employeeId, true);
+        return $this->saveStaffByIdentity((int)$id, true);
     }
 
     /**
@@ -482,6 +485,15 @@ class SystemStoreStaff extends AuthController
         $employeeId = (int)($raw['employee_id'] ?? 0);
         $storeId = (int)($raw['store_id'] ?? 0);
         $orgId = (int)($raw['org_id'] ?? 0);
+        // 清空必须携带详情中的原任职身份；普通编辑仍锁定原门店，不兼作调店。
+        $clearCurrentStore = (int)($raw['clear_current_store'] ?? 0) === 1;
+        if ($clearCurrentStore && ($storeId !== 0 || (int)($raw['clear_store_staff_id'] ?? 0) <= 0
+            || (!$explicitEmployee && $id !== (int)$raw['clear_store_staff_id']))) {
+            return $this->fail('清空当前门店的任职标识无效，请刷新后重试');
+        }
+        if ($clearCurrentStore && $this->adminType == 3 && !$this->agentId) {
+            return $this->fail('无法确认代理可管范围，不能清空当前任职门店');
+        }
         if ($explicitEmployee) {
             if ($id > 0) {
                 if ($employeeId > 0 && $employeeId !== $id) {
@@ -497,7 +509,8 @@ class SystemStoreStaff extends AuthController
             }
 
             // staff_id 只可作为同一员工既有任职的辅助信息，不能改变保存对象。
-            $requestedStaffId = (int)($raw['staff_id'] ?? 0);
+            $requestedStaffId = $clearCurrentStore
+                ? (int)$raw['clear_store_staff_id'] : (int)($raw['staff_id'] ?? 0);
             if ($requestedStaffId > 0) {
                 $requestedStaff = $this->services->get($requestedStaffId);
                 $requestedStaffArr = is_object($requestedStaff) ? $requestedStaff->toArray() : (array)$requestedStaff;
@@ -530,7 +543,7 @@ class SystemStoreStaff extends AuthController
                 if ((int)($staffArr['store_id'] ?? 0) > 0 && !$this->checkStaffStoreAccess((int)$staffArr['store_id'])) {
                     return $this->fail('无权操作该店员');
                 }
-                $storeId = (int)$staffArr['store_id'];
+                $storeId = $clearCurrentStore ? 0 : (int)$staffArr['store_id'];
                 $employeeId = (int)($staffArr['employee_id'] ?? $employeeId);
                 if ($orgId <= 0 && $employeeId > 0) {
                     $orgId = (int)Db::name('organization_employee')
@@ -630,6 +643,16 @@ class SystemStoreStaff extends AuthController
             'is_customer' => (int)($raw['is_customer'] ?? 0),
             'request_token' => $bodyToken,
         ];
+        // 显式转发原任职与版本，由同一保存事务校验并结束；不能只清空显示文本。
+        if ($clearCurrentStore) {
+            foreach (['clear_current_store', 'clear_store_id', 'current_store_version'] as $field) {
+                $input[$field] = $raw[$field] ?? null;
+            }
+            if (!array_key_exists('position_ids', $raw)) {
+                // 不回填将被结束的旧岗位，确保首提与幂等重放的命令内容相同。
+                unset($input['position_ids']);
+            }
+        }
         foreach (['roles', 'role_ids', 'save_roles', 'is_manager', 'is_butler', 'position', 'position_level'] as $k) {
             if (array_key_exists($k, $raw)) {
                 $input[$k] = $raw[$k];

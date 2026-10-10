@@ -47,7 +47,26 @@ class SystemStoreStaffDao extends BaseDao
      */
     public function search(array $where = [])
     {
-        return parent::search($where)->when(isset($where['keyword']) && $where['keyword'], function ($query) use ($where) {
+        return parent::search($where)->when(isset($where['person_status']), function ($query) use ($where) {
+            // 清空任职不等于员工离职。列表与 count 使用同一条件，避免在职筛选漏人/离职筛选误收。
+            // 仅显式清空且当前停用的任职读员工状态；普通停职、离职和已恢复任职不改历史口径。
+            $table = $query->getTable();
+            $cleared = static function ($sub) use ($table) {
+                $sub->name('staff_tenure_period')->alias('ct')
+                    ->whereColumn('ct.staff_id', '=', $table . '.id')
+                    ->where($table . '.status', 0)->where('ct.action', 'clear')->where('ct.is_del', 0);
+            };
+            $query->where(function ($conditions) use ($where, $table, $cleared) {
+                $conditions->where(function ($normal) use ($where, $cleared) {
+                    $normal->where('status', (int)$where['person_status'])->whereNotExists($cleared);
+                })->whereOr(function ($ended) use ($where, $table, $cleared) {
+                    $ended->where('status', 0)->whereExists($cleared)->whereExists(function ($employee) use ($where, $table) {
+                        $employee->name('employee')->alias('ce')->whereColumn('ce.id', '=', $table . '.employee_id')
+                            ->where('ce.is_del', 0)->where('ce.status', (int)$where['person_status']);
+                    });
+                });
+            });
+        })->when(isset($where['keyword']) && $where['keyword'], function ($query) use ($where) {
             if (!isset($where['field_key']) || $where['field_key'] == '') {
                 $query->whereLike('id|uid|staff_name|phone', '%' . $where['keyword'] . '%');
             } else {

@@ -122,6 +122,18 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $storeIds = $this->normalizeIntIds($input['store_ids'] ?? []);
         $scopeMode = trim((string)($input['scope_mode'] ?? EmployeeDataScopeServices::MODE_PERSONAL));
         $storeId = (int)($input['store_id'] ?? 0);
+        // 任职结束不接受门店端调用、伪造零门店或顺带改岗位；岗位只关闭不迁移。
+        $clearCurrentStore = (int)($input['clear_current_store'] ?? 0) === 1;
+        if ($clearCurrentStore && ($source !== 'hq' || $storeId !== 0 || $employeeIdHint <= 0
+            || $staffIdHint <= 0 || (int)($input['clear_store_id'] ?? 0) <= 0
+            || filter_var($input['current_store_version'] ?? null, FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => 0]]) === false || array_key_exists('position_ids', $input))) {
+            throw new AdminException('清空当前门店需有效任职及版本，且不能同时修改岗位');
+        }
+        // 清空任职不承担员工离职；历史授权版本 0 仍是有效的并发比较值。
+        if ($clearCurrentStore && array_key_exists('status', $input) && (int)$input['status'] !== 1) {
+            throw new AdminException('清空当前门店不能同时办理员工离职');
+        }
         $orgId = (int)($input['org_id'] ?? 0);
         $account = trim((string)($input['account'] ?? ''));
         $pwd = (string)($input['pwd'] ?? '');
@@ -164,6 +176,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'status' => $statusPresent ? $input['status'] : null,
             'status_version' => $statusPresent ? $input['status_version'] : null,
         ];
+        // 只扩展新命令的指纹；普通保存保持旧指纹结构，避免已成功请求重试时误报冲突。
+        if ($clearCurrentStore) {
+            $payload['clear_current_store'] = 1;
+            $payload['clear_store_id'] = (int)$input['clear_store_id'];
+            $payload['current_store_version'] = (int)$input['current_store_version'];
+        }
 
         if (empty($requestCtx['body_token']) && isset($input['request_token'])) {
             $requestCtx['body_token'] = trim((string)$input['request_token']);
@@ -289,6 +307,14 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         }
 
         $storeId = $staff ? (int)$staff['store_id'] : 0;
+        // 完整编辑读取的是当前任职；清空后的旧 staff 仅用于历史，不能回填并在保存时复活。
+        if ($source === 'hq' && $staff && (int)$staff['status'] === 0
+            && Db::name('staff_tenure_period')->where('staff_id', $staffId)
+                ->where('is_del', 0)->where('action', 'clear')->find()) {
+            $staff = null;
+            $staffId = 0;
+            $storeId = 0;
+        }
         $storeName = $storeId > 0
             ? (string)Db::name('system_store')->where('id', $storeId)->value('name')
             : '';
@@ -393,6 +419,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'org_name' => $orgName,
             'store_id' => $storeId,
             'store_name' => $storeName,
+            // 授权版本在调店/任职/岗位变更后递增，清空必须基于本次详情快照。
+            'current_store_version' => (int)($emp['auth_version'] ?? 1),
             'org_employee_id' => $oe ? (int)$oe['id'] : 0,
             'organization_memberships' => $organizationMemberships,
             'staff_name' => (string)($emp['name'] ?? ''),
@@ -560,6 +588,14 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'reason' => '人员完整保存',
             'allow_profile_update' => true,
         ];
+        $clearCurrentStore = (int)($input['clear_current_store'] ?? 0) === 1;
+        if ($clearCurrentStore) {
+            // 先锁定员工与原任职再改资料；后续任一步失败都会回滚任职结束与审计。
+            app()->make(\app\services\organization\StaffTenureServices::class)->clearCurrentStoreInTx(
+                $employeeIdHint, $staffIdHint, (int)$input['clear_store_id'],
+                (int)$input['current_store_version'], $adminInfo, $auditMeta
+            );
+        }
 
         // 门店“新增员工”不能按手机号复用既有主档绕过调店核对；编辑已调入的本店任职不受影响。
         if ($source === 'store' && $staffIdHint <= 0 && $employeeIdHint <= 0
@@ -694,7 +730,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                     'order_status' => $legacyOrderStatus,
                 ]);
             }
-        } elseif ($staffIdHint > 0) {
+        } elseif ($staffIdHint > 0 && !$clearCurrentStore) {
             throw new AdminException('无店直属不可绑定伪造门店任职');
         }
 

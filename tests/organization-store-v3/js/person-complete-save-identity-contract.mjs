@@ -13,7 +13,7 @@ const assertions = [
   ['explicit employee API uses a dedicated endpoint', staffApi.includes('merchant/staff/person_complete/save/${employeeId}')],
   ['organization form saves through the explicit employee API', staffForm.includes("this.scene === 'organization'\n        ? postPersonComplete(payload, Number(this.editId) || 0, headers)")],
   ['dedicated route is registered', routes.includes("Route::post('staff/person_complete/save/:id', 'v1.merchant.SystemStoreStaff/savePersonComplete')")],
-  ['controller keeps the legacy and explicit identity paths separate', controller.includes('return $this->saveStaffByIdentity((int)$id, false);') && controller.includes('return $this->saveStaffByIdentity((int)$employeeId, true);')],
+  ['controller keeps the legacy and explicit identity paths separate', controller.includes('return $this->saveStaffByIdentity((int)$id, false);') && controller.includes('return $this->saveStaffByIdentity((int)$id, true);')],
   ['explicit path rejects employee mismatch and unrelated staff', controller.includes("return $this->fail('路径员工与提交员工不一致');") && controller.includes("return $this->fail('任职与员工不匹配');")],
 ]
 

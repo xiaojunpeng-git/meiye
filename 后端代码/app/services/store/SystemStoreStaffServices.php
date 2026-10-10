@@ -338,6 +338,11 @@ class SystemStoreStaffServices extends BaseServices
      */
     public function getStoreStaffList(array $where, array $with = [], bool $hideFencheng = false)
     {
+        // 平台人员列表的清空任职行按员工主档筛选在职状态；其余历史任职维持原口径。
+        if (isset($where['status']) && $where['status'] !== '') {
+            $where['person_status'] = (int)$where['status'];
+            unset($where['status']);
+        }
         $organizationId = (int)($where['organization_id'] ?? 0);
         unset($where['organization_id']);
         if ($organizationId > 0) {
@@ -358,6 +363,7 @@ class SystemStoreStaffServices extends BaseServices
                 $this->enrichStaffListItem($item, $allRole, $userService, $hideFencheng);
             }
             unset($item);
+            $this->projectClearedCurrentStoreRows($list);
             $this->enrichStaffPositionLabels($list);
             $this->enrichMobileEnabled($list);
         }
@@ -397,8 +403,8 @@ class SystemStoreStaffServices extends BaseServices
             ->whereIn('oe.org_id', $orgIds)
             ->where('oe.is_del', 0)
             ->where('e.is_del', 0);
-        if (isset($where['status']) && $where['status'] !== '') {
-            $directQuery->where('e.status', (int)$where['status']);
+        if (isset($where['person_status']) && $where['person_status'] !== '') {
+            $directQuery->where('e.status', (int)$where['person_status']);
         }
         $keyword = trim((string)($where['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -471,7 +477,8 @@ class SystemStoreStaffServices extends BaseServices
             }
         }
         foreach ($pageStoreRows as $row) {
-            $row['employment_type_code'] = (string)($employmentTypeByEmployee[(int)($row['employee_id'] ?? 0)] ?? 'internal');
+            // 类型来自员工主档；历史空值必须原样显示为未分类，不能伪装成已保存的内部员工。
+            $row['employment_type_code'] = (string)($employmentTypeByEmployee[(int)($row['employee_id'] ?? 0)] ?? '');
             $this->enrichStaffListItem($row, $allRole, $userService, $hideFencheng, $bulkLookups);
             $row['is_organization_direct'] = 0;
             // 组织与任职门店是独立关系；名称来自当前门店绑定组织。
@@ -523,16 +530,59 @@ class SystemStoreStaffServices extends BaseServices
                 'position_level_label' => '-', 'status' => (int)($direct['status'] ?? 0),
                 'is_manager' => 0, 'can_choose' => 0, 'cashier_salesperson_enabled' => 0,
                 'cashier_craftsman_enabled' => 0, 'craftsman_performance_type' => 'commission',
-                'employment_type_code' => (string)($direct['employment_type_code'] ?? 'internal'),
+                'employment_type_code' => (string)($direct['employment_type_code'] ?? ''),
                 'mobile_enabled' => 0, 'is_fencheng' => 0, 'has_pwd' => 0,
                 'is_customer' => 0, 'is_reservable' => 0, 'customer_num' => 0,
                 'is_organization_direct' => 1,
             ];
         }
         unset($row);
+        $this->projectClearedCurrentStoreRows($list);
         $this->enrichStaffPositionLabels($list);
         $this->enrichMobileEnabled($list);
         return compact('list', 'count');
+    }
+
+    /**
+     * 清空后的 staff 仍保留历史门店身份；人员列表须投影为无店员工，不能冒充当前任职/全局离职。
+     * 只处理本页已有权限范围内的明确 clear 事实，不新增人员、不扩大查询范围、不修改历史行。
+     */
+    protected function projectClearedCurrentStoreRows(array &$list): void
+    {
+        $ids = [];
+        foreach ($list as $row) {
+            if ((int)($row['id'] ?? 0) > 0 && (int)($row['status'] ?? 0) === 0) {
+                $ids[] = (int)$row['id'];
+            }
+        }
+        if (!$ids) return;
+        $clearedIds = Db::name('staff_tenure_period')->whereIn('staff_id', $ids)
+            ->where('is_del', 0)->where('action', 'clear')->column('staff_id');
+        if (!$clearedIds) return;
+        $clearedSet = array_fill_keys(array_map('intval', $clearedIds), true);
+        $employeeIds = [];
+        foreach ($list as $row) {
+            if (isset($clearedSet[(int)($row['id'] ?? 0)])) {
+                $employeeIds[] = (int)($row['employee_id'] ?? 0);
+            }
+        }
+        $employees = Db::name('employee')->whereIn('id', $employeeIds)->where('is_del', 0)
+            ->column('id,name,phone,avatar,status,employment_type_code', 'id');
+        foreach ($list as &$row) {
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            if (!isset($clearedSet[(int)($row['id'] ?? 0)])
+                || !isset($employees[$employeeId])) continue;
+            $employee = $employees[$employeeId];
+            $row = array_merge($row, [
+                'id' => -$employeeId, 'store_id' => 0, 'store_name' => '',
+                'is_organization_direct' => 1, 'is_manager' => 0,
+                'position_label' => '-', 'position_ids' => [],
+                'staff_name' => $employee['name'], 'phone' => $employee['phone'], 'avatar' => $employee['avatar'],
+                'status' => (int)$employee['status'], 'employment_type_code' => (string)$employee['employment_type_code'],
+                'can_choose' => 0, 'cashier_salesperson_enabled' => 0, 'cashier_craftsman_enabled' => 0,
+            ]);
+        }
+        unset($row);
     }
 
     /** @return int[] */
@@ -1873,9 +1923,10 @@ class SystemStoreStaffServices extends BaseServices
         $item['craftsman_performance_enabled'] = $type === 'labor' ? 0 : 1;
         $item['craftsman_labor_enabled'] = $type === 'commission' ? 0 : 1;
         $item['mobile_enabled'] = (int)($item['mobile_enabled'] ?? 0) === 1 ? 1 : 0;
-        $employmentType = (string)($item['employment_type_code'] ?? 'internal');
+        // 列表与完整详情使用同一分类空值口径，不按岗位或历史分成标记推断类型。
+        $employmentType = (string)($item['employment_type_code'] ?? '');
         $item['employment_type_code'] = in_array($employmentType, ['internal', 'partner', 'outsourced'], true)
-            ? $employmentType : 'internal';
+            ? $employmentType : '';
         if ($hideFencheng) {
             unset($item['is_fencheng']);
         }
