@@ -857,10 +857,12 @@ final class CashierV3CashierWorkspaceServices
             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
         }
         $amounts = $this->couponLineAmounts((array)$line);
+        $options = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey);
         return [
             'lineId' => $lineKey,
             'lineAmountCents' => $amounts['threshold'],
-            'coupons' => $this->availableCoupons($memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey),
+            'coupons' => $options['available'],
+            'belowMinimumCoupons' => $options['belowMinimum'],
             'selectedCouponId' => (int)($line['coupon_user_id'] ?? 0),
         ];
     }
@@ -887,12 +889,14 @@ final class CashierV3CashierWorkspaceServices
             throw $this->incompleteDraft('local_coupon_line_invalid');
         }
         $amounts = ['threshold' => $thresholdCents, 'base' => $lineAmountCents, 'cap' => $lineAmountCents];
+        $options = $this->couponOptions(
+            $memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey, 0, $reservedCouponIds
+        );
         return [
             'lineId' => $lineKey,
             'lineAmountCents' => $thresholdCents,
-            'coupons' => $this->availableCoupons(
-                $memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey, 0, $reservedCouponIds
-            ),
+            'coupons' => $options['available'],
+            'belowMinimumCoupons' => $options['belowMinimum'],
             'selectedCouponId' => 0,
         ];
     }
@@ -918,7 +922,7 @@ final class CashierV3CashierWorkspaceServices
             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
         }
         $amounts = $this->couponLineAmounts((array)$line);
-        $coupons = $this->availableCoupons($memberId, $operatorScope->storeId(), $amounts, true, $workspaceId, $lineKey, $couponId);
+        $coupons = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, true, $workspaceId, $lineKey, $couponId)['available'];
         if (count($coupons) !== 1 || (int)$coupons[0]['couponId'] !== $couponId) {
             throw CashierV3CommandException::versionConflict('该优惠券当前不可使用，请重新选择。', ['coupon_id' => $couponId]);
         }
@@ -3480,7 +3484,14 @@ final class CashierV3CashierWorkspaceServices
         return ['threshold' => $threshold, 'base' => $base, 'cap' => $base];
     }
 
-    private function availableCoupons(
+    /**
+     * Read current member-owned coupons once for both display and the write guard.
+     * Below-minimum rows are read-only hints; the apply command consumes only
+     * `available` and repeats this check under a transaction lock.
+     *
+     * @return array{available:array<int,array<string,mixed>>,belowMinimum:array<int,array<string,mixed>>}
+     */
+    private function couponOptions(
         int $memberId,
         int $storeId,
         array $amounts,
@@ -3504,12 +3515,23 @@ final class CashierV3CashierWorkspaceServices
         $usedIds = Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)
             ->where('line_key', '<>', $lineKey)->where('coupon_user_id', '>', 0)->column('coupon_user_id');
         $used = array_fill_keys(array_merge(array_map('intval', $usedIds), array_map('intval', $reservedCouponIds)), true);
-        $out = [];
+        $available = [];
+        $belowMinimum = [];
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
-            $minimum = $this->decimalMoneyToCents($row['use_min_price'] ?? null, 'coupon_use_min_price_invalid');
-            if ($id <= 0 || isset($used[$id]) || $minimum > $amounts['threshold']) continue;
+            if ($id <= 0 || isset($used[$id])) continue;
             if (!$this->couponAllowsStore($row, $storeId)) continue;
+            $minimum = $this->decimalMoneyToCents($row['use_min_price'] ?? null, 'coupon_use_min_price_invalid');
+            if ($minimum > $amounts['threshold']) {
+                $belowMinimum[] = [
+                    'couponId' => $id,
+                    'name' => trim((string)$row['coupon_title']) ?: '优惠券',
+                    'useMinAmountCents' => $minimum,
+                    'shortfallCents' => $minimum - $amounts['threshold'],
+                    'expiresAt' => (int)($row['end_time'] ?? 0),
+                ];
+                continue;
+            }
             $face = $this->decimalMoneyToCents($row['coupon_price'] ?? null, 'coupon_price_invalid');
             if ((int)($row['coupon_type'] ?? 1) === 2) {
                 $rate = $this->decimalPercentHundredths($row['coupon_price'] ?? null);
@@ -3517,12 +3539,12 @@ final class CashierV3CashierWorkspaceServices
                 $top = $this->decimalMoneyToCents($row['top_discount_price'] ?? 0, 'coupon_top_discount_invalid');
                 if ($top > 0) $face = min($face, $top);
             }
-            $out[] = ['couponId' => $id, 'name' => trim((string)$row['coupon_title']) ?: '优惠券',
+            $available[] = ['couponId' => $id, 'name' => trim((string)$row['coupon_title']) ?: '优惠券',
                 'discountAmountCents' => min($face, $amounts['cap']),
                 'useMinAmountCents' => $minimum,
                 'expiresAt' => (int)($row['end_time'] ?? 0)];
         }
-        return $out;
+        return ['available' => $available, 'belowMinimum' => $belowMinimum];
     }
 
     private function couponAllowsStore(array $row, int $storeId): bool

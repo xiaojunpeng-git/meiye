@@ -278,7 +278,7 @@ final class ThinkPhpCashierV3CheckoutFactRepository
     private function amountColumns(string $domain): array
     {
         if ($domain === 'sale') {
-            return ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'sale_amount_cents'];
+            return ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'coupon_payment_cents', 'sale_amount_cents'];
         }
         if ($domain === 'balance') {
             return ['principal_delta_cents', 'bonus_delta_cents'];

@@ -122,11 +122,13 @@ final class CashierV3CardPurchaseIssuanceServices
             if ($quantity <= 0 || $quantity > 1000) {
                 throw self::failure('card_purchase_quantity_invalid');
             }
+            $lineIssueAmounts = null;
             for ($issueNo = 1; $issueNo <= $quantity; $issueNo++) {
                 $issued[] = $this->issueOneInTx(
                     $header,
                     $salesLine,
                     $issueNo,
+                    $lineIssueAmounts,
                     $workspaceId,
                     (string)($workspaceLineKeys[(string)($salesLine['checkout_line_id'] ?? '')] ?? ''),
                     $member,
@@ -151,6 +153,7 @@ final class CashierV3CardPurchaseIssuanceServices
         array $header,
         array $salesLine,
         int $issueNo,
+        ?array &$lineIssueAmounts,
         string $workspaceId,
         string $workspaceLineKey,
         array $member,
@@ -175,6 +178,13 @@ final class CashierV3CardPurchaseIssuanceServices
         if ($existing) {
             return $this->replay($existing, $header, $salesLine, $issueNo, $commandIdempotencyKey);
         }
+
+        // Historical receipts may predate the whole-yuan rule. Only a new
+        // issuance checks that rule; an existing receipt remains replayable.
+        if ($lineIssueAmounts === null) {
+            $lineIssueAmounts = $this->allocateIssueAmounts($salesLine, (int)$salesLine['quantity']);
+        }
+        $issueAmounts = $lineIssueAmounts[$issueNo];
 
         $customConfiguration = $this->lockCustomConfiguration(
             $header,
@@ -207,6 +217,7 @@ final class CashierV3CardPurchaseIssuanceServices
             $header,
             $salesLine,
             $issueNo,
+            $issueAmounts,
             $member,
             $occurredAt
         );
@@ -218,6 +229,7 @@ final class CashierV3CardPurchaseIssuanceServices
             $line,
             $validity,
             $issueNo,
+            $issueAmounts,
             $occurredAt
         );
         $components = $this->insertComponents(
@@ -271,6 +283,9 @@ final class CashierV3CardPurchaseIssuanceServices
             'baseCartId' => $baseCartId,
             'benefitDetailIds' => array_values((array)$components['benefitDetailIds']),
             'reportCategoryComponents' => $reportCategoryComponents,
+            // The receipt freezes per-card non-cash tender. Legacy
+            // coupon_price is a price-discount field and must remain zero.
+            'couponPaymentCents' => (int)$issueAmounts['couponCents'],
             'debtAmountCents' => 0,
             'cardRuleStateId' => (string)($ruleState['stateId'] ?? ''),
             'cardRuleType' => (string)($ruleState['ruleType'] ?? ''),
@@ -445,16 +460,18 @@ final class CashierV3CardPurchaseIssuanceServices
         array $header,
         array $salesLine,
         int $issueNo,
+        array $issueAmounts,
         array $member,
         int $now
     ): int
     {
         $lineId = (string)$salesLine['order_line_id'];
         $seed = strtolower($lineId . ':' . $issueNo);
-        $saleCents = $this->divideExactly((int)$salesLine['sale_amount_cents'], (int)$salesLine['quantity']);
-        $originalCents = $this->divideExactly((int)$salesLine['original_amount_cents'], (int)$salesLine['quantity']);
-        $discountCents = $this->divideExactly((int)$salesLine['discount_amount_cents'], (int)$salesLine['quantity']);
-        $collectedCents = $saleCents;
+        $saleCents = $issueAmounts['saleCents'];
+        $originalCents = $issueAmounts['originalCents'];
+        $discountCents = $issueAmounts['discountCents'];
+        $couponCents = $issueAmounts['couponCents'];
+        $collectedCents = $saleCents - $couponCents;
         $orderId = 'v3c' . substr(hash('sha256', $seed), 0, 28);
         $unique = md5('cashier-v3-card:' . $seed);
         $verifyCode = strtoupper(substr(hash('sha256', 'verify:' . $seed), 0, 12));
@@ -482,7 +499,7 @@ final class CashierV3CardPurchaseIssuanceServices
             'total_price' => self::money($originalCents),
             'settle_price' => self::money($saleCents),
             'total_postage' => '0.00',
-            'pay_price' => self::money($collectedCents),
+            'pay_price' => self::money($saleCents),
             'cash_pay_price' => self::money($collectedCents),
             'debt_amount' => '0.00',
             'repaid_debt_amount' => '0.00',
@@ -605,12 +622,14 @@ final class CashierV3CardPurchaseIssuanceServices
         array $line,
         array $validity,
         int $issueNo,
+        array $issueAmounts,
         int $now
     ): int {
-        $saleCents = $this->divideExactly((int)$salesLine['sale_amount_cents'], (int)$salesLine['quantity']);
-        $originalCents = $this->divideExactly((int)$salesLine['original_amount_cents'], (int)$salesLine['quantity']);
-        $discountCents = $this->divideExactly((int)$salesLine['discount_amount_cents'], (int)$salesLine['quantity']);
-        $collectedCents = $saleCents;
+        $saleCents = $issueAmounts['saleCents'];
+        $originalCents = $issueAmounts['originalCents'];
+        $discountCents = $issueAmounts['discountCents'];
+        $couponCents = $issueAmounts['couponCents'];
+        $collectedCents = $saleCents - $couponCents;
         $cartId = 'v3b' . substr(hash('sha256', (string)$salesLine['order_line_id'] . ':' . $issueNo), 0, 28);
         $cartInfo = [
             'sourceType' => 'cashier_v3_card_purchase',
@@ -628,7 +647,7 @@ final class CashierV3CardPurchaseIssuanceServices
                 'unique' => (string)($line['authority_snapshot']['sku']['unique'] ?? ''),
             ],
             'truePrice' => self::money($originalCents),
-            'pay_price' => self::money($collectedCents),
+            'pay_price' => self::money($saleCents),
             'write_times' => 0,
             'write_start' => $validity['writeStart'],
             'write_end' => $validity['writeEnd'],
@@ -1168,12 +1187,81 @@ final class CashierV3CardPurchaseIssuanceServices
         return $left * $right;
     }
 
-    private function divideExactly(int $amount, int $quantity): int
+    /**
+     * @return array<int,array{originalCents:int,discountCents:int,saleCents:int,couponCents:int}>
+     */
+    private function allocateIssueAmounts(array $salesLine, int $quantity): array
     {
-        if ($amount < 0 || $quantity <= 0 || $amount % $quantity !== 0) {
-            throw self::failure('card_purchase_unit_amount_invalid');
+        $original = (int)($salesLine['original_amount_cents'] ?? -1);
+        $discount = (int)($salesLine['discount_amount_cents'] ?? -1);
+        $sale = (int)($salesLine['sale_amount_cents'] ?? -1);
+        $coupon = (int)($salesLine['coupon_payment_cents'] ?? 0);
+        if ($quantity <= 0 || $original < 0 || $discount < 0 || $sale < 0
+            || $coupon < 0 || $coupon > $sale
+            || $discount > $original || $sale !== $original - $discount) {
+            throw self::failure('card_purchase_line_amount_invalid');
         }
-        return intdiv($amount, $quantity);
+
+        // Card amounts are whole yuan by product rule. A source amount with
+        // cents cannot be split into integer-yuan cards without changing the
+        // settled sales total, so fail closed before creating any card rights.
+        if ($original % 100 !== 0 || $discount % 100 !== 0 || $sale % 100 !== 0 || $coupon % 100 !== 0) {
+            throw self::failure('card_purchase_amount_not_integer_yuan');
+        }
+        $originalUnits = intdiv($original, 100);
+        $discountUnits = intdiv($discount, 100);
+        $couponUnits = intdiv($coupon, 100);
+        $originalBase = intdiv($originalUnits, $quantity);
+        $discountBase = intdiv($discountUnits, $quantity);
+        $couponBase = intdiv($couponUnits, $quantity);
+        $result = [];
+        for ($issueNo = 1; $issueNo <= $quantity; $issueNo++) {
+            // Issue order is the stable allocation order; the final card gets
+            // all remainder yuan while the formal sale line keeps its total.
+            $result[$issueNo] = [
+                'originalCents' => $originalBase + ($issueNo === $quantity ? $originalUnits % $quantity : 0),
+                'discountCents' => $discountBase + ($issueNo === $quantity ? $discountUnits % $quantity : 0),
+                'couponCents' => $couponBase + ($issueNo === $quantity ? $couponUnits % $quantity : 0),
+            ];
+        }
+        // Extremely small original values can leave the last card with less
+        // value than the discount tail. Move only that excess backwards so no
+        // card has a negative sale, without losing or inventing a yuan.
+        $excess = max(0, $result[$quantity]['discountCents'] - $result[$quantity]['originalCents']);
+        for ($issueNo = $quantity - 1; $issueNo >= 1 && $excess > 0; $issueNo--) {
+            $capacity = $result[$issueNo]['originalCents'] - $result[$issueNo]['discountCents'];
+            $shift = min($capacity, $excess);
+            $result[$issueNo]['discountCents'] += $shift;
+            $result[$quantity]['discountCents'] -= $shift;
+            $excess -= $shift;
+        }
+        if ($excess > 0) {
+            throw self::failure('card_purchase_line_amount_invalid');
+        }
+        // The voucher remainder must stay within each issued card's sale
+        // value. Move only overflow toward earlier cards; the total tender
+        // and whole-yuan allocation remain unchanged.
+        $lastSale = $result[$quantity]['originalCents'] - $result[$quantity]['discountCents'];
+        $couponExcess = max(0, $result[$quantity]['couponCents'] - $lastSale);
+        for ($issueNo = $quantity - 1; $issueNo >= 1 && $couponExcess > 0; $issueNo--) {
+            $capacity = $result[$issueNo]['originalCents'] - $result[$issueNo]['discountCents']
+                - $result[$issueNo]['couponCents'];
+            $shift = min($capacity, $couponExcess);
+            $result[$issueNo]['couponCents'] += $shift;
+            $result[$quantity]['couponCents'] -= $shift;
+            $couponExcess -= $shift;
+        }
+        if ($couponExcess > 0) {
+            throw self::failure('card_purchase_coupon_allocation_invalid');
+        }
+        foreach ($result as &$amounts) {
+            $amounts['saleCents'] = ($amounts['originalCents'] - $amounts['discountCents']) * 100;
+            $amounts['originalCents'] *= 100;
+            $amounts['discountCents'] *= 100;
+            $amounts['couponCents'] *= 100;
+        }
+        unset($amounts);
+        return $result;
     }
 
     private function json(array $value): string

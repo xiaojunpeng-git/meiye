@@ -75,6 +75,13 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                         $row['coupon_discount_cents'] ?? 0,
                         'sale.coupon_discount_cents'
                     ),
+                    // Voucher tender is not a sale discount. Keep it in the
+                    // final authority snapshot or coupon-bound drafts fail
+                    // validation after the cashier has balanced payment.
+                    'couponPaymentCents' => self::nonNegativeInt(
+                        $row['coupon_payment_cents'] ?? 0,
+                        'sale.coupon_payment_cents'
+                    ),
                     'saleAmountCents' => self::nonNegativeInt(
                         $row['sale_amount_cents'] ?? null,
                         'sale.sale_amount_cents'

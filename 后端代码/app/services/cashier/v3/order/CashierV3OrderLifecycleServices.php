@@ -646,7 +646,7 @@ final class CashierV3OrderLifecycleServices
             ->whereIn('order_line_id', $lineIds)
             ->where('line_direction', 'forward')
             ->where('line_status', 'settled')
-            ->field('order_line_id,item_name_snapshot,item_type,quantity,line_no,sale_amount_cents')
+            ->field('order_line_id,item_name_snapshot,item_type,quantity,line_no,sale_amount_cents,coupon_payment_cents')
             ->lock(true)->order('line_no', 'asc')->select()->toArray();
         if (count($rows) !== count($lineIds)) {
             throw self::failure('order_lifecycle_refund_line_scope_invalid');
@@ -662,6 +662,7 @@ final class CashierV3OrderLifecycleServices
                 'quantity' => (int)$row['quantity'],
                 'lineNo' => (int)$row['line_no'],
                 'saleAmountCents' => (int)$row['sale_amount_cents'],
+                'refundableAmountCents' => (int)$row['sale_amount_cents'] - (int)$row['coupon_payment_cents'],
             ];
         }, $rows);
     }
@@ -866,7 +867,10 @@ final class CashierV3OrderLifecycleServices
                         if ($amount <= 0) continue;
                         if ($amount > (int)$row['sale_amount_cents']) throw self::failure('order_lifecycle_refund_line_amount_exceeds_sale');
                         $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now, [
+                            // Financial refunds do not restore either legacy
+                            // discount coupons or new coupon tender.
                             'original_amount_cents' => -$amount, 'discount_amount_cents' => 0,
+                            'coupon_discount_cents' => 0, 'coupon_payment_cents' => 0,
                             'sale_amount_cents' => -$amount, 'debt_amount_cents' => 0,
                         ]);
                     }
@@ -879,6 +883,7 @@ final class CashierV3OrderLifecycleServices
                     $amount = (int)$amounts[$index];
                     $this->insertReversal($table, $row, $operationId, $commandKey, $event, $operator, $now, [
                         'original_amount_cents' => -$amount, 'discount_amount_cents' => 0,
+                        'coupon_discount_cents' => 0, 'coupon_payment_cents' => 0,
                         'sale_amount_cents' => -$amount, 'debt_amount_cents' => -(int)($debts[$index] ?? 0),
                     ]);
                 }
@@ -945,12 +950,12 @@ final class CashierV3OrderLifecycleServices
     }
 
     /**
-     * Allocates each refund component by immutable sale amounts.  The largest
+     * Allocates each refund component by the original refundable consideration. The largest
      * remainder rule keeps every component exact to the cent and deterministic.
      */
     private function allocateRefundLines(array $lines, array $input, array $financial): array
     {
-        $selectedAmount = array_sum(array_map(static function (array $line): int { return (int)$line['saleAmountCents']; }, $lines));
+        $selectedAmount = array_sum(array_map(static function (array $line): int { return (int)$line['refundableAmountCents']; }, $lines));
         $economic = (int)$financial['economicReversalCents'];
         if ($selectedAmount <= 0 || $economic <= 0 || $economic > $selectedAmount) {
             throw self::failure('order_lifecycle_refund_selected_sale_amount_invalid');
@@ -963,7 +968,7 @@ final class CashierV3OrderLifecycleServices
             $line['restorePrincipalCents'] = (int)$principal[$index];
             $line['restoreBonusCents'] = (int)$bonus[$index];
             $line['totalRefundCents'] = $line['cashRefundCents'] + $line['restorePrincipalCents'] + $line['restoreBonusCents'];
-            $line['allocationWeightNumerator'] = (int)$line['saleAmountCents'];
+            $line['allocationWeightNumerator'] = (int)$line['refundableAmountCents'];
             $line['allocationWeightDenominator'] = $selectedAmount;
             $lines[$index] = $line;
         }
@@ -975,7 +980,7 @@ final class CashierV3OrderLifecycleServices
     {
         $result = array_fill(0, count($lines), 0);
         if ($target === 0) return $result;
-        $total = array_sum(array_map(static function (array $line): int { return (int)$line['saleAmountCents']; }, $lines));
+        $total = array_sum(array_map(static function (array $line): int { return (int)$line['refundableAmountCents']; }, $lines));
         if ($target < 0 || $total <= 0) throw self::failure('order_lifecycle_refund_line_allocation_invalid');
 
         // Refund details are displayed in whole yuan. When the component itself
@@ -988,7 +993,7 @@ final class CashierV3OrderLifecycleServices
             $allocatedYuan = 0;
             $remainders = [];
             foreach ($lines as $index => $line) {
-                $product = $targetYuan * (int)$line['saleAmountCents'];
+                $product = $targetYuan * (int)$line['refundableAmountCents'];
                 $resultYuan = intdiv($product, $total);
                 $result[$index] = $resultYuan * 100;
                 $allocatedYuan += $resultYuan;
@@ -1017,7 +1022,7 @@ final class CashierV3OrderLifecycleServices
         $allocated = 0;
         $remainders = [];
         foreach ($lines as $index => $line) {
-            $product = bcmul((string)$target, (string)(int)$line['saleAmountCents'], 0);
+            $product = bcmul((string)$target, (string)(int)$line['refundableAmountCents'], 0);
             $result[$index] = (int)bcdiv($product, (string)$total, 0);
             $allocated += $result[$index];
             $remainders[] = ['index' => $index, 'remainder' => (int)bcmod($product, (string)$total), 'lineNo' => (int)$line['lineNo'], 'lineId' => (string)$line['lineId']];
@@ -1390,13 +1395,16 @@ final class CashierV3OrderLifecycleServices
     {
         $lines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $tenantId)->where('order_id', $orderId)
             ->where('line_direction', 'forward')->where('line_status', 'settled')
-            ->field('order_line_id,sale_amount_cents')->lock(true)->order('line_no', 'asc')->select()->toArray();
+            ->field('order_line_id,sale_amount_cents,coupon_payment_cents')->lock(true)->order('line_no', 'asc')->select()->toArray();
         $batch = (array)Db::name('cashier_v3_payment_collection_batch')->where('tenant_id', $tenantId)
             ->where('sales_order_id', $orderId)->where('batch_direction', 'forward')->where('batch_status', 'settled')
             ->field('cash_performance_amount_cents')->lock(true)->find();
         if (!$lines || !$batch) throw self::failure('personnel_adjustment_cash_authority_missing');
         $amount = (int)$batch['cash_performance_amount_cents'];
-        $total = array_sum(array_map(static function (array $line): int { return (int)$line['sale_amount_cents']; }, $lines));
+        // A voucher preserves gross card value but never earns cash performance.
+        $total = array_sum(array_map(static function (array $line): int {
+            return (int)$line['sale_amount_cents'] - (int)$line['coupon_payment_cents'];
+        }, $lines));
         // 全部为 0 元的订单仍可调整人员；其权威现金业绩为 0，不能进入除法分摊。
         if ($total === 0 && $amount === 0) {
             foreach ($lines as $line) {
@@ -1410,7 +1418,8 @@ final class CashierV3OrderLifecycleServices
         $allocated = 0;
         foreach (array_values($lines) as $index => $line) {
             $id = (string)$line['order_line_id'];
-            $product = bcmul((string)$amount, (string)(int)$line['sale_amount_cents'], 0);
+            $net = (int)$line['sale_amount_cents'] - (int)$line['coupon_payment_cents'];
+            $product = bcmul((string)$amount, (string)$net, 0);
             $share = (int)bcdiv($product, (string)$total, 0);
             $shares[$id] = $share;
             $remainders[] = ['id' => $id, 'remainder' => (int)bcmod($product, (string)$total), 'index' => $index];
@@ -1463,7 +1472,7 @@ final class CashierV3OrderLifecycleServices
         $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_direction'] = 'reversal'; $row['natural_key'] = 'order_lifecycle:reversal:' . hash('sha256', $table . '|' . $source['fact_id'] . '|' . $operationId); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = (string)$source['fact_id']; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now;
         if (!$amountOverrides) {
             $columns = $table === 'cashier_v3_sale_fact'
-                ? ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'sale_amount_cents', 'debt_amount_cents']
+                ? ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'coupon_payment_cents', 'sale_amount_cents', 'debt_amount_cents']
                 : ($table === 'cashier_v3_performance_fact' ? ['allocation_base_amount_cents', 'amount_cents', 'labor_fee_amount_cents'] : ['amount_cents']);
             foreach ($columns as $column) $row[$column] = -(int)($source[$column] ?? 0);
             if ($table === 'cashier_v3_performance_fact') {

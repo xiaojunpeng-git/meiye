@@ -28,7 +28,10 @@ final class CashierV3CheckoutCouponSettlementServices
         $consumed = [];
         foreach ($plan->lines() as $line) {
             $couponId = (int)($line['coupon_user_id'] ?? 0);
-            $discount = (int)($line['coupon_discount_cents'] ?? 0);
+            // Old orders used a price discount; new orders redeem the same
+            // coupon as non-cash tender. Both modes consume one coupon once.
+            $discount = (int)($line['coupon_discount_cents'] ?? 0)
+                + (int)($line['coupon_payment_cents'] ?? 0);
             if ($couponId === 0) continue;
             if (isset($consumed[$couponId])) throw self::failure('checkout_coupon_duplicate');
             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
@@ -42,7 +45,9 @@ final class CashierV3CheckoutCouponSettlementServices
                 || trim((string)($coupon['coupon_title'] ?? '')) !== trim((string)$line['coupon_name_snapshot'])
                 || $this->moneyCents($coupon['use_min_price'] ?? '0') > (int)$line['original_amount_cents']
                 || $discount <= 0
-                || $discount !== (int)($line['discount_amount_cents'] ?? -1)) {
+                || ((int)($line['coupon_payment_cents'] ?? 0) > 0
+                    ? ($discount > (int)($line['sale_amount_cents'] ?? 0))
+                    : ($discount !== (int)($line['discount_amount_cents'] ?? -1)))) {
                 throw self::failure('checkout_coupon_frozen_authority_changed');
             }
             $updated = Db::name('store_coupon_user')->where('id', $couponId)

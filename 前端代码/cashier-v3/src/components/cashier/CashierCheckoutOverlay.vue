@@ -179,7 +179,13 @@ const snapshotSaleAmount = (line = {}, original = false) => {
   // Local preview rows can still carry a unit amount. Persisted rows already
   // carry the line total, so only browser-local rows are multiplied here.
   const isLocal = String(line.id || '').startsWith('local-')
-  return raw * (isLocal ? Math.max(1, Number(line.quantity || 1)) : 1)
+  const lineAmount = raw * (isLocal ? Math.max(1, Number(line.quantity || 1)) : 1)
+  // An already-open preview may predate explicit line totals. Its local unit
+  // price is before the whole-row coupon, which must be deducted only once.
+  if (!original && isLocal && !isRecord(line.cardPurchaseSnapshot?.multiCardUpgrade)) {
+    return Math.max(0, lineAmount - Math.max(0, Number(line.couponDiscountCents || 0)) / 100)
+  }
+  return lineAmount
 }
 const snapshotReceivableSummary = computed(() => {
   const lines = Array.isArray(props.checkout.lines) ? props.checkout.lines : []
@@ -187,14 +193,26 @@ const snapshotReceivableSummary = computed(() => {
   if (!saleLines.length) return null
   const originalAmount = saleLines.reduce((total, line) => total + snapshotSaleAmount(line, true), 0)
   const saleAmount = saleLines.reduce((total, line) => total + snapshotSaleAmount(line), 0)
+  const localCouponAmount = saleLines.reduce((total, line) => (
+    total + (String(line.id || '').startsWith('local-')
+      ? Math.max(0, Number(line.couponDiscountCents || 0)) / 100 : 0)
+  ), 0)
+  const couponPaymentAmount = saleLines.reduce((total, line) => (
+    total + (String(line.id || '').startsWith('local-')
+      ? 0 : Math.max(0, Number(line.couponPaymentAmount || 0)))
+  ), localCouponAmount)
+  // Browser rows carry net payable while persisted settlement rows carry the
+  // pre-voucher sale; normalize both before showing price discount and due.
+  const grossSaleAmount = saleAmount + localCouponAmount
   const debtAmount = saleLines.reduce((total, line) => {
     const cents = Number(line?.debtAmountCents || 0)
     return total + (Number.isSafeInteger(cents) && cents > 0 ? cents / 100 : 0)
   }, 0)
-  const receivableAmount = Math.max(0, saleAmount - debtAmount)
+  const receivableAmount = Math.max(0, grossSaleAmount - couponPaymentAmount - debtAmount)
   return {
     originalAmount,
-    discountAmount: Math.max(0, originalAmount - saleAmount),
+    discountAmount: Math.max(0, originalAmount - grossSaleAmount),
+    couponPaymentAmount,
     receivableAmount
   }
 })
@@ -1475,6 +1493,7 @@ onBeforeUnmount(() => {
           <div v-if="isCardOperationUpgrade"><dt>补差应收</dt><dd>{{ formatMoney(cardOperationDeltaAmount) }}</dd></div>
           <div v-else-if="hasSaleLines || isDebtRepayment"><dt>应收</dt><dd>{{ formatMoney(checkoutSummary.receivableAmount) }}</dd></div>
           <div v-if="hasSaleLines"><dt>优惠</dt><dd>{{ formatMoney(checkoutSummary.discountAmount) }}</dd></div>
+          <div v-if="hasSaleLines && Number(checkoutSummary.couponPaymentAmount || 0) > 0"><dt>抵用券抵付</dt><dd>{{ formatMoney(checkoutSummary.couponPaymentAmount) }}</dd></div>
           <div v-if="hasSaleLines || isDebtRepayment"><dt>欠款</dt><dd>{{ formatMoney(checkout.debtAmount) }}</dd></div>
           <div v-if="hasSaleLines || isDebtRepayment"><dt>收款</dt><dd>{{ formatMoney(checkoutCollectionAmount) }}</dd></div>
           <div v-if="!isCardOperationUpgrade && (hasSaleLines || isDebtRepayment)"><dt>余额支付</dt><dd>{{ formatMoney(checkoutBalancePaymentAmount) }}</dd></div>

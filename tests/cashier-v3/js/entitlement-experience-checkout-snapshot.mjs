@@ -10,6 +10,7 @@ const names = [
   'recalculateLocalCashierDraft', 'localCheckoutPreviewSnapshot', 'buildCheckoutSnapshot',
   'cartLineExperienceSelected', 'checkoutSnapshotBusinessLines', 'checkoutSnapshotPaymentLines',
   'checkoutLineRole', 'checkoutSnapshotReceivableAmount', 'localDraftLineTotalAmountCents',
+  'localDraftLinePayableAmountCents',
   'moneyToCents', 'centsToMoney', 'isLocalCashierDraftLine', 'localCheckoutPaymentMethods'
 ]
 // Execute the real browser snapshot functions with local refs; no HTTP writes,
@@ -119,4 +120,62 @@ for (const [field, staffId] of [['craftsmen', 22], ['salespeople', 23], ['guideS
 merged.lines[0].craftsmen[0].staffId = 99
 equal(context.localPersonnelAssignments.value['local-default'].craftsmen[0].staffId, 22,
   'snapshot mutation must not alter the selected personnel')
+
+// A coupon discounts one whole sale row even when its local editor still
+// stores a per-item price. The displayed payable and final HTTP snapshot
+// must agree before any payment method is selected.
+context.localLineServiceSettings.value = {}
+context.localPersonnelAssignments.value = {}
+context.localCashierDraft.value = { memberId: 1, lines: [{
+  id: 'local-coupon-sale', lineRole: 'sale', kind: '产品', name: '东方熏蒸',
+  quantity: 3, amount: 3960, finalAmount: 3960, originalAmount: 3960,
+  couponId: '16833', couponSummary: '老友答谢券', couponDiscountCents: 100000,
+  craftsmen: []
+}] }
+const couponPreview = context.localCheckoutPreviewSnapshot()
+equal(couponPreview.summary.receivableAmount, 10880, 'preview must subtract the coupon once from three items')
+equal(couponPreview.lines[0].couponDiscountCents, 100000, 'preview must retain the selected coupon')
+equal(couponPreview.lines[0].lineAmountCents, 1088000, 'preview line must freeze the discounted total for checkout display')
+equal(couponPreview.lines[0].originalLineAmountCents, 1188000, 'preview line must freeze the original total')
+const couponSnapshot = context.buildCheckoutSnapshot(couponPreview)
+equal(couponSnapshot.lines[0].lineAmountCents, 1088000, 'final sale amount must match the preview')
+equal(couponSnapshot.lines[0].originalLineAmountCents, 1188000, 'original sale amount must use all three items')
+equal(couponSnapshot.lines[0].couponDiscountCents, 100000, 'final snapshot must freeze one coupon discount')
+equal(context.checkoutSnapshotReceivableAmount(couponSnapshot.lines), 10880, 'payment equality guard must use discounted receivable')
+
+// Exercise the checkout overlay's real display calculation too: a payment
+// amount can be correct while its independently rendered "应收" is stale.
+const overlaySource = fs.readFileSync(new URL('../../../前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue', import.meta.url), 'utf8')
+const amountStart = overlaySource.indexOf('const snapshotSaleAmount =')
+const amountEnd = overlaySource.indexOf('\nconst snapshotReceivableSummary', amountStart)
+assert.ok(amountStart >= 0 && amountEnd > amountStart, 'checkout display calculation must exist')
+vm.runInContext(overlaySource.slice(amountStart, amountEnd), context)
+context.couponPreviewLine = couponPreview.lines[0]
+equal(vm.runInContext('snapshotSaleAmount(couponPreviewLine)', context), 10880,
+  'checkout displayed receivable must match the three-item payment amount')
+const olderPreviewLine = { ...couponPreview.lines[0] }
+delete olderPreviewLine.lineAmountCents
+delete olderPreviewLine.originalLineAmountCents
+context.couponPreviewLine = olderPreviewLine
+equal(vm.runInContext('snapshotSaleAmount(couponPreviewLine)', context), 10880,
+  'an already-open preview must still subtract its coupon once')
+context.localCashierDraft.value.lines[0].quantity = 4
+context.localCashierDraft.value.lines[0].amount = 3180
+context.localCashierDraft.value.lines[0].finalAmount = 3180
+context.localCashierDraft.value.lines[0].originalAmount = 3180
+const fourItemPreview = context.localCheckoutPreviewSnapshot()
+context.couponPreviewLine = fourItemPreview.lines[0]
+equal(fourItemPreview.lines[0].lineAmountCents, 1172000,
+  'four-item preview must subtract one coupon from the row total')
+equal(fourItemPreview.lines[0].originalLineAmountCents, 1272000,
+  'four-item preview must preserve the original row total')
+equal(vm.runInContext('snapshotSaleAmount(couponPreviewLine)', context), 11720,
+  'four-item checkout display must use the discounted line total')
+equal(vm.runInContext('snapshotSaleAmount(couponPreviewLine, true)', context), 12720,
+  'four-item checkout display must retain the original amount')
+equal(context.checkoutSnapshotReceivableAmount(fourItemPreview.lines), 11720,
+  'four-item payment guard must agree with the displayed receivable')
+context.couponPreviewLine = { ...fourItemPreview.lines[0], lineAmountCents: undefined, originalLineAmountCents: undefined }
+equal(vm.runInContext('snapshotSaleAmount(couponPreviewLine)', context), 11720,
+  'an already-open four-item preview must display the discounted amount')
 console.log(`ENTITLEMENT_EXPERIENCE_CHECKOUT_SNAPSHOT=PASS checks=${checks}`)

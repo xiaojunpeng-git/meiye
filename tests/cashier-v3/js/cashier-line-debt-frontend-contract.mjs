@@ -14,8 +14,8 @@ assert.match(workbench, /<div class="cart-line__meta-slot cart-line__meta-slot--
   '欠款隐藏时必须保留固定位置插槽')
 assert.match(workbench, /function handleDebtEditorAmountInput\(event\) \{[\s\S]*?replace\(\/\\D\/g, ''\)/,
   '欠款输入框必须在输入时过滤非数字字符')
-assert.match(workbench, /function lineSaleAmountCents\(line = \{\}\) \{[\s\S]*?return localDraftLineTotalAmountCents\(line\)/,
-  '欠款上限必须复用结账行合计：本地单价乘数量，已保存行直接使用行合计')
+assert.match(workbench, /function lineSaleAmountCents\(line = \{\}\) \{[\s\S]*?return localDraftLinePayableAmountCents\(line\)/,
+  '欠款上限必须复用结账应付行合计：本地单价乘数量并扣一次券额')
 assert.doesNotMatch(workbench, /function confirmCheckoutDebt\(\) \{[\s\S]*?欠款金额必须为整数元。/,
   '确认欠款不再承担输入格式校验')
 assert.doesNotMatch(workbench, /debtAmountCents:\s*checkoutDebtAmountCents\.value/,

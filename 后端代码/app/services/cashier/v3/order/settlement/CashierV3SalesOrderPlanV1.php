@@ -72,7 +72,7 @@ final class CashierV3SalesOrderPlanV1
         'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
-        'coupon_user_id', 'coupon_name_snapshot', 'coupon_discount_cents',
+        'coupon_user_id', 'coupon_name_snapshot', 'coupon_discount_cents', 'coupon_payment_cents',
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
@@ -220,8 +220,9 @@ final class CashierV3SalesOrderPlanV1
         $lineDebtAmount = self::sum($saleLines, 'debt_amount_cents');
         $originalAmount = self::sum($saleLines, 'original_amount_cents');
         $discountAmount = self::sum($saleLines, 'discount_amount_cents');
+        $couponPaymentAmount = self::sum($saleLines, 'coupon_payment_cents');
         if ($saleAmount !== $request['sales_amount_cents'] + $credit['amountCents']
-            || $request['receivable_amount_cents'] + $credit['amountCents'] !== $saleAmount - $lineDebtAmount
+            || $request['receivable_amount_cents'] + $credit['amountCents'] !== $saleAmount - $lineDebtAmount - $couponPaymentAmount
             || $originalAmount - $discountAmount !== $saleAmount
             || $lineDebtAmount !== $request['debt_amount_cents']) {
             throw self::failure('sales_order_checkout_total_mismatch');
@@ -236,7 +237,7 @@ final class CashierV3SalesOrderPlanV1
             $credit['amountCents'],
             'sales_order_entitlement_credit_total_overflow'
         );
-        if ($settlementTotal !== $saleAmount - $lineDebtAmount) {
+        if ($settlementTotal + $couponPaymentAmount !== $saleAmount - $lineDebtAmount) {
             throw self::failure('sales_order_checkout_not_balanced');
         }
         self::assertComposition(
@@ -297,6 +298,7 @@ final class CashierV3SalesOrderPlanV1
                 'coupon_user_id' => $line['coupon_user_id'],
                 'coupon_name_snapshot' => $line['coupon_name_snapshot'],
                 'coupon_discount_cents' => $line['coupon_discount_cents'],
+                'coupon_payment_cents' => $line['coupon_payment_cents'],
                 'sale_amount_cents' => $line['sale_amount_cents'],
                 'debt_amount_cents' => $line['debt_amount_cents'],
                 'manual_labor_fee_cents' => $line['manual_labor_fee_cents'],
@@ -864,6 +866,7 @@ final class CashierV3SalesOrderPlanV1
         $couponUserId = self::nonNegativeInt($row['coupon_user_id'], 'sales_order_coupon_user_invalid');
         $couponName = self::text($row['coupon_name_snapshot'], 128, 'sales_order_coupon_name_invalid', true);
         $couponDiscount = self::money($row['coupon_discount_cents'], 'sales_order_coupon_discount_invalid');
+        $couponPayment = self::money($row['coupon_payment_cents'] ?? 0, 'sales_order_coupon_payment_invalid');
         $debt = self::money($row['debt_amount_cents'], 'sales_order_debt_amount_invalid');
         $configuredCost = self::money(
             $row['configured_cost_cents'],
@@ -889,12 +892,15 @@ final class CashierV3SalesOrderPlanV1
             $row['price_changed_at'],
             'sales_order_price_changed_at_invalid'
         );
-        if ($discount > $original || $sale !== $original - $discount || $debt > $sale) {
+        if ($discount > $original || $sale !== $original - $discount
+            || $couponPayment > $sale || $debt > $sale - $couponPayment
+            || ($couponDiscount > 0 && $couponPayment > 0)) {
             throw self::failure('sales_order_line_amount_equation_invalid');
         }
         if ($couponUserId === 0
-            ? ($couponName !== '' || $couponDiscount !== 0)
-            : ($couponName === '' || $couponDiscount <= 0 || $couponDiscount > $discount)) {
+            ? ($couponName !== '' || $couponDiscount !== 0 || $couponPayment !== 0)
+            : ($couponName === '' || ($couponDiscount <= 0 && $couponPayment <= 0)
+                || $couponDiscount > $discount)) {
             throw self::failure('sales_order_coupon_snapshot_invalid');
         }
         $costOverflow = $configuredCost > 0
@@ -1019,6 +1025,9 @@ final class CashierV3SalesOrderPlanV1
             'salesManagerSelections' => $salesManagerSelections,
             'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
         ];
+        if ($couponPayment > 0) {
+            $authority['couponPaymentCents'] = $couponPayment;
+        }
         if ($detailRemark !== '') {
             $authority['detailRemark'] = $detailRemark;
         }
@@ -1095,6 +1104,7 @@ final class CashierV3SalesOrderPlanV1
             'coupon_user_id' => $couponUserId,
             'coupon_name_snapshot' => $couponName,
             'coupon_discount_cents' => $couponDiscount,
+            'coupon_payment_cents' => $couponPayment,
             'sale_amount_cents' => $sale,
             'debt_amount_cents' => $debt,
             'configured_cost_cents' => $configuredCost,

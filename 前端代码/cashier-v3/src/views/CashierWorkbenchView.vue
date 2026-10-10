@@ -79,6 +79,7 @@ const debtEditor = ref(null)
 const debtEditorAmount = ref('')
 const couponSelector = ref(null)
 const isSavingLineCoupon = ref(false)
+const isRefreshingLineCoupon = ref(false)
 const moreActionEditor = ref(null)
 const moreActionValue = ref('')
 const moreActionReason = ref('')
@@ -718,7 +719,7 @@ function checkoutSnapshotReceivableAmount(lines = []) {
   const saleLines = (Array.isArray(lines) ? lines : [])
     .filter((line) => checkoutLineRole(line) === 'sale')
   const salesCents = saleLines.reduce((total, line) => (
-    total + localDraftLineTotalAmountCents(line)
+    total + localDraftLinePayableAmountCents(line)
   ), 0)
   const debtCents = saleLines.reduce((total, line) => (
     total + lineDebtAmountCents(line)
@@ -748,6 +749,18 @@ function localDraftLineTotalAmountCents(line = {}, amount = getLineAmount(line))
   return isLocalCashierDraftLine(line)
     ? cents * Math.max(1, Number(line.quantity || 1))
     : cents
+}
+
+function localDraftLinePayableAmountCents(line = {}) {
+  const total = localDraftLineTotalAmountCents(line)
+  // Browser-owned rows keep a unit price. A coupon belongs to the whole row,
+  // so subtract it once after multiplying by quantity, never once per item.
+  // Multi-card upgrades already materialize the coupon into finalAmount when
+  // old-card credit is recalculated; subtracting again would undercharge.
+  if (isRecord(line.cardPurchaseSnapshot?.multiCardUpgrade)) return total
+  return isLocalCashierDraftLine(line)
+    ? Math.max(0, total - Math.max(0, Number(line.couponDiscountCents || 0)))
+    : total
 }
 
 function recalculateLocalCashierDraft(draft) {
@@ -780,7 +793,10 @@ function recalculateLocalCashierDraft(draft) {
     total + localDraftLineTotalAmountCents(line, line.originalAmount ?? getLineAmount(line))
   ), 0)
   const saleAmountCents = saleLines.reduce((total, line) => (
-    total + localDraftLineTotalAmountCents(line)
+    total + localDraftLinePayableAmountCents(line)
+  ), 0)
+  const couponPaymentCents = saleLines.reduce((total, line) => (
+    total + Math.max(0, Number(line.couponDiscountCents || 0))
   ), 0)
   const debtAmountCents = saleLines.reduce((total, line) => (
     total + lineDebtAmountCents(line)
@@ -790,7 +806,10 @@ function recalculateLocalCashierDraft(draft) {
     ...(draft.summary || {}),
     selectedCount: lines.reduce((total, line) => total + Math.max(1, Number(line.quantity || 1)), 0),
     originalAmount: centsToMoney(originalAmountCents),
-    discountAmount: centsToMoney(Math.max(0, originalAmountCents - saleAmountCents)),
+    // The workspace keeps net payable; coupon tender restores the purchase
+    // value before calculating the separate price-discount summary.
+    discountAmount: centsToMoney(Math.max(0, originalAmountCents - saleAmountCents - couponPaymentCents)),
+    couponPaymentAmount: centsToMoney(couponPaymentCents),
     receivableAmount: centsToMoney(receivableAmountCents),
     orderNote: String(draft.orderNote || ''),
     hasOrderNote: Boolean(String(draft.orderNote || '').trim())
@@ -1064,6 +1083,19 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
     }
     if (action === 'change-cart-line-quantity') {
       target.quantity = Math.max(1, Number(target.quantity || 1) + Number(payload.delta || 0))
+      if (target.couponId) {
+        // The previous coupon decision was made for a different line total.
+        // Require a fresh selector lookup before the edited row can use it.
+        if (!isLocalCashierDraftLine(target) && target.couponBaseAmount !== undefined) {
+          target.finalAmount = target.couponBaseAmount
+          target.amount = target.finalAmount
+          refreshMultiCardUpgradePayable(target, moneyToCents(target.finalAmount))
+        }
+        delete target.couponId
+        delete target.couponSummary
+        delete target.couponDiscountCents
+        delete target.couponBaseAmount
+      }
       if (isEntitlementLine(target) && isLocalCashierDraftLine(target)) {
         // The local row stores the amount for its whole selected quantity.
         // Rebuild it after a quantity edit so the final checkout snapshot
@@ -1109,13 +1141,16 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
         isRecord(multiUpgrade) ? Number(multiUpgrade.targetSaleAmountCents || 0) / 100 : (target.finalAmount ?? target.amount)
       ))
       target.couponBaseAmount = centsToMoney(baseAmount)
-      target.couponDiscountCents = Math.min(baseAmount, Math.max(0, Number(payload.discountAmountCents || 0)))
+      const couponCap = isLocalCashierDraftLine(target)
+        ? localDraftLineTotalAmountCents(target, target.couponBaseAmount)
+        : baseAmount
+      target.couponDiscountCents = Math.min(couponCap, Math.max(0, Number(payload.discountAmountCents || 0)))
       if (isRecord(multiUpgrade)) {
         // A coupon discounts the target-card sale price before old-card
         // credit.  Keep the target price itself immutable in the one final
         // upgrade snapshot; refresh then derives the net collection amount.
         refreshMultiCardUpgradePayable(target, baseAmount)
-      } else {
+      } else if (!isLocalCashierDraftLine(target)) {
         target.finalAmount = centsToMoney(baseAmount - target.couponDiscountCents)
         target.amount = target.finalAmount
       }
@@ -1126,8 +1161,10 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
       delete target.couponSummary
       delete target.couponDiscountCents
       if (target.couponBaseAmount !== undefined) {
-        target.finalAmount = target.couponBaseAmount
-        target.amount = target.finalAmount
+        if (!isLocalCashierDraftLine(target)) {
+          target.finalAmount = target.couponBaseAmount
+          target.amount = target.finalAmount
+        }
         delete target.couponBaseAmount
         refreshMultiCardUpgradePayable(target, moneyToCents(target.finalAmount))
       }
@@ -3927,18 +3964,23 @@ function normalizeCouponSelector(selector = {}, line = {}) {
       couponId: String(coupon?.couponId || '')
     }))
     .filter((coupon) => coupon.couponId)
+  const belowMinimumCoupons = (Array.isArray(selector.belowMinimumCoupons) ? selector.belowMinimumCoupons : [])
+    .map((coupon) => ({ ...coupon, couponId: String(coupon?.couponId || '') }))
+    .filter((coupon) => coupon.couponId)
   return {
     ...selector,
     lineId: String(selector.lineId || line.id || ''),
     lineName: String(selector.lineName || line.name || ''),
-    lineAmountCents: Number(selector.lineAmountCents ?? Math.round(Number(getLineAmount(line) || 0) * 100)),
+    lineAmountCents: Number(selector.lineAmountCents ?? localDraftLineTotalAmountCents(line)),
     selectedCouponId: String(selector.selectedCouponId || ''),
-    coupons
+    coupons,
+    belowMinimumCoupons
   }
 }
 
-async function openCartLineCoupon(line) {
+async function openCartLineCoupon(line, { present = true } = {}) {
   if (isEntitlementLine(line)) return
+  if (present && isRefreshingLineCoupon.value) return
   activeCartLineId.value = line.id
   // 本地草稿可能同时投影旧服务端行和新临时行。只要当前存在本地草稿，
   // 所有券选择都必须写入同一份本地快照，不能按单行 ID 退回旧接口。
@@ -3949,7 +3991,10 @@ async function openCartLineCoupon(line) {
       .map((candidate) => Number(candidate?.couponId || 0))
       .filter((couponId) => Number.isInteger(couponId) && couponId > 0)
     : []
-  const lineAmountCents = moneyToCents(getLineAmount(line))
+  const lineAmountCents = localDraftLineTotalAmountCents(
+    line,
+    line.couponBaseAmount ?? getLineAmount(line)
+  )
   const couponThresholdCents = Math.max(
     lineAmountCents,
     Number(line?.cardOperationUpgrade?.targetAmountCents || 0)
@@ -3990,7 +4035,9 @@ async function openCartLineCoupon(line) {
     }))
     return
   }
-  couponSelector.value = normalizeCouponSelector(selector, line)
+  const normalized = normalizeCouponSelector(selector, line)
+  if (present) couponSelector.value = normalized
+  return normalized
 }
 
 async function saveLineCoupon(action, couponId = '') {
@@ -4004,6 +4051,8 @@ async function saveLineCoupon(action, couponId = '') {
   isSavingLineCoupon.value = true
   try {
     const coupon = (couponSelector.value?.coupons || []).find((item) => String(item?.couponId || '') === String(couponId || ''))
+    // The read-only below-minimum list must never enter a local draft command.
+    if (couponId && !coupon) return
     const payload = couponId
       ? {
           couponId,
@@ -4044,7 +4093,7 @@ function lineSaleAmountCents(line = {}) {
   // while persisted workspace rows already carry a line total.  Reuse the
   // same normalizer as the checkout summary so a changed unit price can
   // never make the debt editor validate against only one item in the row.
-  return localDraftLineTotalAmountCents(line)
+  return localDraftLinePayableAmountCents(line)
 }
 
 function personnelPerformanceBaseAmountCents(line = {}) {
@@ -4977,13 +5026,54 @@ function openSupplementDateEditor() {
 
 async function changeLineQuantity(line, delta) {
   activeCartLineId.value = line.id
-  const result = await mutateCashierDraft('change-cart-line-quantity', line, { delta })
+  const result = await changeLineQuantityWithCoupon(line, delta)
   if (['failed', 'conflict'].includes(resultStatus(result))) {
     reportCartQuantityFailure(result, '购物车数量更新失败，请重试。')
   } else {
     cartQuantityValidationError.value = ''
   }
   return result
+}
+
+async function changeLineQuantityWithCoupon(line, delta) {
+  if (isRefreshingLineCoupon.value) return { result: { status: 'failed', message: '优惠券正在按新数量校验，请稍候。' } }
+  const selectedCouponId = String(line.couponId || '')
+  if (selectedCouponId) isRefreshingLineCoupon.value = true
+  try {
+    const result = await mutateCashierDraft('change-cart-line-quantity', line, { delta })
+    if (!['success', 'succeeded'].includes(resultStatus(result)) || !selectedCouponId) return result
+    const latest = cartLines.value.find((item) => String(item.id) === String(line.id))
+    const scopeKey = currentCashierDraftScopeKey.value
+    const quantity = Number(latest?.quantity || 0)
+    if (!latest || quantity < 1) return result
+    // Quantity changes invalidate the old decision. Re-read the member's
+    // current coupon authority, then restore only the same coupon if its new
+    // line total still qualifies; percentage discounts must be recalculated.
+    let selector
+    try {
+      selector = await openCartLineCoupon(latest, { present: false })
+    } catch (_) {
+      // The quantity itself remains valid; an unavailable coupon lookup must
+      // not silently reinstate a stale discount in the checkout snapshot.
+    }
+    const coupon = (selector?.coupons || []).find((item) => String(item.couponId) === selectedCouponId)
+    const current = cartLines.value.find((item) => String(item.id) === String(line.id))
+    if (scopeKey !== currentCashierDraftScopeKey.value || Number(current?.quantity || 0) !== quantity) return result
+    if (coupon) {
+      const applied = await mutateCashierDraft('apply-line-coupon', current, {
+        couponId: selectedCouponId,
+        couponSummary: String(coupon.name || '已选优惠券'),
+        discountAmountCents: Math.max(0, Number(coupon.discountAmountCents || 0))
+      })
+      if (['success', 'succeeded'].includes(resultStatus(applied))) return result
+    }
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'info', message: '数量已更新，原优惠券未能继续使用，请重新选券。' }
+    }))
+    return result
+  } finally {
+    isRefreshingLineCoupon.value = false
+  }
 }
 
 function entitlementLineMaximum(line = {}) {
@@ -5072,11 +5162,7 @@ async function setLineQuantity(line, event) {
     cartQuantityValidationError.value = ''
     return
   }
-  const result = await mutateCashierDraft(
-    'change-cart-line-quantity',
-    line,
-    { delta: nextQuantity - currentQuantity }
-  )
+  const result = await changeLineQuantityWithCoupon(line, nextQuantity - currentQuantity)
   if (['failed', 'conflict'].includes(resultStatus(result))) {
     const authoritativeLine = cartLines.value.find((candidate) => String(candidate?.id || '') === String(line?.id || ''))
     event.target.value = String(Math.max(1, Number(authoritativeLine?.quantity || currentQuantity)))
@@ -5136,6 +5222,17 @@ function localCheckoutPreviewSnapshot() {
     // replacing a just-selected 本人/朋友/朋友算口径.
     return {
       ...line,
+      // Freeze whole-row amounts at checkout entry. The cart keeps a unit
+      // price, while payment selection and the checkout display must use the
+      // same once-per-row coupon deduction.
+      ...(saleLine
+        ? {
+            lineAmountCents: localDraftLinePayableAmountCents(line),
+            originalLineAmountCents: localDraftLineTotalAmountCents(
+              line, line.originalAmount ?? getLineAmount(line)
+            )
+          }
+        : {}),
       // Keep card-upgrade intent explicit across the local preview boundary;
       // the final submit transaction materializes it before settlement.
       ...(isRecord(line.cardOperationUpgrade)
@@ -5366,7 +5463,7 @@ function buildCheckoutSnapshot(preview = {}) {
       // Cart sale rows keep a unit amount for local editing. The final
       // snapshot carries immutable line totals so settlement cannot mistake
       // a unit price for the whole line when quantity is greater than one.
-      next.lineAmountCents = localDraftLineTotalAmountCents(line, getLineAmount(line))
+      next.lineAmountCents = localDraftLinePayableAmountCents(line)
       next.originalLineAmountCents = localDraftLineTotalAmountCents(
         line,
         line.originalAmount ?? getLineAmount(line)
@@ -5487,6 +5584,11 @@ function buildCheckoutSnapshot(preview = {}) {
 }
 
 async function openCheckout() {
+  if (isRefreshingLineCoupon.value) {
+    const blocked = { result: { status: 'failed', message: '优惠券正在按新数量校验，请稍候再结账。' } }
+    reportCheckoutEntryFailure(blocked, blocked.result.message)
+    return blocked
+  }
   // The toolbar is the source of truth until checkout opens. Block an empty
   // selection here so a stale checkout projection cannot silently supply it.
   if (Number(localCheckoutBusinessSource.value.primarySourceId || 0) <= 0) {

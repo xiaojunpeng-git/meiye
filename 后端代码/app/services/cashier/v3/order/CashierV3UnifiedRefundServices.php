@@ -62,7 +62,7 @@ final class CashierV3UnifiedRefundServices
             }
             $total = (int)(clone $query)->count('h.id');
             $rows = $query
-                ->field('h.id,h.uid,h.oid,h.card_no,h.card_name,h.write_times,h.write_surplus_times,h.write_end,o.order_id,o.pay_price,o.uid AS origin_uid,o.store_id AS origin_store_id,o.debt_amount,o.repaid_debt_amount,o.refund_status,o.terminal_action')
+                ->field('h.id,h.uid,h.oid,h.card_no,h.card_name,h.write_times,h.write_surplus_times,h.write_end,o.order_id,o.pay_price,o.coupon_price,o.uid AS origin_uid,o.store_id AS origin_store_id,o.debt_amount,o.repaid_debt_amount,o.refund_status,o.terminal_action')
                 ->order('h.id desc')->page($page, 50)->select()->toArray();
             // One receipt lookup per page avoids another query for every card;
             // holder and legacy-order IDs must both match before showing an XS number.
@@ -92,7 +92,7 @@ final class CashierV3UnifiedRefundServices
             ->where('so.order_status', 'settled')->where('so.order_direction', 'forward')
             ->whereIn('l.item_type', ['project', 'product']);
         if ($keyword !== '') $query->where('so.order_no', 'like', '%' . addcslashes($keyword, '%_\\') . '%');
-        $lines = $query->field('l.order_line_id,l.order_id,l.item_name_snapshot,l.item_type,l.sale_amount_cents,l.store_id,l.member_id,l.tenant_id,l.line_status,l.line_direction,so.order_no,so.order_status,so.order_direction')
+        $lines = $query->field('l.order_line_id,l.order_id,l.item_name_snapshot,l.item_type,l.sale_amount_cents,l.coupon_payment_cents,l.store_id,l.member_id,l.tenant_id,l.line_status,l.line_direction,so.order_no,so.order_status,so.order_direction')
             ->order('l.id desc')->limit(100)->select()->toArray();
         $documents = [];
         foreach ($lines as $line) {
@@ -161,6 +161,12 @@ final class CashierV3UnifiedRefundServices
         $remaining = (int)$target['remainingAmountCents'];
         if ($mode !== 'catalog' && ($refundCents > $remaining || $balanceCents > (int)$snapshot['remainingAmountCents'])) {
             throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
+        }
+        // Rights keep their voucher-funded face value, but a partial refund
+        // cannot turn the non-cash voucher into refundable cash.
+        if ($mode !== 'catalog' && $refundCents + $balanceCents
+            > (int)($snapshot['cashRefundRemainingCents'] ?? $remaining)) {
+            throw self::fail('本次退款超过原单实际支付的可退金额，抵用券不参与退款。', 'refund_coupon_tender_exceeds_cash');
         }
         $newEnd = (int)($payload['validThrough'] ?? 0);
         if ($mode === 'card' && $snapshot['isTimeCard']) {
@@ -345,7 +351,7 @@ final class CashierV3UnifiedRefundServices
         if (!$candidate) {
             $query = Db::name('user_card_holder')->alias('h')->join('store_order o', 'o.id=h.oid')
                 ->where('h.id', $holderId)->where('h.uid', $memberId)
-                ->field('h.id,h.uid,h.oid,h.card_no,h.card_name,h.write_times,h.write_surplus_times,h.write_end,h.is_del,o.order_id,o.pay_price,o.uid AS origin_uid,o.store_id AS origin_store_id,o.debt_amount,o.repaid_debt_amount,o.refund_status,o.terminal_action,o.paid,o.is_del AS order_deleted,o.is_system_del,o.is_user_del');
+                ->field('h.id,h.uid,h.oid,h.card_no,h.card_name,h.write_times,h.write_surplus_times,h.write_end,h.is_del,o.order_id,o.pay_price,o.coupon_price,o.uid AS origin_uid,o.store_id AS origin_store_id,o.debt_amount,o.repaid_debt_amount,o.refund_status,o.terminal_action,o.paid,o.is_del AS order_deleted,o.is_system_del,o.is_user_del');
             $candidate = (array)$query->lock($lock)->find();
         }
         if (!$candidate || (int)($candidate['id'] ?? 0) !== $holderId || (int)($candidate['uid'] ?? 0) !== $memberId) {
@@ -449,6 +455,30 @@ final class CashierV3UnifiedRefundServices
                 : ($one ? '0.00' : bcsub((string)$candidate['debt_amount'], (string)$candidate['repaid_debt_amount'], 2));
         }
         $debtCents = self::moneyCents((string)$debt, true);
+        $cardPurchaseCents = self::moneyCents((string)$candidate['pay_price'], false);
+        $cardCouponCents = 0;
+        if (strncmp((string)$candidate['order_id'], 'v3c', 3) === 0) {
+            // The V3 receipt is the immutable per-card tender snapshot.
+            // Legacy coupon_price means a discount and cannot be used here.
+            $receipt = (array)Db::name(CashierV3CardPurchaseIssuanceServices::RECEIPT_TABLE)
+                ->where('tenant_id', $tenantId)->where('legacy_order_id', $originId)
+                ->where('card_holder_id', $holderId)->where('status', 'completed')
+                ->lock($lock)->find();
+            $receiptResult = json_decode((string)($receipt['result_snapshot_json'] ?? ''), true);
+            if (!$receipt || !is_array($receiptResult)) {
+                throw self::fail('购卡回执缺失，暂不能退款。', 'refund_card_receipt_missing');
+            }
+            $cardCouponCents = (int)($receiptResult['couponPaymentCents'] ?? 0);
+            if ($cardCouponCents < 0 || $cardCouponCents > $cardPurchaseCents) {
+                throw self::fail('购卡抵用券资料异常，暂不能退款。', 'refund_card_coupon_snapshot_invalid');
+            }
+        }
+        $priorRefundCents = (int)Db::name(self::TABLE)->where('tenant_id', $tenantId)
+            ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('refund_amount_cents');
+        $priorBalanceCreditCents = (int)Db::name(self::TABLE)->where('tenant_id', $tenantId)
+            ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('balance_credit_cents');
+        $cashRefundRemainingCents = max(0, $cardPurchaseCents - $cardCouponCents
+            - $priorRefundCents - $priorBalanceCreditCents);
         $canRefund = !$voided && $sum > 0 && $components !== [] && $debtCents === 0
             && (int)$candidate['origin_uid'] === $memberId;
         $reason = $debtCents > 0 ? '本卡存在未结清欠款，请先补交或取消欠款后再办理退款。'
@@ -469,8 +499,8 @@ final class CashierV3UnifiedRefundServices
             'sourceOrderNo' => $salesOrderNo !== '' ? $salesOrderNo : (string)$candidate['order_id'],
             'purchaseAmountCents' => array_sum(array_column($components, 'purchaseAmountCents')),
             'remainingAmountCents' => $sum, 'remainingTimes' => (int)$candidate['write_surplus_times'],
-            'historicalRefundCents' => (int)Db::name(self::TABLE)->where('tenant_id', $tenantId)
-                ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('refund_amount_cents'),
+            'cashRefundRemainingCents' => $cashRefundRemainingCents,
+            'historicalRefundCents' => $priorRefundCents,
             'validThrough' => (int)$candidate['write_end'], 'isTimeCard' => $isTime,
             'ruleType' => (string)($rule['rule_type'] ?? ''), 'components' => $components,
             'voided' => $voided, 'canRefund' => $canRefund, 'unavailableReason' => $canRefund ? '' : $reason];
@@ -510,13 +540,17 @@ final class CashierV3UnifiedRefundServices
         }
         $history = Db::name(self::TABLE)->where('tenant_id', $tenantId)->where('source_line_id', $lineId)
             ->where('status', 'effective')->order('id asc')->lock($lock)->select()->toArray();
-        $used = array_sum(array_map(static fn(array $r): int => (int)$r['refund_amount_cents'], $history));
+        $used = array_sum(array_map(static fn(array $r): int =>
+            (int)$r['refund_amount_cents'] + (int)($r['balance_credit_cents'] ?? 0), $history));
         $voided = (bool)array_filter($history, static fn(array $r): bool => (int)$r['void_target'] === 1);
-        $remaining = max(0, (int)$line['sale_amount_cents'] - $used);
+        $cashRefundRemaining = max(0, (int)$line['sale_amount_cents']
+            - (int)($line['coupon_payment_cents'] ?? 0) - $used);
+        $remaining = $cashRefundRemaining;
         return ['lineId' => $lineId, 'memberId' => $memberId, 'name' => (string)$line['item_name_snapshot'],
             'itemType' => (string)$line['item_type'], 'sourceOrderId' => (string)$line['order_id'],
             'sourceOrderNo' => (string)$line['order_no'], 'purchaseAmountCents' => (int)$line['sale_amount_cents'],
-            'remainingAmountCents' => $remaining, 'remainingTimes' => 0, 'voided' => $voided,
+            'remainingAmountCents' => $remaining, 'cashRefundRemainingCents' => $cashRefundRemaining,
+            'remainingTimes' => 0, 'voided' => $voided,
             'canRefund' => !$voided && $remaining > 0,
             'unavailableReason' => $voided ? '这条明细已作废，不能再次退款。' : '这条明细没有可退金额。'];
     }

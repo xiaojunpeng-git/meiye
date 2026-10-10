@@ -10,8 +10,8 @@ $checks = [
     'refund_line_authority_is_append_only_and_scoped' => strpos($migration, 'eb_cashier_v3_order_lifecycle_refund_line') !== false
         && strpos($migration, 'UNIQUE KEY `uk_operation_source_line`') !== false
         && strpos($migration, 'idx_source_line') !== false,
-    'refund_line_uses_original_settled_sale_amount_as_weight' => strpos($lifecycle, 'sale_amount_cents') !== false
-        && strpos($lifecycle, 'saleAmountCents') !== false
+    'refund_line_uses_original_refundable_amount_as_weight' => strpos($lifecycle, "'refundableAmountCents' => (int)\$row['sale_amount_cents'] - (int)\$row['coupon_payment_cents']") !== false
+        && strpos($lifecycle, "\$line['refundableAmountCents']") !== false
         && strpos($lifecycle, 'allocationWeightDenominator') !== false,
     'refund_components_use_deterministic_largest_remainder' => strpos($lifecycle, 'allocateRefundComponent') !== false
         && strpos($lifecycle, 'bcmul') !== false

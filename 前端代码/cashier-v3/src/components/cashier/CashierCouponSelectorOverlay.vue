@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { formatMoney } from '@/services/cashierV3Bridge'
 
 const props = defineProps({
   selector: { type: Object, required: true },
@@ -16,7 +17,9 @@ watch(
 )
 
 const coupons = computed(() => Array.isArray(props.selector.coupons) ? props.selector.coupons : [])
+const belowMinimumCoupons = computed(() => Array.isArray(props.selector.belowMinimumCoupons) ? props.selector.belowMinimumCoupons : [])
 const hasSelectedCoupon = computed(() => Boolean(String(props.selector.selectedCouponId || '')))
+const canConfirmSelection = computed(() => coupons.value.some((coupon) => couponId(coupon) === selectedCouponId.value))
 
 function couponId(coupon = {}) {
   return String(coupon.couponId || '')
@@ -25,6 +28,11 @@ function couponId(coupon = {}) {
 function moneyFromCents(value) {
   const cents = Number(value || 0)
   return `¥${(Number.isFinite(cents) ? cents / 100 : 0).toFixed(2)}`
+}
+
+function roundedMoneyFromCents(value) {
+  const cents = Number(value || 0)
+  return formatMoney(Math.round((Number.isFinite(cents) ? cents : 0) / 100))
 }
 
 function expiryText(value) {
@@ -43,7 +51,8 @@ function expiryText(value) {
 }
 
 function confirmSelection() {
-  if (!selectedCouponId.value || props.saving) return
+  // Only the server's usable set can be submitted; threshold hints are display-only.
+  if (!canConfirmSelection.value || props.saving) return
   emit('apply', selectedCouponId.value)
 }
 </script>
@@ -59,7 +68,7 @@ function confirmSelection() {
         <button type="button" aria-label="关闭" title="关闭" :disabled="saving" @click="emit('close')">×</button>
       </header>
 
-      <div v-if="coupons.length" class="cashier-coupon-list" role="radiogroup" aria-label="可用优惠券">
+      <div v-if="coupons.length || belowMinimumCoupons.length" class="cashier-coupon-list" role="radiogroup" aria-label="会员优惠券">
         <label
           v-for="coupon in coupons"
           :key="couponId(coupon)"
@@ -76,6 +85,21 @@ function confirmSelection() {
             </small>
           </span>
         </label>
+        <template v-if="belowMinimumCoupons.length">
+          <h3 class="cashier-coupon-list__heading">未达使用门槛</h3>
+          <label
+            v-for="coupon in belowMinimumCoupons"
+            :key="couponId(coupon)"
+            class="cashier-coupon-item is-unavailable"
+          >
+            <input type="radio" name="cashier-line-coupon" :value="couponId(coupon)" disabled>
+            <span class="cashier-coupon-item__amount">暂不可用</span>
+            <span class="cashier-coupon-item__content">
+              <strong>{{ coupon.name || '优惠券' }}</strong>
+              <small>满 {{ roundedMoneyFromCents(coupon.useMinAmountCents) }} 可用 · 还差 {{ roundedMoneyFromCents(coupon.shortfallCents) }} · {{ expiryText(coupon.expiresAt) }}</small>
+            </span>
+          </label>
+        </template>
       </div>
       <div v-else class="cashier-coupon-empty">
         <strong>暂无可用优惠券</strong>
@@ -87,7 +111,7 @@ function confirmSelection() {
         <span v-else></span>
         <div>
           <button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">取消</button>
-          <button type="button" class="button button--primary" :disabled="saving || !selectedCouponId" @click="confirmSelection">
+          <button type="button" class="button button--primary" :disabled="saving || !canConfirmSelection" @click="confirmSelection">
             {{ saving ? '保存中…' : '确认使用' }}
           </button>
         </div>
@@ -152,6 +176,8 @@ function confirmSelection() {
   padding: 18px 20px;
 }
 
+.cashier-coupon-list__heading { margin: 6px 0 0; color: #4b5961; font-size: 13px; }
+
 .cashier-coupon-item {
   min-height: 76px;
   display: grid;
@@ -165,6 +191,8 @@ function confirmSelection() {
 }
 
 .cashier-coupon-item.is-selected { border-color: #a9709d; background: #fbf7fa; }
+.cashier-coupon-item.is-unavailable { background: #f7f8f9; cursor: not-allowed; }
+.cashier-coupon-item.is-unavailable .cashier-coupon-item__amount { color: #66757c; }
 .cashier-coupon-item__amount { color: #a04f83; font-weight: 700; }
 .cashier-coupon-item__content { min-width: 0; display: grid; gap: 5px; }
 .cashier-coupon-item__content strong { overflow-wrap: anywhere; color: #25333a; }

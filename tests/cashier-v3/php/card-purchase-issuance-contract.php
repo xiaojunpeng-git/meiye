@@ -8,10 +8,12 @@ require_once $root . '/app/services/cashier/v3/CashierV3ResultCode.php';
 require_once $root . '/app/services/cashier/v3/CashierV3CommandException.php';
 require_once $root . '/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php';
 require_once $root . '/app/services/cashier/v3/card/CashierV3IssuedCardRuleStateServices.php';
+require_once $root . '/app/services/cashier/v3/settlement/CashierV3CheckoutDebtAuthorityServices.php';
 
 use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\card\CashierV3CardPurchaseIssuanceServices;
 use app\services\cashier\v3\card\CashierV3IssuedCardRuleStateServices;
+use app\services\cashier\v3\settlement\CashierV3CheckoutDebtAuthorityServices;
 
 $passed = 0;
 $failed = 0;
@@ -29,6 +31,100 @@ function cardPurchaseCheck(string $name, bool $condition): void
 
 $reflection = new ReflectionClass(CashierV3CardPurchaseIssuanceServices::class);
 $service = $reflection->newInstanceWithoutConstructor();
+$allocate = $reflection->getMethod('allocateIssueAmounts');
+$allocate->setAccessible(true);
+$three = $allocate->invoke($service, [
+    'original_amount_cents' => 1188000,
+    'discount_amount_cents' => 0,
+    'coupon_payment_cents' => 100000,
+    'sale_amount_cents' => 1188000,
+], 3);
+cardPurchaseCheck('CPU-00A three cards absorb the integer-yuan coupon tail on the final issue',
+    $three === [
+        1 => ['originalCents' => 396000, 'discountCents' => 0, 'couponCents' => 33300, 'saleCents' => 396000],
+        2 => ['originalCents' => 396000, 'discountCents' => 0, 'couponCents' => 33300, 'saleCents' => 396000],
+        3 => ['originalCents' => 396000, 'discountCents' => 0, 'couponCents' => 33400, 'saleCents' => 396000],
+    ]);
+$four = $allocate->invoke($service, [
+    'original_amount_cents' => 1272000,
+    'discount_amount_cents' => 0,
+    'coupon_payment_cents' => 100000,
+    'sale_amount_cents' => 1272000,
+], 4);
+cardPurchaseCheck('CPU-00B four-card allocation preserves the screenshot settlement total',
+    count($four) === 4 && array_sum(array_column($four, 'saleCents')) === 1272000
+    && array_sum(array_column($four, 'couponCents')) === 100000
+    && array_sum(array_column($four, 'discountCents')) === 0
+    && count(array_unique(array_column($four, 'saleCents'))) === 1);
+$issuanceSource = file_get_contents($root . '/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php');
+$refundSource = file_get_contents($root . '/app/services/cashier/v3/order/CashierV3UnifiedRefundServices.php');
+cardPurchaseCheck('CPU-00B2 V3 receipt freezes tender without reusing legacy discount fields',
+    str_contains($issuanceSource, "'couponPaymentCents' => (int)\$issueAmounts['couponCents']")
+    && substr_count($issuanceSource, "'coupon_price' => '0.00'") >= 2
+    && str_contains($refundSource, "\$receiptResult['couponPaymentCents'] ?? 0")
+    && !str_contains($refundSource, "self::moneyCents((string)(\$candidate['coupon_price'] ?? '0'), true)"));
+$tiny = $allocate->invoke($service, [
+    'original_amount_cents' => 300,
+    'discount_amount_cents' => 200,
+    'sale_amount_cents' => 100,
+], 3);
+cardPurchaseCheck('CPU-00C tiny amounts never create a negative card sale',
+    $tiny[3]['discountCents'] === 100
+    && array_sum(array_column($tiny, 'saleCents')) === 100
+    && min(array_column($tiny, 'saleCents')) >= 0);
+// Exhaust low-yuan remainder/capacity collisions. Every card must balance
+// independently in whole yuan and reconcile to the locked sales row.
+$allBalanced = true;
+for ($quantity = 1; $quantity <= 8 && $allBalanced; $quantity++) {
+    for ($originalUnits = 0; $originalUnits <= 40 && $allBalanced; $originalUnits++) {
+        for ($discountUnits = 0; $discountUnits <= $originalUnits; $discountUnits++) {
+            $original = $originalUnits * 100;
+            $discount = $discountUnits * 100;
+            $sale = $original - $discount;
+            $units = $allocate->invoke($service, [
+                'original_amount_cents' => $original,
+                'discount_amount_cents' => $discount,
+                'sale_amount_cents' => $sale,
+            ], $quantity);
+            $allBalanced = count($units) === $quantity
+                && array_sum(array_column($units, 'originalCents')) === $original
+                && array_sum(array_column($units, 'discountCents')) === $discount
+                && array_sum(array_column($units, 'saleCents')) === $sale;
+            foreach ($units as $unit) {
+                $allBalanced = $allBalanced
+                    && $unit['originalCents'] >= 0 && $unit['discountCents'] >= 0
+                    && $unit['saleCents'] >= 0
+                    && $unit['originalCents'] === $unit['discountCents'] + $unit['saleCents']
+                    && $unit['originalCents'] % 100 === 0
+                    && $unit['discountCents'] % 100 === 0
+                    && $unit['saleCents'] % 100 === 0;
+            }
+            if (!$allBalanced) break;
+        }
+    }
+}
+cardPurchaseCheck('CPU-00D whole-yuan allocations reconcile without fractional amounts', $allBalanced);
+$fractionalReason = '';
+try {
+    $allocate->invoke($service, [
+        'original_amount_cents' => 100001,
+        'discount_amount_cents' => 100000,
+        'sale_amount_cents' => 1,
+    ], 3);
+} catch (\Throwable $exception) {
+    $sourceException = $exception->getPrevious() ?: $exception;
+    if ($sourceException instanceof CashierV3CommandException) {
+        $fractionalReason = (string)($sourceException->getDetail()['reason'] ?? '');
+    }
+}
+cardPurchaseCheck('CPU-00E fractional-yuan source amounts fail without rounding the sale',
+    $fractionalReason === 'card_purchase_amount_not_integer_yuan');
+$debt = CashierV3CheckoutDebtAuthorityServices::exactAllocations(100100, [[
+    'order_line_id' => 'card-three', 'quantity' => 3,
+    'sale_amount_cents' => 1088000, 'debt_amount_cents' => 100100,
+]]);
+cardPurchaseCheck('CPU-00F card debt remains an exact whole-line authority without divisibility requirements',
+    $debt === ['card-three' => 100100]);
 $validity = $reflection->getMethod('validity');
 $validity->setAccessible(true);
 $days = $validity->invoke($service, ['validity' => [
@@ -143,6 +239,14 @@ cardPurchaseCheck('CPU-20 purchase receipt fingerprints the same browser card sn
     && strpos($source, "'catalog' => \$snapshot") === false);
 cardPurchaseCheck('CPU-21 formal fact input accepts the persisted card snapshot field',
     strpos($factAssemblerSource, "'manual_labor_fee_cents', 'card_purchase_snapshot_json'") !== false);
+cardPurchaseCheck('CPU-22 legacy order and card cart use one issued-unit allocation, not independent division',
+    substr_count($source, "\$issueAmounts['saleCents']") === 2
+    && substr_count($source, "\$issueAmounts['originalCents']") === 2
+    && substr_count($source, "\$issueAmounts['discountCents']") === 2
+    && strpos($source, 'divideExactly(') === false);
+cardPurchaseCheck('CPU-23 historical receipt replay precedes new whole-yuan allocation',
+    strpos($source, 'return $this->replay($existing, $header, $salesLine, $issueNo, $commandIdempotencyKey);')
+        < strpos($source, '$lineIssueAmounts = $this->allocateIssueAmounts($salesLine,'));
 
 echo "CARD_PURCHASE_ISSUANCE_CONTRACT passed={$passed} failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

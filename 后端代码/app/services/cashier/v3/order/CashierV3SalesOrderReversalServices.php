@@ -82,10 +82,12 @@ final class CashierV3SalesOrderReversalServices
         $legacyCardValue = $action === 'void-sales-order'
             ? $this->lockedLegacyCardValue($source, $scope, $cashCollected, $principalPaid + $bonusPaid)
             : 0;
+        $couponTender = $action === 'void-sales-order'
+            ? $this->couponTenderCents($source, $scope) : 0;
         // Old-card value settled the original sale without a payment fact.
         // Count it when reversing the sale, never as refunded or reversed cash.
         $economicReversal = $cashReversal + $restorePrincipal + $restoreBonus + $cancelledDebtCents
-            + $entitlementCreditCents + $legacyCardValue;
+            + $entitlementCreditCents + $legacyCardValue + $couponTender;
         // 免费的人次／项目也是已经结算的销售事实。全量作废仍需留下作废
         // 事件和反向业务事实，只是没有资金、欠款、余额或权益可冲销；退款
         // 则必须始终有正向经济金额，不能借此生成零额退款。
@@ -98,10 +100,9 @@ final class CashierV3SalesOrderReversalServices
         if ($action === 'void-sales-order' && $economicReversal !== (int)$source['amountCents']) {
             throw self::failure('sales_void_source_equation_invalid');
         }
-        // A coupon is a one-shot sale discount. It becomes reusable only when
-        // the order's entire settled economic value is reversed; a partial
-        // financial refund must leave the coupon consumed.
-        $coupons = $economicReversal === (int)$source['amountCents']
+        // Coupon tender restores only with a full void; even a refund of all
+        // refundable cash leaves the coupon consumed.
+        $coupons = $action === 'void-sales-order'
             ? $this->lockConsumedCoupons($source, $scope)
             : [];
 
@@ -180,9 +181,9 @@ final class CashierV3SalesOrderReversalServices
         if ($economicReversal <= 0 || $economicReversal > (int)$source['amountCents']) {
             throw self::failure('sales_refund_economic_amount_invalid');
         }
-        $coupons = $economicReversal === (int)$source['amountCents']
-            ? $this->lockConsumedCoupons($source, $scope)
-            : [];
+        // A financial refund never reissues the original coupon, including
+        // when all cash paid by the customer is refunded.
+        $coupons = [];
 
         return [
             'balanceFacts' => $balanceFacts,
@@ -476,18 +477,31 @@ final class CashierV3SalesOrderReversalServices
         if ((int)Db::name(self::BENEFIT_REVERSAL_TABLE)->insert($row) !== 1) throw self::failure('sales_reversal_card_audit_insert_failed');
     }
 
+    /** Coupon tender is non-cash settlement; a full void must reverse it to balance the gross sale. */
+    private function couponTenderCents(array $source, CashierV3DataScopeContext $scope): int
+    {
+        return (int)Db::name('cashier_v3_sales_order_line')
+            ->where('tenant_id', $scope->tenantId())
+            ->where('order_id', (string)$source['sourceId'])
+            ->where('line_direction', 'forward')->where('line_status', 'settled')
+            ->sum('coupon_payment_cents');
+    }
+
     /** @return array<int,array<string,mixed>> */
     private function lockConsumedCoupons(array $source, CashierV3DataScopeContext $scope): array
     {
         $lines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
             ->where('order_id', (string)$source['sourceId'])->where('line_direction', 'forward')
             ->where('line_status', 'settled')->where('coupon_user_id', '>', 0)
-            ->field('order_line_id,coupon_user_id,coupon_name_snapshot,coupon_discount_cents')
+            ->field('order_line_id,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,coupon_payment_cents')
             ->order('line_no', 'asc')->lock(true)->select()->toArray();
         $seen = [];
         foreach ($lines as &$line) {
             $couponId = (int)$line['coupon_user_id'];
-            if (isset($seen[$couponId]) || (int)$line['coupon_discount_cents'] <= 0) {
+            // A void restores either historical discount coupons or the new
+            // non-cash tender; partial refunds intentionally restore neither.
+            if (isset($seen[$couponId])
+                || (int)$line['coupon_discount_cents'] + (int)($line['coupon_payment_cents'] ?? 0) <= 0) {
                 throw self::failure('sales_reversal_coupon_trace_invalid');
             }
             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();

@@ -256,6 +256,13 @@ final class CashierV3CheckoutFactPlanV1
                 array_merge($requiredKeys, ['laborFeeAmountCents', 'projectCountHalfUnits', 'projectCount']),
                 $domain
             );
+        } elseif ($domain === 'sale') {
+            self::assertAllowedKeys(
+                $fact,
+                $requiredKeys,
+                array_merge($requiredKeys, ['couponPaymentCents']),
+                $domain
+            );
         } else {
             self::assertExactKeys($fact, $requiredKeys, $domain);
         }
@@ -317,13 +324,26 @@ final class CashierV3CheckoutFactPlanV1
                 'sale_amount_cents' => self::signedMoney($fact['saleAmountCents'], $direction, 'sale_amount_invalid', true),
                 'debt_amount_cents' => self::signedMoney($fact['debtAmountCents'], $direction, 'sale_debt_amount_invalid', true),
             ];
+            $couponPayment = self::signedMoney(
+                $fact['couponPaymentCents'] ?? 0,
+                $direction,
+                'sale_coupon_payment_invalid',
+                true
+            );
+            // Zero is omitted to preserve fingerprints of already completed
+            // sale facts; only new voucher-tender facts use the added column.
+            if ($couponPayment !== 0) {
+                $row['coupon_payment_cents'] = $couponPayment;
+            }
             if ($row['friend_counts_as_customer'] > 1 || $row['is_presale'] > 1 || $row['inventory_outbound_required'] > 1 || ($row['is_presale'] === 1 && $row['inventory_outbound_required'] === 1)
                 || $row['original_amount_cents'] - $row['discount_amount_cents'] !== $row['sale_amount_cents']
-                || abs($row['debt_amount_cents']) > abs($row['sale_amount_cents'])
+                || abs($couponPayment) > abs($row['sale_amount_cents'])
+                || abs($row['debt_amount_cents']) > abs($row['sale_amount_cents']) - abs($couponPayment)
                 || abs($row['coupon_discount_cents']) > abs($row['discount_amount_cents'])
+                || ($couponPayment !== 0 && $row['coupon_discount_cents'] !== 0)
                 || ($row['coupon_user_id'] === 0
-                    ? ($row['coupon_name_snapshot'] !== '' || $row['coupon_discount_cents'] !== 0)
-                    : ($row['coupon_name_snapshot'] === '' || $row['coupon_discount_cents'] === 0))) {
+                    ? ($row['coupon_name_snapshot'] !== '' || $row['coupon_discount_cents'] !== 0 || $couponPayment !== 0)
+                    : ($row['coupon_name_snapshot'] === '' || ($row['coupon_discount_cents'] === 0 && $couponPayment === 0)))) {
                 throw self::failure('sale_amount_equation_invalid');
             }
             return $row;

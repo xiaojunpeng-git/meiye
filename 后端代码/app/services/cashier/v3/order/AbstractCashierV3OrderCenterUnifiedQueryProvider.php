@@ -272,6 +272,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'sales_order_no' => ['salesOrderNo', 'orderNo'], 'business_date' => ['businessDate'], 'member_name' => ['memberName'],
             'store' => ['storeName', 'businessStoreName'], 'item_summary' => ['itemSummary'], 'item_count' => ['itemCount'],
             'receivable_amount' => ['receivableAmount', 'payableAmount'], 'discount_amount' => ['discountAmount'], 'debt_amount' => ['debtAmount', 'outstandingDebtAmount'],
+            'coupon_discount_amount' => ['couponDiscountAmount'],
             'actual_received_amount' => ['actualReceivedAmount'], 'payment_method' => ['paymentSummary', 'paymentMethod'], 'salesperson' => ['salespersonSummary', 'salespersonName'],
             'cashier' => ['cashierName', 'operatorName'], 'source' => ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary'],
             'payment_status' => ['paymentStatus'], 'order_status' => ['orderStatus', 'statusLabel'], 'supplement' => ['supplementLabel'],
@@ -318,7 +319,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                     foreach (['item_name'=>'name','unit_price'=>'unitPrice','quantity'=>'quantity'] as $key=>$source) {
                         if (isset($item[$source]) && $item[$source] !== '') $row[$key][] = $item[$source];
                     }
-                    $amount = $item[($item['businessTag'] ?? '') === '权益' ? 'entitlementAmount' : 'payableAmount'] ?? null;
+                    // 导出与表格同取用券前金额；权益行仍展示独立核销价值。
+                    $amount = $item[($item['businessTag'] ?? '') === '权益' ? 'entitlementAmount' : 'amountBeforeCoupon'] ?? null;
                     if ($amount !== null) $row['line_amount'][] = $amount;
                     foreach (['craftsman'=>'craftsmenListAllocations','sales_manager'=>'salesManagers','guide'=>'guides'] as $key=>$source) {
                         $people = $item[$source] ?? ($key === 'craftsman' ? ($item['craftsmen'] ?? []) : []);
