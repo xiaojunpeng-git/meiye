@@ -250,6 +250,7 @@ export default {
           key: "address",
           ellipsis: true,
           minWidth: 150,
+          render: (h, { row }) => h('span', this.storeFullAddress(row)),
         },
         {
           title: "营业时间",
@@ -293,6 +294,12 @@ export default {
     this.getList();
   },
   methods: {
+    // 列表必须兼容旧整串地址及已拆分地址；旧字段已经含门牌时不重复拼接。
+    storeFullAddress(row) {
+      const address = String(row.address || '');
+      const detail = String(row.detailed_address || '');
+      return detail && !address.endsWith(detail) ? address + detail : address;
+    },
 	changeMenu(row, name) {
 	  switch (name) {
 	    case '1':

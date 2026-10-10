@@ -1276,8 +1276,8 @@ class SystemStoreServices extends BaseServices
                 $storeInfo['dataVal'] = $storeInfo['valid_time'] ? explode(' - ', $storeInfo['valid_time']) : [];
                 $storeInfo['timeVal'] = $storeInfo['day_time'] ? explode(' - ', $storeInfo['day_time']) : [];
                 $storeInfo['address2'] = $storeInfo['address'] ? explode(',', $storeInfo['address']) : [];
-                $storeInfo['addressSelect'] = [$storeInfo['province'], $storeInfo['city'], $storeInfo['area'], $storeInfo['street']];
-                return $storeInfo;
+                // 编辑只读投影兼容旧整串地址，不在查询时静默回填门店主表或改变定位坐标。
+                return app()->make(StoreAddressReadServices::class)->project($storeInfo);
             }
             return false;
         }
