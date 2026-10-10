@@ -270,7 +270,7 @@ final class CashierV3OrderCenterVoidServices
     }
 
     /**
-     * 项目替换无收款事实；只在来源和目标权益均未发生后续业务时反转本次权益迁移。
+     * 项目替换无收款事实；后续替换已完整冲销且权益没有后续使用时，可按倒序继续反转。
      * 原操作及项目行不删除，作废操作、规则状态和权益版本在同一事务内落地。
      */
     private function voidProjectReplacement(string $recordId, string $reason, string $key, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, CashierV3BusinessEventRecorder $recorder, CashierV3BusinessEventExecution $execution, array $contract): array
@@ -279,20 +279,31 @@ final class CashierV3OrderCenterVoidServices
             throw self::failure('仅支持作废V3项目替换记录。', 'replacement_void_v3_only');
         }
         $original = (array)Db::name('cashier_v3_card_operation')->where('id', (int)$matches[1])
-            ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())->lock(true)->find();
+            ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())->find();
         if (!$original || (string)$original['operation_type'] !== 'project_replacement'
             || (string)$original['operation_status'] !== 'succeeded') {
             throw self::failure('项目替换记录不存在或不可作废。', 'replacement_void_original_invalid');
         }
         $operationId = (string)$original['operation_id'];
-        $state = (array)Db::name('cashier_v3_card_state')->where('tenant_id', $scope->tenantId())
-            ->where('card_holder_id', (int)$original['source_card_holder_id'])->lock(true)->find();
+        // Match the forward card command's holder -> order -> state lock order.
+        // Only inspect/lock operation history after this common serialization point.
         $holder = (array)Db::name('user_card_holder')->where('id', (int)$original['source_card_holder_id'])->lock(true)->find();
         $order = (array)Db::name('store_order')->where('id', (int)$original['origin_order_id'])->lock(true)->find();
+        $state = (array)Db::name('cashier_v3_card_state')->where('tenant_id', $scope->tenantId())
+            ->where('card_holder_id', (int)$original['source_card_holder_id'])->lock(true)->find();
+        $lockedOriginal = (array)Db::name('cashier_v3_card_operation')->where('id', (int)$matches[1])
+            ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId())->lock(true)->find();
+        if ($lockedOriginal !== $original) {
+            throw self::failure('项目替换记录已经变化，请刷新后重试。', 'replacement_void_original_changed');
+        }
+        // A waiter can have observed no reversal before blocking on the holder.
+        // Check again under the shared lock before restoring a single entitlement.
+        $completedVoid = Db::name(self::OPERATION_TABLE)->where('tenant_id', $scope->tenantId())
+            ->where('record_id', $recordId)->where('source_kind', 'project_replacement')
+            ->where('status', 'succeeded')->lock(true)->find();
+        if ($completedVoid) return $this->replayedVoid((array)$completedVoid, 'void-order-center-project-replacement');
         $snapshot = json_decode((string)$original['result_snapshot_json'], true);
         if (!$state || !$holder || !$order || !is_array($snapshot) || (int)$original['settled_at'] <= 0
-            || (string)($state['last_operation_id'] ?? '') !== $operationId
-            || (int)$state['current_version'] !== (int)($snapshot['stateVersionAfter'] ?? 0)
             || (string)$state['card_status'] !== 'enabled'
             || (int)$state['current_member_id'] !== (int)$original['member_id_after']
             || (int)$holder['uid'] !== (int)$original['member_id_after'] || (int)$holder['is_del'] !== 0
@@ -301,6 +312,7 @@ final class CashierV3OrderCenterVoidServices
             || (int)$order['terminal_action'] !== 0 || (int)$order['card_upgrade_use_oid'] !== 0) {
             throw self::failure('原卡或订单已有后续变化，不能作废项目替换。', 'replacement_void_card_changed');
         }
+        $this->assertReplacementVoidChain($original, $snapshot, $state, $scope);
         $lines = Db::name('cashier_v3_card_operation_line')->where('tenant_id', $scope->tenantId())
             ->where('operation_id', $operationId)->order('line_no', 'asc')->lock(true)->select()->toArray();
         $sourceLines = array_values(array_filter($lines, static function (array $line): bool {
@@ -379,7 +391,7 @@ final class CashierV3OrderCenterVoidServices
                 'refund_num' => $targetQuantity, 'is_writeoff' => 0,
             ]) !== 1) throw self::failure('目标项目权益并发变化，作废未提交。', 'replacement_void_target_race');
         if ((int)Db::name('cashier_v3_card_state')->where('id', (int)$state['id'])
-            ->where('current_version', (int)$state['current_version'])->where('last_operation_id', $operationId)
+            ->where('current_version', (int)$state['current_version'])->where('last_operation_id', (string)$state['last_operation_id'])
             ->update(['current_version' => (int)$state['current_version'] + 1,
                 'last_operation_id' => (string)$void['operation_id'], 'status_reason_snapshot' => $reason, 'updated_at' => $now]) !== 1) {
             throw self::failure('原卡状态并发变化，作废未提交。', 'replacement_void_card_race');
@@ -409,6 +421,72 @@ final class CashierV3OrderCenterVoidServices
             ->update(['business_event_no' => (string)$event['event_no'], 'status' => 'succeeded', 'updated_at' => $now]);
         return ['data' => ['void' => ['operationNo' => $void['operation_no'], 'replayed' => false]],
             'business_no' => $void['operation_no'], 'touched' => ['source_card'], 'message' => '项目替换已作废，原项目次数已恢复。'];
+    }
+
+    /**
+     * A reversal advances the card version; it must never rewind it to an old snapshot.
+     * Starting at the requested replacement, prove every later version is either a
+     * replacement already reversed or its matching immutable reversal event. This
+     * permits reverse-order cancellation without treating arbitrary newer card changes
+     * (transfer/extension/upgrade, missing audit, or version gaps) as harmless.
+     * The caller holds the card-state lock; ledger reads use current locks as well,
+     * avoiding a stale repeatable-read snapshot after waiting for another command.
+     */
+    private function assertReplacementVoidChain(array $original, array $snapshot, array $state, CashierV3DataScopeContext $scope): void
+    {
+        $base = (int)($snapshot['stateVersionAfter'] ?? 0);
+        $current = (int)$state['current_version'];
+        $reject = static function (): void {
+            throw self::failure('请先从最新一笔开始逐笔作废；原卡存在未撤销的后续操作或流水不完整。', 'replacement_void_card_changed');
+        };
+        if ($base <= 1 || $base !== (int)$original['source_card_holder_version'] + 1 || $current < $base) $reject();
+        if ($current === $base) {
+            if ((string)$state['last_operation_id'] !== (string)$original['operation_id']) $reject();
+            return;
+        }
+        // Bound the audit walk; never silently truncate a long or corrupt chain.
+        if ($current - $base > 1000) $reject();
+        $later = Db::name('cashier_v3_card_operation')->where('tenant_id', $scope->tenantId())
+            ->where('source_card_holder_id', (int)$original['source_card_holder_id'])
+            ->where('source_card_holder_version', '>=', $base)
+            ->order('id', 'asc')->limit(1001)->lock(true)->select()->toArray();
+        if (count($later) > 1000) $reject();
+        $steps = []; $reversed = [];
+        foreach ($later as $operation) {
+            $result = json_decode((string)$operation['result_snapshot_json'], true);
+            $version = (int)($result['stateVersionAfter'] ?? 0);
+            if ((string)$operation['operation_type'] !== 'project_replacement'
+                || (string)$operation['operation_status'] !== 'succeeded'
+                || (int)$operation['origin_order_id'] !== (int)$original['origin_order_id']
+                || (int)$operation['member_id_after'] !== (int)$original['member_id_after']
+                || $version !== (int)$operation['source_card_holder_version'] + 1
+                || $version > $current || isset($steps[$version])) $reject();
+            $steps[$version] = (string)$operation['operation_id'];
+            $void = (array)Db::name(self::OPERATION_TABLE)->where('tenant_id', $scope->tenantId())
+                ->where('record_id', 'card-operation:' . $operation['id'])
+                ->where('source_kind', 'project_replacement')->where('status', 'succeeded')->lock(true)->find();
+            if (!$void || (string)$void['source_id'] !== (string)$operation['operation_id']
+                || (int)$void['store_id'] !== (int)$operation['store_id']) $reject();
+            $event = (array)Db::name('cashier_v3_business_event')->where('tenant_id', $scope->tenantId())
+                ->where('event_no', (string)$void['business_event_no'])->where('event_type', 'card.operation.voided')
+                ->where('aggregate_type', 'card_operation')->where('aggregate_id', (string)$operation['operation_id'])
+                ->where('source_type', 'void-order-center-project-replacement')->where('source_id', (string)$void['operation_id'])
+                ->where('command_idempotency_key', (string)$void['command_idempotency_key'])->lock(true)->find();
+            $voidVersion = (int)($event['aggregate_version'] ?? 0);
+            if (!$event || $voidVersion <= $version || $voidVersion > $current
+                || isset($reversed[$voidVersion])
+                || (string)$event['reversal_of'] !== $this->originalEventNo($scope->tenantId(), (string)$operation['operation_id'], ['card.operation.recorded'])) $reject();
+            $reversed[$voidVersion] = (string)$void['operation_id'];
+        }
+        foreach ($reversed as $version => $operationId) {
+            if (isset($steps[$version])) $reject();
+            $steps[$version] = $operationId;
+        }
+        if (count($steps) !== $current - $base) $reject();
+        for ($version = $base + 1; $version <= $current; $version++) {
+            if (!isset($steps[$version])) $reject();
+        }
+        if (($steps[$current] ?? '') !== (string)$state['last_operation_id']) $reject();
     }
 
     /** Preserve each existing void type's idempotent response without sharing its business identity. */
