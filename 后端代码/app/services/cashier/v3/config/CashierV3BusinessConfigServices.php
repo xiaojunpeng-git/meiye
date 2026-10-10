@@ -189,11 +189,33 @@ final class CashierV3BusinessConfigServices extends BaseServices
     public function checkoutCatalog(): array
     {
         return [
-            'sources' => $this->sourceTree(true),
+            // K 是退款统计来源，不是收银可选来源；保留平台目录及历史引用。
+            'sources' => array_values(array_filter($this->sourceTree(true), static function (array $source): bool {
+                return !self::isRefundSourceName((string)$source['name']);
+            })),
             'accountingMethods' => $this->accountingMethods(true),
             'sourceMaxLevel' => 2,
             'configVersion' => $this->configVersion(),
         ];
+    }
+
+    /**
+     * 收银写入只禁止退款专用来源，不重新校验普通历史快照的启停、改名或删除。
+     * 既按权威 ID 查目录，也检查旧快照名称，防止客户端伪造名称或旧挂单绕过。
+     */
+    public function assertCheckoutSourceAllowed(int $primaryId, string $snapshotName = ''): void
+    {
+        $name = $primaryId > 0
+            ? (string)Db::name('cashier_v3_business_source')->where('id', $primaryId)->value('name') : '';
+        if (self::isRefundSourceName($name) || self::isRefundSourceName($snapshotName)) {
+            throw new ValidateException('K退款顾客仅用于退款统计，请重新选择客户来源。');
+        }
+    }
+
+    /** 沿用既有一级来源字母标识，不绑定某个客户库的来源 ID。 */
+    private static function isRefundSourceName(string $name): bool
+    {
+        return preg_match('/^K(?:\s|退款|$)/u', trim($name)) === 1;
     }
 
     public function createSource(array $input, int $adminId): array

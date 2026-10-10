@@ -73,6 +73,12 @@ foreach (['market_performance', 'market_detail'] as $reportCode) {
             && strpos($explanation, '“不算人数人次”') !== false,
             'Missing explicit service labels: ' . $reportCode . ':' . $key);
         if ($visitColumn) {
+            // K 人次已明确按退款记录统计，不再要求服务或使用体验排除规则。
+            if ($key !== 'visits' && strpos((string)($column['group_label'] ?? ''), 'K') === 0) {
+                checkMarketExperience(strpos($explanation, '按有效退款记录统计') !== false
+                    && strpos($explanation, '不要求有服务记录') !== false, 'K explanation must use refund member-days');
+                continue;
+            }
             checkMarketExperience(strpos($explanation, '只影响人员统计，不影响本列') !== false
                 && strpos($explanation, '其他符合条件的服务') !== false
                 && strpos($explanation, '整行') !== false,
@@ -177,7 +183,7 @@ try {
         && (int)($detailRow($guestOrderId)['visits'] ?? -1) === 0,
         'Experience guest was counted or its zero-visit row disappeared');
     $allDetail = $query('market_detail', ['_internal_all' => true]);
-    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-visits-experience-only-v3'
+    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-refund-member-day-v5'
         && (string)($query('market_performance')['metric_version'] ?? '') === (string)$allDetail['metric_version']
         && array_key_exists('service_customer_rule_version', $allDetail)
         && $allDetail['service_customer_rule_version'] === null

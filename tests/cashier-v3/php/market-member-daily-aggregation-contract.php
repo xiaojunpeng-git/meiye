@@ -8,6 +8,8 @@ require rtrim($backend, '/\\') . '/vendor/autoload.php';
 
 $service = new \app\services\report\StoreUnifiedReportPhaseTwoServices();
 $method = new ReflectionMethod($service, 'marketMemberDailyRows');
+// 生产基线 PHP 7.4 需要显式开放反射；不改变被测服务方法的可见性。
+$method->setAccessible(true);
 $make = static function (string $date, int $member, int $source, string $order, int $cents, int $visits, int $walkIn): array {
     return [
         'store_id' => 133, 'business_date' => $date, 'member_id' => $member,

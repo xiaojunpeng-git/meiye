@@ -1,0 +1,75 @@
+{
+  "task": "R53-00001",
+  "status": "development-and-selftest-complete-awaiting-product-acceptance",
+  "baseline_head": "6d46470305799efc7198c777deb04df25ec5052a",
+  "metric_version": "market-effective-member-day-v4",
+  "fixed_at": "2026-10-10T09:14:34.886Z",
+  "files": [
+    {
+      "path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+      "sha256": "98582f24abdc453b5eaf8708a90021983f7d8e745f2a15ccba865173a48d573e"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+      "sha256": "d8a542f68d53ff188d2c432cafb090b0f655add1517083792820ec0a62ec53dd"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-effective-people-drilldown-contract.php",
+      "sha256": "2f540a71796466c2598ed037d4f53b178b19a892e263bc367c36e8024d9e7291"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-detail-summary-row-contract.php",
+      "sha256": "1d699bd0f7ce3c032b9f5d869bce8b118750ea6c4ed8efc9c819dd1b65ba2554"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-experience-visits.php",
+      "sha256": "7075c99c0ca8dfdb4bc0c31715fe21410f4ebd06e5fd848cfe14f92bc2015f7a"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-member-daily-aggregation-contract.php",
+      "sha256": "69a2217903aa3b19b9edc4c70c8d72866730f9b3bd23b28947c4f694637e053e"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-effective-member-day-mysql-integration.php",
+      "sha256": "fa35e5146ec863bbc8cd1573d2bdabd3a626e403c9569300c875ee3dc9bce02b"
+    }
+  ],
+  "patch_sha256": "3bb02a61e7a1d184a51770078d1635b080725b103a5d6df9f952d1548b882c08",
+  "tests_record": "自测记录.md",
+  "evidence": [
+    {
+      "path": "自测记录.md",
+      "sha256": "2624cd41b1d82dc18cb3eb01da598bb111fa339ffd1341ae7f879d6ee0885757"
+    },
+    {
+      "path": "每日达标说明.png",
+      "sha256": "34b34a0a900cde0c3203c8777e6a8b59b74e339fcbfe6351f7c3c1fdbcf97448"
+    }
+  ],
+  "local_build_only": [
+    {
+      "path": "/tmp/r53-market-day-build/index.html",
+      "sha256": "b9a34455de5d40e3f2ce84a686e2392cb1801222a96dc22e93c1ca00dd393a94"
+    },
+    {
+      "path": "/tmp/r53-market-day-build/assets/index-92b3304d.js",
+      "sha256": "bb9bc8f6896157a9c3f9279beb21a8b3d5ded85cac0259b0335d346d7561bc79"
+    },
+    {
+      "path": "/tmp/r53-market-day-build/assets/index-b403add1.css",
+      "sha256": "b403add18edd81734b8506e7d2bdcd447b99771f8f071ef59964655ef0e44e02"
+    }
+  ],
+  "browser_csv": {
+    "filename": "门店经营报表-市场明细表-20261010171115.csv",
+    "sha256": "eae332165aaca6ce97651ecac4ebd98ab917ceff3a2fb37319b3eccd061f74d3",
+    "effective_total": 3,
+    "member_day_counts": {
+      "2026-10-09": 1,
+      "2026-10-10": 2
+    }
+  },
+  "deployment": "not-authorized-not-performed",
+  "commit": "not-performed",
+  "push": "not-performed"
+}

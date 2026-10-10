@@ -1,0 +1,73 @@
+{
+  "task": "R53-00001-v2",
+  "status": "development-and-automated-selftest-complete-awaiting-product-acceptance",
+  "baseline_head": "6d46470305799efc7198c777deb04df25ec5052a",
+  "metric_version": "market-refund-member-day-v5",
+  "fixed_at": "2026-10-10T09:35:46.801Z",
+  "supersedes": "固定版本.json",
+  "files": [
+    {
+      "path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+      "sha256": "c35dca30d629fe32dccb0e31f344ae907ee7b3a3be86abca229bfb65045737fe"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+      "sha256": "0066803d94aa08ccaf6a1de40b4736770253f0ea2e0d1e8710ae2bcfa3fce026"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-effective-people-drilldown-contract.php",
+      "sha256": "2f540a71796466c2598ed037d4f53b178b19a892e263bc367c36e8024d9e7291"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-detail-summary-row-contract.php",
+      "sha256": "1d699bd0f7ce3c032b9f5d869bce8b118750ea6c4ed8efc9c819dd1b65ba2554"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-experience-visits.php",
+      "sha256": "9ef74b50178c7034174145643faceb9dd0efa10b4dbada0498494c02830f325b"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-member-daily-aggregation-contract.php",
+      "sha256": "69a2217903aa3b19b9edc4c70c8d72866730f9b3bd23b28947c4f694637e053e"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-effective-member-day-mysql-integration.php",
+      "sha256": "02b713bd45369c67a1cc6124a1252acf9d2617908388ad55095016e6d9c2c964"
+    },
+    {
+      "path": "tests/cashier-v3/php/market-refund-member-day-mysql-integration.php",
+      "sha256": "9101c0274254eb56ef5daef32d2e41d310c5589d88df6cf99b8c14de8ff31216"
+    }
+  ],
+  "patch_sha256": "7bfe4e5627ee3ef7906c50ed2ee46d4edfdf08397aa1cd62ba82db374a96bd97",
+  "tests_record": "K退款人次自测.md",
+  "evidence": [
+    {
+      "path": "K退款人次自测.md",
+      "sha256": "11b84ea1bdd54726fbbb3b84660c687ce32839dec8965409d8696ed6396d454f"
+    }
+  ],
+  "local_build_only": [
+    {
+      "path": "/tmp/r53-market-refund-day-build/index.html",
+      "sha256": "dd596ba32988aefa87b88feebfcaf92ceaa71b95db243317737a409ced21bf2d"
+    },
+    {
+      "path": "/tmp/r53-market-refund-day-build/assets/index-ead76a77.js",
+      "sha256": "dd15fb666c4afdb58d93e0de4e345b13769cc07b92f834ff78953c16ec9cd3a3"
+    },
+    {
+      "path": "/tmp/r53-market-refund-day-build/assets/index-3741559d.css",
+      "sha256": "3741559dc8d32a13e489f5837234547a731ae6086fc658a0290448946b1dbfe4"
+    }
+  ],
+  "browser_verification": "K-browser-check-not-performed-preserved-user-cashier-state-and-separate-tab-requires-login",
+  "tests": {
+    "refund_day": 20,
+    "effective_day": 23,
+    "regressions": "passed; see tests record"
+  },
+  "deployment": "not-authorized-not-performed",
+  "commit": "not-performed",
+  "push": "not-performed"
+}

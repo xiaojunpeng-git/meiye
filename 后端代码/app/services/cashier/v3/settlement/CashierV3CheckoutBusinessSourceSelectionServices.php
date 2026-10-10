@@ -57,7 +57,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
      * otherwise valid checkout fail when an administrator renamed, disabled,
      * or removed a source after the cashier selected it.  The selection row
      * is already tenant/store scoped and locked by the final transaction, so
-     * settlement must persist that snapshot as-is.  Payment, entitlement,
+     * settlement must persist that snapshot as-is, except that K is reserved
+     * for refunds and may not be carried into a new checkout. Payment, entitlement,
      * balance, and inventory authorities remain separately rechecked by the
      * settlement pipeline.
      */
@@ -85,6 +86,7 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
                 true
             );
         }
+        $this->config->assertCheckoutSourceAllowed((int)$row['primary_source_id'], (string)$row['primary_source_name_snapshot']);
         return self::rowProjection($row);
     }
 
@@ -132,6 +134,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             return self::emptySelection();
         }
         $primaryName = trim((string)($source['primarySourceNameSnapshot'] ?? ''));
+        // 最终快照也必须拒绝 K；普通来源继续保留发生时名称，不反查重建快照。
+        $this->config->assertCheckoutSourceAllowed($primaryId, $primaryName);
         $secondaryName = trim((string)($source['secondarySourceNameSnapshot'] ?? ''));
         $label = trim((string)($source['displayNameSnapshot'] ?? ''));
         if ($label === '') {
@@ -210,6 +214,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             return self::emptySelection();
         }
         try {
+            // 默认继承不得重新带入历史 K 选择，原销售记录仍保留不改。
+            $this->config->assertCheckoutSourceAllowed((int)$order['business_source_primary_id'], (string)$order['business_source_primary_name_snapshot']);
             $source = $this->config->resolveSourceSnapshot(
                 (int)$order['business_source_primary_id'],
                 (int)($order['business_source_secondary_id'] ?? 0),
@@ -229,6 +235,8 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
         if ($expected < 0 || $primaryId <= 0 || $secondaryId < 0) {
             throw self::invalid('business_source_payload_invalid', '请选择有效的业务来源。');
         }
+        // 即使旧客户端仍提交 K，也不能写入本次来源选择。
+        $this->config->assertCheckoutSourceAllowed($primaryId);
         $snapshot = $this->config->resolveSourceSnapshot($primaryId, $secondaryId, true);
         $rewardAmountCents = (int)($payload['rewardAmountCents'] ?? 0);
         if ($rewardAmountCents < 0 || $rewardAmountCents > 100000000000) {

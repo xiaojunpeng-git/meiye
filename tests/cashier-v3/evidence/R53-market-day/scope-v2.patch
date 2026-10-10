@@ -1,0 +1,733 @@
+diff --git a/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php b/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php
+index 15976721..ad34fed1 100644
+--- a/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php
++++ b/后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php
+@@ -134,9 +134,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+                 $this->projectOrganization($rows[$storeId], '', '', $range['end']);
+             }
+         }
++        $refundReversal = $this->marketCashRefundCondition('market_payment');
+         $cash = $this->cashFacts($stores, 'market_payment')
+             ->whereBetween('market_payment.business_date', [$range['start'], $range['end']])->where('market_payment.status', 'effective')
+-            ->fieldRaw("market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,CASE WHEN market_payment.fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id=market_payment.tenant_id AND refund_operation.command_idempotency_key=market_payment.command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded') THEN 1 ELSE 0 END is_refund_reversal,SUM(market_payment.amount_cents) amount_cents")
++            ->fieldRaw("market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,CASE WHEN " . $refundReversal . " THEN 1 ELSE 0 END is_refund_reversal,SUM(market_payment.amount_cents) amount_cents")
+             ->group('market_payment.store_id,market_payment.business_source_primary_id,market_payment.fact_direction,market_payment.payment_method,is_refund_reversal')->select()->toArray();
+         foreach ($cash as $fact) {
+             $storeId = (int)$fact['store_id'];
+@@ -169,9 +170,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+         // 体验服务仍可形成明细和其他经营结果，但不取得市场人次资格。
+         foreach ($this->marketCountableServiceVisits($serviceVisitFacts) as $fact) {
+             $sourceId = (int)($fact['business_source_primary_id'] ?? 0);
+-            if ($sourceId <= 0) continue;
++            if ($sourceId <= 0 || $sourceId === $refundSourceId) continue;
+             $storeId = (int)$fact['store_id'];
+-            // 人次的权威源是完成且未作废的服务；任何来源都不要求本期先有收款。
++            // 普通来源人次取完成且未作废的服务，不要求本期先有收款；K 单独按退款日计数。
+             if (!isset($rows[$storeId]) && isset($sourceById[$sourceId])) {
+                 $rows[$storeId] = [
+                     'store_id' => $storeId, 'division_name' => '',
+@@ -201,19 +202,20 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+             $sourceId = (int)$fact['business_source_primary_id'];
+             $rows[$storeId]['channel_' . $sourceId . '_visits'] = (int)$fact['visit_count'];
+         }
+-        foreach ($sources as $source) {
+-            $sourceId = (int)$source['id'];
+-            $threshold = $this->sourcePrefix($source) === 'A' ? 100000 : 50000;
+-            $effective = $this->cashFacts($stores)
+-                ->whereBetween('business_date', [$range['start'], $range['end']])->where('status', 'effective')
+-                ->where('business_source_primary_id', $sourceId)->where('member_id', '>', 0)
+-                ->fieldRaw('store_id,member_id,SUM(amount_cents) amount_cents')->group('store_id,member_id')
+-                ->having('SUM(amount_cents)>=' . $threshold)->select()->toArray();
+-            foreach ($effective as $fact) {
+-                $storeId = (int)$fact['store_id'];
+-                if (isset($rows[$storeId])) $rows[$storeId]['channel_' . $sourceId . '_effective'] = (int)($rows[$storeId]['channel_' . $sourceId . '_effective'] ?? 0) + 1;
++        // K 的人次与服务无关：跨退款方式和退款单合并同一会员日，不套达标金额门槛。
++        if ($refundSourceId > 0) foreach ($this->marketRefundVisitDays($stores, $range) as $refundDay) {
++            $storeId = (int)$refundDay['store_id'];
++            if (isset($rows[$storeId])) {
++                $key = 'channel_' . $refundSourceId . '_visits';
++                $rows[$storeId][$key] = (int)($rows[$storeId][$key] ?? 0) + 1;
+             }
+         }
++        // 每个达标会员日计 1；跨日既不能凑门槛，也不能再按整段日期去重。
++        foreach ($this->marketEffectiveMemberKeys($stores, $range) as $fact) {
++            $storeId = (int)$fact['store_id'];
++            $sourceId = (int)$fact['business_source_primary_id'];
++            if (isset($rows[$storeId])) $rows[$storeId]['channel_' . $sourceId . '_effective'] = (int)($rows[$storeId]['channel_' . $sourceId . '_effective'] ?? 0) + 1;
++        }
+         // B 来源进店优先读取会员每日来源行的补充值。旧逐单值只在该行尚无
+         // 新补充值时回退相加，不能把两种记录同时叠加到市场业绩。
+         $bSourceIds = [];
+@@ -334,7 +336,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+             break;
+         }
+         // 与市场汇总使用同一“成功退款反向流水”判定，作废仍留在原来源。
+-        $refundReversal = "p.fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id=p.tenant_id AND refund_operation.command_idempotency_key=p.command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded')";
++        $refundReversal = $this->marketCashRefundCondition('p');
+         $query = $this->cashFacts($stores, 'p')
+             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
+         $dimension = trim((string)($input['dimension_code'] ?? ''));
+@@ -380,13 +382,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+             unset($refundRow);
+             $rows = array_merge($rows, $refundRows);
+         }
+-        // The detail query already contains every matching payment record before
+-        // pagination, so derive effective members here instead of running another
+-        // aggregate query solely for the summary row or drilldown filter.
+-        $effectiveMemberKeys = $this->marketEffectiveMemberKeys($rows);
++        // 与汇总共用原始收款的每日净额资格；不能用已将退款展示为 K 的明细
++        // 重新判定，否则同日退款抵减后的资格会与汇总不同。支付方式筛选仍缩小范围。
++        $effectiveMemberKeys = $this->marketEffectiveMemberKeys($stores, $range, $method);
+         if ($metricCode === 'effective_people') {
+             $rows = array_values(array_filter($rows, function (array $row) use ($effectiveMemberKeys): bool {
+-                return isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]);
++                return isset($effectiveMemberKeys[$this->marketEffectiveMemberDayKey($row)]);
+             }));
+         }
+         $serviceVisits = $this->marketServiceVisitFacts($stores, $range, $input);
+@@ -395,12 +396,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+         if ($method === '' && !in_array($metricCode, ['amount', 'effective_people'], true)) {
+             $rows = array_merge($rows, $this->marketServiceOnlyRows($stores, $serviceVisits, $rows, $dimension));
+         }
++        $refundVisitDays = $refundSourceId > 0 && ($dimension === '' || (int)$dimension === $refundSourceId)
++            ? $this->marketRefundVisitDays($stores, $range, $method) : [];
+         $visitedSubjects = [];
+         // 与市场业绩汇总使用同一资格集合；体验行可展示，不能因展示而计入人次。
+         foreach ($this->marketCountableServiceVisits($serviceVisits) as $serviceVisit) {
+             $sourceId = (int)($serviceVisit['business_source_primary_id'] ?? 0);
+             $visitIdentity = $this->marketVisitIdentity($serviceVisit);
+-            if ($sourceId <= 0 || $visitIdentity === '') continue;
++            if ($sourceId <= 0 || $sourceId === $refundSourceId || $visitIdentity === '') continue;
+             // 人次不能按项目数累加：会员按当天去重，游客按有效服务单去重。
+             $dayKey = (int)$serviceVisit['store_id'] . '|' . (string)$serviceVisit['service_business_date'] . '|' . $sourceId . '|' . $visitIdentity;
+             $visitedSubjects[$dayKey] = true;
+@@ -411,10 +414,15 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+             // 仅改变报表展示，不把游客补写成会员，也不改变金额或人次归属。
+             if ((int)($row['member_id'] ?? 0) <= 0) $row['member_name_snapshot'] = '游客';
+             $row['walk_in'] = 0; $row['visits'] = 0;
+-            $row['effective_people'] = isset($effectiveMemberKeys[(int)$row['store_id'] . '|' . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id']]) ? 1 : 0;
++            $row['effective_people'] = isset($effectiveMemberKeys[$this->marketEffectiveMemberDayKey($row)]) ? 1 : 0;
+             $visitIdentity = $this->marketVisitIdentity($row);
+             $dayKey = (int)$row['store_id'] . '|' . (string)$row['business_date'] . '|' . (int)$row['business_source_primary_id'] . '|' . $visitIdentity;
+             $row['visits'] = $visitIdentity !== '' && isset($visitedSubjects[$dayKey]) ? 1 : 0;
++            // 同一天的多笔退款/多种退款方式在后续会员日聚合中取 max(1)，
++            // 普通 K 收款或服务本身不提供资格；人次下钻仅留下真实退款日。
++            if ($refundSourceId > 0 && (int)$row['business_source_primary_id'] === $refundSourceId) {
++                $row['visits'] = isset($refundVisitDays[$this->marketRefundVisitDayKey($row)]) ? 1 : 0;
++            }
+             $row['amount'] = $this->money((int)$row['amount_cents']);
+             $row['registered_date'] = (string)$row['business_date'];
+             $row['reviewer'] = ''; $row['reviewed_at'] = ''; $row['created_at'] = $this->dateTime((int)$row['recorded_at']);
+@@ -1334,27 +1342,82 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+         $orderId = trim((string)($row['matched_order_id'] ?? $row['order_id'] ?? ''));
+         return $orderId === '' ? '' : 'guest-order:' . $orderId;
+     }
+-    private function marketEffectiveMemberKeys(array $rows):array
++    /** K 金额、明细和退款人次共用同一成功退款判定；别名只由服务内部传入。 */
++    private function marketCashRefundCondition(string $alias): string
++    {
++        return "{$alias}.fact_direction='reversal' AND EXISTS (SELECT 1 FROM eb_cashier_v3_order_lifecycle_operation refund_operation WHERE refund_operation.tenant_id={$alias}.tenant_id AND refund_operation.command_idempotency_key={$alias}.command_idempotency_key AND refund_operation.operation_type='refund' AND refund_operation.status='succeeded')";
++    }
++    /**
++     * K 人次只读既有金额路径认可的有效负向退款事实，继承门店/组织/个人权限。
++     * 现金退款、登记退款及旧卡退款先按记录取身份，再跨方式按门店+业务日+会员去重。
++     * 无会员身份沿用市场明细的原单边界，不把所有游客当作同一人；不按姓名猜身份。
++     * 选择支付方式时只计该通道退款，登记/旧卡退款没有支付通道，不混入其下钻。
++     */
++    private function marketRefundVisitDays(array $stores, array $range, string $method = ''): array
++    {
++        $query = $this->cashFacts($stores, 'refund_visit')
++            ->whereBetween('refund_visit.business_date', [$range['start'], $range['end']])
++            ->where('refund_visit.status', 'effective')->where('refund_visit.amount_cents', '<', 0)
++            ->whereRaw($this->marketCashRefundCondition('refund_visit'));
++        if ($method !== '') $query->where('refund_visit.payment_method', $method);
++        $fields = 'refund_visit.store_id,refund_visit.business_date,refund_visit.member_id,refund_visit.order_id';
++        $records = $query->field($fields)->group($fields)->select()->toArray();
++        if ($method === '') {
++            $adjustments = $this->marketRefundAdjustmentFacts($stores, 'refund_visit')
++                ->whereBetween('refund_visit.business_date', [$range['start'], $range['end']])
++                ->field($fields)->group($fields)->select()->toArray();
++            $records = array_merge($records, $adjustments);
++        }
++        $days = [];
++        foreach ($records as $record) {
++            if ($this->marketVisitIdentity($record) === '') continue;
++            $days[$this->marketRefundVisitDayKey($record)] = $record;
++        }
++        return $days;
++    }
++    /** K 是固定来源，身份键只需门店、退款业务日与稳定会员/原单标识。 */
++    private function marketRefundVisitDayKey(array $row): string
++    {
++        return (int)$row['store_id'] . '|' . (string)$row['business_date'] . '|' . $this->marketVisitIdentity($row);
++    }
++    /** K 汇总列与明细共用业务说明，明确其人次不是服务次数或达标人数。 */
++    private function marketRefundVisitExplanation(): string
++    {
++        return 'K退款顾客的人次按有效退款记录统计：同一门店、同一业务日期、同一会员有退款即计 1，多笔或多种方式退款只计一次，不同日期分别累计。包括成功现金退款、登记退款和旧卡退款；已作废或未生效退款不计。不要求有服务记录，不设退款金额达标门槛，“体验”和“不算人数人次”不影响退款人次。无会员身份时按原单独立计数，不按空会员或姓名合并。';
++    }
++    /**
++     * 有效人员只按业务日净记账收款达标：门店、日期、来源、会员为唯一粒度。
++     * 查询/下钻/导出共用权限裁剪后的事实；退款沿原来源在其业务日抵减，
++     * 作废沿 cashFacts 排除，不改金额列的 K 来源展示，也不改任何原始事实。
++     * SQL 先聚合并排除低于最低门槛的会员日，避免加载逐笔事实或逐来源重复扫描。
++     */
++    private function marketEffectiveMemberKeys(array $stores, array $range, string $method = ''):array
+     {
+         $sources = [];
+         foreach ($this->primarySources() as $source) $sources[(int)$source['id']] = $source;
+-        $amounts = [];
++        $query = $this->cashFacts($stores)
++            ->whereBetween('business_date', [$range['start'], $range['end']])
++            ->where('status', 'effective')->where('member_id', '>', 0);
++        if ($method !== '') $query->where('payment_method', $method);
++        $rows = $query->fieldRaw('store_id,business_date,business_source_primary_id,member_id,SUM(amount_cents) amount_cents')
++            ->group('store_id,business_date,business_source_primary_id,member_id')
++            ->having('SUM(amount_cents)>=50000')->select()->toArray();
++        $keys = [];
+         foreach ($rows as $row) {
+-            $memberId = (int)($row['member_id'] ?? 0);
+             $sourceId = (int)($row['business_source_primary_id'] ?? 0);
+-            if ($memberId <= 0 || !isset($sources[$sourceId])) continue;
+-            $key = (int)$row['store_id'] . '|' . $sourceId . '|' . $memberId;
+-            $amounts[$key] = (int)($amounts[$key] ?? 0) + (int)($row['amount_cents'] ?? 0);
+-        }
+-        $keys = [];
+-        foreach ($amounts as $key => $amount) {
+-            $parts = explode('|', $key);
+-            $source = $sources[(int)$parts[1]];
++            if (!isset($sources[$sourceId])) continue;
++            $source = $sources[$sourceId];
+             $threshold = $this->sourcePrefix($source) === 'A' ? 100000 : 50000;
+-            if ($amount >= $threshold) $keys[$key] = true;
++            if ((int)$row['amount_cents'] >= $threshold) $keys[$this->marketEffectiveMemberDayKey($row)] = $row;
+         }
+         return $keys;
+     }
++    /** 达标、逐行标记与合计使用同一会员日键，不合并跨门店、跨来源或跨日记录。 */
++    private function marketEffectiveMemberDayKey(array $row):string
++    {
++        return (int)$row['store_id'] . '|' . (string)$row['business_date'] . '|'
++            . (int)$row['business_source_primary_id'] . '|' . (int)$row['member_id'];
++    }
+     /**
+      * 市场明细按门店、日期、会员 ID 和来源投影；不以姓名合并不同会员。
+      * 收款仍从原订单事实累加，人工进店保留各原单据的独立记录及版本。
+@@ -1424,6 +1487,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+     {
+         return 'market-guest-v1:' . $storeId . ':' . $date . ':' . $sourceId . ':' . hash('sha256', $orderId);
+     }
++    /** 合计覆盖分页前的全部明细，按达标会员日计数，不能跨天或跨来源按会员再去重。 */
+     private function marketDetailSummaryRow(array $rows):array
+     {
+         $walkIn = $visits = $amountCents = 0; $effectiveMembers = [];
+@@ -1431,7 +1495,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+             $walkIn += (int)($row['walk_in'] ?? 0);
+             $visits += (int)($row['visits'] ?? 0);
+             $amountCents += (int)($row['amount_cents'] ?? 0);
+-            if ((int)($row['effective_people'] ?? 0) === 1 && (int)($row['member_id'] ?? 0) > 0) $effectiveMembers[(int)$row['member_id']] = true;
++            if ((int)($row['effective_people'] ?? 0) === 1 && (int)($row['member_id'] ?? 0) > 0) $effectiveMembers[$this->marketEffectiveMemberDayKey($row)] = true;
+         }
+         return [
+             'business_date' => '合计', 'store_name_snapshot' => '-', 'member_name_snapshot' => '-', 'member_phone' => '-',
+@@ -1499,9 +1563,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
+         // 未付清订单入表改变两张新客表的资格和统计时间，不能复用旧口径版本。
+         $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v6':($title==='新客明细表'?'new-customer-first-sale-v5':'store-operations-phase-two-v1');
+-        // 市场两表与导出共用“只排除体验”的门店人次口径，不再宣称采用人员客数开关版本。
++        // 有效人员按日达标，K 人次按有效退款会员日；普通来源体验人次规则保持不变。
+         $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
+-        if ($isMarketReport) $metricVersion = 'market-visits-experience-only-v3';
++        if ($isMarketReport) $metricVersion = 'market-refund-member-day-v5';
+         // 台账 v3 纳入登记退款，并明确会员手机读取当前档案而非历史快照。
+         if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v3';
+         // 护理槽位与首次到店日期原先误用了人员标记；相关报表单独升级口径，其他报表不变。
+@@ -1530,7 +1594,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+     /**
+      * 市场业绩的动态来源列必须说明真实计入口径。分组名称来自当前来源配置，
+      * 但人次、有效人员和金额的解释固定由后端给出，页面不能按列名猜算法。
+-     * 两种服务标记只排除人次，不能把它们解释为收款或有效人员也被排除。
++     * 普通来源沿用体验服务排除规则；K 人次取退款而不是服务，不受服务标记影响。
+      * 最终说明集中在此及明细说明方法，避免前置列模板重复维护后又被覆盖。
+      */
+     private function marketPerformanceColumnExplanations(array $columns):array
+@@ -1552,10 +1616,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+                 $descriptions=[
+                     'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
+                     'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次。打了“体验”标签的服务不计门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除门店人次，不排除金额和按收款门槛计算的有效人员，也不表示整行明细隐藏。',
+-                    'effective'=>'统计所选日期内归属“'.$source.'”且净记账收款达到标准的会员人数：A 来源每位会员至少 1,000 元，其他来源至少 500 元；按门店、来源和会员去重，游客不计。退款会抵减，已作废销售不计。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
++                    'effective'=>'统计所选日期内归属“'.$source.'”的每日达标会员数之和：同一门店、同一业务日期、同一来源、同一会员的净记账收款独立达到标准才计 1，A 来源每天至少 1,000 元，其他来源每天至少 500 元。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计，游客不计。退款会抵减，已作废销售不计；成功现金退款在退款业务日抵减原来源的达标收款，不回改其他日期。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
+                     'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。成功现金退款及登记退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
+                 ];
+                 $column['source_explanation']=$descriptions[$parts[1]];
++                if ($parts[1] === 'visits' && $this->sourcePrefix(['name' => $source]) === 'K') {
++                    $column['source_explanation'] = $this->marketRefundVisitExplanation();
++                }
+                 continue;
+             }
+             if(strpos($key,'payment_')===0){
+@@ -1569,7 +1636,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+         unset($column);
+         return$columns;
+     }
+-    /** 市场明细按日合并；服务人次资格与收款资格独立，不能把零人次解释为整行隐藏。 */
++    /** 市场明细按日合并；K 按退款、其他来源按服务计人次，零人次不表示整行隐藏。 */
+     private function marketDetailColumnExplanations(array $columns):array
+     {
+         $descriptions=[
+@@ -1580,8 +1647,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
+             'member_phone'=>'显示会员资料中当前保存的手机号码；未填写则留空。',
+             'dimension'=>'显示业务发生时保存的客户来源；纯权益服务优先读取本次结账保存的来源，历史服务没有该快照时读取关联购卡或销售记录，不按会员当前资料改写历史来源。',
+             'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
+-            'visits'=>'有已完成且未作废的非体验服务才计门店人次。打了“体验”标签的服务不计门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除门店人次，不排除金额和按收款门槛计算的有效人员；明细行仍可能显示，人次为 0 不代表整行隐藏。',
+-            'effective_people'=>'所选日期内，同一门店、同一来源的会员净记账收款达到标准时显示 1：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同一会员跨日期可能显示多行 1，但合计按会员去重。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
++            'visits'=>$this->marketRefundVisitExplanation().' 其他来源有已完成且未作废的非体验服务才计门店人次。打了“体验”标签的服务不计普通来源门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除普通来源门店人次，不排除金额和按收款门槛计算的有效人员；明细行仍可能显示，人次为 0 不代表整行隐藏。',
++            'effective_people'=>'同一门店、同一业务日期、同一来源、同一会员的净记账收款独立达标时显示 1，否则为 0：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计，合计为每日达标会员数之和。成功现金退款在退款业务日抵减原来源的达标收款，不回改其他日期；退款金额仍展示在 K 来源，已作废销售不计。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
+             'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
+             'registered_date'=>'显示本行收款或服务归属的业务日期；补录业务的系统录入时间可能晚于该日期。',
+             'reviewer'=>'本表目前没有读取审核人，显示“—”；不能据此判断单据是否审核。',
+diff --git a/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue b/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue
+index 32b0a433..d00f1709 100644
+--- a/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue
++++ b/前端代码/cashier-v3/src/views/StoreBusinessReportView.vue
+@@ -200,8 +200,10 @@ const FIELD_LOGIC = Object.freeze({
+   order_no_snapshot: '结账成功后生成的业务单据编号。',
+   dimension: '成交时选择并保存的来源渠道。',
+   walk_in: '运营人员对该笔业务手动登记的进店次数；未登记时为 0。',
+-  visits: '该会员在当前查询日期内已完成护理的次数。',
+-  effective_people: '同一门店、同一来源下，当前查询日期内累计现金业绩达到门槛的不同会员数；A 类来源为 1000 元，其他来源为 500 元。',
++  // K 人次的依据是有效退款，不能在后端说明缺失时退回护理次数解释。
++  visits: 'K退款顾客按同一门店、同一天、同一会员有有效退款计 1 次，多笔退款不重复；其他来源沿用已完成的非体验服务人次。',
++  // 后端说明优先；旧响应缺少说明时仍按每日达标解释，不能退回周期去重口径。
++  effective_people: '按门店、业务日期、来源和会员每天独立判断净记账收款是否达标：A 类来源为 1000 元，其他来源为 500 元。同日多笔合并，不跨天凑门槛；合计为每日达标会员数之和。',
+   amount: '本行成交明细分摊到的成功记账收款金额。',
+   registered_date: '该笔业务归入报表的经营日期。',
+   reviewer: '该笔业务的审核人员；未审核时显示“-”。',
+@@ -265,7 +267,8 @@ function fieldLogic(column) {
+   if (FIELD_LOGIC[key]) return FIELD_LOGIC[key]
+   if (key.startsWith('payment_')) return `本单使用“${label}”且成功记账的金额；未使用或未成功记账时显示 0。`
+   if (key.startsWith('partner_category_')) return `普通商品和项目按自身成交分类归集；卡项按卡内项目的成交分类归集，卡内有多个分类时按各项目配置金额分摊。该分类的现金业绩乘以成交时设置的合作方默认比例，得到“${label}”；后续修改分类或比例不会改写已成交数据。`
+-  if (/^channel_\d+_effective$/.test(key)) return '同一门店、同一渠道中，在当前日期内累计现金业绩达到有效门槛的不同会员人数：A 类渠道为 1000 元，其他渠道为 500 元。点击后仅显示这些会员的成交明细。'
++  // 动态来源列只提供同口径说明，不在前端判定或重算达标人员。
++  if (/^channel_\d+_effective$/.test(key)) return '同一门店、同一来源的会员按业务日期每天独立达标后累计：A 类来源每天为 1000 元，其他来源每天为 500 元。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计。点击后仅显示达标当天的会员明细。'
+   if (/^day_\d+_consume$/.test(key)) return `${label.replace('消耗', '')}该手艺人按项目分配到的劳动业绩合计。`
+   if (/^day_\d+_labor$/.test(key)) return `${label.replace('手工', '')}该手艺人按项目分配到的手工费合计；手工费和劳动业绩可以不同。`
+   if (/^day_\d+_performance$/.test(key)) return `${label.replace('业绩', '')}该销售人按成交项目分配到的销售业绩合计。`
+diff --git a/tests/cashier-v3/php/market-effective-people-drilldown-contract.php b/tests/cashier-v3/php/market-effective-people-drilldown-contract.php
+index 29c96b56..674479e0 100644
+--- a/tests/cashier-v3/php/market-effective-people-drilldown-contract.php
++++ b/tests/cashier-v3/php/market-effective-people-drilldown-contract.php
+@@ -9,10 +9,12 @@ $marketDetail = substr($source, strpos($source, 'private function marketDetail')
+ 
+ $checks = [
+     'effective-people click forwards the metric filter' => strpos($marketPerformance, "\$params['metric_code'] = 'effective_people'") !== false,
+-    'detail filter reuses the already-loaded detail records' => strpos($marketDetail, "\$this->marketEffectiveMemberKeys(\$rows)") !== false,
++    // 汇总和明细必须复用原始收款的每日资格，不能从退款已转 K 的展示行另算。
++    'summary and detail share member-day eligibility' => strpos($marketPerformance, '$this->marketEffectiveMemberKeys($stores, $range)') !== false
++        && strpos($marketDetail, '$this->marketEffectiveMemberKeys($stores, $range, $method)') !== false,
+     'detail excludes non-effective members before pagination' => strpos($marketDetail, "if (\$metricCode === 'effective_people')") !== false && strpos($marketDetail, 'array_filter($rows') !== false,
+     'effective threshold is fixed by source type' => strpos($source, "\$this->sourcePrefix(\$source) === 'A' ? 100000 : 50000") !== false,
+-    'field guide explains effective-person drilldown' => strpos($view, "key)) return '同一门店、同一渠道中，在当前日期内累计现金业绩达到有效门槛") !== false,
++    'field guide explains daily qualification and drilldown' => strpos($view, '不跨天凑门槛') !== false && strpos($view, '仅显示达标当天的会员明细') !== false,
+ ];
+ 
+ $passed = 0;
+diff --git a/tests/cashier-v3/php/market-detail-summary-row-contract.php b/tests/cashier-v3/php/market-detail-summary-row-contract.php
+index 5da12588..05b83a85 100644
+--- a/tests/cashier-v3/php/market-detail-summary-row-contract.php
++++ b/tests/cashier-v3/php/market-detail-summary-row-contract.php
+@@ -11,10 +11,11 @@ $checks = [
+     'market detail returns a first-row summary separately from records' => strpos($marketDetail, "\$result['summary_row'] = \$this->marketDetailSummaryRow(\$rows)") !== false,
+     'summary labels the date column and keeps unsuitable fields blank' => strpos($service, "'business_date' => '合计', 'store_name_snapshot' => '-', 'member_name_snapshot' => '-', 'member_phone' => '-'") !== false,
+     'summary adds the applicable count and amount fields' => strpos($service, "'dimension' => '-', 'walk_in' => \$walkIn, 'visits' => \$visits, 'effective_people' => count(\$effectiveMembers)") !== false && strpos($service, "'amount' => \$this->money(\$amountCents)") !== false,
+-    'effective people are deduplicated by member in the summary' => strpos($service, "\$effectiveMembers[(int)\$row['member_id']] = true") !== false,
+-    'market detail explains source-specific effective thresholds and member-level summary' => strpos($service, "if(\$title==='市场明细表')\$columns=\$this->marketDetailColumnExplanations(\$columns)") !== false
++    // 同一会员跨日期、门店和来源不能再被合计折成一个人。
++    'effective people are deduplicated by member-day in the summary' => strpos($service, '$effectiveMembers[$this->marketEffectiveMemberDayKey($row)] = true') !== false,
++    'market detail explains daily thresholds and additive summary' => strpos($service, "if(\$title==='市场明细表')\$columns=\$this->marketDetailColumnExplanations(\$columns)") !== false
+         && strpos($service, 'A 来源至少 1,000 元，其他来源至少 500 元') !== false
+-        && strpos($service, '同一会员跨日期可能显示多行 1，但合计按会员去重') !== false,
++        && strpos($service, '合计为每日达标会员数之和') !== false,
+     // 门店市场说明要与实际同单去重边界一致，且明确人员开关不改变本列。
+     'market detail explains member-day amount and member-or-guest visits' => strpos($service, '合计本行会员当天在该门店和来源下的有效记账收款净额') !== false
+         && strpos($service, '游客每张可关联销售单记 1') !== false
+@@ -23,7 +24,7 @@ $checks = [
+     'market performance and detail expose business-language source explanations' => strpos($service, "if(\$title==='市场业绩表')\$columns=\$this->marketPerformanceColumnExplanations(\$columns)") !== false
+         && strpos($service, '新旧值不会重复相加。仅 B 来源显示该列') !== false
+         && strpos($service, '退款会抵减，已作废销售不计') !== false
+-        && strpos($service, '余额支付、赠金和旧卡录入不计') !== false
++        && strpos($service, '余额支付和旧卡录入不计') !== false
+         && strpos($service, '显示收款或服务实际归属的门店') !== false,
+     'shared report view renders the summary before ordinary rows' => strpos($view, '<tr v-if="summaryRow" class="store-business-report__summary-row">') !== false && strpos($view, '<tr v-for="(row, rowIndex) in records"') !== false,
+ ];
+diff --git a/tests/cashier-v3/php/market-experience-visits.php b/tests/cashier-v3/php/market-experience-visits.php
+index e341297a..d1347c26 100644
+--- a/tests/cashier-v3/php/market-experience-visits.php
++++ b/tests/cashier-v3/php/market-experience-visits.php
+@@ -73,6 +73,12 @@ foreach (['market_performance', 'market_detail'] as $reportCode) {
+             && strpos($explanation, '“不算人数人次”') !== false,
+             'Missing explicit service labels: ' . $reportCode . ':' . $key);
+         if ($visitColumn) {
++            // K 人次已明确按退款记录统计，不再要求服务或使用体验排除规则。
++            if ($key !== 'visits' && strpos((string)($column['group_label'] ?? ''), 'K') === 0) {
++                checkMarketExperience(strpos($explanation, '按有效退款记录统计') !== false
++                    && strpos($explanation, '不要求有服务记录') !== false, 'K explanation must use refund member-days');
++                continue;
++            }
+             checkMarketExperience(strpos($explanation, '只影响人员统计，不影响本列') !== false
+                 && strpos($explanation, '其他符合条件的服务') !== false
+                 && strpos($explanation, '整行') !== false,
+@@ -177,7 +183,7 @@ try {
+         && (int)($detailRow($guestOrderId)['visits'] ?? -1) === 0,
+         'Experience guest was counted or its zero-visit row disappeared');
+     $allDetail = $query('market_detail', ['_internal_all' => true]);
+-    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-visits-experience-only-v3'
++    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-refund-member-day-v5'
+         && (string)($query('market_performance')['metric_version'] ?? '') === (string)$allDetail['metric_version']
+         && array_key_exists('service_customer_rule_version', $allDetail)
+         && $allDetail['service_customer_rule_version'] === null
+diff --git a/tests/cashier-v3/php/market-member-daily-aggregation-contract.php b/tests/cashier-v3/php/market-member-daily-aggregation-contract.php
+index 887b22d8..e725bccf 100644
+--- a/tests/cashier-v3/php/market-member-daily-aggregation-contract.php
++++ b/tests/cashier-v3/php/market-member-daily-aggregation-contract.php
+@@ -8,6 +8,8 @@ require rtrim($backend, '/\\') . '/vendor/autoload.php';
+ 
+ $service = new \app\services\report\StoreUnifiedReportPhaseTwoServices();
+ $method = new ReflectionMethod($service, 'marketMemberDailyRows');
++// 生产基线 PHP 7.4 需要显式开放反射；不改变被测服务方法的可见性。
++$method->setAccessible(true);
+ $make = static function (string $date, int $member, int $source, string $order, int $cents, int $visits, int $walkIn): array {
+     return [
+         'store_id' => 133, 'business_date' => $date, 'member_id' => $member,
+diff --git a/tests/cashier-v3/php/market-effective-member-day-mysql-integration.php b/tests/cashier-v3/php/market-effective-member-day-mysql-integration.php
+new file mode 100644
+index 00000000..647f5335
+--- /dev/null
++++ b/tests/cashier-v3/php/market-effective-member-day-mysql-integration.php
+@@ -0,0 +1,165 @@
++<?php
++
++declare(strict_types=1);
++
++/** 本地事务夹具验证每日达标；不触发真实结账，所有收款/冲销夹具最终回滚。 */
++$backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
++require rtrim($backend, '/\\') . '/vendor/autoload.php';
++
++use app\services\report\StoreUnifiedReportServices;
++use think\facade\Db;
++
++(new \think\App(rtrim($backend, '/\\') . '/'))->initialize();
++date_default_timezone_set('Asia/Shanghai');
++if (getenv('MARKET_DAY_LOCAL_TEST') !== '1'
++    || config('database.connections.mysql.hostname') !== 'mysql'
++    || config('database.connections.mysql.database') !== 'ruihao') {
++    throw new RuntimeException('Explicit local Docker test environment required');
++}
++$checks = 0;
++/** 失败立即终止，但 finally 仍回滚；仅输出断言名称，不输出会员隐私。 */
++function checkMarketDay(bool $valid, string $message): void
++{
++    global $checks;
++    if (!$valid) throw new RuntimeException($message);
++    $checks++;
++    echo 'PASS ' . $message . PHP_EOL;
++}
++$seed = Db::name('cashier_v3_payment_fact')->where('fact_direction', 'forward')
++    ->where('status', 'effective')->where('payment_method', 'cash')->find();
++$operationSeed = Db::name('cashier_v3_order_lifecycle_operation')->where('status', 'succeeded')->find();
++$a = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('status', 1)->where('name', 'like', 'A%')->find();
++$b = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('status', 1)->where('name', 'like', 'B%')->find();
++if (!$seed || !$a || !$b || !$operationSeed) throw new RuntimeException('Local payment/source/operation seeds required');
++$stores = [(int)$seed['store_id']];
++$otherStore = (int)Db::name('cashier_v3_payment_fact')->where('store_id', '<>', $stores[0])->value('store_id');
++if ($otherStore <= 0) throw new RuntimeException('Second local store required');
++$stores[] = $otherStore;
++$start = '2035-01-01';
++$end = '2035-01-02';
++if (Db::name('cashier_v3_payment_fact')->whereIn('store_id', $stores)->whereBetween('business_date', [$start, $end])->count()) {
++    throw new RuntimeException('Fixture date range must be empty');
++}
++$token = 'MDAY-' . bin2hex(random_bytes(10));
++$sequence = 0;
++$reports = new StoreUnifiedReportServices();
++$input = ['start_date' => $start, 'end_date' => $end, 'limit' => 10];
++$query = static function (string $report, array $extra = [], ?array $scope = null) use ($reports, $input, $stores): array {
++    return $reports->query($scope ?? $stores, array_merge($input, ['report' => $report], $extra));
++};
++/** 复制本地字段结构并覆盖所有身份和金额；不同夹具绝不复用原业务幂等键。 */
++$pay = static function (int $member, array $source, string $date, int $cents, array $extra = []) use ($seed, $token, &$sequence, $stores): array {
++    $fact = $seed;
++    unset($fact['id']);
++    $key = $token . '-' . ++$sequence;
++    foreach (['fact_id', 'business_event_no', 'natural_key', 'command_idempotency_key', 'order_id', 'checkout_request_id', 'payment_authority_key'] as $field) $fact[$field] = $key;
++    $fact['order_no_snapshot'] = $key;
++    $fact['fact_type'] = 'payment_collected';
++    $fact['fact_direction'] = 'forward';
++    $fact['source_document_type'] = 'sale';
++    $fact['store_id'] = $stores[0];
++    $fact['member_id'] = $member;
++    $fact['member_name_snapshot'] = '每日达标测试';
++    $fact['business_date'] = $date;
++    $fact['business_source_primary_id'] = (int)$source['id'];
++    $fact['business_source_primary_name_snapshot'] = $source['name'];
++    $fact['business_source_label_snapshot'] = $source['name'];
++    $fact['amount_cents'] = $cents;
++    $fact['immutable_fingerprint'] = hash('sha256', $key);
++    $fact = array_replace($fact, $extra);
++    Db::name('cashier_v3_payment_fact')->insert($fact);
++    return $fact;
++};
++/** 成功退款/作废才被事实读取器识别；负向事实与操作记录在同一测试事务内。 */
++$reverse = static function (array $original, string $date, int $cents, string $type) use ($pay, $operationSeed, $a): void {
++    $fact = $pay((int)$original['member_id'], $a, $date, -$cents, [
++        'order_id' => $original['order_id'], 'fact_direction' => 'reversal',
++        'fact_type' => $type === 'void' ? 'payment_voided' : 'payment_refunded',
++        'reversal_of' => $original['fact_id'],
++    ]);
++    $operation = $operationSeed;
++    unset($operation['id']);
++    foreach (['operation_id', 'operation_no', 'business_event_no', 'command_idempotency_key'] as $field) $operation[$field] = $fact['command_idempotency_key'];
++    $operation['tenant_id'] = $fact['tenant_id'];
++    $operation['store_id'] = $fact['store_id'];
++    $operation['source_order_id'] = $original['order_id'];
++    $operation['source_type'] = 'sales';
++    $operation['operation_type'] = $type;
++    $operation['status'] = 'succeeded';
++    $operation['immutable_fingerprint'] = hash('sha256', $fact['command_idempotency_key']);
++    Db::name('cashier_v3_order_lifecycle_operation')->insert($operation);
++};
++$base = 987650000;
++Db::startTrans();
++try {
++    // A: 跨日各 600 不达标；连续两日各 1200 计 2；同日两笔各 600 计 1。
++    $pay($base + 1, $a, $start, 60000); $pay($base + 1, $a, $end, 60000);
++    $pay($base + 2, $a, $start, 120000); $pay($base + 2, $a, $end, 120000);
++    $pay($base + 3, $a, $start, 60000); $pay($base + 3, $a, $start, 60000, ['payment_method' => 'wechat']);
++    $pay($base + 4, $a, $start, 100000); $pay($base + 5, $a, $start, 99999);
++    // B: 500 元临界值，跨日 300+300 不达标；同会员不同来源和门店独立。
++    $pay($base + 2, $b, $start, 50000); $pay($base + 6, $b, $start, 49999);
++    $pay($base + 7, $b, $start, 30000); $pay($base + 7, $b, $end, 30000);
++    $pay($base + 2, $a, $start, 100000, ['store_id' => $stores[1]]);
++    $pay(0, $a, $start, 200000);
++    $pay($base + 8, $a, $start, 200000, ['status' => 'voided']);
++    // 同日退款后 900 不达标；跨日退款不得撤回前一天的达标资格。
++    $refund = $pay($base + 9, $a, $start, 120000); $reverse($refund, $start, 30000, 'refund');
++    $later = $pay($base + 10, $a, $start, 120000); $reverse($later, $end, 30000, 'refund');
++    $voided = $pay($base + 11, $a, $start, 120000); $reverse($voided, $end, 120000, 'void');
++
++    $detail = $query('market_detail', ['_internal_all' => true]);
++    $effective = static function (int $member, ?int $source = null) use ($detail): int {
++        $count = 0;
++        foreach ($detail['records'] as $row) {
++            if ((int)$row['member_id'] === $member && ($source === null || (int)$row['business_source_primary_id'] === $source)) $count += (int)$row['effective_people'];
++        }
++        return $count;
++    };
++    checkMarketDay($effective($base + 1) === 0, 'A receipts cannot qualify across dates');
++    checkMarketDay($effective($base + 2, (int)$a['id']) === 3, 'A repeated days and different stores count independently');
++    checkMarketDay($effective($base + 2) === 4, 'Different sources retain independent daily qualification');
++    checkMarketDay($effective($base + 3) === 1, 'Same-day multiple payments and methods count once');
++    checkMarketDay($effective($base + 4) === 1 && $effective($base + 5) === 0, 'A threshold uses exact cents');
++    checkMarketDay($effective($base + 2, (int)$b['id']) === 1 && $effective($base + 6) === 0 && $effective($base + 7) === 0, 'Other source threshold is daily 500 yuan');
++    checkMarketDay($effective(0) === 0 && $effective($base + 8) === 0, 'Guests and ineffective facts do not qualify');
++    checkMarketDay($effective($base + 9) === 0 && $effective($base + 10) === 1, 'Refunds offset only their business day; K display does not alter qualification');
++    checkMarketDay($effective($base + 11) === 0, 'Successfully voided sale never qualifies');
++    checkMarketDay((int)$detail['summary_row']['effective_people'] === 7, 'All-source detail summary counts qualified member-days');
++
++    $performance = $query('market_performance');
++    $aKey = 'channel_' . $a['id'] . '_effective';
++    checkMarketDay((int)$performance['summary_row'][$aKey] === 6, 'Performance summary equals daily A qualification');
++    $daySum = 0;
++    foreach ([$start, $end] as $date) $daySum += (int)$query('market_performance', ['start_date' => $date, 'end_date' => $date])['summary_row'][$aKey];
++    checkMarketDay($daySum === 6, 'Period result equals sum of independent daily queries');
++    $drill = ['dimension_code' => (string)$a['id'], 'metric_code' => 'effective_people'];
++    $drilled = $query('market_detail', $drill);
++    checkMarketDay($drilled['total'] === 6 && (int)$drilled['summary_row']['effective_people'] === 6, 'Drilldown only contains qualified dates and reconciles with summary');
++    $cashOnly = $query('market_detail', $drill + ['payment_method_code' => 'cash']);
++    checkMarketDay($cashOnly['total'] === 5, 'Payment filter narrows daily qualifying receipts');
++    $singleStore = $query('market_detail', $drill, [$stores[0]]);
++    checkMarketDay($singleStore['total'] === 5, 'Authorized store scope excludes another store');
++    $none = $query('market_detail', $drill + ['store_id' => $stores[0]], [999999999]);
++    checkMarketDay($none['records'] === [] && (int)$none['summary_row']['effective_people'] === 0, 'Client filter cannot expand caller store scope');
++    $personal = $query('market_detail', $drill + ['_report_scope' => ['mode' => 'self_participant', 'employee_id' => 999999999]]);
++    checkMarketDay($personal['records'] === [], 'Unrelated employee cannot read qualifying members');
++    $empty = $query('market_detail', ['start_date' => '2035-01-03', 'end_date' => '2035-01-03']);
++    checkMarketDay($empty['records'] === [] && (int)$empty['summary_row']['effective_people'] === 0, 'Empty range returns zero qualification');
++
++    // 超过第一页的会员日仍应进入合计、下钻和导出，不能用页面条数当总数。
++    for ($i = 20; $i < 32; $i++) $pay($base + $i, $a, $end, 100000);
++    $page = $query('market_detail', $drill);
++    $export = $reports->export($stores, array_merge($input, ['report' => 'market_detail'], $drill));
++    checkMarketDay(count($page['records']) === 10 && $page['total'] === 18 && (int)$page['summary_row']['effective_people'] === 18, 'Summary covers all pages');
++    checkMarketDay(count($export['records']) === 18 && $export['summary_row'] === $page['summary_row'], 'Detail export uses complete identical daily results');
++    $marketExport = $reports->export($stores, $input + ['report' => 'market_performance']);
++    checkMarketDay((int)$marketExport['summary_row'][$aKey] === 18 && $marketExport['metric_version'] === $export['metric_version']
++        && $export['metric_version'] === 'market-refund-member-day-v5', 'Summary export and detail share daily metric version');
++    checkMarketDay($query('market_detail', $drill)['summary_row'] === $page['summary_row'], 'Repeated query is stable and read-only');
++} finally {
++    Db::rollback();
++}
++checkMarketDay((int)Db::name('cashier_v3_payment_fact')->where('fact_id', 'like', $token . '%')->count() === 0
++    && (int)Db::name('cashier_v3_order_lifecycle_operation')->where('operation_id', 'like', $token . '%')->count() === 0, 'All local fixtures rolled back');
++echo 'market effective member-day integration: ' . $checks . " PASS\n";
+diff --git a/tests/cashier-v3/php/market-refund-member-day-mysql-integration.php b/tests/cashier-v3/php/market-refund-member-day-mysql-integration.php
+new file mode 100644
+index 00000000..a5935cd3
+--- /dev/null
++++ b/tests/cashier-v3/php/market-refund-member-day-mysql-integration.php
+@@ -0,0 +1,155 @@
++<?php
++
++declare(strict_types=1);
++
++/** K 退款会员日的本地事务测试；不调用真实退款命令，所有夹具最终回滚。 */
++$backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
++require rtrim($backend, '/\\') . '/vendor/autoload.php';
++
++use app\services\report\StoreUnifiedReportServices;
++use think\facade\Db;
++
++(new \think\App(rtrim($backend, '/\\') . '/'))->initialize();
++date_default_timezone_set('Asia/Shanghai');
++if (getenv('MARKET_REFUND_DAY_LOCAL_TEST') !== '1'
++    || config('database.connections.mysql.hostname') !== 'mysql'
++    || config('database.connections.mysql.database') !== 'ruihao') {
++    throw new RuntimeException('Explicit local Docker test environment required');
++}
++$checks = 0;
++/** 断言只打印场景名，不泄漏从本地模板读取的业务身份。 */
++function checkRefundDay(bool $valid, string $message): void
++{
++    global $checks;
++    if (!$valid) throw new RuntimeException($message);
++    $checks++;
++    echo 'PASS ' . $message . PHP_EOL;
++}
++$seed = Db::name('cashier_v3_payment_fact')->where('fact_direction', 'forward')->where('payment_method', 'cash')->where('status', 'effective')->find();
++$operationSeed = Db::name('cashier_v3_order_lifecycle_operation')->where('status', 'succeeded')->find();
++$adjustmentSeed = Db::name('cashier_v3_refund_adjustment')->where('id', '>', 0)->find();
++$a = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('status', 1)->where('name', 'like', 'A%')->find();
++$k = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('status', 1)->where('name', 'like', 'K%')->find();
++$serviceSeed = Db::name('cashier_v3_entitlement_service_fact')->where('service_status', 'completed')->find();
++$selectionSeed = Db::name('cashier_v3_checkout_business_source_selection')->where('primary_source_id', '>', 0)->find();
++foreach (compact('seed', 'operationSeed', 'adjustmentSeed', 'a', 'k', 'serviceSeed', 'selectionSeed') as $name => $value) {
++    if (!$value) throw new RuntimeException('Local seed required: ' . $name);
++}
++$stores = [(int)$seed['store_id'], (int)Db::name('cashier_v3_payment_fact')->where('store_id', '<>', $seed['store_id'])->value('store_id')];
++$start = '2035-02-01'; $end = '2035-02-02';
++foreach (['cashier_v3_payment_fact', 'cashier_v3_entitlement_service_fact'] as $table) {
++    if (Db::name($table)->whereIn('store_id', $stores)->whereBetween('business_date', [$start, $end])->count()) throw new RuntimeException('Fixture dates must be empty');
++}
++$token = 'KRDAY-' . bin2hex(random_bytes(8)); $sequence = 0; $member = 987640000;
++$reports = new StoreUnifiedReportServices();
++$input = ['start_date' => $start, 'end_date' => $end, 'limit' => 10];
++$query = static function (string $report, array $extra = [], ?array $scope = null) use ($reports, $stores, $input): array {
++    return $reports->query($scope ?? $stores, array_merge($input, ['report' => $report], $extra));
++};
++/** 克隆字段结构，覆盖业务键；现金负向事实只在成功退款生命周期存在时有效。 */
++$refund = static function (int $memberId, string $day, string $kind = 'cash', array $extra = [], string $operationStatus = 'succeeded') use ($seed, $operationSeed, $token, &$sequence, $a, $stores): array {
++    $fact = $seed; unset($fact['id']);
++    $key = $token . '-' . ++$sequence;
++    foreach (['fact_id', 'natural_key', 'command_idempotency_key', 'business_event_no', 'order_id', 'checkout_request_id', 'payment_authority_key'] as $field) $fact[$field] = $key;
++    $fact = array_replace($fact, [
++        'order_no_snapshot' => $key, 'fact_type' => $kind === 'manual' ? 'manual_refund_adjustment' : 'payment_refunded',
++        'fact_direction' => in_array($kind, ['manual', 'old_card'], true) ? 'adjustment' : 'reversal',
++        'source_document_type' => $kind === 'manual' ? 'manual_refund' : ($kind === 'old_card' ? 'imported_card_refund' : 'sale'),
++        'payment_method' => $kind === 'manual' ? 'manual_adjustment' : ($kind === 'old_card' ? 'manual_refund' : $kind),
++        'store_id' => $stores[0], 'member_id' => $memberId, 'member_name_snapshot' => '退款人次测试',
++        'business_date' => $day, 'business_source_primary_id' => (int)$a['id'],
++        'business_source_primary_name_snapshot' => $a['name'], 'business_source_label_snapshot' => $a['name'],
++        'amount_cents' => -100, 'immutable_fingerprint' => hash('sha256', $key),
++    ], $extra);
++    Db::name('cashier_v3_payment_fact')->insert($fact);
++    if ($fact['fact_direction'] === 'reversal') {
++        $operation = $operationSeed; unset($operation['id']);
++        foreach (['operation_id', 'operation_no', 'command_idempotency_key', 'business_event_no'] as $field) $operation[$field] = $key;
++        $operation = array_replace($operation, [
++            'tenant_id' => $fact['tenant_id'], 'store_id' => $fact['store_id'], 'source_order_id' => $fact['order_id'],
++            'source_type' => 'sales', 'operation_type' => 'refund', 'status' => $operationStatus,
++            'immutable_fingerprint' => hash('sha256', $key),
++        ]);
++        Db::name('cashier_v3_order_lifecycle_operation')->insert($operation);
++    }
++    return $fact;
++};
++$drill = ['dimension_code' => (string)$k['id'], 'metric_code' => 'visits'];
++$visitsKey = 'channel_' . $k['id'] . '_visits';
++Db::startTrans();
++try {
++    // 同会员同日多单、多支付方式、登记及旧卡退款均只能得到一个退款人次。
++    foreach (['cash', 'wechat', 'manual', 'old_card'] as $kind) $refund($member, $start, $kind);
++    $one = $query('market_detail', $drill);
++    checkRefundDay($one['total'] === 1 && (int)$one['summary_row']['visits'] === 1 && (int)$one['records'][0]['amount_cents'] === -400, 'Same member/day merges refund types without requiring service');
++    $refund($member, $end); $refund($member + 1, $start, 'manual');
++    $refund($member, $start, 'cash', ['store_id' => $stores[1]]);
++    checkRefundDay((int)$query('market_performance')['summary_row'][$visitsKey] === 4, 'Different days, members and stores count independently');
++
++    // 失败操作、失效事实、已作废登记退款都不得贡献退款人次。
++    $refund($member + 2, $start, 'cash', [], 'failed');
++    $refund($member + 3, $start, 'cash', ['status' => 'voided']);
++    $voided = $refund($member + 4, $start, 'manual');
++    $adjustment = $adjustmentSeed; unset($adjustment['id']);
++    $adjustment['tenant_id'] = $voided['tenant_id']; $adjustment['operation_id'] = $voided['order_id'];
++    $adjustment['adjustment_id'] = $voided['fact_id']; $adjustment['command_idempotency_key'] = $voided['command_idempotency_key'];
++    $adjustment['status'] = 'voided';
++    Db::name('cashier_v3_refund_adjustment')->insert($adjustment);
++    checkRefundDay((int)$query('market_performance')['summary_row'][$visitsKey] === 4, 'Failed, ineffective and voided refunds excluded');
++
++    // K 的正常收款和服务不是退款证据，不能沿用普通来源的服务资格。
++    $refund($member + 5, $start, 'cash', ['fact_direction' => 'forward', 'fact_type' => 'payment_collected', 'amount_cents' => 100,
++        'business_source_primary_id' => (int)$k['id'], 'business_source_primary_name_snapshot' => $k['name'], 'business_source_label_snapshot' => $k['name']]);
++    $service = $serviceSeed; unset($service['id']);
++    $checkout = $token . '-service';
++    foreach (['service_fact_id', 'natural_key', 'command_idempotency_key', 'business_event_no', 'source_line_id'] as $field) $service[$field] = $checkout;
++    $service = array_replace($service, ['checkout_request_id' => $checkout, 'store_id' => $stores[0], 'member_id' => $member + 6,
++        'business_date' => $start, 'service_record_no' => $checkout, 'service_object' => 'self', 'is_experience' => 0,
++        'friend_counts_as_customer' => 1, 'immutable_fingerprint' => hash('sha256', $checkout)]);
++    Db::name('cashier_v3_entitlement_service_fact')->insert($service);
++    $selection = $selectionSeed; unset($selection['id']);
++    $selection = array_replace($selection, ['tenant_id' => $service['tenant_id'], 'store_id' => $stores[0], 'checkout_request_id' => $checkout,
++        'checkout_kind' => 'sale', 'primary_source_id' => (int)$k['id'], 'primary_source_name_snapshot' => $k['name'],
++        'secondary_source_id' => 0, 'secondary_source_name_snapshot' => '', 'source_label_snapshot' => $k['name']]);
++    Db::name('cashier_v3_checkout_business_source_selection')->insert($selection);
++    checkRefundDay($query('market_detail', $drill)['total'] === 4 && (int)$query('market_performance')['summary_row'][$visitsKey] === 4, 'K receipts and service alone do not count');
++    // 退款会员即使当天仅有体验服务或人员不计客数标记，退款人次也不能被移除。
++    Db::name('cashier_v3_entitlement_service_fact')->where('service_fact_id', $checkout)
++        ->update(['member_id' => $member, 'is_experience' => 1, 'friend_counts_as_customer' => 0]);
++    checkRefundDay($query('market_detail', $drill)['total'] === 4 && (int)$query('market_performance')['summary_row'][$visitsKey] === 4, 'Experience and personnel flags do not suppress refund visits');
++
++    // 无稳定会员身份时沿用原单身份，不把所有游客合并，也不按姓名猜同一人。
++    $guest = $refund(0, $start); $refund(0, $start, 'wechat', ['order_id' => $guest['order_id']]); $refund(0, $start);
++    $performance = $query('market_performance'); $detail = $query('market_detail', $drill);
++    checkRefundDay((int)$performance['summary_row'][$visitsKey] === 6 && $detail['total'] === 6 && (int)$detail['summary_row']['visits'] === 6, 'Guest refunds retain original-order identity');
++    checkRefundDay((int)$detail['summary_row']['effective_people'] === 0 && (float)$performance['summary_row']['channel_' . $k['id'] . '_amount'] === -9.0, 'No spend threshold applied; K amount and effective metrics unchanged');
++    $sum = 0;
++    foreach ([$start, $end] as $date) $sum += (int)$query('market_performance', ['start_date' => $date, 'end_date' => $date])['summary_row'][$visitsKey];
++    checkRefundDay($sum === 6, 'Period K count equals independent daily totals');
++    checkRefundDay($query('market_detail', $drill + ['payment_method_code' => 'wechat'])['total'] === 2, 'Payment-method drill narrows refund facts');
++    checkRefundDay($query('market_detail', $drill, [$stores[0]])['total'] === 5, 'Store authorization excludes another store');
++    checkRefundDay($query('market_detail', $drill + ['store_id' => $stores[0]], [999999999])['records'] === [], 'Client filter cannot expand store scope');
++    checkRefundDay($query('market_detail', $drill + ['_report_scope' => ['mode' => 'self_participant', 'employee_id' => 999999999]])['records'] === [], 'Participant scope excludes unrelated refunds');
++    checkRefundDay($query('market_detail', $drill + ['company_dimension_id' => 'missing-test-company'])['records'] === [], 'Organization filter applies to all refund types');
++    checkRefundDay($query('market_detail', array_merge($drill, ['start_date' => '2035-02-03', 'end_date' => '2035-02-03']))['total'] === 0, 'Empty refund day returns zero');
++    foreach ($performance['columns'] as $column) if ($column['key'] === $visitsKey) {
++        checkRefundDay(strpos($column['source_explanation'], '按有效退款记录统计') !== false && strpos($column['source_explanation'], '不要求有服务记录') !== false, 'K column explains refund-day rule');
++    }
++    // 人次合计和导出须覆盖未显示在第一页的全部退款会员日。
++    for ($i = 20; $i < 32; $i++) $refund($member + $i, $end, 'manual');
++    $page = $query('market_detail', $drill);
++    $export = $reports->export($stores, $input + ['report' => 'market_detail'] + $drill);
++    $marketExport = $reports->export($stores, $input + ['report' => 'market_performance']);
++    checkRefundDay(count($page['records']) === 10 && $page['total'] === 18 && (int)$page['summary_row']['visits'] === 18, 'Refund summary covers every page');
++    checkRefundDay(count($export['records']) === 18 && $export['summary_row'] === $page['summary_row'] && (int)$marketExport['summary_row'][$visitsKey] === 18, 'Summary, drilldown and exports reconcile');
++    checkRefundDay($export['metric_version'] === 'market-refund-member-day-v5' && $export['metric_version'] === $marketExport['metric_version'], 'Market reports expose identical updated metric version');
++    checkRefundDay($query('market_detail', $drill)['summary_row'] === $page['summary_row'], 'Repeated refund query is stable');
++} finally {
++    Db::rollback();
++}
++checkRefundDay((int)Db::name('cashier_v3_payment_fact')->where('fact_id', 'like', $token . '%')->count() === 0
++    && (int)Db::name('cashier_v3_order_lifecycle_operation')->where('operation_id', 'like', $token . '%')->count() === 0
++    && (int)Db::name('cashier_v3_refund_adjustment')->where('operation_id', 'like', $token . '%')->count() === 0
++    && (int)Db::name('cashier_v3_entitlement_service_fact')->where('service_fact_id', 'like', $token . '%')->count() === 0
++    && (int)Db::name('cashier_v3_checkout_business_source_selection')->where('checkout_request_id', 'like', $token . '%')->count() === 0, 'All local refund fixtures rolled back');
++echo 'market refund member-day integration: ' . $checks . " PASS\n";
