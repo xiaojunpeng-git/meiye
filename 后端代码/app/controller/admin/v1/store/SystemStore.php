@@ -60,6 +60,8 @@ class SystemStore extends AuthController
 	 */
     public function index(SystemRegionAgentServices $regionAgentServices)
     {
+        // 所属组织仅缩小门店查询，正式绑定及下级关系由统一组织服务解析。
+        $organizationId = (int)$this->request->param('organization_id', 0);
         $where = $this->request->getMore([
 			['name', ''],
             ['keywords', ''],
@@ -103,7 +105,15 @@ class SystemStore extends AuthController
 			}
 		}
 		$field = ['id', 'type', 'cate_id', 'region_id', 'name', 'phone', 'address', 'detailed_address', 'image', 'is_show', 'day_time', 'day_start', 'day_end'];
-        return $this->success($this->services->getStoreList($where, $field, '', '', 0, ['categoryName']));
+        if ($organizationId > 0) {
+            $scope = app()->make(\app\services\organization\OrganizationScopeService::class);
+            // 独立 AND 条件避免 getStoreList 合并 id/ids 时扩大组织范围；空组织必须返回空结果。
+            $where['organization_store_ids'] = $scope->getOrgStoreIds($organizationId, true) ?: [0];
+        }
+        $result = $this->services->getStoreList($where, $field, '', '', 0, ['categoryName']);
+        // 只补充已通过原列表权限与分页的门店，不扩大结果范围或改变数量。
+        $result['list'] = $this->withStoreOrganizations($result['list']);
+        return $this->success($result);
     }
 
     /**
@@ -150,12 +160,32 @@ class SystemStore extends AuthController
 				$info['manage_region_path'] = $manageServices->getManageRegionPath((int)$info['manage_region_id']);
 			}
 		}
-        // 新组织归属以 organization_store 为权威，不能从历史区域管理员反推。
-        $binding = \think\facade\Db::name('organization_store')->where('store_id', $id)->find();
-        $info['organization_id'] = (int)($binding['org_id'] ?? 0);
-        $info['organization_name'] = $info['organization_id']
-            ? (string)\think\facade\Db::name('organization')->where('id', $info['organization_id'])->value('name') : '';
+        $info = $this->withStoreOrganizations([$info])[0];
         return $this->success(compact('info'));
+    }
+
+    /**
+     * 列表与编辑详情共享当前组织归属投影；输入必须是各入口已授权读取的门店。
+     * 仅批量读取这些门店的正式绑定，不写库、不回退旧区域、不逐行查询或新增结果行。
+     */
+    private function withStoreOrganizations(array $stores): array
+    {
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', array_column($stores, 'id')))));
+        $organizations = [];
+        if ($storeIds) {
+            $rows = \think\facade\Db::name('organization_store')->alias('os')
+                ->leftJoin('organization o', 'o.id = os.org_id')
+                ->whereIn('os.store_id', $storeIds)
+                ->field('os.store_id,os.org_id,o.name as organization_name')->select()->toArray();
+            $organizations = array_column($rows, null, 'store_id');
+        }
+        foreach ($stores as &$store) {
+            $organization = $organizations[(int)($store['id'] ?? 0)] ?? [];
+            $store['organization_id'] = (int)($organization['org_id'] ?? 0);
+            $store['organization_name'] = (string)($organization['organization_name'] ?? '');
+        }
+        unset($store);
+        return $stores;
     }
 
     /**

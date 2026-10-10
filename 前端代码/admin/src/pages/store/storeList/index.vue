@@ -34,20 +34,18 @@
 			  		<Option value="-1">已停业</Option>
 			  	</Select>
 			  </FormItem>
-			  <FormItem label="门店区域：" prop='region_id'>
-			  	<Select
-					v-model="formValidate.region_id"
-					placeholder="请选择"
-					clearable
-					@on-change="searchs"
-					class="input-add"
-					>
-			  		<Option v-for="item in regionList"
-					:value="item.id"
-					:key="item.id">
-					{{ item.name }}
-					</Option>
-			  	</Select>
+			  <FormItem label="所属组织：" prop='organization_id'>
+                <!-- 正式组织资源按权限查询；不使用可能回退旧区域 ID 的通用组织树。 -->
+                <OrganizationResourceSelector
+                  v-model="formValidate.organization_id"
+                  resource="organization"
+                  picker-mode="modal"
+                  modal-title="选择所属组织"
+                  trigger-placeholder="请选择所属组织"
+                  placeholder="搜索组织名称"
+                  class="input-add"
+                  @change="searchs"
+                />
 			  </FormItem>
 			  <FormItem label="自建商品：" prop='product_status'>
 			  	<Select
@@ -188,16 +186,17 @@
 import util from "@/libs/util";
 import Setting from "@/setting";
 import { mapState } from "vuex";
+import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
 import {
   storeListApi,
   storeLogin,
   storeSetShowApi,
   resetApi,
-  getAllRegion,
   cascaderList
 } from "@/api/store";
 export default {
   name: "storeList",
+  components: { OrganizationResourceSelector },
   data() {
     return {
 	  routerPre: Setting.roterPre,
@@ -212,7 +211,7 @@ export default {
 		use_system_money:'',
         status: "",
 		cate_id: [],
-		region_id:'',
+		organization_id: 0,
 		type:'all',
 		keywords:'',
         page: 1,
@@ -263,8 +262,9 @@ export default {
           minWidth: 80,
         },
 		{
-		  title: "门店区域",
-		  key: "recommend_region_name",
+		  // 与编辑页使用同一组织绑定名称，不把历史区域名称冒充所属组织。
+		  title: "所属组织",
+		  key: "organization_name",
 		  minWidth: 100,
 		},
         {
@@ -275,7 +275,6 @@ export default {
         },
       ],
       orderList: [],
-	  regionList:[],
 	  treeSelect: []
     };
   },
@@ -290,7 +289,6 @@ export default {
   },
   mounted() {
 	this.goodsCategory();
-	this.allRegion();
     this.getList();
   },
   methods: {
@@ -317,6 +315,8 @@ export default {
 	// 重置搜索表单
 	resetForm(){
 		this.$refs.formValidate.resetFields();
+        // 选择器回显跟随 v-model；重置 ID 即清除组织，不保留旧筛选范围。
+        this.formValidate.organization_id = 0;
 		this.formValidate.page = 1;
 		this.getList();
 	},
@@ -327,14 +327,6 @@ export default {
 	  }).catch(res => {
 	    this.$Message.error(res.msg);
 	  })
-	},
-	// 区域列表
-	allRegion(){
-		getAllRegion().then(res=>{
-			this.regionList = res.data;
-		}).catch(err=>{
-			this.$Message.error(err.msg);
-		})
 	},
     getList() {
       this.loading = true;

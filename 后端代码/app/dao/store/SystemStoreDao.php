@@ -39,7 +39,10 @@ class SystemStoreDao extends BaseDao
 	 */
 	public function search(array $where = [])
 	{
-		return parent::search($where)->when(isset($where['ids']) && $where['ids'], function ($query) use ($where) {
+        // 所属组织范围与既有权限、门店 ID、其他筛选作交集；列表及 count 共用同一条件。
+        return parent::search($where)->when(isset($where['organization_store_ids']), function ($query) use ($where) {
+            $query->whereIn('id', $where['organization_store_ids'] ?: [0]);
+        })->when(isset($where['ids']) && $where['ids'], function ($query) use ($where) {
 			$query->whereIn('id', $where['ids']);
 		})->when(isset($where['province']) && $where['province'], function ($query) use ($where) {
 			$query->where('province', $where['province']);
