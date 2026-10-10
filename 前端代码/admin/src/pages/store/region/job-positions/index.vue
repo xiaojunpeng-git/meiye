@@ -159,6 +159,16 @@ export default {
       const positionId = Number(row.id); const old = { status: row.status, allow_store_select: row.allow_store_select };
       Object.assign(row, patch); this.saving = true;
       try {
+        // 启停只修改状态：不重存旧权限规则，避免无效历史菜单阻断停用或清除其他岗位配置。
+        if (Object.prototype.hasOwnProperty.call(patch, 'status') &&
+          !Object.prototype.hasOwnProperty.call(patch, 'allow_store_select')) {
+          const payload = { id: positionId, status: Number(patch.status) === 1 ? 1 : 0, status_only: 1 };
+          this.resetToken(); const headers = this.writeHeaders('job_position_status', payload);
+          payload.request_token = headers['X-Request-Token'];
+          const res = await saveJobPosition(payload, headers);
+          this.resetToken(); this.showToast((res && res.msg) || '保存成功'); await this.loadList();
+          return;
+        }
         const detailRes = await getJobPositionDetail(positionId); const d = (detailRes && detailRes.data) || {}; const p = Object.assign({}, row, d.position || {}, { id: positionId });
         const payload = {
           id: positionId, name: p.name || '', status: patch.status == null ? Number(p.status) : Number(patch.status), remark: p.remark || '',
