@@ -1,0 +1,123 @@
+{
+  "sourceCommit": "cff003faf161a29b284708a66586a736eec645de",
+  "sourceEntry": "18091 cashier-v3 with inventory-vue3/shared",
+  "baselineCommit": "ea40cf481e2c790d850b485f3711bc840ac43f1b",
+  "frontendBaselineMatchesProduction": true,
+  "candidatePackageSha256": "67041d2296b485d2e24df929f9063c6d952e4c5492a69f97de5b35434596bc95",
+  "backend": [
+    {
+      "path": "app/controller/store/product/inventory/InventoryManualOutbound.php",
+      "before": "329bca11af836f0c58805f768ed2687e8016131b052fbf1536b6754e85a6c1fd",
+      "after": "220a2ebfc53d3385810636ac018fdb67473d5960548b8e6aeae550c046fb17a9"
+    },
+    {
+      "path": "app/controller/store/product/inventory/InventoryUnifiedQuery.php",
+      "before": "482fda5193a1d13644402cde553120e946b294b49c4e26dd9e75d65c6b283750",
+      "after": "e140fef65dd580bd23e371a2a3631cfd26fe8315912ca6151d5853ef4c51e4af"
+    },
+    {
+      "path": "app/services/product/inventory/InventoryManualOutboundServices.php",
+      "before": "cdc7ae1c9b410d573ca2545280db11cc7b299b52cffc9cc20fbe2bf526088e96",
+      "after": "dd5312369dbf7f699d162e230c82c6859c43e381376a4604614b66325d76df0d"
+    },
+    {
+      "path": "app/services/product/inventory/InventoryMovementQueryServices.php",
+      "before": "b9ce1df7de987c58bacf5d96a0300f1fcf1bc117f35d44de70b3f31c069660b5",
+      "after": "5b3c56cc7b75cd4aa2016c83ee46432b6ce08425b042b02cc96785ada212789d"
+    },
+    {
+      "path": "app/services/product/inventory/InventoryPlatformHqOutboundServices.php",
+      "before": "178f9d2a020a5cc3c75543e299bcbeb092506660bd9c6768276b470fcdf14045",
+      "after": "7a14f8cf31d1c4db0ecf814fa1dc13dba28924b81a01660352d7cce88e95e185"
+    },
+    {
+      "path": "app/services/product/inventory/InventoryOutboundHeaderServices.php",
+      "before": null,
+      "after": "0bc635dd8663848f9cced731a609f0372aaa4fbd8ecd463fffc0eac95cb79c39"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php",
+      "before": "4d0da88ffb5aeb58dce076a613991170bc761bdc4385839bb2bb5963cb07fa8e",
+      "after": "ae2fd485d013a96087efe4730da5bb0445cb78c106efea8229d5f24b0c5a7f41"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php",
+      "before": "92296decb72ceb93b1aa89a5468e683cd303a62c41436f938e23158a29e81ff0",
+      "after": "ff2351f62296a7546a48365239d8dea75d17d1a791f46dfbfa95d23d7a043676"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryOutboundUnifiedQueryProvider.php",
+      "before": "6392ec0c54e7abce6342e58150c6dfe3a9431410fa00fae5f6f7e5e314ef484a",
+      "after": "f1f012d107edf0f105682bbab57adba05f6e77cf7ffe6f4b7ce0bd748180c36c"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryOperationalUnifiedQueryRegistrar.php",
+      "before": "a0926e5b756aa26ea8d6a91b3c56b49362d507fa8d48ab214283eb4a45a6544b",
+      "after": "5cb09ade8e876ddb8da737cea1d38455ceb6db7e26c7b647fafac722c3a208c9"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryOperationalUnifiedQueryWorkerContextResolver.php",
+      "before": "907d440dee9d7a3fdfe5e739af7cac4cca8239827f59c18f55616918cccc3d78",
+      "after": "bec6540af22197933ba9febb0f9860f1c38ba723ce0f4e285c3506677b99482c"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryStoreUnifiedQueryContextFactory.php",
+      "before": "3b8ec2c0ab5ef6c5bc96d12f869494f859e3be4fa62d8e48c0229b074c43b3e8",
+      "after": "4746652128439140542e3b78dc35c1c6169b556c2e8bcc24f62ca72071758856"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php",
+      "before": "120714a9617581e00d006b4e20c04e99f31892bd81735b0c540fee9ff846fe75",
+      "after": "6c75fada9831c739af0413d6aaaa1ae80c063972eb837a274e1f0486c5cde59a"
+    },
+    {
+      "path": "app/services/product/inventory/query/InventoryOutboundWorkerIdentity.php",
+      "before": null,
+      "after": "4d63b4febef3d8bacb8de66ed1140eafa0c66db0c3a476e108b8cc9adb6d0f5f"
+    },
+    {
+      "path": "route/store.php",
+      "before": "dcddc30ccf57cf23201b9732b27728db3996f6ef3943a32de977aa0aa4819ce5",
+      "after": "c2d77785a75fa200ef20eb9002d81db3570a12bf3190ce513c481693fe238bca"
+    }
+  ],
+  "http": [
+    {
+      "url": "/view_cashier_v3/index.html",
+      "sha256": "e2e0acf38360672e579037b3d289dbf1b6a684fdd42351b4a32042232f7d2019",
+      "exact": true
+    },
+    {
+      "url": "/view_cashier_v3/assets/index-b10b0be6.js",
+      "sha256": "f676536f6f04ef782f11a87a2c8b70b096810a1b4a7f72e3ac2f50300c8a49c8",
+      "exact": true
+    },
+    {
+      "url": "/view_cashier_v3/assets/index-4e4d2cf2.css",
+      "sha256": "4e4d2cf21ce34db51d8743510fe83897fad0c97a11d82e2c04cfb7ab65202559",
+      "exact": true
+    },
+    {
+      "url": "/preview-8080/view_cashier_v3/index.html",
+      "sha256": "f7e2031a40b3908cf3763477e95f3960972a14098955d2e67613ba00ba61de29",
+      "exact": false
+    },
+    {
+      "url": "/preview-8080/view_cashier_v3/assets/index-b10b0be6.js",
+      "sha256": "f676536f6f04ef782f11a87a2c8b70b096810a1b4a7f72e3ac2f50300c8a49c8",
+      "exact": true
+    },
+    {
+      "url": "/preview-8080/view_cashier_v3/assets/index-4e4d2cf2.css",
+      "sha256": "4e4d2cf21ce34db51d8743510fe83897fad0c97a11d82e2c04cfb7ab65202559",
+      "exact": true
+    }
+  ],
+  "backup": "/www/backups/rh.cc3798.com/20261010-r52-cff003fa",
+  "migration": {
+    "id": 216,
+    "key": "20261010-r52-outbound-header"
+  },
+  "browserValidation": "pending_login",
+  "push": "pending"
+}
