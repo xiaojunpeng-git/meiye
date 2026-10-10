@@ -506,6 +506,7 @@
 				svipOrderRate:0,
 				spinShow: false,
 				addresData: [],
+				addressHydrationVersion: 0,
 				ruleValidate: {
 					// valid_range: [
 					// 	{ required: true, message: '请输入配送范围' }
@@ -644,7 +645,8 @@
 				this._staticDataReady = true;
 				this.getErpConfig();
 				this.getKey();
-				this.cityInfo({ pid: 0 });
+				// 根字典共用一个请求；详情随后补齐已选路径，避免根请求晚到清掉子节点。
+				this.addressRootsPromise = this.cityInfo({ pid: 0 });
 				this.getDeliveryConfig();
 				this.financeConfig();
 			},
@@ -655,6 +657,7 @@
 				if (storeId && storeId === this.loadedRouteStoreId) return;
 				this.currentTab = '1';
 				if (storeId) {
+					this.addressHydrationVersion++;
 					this.loadedRouteStoreId = storeId;
 					this.getInfo(storeId);
 				} else {
@@ -662,6 +665,8 @@
 				}
 			},
 			resetFormForCreate() {
+				// 使上一家门店尚未返回的地区路径失效，不能覆盖新建页。
+				this.addressHydrationVersion++;
 				this.loadedRouteStoreId = '';
 				this.isApi = 1;
 				Object.assign(this.formItem, createDefaultFormItem());
@@ -690,6 +695,7 @@
 				this.organizationPickerKey++;
 				this.organizationRequest = null;
 				this.storeAddress = info.address || '';
+				this.addressHydrationPromise = this.hydrateAddressOptions(this.formItem.addressSelect);
 			},
 			financeConfig(){
 				getFinanceConfig(0).then(res=>{
@@ -739,15 +745,50 @@
 				})
 			},
 			addchack(e,selectedData){
+				// 用户选址优先于尚未结束的自动回显，不允许旧路径再覆盖当前选择。
+				this.addressHydrationVersion++;
 				this.formItem.addressSelect = e;
 				this.formItem.address = (selectedData.map(o => o.label)).join("");
 				this.storeAddress = (selectedData.map(o => o.label)).join("");
 			},
 			cityInfo(data){
-				cityApi(data).then(res=>{
-          console.log(res)
+				return cityApi(data).then(res=>{
 					this.addresData = res.data
+					return res.data;
+				}).catch(err => {
+					this.$Message.error(err.msg || '地区选项加载失败，请重试');
+					return [];
 				})
+			},
+			async hydrateAddressOptions(selection) {
+				const version = ++this.addressHydrationVersion;
+				const ids = Array.isArray(selection) ? selection.map(Number) : [];
+				try {
+					const roots = await this.addressRootsPromise;
+					if (version !== this.addressHydrationVersion || !roots) return;
+					// 克隆只属于当前回显的选项树，避免切换门店时改动共用根字典。
+					const tree = JSON.parse(JSON.stringify(roots));
+					let options = tree;
+					for (let index = 0; index < ids.length; index++) {
+						const node = options.find(item => Number(item.value) === ids[index]);
+						if (!node) return;
+						if (index < ids.length - 1) {
+							const response = await cityApi({ pid: node.value });
+							if (version !== this.addressHydrationVersion) return;
+							node.children = response.data;
+							options = node.children;
+						}
+					}
+					if (version === this.addressHydrationVersion) {
+						this.addresData = tree;
+						this.formItem.addressSelect = ids;
+					}
+				} catch (err) {
+					// 加载失败只保留已读取地址，不清空资料，也不触发保存。
+					if (version === this.addressHydrationVersion) {
+						this.$Message.error(err.msg || '已保存地区加载失败，请重试');
+					}
+				}
 			},
 			loadData(item, callback) {
 				item.loading = true;
@@ -808,10 +849,13 @@
 			    let that = this;
 			    that.spinShow = true;
 			    storeGetInfoApi(id).then(res => {
+					// 路由切换后，旧详情不能覆盖新门店资料及其地区路径。
+					if (this.loadedRouteStoreId !== String(id)) return;
 					this.isApi = 1;
 					this.applyStoreInfo(res.data.info || {}, id);
 					that.spinShow = false;
 				}).catch(function (res) {
+					if (that.loadedRouteStoreId !== String(id)) return;
 					that.spinShow = false;
 					that.loadedRouteStoreId = '';
 					that.$Message.error(res.msg);
