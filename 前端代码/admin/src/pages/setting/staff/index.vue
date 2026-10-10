@@ -107,15 +107,15 @@
                     <a @click="openTransferLog(row.id)">调店记录</a>
                   </div>
                   <div class="action-row">
-                    <a @click="handleClick1(row.id)">专属客户</a>
+                    <a v-if="Number(row.id) > 0" @click="handleClick1(row.id)">专属会员</a>
                     <Divider
                       v-if="Number(row.is_organization_direct || 0) !== 1 && Number(row.id || 0) > 0"
                       type="vertical"
                     />
                     <a
                       v-if="Number(row.is_organization_direct || 0) !== 1 && Number(row.id || 0) > 0"
-                      @click="openPermissionEditor(row)"
-                    >权限编辑</a>
+                      @click="openExclusiveTransfer(row)"
+                    >转移专属会员</a>
                   </div>
                 </div>
               </template>
@@ -156,16 +156,12 @@
     />
     <transfer-modal v-model="showTransferModal" :staff-row="transferStaffRow" @success="getList" />
     <transfer-log-modal v-model="showTransferLogModal" :staff-id="transferLogStaffId" />
-    <staff-feature-permission-modal
-      v-model="permissionModal"
-      :staff="permissionStaff"
-      @success="getList"
-    />
+    <exclusive-member-transfer-modal v-model="exclusiveTransferModal" :staff-row="exclusiveTransferStaff" @success="onExclusiveTransferSuccess" />
 
     <Modal
       v-model="modal1"
       :mask-closable="false"
-      title="查看专属客户"
+      title="查看专属会员"
       footer-hide
       width="1000"
       @on-cancel="onModal1Cancel"
@@ -180,7 +176,7 @@
       >
         <FormItem label="客户查询：">
           <Input
-            placeholder="请输入客户名称/ID/手机号"
+            placeholder="请输入客户昵称/姓名/手机号"
             v-model="formData1.keyword"
             class="input-add"
           />
@@ -190,7 +186,7 @@
             :editable="false"
             @on-change="onDateChange1"
             :value="timeVal1"
-            format="yyyy/MM/dd"
+            format="yyyy-MM-dd"
             type="daterange"
             placement="bottom-end"
             placeholder="自定义时间"
@@ -204,6 +200,7 @@
       </Form>
       <Table
         highlight-row
+        :loading="memberLoading"
         no-data-text="暂无数据"
         :columns="columns1"
         :data="tableData1"
@@ -240,7 +237,7 @@ import ColumnSetting from './components/ColumnSetting';
 import TransferModal from './components/TransferModal';
 import TransferLogModal from './components/TransferLogModal';
 import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
-import StaffFeaturePermissionModal from './components/StaffFeaturePermissionModal.vue';
+import ExclusiveMemberTransferModal from './components/ExclusiveMemberTransferModal.vue';
 
 const COLUMNS_META = [
   { key: 'id', title: 'ID', minWidth: 60 },
@@ -316,7 +313,7 @@ export default {
     TransferModal,
     TransferLogModal,
     OrganizationStoreScopePicker,
-    StaffFeaturePermissionModal,
+    ExclusiveMemberTransferModal,
   },
   data() {
     return {
@@ -331,8 +328,10 @@ export default {
       showTransferLogModal: false,
       transferStaffRow: {},
       transferLogStaffId: 0,
-      permissionModal: false,
-      permissionStaff: {},
+      exclusiveTransferModal: false,
+      exclusiveTransferStaff: {},
+      memberLoading: false,
+      memberRequestSequence: 0,
       columnsMeta: COLUMNS_META,
       columnConfig: [...DEFAULT_COLUMN_CONFIG],
       defaultColumnConfig: DEFAULT_COLUMN_CONFIG,
@@ -355,17 +354,17 @@ export default {
       modal1: false,
       formData1: {
         keyword: '',
-        data: '',
+        date_from: '',
+        date_to: '',
         page: 1,
         limit: 20,
       },
       timeVal1: [],
       columns1: [
-        { title: 'ID', key: 'uid' },
         { title: '客户昵称', key: 'nickname' },
-        { title: '客户手机号', key: 'phone' },
-        { title: '专属业绩', key: 'performance_price' },
-        { title: '绑定时间', key: 'salesman_time' },
+        { title: '客户姓名', key: 'real_name' },
+        { title: '手机号', key: 'phone' },
+        { title: '绑定时间', key: 'bound_at' },
       ],
       total1: 0,
       tableData1: [],
@@ -598,10 +597,19 @@ export default {
         });
     },
     getCustomerList() {
+      // 弹窗翻页、切换员工及关闭均使旧请求失效，不能显示其他员工的会员。
+      const sequence = ++this.memberRequestSequence;
+      this.memberLoading = true;
       merchantStaffCustomer(this.currentId, this.formData1).then((res) => {
+        if (sequence !== this.memberRequestSequence || !this.modal1) return;
         this.tableData1 = res.data.list || [];
         this.total1 = res.data.count || 0;
-      });
+      }).catch((err) => {
+        if (sequence !== this.memberRequestSequence) return;
+        this.tableData1 = [];
+        this.total1 = 0;
+        this.$Message.error(err.msg || '读取专属会员失败');
+      }).finally(() => { if (sequence === this.memberRequestSequence) this.memberLoading = false; });
     },
     getExcelData(excelData) {
       return new Promise((resolve) => {
@@ -628,6 +636,9 @@ export default {
       }
     },
     handleClick1(id) {
+      this.onModal1Cancel();
+      this.tableData1 = [];
+      this.total1 = 0;
       this.modal1 = true;
       this.currentId = id;
       this.getCustomerList();
@@ -637,20 +648,26 @@ export default {
       this.getCustomerList();
     },
     onDateChange1(date) {
-      this.formData1.data = date[0] ? date.join('-') : '';
+      this.formData1.date_from = date[0] || '';
+      this.formData1.date_to = date[1] || '';
     },
     onPageChange1(page) {
       this.formData1.page = page;
       this.getCustomerList();
     },
     onModal1Cancel() {
-      this.formData1 = { keyword: '', data: '', page: 1, limit: 20 };
+      this.memberRequestSequence += 1;
+      this.formData1 = { keyword: '', date_from: '', date_to: '', page: 1, limit: 20 };
       this.timeVal1 = [];
     },
-    openPermissionEditor(row) {
+    openExclusiveTransfer(row) {
       if (!row || Number(row.is_organization_direct || 0) === 1 || Number(row.id || 0) <= 0) return;
-      this.permissionStaff = row;
-      this.permissionModal = true;
+      this.exclusiveTransferStaff = row;
+      this.exclusiveTransferModal = true;
+    },
+    onExclusiveTransferSuccess() {
+      this.getList();
+      if (this.modal1) this.getCustomerList();
     },
   },
 };

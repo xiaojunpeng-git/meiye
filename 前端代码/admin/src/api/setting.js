@@ -1260,6 +1260,16 @@ export function merchantStaffCustomer(id, data) {
   });
 }
 
+// 专属会员转移只传来源任职、接收任职及预览版本，门店范围由服务端判定。
+export function prepareExclusiveMemberTransfer(id) {
+  return request({ url: `/merchant/staff/exclusive-transfer/${id}`, method: 'get' });
+}
+
+// 确认只替换档案绑定，令牌和预览快照用于防重及防止覆盖并发编辑。
+export function transferExclusiveMembers(id, data) {
+  return request({ url: `/merchant/staff/exclusive-transfer/${id}`, method: 'post', data });
+}
+
 /**
  * 获取店员业绩列表
  * @param {*} id
