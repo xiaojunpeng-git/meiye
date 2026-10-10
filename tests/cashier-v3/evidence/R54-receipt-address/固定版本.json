@@ -1,0 +1,37 @@
+{
+  "task": "R54-00001",
+  "status": "development-and-selftest-complete-awaiting-product-acceptance",
+  "baseline_head": "785b2a841916e3f72869968b5255e4707002c461",
+  "files": [
+    {
+      "path": "前端代码/cashier-v3/src/services/salesOrderReceiptPrint.js",
+      "sha256": "e3897820660f0f36f2b671fc50aa282c4e3e19c777477dfd521442ce6c750243"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php",
+      "sha256": "1dc0cdbb6d660664e9ccc7f74ce7409dc519c408acb23b47d6cc709d41501729"
+    },
+    {
+      "path": "tests/cashier-v3/js/sales-order-receipt-print-contract.mjs",
+      "sha256": "6bf38c8095e4cc8a60f328b7bef987b653492ef17af898304804a7fb91e89b1d"
+    },
+    {
+      "path": "tests/cashier-v3/php/sales-receipt-store-address-mysql.php",
+      "sha256": "0796e06bf45725afc7dcb13fa07418af8462debb94e8baea52a5e87d3c40632f"
+    }
+  ],
+  "tracked_patch_sha256": "b4ba3ac0f6bc089d5ad23cf4c7d480308ab50422eb2495ecd303cef098c84655",
+  "note": "New integration test is fixed by file SHA-256; no staging or commit",
+  "tests": {
+    "javascript": 19,
+    "mysql": 13,
+    "php_lint": "pass",
+    "receipt_widths": [
+      58,
+      76,
+      80
+    ],
+    "specific_order_browser_retest": "pending login",
+    "physical_print": "not performed"
+  }
+}

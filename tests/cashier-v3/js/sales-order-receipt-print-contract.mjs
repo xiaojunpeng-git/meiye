@@ -30,6 +30,28 @@ function ok(label, callback) {
   process.stdout.write(`[PASS] ${label}\n`)
 }
 
+ok('门店地址在实收金额之后，转义并换行，缺失地址不虚构', () => {
+  for (const paperSize of ['58', '76', '80']) {
+    const html = buildSalesOrderReceiptHtml({
+      storeAddress: '河南省许昌市禹州市\n禹王大道<测试>门店 & 2楼',
+      amountSummary: { payableAmount: 0, actualReceivedAmount: 0 },
+      orderNote: '备注'
+    }, { paperSize })
+    assert.ok(html.indexOf('<div class="store-address">') > html.indexOf('实收金额'))
+    assert.ok(html.indexOf('<div class="store-address">') < html.indexOf('<div class="note">'))
+    assert.match(html, /门店地址：/)
+    assert.match(html, /禹王大道&lt;测试&gt;门店 &amp; 2楼/)
+    assert.match(html, /\.store-address \{[^}]*overflow-wrap: anywhere/)
+    assert.match(html, /\.store-address \{[^}]*font-size: \.9em/)
+  }
+  for (const storeAddress of ['', '  ', null, undefined]) {
+    assert.doesNotMatch(buildSalesOrderReceiptHtml({ storeAddress }), /<div class="store-address">/)
+  }
+  assert.equal(salesOrderReceiptFromCheckout({ storeAddress: '订单门店地址' }).storeAddress, '订单门店地址')
+  // 独立的顶层打印样式必须与 iframe 预览同样缩小地址字号。
+  assert.match(receiptPrint, /\$\{root\} \.store-address \{[^}]*font-size: \.9em/)
+})
+
 ok('小票只展示订单冻结快照且转义动态文本', () => {
   const html = buildSalesOrderReceiptHtml({
     salesOrderNo: 'SO-1001',

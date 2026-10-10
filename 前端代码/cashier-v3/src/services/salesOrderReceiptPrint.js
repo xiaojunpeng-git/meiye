@@ -222,7 +222,8 @@ export function buildSalesOrderReceiptTestOrder(options = {}) {
 }
 
 /**
- * The receipt is deliberately a projection of an already-settled order snapshot.
+ * Amounts and items project an already-settled order snapshot; storeAddress is
+ * current contact information supplied by the authorized order-detail response.
  * It never queries or changes an order, payment, inventory, or accounting record.
  */
 export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
@@ -242,6 +243,8 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   const orderNo = pickValue(source, ['salesOrderNo', 'orderNo', 'no'])
   const memberName = pickValue(source, ['memberName']) || pickValue(member, ['name', 'memberName']) || (source.isGuest ? '游客' : '游客')
   const note = pickValue(source, ['orderNote', 'remark', 'note'])
+  // 地址只取后端订单详情，不回退到当前会话门店；缺失资料不虚构地址。
+  const storeAddress = pickValue(source, ['storeAddress'])
   const itemRows = salesItems.length
     ? salesItems.map((item) => `<tr><td>${escapeHtml(itemName(item))}</td><td class="right">x${escapeHtml(itemQuantity(item))}</td><td class="right">${escapeHtml(displayAmount(itemAmount(item)))}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">暂无商品明细</td></tr>'
@@ -300,6 +303,8 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .empty { color: #6b7280; text-align: center; }
   .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
   .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
+  /* 地址比正文小一号；预览与顶层打印保持相同的相对字号。 */
+  .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
   .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
   .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
   @page { size: ${paperProfile.paperWidthMm}mm ${paperProfile.fixedPageHeightMm || 297}mm; margin: 0; }
@@ -312,7 +317,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     .receipt h1 { font-size: 1.3em; }
     .receipt h2 { font-size: 1em; }
     .receipt .tear-guide { font-size: .6em; }
-    .meta, tr, .summary, .note, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+    .meta, tr, .summary, .store-address, .note, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
     h2 { break-after: avoid; page-break-after: avoid; }
   }
 </style>
@@ -340,6 +345,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   ${payments.length || hasSalesReceipt ? `<h2>收款明细</h2>
   <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
   ${summaryRows || hasSalesReceipt ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
+  ${hasValue(storeAddress) ? `<div class="store-address"><strong>门店地址：</strong>${escapeHtml(storeAddress)}</div>` : ''}
   ${hasValue(note) ? `<div class="note"><strong>订单备注</strong><br>${escapeHtml(note)}</div>` : ''}
   <div class="tear-guide" aria-hidden="true"></div>
   </main>
@@ -406,6 +412,7 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
     ...snapshot,
     salesOrderNo: pickValue(source, ['salesOrderNo', 'orderNo']) || pickValue(snapshot, ['salesOrderNo', 'orderNo']),
     storeName: pickValue(source, ['storeName', 'shopName']) || pickValue(snapshot, ['storeName', 'shopName']),
+    storeAddress: pickValue(source, ['storeAddress']) || pickValue(snapshot, ['storeAddress']),
     member: source.member || snapshot.member,
     memberName: pickValue(source, ['memberName']) || pickValue(snapshot, ['memberName']),
     isGuest: source.isGuest === true || snapshot.isGuest === true || !source.member,
@@ -555,6 +562,8 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       ${root} .empty { color: #6b7280; text-align: center; }
       ${root} .summary { margin-top: 8px; border-top: 1px dashed #6b7280; }
       ${root} .summary-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
+      /* 与预览一致，地址相对正文缩小，不改变金额和明细字号。 */
+      ${root} .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
       ${root} .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
       ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
       @page { size: ${profile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }
@@ -565,7 +574,7 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
         ${root} h1 { font-size: 1.3em !important; }
         ${root} h2 { font-size: 1em !important; }
         ${root} .tear-guide { font-size: .6em !important; }
-        ${root} .meta, ${root} tr, ${root} .summary, ${root} .note, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+        ${root} .meta, ${root} tr, ${root} .summary, ${root} .store-address, ${root} .note, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
         ${root} h2 { break-after: avoid; page-break-after: avoid; }
       }
     `
