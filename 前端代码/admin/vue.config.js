@@ -29,6 +29,8 @@ module.exports = {
   productionSourceMap: false, //关闭生产环境下的SourceMap映射文件
   devServer: {
     publicPath: Setting.publicPath,
+    // macOS Docker 挂载可能漏掉文件事件；轮询源码以避免 18081 持续返回旧代码，不扫描依赖目录。
+    watchOptions: { poll: 1000, ignored: /node_modules/ },
     // 容器内 8081 映射到宿主机 18081 时，HMR 必须连接浏览器可访问的宿主机端口。
     // 当前项目的 webpack-dev-server 2.x 以 public 生成客户端连接地址；仅设置
     // sockHost/sockPort 不会覆盖注入 app.js 的 localhost:8081。
