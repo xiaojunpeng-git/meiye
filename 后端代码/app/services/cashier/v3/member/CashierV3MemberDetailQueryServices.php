@@ -296,6 +296,12 @@ final class CashierV3MemberDetailQueryServices
             $detailQuery['tab'] === 'gift' && $giftStatus === '' ? $detailQuery['dateTo'] : '');
         $care = $this->care($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'care' ? $detailQuery['status'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
         $balanceChanges = $this->balanceChanges($memberId, $operatorScope->tenantId());
+        // 券实例属于会员当前持有权益；只在优惠券页签读取，不能从赠送事实反推可用券。
+        $coupons = $detailQuery['tab'] === 'coupons'
+            ? $this->coupons($memberId, $detailQuery['keyword'], $detailQuery['status'],
+                $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '',
+                $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '')
+            : [];
         $cardOperations = $this->cardOperations(
             $memberId,
             $operatorScope->tenantId(),
@@ -381,6 +387,7 @@ final class CashierV3MemberDetailQueryServices
                 ],
             ],
             'cards' => $cards,
+            'coupons' => $coupons,
             // 余额记录只读取 V3 不可变 balance_changed 事实；本金和赠金拆分不从
             // 页面、订单或当前余额反推。
             'balanceChanges' => $balanceChanges,
@@ -394,6 +401,7 @@ final class CashierV3MemberDetailQueryServices
             'tabStates' => [
                 'profile' => ['total' => 1, 'dataStatus' => 'authoritative'],
                 'assets' => ['total' => count($cards), 'dataStatus' => 'authoritative'],
+                'coupons' => ['total' => count($coupons), 'dataStatus' => 'authoritative'],
                 'balance-changes' => ['total' => count($balanceChanges), 'dataStatus' => 'authoritative'],
                 'card-operations' => ['total' => count($cardOperations), 'dataStatus' => 'authoritative'],
                 'writeoff' => ['total' => count($services), 'dataStatus' => 'authoritative'],
@@ -404,6 +412,56 @@ final class CashierV3MemberDetailQueryServices
             'detailQuery' => $detailQuery,
             'projectionContractVersion' => 'cashier-v3-member-detail-v3',
         ];
+    }
+
+    /**
+     * Read the member-owned coupon instances, including direct/recharge gifts and transfers.
+     * Gift documents are issuance history, not spendable entitlement authority; status and
+     * validity always come from the current coupon instance. A bounded list avoids loading
+     * an unbounded lifetime history into every member-detail request.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function coupons(int $memberId, string $keyword, string $status, string $dateFrom, string $dateTo): array
+    {
+        $now = time();
+        $query = Db::name('store_coupon_user')->alias('cu')
+            ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
+            ->where('cu.uid', $memberId);
+        if ($status === 'active') {
+            $query->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
+                ->where(function ($q) use ($now): void { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
+                ->where(function ($q) use ($now): void { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); });
+        }
+        $this->applyDetailKeyword($query, $keyword, ['cu.coupon_title']);
+        if ($dateFrom !== '') $query->where('cu.add_time', '>=', strtotime($dateFrom . ' 00:00:00'));
+        if ($dateTo !== '') $query->where('cu.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
+        $rows = $query->field('cu.id,cu.coupon_title,cu.coupon_price,cu.start_time,cu.end_time,cu.use_time,cu.status,cu.is_fail,ci.coupon_type')
+            ->order('cu.add_time desc,cu.id desc')->limit(200)->select()->toArray();
+        return array_map(function (array $row) use ($now): array {
+            $couponType = $row['coupon_type'] === null ? 0 : (int)$row['coupon_type'];
+            $start = (int)$row['start_time'];
+            $end = (int)$row['end_time'];
+            $statusCode = (int)$row['status'];
+            $used = $statusCode === 1 || (int)$row['use_time'] > 0;
+            $voided = (int)$row['is_fail'] !== 0 || $statusCode === 2;
+            $statusLabel = $voided ? '已作废' : ($used ? '已使用'
+                : ($statusCode !== 0 ? '不可用'
+                    : ($end > 0 && $end < $now ? '已过期' : ($start > $now ? '未生效' : '有效'))));
+            return [
+                'id' => 'coupon:' . (int)$row['id'], 'couponNo' => (string)$row['id'],
+                'couponName' => (string)$row['coupon_title'],
+                'couponTypeLabel' => $couponType === 2 ? '折扣券' : ($couponType === 1 ? '满减券' : '未标注'),
+                // 折扣券的 coupon_price 是百分比而非金额；不可格式化成元。
+                'couponAmountLabel' => $couponType === 2
+                    ? rtrim(rtrim((string)$row['coupon_price'], '0'), '.') . '%'
+                    : ($couponType === 0 ? '未标注' : null),
+                'couponAmount' => $couponType === 1 ? (string)$row['coupon_price'] : null,
+                'effectiveAt' => $start > 0 ? $this->dateTime($start) : null,
+                'expiresAt' => $end > 0 ? $this->dateTime($end) : null,
+                'statusLabel' => $statusLabel,
+            ];
+        }, $rows);
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -1350,7 +1408,7 @@ final class CashierV3MemberDetailQueryServices
     private function detailQuery(array $raw): array
     {
         $tab = trim((string)($raw['tab'] ?? ''));
-        $allowedTabs = ['assets', 'card-operations', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'];
+        $allowedTabs = ['assets', 'card-operations', 'coupons', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'];
         $keyword = trim((string)($raw['keyword'] ?? ''));
         $status = trim((string)($raw['status'] ?? ''));
         if (!in_array($status, ['', 'active', 'unfinished'], true)) $status = '';

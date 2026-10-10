@@ -18,6 +18,7 @@ require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3Checko
 require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutRequestRepository.php';
 require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutVerifiedSourceSet.php';
 require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php';
+require_once $backendRoot . '/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php';
 
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementCanonicalizer;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementContractException;
@@ -25,6 +26,8 @@ use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementIdFactory;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementKernel;
 use app\services\cashier\v3\settlement\CashierV3CheckoutSettlementStateMachine;
 use app\services\cashier\v3\settlement\CashierV3CheckoutProjectionServices;
+use app\services\cashier\v3\settlement\CashierV3CheckoutDraftAuthorityRebuilder;
+use app\services\cashier\v3\settlement\CashierV3CheckoutVerifiedSourceSet;
 
 $passed = 0;
 $failed = 0;
@@ -299,6 +302,7 @@ function checkoutProjectionAggregate(array $result): array
             'coupon_user_id' => $line['couponUserId'],
             'coupon_name_snapshot' => $line['couponNameSnapshot'],
             'coupon_discount_cents' => $line['couponDiscountCents'],
+            'coupon_payment_cents' => $line['couponPaymentCents'] ?? 0,
             'sale_amount_cents' => $line['saleAmountCents'],
             'debt_amount_cents' => $line['debtAmountCents'],
             'entitlement_actual_amount_cents' => $line['entitlementActualAmountCents'],
@@ -371,6 +375,86 @@ checkoutAssert(
 $snapshot = checkoutSnapshot();
 $saveCommand = checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 1);
 $draft = CashierV3CheckoutSettlementKernel::saveDraft($saveCommand, $snapshot, null, $secret);
+$couponSnapshot = checkoutSnapshot();
+$couponSnapshot['saleLines'][0]['couponUserId'] = 123;
+$couponSnapshot['saleLines'][0]['couponNameSnapshot'] = '测试抵用券';
+$couponSnapshot['saleLines'][0]['couponPaymentCents'] = 500;
+$couponSnapshot['paymentDetails'][0]['amountCents'] = 2500;
+checkoutResign($couponSnapshot);
+$couponDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 34),
+    $couponSnapshot,
+    null,
+    $secret
+);
+checkoutAssert('coupon tender preserves gross sale and excludes voucher from cash and debt',
+    $couponDraft['totals']['salesAmountCents'] === 9000
+    && $couponDraft['totals']['receivableAmountCents'] === 5500
+    && $couponDraft['totals']['cashPerformanceAmountCents'] === 3500
+    && $couponDraft['totals']['debtAmountCents'] === 3000
+    && $couponDraft['persistencePlan']['lineDrafts'][0]['couponPaymentCents'] === 500
+    && $couponDraft['persistencePlan']['lineDrafts'][0]['discountAmountCents'] === 1000);
+$couponAggregate = checkoutProjectionAggregate($couponDraft);
+$couponAggregate['request'] += [
+    'organization_id' => '3',
+    'organization_path' => '/1/3/',
+    'organization_name_snapshot' => '华东区域',
+    'store_name_snapshot' => '魔核旗舰店',
+    'operator_name_snapshot' => '收银员甲',
+    'business_timezone' => 'Asia/Shanghai',
+    'balance_authority_key' => 'balance:member:1001',
+    'balance_account_id' => 'member-balance-1001',
+    'balance_account_version' => 5,
+    'debt_authority_key' => 'debt-policy:store:7',
+    'debt_policy_version' => 3,
+];
+$couponAggregate['currentRequest'] = [];
+$couponAggregate['verifiedSources'] = CashierV3CheckoutVerifiedSourceSet::fromServerVerifiedAuthorityRows('0', 7, []);
+$rebuiltCouponSnapshot = (new CashierV3CheckoutDraftAuthorityRebuilder())->rebuild(
+    $couponAggregate,
+    $couponAggregate['workspaceCurrentVersion'],
+    'roles:' . str_repeat('a', 32),
+    1785258003
+);
+checkoutAssert('final authority rebuild retains coupon tender and gross sale',
+    $rebuiltCouponSnapshot['saleLines'][0]['couponUserId'] === 123
+    && $rebuiltCouponSnapshot['saleLines'][0]['couponPaymentCents'] === 500
+    && $rebuiltCouponSnapshot['saleLines'][0]['couponDiscountCents'] === 0
+    && $rebuiltCouponSnapshot['saleLines'][0]['saleAmountCents'] === 9000);
+$untracedCoupon = $couponSnapshot;
+$untracedCoupon['saleLines'][0]['couponUserId'] = 0;
+$untracedCoupon['saleLines'][0]['couponNameSnapshot'] = '';
+checkoutResign($untracedCoupon);
+checkoutAssert('coupon tender without a coupon authority is rejected',
+    checkoutReason(static function () use ($untracedCoupon, $secret): void {
+        CashierV3CheckoutSettlementKernel::saveDraft(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 35),
+            $untracedCoupon,
+            null,
+            $secret
+        );
+    }) === 'sale_line_coupon_snapshot_invalid');
+$couponOnlySnapshot = $couponSnapshot;
+$couponOnlySnapshot['entitlementLines'] = [];
+$couponOnlySnapshot['saleLines'][0]['couponPaymentCents'] = 9000;
+$couponOnlySnapshot['saleLines'][0]['debtAmountCents'] = 0;
+$couponOnlySnapshot['paymentDetails'] = [];
+$couponOnlySnapshot['balanceDeduction'] = [
+    'authorityKey' => '', 'accountId' => '', 'accountVersion' => 0, 'amountCents' => 0,
+];
+$couponOnlySnapshot['debt'] = ['authorityKey' => '', 'policyVersion' => 0, 'amountCents' => 0];
+checkoutResign($couponOnlySnapshot);
+$couponOnlyDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 36),
+    $couponOnlySnapshot,
+    null,
+    $secret
+);
+checkoutAssert('coupon-only sale retains gross rights value with zero cash collection',
+    $couponOnlyDraft['totals']['salesAmountCents'] === 9000
+    && $couponOnlyDraft['totals']['receivableAmountCents'] === 0
+    && $couponOnlyDraft['totals']['cashPerformanceAmountCents'] === 0
+    && $couponOnlyDraft['totals']['balanced'] === true);
 // A guide round is a formal checkout attribution dimension. It must survive
 // the kernel's normalized line snapshot instead of degrading to employee-only.
 $guideSnapshot = checkoutSnapshot();
@@ -536,6 +620,7 @@ checkoutAssert('checkout projection lines summary and composition use frozen req
             'selectedCount' => 2,
             'originalAmount' => '100.00',
             'discountAmount' => '10.00',
+            'couponPaymentAmount' => '0.00',
             'receivableAmount' => '60.00',
             'entitlementActualAmount' => '20.00',
         ]

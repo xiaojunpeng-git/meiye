@@ -53,7 +53,7 @@ final class CashierV3SaleOnlyFactAssembler
         'discount_amount_cents', 'sale_amount_cents', 'debt_amount_cents', 'entitlement_actual_amount_cents',
         'source_name_snapshot', 'source_code_snapshot', 'project_name_snapshot',
         'category_id_snapshot', 'category_name_snapshot', 'line_fingerprint',
-        'coupon_user_id', 'coupon_name_snapshot', 'coupon_discount_cents',
+        'coupon_user_id', 'coupon_name_snapshot', 'coupon_discount_cents', 'coupon_payment_cents',
         'configured_cost_cents', 'price_change_reason', 'price_changed_by',
         'price_changed_by_name_snapshot', 'price_changed_at',
         'craftsmen_snapshot_json',
@@ -192,6 +192,7 @@ final class CashierV3SaleOnlyFactAssembler
                 'couponUserId' => (int)$line['coupon_user_id'],
                 'couponNameSnapshot' => (string)$line['coupon_name_snapshot'],
                 'couponDiscountCents' => (int)$line['coupon_discount_cents'],
+                'couponPaymentCents' => (int)($line['coupon_payment_cents'] ?? 0),
                 'saleAmountCents' => (int)$line['sale_amount_cents'],
                 'debtAmountCents' => (int)$line['debt_amount_cents'],
             ];
@@ -863,6 +864,7 @@ final class CashierV3SaleOnlyFactAssembler
         $original = self::sum($orderLines, 'original_amount_cents');
         $discount = self::sum($orderLines, 'discount_amount_cents');
         $sale = self::sum($orderLines, 'sale_amount_cents');
+        $couponPayment = self::sum($orderLines, 'coupon_payment_cents');
         $lineDebt = self::sum($orderLines, 'debt_amount_cents');
         $collected = self::sum($collections, 'amount_cents');
         $balance = (int)$request['balance_deduction_amount_cents'];
@@ -895,7 +897,7 @@ final class CashierV3SaleOnlyFactAssembler
             || $sale !== (int)$order['sale_amount_cents']
             || $collected + $legacyAmount !== (int)$request['selected_payment_amount_cents']
             || $collected !== (int)$request['cash_performance_amount_cents']
-            || $collected + $legacyAmount + $balance + $debt + $entitlementCredit !== $sale
+            || $collected + $legacyAmount + $balance + $debt + $entitlementCredit + $couponPayment !== $sale
             || $lineDebt !== $debt
             || $collected !== (int)$batch['collected_amount_cents']
             || $collected !== (int)$batch['cash_performance_amount_cents']
@@ -905,7 +907,7 @@ final class CashierV3SaleOnlyFactAssembler
         foreach ($orderLines as $index => $line) {
             if ((int)$line['sale_amount_cents'] < 0
                 || (int)$line['debt_amount_cents'] < 0
-                || (int)$line['debt_amount_cents'] > (int)$line['sale_amount_cents']
+                || (int)$line['debt_amount_cents'] > (int)$line['sale_amount_cents'] - (int)($line['coupon_payment_cents'] ?? 0)
                 || (int)$line['original_amount_cents'] - (int)$line['discount_amount_cents']
                     !== (int)$line['sale_amount_cents']) {
                 throw self::failure('sale_only_fact_line_amount_equation_mismatch', ['index' => $index]);
@@ -952,7 +954,8 @@ final class CashierV3SaleOnlyFactAssembler
         }
         $total = 0;
         foreach ($lines as $line) {
-            $total += (int)($line['sale_amount_cents'] ?? 0);
+            $total += (int)($line['sale_amount_cents'] ?? 0)
+                - (int)($line['coupon_payment_cents'] ?? 0);
         }
         if ($amount < 0 || $total <= 0 || $amount > $total) {
             throw self::failure('sale_only_fact_line_allocation_total_invalid');
@@ -963,8 +966,11 @@ final class CashierV3SaleOnlyFactAssembler
         $allocated = 0;
         foreach (array_values($lines) as $index => $line) {
             $lineId = trim((string)($line['order_line_id'] ?? ''));
-            $lineAmount = (int)($line['sale_amount_cents'] ?? 0);
-            if ($lineId === '' || $lineAmount <= 0 || isset($result[$lineId])) {
+            // Cash performance follows post-voucher consideration, while
+            // the immutable sale fact retains the full card purchase value.
+            $lineAmount = (int)($line['sale_amount_cents'] ?? 0)
+                - (int)($line['coupon_payment_cents'] ?? 0);
+            if ($lineId === '' || $lineAmount < 0 || isset($result[$lineId])) {
                 throw self::failure('sale_only_fact_line_allocation_line_invalid', ['index' => $index]);
             }
             $product = bcmul((string)$amount, (string)$lineAmount, 0);

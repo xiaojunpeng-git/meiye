@@ -85,6 +85,11 @@ final class InventoryMovementQueryServices
                 'void_reason' => $voided ? (string)$voided['reason'] : '', 'voided_at' => $voided ? (int)$voided['settled_at'] : 0,
             ];
         }
+        // Saved attributes are immutable snapshots, read only after the warehouse permission check.
+        $document['source_id'] = $sourceId;
+        $document['source_type'] = $sourceType;
+        $document['order_type_name'] = $this->outboundTypeName($sourceType);
+        $document = (new InventoryOutboundHeaderServices())->apply([$document], CashierV3ScopeResolver::TENANT_SCOPE_ID, [(int)$location['id']])[0];
         return ['document' => $document, 'lines' => $facts];
     }
 
@@ -169,6 +174,7 @@ final class InventoryMovementQueryServices
             }
             unset($row);
         }
+        $rows = (new InventoryOutboundHeaderServices())->apply($rows, CashierV3ScopeResolver::TENANT_SCOPE_ID, [$locationId]);
         return ['count' => $count, 'list' => $rows];
     }
 

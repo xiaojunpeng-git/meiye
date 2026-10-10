@@ -41,7 +41,7 @@ function initialBusinessDate() {
 const inboundType = ref('采购入库')
 const outboundType = ref('过期退货')
 const inboundTypes = ['初始入库', '采购入库', '退货入库', '其他入库']
-const outboundTypes = ['过期退货', '试用出库', '报废出库', '其他出库']
+const outboundTypes = ['过期退货', '试用出库', '报废出库', '其他出库', '对内出库', '对外出库']
 const selectedRows = ref([])
 // 盘点单标题只反映当前已加载明细的账面快照，增删、清空和恢复草稿后由响应式明细同步更新。
 const countBookQuantityTotal = computed(() => sumCountBookQuantities(selectedRows.value))
@@ -63,6 +63,9 @@ const inboundDate = ref(initialBusinessDate())
 const inboundRemark = ref('')
 const outboundDate = ref(initialBusinessDate())
 const outboundRemark = ref('')
+// Optional recipient is a document snapshot, not a member/staff identifier.
+const outboundRecipient = ref('')
+const outboundAttempt = ref(null)
 const countRemark = ref('')
 const countDraftId = ref(0)
 const countDraftVersion = ref(0)
@@ -1087,16 +1090,21 @@ async function submitInbound() {
 }
 
 async function submitOutbound() {
-  if (props.pageKey !== 'outbound' || !selectedRows.value.length) return
+  if (props.pageKey !== 'outbound' || !selectedRows.value.length || submitting.value) return
   submitting.value = true
   submitError.value = ''
   try {
     const payload = {
-      idempotency_key: outboundIdempotencyKey(), business_date: outboundDate.value, remark: outboundRemark.value,
+      idempotency_key: '', business_date: outboundDate.value, remark: outboundRemark.value,
+      outbound_type: outboundType.value, outbound_recipient: outboundRecipient.value.trim(),
       lines: selectedRows.value.map((row) => ({
         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, detail_remark: String(row.detail_remark || '')
       }))
     }
+    // A retry of unchanged content reuses the original key; edits start a new command.
+    const fingerprint = JSON.stringify(payload)
+    if (outboundAttempt.value?.fingerprint !== fingerprint) outboundAttempt.value = { fingerprint, key: outboundIdempotencyKey() }
+    payload.idempotency_key = outboundAttempt.value.key
     if (isPlatformHeadquarters.value) {
       if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
       await platformInventoryApi.createHqOutbound({ ...payload, hq_location_id: Number(props.hqLocationId) })
@@ -1246,6 +1254,7 @@ function submitPrimaryEditor() {
               <section class="line-section"><header><div><h3>入库商品</h3><p>明细由已结算入库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次号</th><th>生产日期</th><th>到期日</th><th>入库数量</th><th>库存单位</th><th>入库单价</th><th>明细备注</th><th>入库金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该入库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'outbound' && detail?.document">
+              <div class="detail-meta"><span>出库类型：{{ detail.document.order_type_name || '手工出库' }}</span><span>出库对象：{{ detail.document.outbound_recipient || '-' }}</span></div>
               <div class="detail-meta"><span>出库单号：<b>{{ detail.document.order_sn }}</b></span><span>出库日期：{{ detail.document.business_date }}</span><span>出库时间：{{ detail.document.recorded_at ? new Date(Number(detail.document.recorded_at) * 1000).toLocaleString() : '-' }}</span><span>出库主体：{{ detail.document.location_name }}</span></div>
               <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>成本单价</th><th>明细备注</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
@@ -1287,6 +1296,7 @@ function submitPrimaryEditor() {
               <div class="form-grid__inline form-grid__full"><span class="field-label">{{ pageKey === 'inbound' ? '入库类型' : '出库类型' }}<i>*</i></span><div><div class="type-radio-group"><button v-for="item in pageKey === 'inbound' ? inboundTypes : outboundTypes" :key="item" :class="{ active: selectedType === item }" @click="pageKey === 'inbound' ? inboundType = item : outboundType = item">{{ item }}</button></div><p class="type-tip">{{ pageKey === 'inbound' ? '调拨入库由调拨确认自动生成，不在此处手工创建。' : '调拨出库由调拨确认自动生成；出库按所选仓库的实际批次扣减。' }}</p></div></div>
               <label class="form-grid__inline"><span class="field-label">{{ pageKey === 'inbound' ? '入库日期' : '出库日期' }}<i>*</i></span><input v-if="pageKey === 'inbound'" v-model="inboundDate" type="date" /><input v-else v-model="outboundDate" type="date" /></label>
               <label v-if="pageKey === 'inbound' && inboundType === '退货入库'" class="form-grid__inline"><span class="field-label">售后单号</span><span class="input-like input-like--action">+ 选择售后单据</span></label>
+              <label v-if="pageKey === 'outbound'" class="form-grid__inline"><span class="field-label">出库对象</span><input v-model="outboundRecipient" maxlength="100" placeholder="请输入出库对象" /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-if="pageKey === 'inbound'" v-model="inboundRemark" placeholder="请输入备注" /><input v-else v-model="outboundRemark" placeholder="请输入备注" /></label>
             </section>
 

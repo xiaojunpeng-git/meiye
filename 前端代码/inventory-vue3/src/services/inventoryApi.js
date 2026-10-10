@@ -213,6 +213,8 @@ export function createInventoryApi(options = {}) {
       return request('/v3/unified-query/commands', { method: 'POST', body: { ...body, idempotencyKey } })
     },
     unifiedQueryExportTask(taskNo, query = {}) { return request(`/v3/unified-query/export-task/${encodeURIComponent(String(taskNo || ''))}`, { query }) },
+    // Authenticated binary transport rejects JSON error envelopes instead of saving fake spreadsheets.
+    downloadOutboundExport(taskNo) { return download(`/v3/unified-query/export-task/${encodeURIComponent(String(taskNo || ''))}/download`) },
     createWarehouse(body) { return request('/v3/locations', { method: 'POST', body }) },
     listHqInbound(query = {}) { return request('/v3/hq/inbound', { query }) },
     hqInboundDetail(id, query = {}) { return request(`/v3/hq/inbound/${encodeURIComponent(String(id || ''))}/detail`, { query }) },

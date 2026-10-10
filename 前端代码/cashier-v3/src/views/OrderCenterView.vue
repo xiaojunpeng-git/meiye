@@ -173,7 +173,7 @@ const ORDER_TABS = [
       field('sales_manager', '销售经理', 'person'), field('guide', '导购', 'person'),
       field('line_amount', '金额', 'money'), field('occurred_at', '实际下单时间', 'date'),
       field('item_count', '商品数量', 'number'), field('receivable_amount', '应收金额', 'money'),
-      field('discount_amount', '优惠金额', 'money'), field('debt_amount', '欠款', 'money'),
+      field('discount_amount', '优惠金额', 'money'), field('debt_amount', '欠款', 'money'), field('coupon_discount_amount', '优惠券', 'money'),
       field('actual_received_amount', '已收金额', 'money'), field('payment_method', '记账收款'),
       field('salesperson', '销售人（业绩）', 'person'), field('cashier', '收银员／操作人', 'person'),
       field('source', '客户来源'),
@@ -324,7 +324,7 @@ const FIELD_ALIASES = {
   sales_order_no: ['salesOrderNo', 'orderNo'], business_date: ['businessDate'], member_name: ['memberName'],
   store: ['storeName', 'businessStoreName'], item_summary: ['itemSummary'], item_count: ['itemCount'],
   receivable_amount: ['receivableAmount', 'payableAmount'], discount_amount: ['discountAmount'],
-  debt_amount: ['debtAmount', 'outstandingDebtAmount'], actual_received_amount: ['actualReceivedAmount'],
+  debt_amount: ['debtAmount', 'outstandingDebtAmount'], coupon_discount_amount: ['couponDiscountAmount'], actual_received_amount: ['actualReceivedAmount'],
   payment_method: ['paymentSummary', 'paymentMethod'], salesperson: ['salespersonSummary', 'salespersonName'],
   cashier: ['cashierName', 'operatorName'], source: ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary'],
   payment_status: ['paymentStatus'], order_status: ['orderStatus', 'statusLabel'], supplement: ['supplementLabel', 'isSupplement'],
@@ -1170,7 +1170,7 @@ function giftVoidRecordId(record) {
 }
 
 // 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
-const salesOrderListColumnKeys = ['item_name', 'unit_price', 'quantity', 'craftsman', 'salesperson', 'sales_manager', 'guide', 'line_amount', 'receivable_amount', 'debt_amount', 'actual_received_amount', 'payment_method', 'store', 'order_status']
+const salesOrderListColumnKeys = ['item_name', 'unit_price', 'quantity', 'craftsman', 'salesperson', 'sales_manager', 'guide', 'line_amount', 'receivable_amount', 'debt_amount', 'coupon_discount_amount', 'actual_received_amount', 'payment_method', 'store', 'order_status']
 const salesOrderListColumns = salesOrderListColumnKeys.map((key) => ORDER_TABS[0].fields.find((item) => item.key === key).label)
 
 function salesOrderItems(record) {
@@ -1182,6 +1182,7 @@ function salesOrderItems(record) {
     quantity: displayRecordField(record, 'item_count'),
     unitPrice: null,
     payableAmount: recordFieldValue(record, 'receivable_amount'),
+    amountBeforeCoupon: record?.amountBeforeCoupon ?? null,
     craftsmen: [],
     salespeople: [],
     salesManagers: [],
@@ -3265,13 +3266,16 @@ onBeforeUnmount(() => {
               <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ personnelNames(item, 'guides') }}</button>
               <span v-else>{{ personnelNames(item, 'guides') }}</span>
             </td>
-            <!-- 权益价值仅展示，整单应收/已收继续读取销售资金事实。 -->
-            <td>{{ itemMoney(item.businessTag === '权益' ? item.entitlementAmount : item.payableAmount) }}</td>
+            <!-- 购买明细展示用券前金额；权益价值与整单资金继续读取各自的权威投影。 -->
+            <td>{{ itemMoney(item.businessTag === '权益' ? item.entitlementAmount : item.amountBeforeCoupon) }}</td>
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.receivableAmount ?? record.receivable_amount) }}
             </td>
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.debtAmount ?? record.debt_amount) }}
+            </td>
+            <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
+              {{ itemMoney(record.couponDiscountAmount ?? record.coupon_discount_amount) }}
             </td>
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.actualReceivedAmount ?? record.actual_received_amount) }}

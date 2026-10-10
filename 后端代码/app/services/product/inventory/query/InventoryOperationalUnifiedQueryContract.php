@@ -32,6 +32,10 @@ final class InventoryOperationalUnifiedQueryContract
             // 旧查询偏好和冻结计划仍可读取真实仓名；默认不展示，不将仓名改写为门店名。
             $common[] = UnifiedQueryPageRegistry::field('location_name', '盘点仓库', 'text', false, false);
         }
+        if ($pageCode === 'inventory_outbound') {
+            // Retain warehouse identity for existing frozen plans without presenting it as a store.
+            $common[] = UnifiedQueryPageRegistry::field('location_name', '出库仓库', 'text', false, false);
+        }
         $specific = [
             'inventory_inbound' => [
                 ['order_type_name', '入库类型', 'text', ''], ['location_name', '入库仓/门店', 'text', ''],
@@ -40,7 +44,9 @@ final class InventoryOperationalUnifiedQueryContract
                 ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
             ],
             'inventory_outbound' => [
-                ['order_type_name', '出库类型', 'text', ''], ['location_name', '出库仓/门店', 'text', ''],
+                // Typed and optional header values share the list/filter/export authority.
+                ['outbound_recipient', '出库对象', 'text', ''], ['remark', '备注', 'text', ''],
+                ['order_type_name', '出库类型', 'text', ''], ['store_name', '出库门店', 'text', ''],
                 ['product_summary', '商品摘要', 'text', ''], ['detail_count', '出库项数', 'integer', ''],
                 ['cost_amount_cents', '成本金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
                 ['operation_at', '操作日期', 'datetime', ''], ['operator_name', '操作人', 'text', ''],
@@ -90,16 +96,26 @@ final class InventoryOperationalUnifiedQueryContract
         foreach ($specific[$pageCode] as [$key, $label, $type, $permission]) {
             $common[] = UnifiedQueryPageRegistry::field($key, $label, $type, true, true, [], $permission);
         }
+        // Detail fields are export-only: document filters must never change grain to batch lines.
+        if ($pageCode === 'inventory_outbound') {
+            foreach ([['outbound_product', '商品', 'text'], ['outbound_sku', '规格', 'text'],
+                ['outbound_batch', '扣减批次', 'text'], ['outbound_manufactured', '生产日期', 'date'],
+                ['outbound_expire', '到期日', 'date'], ['outbound_quantity', '出库数量', 'decimal'],
+                ['outbound_unit', '库存单位', 'text'], ['outbound_unit_cost_cents', '成本单价（分）', 'integer'],
+                ['outbound_cost_cents', '成本金额（分）', 'integer'], ['outbound_detail_remark', '明细备注', 'text']] as [$key, $label, $type]) {
+                $permission = in_array($key, ['outbound_unit_cost_cents', 'outbound_cost_cents'], true) ? InventoryBatchStockQueryContract::PERMISSION_COST : '';
+                $common[] = UnifiedQueryPageRegistry::field($key, $label, $type, false, false, ['display', 'export'], $permission);
+            }
+        }
         return [
             'pageCode' => $pageCode,
             'label' => self::label($pageCode),
             'stableRowKey' => 'record_id',
             'keywordFields' => self::keywordFields($pageCode),
             'requiredFeature' => InventoryBatchStockQueryContract::PERMISSION_VIEW,
-            // Export workers only exist for the batch-balance provider today. Keep
-            // document-page export closed until each page has a worker context
-            // that can rebuild the same store-scoped projection.
-            'exportFeature' => 'inventory.operation.export',
+            // Outbound uses the registered operational worker and rechecks the same store grant.
+            // Other operational pages retain their existing closed export gate.
+            'exportFeature' => $pageCode === 'inventory_outbound' ? InventoryBatchStockQueryContract::PERMISSION_EXPORT : 'inventory.operation.export',
             'fields' => $common,
         ];
     }

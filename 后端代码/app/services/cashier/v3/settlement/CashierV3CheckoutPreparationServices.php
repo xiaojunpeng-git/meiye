@@ -920,10 +920,14 @@ final class CashierV3CheckoutPreparationServices
         if ($original < 0 || $sale < 0) {
             throw self::incomplete('checkout_sale_amount_invalid');
         }
-        // 手工改价可以高于目录原价；结算方程以成交价作为本单原价，
-        // 不产生负折扣，实际收款仍以草稿中的成交价为准。
-        if ($sale > $original) {
-            $original = $sale;
+        // Workspace keeps the post-voucher payable amount for the cashier.
+        // Freeze its pre-voucher sale value separately so issuing card rights
+        // never mistakes a non-cash voucher tender for a price reduction.
+        $couponPayment = (int)($line['couponDiscountCents'] ?? 0);
+        try {
+            $amounts = CashierV3CouponTenderAmounts::fromNetSale($original, $sale, $couponPayment);
+        } catch (\InvalidArgumentException $exception) {
+            throw self::incomplete('checkout_sale_coupon_amount_invalid');
         }
         $isPresale = !empty($line['isPresale']);
         try {
@@ -952,12 +956,13 @@ final class CashierV3CheckoutPreparationServices
             'catalogSkuId' => (int)($line['skuId'] ?? 0),
             'sourceVersion' => (int)($line['productVersion'] ?? 0),
             'quantity' => (int)($line['quantity'] ?? 0),
-            'originalAmountCents' => $original,
-            'discountAmountCents' => $original - $sale,
+            'originalAmountCents' => $amounts['originalCents'],
+            'discountAmountCents' => $amounts['discountCents'],
             'couponUserId' => (int)($line['couponUserId'] ?? 0),
             'couponNameSnapshot' => (string)($line['couponNameSnapshot'] ?? ''),
-            'couponDiscountCents' => (int)($line['couponDiscountCents'] ?? 0),
-            'saleAmountCents' => $sale,
+            'couponDiscountCents' => 0,
+            'couponPaymentCents' => $amounts['couponPaymentCents'],
+            'saleAmountCents' => $amounts['saleCents'],
             'debtAmountCents' => $this->saleLineDebtAmountCents($line, $sale),
             'configuredCostCents' => (int)($line['configuredCostCents'] ?? 0),
             'priceChangeReason' => (string)($line['priceChangeReason'] ?? ''),

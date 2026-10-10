@@ -1377,7 +1377,7 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('order_id', $orderIds)
             ->where('line_status', 'settled')
             ->where('line_direction', 'forward')
-            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,is_presale,inventory_outbound_required,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
+            ->field('order_line_id,checkout_line_id,order_id,line_no,item_type,item_type_name_snapshot,item_id,item_code_snapshot,item_name_snapshot,category_name_snapshot,service_object,friend_counts_as_customer,is_experience,is_presale,inventory_outbound_required,craftsmen_snapshot_json,quantity,original_amount_cents,discount_amount_cents,sale_amount_cents,debt_amount_cents,coupon_user_id,coupon_name_snapshot,coupon_discount_cents,coupon_payment_cents,card_purchase_snapshot_json,detail_remark_snapshot,line_version')
             ->order('order_id', 'asc')->order('line_no', 'asc')->select()->toArray() as $line) {
             $linesByOrder[(string)$line['order_id']][] = $line;
         }
@@ -1658,13 +1658,18 @@ final class CashierV3SalesOrderQueryServices
             && $snapshot['collections'] === []
         );
         $couponDiscountCents = 0;
+        $couponPaymentCents = 0;
         $priceChangeDiscountCents = 0;
         foreach ((array)($snapshot['lines'] ?? []) as $line) {
             $coupon = max(0, (int)($line['coupon_discount_cents'] ?? 0));
             $discount = max(0, (int)($line['discount_amount_cents'] ?? 0));
             $couponDiscountCents += $coupon;
+            $couponPaymentCents += max(0, (int)($line['coupon_payment_cents'] ?? 0));
             $priceChangeDiscountCents += max(0, $discount - $coupon);
         }
+        // The formal sale keeps the card's pre-voucher purchase value; the
+        // order list's receivable remains the amount owed after voucher.
+        $receivableCents -= $couponPaymentCents;
         $headerDiscountCents = max(0, (int)($header['discount_amount_cents'] ?? 0));
         // card_operation_settlement.cash_delta_cents is the immutable cash
         // delta before order-level discounts (coupon/price-change).  The
@@ -1755,6 +1760,7 @@ final class CashierV3SalesOrderQueryServices
         foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
         if ($legacyEntryCents > 0) $paymentNames['旧卡录入'] = true;
         if ($balanceCents > 0) $paymentNames['余额支付'] = true;
+        if ($couponPaymentCents > 0) $paymentNames['抵用券抵付'] = true;
         $memberName = trim((string)$header['member_name_snapshot']);
         $operations = (array)($snapshot['lifecycleOperations'] ?? []);
         $terminal = null;
@@ -1803,8 +1809,12 @@ final class CashierV3SalesOrderQueryServices
             'paymentStatus' => $paymentStatus, 'payment_status' => $paymentStatus,
             'receivableAmount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
             'receivable_amount' => $settlementEquationValid ? $this->moneyFromCents($receivableCents) : null,
+            'amountBeforeCoupon' => $settlementEquationValid ? $this->moneyFromCents($receivableCents + $couponDiscountCents + $couponPaymentCents) : null,
             'discountAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
             'discount_amount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['discount_amount_cents']) : null,
+            // 列表的优惠券取正式销售明细快照之和，不把它再计作收款或欠款。
+            'couponDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents + $couponPaymentCents) : null,
+            'coupon_discount_amount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents + $couponPaymentCents) : null,
             'debtAmount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
             'debt_amount' => $settlementEquationValid ? $this->moneyFromCents($debtCents) : null,
             'actualReceivedAmount' => $settlementEquationValid ? $this->moneyFromCents($cashPerformanceCents) : null,
@@ -1887,7 +1897,7 @@ final class CashierV3SalesOrderQueryServices
         $mapped['amountSummary'] = [
             'originalAmount' => $settlementEquationValid ? $this->moneyFromCents((int)$header['original_amount_cents']) : null,
             'priceChangeDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($priceChangeDiscountCents) : null,
-            'couponDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents) : null,
+            'couponDiscountAmount' => $settlementEquationValid ? $this->moneyFromCents($couponDiscountCents + $couponPaymentCents) : null,
             'otherDiscountAmount' => $settlementEquationValid
                 ? $this->moneyFromCents(max(0, $headerDiscountCents - $priceChangeDiscountCents - $couponDiscountCents)) : null,
             'entitlementCreditAmount' => $settlementEquationValid ? $this->moneyFromCents($entitlementCreditCents) : null,
@@ -2014,9 +2024,11 @@ final class CashierV3SalesOrderQueryServices
             'unitPrice' => $quantity > 0 ? $this->moneyFromCents((int)$line['original_amount_cents']) / $quantity : null,
             'originalAmount' => $this->moneyFromCents((int)$line['original_amount_cents']),
             'priceChangeDiscountAmount' => $this->moneyFromCents(max(0, (int)($line['discount_amount_cents'] ?? 0) - (int)($line['coupon_discount_cents'] ?? 0))),
-            'couponDiscountAmount' => $this->moneyFromCents((int)($line['coupon_discount_cents'] ?? 0)),
+            'couponDiscountAmount' => $this->moneyFromCents((int)($line['coupon_discount_cents'] ?? 0) + (int)($line['coupon_payment_cents'] ?? 0)),
             'couponName' => (string)($line['coupon_name_snapshot'] ?? ''),
-            'payableAmount' => $this->moneyFromCents((int)$line['sale_amount_cents']),
+            // 列表“金额”是用券前成交金额；应收仍是用券后的结算金额。
+            'amountBeforeCoupon' => $this->moneyFromCents((int)$line['sale_amount_cents'] + (int)($line['coupon_discount_cents'] ?? 0)),
+            'payableAmount' => $this->moneyFromCents((int)$line['sale_amount_cents'] - (int)($line['coupon_payment_cents'] ?? 0)),
             'debtAmount' => $this->moneyFromCents((int)($line['debt_amount_cents'] ?? 0)),
             'actualReceivedAmount' => null, 'economicsDataStatus' => 'ready', 'snapshotStatus' => 'ready',
             // 购买次数只读取销售明细在结账时冻结的购卡快照；绝不从当前
@@ -2357,6 +2369,16 @@ final class CashierV3SalesOrderQueryServices
         if ($v3Ready && $balancePayment < 0) {
             throw new \RuntimeException('sales_order_v3_settlement_equation_invalid');
         }
+        // 旧订单若关联 V3 正式明细，也只从冻结的分金额度汇总优惠券。
+        $legacyCouponDiscountCents = 0;
+        if ($v3Ready) {
+            foreach ($lineRows as $legacyLine) {
+                $legacyLineId = (int)($legacyLine['id'] ?? 0);
+                $v3Line = (array)($v3['lines'][$legacyLineId] ?? []);
+                $authority = is_array($v3Line['authority'] ?? null) ? $v3Line['authority'] : [];
+                $legacyCouponDiscountCents += (int)($authority['coupon_discount_cents'] ?? 0);
+            }
+        }
 
         $mapped = [
             'id' => (string)(int)$row['id'],
@@ -2409,10 +2431,14 @@ final class CashierV3SalesOrderQueryServices
             'payment_status' => '已支付',
             'receivableAmount' => $receivable,
             'receivable_amount' => $receivable,
+            'amountBeforeCoupon' => $v3Ready
+                ? $this->moneyFromCents((int)$v3Batch['receivable_amount_cents'] + $legacyCouponDiscountCents) : null,
             'discountAmount' => $v3Ready
                 ? $this->moneyFromCents((int)$v3Header['discount_amount_cents']) : null,
             'discount_amount' => $v3Ready
                 ? $this->moneyFromCents((int)$v3Header['discount_amount_cents']) : null,
+            'couponDiscountAmount' => $v3Ready ? $this->moneyFromCents($legacyCouponDiscountCents) : null,
+            'coupon_discount_amount' => $v3Ready ? $this->moneyFromCents($legacyCouponDiscountCents) : null,
             'debtAmount' => $debt,
             'debt_amount' => $debt,
             'actualReceivedAmount' => $actualReceived,
@@ -2548,7 +2574,10 @@ final class CashierV3SalesOrderQueryServices
             'unitPrice' => $v3Ready && $quantity > 0 ? $originalAmount / $quantity : null,
             'originalAmount' => $originalAmount,
             'priceChangeDiscountAmount' => null,
-            'couponDiscountAmount' => null,
+            'couponDiscountAmount' => $v3Ready
+                ? $this->moneyFromCents((int)($authority['coupon_discount_cents'] ?? 0)) : null,
+            'amountBeforeCoupon' => $v3Ready
+                ? $this->moneyFromCents((int)$authority['sale_amount_cents'] + (int)($authority['coupon_discount_cents'] ?? 0)) : null,
             'payableAmount' => $payableAmount,
             'debtAmount' => $v3Ready ? $this->decimalMoney($line['debt_amount'] ?? '0') : null,
             'actualReceivedAmount' => $v3Ready

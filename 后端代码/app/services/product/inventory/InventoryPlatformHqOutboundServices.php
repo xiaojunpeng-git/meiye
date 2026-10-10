@@ -30,6 +30,7 @@ final class InventoryPlatformHqOutboundServices
             ->group('f.source_id,n.document_no,f.business_date,l.location_name')->order('operation_at desc')->page($page, $limit)->select()->toArray();
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
         foreach ($list as &$row) {
+            $row['source_type'] = 'manual_outbound';
             $row['order_type_name'] = '总部手工出库';
             if (!$canViewCost) $row['cost_amount_cents'] = null;
         }
@@ -37,6 +38,8 @@ final class InventoryPlatformHqOutboundServices
         $list = (new InventoryManualDocumentReversalProjectionServices())->apply(
             $list, (string)$location['tenant_id'], InventoryManualDocumentReversalServices::OUTBOUND, [(int)$location['id']]
         );
+        // Shared form attributes must survive read-back for headquarters callers as well.
+        $list = (new InventoryOutboundHeaderServices())->apply($list, (string)$location['tenant_id'], [(int)$location['id']]);
         return ['count' => $count, 'list' => $list];
     }
 
@@ -63,12 +66,15 @@ final class InventoryPlatformHqOutboundServices
             (string)$location['tenant_id'], InventoryManualDocumentReversalServices::OUTBOUND, [$sourceId], [(int)$location['id']]
         );
         $voided = $reversal[$sourceId] ?? null;
-        return ['document' => [
+        $document = [
+            'source_type' => 'manual_outbound', 'source_id' => $sourceId, 'order_type_name' => '总部手工出库',
             'order_sn' => (string)$facts[0]['order_sn'], 'business_date' => (string)$facts[0]['business_date'],
             'recorded_at' => (int)$facts[0]['recorded_at'], 'location_name' => (string)($location['location_name'] ?? '总部仓'),
             'status_name' => $voided ? '已作废' : '已完成', 'can_void' => $voided === null,
             'void_reason' => $voided ? (string)$voided['reason'] : '', 'voided_at' => $voided ? (int)$voided['settled_at'] : 0,
-        ], 'lines' => $facts];
+        ];
+        $document = (new InventoryOutboundHeaderServices())->apply([$document], (string)$location['tenant_id'], [(int)$location['id']])[0];
+        return ['document' => $document, 'lines' => $facts];
     }
 
     public function create(array $adminInfo, int $locationId, array $input): array

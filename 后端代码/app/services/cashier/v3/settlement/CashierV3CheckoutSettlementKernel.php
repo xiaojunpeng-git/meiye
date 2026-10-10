@@ -269,6 +269,14 @@ final class CashierV3CheckoutSettlementKernel
 
         $composition = self::classifyComposition($snapshot['saleLines'], $snapshot['entitlementLines']);
         $salesAmountCents = self::sumField($snapshot['saleLines'], 'saleAmountCents');
+        $couponPaymentCents = 0;
+        foreach ($snapshot['saleLines'] as $saleLine) {
+            $couponPaymentCents = self::safeAdd(
+                $couponPaymentCents,
+                $saleLine['couponPaymentCents'] ?? 0,
+                'coupon_payment_total'
+            );
+        }
         $entitlementActualAmountCents = self::sumField(
             $snapshot['entitlementLines'],
             'actualEntitlementAmountCents'
@@ -294,21 +302,22 @@ final class CashierV3CheckoutSettlementKernel
         $cashPerformanceAmountCents = $legacyEntryPayments ? 0 : $selectedPaymentAmountCents;
         $balanceAmountCents = $snapshot['balanceDeduction']['amountCents'];
         $debtAmountCents = $snapshot['debt']['amountCents'];
-        if ($debtAmountCents > $salesAmountCents) {
+        if ($couponPaymentCents > $salesAmountCents
+            || $debtAmountCents > $salesAmountCents - $couponPaymentCents) {
             throw self::failure('checkout_debt_amount_exceeds_sales_amount', [
                 'salesAmountCents' => $salesAmountCents,
                 'debtAmountCents' => $debtAmountCents,
             ]);
         }
-        // Debt is recorded separately and is not a collected payment. The
-        // amount due now is the sale total less the debt; only payment methods
-        // and balance deductions are compared against that receivable.
+        // Coupon tender is non-cash settlement: it preserves the sale and card
+        // rights value, but cannot enter the eight cash-performance methods.
+        // Debt is also recorded separately rather than as collected payment.
         $settlementAmountCents = self::safeAdd(
             $selectedPaymentAmountCents,
             $balanceAmountCents,
             'settlement_total'
         );
-        $receivableAmountCents = $salesAmountCents - $debtAmountCents;
+        $receivableAmountCents = $salesAmountCents - $couponPaymentCents - $debtAmountCents;
         $balanced = $settlementAmountCents === $receivableAmountCents;
 
         if ($composition === self::COMPOSITION_ENTITLEMENT_ONLY && $settlementAmountCents !== 0) {
@@ -751,7 +760,7 @@ final class CashierV3CheckoutSettlementKernel
                 'priceChangedByNameSnapshot',
                 'priceChangedAt',
                 'craftsmen',
-            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'salespeople', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents', 'cardPurchaseSnapshot', 'detailRemark'], 'saleLines[' . $index . ']');
+            ], ['catalogSkuId', 'serviceObject', 'friendCountsAsCustomer', 'isExperience', 'isPresale', 'inventoryOutboundRequired', 'salespeople', 'guideSelections', 'salesManagerSelections', 'manualLaborFeeCents', 'cardPurchaseSnapshot', 'detailRemark', 'couponPaymentCents'], 'saleLines[' . $index . ']');
             if ($line['saleClassification'] !== 'formal_sale') {
                 throw self::failure('sale_line_not_formal', ['index' => $index]);
             }
@@ -766,6 +775,10 @@ final class CashierV3CheckoutSettlementKernel
             $original = self::money($line['originalAmountCents'], 'saleLine.originalAmountCents');
             $discount = self::money($line['discountAmountCents'], 'saleLine.discountAmountCents');
             $sale = self::money($line['saleAmountCents'], 'saleLine.saleAmountCents');
+            $couponPayment = self::money($line['couponPaymentCents'] ?? 0, 'saleLine.couponPaymentCents');
+            $couponUserId = self::nonNegativeInt($line['couponUserId'] ?? 0, 'saleLine.couponUserId');
+            $couponName = self::text($line['couponNameSnapshot'] ?? '', 128, 'saleLine.couponNameSnapshot', true);
+            $couponDiscount = self::money($line['couponDiscountCents'] ?? 0, 'saleLine.couponDiscountCents');
             $lineDebt = self::money($line['debtAmountCents'], 'saleLine.debtAmountCents');
             $quantity = self::boundedQuantity($line['quantity'], 'saleLine.quantity');
             $configuredCost = self::money($line['configuredCostCents'], 'saleLine.configuredCostCents');
@@ -783,8 +796,17 @@ final class CashierV3CheckoutSettlementKernel
                 true
             );
             $priceChangedAt = self::nonNegativeInt($line['priceChangedAt'], 'saleLine.priceChangedAt');
-            if ($discount > $original || $sale !== $original - $discount || $lineDebt > $sale) {
+            if ($discount > $original || $sale !== $original - $discount
+                || $couponPayment > $sale || $lineDebt > $sale - $couponPayment) {
                 throw self::failure('sale_line_amount_equation_invalid', ['authorityKey' => $authorityKey]);
+            }
+            // A tender without a coupon ID could not be consumed by the final
+            // transaction, so reject it before persisting a balanced draft.
+            if ($couponUserId === 0
+                ? ($couponName !== '' || $couponDiscount !== 0 || $couponPayment !== 0)
+                : ($couponName === '' || ($couponDiscount <= 0 && $couponPayment <= 0)
+                    || ($couponDiscount > 0 && $couponPayment > 0))) {
+                throw self::failure('sale_line_coupon_snapshot_invalid', ['authorityKey' => $authorityKey]);
             }
             $costOverflow = $configuredCost > 0
                 && $quantity > intdiv(PHP_INT_MAX, $configuredCost);
@@ -866,20 +888,9 @@ final class CashierV3CheckoutSettlementKernel
                 'quantity' => $quantity,
                 'originalAmountCents' => $original,
                 'discountAmountCents' => $discount,
-                'couponUserId' => self::nonNegativeInt(
-                    $line['couponUserId'] ?? 0,
-                    'saleLine.couponUserId'
-                ),
-                'couponNameSnapshot' => self::text(
-                    $line['couponNameSnapshot'] ?? '',
-                    128,
-                    'saleLine.couponNameSnapshot',
-                    true
-                ),
-                'couponDiscountCents' => self::money(
-                    $line['couponDiscountCents'] ?? 0,
-                    'saleLine.couponDiscountCents'
-                ),
+                'couponUserId' => $couponUserId,
+                'couponNameSnapshot' => $couponName,
+                'couponDiscountCents' => $couponDiscount,
                 'saleAmountCents' => $sale,
                 'debtAmountCents' => $lineDebt,
                 'sourceNameSnapshot' => self::text(
@@ -909,6 +920,11 @@ final class CashierV3CheckoutSettlementKernel
                 'inventoryOutboundRequired' => $inventoryOutboundRequired,
                 'cardPurchaseSnapshot' => $cardPurchaseSnapshot,
             ];
+            // Omit zero tender from immutable line fingerprints so drafts
+            // written before this settlement mode remain replayable.
+            if ($couponPayment > 0) {
+                $normalized['couponPaymentCents'] = $couponPayment;
+            }
             $detailRemark = self::text(
                 $line['detailRemark'] ?? '',
                 65535,
@@ -1580,6 +1596,7 @@ final class CashierV3CheckoutSettlementKernel
                 'couponUserId' => $line['couponUserId'],
                 'couponNameSnapshot' => $line['couponNameSnapshot'],
                 'couponDiscountCents' => $line['couponDiscountCents'],
+                'couponPaymentCents' => $line['couponPaymentCents'] ?? 0,
                 'saleAmountCents' => $line['saleAmountCents'],
                 'debtAmountCents' => $line['debtAmountCents'],
                 'entitlementActualAmountCents' => 0,
@@ -1662,6 +1679,7 @@ final class CashierV3CheckoutSettlementKernel
                 'couponUserId' => 0,
                 'couponNameSnapshot' => '',
                 'couponDiscountCents' => 0,
+                'couponPaymentCents' => 0,
                 'saleAmountCents' => 0,
                 'debtAmountCents' => 0,
                 'entitlementActualAmountCents' => $line['actualEntitlementAmountCents'],

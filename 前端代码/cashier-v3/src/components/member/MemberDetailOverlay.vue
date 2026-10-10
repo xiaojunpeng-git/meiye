@@ -90,6 +90,7 @@ const DEFAULT_TABS = [
   { key: 'profile', label: '会员概况' },
   { key: 'assets', label: '权益明细' },
   { key: 'balance-changes', label: '余额变动明细' },
+  { key: 'coupons', label: '优惠券' },
   { key: 'sales', label: '销售订单' },
   { key: 'writeoff', label: '服务记录' },
   { key: 'care', label: '客情管理' },
@@ -126,7 +127,7 @@ const todayDate = () => {
 }
 const tabDateFrom = ref(todayDate())
 const tabDateTo = ref(todayDate())
-const tabStatus = ref(['assets', 'gift'].includes(props.initialTab) ? 'active' : (props.initialTab === 'care' ? 'unfinished' : ''))
+const tabStatus = ref(['assets', 'gift', 'coupons'].includes(props.initialTab) ? 'active' : (props.initialTab === 'care' ? 'unfinished' : ''))
 const metricTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 
 const detail = computed(() => (props.detail && typeof props.detail === 'object' ? props.detail : {}))
@@ -191,23 +192,24 @@ const debtRecords = computed(() => readList(detail.value, ['debtRecords', 'debts
 const availableActions = computed(() => normalizeActionList(readList(detail.value, ['actions', 'availableActions', 'actionList']), 'member'))
 
 const tabs = DEFAULT_TABS
-const isSearchableTab = computed(() => ['assets', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'].includes(activeTab.value))
+const isSearchableTab = computed(() => ['assets', 'coupons', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'].includes(activeTab.value))
 const tabKeywordPlaceholder = computed(() => {
   if (activeTab.value === 'writeoff') return '输入手艺人或项目后查询'
   if (activeTab.value === 'sales') return '输入商品名称或销售人后查询'
+  if (activeTab.value === 'coupons') return '输入优惠券名称后查询'
   if (activeTab.value === 'gift') return '输入赠送内容或来源后查询'
   return '输入关键词后查询'
 })
-const hasStatusFilter = computed(() => ['assets', 'gift', 'care'].includes(activeTab.value))
-// 有效赠送/预售是跨日期的当前权益；只有查看全部历史时才让日期收窄结果。
-const showDateRange = computed(() => !['assets', 'care', 'gift'].includes(activeTab.value) || tabStatus.value === '')
+const hasStatusFilter = computed(() => ['assets', 'gift', 'coupons', 'care'].includes(activeTab.value))
+// 当前有效的赠送与优惠券不受日期限制；查看全部历史时才按日期收窄。
+const showDateRange = computed(() => !['assets', 'care', 'gift', 'coupons'].includes(activeTab.value) || tabStatus.value === '')
 
 watch(
   () => props.initialTab,
   (tabKey) => {
     if (DEFAULT_TABS.some((tab) => tab.key === tabKey)) {
       activeTab.value = tabKey
-      tabStatus.value = ['assets', 'gift'].includes(tabKey) ? 'active' : (tabKey === 'care' ? 'unfinished' : '')
+      tabStatus.value = ['assets', 'gift', 'coupons'].includes(tabKey) ? 'active' : (tabKey === 'care' ? 'unfinished' : '')
     }
   }
 )
@@ -405,7 +407,7 @@ function switchTab(tab) {
   tabKeyword.value = ''
   tabDateFrom.value = todayDate()
   tabDateTo.value = todayDate()
-  tabStatus.value = tab.key === 'assets' || tab.key === 'gift'
+  tabStatus.value = ['assets', 'gift', 'coupons'].includes(tab.key)
     ? 'active'
     : (tab.key === 'care' ? 'unfinished' : '')
   emit('tab-change', {
@@ -414,8 +416,8 @@ function switchTab(tab) {
     member: member.value,
     keyword: '',
     status: tabStatus.value,
-    dateFrom: tab.key === 'gift' && tabStatus.value === 'active' ? '' : tabDateFrom.value,
-    dateTo: tab.key === 'gift' && tabStatus.value === 'active' ? '' : tabDateTo.value
+    dateFrom: ['gift', 'coupons'].includes(tab.key) && tabStatus.value === 'active' ? '' : tabDateFrom.value,
+    dateTo: ['gift', 'coupons'].includes(tab.key) && tabStatus.value === 'active' ? '' : tabDateTo.value
   })
 }
 
@@ -427,8 +429,8 @@ function queryActiveTab() {
     member: member.value,
     keyword: tabKeyword.value.trim(),
     status: hasStatusFilter.value ? tabStatus.value : '',
-    dateFrom: activeTab.value === 'gift' && tabStatus.value === 'active' ? '' : tabDateFrom.value,
-    dateTo: activeTab.value === 'gift' && tabStatus.value === 'active' ? '' : tabDateTo.value
+    dateFrom: ['gift', 'coupons'].includes(activeTab.value) && tabStatus.value === 'active' ? '' : tabDateFrom.value,
+    dateTo: ['gift', 'coupons'].includes(activeTab.value) && tabStatus.value === 'active' ? '' : tabDateTo.value
   })
 }
 
@@ -1012,8 +1014,11 @@ async function triggerAction(action, context = {}) {
             </section>
             <div v-if="!cards.length" class="member-detail-overlay__empty-inline member-detail-overlay__empty-inline--page">暂无卡项权益</div>
 
+          </section>
+
+          <section v-else-if="activeTab === 'coupons'" class="member-detail-overlay__tab-content" aria-label="优惠券">
             <section class="member-detail-overlay__panel">
-              <header><h3>优惠券</h3><span>展示后端返回的可查看优惠券记录。</span></header>
+              <header><h3>优惠券</h3></header>
               <div class="member-detail-overlay__table-wrap">
                 <table class="member-detail-overlay__table member-detail-overlay__table--wide">
                   <thead>
@@ -1035,7 +1040,6 @@ async function triggerAction(action, context = {}) {
                 </table>
               </div>
             </section>
-
           </section>
 
           <section v-else-if="activeTab === 'writeoff'" class="member-detail-overlay__tab-content" aria-label="服务记录">

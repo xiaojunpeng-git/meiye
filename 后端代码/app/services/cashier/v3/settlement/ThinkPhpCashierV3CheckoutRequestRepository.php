@@ -128,6 +128,7 @@ final class ThinkPhpCashierV3CheckoutRequestRepository implements CashierV3Check
         'couponUserId' => 'coupon_user_id',
         'couponNameSnapshot' => 'coupon_name_snapshot',
         'couponDiscountCents' => 'coupon_discount_cents',
+        'couponPaymentCents' => 'coupon_payment_cents',
         'craftsmenSnapshotJson' => 'craftsmen_snapshot_json',
         'salespeopleSnapshotJson' => 'salespeople_snapshot_json',
         'guideSelectionsJson' => 'guide_selections_json',

@@ -74,6 +74,7 @@ final class InventoryManualOutboundServices
                 ->select()
                 ->toArray();
             if ($existing) {
+                (new InventoryOutboundHeaderServices())->assertReplay($scope, $location, $command);
                 return $this->replay($existing, $scope, $location, $command);
             }
 
@@ -85,6 +86,8 @@ final class InventoryManualOutboundServices
                 (int)$command['recordedAt']
             );
 
+            // Header attributes and stock facts must commit or roll back together.
+            (new InventoryOutboundHeaderServices())->insert($scope, $location, $command);
             // A stable SKU order prevents opposite multi-line requests from
             // acquiring aggregate stock locks in different orders.
             $ordered = $command['lines'];
@@ -111,6 +114,9 @@ final class InventoryManualOutboundServices
 
     private function normalize(array $input, int $lineLimit = 100): array
     {
+        // Optional new attributes preserve old import callers without accepting arbitrary fields.
+        $header = (new InventoryOutboundHeaderServices())->normalize($input);
+        unset($input['outbound_type'], $input['outbound_recipient']);
         if (array_keys($input) !== ['idempotency_key', 'business_date', 'remark', 'lines']
             || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > $lineLimit) {
             throw new \InvalidArgumentException('inventory_manual_outbound_input_invalid');
@@ -146,6 +152,7 @@ final class InventoryManualOutboundServices
             'idempotencyKey' => $key,
             'businessDate' => $this->date((string)$input['business_date']),
             'remark' => mb_substr(trim((string)$input['remark']), 0, 500),
+            'header' => $header,
             'lines' => $lines,
             'recordedAt' => time(),
         ];

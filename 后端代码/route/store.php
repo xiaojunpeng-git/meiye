@@ -616,6 +616,8 @@ Route::group('storeapi', function () {
 		Route::get('v3/unified-query/capabilities', 'product.inventory.InventoryUnifiedQuery/capabilities')->option(['real_name' => '库存统一查询能力']);
 		Route::post('v3/unified-query/commands', 'product.inventory.InventoryUnifiedQuery/command')->option(['real_name' => '库存统一查询操作']);
 		Route::get('v3/unified-query/export-task/:taskNo', 'product.inventory.InventoryUnifiedQuery/exportTask')->option(['real_name' => '库存统一查询导出任务']);
+		// Download reuses authenticated inventory context; file paths are never accepted from the browser.
+		Route::get('v3/unified-query/export-task/:taskNo/download', 'product.inventory.InventoryUnifiedQuery/downloadOutboundExport')->option(['real_name' => '出库Excel下载']);
 		Route::get('v3/catalog', 'product.inventory.InventoryStoreCatalog/search')->option(['real_name' => '库存商品条码搜索']);
 		Route::get('v3/catalog/barcode', 'product.inventory.InventoryStoreCatalog/barcode')->option(['real_name' => '库存商品精确条码查询']);
 		Route::get('v3/request/requester', 'product.inventory.InventoryStoreCatalog/requester')->option(['real_name' => '库存请货人默认信息']);

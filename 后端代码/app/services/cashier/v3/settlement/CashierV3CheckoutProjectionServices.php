@@ -499,6 +499,7 @@ final class CashierV3CheckoutProjectionServices
         $saleOriginal = 0;
         $saleDiscount = 0;
         $saleAmount = 0;
+        $saleCouponPayment = 0;
         $saleDebt = 0;
         $entitlementActual = 0;
         foreach ($rows as $row) {
@@ -589,6 +590,10 @@ final class CashierV3CheckoutProjectionServices
                     $row['coupon_discount_cents'] ?? 0,
                     'line.coupon_discount_cents'
                 );
+                $couponPayment = self::nonNegativeInt(
+                    $row['coupon_payment_cents'] ?? 0,
+                    'line.coupon_payment_cents'
+                );
                 $amount = self::nonNegativeInt(
                     $row['sale_amount_cents'] ?? null,
                     'line.sale_amount_cents'
@@ -620,7 +625,8 @@ final class CashierV3CheckoutProjectionServices
                     'line.price_changed_at'
                 );
                 if ($original !== self::safeAdd($discount, $amount, 'sale_line_amount')
-                    || $lineDebt > $amount
+                    || $couponPayment > $amount || $lineDebt > $amount - $couponPayment
+                    || ($couponDiscount > 0 && $couponPayment > 0)
                     || self::nonNegativeInt(
                         $row['entitlement_actual_amount_cents'] ?? null,
                         'line.entitlement_actual_amount_cents'
@@ -700,6 +706,9 @@ final class CashierV3CheckoutProjectionServices
                     'isPresale' => $isPresale,
                     'inventoryOutboundRequired' => $inventoryOutboundRequired,
                 ];
+                if ($couponPayment > 0) {
+                    $fingerprintInput['couponPaymentCents'] = $couponPayment;
+                }
                 if ($isPresale === 0) {
                     unset($fingerprintInput['isPresale']);
                 }
@@ -769,6 +778,7 @@ final class CashierV3CheckoutProjectionServices
                 $saleOriginal = self::safeAdd($saleOriginal, $original, 'sale_original_total');
                 $saleDiscount = self::safeAdd($saleDiscount, $discount, 'sale_discount_total');
                 $saleAmount = self::safeAdd($saleAmount, $amount, 'sale_total');
+                $saleCouponPayment = self::safeAdd($saleCouponPayment, $couponPayment, 'sale_coupon_payment_total');
                 $saleDebt = self::safeAdd($saleDebt, $lineDebt, 'sale_debt_total');
                 $lines[] = [
                     'id' => $lineId,
@@ -787,6 +797,7 @@ final class CashierV3CheckoutProjectionServices
                     'couponUserId' => $couponUserId,
                     'couponNameSnapshot' => $couponName,
                     'couponDiscountAmount' => self::money($couponDiscount),
+                    'couponPaymentAmount' => self::money($couponPayment),
                     'amountRole' => 'sale_receivable',
                     'debtAmountCents' => $lineDebt,
                     'serviceSource' => '本次购买',
@@ -923,7 +934,7 @@ final class CashierV3CheckoutProjectionServices
             'request.entitlement_actual_amount_cents'
         );
         if ($saleAmount !== $salesAmount
-            || $receivable !== $salesAmount - $saleDebt
+            || $receivable !== $salesAmount - $saleCouponPayment - $saleDebt
             || $entitlementActual !== $requestEntitlementActual) {
             throw self::failure('checkout_projection_line_total_drift');
         }
@@ -1145,6 +1156,7 @@ final class CashierV3CheckoutProjectionServices
                 'selectedCount' => count($lines),
                 'originalAmount' => self::money($saleOriginal),
                 'discountAmount' => self::money($saleDiscount),
+                'couponPaymentAmount' => self::money($saleCouponPayment),
                 'receivableAmount' => self::money($receivable),
                 'entitlementActualAmount' => self::money($entitlementActual),
             ],

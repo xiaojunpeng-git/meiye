@@ -56,7 +56,18 @@ final class InventoryOperationalUnifiedQueryWorkerContextResolver implements Uni
             $factory = new InventoryStoreUnifiedQueryContextFactory(
                 UnifiedQueryRuntime::service('contextFactory')
             );
-            $context = $factory->make($storeId, $operatorId, [], date('Y-m-d'), $pageCode);
+            if ($pageCode === 'inventory_outbound') {
+                // Only task-owned frozen identity selects the account namespace; no browser/session hint is trusted.
+                $previous = request()->storeStaffInfo ?? [];
+                try {
+                    request()->storeStaffInfo = (new InventoryOutboundWorkerIdentity())->profile($authoritativeTask);
+                    $context = $factory->make($storeId, $operatorId, [], date('Y-m-d'), $pageCode);
+                } finally {
+                    request()->storeStaffInfo = $previous;
+                }
+            } else {
+                $context = $factory->make($storeId, $operatorId, [], date('Y-m-d'), $pageCode);
+            }
         } else {
             throw new UnifiedQueryException(
                 'UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED',

@@ -19,12 +19,15 @@ $checks = [
     'locked workspace coupon snapshot participates in checkout line fingerprint' => strpos($workspace, "\$source['couponUserId']") !== false
         && strpos($preparation, "'couponUserId' => (int)(\$line['couponUserId'] ?? 0)") !== false
         && strpos($kernel, "'couponNameSnapshot',") !== false
-        && strpos($kernel, "'couponUserId' => self::nonNegativeInt(") !== false
-        && strpos($kernel, "'couponDiscountCents' => self::money(") !== false,
+        && strpos($kernel, "\$couponUserId = self::nonNegativeInt(") !== false
+        && strpos($kernel, "'couponUserId' => \$couponUserId") !== false
+        && strpos($kernel, "'couponDiscountCents' => \$couponDiscount") !== false
+        && strpos($kernel, "\$normalized['couponPaymentCents'] = \$couponPayment;") !== false,
     'checkout draft projection verifies and reads the same coupon snapshot' => strpos($projection, "'couponUserId' => \$couponUserId") !== false
         && strpos($projection, "'couponDiscountCents' => \$couponDiscount") !== false,
     'payment and submission rebuild preserve the frozen coupon snapshot' => strpos($rebuilder, "'couponUserId' => self::nonNegativeInt(") !== false
-        && strpos($rebuilder, "'couponDiscountCents' => self::nonNegativeInt(") !== false,
+        && strpos($rebuilder, "'couponDiscountCents' => self::nonNegativeInt(") !== false
+        && strpos($rebuilder, "'couponPaymentCents' => self::nonNegativeInt(") !== false,
     'upgrade coupon is sales discount not entitlement payment discount' => strpos($salesPlan, "\$saleLines[0]['discount_amount_cents'] = \$couponDiscount") !== false
         && strpos($salesPlan, "\$saleLines[0]['sale_amount_cents'] = \$credit['targetPriceCents'] - \$couponDiscount") !== false
         && strpos($salesPlan, "\$targetPrice !== (int)\$saleLines[0]['sale_amount_cents'] + \$amount + \$couponDiscount") !== false
@@ -36,11 +39,11 @@ $checks = [
         && strpos($fact, "'couponNameSnapshot', 'couponDiscountCents'") !== false
         && strpos($fact, "'coupon_user_id' => self::nonNegativeInt(\$fact['couponUserId']") !== false
         && strpos($fact, "'coupon_discount_cents' => self::signedMoney(\$fact['couponDiscountCents']") !== false,
-    'refund and void restore exact used coupon' => strpos($reversal, 'lockConsumedCoupons') !== false
+    'void restores exact used coupon' => strpos($reversal, 'lockConsumedCoupons') !== false
         && strpos($reversal, 'restoreCoupons') !== false
         && strpos($reversal, "->update(['status' => 0, 'use_time' => 0])") !== false,
-    'partial refund keeps coupon consumed' => strpos($reversal, "\$economicReversal === (int)\$source['amountCents']") !== false
-        && strpos($reversal, '? $this->lockConsumedCoupons($source, $scope)') !== false,
+    'all financial refunds keep coupon consumed' => strpos($reversal, "\$coupons = \$action === 'void-sales-order'") !== false
+        && strpos($reversal, "\$coupons = [];") !== false,
 ];
 $checks['sale-only and orchestrated checkout consume coupon in final transaction'] =
     strpos($saleOnly, 'CashierV3CheckoutCouponSettlementServices') !== false

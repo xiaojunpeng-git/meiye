@@ -36,7 +36,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 ['craftsman', '手艺人（类型，业绩，手工、项目数）'], ['sales_manager', '销售经理'], ['guide', '导购'],
                 ['line_amount', '金额', 'amount'], ['occurred_at', '实际下单时间', 'datetime'],
                 ['item_count', '商品数量', 'integer'], ['receivable_amount', '应收金额', 'amount'], ['discount_amount', '优惠金额', 'amount'],
-                ['debt_amount', '欠款', 'amount'], ['actual_received_amount', '已收金额', 'amount'], ['payment_method', '记账收款'],
+                ['debt_amount', '欠款', 'amount'], ['coupon_discount_amount', '优惠券', 'amount'], ['actual_received_amount', '已收金额', 'amount'], ['payment_method', '记账收款'],
                 ['salesperson', '销售人（业绩）'], ['cashier', '收银员／操作人'], ['source', '客户来源'],
                 ['payment_status', '支付状态'], ['order_status', '状态'], ['supplement', '补单标记'], ['payment_completed_at', '支付完成时间', 'datetime'],
             ], ['sales_order_no', 'member_name', 'phone', 'item_summary']],

@@ -49,6 +49,15 @@ final class InventoryStoreUnifiedQueryContextFactory
         if (!$staff && !$organizationSession) {
             throw new UnifiedQueryException('UNIFIED_QUERY_CONTEXT_INVALID', '当前员工不属于门店库存范围。', []);
         }
+        // Export creation, polling and download all recheck the outbound feature, including no-cost exports.
+        if ($pageCode === 'inventory_outbound') {
+            $profile = $organizationSession ? $sessionInfo : $staff;
+            $resolver = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class);
+            $allowed = !empty($profile['_cashier_v3_delegated']) ? $resolver->resolveVisibleFeatures($profile) : $resolver->resolveGrantedFeatures($profile);
+            if (!in_array(self::PAGE_FEATURES[$pageCode], $allowed, true)) {
+                throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '当前账号没有出库功能权限。', []);
+            }
+        }
         $locations = Db::name('inventory_location')->where('store_id', $storeId)
             ->where('location_status', 'ACTIVE')->field('id,tenant_id')->select()->toArray();
         $tenantIds = [];
@@ -93,7 +102,11 @@ final class InventoryStoreUnifiedQueryContextFactory
             'granted_features' => $features,
             'manage_shared_fields' => true,
             'share_tenant_fields' => true,
-            'scope_dimensions' => ['location_id' => array_keys($locationIds)],
+            // Freeze a typed identity for outbound workers: session ids can collide with legacy staff ids.
+            'scope_dimensions' => ['location_id' => array_keys($locationIds)] + ($pageCode === 'inventory_outbound' ? [
+                'inventory_actor_type' => [!empty($sessionInfo['_cashier_v3_delegated']) ? 'delegated'
+                    : (!empty($sessionInfo['_cashier_v3_organization']) ? 'organization' : 'staff')],
+            ] : []),
             'query_cutoff_date' => InventoryBatchStockQueryContract::assertCutoffDate($cutoffDate),
             'data_as_of' => time(),
         ], ['pageCode' => $pageCode]);
