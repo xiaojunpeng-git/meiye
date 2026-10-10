@@ -1,0 +1,39 @@
+{
+  "task": "R8-00001",
+  "date": "2026-10-10",
+  "status": "development_and_selftest_complete_pending_product_manager_acceptance",
+  "start_head": "7951a3f38c782395be775324f9fe88837a4e1fec",
+  "fixed_head": "5288105532521656b5dba5a57a3dbe8175f5236f",
+  "files": {
+    "tests/cashier-v3/php/project-replacement-serial-void-local.php": "ef9512cc0279a9077ca5df55506bf779b9bd0aa9a1270981d84760a8d9dd45ac",
+    "后端代码/app/services/cashier/v3/order/CashierV3OrderCenterVoidServices.php": "d15f158edb84256c94416871e44e51048f12eeb0a472cdfdd00336c70a143466"
+  },
+  "files_fingerprint_sha256": "15da279be6bb51ddeade617ada3d035ad48d5b18fd227b77ab3335ae2295d308",
+  "fingerprint_algorithm": "SHA256(JSON.stringify(files)), paths sorted ascending, UTF-8",
+  "tracked_patch_sha256": "9421b1200640a3f5b30334a5161854a4db44ee423d53b8960c1511150357628d",
+  "test_output": {
+    "path": "tests/cashier-v3/evidence/R8-project-replacement-serial-void-local-2026-10-10.txt",
+    "sha256": "4a3145494e048dc1c0b6a017c55b54278df62efb8c53973752783b77e6e2d944",
+    "assertion_pass_count": 48,
+    "terminal_marker": "R8_PROJECT_REPLACEMENT_SERIAL_VOID_LOCAL=PASS",
+    "all_business_writes_rolled_back": true
+  },
+  "online_read_only": {
+    "instance": "rh",
+    "database": "ruihao",
+    "mysql": "5.7.44-log",
+    "latest_upgrade_id": 216,
+    "latest_upgrade_key": "20261010-r52-outbound-header",
+    "service_sha256_before_and_after": "837e3249180c4e98227c5dccb1dca2165e462b0272749383aafce82b51da9948",
+    "record_count": 7,
+    "already_voided_count": 2,
+    "current_remaining_times": 6,
+    "first_operation_before_remaining_times": 16,
+    "production_writes": false
+  },
+  "commit": null,
+  "deployment": null,
+  "push": null,
+  "frontend_changes": false,
+  "database_migrations": false
+}
