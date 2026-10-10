@@ -16,7 +16,8 @@ final class InventoryOperationalUnifiedQueryRegistrar implements UnifiedQueryPag
                 'keywordFields' => $definition['keywordFields'],
                 'requiredFeature' => $definition['requiredFeature'],
                 'exportFeature' => $definition['exportFeature'],
-                'scopeDimensions' => ['location_id'],
+                // Outbound export identity is frozen alongside warehouse scope to prevent account-id collisions.
+                'scopeDimensions' => $pageCode === 'inventory_outbound' ? ['location_id', 'inventory_actor_type'] : ['location_id'],
             ]);
         }
     }

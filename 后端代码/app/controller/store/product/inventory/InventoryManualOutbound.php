@@ -22,6 +22,8 @@ class InventoryManualOutbound extends AuthController
     {
         $data = $this->request->postMore([
             ['idempotency_key', ''], ['business_date', ''], ['remark', ''], ['lines', []],
+            // Optional document attributes are validated and persisted by the same stock command.
+            ['outbound_type', ''], ['outbound_recipient', ''],
         ]);
         return $this->success($this->services->create((int)$this->storeId, (int)$this->storeStaffId, $data));
     }

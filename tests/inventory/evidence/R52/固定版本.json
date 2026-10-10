@@ -1,0 +1,151 @@
+{
+  "task": "R52 Round7",
+  "status": "awaiting_product_manager_acceptance",
+  "baseHead": "ea40cf481e2c790d850b485f3711bc840ac43f1b",
+  "createdAt": "2026-10-10T08:47:05.816Z",
+  "patchSha256": "5922d49fea874c028616880cb99e60536ee60d895978526bab51cae12f2f12f0",
+  "files": [
+    {
+      "path": "前端代码/inventory-vue3/src/App.vue",
+      "sha256": "23ee661da18da3e4018718bf24d9239730ff5da7648f2b89919b8b531de3b9f6"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+      "sha256": "46a5ab470ad15d53000ec0946823716b3f9b68275644b98c30d055aba8e6ad32"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryOutboundExport.vue",
+      "sha256": "0dd142dad7ad72dccb920a827e790b67b5ea5a0a4fd341dd528f1c73957f0aa3"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/services/inventoryApi.js",
+      "sha256": "55222f6be036bd1527c933dadc8c7cfb77efec6f0211a929ed5868cdc17ca892"
+    },
+    {
+      "path": "后端代码/app/controller/store/product/inventory/InventoryManualOutbound.php",
+      "sha256": "220a2ebfc53d3385810636ac018fdb67473d5960548b8e6aeae550c046fb17a9"
+    },
+    {
+      "path": "后端代码/app/controller/store/product/inventory/InventoryUnifiedQuery.php",
+      "sha256": "e140fef65dd580bd23e371a2a3631cfd26fe8315912ca6151d5853ef4c51e4af"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryManualOutboundServices.php",
+      "sha256": "dd5312369dbf7f699d162e230c82c6859c43e381376a4604614b66325d76df0d"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryMovementQueryServices.php",
+      "sha256": "5b3c56cc7b75cd4aa2016c83ee46432b6ce08425b042b02cc96785ada212789d"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryPlatformHqOutboundServices.php",
+      "sha256": "7a14f8cf31d1c4db0ecf814fa1dc13dba28924b81a01660352d7cce88e95e185"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryOutboundHeaderServices.php",
+      "sha256": "0bc635dd8663848f9cced731a609f0372aaa4fbd8ecd463fffc0eac95cb79c39"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryContract.php",
+      "sha256": "ae2fd485d013a96087efe4730da5bb0445cb78c106efea8229d5f24b0c5a7f41"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php",
+      "sha256": "ff2351f62296a7546a48365239d8dea75d17d1a791f46dfbfa95d23d7a043676"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOutboundUnifiedQueryProvider.php",
+      "sha256": "f1f012d107edf0f105682bbab57adba05f6e77cf7ffe6f4b7ce0bd748180c36c"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryRegistrar.php",
+      "sha256": "5cb09ade8e876ddb8da737cea1d38455ceb6db7e26c7b647fafac722c3a208c9"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryWorkerContextResolver.php",
+      "sha256": "bec6540af22197933ba9febb0f9860f1c38ba723ce0f4e285c3506677b99482c"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryStoreUnifiedQueryContextFactory.php",
+      "sha256": "4746652128439140542e3b78dc35c1c6169b556c2e8bcc24f62ca72071758856"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php",
+      "sha256": "6c75fada9831c739af0413d6aaaa1ae80c063972eb837a274e1f0486c5cde59a"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/query/InventoryOutboundWorkerIdentity.php",
+      "sha256": "4d63b4febef3d8bacb8de66ed1140eafa0c66db0c3a476e108b8cc9adb6d0f5f"
+    },
+    {
+      "path": "后端代码/route/store.php",
+      "sha256": "c2d77785a75fa200ef20eb9002d81db3570a12bf3190ce513c481693fe238bca"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-10-出库类型与对象/00-说明.md",
+      "sha256": "bbe1623fde3619838783b06be0db094136bfa22da28a74a8d8e62b9677d8c086"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-10-出库类型与对象/01-up.sql",
+      "sha256": "b15baae854f9cc79f2fc5b798ed4264f2d543b4f03f780202ee20ccfab2fdda6"
+    },
+    {
+      "path": "tests/inventory/php/outbound-header-export-local-integration.php",
+      "sha256": "2b1aaa0152dc14aea9acefce589909e1469ae4196eed4712ddfb42c3acb2dd16"
+    },
+    {
+      "path": "tests/inventory/php/outbound-worker-local-integration.php",
+      "sha256": "f89d27be48a6b92c4b38bc499d5b6eec1940f35ac8f49582669b22bf8f580db9"
+    },
+    {
+      "path": "tests/inventory/php/operational-unified-query-registration-contract.php",
+      "sha256": "5dd5e69ac49718696ed98cd3af84d32436cb019802672d6ffd90dc632a5c1191"
+    },
+    {
+      "path": "tests/inventory/js/outbound-export-contract.mjs",
+      "sha256": "541e9c80121baf3b83b2f6d42a425fcb27d1145e778c2f0d2de3e2924e46289f"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "outbound-form.png",
+      "sha256": "3ecd8c16085a1669b974d1740e9a1262ea319094d95b172d4e1673f544346a08"
+    },
+    {
+      "path": "recipient-after-refresh.png",
+      "sha256": "e2c035d6ad4d95dc2730002b3ff55c20c3514455bcd4c271d466f9d0bcac882d"
+    },
+    {
+      "path": "outbound-list-final.png",
+      "sha256": "c2dbb1fa642cdfadde828bc5ac58ec7fbb0dec7d1d4d16536b98df06cb4d113f"
+    },
+    {
+      "path": "export-ready.png",
+      "sha256": "b6d03add00ec18f6679e37d7e95885e5bf244de13ec2df942c2a4edb851930e4"
+    },
+    {
+      "path": "outbound-export-verified.xlsx",
+      "sha256": "e59a0e3f596bad0a86c65b80e5a91f4477da87b432d4501f0aca203faff9c5bd"
+    },
+    {
+      "path": "验收记录.md",
+      "sha256": "7c078d087b2c6af0b7d809e52f4741e330e48edf764ca145c00fa303b7e10c95"
+    },
+    {
+      "path": "outbound-store-name.png",
+      "sha256": "cf345b9b6756794089b52852336136a87bef1f0c9b4aeb218d21483a547ba83d"
+    },
+    {
+      "path": "outbound-recipient-header.png",
+      "sha256": "e3306ca82107afd59d7e452646af42b8f5050092f6c900989ad8461eb213ba99"
+    }
+  ],
+  "localMigration": "applied; mysql/ruihao only",
+  "remoteOperations": "none",
+  "build": {
+    "directory": "/tmp/r52-cashier-build",
+    "entrySha256": "0c0db399289fcf6f8b87018fef633fa3edc669f226fa2dbcf050ed9e05c7d658"
+  },
+  "previousPatchSha256": "f280989b42a311750cda4309a674abd5ec8e230ca9356fca9dc7c7db91b79a50",
+  "version": 3
+}

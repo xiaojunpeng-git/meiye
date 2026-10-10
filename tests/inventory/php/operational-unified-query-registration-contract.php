@@ -26,7 +26,9 @@ operationalUqAssert('operational inventory UQ registers one isolated page code p
 
 foreach ($expected as $pageCode) {
     $page = $registry->page($pageCode);
-    operationalUqAssert("{$pageCode} has a stable row key and server scope dimension", $page['stableRowKey'] === 'record_id' && $page['scopeDimensions'] === ['location_id']);
+    // Outbound jobs additionally freeze account namespace; other document pages keep their existing scope.
+    $dimensions = $pageCode === 'inventory_outbound' ? ['location_id', 'inventory_actor_type'] : ['location_id'];
+    operationalUqAssert("{$pageCode} has a stable row key and server scope dimension", $page['stableRowKey'] === 'record_id' && $page['scopeDimensions'] === $dimensions);
     operationalUqAssert("{$pageCode} uses the existing inventory view feature", $page['requiredFeature'] === 'inventory.batch.view');
 }
 
@@ -36,8 +38,9 @@ operationalUqAssert('operational provider keeps a bounded full source window ins
     strpos($source, 'UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1') !== false
     && strpos($source, 'list($storeId, $operatorId') === false
 );
-operationalUqAssert('operational document exports remain closed until a worker context can rebuild each projection',
+operationalUqAssert('only outbound enables document export with its typed worker context',
     InventoryOperationalUnifiedQueryContract::definition('inventory_inbound')['exportFeature'] === 'inventory.operation.export'
+    && InventoryOperationalUnifiedQueryContract::definition('inventory_outbound')['exportFeature'] === 'inventory.batch.export'
 );
 operationalUqAssert('Excel import records are an isolated operational projection, not a local browser filter',
     in_array('inventory_import', InventoryOperationalUnifiedQueryContract::PAGE_CODES, true)

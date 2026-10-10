@@ -113,7 +113,34 @@ final class InventoryUnifiedQuery extends AuthController
             $runtime = UnifiedQueryRuntime::runtime();
             $pageCode = $this->requestedPageCode($runtime);
             $context = $this->context($runtime, date('Y-m-d'), $pageCode);
-            return $this->success(['exportTask' => $runtime['exports']->findForAccount($context, $taskNo)]);
+            $task = $runtime['exports']->findForAccount($context, $taskNo);
+            if ($pageCode === 'inventory_outbound' && !empty($task['downloadAvailable'])) {
+                $task['downloadUrl'] = '/storeapi/product/inventory/v3/unified-query/export-task/' . rawurlencode($taskNo) . '/download';
+            }
+            return $this->success(['exportTask' => $task]);
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        }
+    }
+
+    /** Download only the creator's outbound task after rechecking current scope, fields and expiry. */
+    public function downloadOutboundExport(string $taskNo)
+    {
+        try {
+            $runtime = UnifiedQueryRuntime::runtime();
+            $context = $this->context($runtime, date('Y-m-d'), 'inventory_outbound');
+            $descriptor = $runtime['exports']->resolveDownloadDescriptor($context, $taskNo);
+            $path = $runtime['exportStorage']->absolutePath((string)$descriptor['storageKey']);
+            if (!is_file($path) || !is_readable($path)) return $this->fail('导出文件不存在或已过期。');
+            // A binary response works under the local hot-reload proxy and Swoole without File output buffering.
+            $content = file_get_contents($path);
+            if ($content === false || $content === '') return $this->fail('导出文件读取失败。');
+            return response($content, 200)->header([
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition' => "attachment; filename=outbound.xlsx; filename*=UTF-8''" . rawurlencode((string)$descriptor['fileName']),
+                'Cache-Control' => 'private, no-store',
+                'Content-Length' => (string)strlen($content),
+            ]);
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         }

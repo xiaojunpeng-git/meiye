@@ -143,15 +143,20 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     private function documentRows(string $tenantId, int $storeId, array $locationIds, $types, bool $canViewCost): array
     {
         $types = is_array($types) ? $types : [(string)$types];
+        // Resolve the document's store, not the logged-in store or warehouse label.
+        // Preserve the location's store snapshot; legacy empty snapshots use that same store ID.
+        $storeName = "COALESCE(NULLIF(l.store_name_snapshot, ''), s.name, '')";
         $rows = Db::name('inventory_batch_movement_fact')->alias('f')->leftJoin('inventory_batch b', 'b.id=f.batch_id')
             ->leftJoin('inventory_location l', 'l.id=f.location_id')
+            ->leftJoin('system_store s', 's.id=l.store_id AND l.store_id=f.store_id')
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')->where('f.tenant_id', $tenantId)->where('f.store_id', $storeId)
             ->whereIn('f.location_id', $locationIds)->where('f.fact_status', 'SETTLED')->whereIn('f.source_type', $types)
             // Query expressions cannot be used as PHP array keys. Use one raw
             // projection so ThinkORM receives the SQL aliases directly.
             ->fieldRaw("f.source_id AS source_id, f.source_type AS source_type, MAX(pc.claim_status) AS presale_claim_status, COALESCE(n.document_no, f.source_id) AS order_sn, f.business_date, f.location_id, l.location_name, MAX(f.recorded_at) AS add_time, MAX(COALESCE(NULLIF(f.occurred_at, 0), f.recorded_at)) AS operation_at, MAX(f.operator_name_snapshot) AS operator_name, COUNT(f.id) AS detail_count, SUM(f.cost_amount_cents) AS cost_amount_cents, GROUP_CONCAT(DISTINCT CONCAT(IFNULL(b.product_name_snapshot, '商品'), ' / ', IFNULL(b.sku_name_snapshot, '默认规格')) SEPARATOR '、') AS product_summary")
-            ->group('f.source_id,f.source_type,n.document_no,f.business_date,f.location_id,l.location_name')->order('add_time desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
+            ->fieldRaw($storeName . ' AS store_name')
+            ->group('f.source_id,f.source_type,n.document_no,f.business_date,f.location_id,l.location_name,l.store_name_snapshot,s.name')->order('add_time desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         foreach ($rows as &$row) {
             $row['source_id'] = (string)($row['source_id'] ?? '');
             $presale = (string)$row['source_type'] === 'presale_claim_outbound';
@@ -170,6 +175,8 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             foreach ($rows as &$row) if ((string)$row['source_type'] === 'manual_outbound') $row = $manualRows[$manualIndex++];
             unset($row);
         }
+        // Lists and frozen exports share the same persisted type/recipient projection.
+        $rows = (new \app\services\product\inventory\InventoryOutboundHeaderServices())->apply($rows, $tenantId, $locationIds);
         return $this->bounded($rows);
     }
 
