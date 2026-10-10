@@ -39,7 +39,8 @@ if ($allocator::allocate('6980.00', 30, 0, 1) !== '232.00'
     throw new RuntimeException('existing final-tail allocation invariant changed');
 }
 $source = file_get_contents($path);
-if (substr_count($source, "'unitPrice'") !== 2
+if (strpos($source, "\$project['unitPrice'] = \$this->purchaseUnitPrice(") === false
+    || strpos($source, "'unitPrice' => \$this->purchaseUnitPrice(") === false
     || strpos($source, "(int)\$project['totalPurchaseTimes']") === false
     || strpos($source, 'return bcdiv($purchaseAmount, (string)$purchaseTimes, 0);') === false) {
     throw new RuntimeException('card/project display projection wiring missing');

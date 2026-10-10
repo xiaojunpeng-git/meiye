@@ -40,6 +40,7 @@ import EntitlementSelectorOverlay from '@/components/cashier/EntitlementSelector
 import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSelectorOverlay.vue'
+import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
 import { defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
@@ -508,9 +509,14 @@ function catalogItemSelectedQuantity(item) {
 
 const emptyCartSummaries = new Set(['未选择', '未设置', '不适用', '无', '—', '-'])
 
-function cartActionLabel(label, summary) {
+function cartActionValue(summary) {
   const value = String(summary || '').trim()
-  return !value || emptyCartSummaries.has(value) ? label : `${label}:${value}`
+  return emptyCartSummaries.has(value) ? '' : value
+}
+
+function cartActionLabel(label, summary) {
+  const value = cartActionValue(summary)
+  return value ? `${label}:${value}` : label
 }
 
 const isServiceOrder = computed(() => Boolean(cashier.value.serviceOrder))
@@ -1957,6 +1963,13 @@ function getLineAmount(line) {
   return line.finalAmount ?? line.actualAmount ?? line.amount ?? 0
 }
 
+// 权益行金额已按本次次数和尾差分摊；只有本地销售行仍保存单件金额。
+function cartLineTotalAmountCents(line = {}) {
+  return isEntitlementLine(line)
+    ? moneyToCents(line.actualAmount ?? getLineAmount(line))
+    : localDraftLineTotalAmountCents(line)
+}
+
 function linePriceChanged(line = {}) {
   return line.originalAmount !== undefined
     && Number(line.originalAmount) !== Number(getLineAmount(line))
@@ -1964,6 +1977,33 @@ function linePriceChanged(line = {}) {
 
 function formatPlainAmount(value) {
   return String(Number(value || 0))
+}
+
+// 购物车行按产品经理要求显示整数元且不分组；仅改变呈现，不参与草稿计价。
+const cartLineMoneyFormatter = new Intl.NumberFormat('zh-CN', {
+  style: 'currency',
+  currency: 'CNY',
+  currencyDisplay: 'narrowSymbol',
+  useGrouping: false,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0
+})
+
+function formatCartLineMoney(value) {
+  const amount = Number(value)
+  return cartLineMoneyFormatter.format(Number.isFinite(amount) ? amount : 0)
+}
+
+// 权益左侧展示原购买平均单价；末次尾差只进入右侧实际分摊合计与结账快照。
+function formatCartEntitlementUnitPrice(line = {}) {
+  const purchaseAmount = String(line.purchaseAmount ?? '')
+  const purchaseTimes = Number(line.totalPurchaseTimes)
+  if (line.unlimited || line.displaySnapshot?.unlimited
+    || !/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(purchaseAmount)
+    || !Number.isSafeInteger(purchaseTimes) || purchaseTimes <= 0) return '—'
+  const purchaseCents = moneyToCents(purchaseAmount)
+  if (!Number.isSafeInteger(purchaseCents) || !Number.isSafeInteger(purchaseTimes * 100)) return '—'
+  return formatCartLineMoney(Math.floor(purchaseCents / (purchaseTimes * 100)))
 }
 
 async function requestAction(action, payload = {}) {
@@ -4392,37 +4432,57 @@ async function applyPersonnelAssignmentToAll(result = {}) {
   }
 }
 
-function craftsmenDisplaySummary(line = {}) {
+function craftsmenDisplayValue(line = {}) {
   const records = localPersonnelAssignments.value[line.id]?.craftsmen
   const chosen = Array.isArray(records) ? records : Array.isArray(line.craftsmen) ? line.craftsmen : []
-  if (!chosen.length) return hasCartLineCraftsmen(line) ? line.craftsmenSummary : '待选择手艺人'
-  const first = `手艺人：${chosen[0].name || chosen[0].staffName || ''}(${chosen[0].marked || chosen[0].isPointCustomer ? '点' : '轮'})`
-  return chosen.length > 1 ? `${first}等${chosen.length}人` : first
+  if (!chosen.length) return ''
+  // 两人时逐名展示服务标记；三人起只折叠后续人员，不改变人员分配事实。
+  const visible = chosen.slice(0, 2).map((record) => (
+    `${record.name || record.staffName || ''}(${record.marked || record.isPointCustomer ? '点' : '轮'})`
+  )).join('、')
+  return `${visible}${chosen.length > 2 ? `等${chosen.length}人` : ''}`
+}
+
+function craftsmenDisplaySummary(line = {}) {
+  const value = craftsmenDisplayValue(line)
+  return value ? `手艺人:${value}` : hasCartLineCraftsmen(line) ? line.craftsmenSummary : '待选择手艺人'
 }
 
 function salespersonDisplaySummary(line = {}) {
   const records = localPersonnelAssignments.value[line.id]?.salespeople
   const chosen = Array.isArray(records) ? records : Array.isArray(line.salespeople) ? line.salespeople : []
   if (!chosen.length) return ''
-  const first = `${chosen[0].name || chosen[0].staffName || ''}${chosen[0].marked || chosen[0].isPreSale ? '(售前)' : ''}`
-  return chosen.length > 1 ? `${first}${chosen.length}人` : first
+  // 销售人采用同一两人可见规则，售前标记仍跟随对应人员。
+  const visible = chosen.slice(0, 2).map((record) => (
+    `${record.name || record.staffName || ''}${record.marked || record.isPreSale ? '(售前)' : ''}`
+  )).join('、')
+  return `${visible}${chosen.length > 2 ? `等${chosen.length}人` : ''}`
 }
 
-function attributionDisplaySummary(line = {}, key = '', fallback = '') {
+function attributionDisplaySummary(line = {}, key = '', fallback = '', showGuideRound = false) {
   const localRecords = localPersonnelAssignments.value[line.id]?.[key]
   const records = Array.isArray(localRecords)
     ? localRecords
     : (Array.isArray(line[key]) ? line[key] : [])
   if (!records.length) return fallback
   const names = records
-    .map((record) => record?.name || record?.staffName || record?.employeeName || '')
+    .map((record) => {
+      const name = record?.name || record?.staffName || record?.employeeName || ''
+      if (!name || !showGuideRound) return name
+      // 仅按已保存的轮次展示；缺字段的旧记录不能推断为“无轮次”。
+      const rawRound = record?.guideRoundNo ?? record?.guide_round_no
+      if (rawRound === undefined || rawRound === null || rawRound === '') return name
+      const round = Number(rawRound)
+      if (Number.isInteger(round) && round >= 1 && round <= 3) return `${name}(第${round}轮)`
+      return round === 0 ? `${name}(无轮次)` : name
+    })
     .filter(Boolean)
   if (!names.length) return fallback
   return names.length > 2 ? `${names.slice(0, 2).join('、')}等${names.length}人` : names.join('、')
 }
 
 function guideDisplaySummary(line = {}) {
-  return attributionDisplaySummary(line, 'guideSelections', '')
+  return attributionDisplaySummary(line, 'guideSelections', '', true)
 }
 
 function salesManagerDisplaySummary(line = {}) {
@@ -7707,78 +7767,39 @@ onBeforeUnmount(() => {
                     · 剩余 {{ line.debtLimitedRemainingTimes ?? line.remainingTimes ?? '—' }} · 占用 {{ line.occupiedTimes ?? line.reservedTimes ?? 0 }} · 可用 {{ line.availableTimes ?? '—' }}
                   </span>
                 </div>
-                <div class="cart-line__header-actions">
-                  <div
-                    v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
-                    class="cart-line__service-object cart-line__service-object--header"
-                    aria-label="服务对象与客数"
-                  >
-                    <button
-                      type="button"
-                      :class="{ 'is-active': cartLineServiceChoice(line) === 'self' }"
-                      @click="setCartLineServiceObject(line, 'self', true)"
-                    >本人</button>
-                    <button
-                      type="button"
-                      :class="{ 'is-active': cartLineServiceChoice(line) === 'friend' }"
-                      @click="setCartLineServiceObject(line, 'friend', true)"
-                    >朋友算</button>
-                    <button
-                      type="button"
-                      :class="{ 'is-active': cartLineServiceChoice(line) === 'excluded' }"
-                      @click="setCartLineExcludedFromCustomerCounts(line)"
-                    >不算人数人次</button>
-                  </div>
+                <div class="cart-line__header-actions cart-line__header-actions--line-controls">
                   <div class="cart-line__amount">
                     <span v-if="linePriceChanged(line)" class="cart-line__original-price">
-                      {{ formatMoney(line.originalAmount) }}
+                      {{ formatCartLineMoney(line.originalAmount) }}
                     </span>
                     <strong
                       v-if="!isEntitlementLine(line)"
                       :class="{ 'cart-line__current-price--changed': linePriceChanged(line) }"
-                    >{{ formatMoney(cardOperationUpgradeBinding(line) ? line.originalAmount : getLineAmount(line)) }}</strong>
+                    >{{ formatCartLineMoney(cardOperationUpgradeBinding(line) ? line.originalAmount : getLineAmount(line)) }}</strong>
                     <strong
                       v-else
                       class="cart-line__entitlement-amount"
-                      title="权益实际金额，不计入本次应收"
-                    >{{ formatMoney(line.actualAmount) }}</strong>
+                      title="原购买平均单价；实际分摊金额以右侧合计和结账快照为准"
+                    >{{ formatCartEntitlementUnitPrice(line) }}</strong>
                   </div>
-                  <button
-                    type="button"
-                    class="cart-line__delete"
-                    :aria-label="`删除${line.name}`"
-                    title="删除"
-                    @click.stop="removeCartLine(line)"
-                  >
-                    <span aria-hidden="true">×</span>
-                  </button>
+                  <CartLineRightControls
+                    :line="line"
+                    :entitlement="isEntitlementLine(line)"
+                    :upgrade-bound="Boolean(cardOperationUpgradeBinding(line))"
+                    :show-quantity="cardOperationUpgradeBinding(line)?.operationType !== 'project_upgrade'"
+                    :formatted-total="formatCartLineMoney(centsToMoney(cartLineTotalAmountCents(line)))"
+                    @step="changeLineQuantity(line, $event)"
+                    @quantity-change="setLineQuantity(line, $event)"
+                    @focus="activeCartLineId = line.id"
+                    @remark="openCartLineDetailRemark(line)"
+                    @remove="removeCartLine(line)"
+                  />
                 </div>
               </div>
 
-              <div class="cart-line__meta">
-                <div class="cart-line__secondary-meta" :class="{ 'is-guest-order': cashier.customerMode === 'guest' }">
-                  <div class="cart-line__meta-slot cart-line__meta-slot--debt">
-                    <button
-                      v-if="canSetCartLineDebt(line)"
-                      type="button"
-                      class="cart-line__meta-action cart-line__meta-action--enabled"
-                      :title="cartActionLabel('欠款', checkoutDebtSummary(line))"
-                      @click="openCartLineDebt(line)"
-                    >
-                      {{ cartActionLabel('欠款', checkoutDebtSummary(line)) }}
-                    </button>
-                  </div>
-                  <div class="cart-line__meta-slot cart-line__meta-slot--coupon">
-                    <button
-                      type="button"
-                      class="cart-line__meta-action cart-line__meta-action--enabled"
-                      :disabled="isEntitlementLine(line)"
-                      :title="cartActionLabel('优惠券', line.couponSummary)"
-                      @click="openCartLineCoupon(line)"
-                    >
-                      {{ cartActionLabel('优惠券', line.couponSummary) }}
-                    </button>
-                  </div>
+                <div class="cart-line__meta">
+                  <div class="cart-line__secondary-meta" :class="{ 'is-guest-order': cashier.customerMode === 'guest' }">
+                  <!-- 第一排按操作顺序排列；权益行继续隐藏不适用的销售与优惠入口。 -->
                   <div v-if="!isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--salesperson">
                     <button
                       type="button"
@@ -7787,8 +7808,21 @@ onBeforeUnmount(() => {
                       :title="salespersonDisplaySummary(line) ? `销售人:${salespersonDisplaySummary(line)}` : '销售人'"
                       @click="openCartLineSalespeople(line)"
                     >
-                      <template v-if="salespersonDisplaySummary(line)">销售人:{{ salespersonDisplaySummary(line) }}</template>
+                      <template v-if="salespersonDisplaySummary(line)">销售人:<span class="cart-line__meta-value">{{ salespersonDisplaySummary(line) }}</span></template>
                       <template v-else>销售人</template>
+                    </button>
+                  </div>
+                  <div class="cart-line__meta-slot cart-line__meta-slot--debt">
+                    <!-- 高亮只反映当前草稿行的欠款事实，不从按钮文字反推金额。 -->
+                    <button
+                      v-if="canSetCartLineDebt(line)"
+                      type="button"
+                      class="cart-line__meta-action cart-line__meta-action--enabled"
+                      :class="{ 'cart-line__meta-action--has-amount': lineDebtAmountCents(line) > 0 }"
+                      :title="cartActionLabel('欠款', checkoutDebtSummary(line))"
+                      @click="openCartLineDebt(line)"
+                    >
+                      {{ cartActionLabel('欠款', checkoutDebtSummary(line)) }}
                     </button>
                   </div>
                   <div v-if="!isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--attribution">
@@ -7798,7 +7832,17 @@ onBeforeUnmount(() => {
                       :title="groupAttributionDisplaySummary(line) ? `导购/销售经理:${groupAttributionDisplaySummary(line)}` : '导购/销售经理'"
                       @click="openCartLineAttributions(line)"
                     >
-                      导购/销售经理<span v-if="groupAttributionDisplaySummary(line)">:{{ groupAttributionDisplaySummary(line) }}</span>
+                      导购/销售经理<template v-if="groupAttributionDisplaySummary(line)">:<span class="cart-line__meta-value">{{ groupAttributionDisplaySummary(line) }}</span></template>
+                    </button>
+                  </div>
+                  <div v-if="!isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--coupon">
+                    <button
+                      type="button"
+                      class="cart-line__meta-action cart-line__meta-action--enabled"
+                      :title="cartActionLabel('优惠券', line.couponSummary)"
+                      @click="openCartLineCoupon(line)"
+                    >
+                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}</span></template>
                     </button>
                   </div>
                   <div class="cart-line__meta-slot cart-line__meta-slot--craftsmen">
@@ -7807,21 +7851,27 @@ onBeforeUnmount(() => {
                       type="button"
                       class="cart-line__meta-action cart-line__meta-action--enabled cart-line__meta-action--craftsmen"
                       :class="{ 'is-required-missing': !hasCartLineCraftsmen(line) }"
-                      :title="`手艺人:${craftsmenDisplaySummary(line)}`"
+                      :title="craftsmenDisplaySummary(line)"
                       @click="openCartLineCraftsmen(line)"
                     >
-                      {{ craftsmenDisplaySummary(line) }}
+                      <template v-if="craftsmenDisplayValue(line)">手艺人:<span class="cart-line__meta-value">{{ craftsmenDisplayValue(line) }}</span></template>
+                      <template v-else>{{ craftsmenDisplaySummary(line) }}</template>
                     </button>
                   </div>
-                  <div class="cart-line__meta-slot cart-line__meta-slot--service-object">
+                  <div
+                    class="cart-line__meta-slot cart-line__meta-slot--service-object"
+                    :class="{ 'cart-line__meta-slot--inventory': isInventoryManagedProductLine(line) }"
+                  >
+                    <!-- 库存分段外观只改变展示，三种出库模式仍调用原有命令。 -->
                     <div
                       v-if="(isProjectLine(line) && !cardOperationUpgradeBinding(line)) || isInventoryManagedProductLine(line)"
                       class="cart-line__service-controls"
+                      :class="{ 'cart-line__service-object cart-line__service-controls--inventory': isInventoryManagedProductLine(line) }"
+                      :aria-label="isInventoryManagedProductLine(line) ? '出库方式' : undefined"
                     >
                       <button
                         v-if="isInventoryManagedProductLine(line)"
                         type="button"
-                        class="cart-line__experience cart-line__presale"
                         :class="{ 'is-active': cartLineInventoryOutboundRequired(line) }"
                         :aria-pressed="cartLineInventoryOutboundRequired(line)"
                         :disabled="cartLinePresaleSelected(line)"
@@ -7831,7 +7881,6 @@ onBeforeUnmount(() => {
                       <button
                         v-if="isInventoryManagedProductLine(line)"
                         type="button"
-                        class="cart-line__experience cart-line__presale"
                         :class="{ 'is-active': !cartLineInventoryOutboundRequired(line) && !cartLinePresaleSelected(line) }"
                         :aria-pressed="!cartLineInventoryOutboundRequired(line) && !cartLinePresaleSelected(line)"
                         title="本单销售但不扣减库存"
@@ -7840,7 +7889,6 @@ onBeforeUnmount(() => {
                       <button
                         v-if="isInventoryManagedProductLine(line)"
                         type="button"
-                        class="cart-line__experience cart-line__presale"
                         :class="{ 'is-active': cartLinePresaleSelected(line) }"
                         :aria-pressed="cartLinePresaleSelected(line)"
                         title="预售自动不出库"
@@ -7857,12 +7905,27 @@ onBeforeUnmount(() => {
                       >体验</button>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    class="cart-line__detail-remark"
-                    :aria-label="`${line.name || '当前明细'}明细备注`"
-                    @click="openCartLineDetailRemark(line)"
-                  >明细备注</button>
+                  <div
+                    v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
+                    class="cart-line__service-object cart-line__service-object--footer"
+                    aria-label="服务对象与客数"
+                  >
+                    <button
+                      type="button"
+                      :class="{ 'is-active': cartLineServiceChoice(line) === 'self' }"
+                      @click="setCartLineServiceObject(line, 'self', true)"
+                    >本人</button>
+                    <button
+                      type="button"
+                      :class="{ 'is-active': cartLineServiceChoice(line) === 'friend' }"
+                      @click="setCartLineServiceObject(line, 'friend', true)"
+                    >朋友算</button>
+                    <button
+                      type="button"
+                      :class="{ 'is-active': cartLineServiceChoice(line) === 'excluded' }"
+                      @click="setCartLineExcludedFromCustomerCounts(line)"
+                    >手艺人不算人数人次</button>
+                  </div>
                   <div
                     v-if="cardOperationUpgradeBinding(line)?.operationType === 'project_upgrade'"
                     class="cart-line__upgrade-entitlement-quantity"
@@ -7892,30 +7955,6 @@ onBeforeUnmount(() => {
                       >＋</button>
                     </div>
                     <span>次</span>
-                  </div>
-                  <div v-else class="quantity-stepper quantity-stepper--editable" aria-label="数量操作">
-                    <button
-                      type="button"
-                      aria-label="减少数量"
-                    :disabled="Boolean(cardOperationUpgradeBinding(line)) || Number(line.quantity || 1) <= 1"
-                      @click="changeLineQuantity(line, -1)"
-                    >−</button>
-                    <input
-                      :value="line.quantity || 1"
-                      type="number"
-                      min="1"
-                      inputmode="numeric"
-                      :disabled="Boolean(cardOperationUpgradeBinding(line))"
-                      :aria-label="isEntitlementLine(line) ? '本次使用次数' : '商品数量'"
-                      @focus="activeCartLineId = line.id"
-                      @change="setLineQuantity(line, $event)"
-                    >
-                    <button
-                      type="button"
-                      aria-label="增加数量"
-                      :disabled="Boolean(cardOperationUpgradeBinding(line))"
-                      @click="changeLineQuantity(line, 1)"
-                    >＋</button>
                   </div>
                 </div>
               </div>

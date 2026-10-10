@@ -159,7 +159,7 @@ assert.match(workbench, /target === 'salesManager'[\s\S]*salesManagerCandidates:
 assert.match(workbench, /target === 'guide'[\s\S]*guideCandidates: records/, '导购查询结果必须回填导购列表')
 assert.match(workbench, /const showGuides = !isEntitlementLine\(line\) && \['guide', 'attribution'\]/, '统一入口必须显示导购候选')
 assert.match(workbench, /const showSalesManagers = !isEntitlementLine\(line\) && \['salesManager', 'attribution'\]/, '统一入口必须显示销售经理候选')
-assert.match(workbench, /导购\/销售经理<span/, '未选择时入口不得显示待选择文案')
+assert.match(workbench, /导购\/销售经理<template v-if="groupAttributionDisplaySummary\(line\)">:<span class="cart-line__meta-value">/, '未选择时入口不得显示摘要或多余冒号')
 assert.match(workbench, /v-if="!isEntitlementLine\(line\)" class="cart-line__meta-slot cart-line__meta-slot--salesperson"/, '权益行不得展示销售人入口')
 assert.match(workbench, /if \(!isEntitlementLine\(line\)\) payload\.salespeople = salespeople/, '权益行确认载荷不得携带销售人')
 assert.match(

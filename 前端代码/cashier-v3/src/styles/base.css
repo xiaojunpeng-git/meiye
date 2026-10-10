@@ -2209,9 +2209,9 @@ button:disabled {
 
 .cart-line {
   display: grid;
-  grid-template-rows: 50px minmax(0, 1fr);
-  min-height: 105px;
-  height: 105px;
+  grid-template-rows: minmax(42px, auto) auto;
+  min-height: 114px;
+  container-type: inline-size;
   padding: 6px 9px 5px;
   border: 1px solid #dde4ed;
   border-left: 3px solid #8fc7ff;
@@ -2222,8 +2222,7 @@ button:disabled {
 }
 
 .cart-line--upgrade {
-  grid-template-rows: auto 50px minmax(0, 1fr);
-  height: auto;
+  grid-template-rows: auto minmax(42px, auto) auto;
   min-height: 196px;
 }
 
@@ -2384,12 +2383,32 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* 标题字号只作用于商品名称，右侧金额仍沿用原有金额样式。 */
+.cart-line__title-row strong {
+  font-size: 16px;
+}
+
 .cart-line__header-actions {
   display: inline-flex;
   flex: none;
   flex-wrap: nowrap;
   align-items: flex-start;
   gap: 8px;
+}
+
+/* 所有明细在标题行统一呈现金额与数量、备注、删除，项目服务对象单独位于下方。 */
+.cart-line__header > .cart-line__header-actions--line-controls {
+  display: grid;
+  grid-template-columns: 126px max-content;
+  align-items: center;
+}
+
+.cart-line__header-actions--line-controls .cart-line__right-controls {
+  grid-area: 1 / 2;
+}
+
+.cart-line__header-actions--line-controls .cart-line__amount {
+  grid-column: 1;
 }
 
 .cart-line__action-stack {
@@ -2401,35 +2420,36 @@ button:disabled {
 }
 
 .cart-line__experience {
-  min-width: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 44px;
   min-height: 22px;
   padding: 0 8px;
-  border: 1px solid #b9d4ff;
-  border-radius: 999px;
-  background: #fff;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #409eff;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 20px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 22px;
   white-space: nowrap;
 }
 
 .cart-line__experience:hover:not(:disabled) {
-  border-color: #409eff;
-  background: #eaf4ff;
+  text-decoration: underline;
 }
 
 .cart-line__experience.is-active,
-.cart-line__experience--active,
 .cart-line__experience[aria-pressed="true"] {
-  border-color: #409eff;
-  background: #409eff;
+  /* 体验标记仍是原业务开关，仅用绿色填充明确已选中状态。 */
+  background: #15803d;
   color: #fff;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .cart-line__experience:disabled {
-  border-color: #e3e6ea;
-  background: #f4f6f8;
   color: #a8afb9;
 }
 
@@ -2455,6 +2475,10 @@ button:disabled {
   font-weight: 700;
 }
 
+.cart-line__title-row .cart-line__role {
+  font-size: 12px;
+}
+
 .cart-line__role--sale {
   background: #eef4ff;
   color: #2563b9;
@@ -2475,7 +2499,7 @@ button:disabled {
   overflow: hidden;
   max-width: 100%;
   color: #909399;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   line-height: 16px;
   text-overflow: ellipsis;
@@ -2485,17 +2509,17 @@ button:disabled {
 .cart-line__delete {
   display: inline-grid;
   flex: none;
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  min-height: 24px;
+  width: 38px;
+  min-width: 38px;
+  height: 26px;
+  min-height: 26px;
   padding: 0;
-  border: 1px solid #e3e6ea;
-  border-radius: 50%;
-  background: #eef1f4;
+  border: 1px solid #f5222d;
+  border-radius: 4px;
+  background: #fff;
   color: #697586;
-  font-size: 20px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 24px;
   place-items: center;
 }
 
@@ -2614,29 +2638,66 @@ button:disabled {
 
 .cart-line__secondary-meta {
   display: grid;
-  grid-template-columns:
-    minmax(48px, .55fr)
-    minmax(62px, .75fr)
-    minmax(80px, 1.1fr)
-    minmax(78px, .95fr)
-    minmax(90px, 1.1fr)
-    minmax(90px, 1.2fr)
-    minmax(140px, 1.15fr)
-    auto
-    auto;
-  column-gap: 12px;
-  min-height: 27px;
+  grid-template-columns: repeat(4, minmax(10em, 1fr));
+  grid-template-rows: repeat(2, minmax(26px, auto));
+  gap: 4px 6px;
+  min-height: 56px;
 }
+
+/* 第一排操作顺序固定；体验与欠款共用第二列左边界。 */
+.cart-line__meta-slot--salesperson { grid-area: 1 / 1; }
+.cart-line__meta-slot--debt { grid-area: 1 / 2; }
+.cart-line__meta-slot--attribution { grid-area: 1 / 3; }
+.cart-line__meta-slot--coupon { grid-area: 1 / 4; }
+.cart-line__meta-slot--craftsmen { grid-area: 2 / 1; }
+.cart-line__meta-slot--service-object { grid-area: 2 / 2; }
+/* 导购与优惠券共移左半列；较窄的四列布局为欠款高亮保留文字间隙。 */
+.cart-line__meta-slot--attribution,
+.cart-line__meta-slot--coupon { transform: translateX(calc(-50% + 20px)); }
+@container (min-width: 750px) {
+  .cart-line__meta-slot--attribution,
+  .cart-line__meta-slot--coupon { transform: translateX(-50%); }
+}
+/* 产品出库方式单独贴右，与标题行数量、备注、删除控件共用右边界。 */
+.cart-line__meta-slot--inventory { grid-area: 2 / 3 / 3 / 5; justify-self: end; }
+.cart-line__right-controls {
+  grid-area: 2 / 3 / 3 / 5;
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 38px;
+  align-items: center;
+  justify-self: end;
+  width: 270px;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* 合计列出现时控件组向左扩展，金额和数量同步左移，备注与删除保持右对齐。 */
+.cart-line__right-controls--with-total {
+  grid-template-columns: 74px max-content 150px 38px;
+  width: max-content;
+  max-width: 100%;
+}
+
+.cart-line__quantity-total {
+  overflow: hidden;
+  color: #303133;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cart-line__service-object--footer {
+  grid-area: 2 / 3 / 3 / 5;
+  justify-self: end;
+  width: 270px;
+  min-width: 0;
+}
+/* 升级生成次数单独占末行，不能遮住明细备注。 */
+.cart-line__upgrade-entitlement-quantity { grid-area: 3 / 3 / 4 / 5; justify-self: end; }
 
 .cart-line__meta-slot {
   display: flex;
   min-width: 0;
   align-items: center;
-}
-
-/* 购物车人员/优惠券等操作统一留出间距，避免按钮相互贴合或依赖定位偏移。 */
-.cart-line__secondary-meta {
-  column-gap: 12px;
 }
 
 .cart-line__meta-slot .cart-line__meta-action {
@@ -2646,11 +2707,39 @@ button:disabled {
   text-align: left;
 }
 
+/* 两位人员姓名必须可读；窄列换行而不覆盖相邻操作。 */
+.cart-line__meta-slot--salesperson .cart-line__meta-action,
+.cart-line__meta-slot--craftsmen .cart-line__meta-action {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .cart-line__meta-slot--debt .cart-line__meta-action {
   width: auto;
   max-width: none;
   overflow: visible;
+  padding-left: 24px;
   white-space: nowrap;
+}
+
+/* 欠款只在草稿行确有金额时高亮；红块与体验选中块保持同一文字起点。 */
+.cart-line__meta-slot--debt .cart-line__meta-action--has-amount {
+  margin-left: 16px;
+  padding-right: 8px;
+  padding-left: 8px;
+  background: #dc2626;
+  color: #fff;
+}
+
+.cart-line__meta-slot--debt .cart-line__meta-action--has-amount:hover:not(:disabled) {
+  color: #fff;
+}
+
+/* 第二列文字共用红线起点；体验的绿色选中块保留 8px 左内边距。 */
+.cart-line__meta-slot--service-object:not(.cart-line__meta-slot--inventory) {
+  padding-left: 16px;
 }
 
 .cart-line__meta-slot--coupon {
@@ -2675,18 +2764,83 @@ button:disabled {
 }
 
 .cart-line__detail-remark {
-  justify-self: end;
+  justify-self: stretch;
+  width: 100%;
+  max-width: 100%;
   min-height: 26px;
+  overflow: hidden;
   padding: 3px 8px;
   border: 1px solid var(--cashier-line, #b9c9dc);
-  border-radius: 5px;
+  border-radius: 0;
   color: var(--cashier-primary, #1677ff);
   background: #fff;
   font: inherit;
   font-size: 12px;
   line-height: 18px;
+  text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* 已填写的备注内容与蓝色操作标签分色，按钮自身仍负责整行省略号。 */
+.cart-line__detail-remark-value {
+  color: #303133;
+}
+
+@container (max-width: 630px) {
+  .cart-line__header {
+    flex-wrap: wrap;
+  }
+
+  .cart-line__header > .cart-line__title-block {
+    flex-basis: 100%;
+  }
+
+  .cart-line__header > .cart-line__header-actions--line-controls {
+    grid-template-columns: minmax(90px, 126px) max-content;
+    margin-left: auto;
+  }
+
+  .cart-line__secondary-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(4, minmax(26px, auto));
+  }
+
+  .cart-line__meta-slot--salesperson { grid-area: 1 / 1; }
+  .cart-line__meta-slot--debt { grid-area: 1 / 2; }
+  .cart-line__meta-slot--attribution { grid-area: 2 / 1; }
+  .cart-line__meta-slot--coupon { grid-area: 2 / 2; }
+  .cart-line__meta-slot--attribution,
+  .cart-line__meta-slot--coupon { transform: none; }
+  .cart-line__meta-slot--craftsmen { grid-area: 3 / 1; }
+  .cart-line__meta-slot--service-object { grid-area: 3 / 2; }
+  .cart-line__meta-slot--inventory { grid-area: 3 / 1 / 4 / 3; justify-self: end; }
+  .cart-line__right-controls,
+  .cart-line__service-object--footer { grid-area: 4 / 1 / 5 / 3; }
+  .cart-line__upgrade-entitlement-quantity { grid-area: 5 / 1 / 6 / 3; }
+
+  .cart-line__service-controls {
+    flex-wrap: wrap;
+  }
+}
+
+@container (max-width: 400px) {
+  .cart-line__header > .cart-line__header-actions--line-controls {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .cart-line__header-actions--line-controls .cart-line__right-controls {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: end;
+  }
+
+  .cart-line__header-actions--line-controls .cart-line__amount {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
 }
 
 .cart-line__detail-remark:hover,
@@ -2724,6 +2878,63 @@ button:disabled {
   appearance: textfield;
 }
 
+/* 右侧数量按减号、数值、加号三段共边呈现，保持原有增减和输入行为。 */
+.cart-line .cart-line__right-controls .quantity-stepper--editable {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 20px;
+  width: 74px;
+  height: 26px;
+  overflow: hidden;
+  gap: 0;
+  margin-left: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.cart-line .cart-line__right-controls .quantity-stepper--editable button {
+  width: 20px;
+  height: 24px;
+  padding: 0;
+  border-radius: 0;
+  background: #fff;
+  color: #4b5563;
+  font-size: 15px;
+}
+
+@container (max-width: 400px) {
+  .cart-line__right-controls--with-total {
+    grid-template-columns: 74px minmax(0, 1fr) 38px;
+    grid-template-rows: 26px 26px;
+    width: min(270px, 100%);
+  }
+
+  .cart-line__right-controls--with-total .cart-line__quantity-total { grid-area: 1 / 2 / 2 / 4; }
+  .cart-line__right-controls--with-total .cart-line__detail-remark { grid-area: 2 / 1 / 3 / 3; }
+  .cart-line__right-controls--with-total .cart-line__delete { grid-area: 2 / 3; }
+}
+
+.cart-line .cart-line__right-controls .quantity-stepper--editable button:first-child {
+  border-right: 1px solid #d7e0ea;
+}
+
+.cart-line .cart-line__right-controls .quantity-stepper--editable button:last-child {
+  border-left: 1px solid #d7e0ea;
+}
+
+.cart-line .cart-line__right-controls .quantity-stepper--editable button:disabled {
+  color: #a8afb9;
+}
+
+.cart-line .cart-line__right-controls .quantity-stepper--editable input {
+  width: 100%;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+}
+
 .cart-line .quantity-stepper--editable input::-webkit-inner-spin-button,
 .cart-line .quantity-stepper--editable input::-webkit-outer-spin-button {
   margin: 0;
@@ -2745,7 +2956,7 @@ button:disabled {
   border: 0;
   background: transparent;
   color: #409eff;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2754,6 +2965,11 @@ button:disabled {
 .cart-line__meta-action:hover:not(:disabled) {
   color: #1677cc;
   text-decoration: underline;
+}
+
+/* 已选摘要与蓝色操作名分色；只影响展示，不参与人员或优惠券取值。 */
+.cart-line__meta-action .cart-line__meta-value {
+  color: #303133;
 }
 
 .cart-line__meta-action:disabled,
@@ -2776,8 +2992,8 @@ button:disabled {
   flex: 0 0 auto;
   overflow: visible;
   min-width: max-content;
-  border: 1px solid #b9d4ff;
-  border-radius: 999px;
+  border: 1px solid var(--cashier-line, #b9c9dc);
+  border-radius: 0;
   background: #fff;
 }
 
@@ -2787,6 +3003,23 @@ button:disabled {
   min-width: max-content;
   align-items: center;
   gap: 6px;
+}
+
+/* 库存三选项复用服务对象的方角、分隔线和选中态，不改变出库命令。 */
+.cart-line__service-controls--inventory {
+  width: 270px;
+  height: 26px;
+  align-items: stretch;
+  gap: 0;
+}
+
+.cart-line__service-object.cart-line__service-controls--inventory button {
+  flex: 1;
+  height: 24px;
+  min-height: 24px;
+  color: var(--cashier-primary, #1677ff);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .cart-line__meta-slot--service-object {
@@ -2811,17 +3044,28 @@ button:disabled {
   min-width: 70px;
 }
 
-.cart-line__service-object button:first-child {
-  border-radius: 999px 0 0 999px;
+.cart-line__service-object button + button {
+  border-left: 1px solid var(--cashier-line, #b9c9dc);
 }
 
-.cart-line__service-object button:last-child {
-  border-radius: 0 999px 999px 0;
-}
-
-.cart-line__service-object--header {
+.cart-line__service-object--footer {
   flex: 0 0 auto;
   align-self: center;
+  justify-self: end;
+  height: 26px;
+  align-items: stretch;
+}
+
+.cart-line__service-object--footer button {
+  height: 24px;
+  min-height: 24px;
+  color: var(--cashier-primary, #1677ff);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.cart-line__service-object--footer button:last-child {
+  flex: 1;
 }
 
 .cart-line__service-object button:hover:not(:disabled) {
