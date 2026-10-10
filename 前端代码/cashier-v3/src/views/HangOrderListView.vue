@@ -94,6 +94,10 @@ function displayHangField(record, key) {
   const value = hangFieldValue(record, key)
   if (key === 'member_name') return value || '游客'
   if (key === 'item_count') return value ?? 0
+  // 旧单没有挂单时联系方式快照时，手机号列留空。
+  if (key === 'phone') return value || ''
+  // 来源未选择与旧挂单缺少快照都不可用会员当前来源补齐。
+  if (key === 'source') return value || '未选择'
   return value || '—'
 }
 

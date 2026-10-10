@@ -1048,16 +1048,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             $reason,
             json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         ));
-        $message = in_array($reason, [
-            'sale_inventory_default_location_not_ready',
-            'sale_inventory_stock_not_ready',
-            'sale_inventory_stock_changed',
-            'sale_inventory_stock_batch_balance_mismatch',
-            'sale_inventory_batch_changed',
-            'sale_inventory_shortage_denied',
-        ], true)
-            ? '当前门店库存已变化或不足，本次结账未提交。请完成入库后重新结账。'
-            : '正式结账未能完整落账，本次操作已全部回滚，请重试。';
+        $message = CashierV3CheckoutInventoryFailureMessage::forReason($reason)
+            ?? '正式结账未能完整落账，本次操作已全部回滚，请重试。';
         return new CashierV3CommandException(
             CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
             $message,

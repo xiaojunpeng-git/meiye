@@ -107,12 +107,14 @@ final class CashierV3HangSubmissionServices
             ->format('Y-m-d');
         $dimensions = $this->dimensions($operatorScope, $dataScope);
         $memberId = (int)($lockedDraft['memberId'] ?? 0);
+        $memberSummary = [];
         $memberName = '';
         if ($memberId > 0) {
-            $memberName = trim((string)$this->members->read(
+            $memberSummary = $this->members->read(
                 $memberId,
                 $operatorScope->storeId()
-            )['name']);
+            );
+            $memberName = trim((string)($memberSummary['name'] ?? ''));
         }
 
         $command = [
@@ -186,6 +188,23 @@ final class CashierV3HangSubmissionServices
                 CashierV3ResultCode::STATUS_FAILED,
                 array_merge(['reason' => $exception->reason()], $exception->detail())
             );
+        }
+
+        if (empty($persisted['replayed'])) {
+            // 旧版挂单入口也冻结创建时联系方式；幂等重放不得改写原快照。
+            $contactJson = json_encode([
+                'memberContactSnapshot' => CashierV3HangMemberPhoneSnapshot::capture($memberId, $memberSummary),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+            if (!is_string($contactJson)) {
+                throw $this->incomplete('hang_member_phone_snapshot_encode_failed');
+            }
+            $updated = Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+                ->where('tenant_id', $dataScope->tenantId())
+                ->where('hang_order_id', (string)$persisted['hangOrderId'])
+                ->update(['local_draft_snapshot_json' => $contactJson]);
+            if ($updated !== 1) {
+                throw $this->incomplete('hang_member_phone_snapshot_write_failed');
+            }
         }
 
         $header = $plan->header();
@@ -313,9 +332,11 @@ final class CashierV3HangSubmissionServices
             $payload['checkoutBusinessSource'] ?? [],
             $memberId
         );
+        $memberSummary = [];
         $memberName = '';
         if ($memberId > 0) {
-            $memberName = trim((string)($this->members->read($memberId, $operatorScope->storeId())['name'] ?? ''));
+            $memberSummary = $this->members->read($memberId, $operatorScope->storeId());
+            $memberName = trim((string)($memberSummary['name'] ?? ''));
         }
         $preparationRequestId = 'HANG_DRAFT_' . substr(hash('sha256', $commandKey), 0, 48);
         $command = [
@@ -354,23 +375,27 @@ final class CashierV3HangSubmissionServices
             );
             $persisted = $this->hangOrders->persistInTx($plan, $operatorScope, $dataScope);
             if (empty($persisted['replayed'])) {
-                // Normal hangs have no browser-local draft JSON. Use the existing
-                // optional resume sidecar for the source only; line authority and
-                // final checkout source capture remain in their original paths.
+                // 浏览器草稿之外的挂单也只把来源与联系方式放进展示侧车；
+                // 购物车行和最终结账事实仍以各自原有权威路径为准。
+                $sidecar = ['checkoutBusinessSource' => $checkoutBusinessSource];
+                $sidecar['memberContactSnapshot'] = CashierV3HangMemberPhoneSnapshot::capture($memberId, $memberSummary);
                 $sourceJson = json_encode(
-                    ['checkoutBusinessSource' => $checkoutBusinessSource],
+                    $sidecar,
                     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
                 );
+                if (!is_string($sourceJson)) {
+                    throw $this->incomplete('hang_display_sidecar_encode_failed');
+                }
                 $updated = Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
                     ->where('tenant_id', $dataScope->tenantId())
                     ->where('hang_order_id', (string)$persisted['hangOrderId'])
                     ->update(['local_draft_snapshot_json' => $sourceJson]);
-                if (!is_string($sourceJson) || $updated !== 1) {
+                if ($updated !== 1) {
                     throw new CashierV3CommandException(
                         CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
-                        '挂单来源保存失败，本次挂单已回滚，请重试。',
+                        '挂单展示资料保存失败，本次挂单已回滚，请重试。',
                         CashierV3ResultCode::STATUS_FAILED,
-                        ['reason' => 'hang_checkout_source_sidecar_incomplete']
+                        ['reason' => 'hang_display_sidecar_incomplete']
                     );
                 }
             }
@@ -420,10 +445,6 @@ final class CashierV3HangSubmissionServices
             $payload['checkoutBusinessSource'] ?? [],
             $memberId
         );
-        $snapshotJson = json_encode($local, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if (!is_string($snapshotJson) || strlen($snapshotJson) > 2 * 1024 * 1024) {
-            throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '本地挂单草稿过大，请减少商品后重试。', CashierV3ResultCode::STATUS_FAILED);
-        }
         $identity = hash('sha256', $dataScope->tenantId() . "\0" . $commandKey);
         $hangOrderId = 'HGO' . substr($identity, 0, 40);
         $existing = Db::name(\app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
@@ -433,7 +454,14 @@ final class CashierV3HangSubmissionServices
         }
         $now = time();
         $dimensions = $this->dimensions($operatorScope, $dataScope);
-        $memberName = $memberId > 0 ? trim((string)($this->members->read($memberId, $operatorScope->storeId())['name'] ?? '')) : '';
+        $memberSummary = $memberId > 0 ? $this->members->read($memberId, $operatorScope->storeId()) : [];
+        $memberName = trim((string)($memberSummary['name'] ?? ''));
+        // 客户端草稿中即使携带联系方式，也只能由服务端会员摘要覆盖后冻结。
+        $local['memberContactSnapshot'] = CashierV3HangMemberPhoneSnapshot::capture($memberId, $memberSummary);
+        $snapshotJson = json_encode($local, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($snapshotJson) || strlen($snapshotJson) > 2 * 1024 * 1024) {
+            throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE, '本地挂单草稿过大，请减少商品后重试。', CashierV3ResultCode::STATUS_FAILED);
+        }
         $summary = (array)($local['summary'] ?? []);
         $fingerprint = hash('sha256', $snapshotJson);
         $header = [
