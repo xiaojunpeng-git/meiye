@@ -50,7 +50,7 @@
             >
               <template slot-scope="{ row }" slot="staff_name">
                 <div class="staff-cell">
-                  <img class="staff-avatar" :src="resolveStaffAvatar(row.avatar)" alt="" />
+                  <img class="staff-avatar" :src="resolveStaffAvatar(row.avatar)" alt="" @error="onStaffAvatarError" />
                   <span>{{ row.staff_name || '-' }}</span>
                 </div>
               </template>
@@ -225,7 +225,7 @@
 
 <script>
 import { mapState } from 'vuex';
-import Setting from '@/setting';
+import { resolveStaffAvatar, onStaffAvatarError } from '@/utils/staffAvatar';
 import {
   merchantStaffList,
   merchantStaffCustomer,
@@ -241,30 +241,6 @@ import TransferModal from './components/TransferModal';
 import TransferLogModal from './components/TransferLogModal';
 import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
 import StaffFeaturePermissionModal from './components/StaffFeaturePermissionModal.vue';
-
-function resolveApiOrigin() {
-  return String(Setting.apiBaseURL || '')
-    .replace(/\/adminapi\/?$/i, '')
-    .replace(/\/storeapi\/?$/i, '')
-    .replace(/\/+$/, '');
-}
-
-function resolveStaffAvatar(url) {
-  if (!url) return '';
-  const origin = resolveApiOrigin();
-  const raw = String(url);
-  const m = raw.match(/\/static\/images\/staff\/avatar_(male|female)\.(svg|png)/i);
-  if (m) {
-    return `${origin}/static/images/staff/avatar_${m[1].toLowerCase()}.png`;
-  }
-  if (raw.startsWith('/')) {
-    return origin + raw;
-  }
-  if (/^https?:\/\/127\.0\.0\.1\/static\//i.test(raw)) {
-    return origin + raw.replace(/^https?:\/\/127\.0\.0\.1/i, '');
-  }
-  return raw;
-}
 
 const COLUMNS_META = [
   { key: 'id', title: 'ID', minWidth: 60 },
@@ -440,6 +416,7 @@ export default {
   },
   methods: {
     resolveStaffAvatar,
+    onStaffAvatarError,
     updateTableHeight() {
       this.$nextTick(() => {
         const el = this.$refs.tableBody;
