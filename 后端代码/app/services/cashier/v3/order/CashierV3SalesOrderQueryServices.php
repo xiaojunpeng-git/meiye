@@ -660,7 +660,18 @@ final class CashierV3SalesOrderQueryServices
         }
         $snapshots = $this->authoritySnapshots([$row]);
         $orderId = (string)$row['order_id'];
-        return isset($snapshots[$orderId]) ? $this->mapAuthorityOrder($snapshots[$orderId], true) : null;
+        if (!isset($snapshots[$orderId])) return null;
+        $detail = $this->mapAuthorityOrder($snapshots[$orderId], true);
+        // 小票联系方式使用订单所属门店的当前资料；先通过订单权限查询，
+        // 不使用客户端门店ID、不改变历史门店名称快照，也不回写订单事实。
+        $store = Db::name('system_store')->where('id', (int)$row['store_id'])
+            ->field('address,detailed_address')->find();
+        $region = trim((string)($store['address'] ?? ''));
+        $address = trim((string)($store['detailed_address'] ?? ''));
+        // 历史资料的详细地址可能已包含地区，打印时避免重复拼接。
+        $detail['storeAddress'] = $region !== '' && strpos($address, $region) !== 0
+            ? $region . $address : $address;
+        return $detail;
     }
 
     private function resolveAuthorityQueryCursor(
