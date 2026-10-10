@@ -1,0 +1,131 @@
+{
+  "commit": "ebe308b058e5e49b8cb19097b57ce95e72112dab",
+  "integration": "b306eb006e66ee9c8b2716e864b28c37aae7727e",
+  "checked_at": "2026-10-10T13:44:32.499Z",
+  "assets": [
+    {
+      "path": "public/system.html",
+      "status": 200,
+      "sha256": "774cb43656fb3bf9513e6dda1e911a38988aebc095bbd791550f5449710ccb88"
+    },
+    {
+      "path": "public/view_admin/css/app.b6208b14.css",
+      "status": 200,
+      "sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd"
+    },
+    {
+      "path": "public/view_admin/css/app.b6208b14.css.gz",
+      "status": 200,
+      "sha256": "95ef1f354c26aa9d5b1407b1f6e449c23e20d3df7acb37a03f244b4f701e62f8"
+    },
+    {
+      "path": "public/view_admin/css/chunk-vendors.48272356.css",
+      "status": 200,
+      "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+    },
+    {
+      "path": "public/view_admin/css/chunk-vendors.48272356.css.gz",
+      "status": 200,
+      "sha256": "cefbcb6bcd91ba321e7fb53e61bb082ae7ba9d60e47af798af8848d133135185"
+    },
+    {
+      "path": "public/view_admin/js/app.c5c20798.js",
+      "status": 200,
+      "sha256": "758fe57107aa5001f6a1be9c0c8d139d490c7f21bf7881b48ae8ee849c376b85"
+    },
+    {
+      "path": "public/view_admin/js/app.c5c20798.js.gz",
+      "status": 200,
+      "sha256": "2a658a06e92da643cf8fac8f0b30ffaed36897e3e289bc72e899a0ffe8bf40d3"
+    },
+    {
+      "path": "public/view_admin/js/chunk-4576b5d7.197a4490.js",
+      "status": 200,
+      "sha256": "386180733d5c5303578dfe576d0611bc6a599ef8e5d7f1e4041bc6f2d86a2ed7"
+    },
+    {
+      "path": "public/view_admin/js/chunk-7e58da55.5c7f3583.js",
+      "status": 200,
+      "sha256": "d485092b5ee1a1cb570500fe8eb29ce19018430511cbac2699ac83be6d9d6d3d"
+    },
+    {
+      "path": "public/view_admin/js/chunk-vendors.5ad8ce84.js",
+      "status": 200,
+      "sha256": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a"
+    },
+    {
+      "path": "public/view_admin/js/chunk-vendors.5ad8ce84.js.gz",
+      "status": 200,
+      "sha256": "eb3eadde4f569b6a64d5fb248dac3b149663b5cdb0b0158e66683975eb0ef295"
+    }
+  ],
+  "live_file_count": 1166,
+  "database_before": {
+    "database": "ruihao",
+    "latest_upgrade": {
+      "id": "216",
+      "upgrade_key": "20261010-r52-outbound-header",
+      "executed_at": "2026-10-10 16:51:44"
+    }
+  },
+  "database_after": {
+    "database": "ruihao",
+    "latest_upgrade": {
+      "id": "216",
+      "upgrade_key": "20261010-r52-outbound-header",
+      "executed_at": "2026-10-10 16:51:44"
+    }
+  },
+  "browser": {
+    "existing_session": true,
+    "production_writes": false,
+    "list": {
+      "dom_images": 20,
+      "all_loaded": true,
+      "all_bundled": true
+    },
+    "new": {
+      "choiceImages": 0,
+      "images": [
+        {
+          "bundled": true,
+          "loaded": true,
+          "width": 100
+        }
+      ],
+      "uploadButtons": 1
+    },
+    "selected_existing": {
+      "bundled": false,
+      "loaded": true,
+      "width": 686
+    },
+    "reopened": {
+      "bundled": true,
+      "loaded": true,
+      "uploadButtons": 1
+    },
+    "edit": {
+      "bundled": true,
+      "choiceImages": 0,
+      "loaded": true,
+      "uploadButtons": 1
+    },
+    "temporary_tab_closed": true,
+    "user_tabs_preserved": true
+  },
+  "runtime": {
+    "manager_count": 1,
+    "manager_pid": 5627,
+    "listen_port": 20800,
+    "restarted": false
+  },
+  "backup": {
+    "directory": "/www/backups/rh.cc3798.com/20261010-r7-avatar-ebe308b0",
+    "code_sha256": "efc1ef6d97b80fe95d74aa57eb20e8b2ba5591f91e9c22fdac19310eb172e238",
+    "database_sha256": "979082f194ab9f161f1b1e53a8420b443c85aab11486878379bdfe3cb505f0b5",
+    "gzip_integrity": true,
+    "directory_mode": "700",
+    "file_mode": "600"
+  }
+}
