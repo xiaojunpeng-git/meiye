@@ -82,28 +82,14 @@
               <Col :span="12">
                 <FormItem label="员工头像：" prop="avatar">
                   <div class="avatar-row">
-                    <div class="avatar-preview" v-if="formInline.avatar">
-                      <img :src="resolveStaffAvatar(formInline.avatar)" alt="avatar" />
+                    <div class="avatar-preview">
+                      <img :src="resolveStaffAvatar(formInline.avatar)" alt="员工头像" @error="onStaffAvatarError" />
                     </div>
                     <div class="avatar-options">
-                      <div
-                        class="avatar-option"
-                        :class="{ active: isSameAvatar(formInline.avatar, defaultAvatars.male) }"
-                        @click="selectDefaultAvatar('male')"
-                      >
-                        <img :src="defaultAvatars.male" alt="avatar-male" />
-                      </div>
-                      <div
-                        class="avatar-option"
-                        :class="{ active: isSameAvatar(formInline.avatar, defaultAvatars.female) }"
-                        @click="selectDefaultAvatar('female')"
-                      >
-                        <img :src="defaultAvatars.female" alt="avatar-female" />
-                      </div>
-                      <div class="avatar-option upload" @click="modalPicTap('单选', 'avatar')">
-                        <span class="iconfont iconjiahao1"></span>
+                      <button type="button" class="avatar-option upload" @click="modalPicTap('单选', 'avatar')">
+                        <Icon type="ios-add" />
                         <span>上传</span>
-                      </div>
+                      </button>
                     </div>
                   </div>
                 </FormItem>
@@ -530,7 +516,7 @@ import {
   getPersonComplete,
 } from '@/api/staff.js';
 import { getJobPositions, getOrganizationResourceSelector } from '@/api/store';
-import Setting from '@/setting';
+import { DEFAULT_STAFF_AVATAR, resolveStaffAvatar, onStaffAvatarError, normalizeStaffAvatarValue } from '@/utils/staffAvatar';
 import { findFirstRequiredError } from '@/utils/requiredCheck';
 import uploadPictures from '@/components/uploadPictures';
 import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
@@ -589,29 +575,13 @@ const REQUIRED_CHECK_ORDER = [
   },
 ];
 
-function resolveApiOrigin() {
-  return String(Setting.apiBaseURL || '')
-    .replace(/\/adminapi\/?$/i, '')
-    .replace(/\/storeapi\/?$/i, '')
-    .replace(/\/+$/, '');
-}
-
-function buildDefaultAvatars() {
-  const base = resolveApiOrigin();
-  return {
-    male: `${base}/static/images/staff/avatar_male.png`,
-    female: `${base}/static/images/staff/avatar_female.png`,
-  };
-}
-
-const DEFAULT_AVATARS = buildDefaultAvatars();
-
 function getDefaultStaffForm() {
   return {
     store_id: '',
     org_id: 0,
     staff_name: '',
-    avatar: DEFAULT_AVATARS.male,
+    // 新建即有默认头像，不依赖数据库提供默认图片或先执行上传。
+    avatar: DEFAULT_STAFF_AVATAR,
     account: '',
     pwd: '',
     phone: '',
@@ -749,7 +719,6 @@ export default {
       formReloadScheduled: false,
       jobOptions: [],
       workList: [],
-      defaultAvatars: { ...DEFAULT_AVATARS },
       formInline: getDefaultStaffForm(),
       viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1440,
       ruleValidate: {
@@ -929,26 +898,8 @@ export default {
     setDateField(field, val) {
       this.formInline[field] = val || '';
     },
-    resolveStaffAvatar(url) {
-      if (!url) return '';
-      const origin = resolveApiOrigin();
-      const raw = String(url);
-      const m = raw.match(/\/static\/images\/staff\/avatar_(male|female)\.(svg|png)/i);
-      if (m) {
-        return `${origin}/static/images/staff/avatar_${m[1].toLowerCase()}.png`;
-      }
-      if (raw.startsWith('/')) {
-        return origin + raw;
-      }
-      if (/^https?:\/\/127\.0\.0\.1\/static\//i.test(raw)) {
-        return origin + raw.replace(/^https?:\/\/127\.0\.0\.1/i, '');
-      }
-      return raw;
-    },
-    selectDefaultAvatar(type) {
-      this.formInline.avatar = type === 'female' ? this.defaultAvatars.female : this.defaultAvatars.male;
-      this.$refs.formInline && this.$refs.formInline.validateField('avatar');
-    },
+    resolveStaffAvatar,
+    onStaffAvatarError,
     handleClose() {
       this.$emit('input', false);
     },
@@ -976,13 +927,6 @@ export default {
       this.$nextTick(() => {
         this.$refs.formInline && this.$refs.formInline.clearValidate();
       });
-    },
-    isSameAvatar(current, target) {
-      if (!current || !target) return false;
-      if (current === target) return true;
-      const a = String(current).split('?')[0];
-      const b = String(target).split('?')[0];
-      return a === b || a.endsWith(b.replace(/^https?:\/\/[^/]+/, '')) || b.endsWith(a.replace(/^https?:\/\/[^/]+/, ''));
     },
     openForm() {
       this.loadSeq += 1;
@@ -1143,7 +1087,7 @@ export default {
         store_id: storeId > 0 ? storeId : '',
         staff_name: String((data && data.staff_name) || base.staff_name || ''),
         phone: String((data && data.phone) || base.phone || ''),
-        avatar: (data && data.avatar) || base.avatar || this.defaultAvatars.male,
+        avatar: (data && data.avatar) || base.avatar || DEFAULT_STAFF_AVATAR,
         account: String((data && data.account) || base.account || ''),
         pwd: '',
         position_ids: ((data && data.position_ids) || []).map(Number).filter((n) => n > 0),
@@ -1202,9 +1146,6 @@ export default {
       DATE_FIELDS.forEach((field) => {
         this.formInline[field] = this.normalizeDate(this.formInline[field]);
       });
-      if (!this.formInline.avatar) {
-        this.formInline.avatar = this.defaultAvatars.male;
-      }
       if (scopeMode === 'store' && storeId > 0) {
         // 门店范围由服务端自动计算，前端不再维护 store_ids
       }
@@ -1342,13 +1283,6 @@ export default {
               this.$Message.error((err && err.msg) || '加载人员失败');
             });
         });
-    },
-    isDefaultAvatar(url) {
-      if (!url) return false;
-      if (this.isSameAvatar(url, this.defaultAvatars.male) || this.isSameAvatar(url, this.defaultAvatars.female)) {
-        return true;
-      }
-      return /avatar_(male|female)\.(svg|png)(?:\?|$)/i.test(String(url));
     },
     modalPicTap(tit, picTit) {
       this.modalPic = true;
@@ -1547,12 +1481,8 @@ export default {
       }
 
       const payload = this.buildSubmitPayload();
-      if (this.isDefaultAvatar(payload.avatar) || !payload.avatar) {
-        payload.avatar = this.isSameAvatar(payload.avatar, this.defaultAvatars.female)
-          || /avatar_female/i.test(payload.avatar || '')
-          ? '/static/images/staff/avatar_female.png'
-          : '/static/images/staff/avatar_male.png';
-      }
+      // 保存稳定标识/上传原值，前端内置图片及错误兜底不进入人员主档。
+      payload.avatar = normalizeStaffAvatarValue(payload.avatar);
       const token = payload.request_token;
       const headers = {
         'X-Request-Token': token,
@@ -1693,20 +1623,13 @@ export default {
   cursor pointer
   border 1px solid #e8eaec
   border-radius 4px
+  background #fff
+  font inherit
   padding 4px
   box-sizing border-box
   display flex
   align-items center
   justify-content center
-
-  &.active
-    border-color #2d8cf0
-
-  img
-    width 40px
-    height 40px
-    object-fit cover
-    border-radius 4px
 
   span
     display block
