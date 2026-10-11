@@ -1,0 +1,111 @@
+{
+  "task": "R12-00012",
+  "verified_at": "2026-10-11T13:59:49.385Z",
+  "release_commit": "633559948cd585e039b88e0e0764625d66ae2168",
+  "checks": [
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "actual_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "expected_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "actual_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-97b28b91.js",
+      "status": 200,
+      "expected_sha256": "93ff6a1b780d469a20efd400518d9c8e2aad417d8c1a77411b537b5163551173",
+      "actual_sha256": "93ff6a1b780d469a20efd400518d9c8e2aad417d8c1a77411b537b5163551173",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "actual_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "status": 200,
+      "expected_sha256": "82dde804e3662d51772fb4cb53d9e50a1eb516780466472dc011e19bb70c9cf2",
+      "actual_sha256": "82dde804e3662d51772fb4cb53d9e50a1eb516780466472dc011e19bb70c9cf2",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "actual_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "expected_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "actual_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-97b28b91.js",
+      "status": 200,
+      "expected_sha256": "93ff6a1b780d469a20efd400518d9c8e2aad417d8c1a77411b537b5163551173",
+      "actual_sha256": "93ff6a1b780d469a20efd400518d9c8e2aad417d8c1a77411b537b5163551173",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "actual_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "status": 200,
+      "expected_sha256": "7bdbb92a4ada5b81357d4543bf03768beb04e19bc9c2265b2b8162817b2b7884",
+      "actual_sha256": "7bdbb92a4ada5b81357d4543bf03768beb04e19bc9c2265b2b8162817b2b7884",
+      "pass": true
+    }
+  ],
+  "receipt_bundle_checks": {
+    "labels": [
+      "客户签字:",
+      "前台签字:",
+      "店长签字:"
+    ],
+    "ordered": true,
+    "signature_space_10mm": true,
+    "xp76_print_font_21px": true
+  },
+  "anonymous_api_status": 410000,
+  "authenticated_business_ui_tested": false,
+  "business_writes": false,
+  "physical_printer_tested": false,
+  "preview_backend_changed": false,
+  "browser": {
+    "url": "https://rh.cc3798.com/view_cashier_v3/#/login",
+    "loaded_script": "/view_cashier_v3/assets/index-97b28b91.js",
+    "login_rendered": true,
+    "console_errors": 0,
+    "console_warnings": 0,
+    "screenshot": "R12-receipt-rh-entry-2026-10-11.png",
+    "authenticated_business_ui_tested": false
+  },
+  "runtime": {
+    "swoole_manager_pid": 21836,
+    "listener_port": 20800,
+    "restarted": false,
+    "database": "ruihao",
+    "mysql": "5.7.44-log",
+    "upgrade_id": 221,
+    "upgrade_key": "20261011-003-inventory-no-expiry",
+    "migration_executed": false
+  }
+}
