@@ -74,12 +74,12 @@ ok('小票只展示订单冻结快照且转义动态文本', () => {
   assert.match(html, /\.receipt \{ width: 60mm; max-width: 100%; margin: 0 auto; padding: 1mm;/)
   assert.match(html, /table-layout: fixed/)
   assert.match(html, /\.items-table th:nth-child\(3\).*width: 31%/)
-  assert.match(html, /font: 20px\/1\.5/)
-  assert.match(html, /h1 .*font-size: 26px/)
+  assert.match(html, /font: 18px\/1\.5/)
+  assert.match(html, /h1 .*font-size: 24px/)
   assert.match(html, /h2 .*text-align: center/)
   assert.match(html, /\.meta div \{ display: flex; justify-content: space-between; gap: 2px; \}/)
   assert.doesNotMatch(html, /本小票仅展示已结账订单快照/)
-  assert.match(html, /\.receipt \{ width: 63mm; max-width: none; margin: 0; padding: \.5mm; font-size: 23px; \}/)
+  assert.match(html, /\.receipt \{ width: 63mm; max-width: none; margin: 0; padding: \.5mm; font-size: 21px; \}/)
   assert.match(html, /\.receipt \.meta div:first-child span:last-child \{ font-size: \.78em; \}/)
   assert.match(html, /\.tear-guide .*height: 64mm/)
   assert.match(html, /<div class="tear-guide" aria-hidden="true"><\/div>/)
@@ -147,12 +147,12 @@ ok('测试小票包含中文金额和底部完整性内容且不冒充业务订�
   assert.match(html, /测试小票底部内容完整/)
   assert.match(html, /@page \{ size: 58mm 297mm; margin: 0; \}/)
   assert.match(html, /\.receipt \{ width: 55mm; max-width: 100%; margin: 0 auto; padding: 1mm;/)
-  assert.match(html, /font: 16px\/1\.5/)
-  assert.match(html, /@media print[\s\S]*\.receipt \{ width: calc\(100% - 2mm\); max-width: none; margin: 0 1mm; padding: 1mm; font-size: clamp\(16px, 8vw, 70px\); \}/)
+  assert.match(html, /font: 14px\/1\.5/)
+  assert.match(html, /@media print[\s\S]*\.receipt \{ width: calc\(100% - 2mm\); max-width: none; margin: 0 1mm; padding: 1mm; font-size: clamp\(14px, calc\(8vw - 2px\), 68px\); \}/)
   const wideHtml = buildSalesOrderReceiptHtml(order, { paperSize: '80' })
   assert.match(wideHtml, /\.receipt \{ width: 76mm; max-width: 100%; margin: 0 auto; padding: 1mm;/)
-  assert.match(wideHtml, /font: 20px\/1\.5/)
-  assert.match(wideHtml, /@media print[\s\S]*\.receipt \{ width: calc\(100% - 2mm\); max-width: none; margin: 0 1mm; padding: 1mm; font-size: clamp\(20px, 8vw, 70px\); \}/)
+  assert.match(wideHtml, /font: 18px\/1\.5/)
+  assert.match(wideHtml, /@media print[\s\S]*\.receipt \{ width: calc\(100% - 2mm\); max-width: none; margin: 0 1mm; padding: 1mm; font-size: clamp\(18px, calc\(8vw - 2px\), 68px\); \}/)
 })
 
 ok('旧结账快照适配器兼容完整快照', () => {
@@ -178,7 +178,7 @@ ok('小票只保留应付与实收汇总，并在有欠款时紧随应付显示�
       actualReceivedAmount: 1400
     }
   })
-  const summary = html.match(/<div class="summary">([\s\S]*?)<\/div>\s*<div class="tear-guide"/)?.[1] || ''
+  const summary = html.match(/<div class="summary">([\s\S]*?)<\/div>\s*<div class="signatures"/)?.[1] || ''
   assert.match(summary, /应付金额<\/span><strong>¥1,400<\/strong>/)
   assert.match(summary, /欠款合计<\/span><strong>¥500<\/strong>/)
   assert.match(summary, /应付金额[\s\S]*欠款合计[\s\S]*实收金额/)
@@ -297,8 +297,9 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
   const hostWindow = {
     localStorage: { getItem() { return null } },
     DOMParser: class {
-      parseFromString() {
-        return { querySelector() { return { innerHTML: '<h1>SO-1003</h1>' } } }
+      parseFromString(html) {
+        // Carry the real generated receipt into the print host, including paper-only signatures.
+        return { querySelector() { return { innerHTML: html.match(/<main class="receipt">([\s\S]*?)<\/main>/)[1] } } }
       }
     },
     print() {
@@ -308,7 +309,7 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
       assert.equal(bodyChildren[1].style.width, '63mm')
       assert.equal(bodyChildren[1].style.margin, '0')
       assert.equal(bodyChildren[1].style.padding, '.5mm')
-      assert.equal(bodyChildren[1].style.fontSize, '23px')
+      assert.equal(bodyChildren[1].style.fontSize, '21px')
       listeners.get('beforeprint')?.()
       listeners.get('afterprint')?.()
     },
@@ -340,12 +341,14 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
   assert.match(headChildren[0].textContent, /body > \* \{ display: none !important; \}/)
   assert.match(headChildren[0].textContent, /@page \{ size: 63mm 210mm; margin: 0; \}/)
   assert.match(headChildren[0].textContent, /width: 60mm; padding: 1mm;/)
-  assert.match(headChildren[0].textContent, /font: 20px\/1\.5/)
+  assert.match(headChildren[0].textContent, /font: 18px\/1\.5/)
   assert.match(headChildren[0].textContent, /\.items-table th:nth-child\(3\).*width: 31%/)
   assert.match(headChildren[0].textContent, /\.tear-guide .*height: 64mm/)
-  assert.match(headChildren[0].textContent, /width: 63mm !important; margin: 0 !important; padding: \.5mm !important; font-size: 23px !important/)
+  assert.match(headChildren[0].textContent, /width: 63mm !important; margin: 0 !important; padding: \.5mm !important; font-size: 21px !important/)
+  assert.match(headChildren[0].textContent, /\.signature-row \{ min-height: 10mm; padding-top: 4px; \}/)
   assert.match(headChildren[0].textContent, /\.meta div:first-child span:last-child \{ font-size: \.78em; \}/)
   assert.doesNotMatch(bodyChildren[1].innerHTML, /本小票仅展示已结账订单快照/)
+  assert.match(bodyChildren[1].innerHTML, /客户签字:[\s\S]*前台签字:[\s\S]*店长签字:/)
   assert.equal(listeners.has('message'), true)
 })
 
@@ -482,6 +485,24 @@ ok('结账成功页直接使用成功快照打开本地小票预览', () => {
   assert.match(cashierWorkbench, /payload\?\.salesOrderId/)
   assert.match(cashierWorkbench, /return \{ \.\.\.result, receiptOrder: detail \}/)
   assert.doesNotMatch(cashierWorkbench, /requestAction\(action, \{\s*salesOrderId/)
+})
+
+// Signatures are handwritten on paper, always after existing content and before the unchanged tear space.
+ok('三种纸宽和各类小票底部均有三行空白签字栏', () => {
+  for (const paperSize of ['58', '76', '80']) {
+    for (const receiptMode of ['sales', 'service', 'mixed']) {
+      const order = { receiptMode, storeAddress: '门店地址', orderNote: '原备注', items: [{ name: '项目', quantity: 1 }] }
+      const before = JSON.stringify(order)
+      const html = buildSalesOrderReceiptHtml(order, { paperSize })
+      const labels = [...html.matchAll(/<div class="signature-row">([^<]+)<\/div>/g)].map((match) => match[1])
+      assert.deepEqual(labels, ['客户签字:', '前台签字:', '店长签字:'])
+      assert.ok(html.indexOf('<div class="signatures">') > html.indexOf('<div class="note">'))
+      assert.ok(html.indexOf('<div class="signatures">') < html.indexOf('<div class="tear-guide"'))
+      assert.match(html, /\.signature-row \{ min-height: 10mm; padding-top: 4px; \}/)
+      assert.match(html, /\.signature-row, \.tear-guide \{ break-inside: avoid/)
+      assert.equal(JSON.stringify(order), before)
+    }
+  }
 })
 
 process.stdout.write(`ASSERT_PASSED=${passed}\n`)

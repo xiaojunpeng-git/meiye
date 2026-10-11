@@ -1,16 +1,22 @@
 export const SALES_ORDER_RECEIPT_PRINT_SETTINGS_KEY = 'cashier-v3:sales-order-receipt-print-settings:v1'
 
 export const SALES_ORDER_RECEIPT_PAPER_PROFILES = Object.freeze([
-  Object.freeze({ key: '58', label: '58mm', paperWidthMm: 58, contentWidthMm: 55, fontSizePx: 16, titleSizePx: 22 }),
+  // R12: preview text and headings are two pixels smaller; paper and driver geometry stay unchanged.
+  Object.freeze({ key: '58', label: '58mm', paperWidthMm: 58, contentWidthMm: 55, fontSizePx: 14, titleSizePx: 20 }),
   // XP-76 exposes a 63.5 x 210mm default form; a taller CSS page makes the driver shrink the entire receipt.
-  Object.freeze({ key: '76', label: '76mm', paperWidthMm: 63, contentWidthMm: 60, fixedPageHeightMm: 210, fontSizePx: 20, titleSizePx: 26 }),
-  Object.freeze({ key: '80', label: '80mm', paperWidthMm: 80, contentWidthMm: 76, fontSizePx: 20, titleSizePx: 26 })
+  Object.freeze({ key: '76', label: '76mm', paperWidthMm: 63, contentWidthMm: 60, fixedPageHeightMm: 210, fontSizePx: 18, titleSizePx: 24 }),
+  Object.freeze({ key: '80', label: '80mm', paperWidthMm: 80, contentWidthMm: 76, fontSizePx: 18, titleSizePx: 24 })
 ])
 
 const DEFAULT_RECEIPT_PAPER_KEY = '76'
 // Fifteen 1/6-inch impact-printer lines, now owned by the receipt instead of the driver.
 const RECEIPT_TEAR_GUIDE_MM = 64
 const RECEIPT_TRAILING_SAFETY_MM = 4
+
+// Both native-print paths retain driver sizing, reduced by the same two pixels as preview.
+function receiptPrintFontSize(profile) {
+  return profile.key === '76' ? '21px' : `clamp(${profile.fontSizePx}px, calc(8vw - 2px), 68px)`
+}
 
 function resolveReceiptPageHeightMm(paperProfile, measuredHeightPx) {
   if (Number.isFinite(paperProfile?.fixedPageHeightMm)) return paperProfile.fixedPageHeightMm
@@ -306,18 +312,21 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   /* 地址比正文小一号；预览与顶层打印保持相同的相对字号。 */
   .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
   .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Paper-only handwriting space, not electronic signatures or order data. */
+  .signatures { margin-top: 10px; }
+  .signature-row { min-height: 10mm; padding-top: 4px; }
   .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
   @page { size: ${paperProfile.paperWidthMm}mm ${paperProfile.fixedPageHeightMm || 297}mm; margin: 0; }
   @media print {
     body { padding: 0; background: #fff; }
     .receipt-toolbar { display: none; }
     /* The XP-76 driver exposes a 63mm page; use it fully while keeping text inside a 0.5mm inset. */
-    .receipt { width: ${paperProfile.key === '76' ? '63mm' : 'calc(100% - 2mm)'}; max-width: none; margin: ${paperProfile.key === '76' ? '0' : '0 1mm'}; padding: ${paperProfile.key === '76' ? '.5mm' : '1mm'}; font-size: ${paperProfile.key === '76' ? '23px' : `clamp(${paperProfile.fontSizePx}px, 8vw, 70px)`}; }
+    .receipt { width: ${paperProfile.key === '76' ? '63mm' : 'calc(100% - 2mm)'}; max-width: none; margin: ${paperProfile.key === '76' ? '0' : '0 1mm'}; padding: ${paperProfile.key === '76' ? '.5mm' : '1mm'}; font-size: ${receiptPrintFontSize(paperProfile)}; }
     ${paperProfile.key === '76' ? '.receipt .meta div:first-child span:last-child { font-size: .78em; }' : ''}
     .receipt h1 { font-size: 1.3em; }
     .receipt h2 { font-size: 1em; }
     .receipt .tear-guide { font-size: .6em; }
-    .meta, tr, .summary, .store-address, .note, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+    .meta, tr, .summary, .store-address, .note, .signature-row, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
     h2 { break-after: avoid; page-break-after: avoid; }
   }
 </style>
@@ -347,6 +356,11 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   ${summaryRows || hasSalesReceipt ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
   ${hasValue(storeAddress) ? `<div class="store-address"><strong>门店地址：</strong>${escapeHtml(storeAddress)}</div>` : ''}
   ${hasValue(note) ? `<div class="note"><strong>订单备注</strong><br>${escapeHtml(note)}</div>` : ''}
+  <div class="signatures">
+    <div class="signature-row">客户签字:</div>
+    <div class="signature-row">前台签字:</div>
+    <div class="signature-row">店长签字:</div>
+  </div>
   <div class="tear-guide" aria-hidden="true"></div>
   </main>
   <script>
@@ -490,7 +504,7 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
     printHost.style.position = 'static'
     printHost.style.left = 'auto'
     printHost.style.width = isXp76 ? '63mm' : 'calc(100% - 2mm)'
-    printHost.style.fontSize = isXp76 ? '23px' : ''
+    printHost.style.fontSize = isXp76 ? receiptPrintFontSize(resolveSalesOrderReceiptPaperProfile(options.paperSize)) : ''
     printHost.style.margin = isXp76 ? '0' : '0 1mm'
     printHost.style.padding = isXp76 ? '.5mm' : '1mm'
     printHost.style.display = 'block'
@@ -565,16 +579,19 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       /* 与预览一致，地址相对正文缩小，不改变金额和明细字号。 */
       ${root} .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
       ${root} .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
+      /* Keep the same handwriting space when the iframe content is mounted for native printing. */
+      ${root} .signatures { margin-top: 10px; }
+      ${root} .signature-row { min-height: 10mm; padding-top: 4px; }
       ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
       @page { size: ${profile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }
       @media print {
         html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
         body > * { display: none !important; }
-        body > ${root} { position: static !important; display: block !important; width: ${profile.key === '76' ? '63mm' : 'calc(100% - 2mm)'} !important; margin: ${profile.key === '76' ? '0' : '0 1mm'} !important; padding: ${profile.key === '76' ? '.5mm' : '1mm'} !important; font-size: ${profile.key === '76' ? '23px' : `clamp(${profile.fontSizePx}px, 8vw, 70px)`} !important; }
+        body > ${root} { position: static !important; display: block !important; width: ${profile.key === '76' ? '63mm' : 'calc(100% - 2mm)'} !important; margin: ${profile.key === '76' ? '0' : '0 1mm'} !important; padding: ${profile.key === '76' ? '.5mm' : '1mm'} !important; font-size: ${receiptPrintFontSize(profile)} !important; }
         ${root} h1 { font-size: 1.3em !important; }
         ${root} h2 { font-size: 1em !important; }
         ${root} .tear-guide { font-size: .6em !important; }
-        ${root} .meta, ${root} tr, ${root} .summary, ${root} .store-address, ${root} .note, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
+        ${root} .meta, ${root} tr, ${root} .summary, ${root} .store-address, ${root} .note, ${root} .signature-row, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
         ${root} h2 { break-after: avoid; page-break-after: avoid; }
       }
     `
