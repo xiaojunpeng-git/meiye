@@ -1,0 +1,8 @@
+{
+  "source_commit": "be4d7d7a19e3f2a31596ba516104bd3ffaa99971",
+  "parent": "b16a27e875675c6125132f3a9784f80e09137868",
+  "integration_commit": "0623f58d5400e4bb5970fdf00590571536b3488d",
+  "tree": "47fd4dc1c9372a9a0d2b36e70717ea1a5956aaec",
+  "method": "isolated-index exact accepted commit patch; no checkout or worktree",
+  "unrelated_head": "ff0df8561e01e8dfacd1fcfb5876f6b2949d7616"
+}

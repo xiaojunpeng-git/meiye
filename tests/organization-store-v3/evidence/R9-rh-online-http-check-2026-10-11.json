@@ -1,0 +1,44 @@
+[
+  {
+    "url": "https://rh.cc3798.com/admin/login",
+    "hash": "ee8536d24139398a202b92de8355d69785608709ec588ac0e702c6dd6bc4d6b1",
+    "expected": "ee8536d24139398a202b92de8355d69785608709ec588ac0e702c6dd6bc4d6b1",
+    "match": true
+  },
+  {
+    "url": "/view_admin/css/chunk-vendors.48272356.css",
+    "hash": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+    "match": true
+  },
+  {
+    "url": "/view_admin/css/app.b6208b14.css",
+    "hash": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+    "match": true
+  },
+  {
+    "url": "/view_admin/js/chunk-vendors.72e8295d.js",
+    "hash": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+    "match": true
+  },
+  {
+    "url": "/view_admin/js/app.86b3e2e9.js",
+    "hash": "87e96bf17188eac21272fa240b1230edd59d63dde4ada4cd1a6b33653bda0c79",
+    "match": true
+  },
+  {
+    "url": "https://rh.cc3798.com/view_inventory_v3/index.html",
+    "hash": "16244a90fa73904171ae6f15256c9d1f2962ac524592fa32a9b406a48b7c135f",
+    "expected": "16244a90fa73904171ae6f15256c9d1f2962ac524592fa32a9b406a48b7c135f",
+    "match": true
+  },
+  {
+    "url": "/view_inventory_v3/assets/index-a08d2dee.js",
+    "hash": "8450cc3de2047e129d27a605443319a1a224dea95c4c12db7724045a5c21277b",
+    "match": true
+  },
+  {
+    "url": "/view_inventory_v3/assets/index-92b7c68f.css",
+    "hash": "92b7c68f761018faf5261c37dce7920fddf560164df780f003aedb149cb7c7a3",
+    "match": true
+  }
+]
