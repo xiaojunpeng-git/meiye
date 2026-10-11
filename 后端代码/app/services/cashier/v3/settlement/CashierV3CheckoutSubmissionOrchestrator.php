@@ -119,7 +119,8 @@ final class CashierV3CheckoutSubmissionOrchestrator
                     $salesOrder,
                     $paymentCollection,
                     $businessEvents,
-                    $balancePayment
+                    $balancePayment,
+                    $saleSettlementEffects
                 )
             );
         }

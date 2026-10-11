@@ -126,6 +126,7 @@ namespace {
         /** @var bool */
         public $invalidEntitlementReceipt = false;
         public $replaySaleEffects = false;
+        public $saleFactEffects = [];
 
         public function __construct(array $authority)
         {
@@ -293,9 +294,11 @@ namespace {
             array $salesOrder,
             array $paymentCollection,
             array $businessEvents,
-            ?array $balancePayment
+            ?array $balancePayment,
+            array $saleSettlementEffects
         ): array {
             $this->step('sale-facts');
+            $this->saleFactEffects = $saleSettlementEffects;
             return ['planFingerprint' => str_repeat('2', 64), 'replayed' => false];
         }
 
@@ -525,6 +528,7 @@ namespace {
         ]
             && $result['salesOrder']['orderId'] === c2SubmissionId('CSO', 'b')
             && $result['cardPurchase']['issuedCardCount'] === 1
+            && $port->saleFactEffects['cardPurchase'] === $result['cardPurchase']
             && $result['debt']['amountCents'] === 49600
             && $result['entitlementCompletion']['receiptId'] === c2SubmissionId('ECR', 'e')
             && $result['completionReferenceId'] === c2SubmissionId('CSO', 'b')
