@@ -1,0 +1,18 @@
+{
+  "status": "installed-files-verified",
+  "target": "rh.cc3798.com",
+  "source_commit": "be4d7d7a19e3f2a31596ba516104bd3ffaa99971",
+  "at": "2026-10-11T13:48:35+08:00",
+  "verified_files": 1190,
+  "backend_files": 20,
+  "service": [
+    "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)",
+    "ruihao swoole started pid=20693 port=20800"
+  ],
+  "health": [
+    "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)",
+    "manager_count=1",
+    "manager_pids=20693"
+  ],
+  "backup": "/www/backups/rh.cc3798.com/20261011-r9-be4d7d7a"
+}

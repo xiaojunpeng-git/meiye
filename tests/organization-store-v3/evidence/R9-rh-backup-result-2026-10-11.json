@@ -1,0 +1,81 @@
+{
+  "backup": "/www/backups/rh.cc3798.com/20261011-r9-be4d7d7a",
+  "code": {
+    "size": 104838316,
+    "sha256": "44825b47d766e9c92c5670633ff824ee102fa27e613a85eb3b0b7e3e81d5c899"
+  },
+  "database": {
+    "size": 199609901,
+    "sha256": "2a73787834b26c1623b6b6970be591c7806261a518bddc1d0411698639855012"
+  },
+  "state": {
+    "target": "rh.cc3798.com",
+    "database": "ruihao",
+    "mysql": "5.7.44-log",
+    "migration": {
+      "id": 219,
+      "upgrade_key": "20261011-002-refund-attribution-adjustment",
+      "title": "退款导购销售经理改派",
+      "task_file": "2026-10-11-退款导购销售经理改派/02-正式升级.sql",
+      "sql_checksum": "179154446655afa79007d6c2557f494c46cb90be3822607ea8d1dd0d869f36a0",
+      "code_version": "0c870d08",
+      "executed_at": "2026-10-11 12:59:33",
+      "executed_by": "Codex",
+      "result_note": "瑞昊独立实例，版本表验证通过，无历史回填",
+      "created_at": "2026-10-11 12:59:33"
+    },
+    "before": {
+      "app/controller/admin/Common.php": "8ef24210dfafb9a8cb9db925095f92e3b0d10682eb87db028cc0e66593e93cb9",
+      "app/services/employee/EmployeeInternalLoginServices.php": "5d7e24f334555f866816f429790787250b8679b8b6a4a51fda0e9a6f064fb9df",
+      "app/services/system/admin/SystemAdminServices.php": "bfeedba2adfe8ba994f45593efa7aa39184bd939b0d1a2f97dd1eef132f1deb4",
+      "app/services/system/SystemMenusServices.php": "1182dc792ae69ae98a83cd19971c6c9052d82869e07e69e0a14b8f7f6997e979",
+      "app/services/system/SystemRoleServices.php": "45520e463a8f7e5c889e8c86c8f2c5d6201f662c04b22057ee3e2cd78ba51ff2",
+      "app/services/product/inventory/InventoryPlatformAccessPolicy.php": "6c8e00a27e1e89ac8c721a7e60b379769fc84ee1de3890eaf314db50ec3b83e8",
+      "app/services/product/inventory/InventoryCrossSubjectTransferServices.php": "85286aa604fa42a39d1fb2ac6fd0461a590790be4f1ff246af045deb9297a670",
+      "app/controller/admin/v1/product/inventory/InventoryPlatformWarehouse.php": "31b9374b64a051c24da6af1c7e98f006dbcfc20866ebaafedcb911b551fb5455",
+      "app/services/product/inventory/query/InventoryPlatformUnifiedQueryContextFactory.php": "6c75fada9831c739af0413d6aaaa1ae80c063972eb837a274e1f0486c5cde59a",
+      "app/services/product/inventory/InventoryStockRequestServices.php": "a64399c7af6e69287da9c407f855c36241ead9d44dc2c71374ccb392b119adfa",
+      "app/services/product/inventory/InventoryStockRequestQueryServices.php": "9f787812e1897f4825e83b448980fc8ec25646be21a70360387bc9a16a0ce571",
+      "app/services/product/inventory/InventoryPlatformHqInboundServices.php": "deafaac3d5c00b35af8e70c1611b568e81455ad7c6953d993ed564353ad3dff9",
+      "app/services/product/inventory/InventoryPlatformHqOutboundServices.php": "7a14f8cf31d1c4db0ecf814fa1dc13dba28924b81a01660352d7cce88e95e185",
+      "app/services/product/inventory/InventorySalonUsageServices.php": "7cda96faf7ef2ebfcc877db6789bb05cd428286852243992d3a5123966a49e5c",
+      "app/services/product/inventory/InventoryHqLocationServices.php": "fa112a2a357d7fbcf1248bf0d7c0e668522e1b3ca7e50f94c10b94c5ec973e1b",
+      "app/services/product/inventory/InventoryStockCountServices.php": "e4181b71d29bbe0f5ef7317a9df78e60b6269c0d19a7f5ed07aeb6e334e21209",
+      "app/services/product/inventory/InventoryStockCountDraftServices.php": "9d673849fc5ce91cd3db7473801a0ca82806f0c08a07f49771f1438a5456cbc0",
+      "app/services/product/inventory/InventoryPlatformHqCatalogServices.php": "c44b6a987879cadbfe2ea3ffc9ddee6da1df7f442e43dd1a7ea6f73c5f13b79b",
+      "app/controller/admin/v1/product/inventory/InventoryPlatformHqCrossTransfer.php": "257b7c00d9ee9348476030ef63374123d100d6b416415c06c1ab8ee0c662f2dc",
+      "route/admin.php": "ff00674eddaacbcfe650a9bcfb787ca0905b12d1c4760dc87cb2f38848939c33",
+      "public/system.html": "b45f5707b7f32ecd5cc5ba7a38eddb9bbb0dd4d8bc212913173ed419a2634bfc",
+      "public/view_inventory_v3/index.html": "7e541402cbe7dae1caf240c10c931e15c3e6e7204b82464f49c9ca7a6d6e1c64"
+    },
+    "templates": [
+      "runtime/temp/636c51bc9e3516bb9cc9838f85176980.php"
+    ],
+    "tables": {
+      "inventory_cross_transfer_document": {
+        "count": 67,
+        "sha256": "6b15a15c1881d7f9acf748012af65487aaad3291aa22327323a901973cca3c98"
+      },
+      "inventory_cross_transfer_line": {
+        "count": 170,
+        "sha256": "8953fdbf8f77c0bd26e599904f1245c6722ddb7fca2863f4b15fd50c92f55096"
+      },
+      "inventory_cross_transfer_batch_allocation": {
+        "count": 127,
+        "sha256": "293dcffbade54efea3f1b94a7aa0578953892f3a55440c5c1d972eed2d06b463"
+      },
+      "inventory_stock": {
+        "count": 7512,
+        "max_id": 16371
+      },
+      "inventory_batch": {
+        "count": 9228,
+        "max_id": 19561
+      },
+      "inventory_batch_movement_fact": {
+        "count": 13800,
+        "max_id": 25164
+      }
+    }
+  }
+}
