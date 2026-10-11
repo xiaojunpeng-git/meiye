@@ -613,6 +613,17 @@ if ! grep -q 'ASSERT_FAILED=0' "$EV/member-restore-integration.out" 2>/dev/null 
 fi
 mark_runner "php/member-restore-integration.php" "$RESTORE_RC"
 
+echo "== R43 member phone repair integration =="
+set +e
+docker_php 'php /tests/php/member-phone-repair-integration.php' | tee "$EV/member-phone-repair-integration.out"
+PHONE_REPAIR_RC=${PIPESTATUS[0]}
+set -e
+if ! grep -q 'ASSERT_FAILED=0' "$EV/member-phone-repair-integration.out" 2>/dev/null \
+  || ! grep -q 'RUNNER_OK=R43-member-phone-repair-integration' "$EV/member-phone-repair-integration.out" 2>/dev/null; then
+  PHONE_REPAIR_RC=1
+fi
+mark_runner "php/member-phone-repair-integration.php" "$PHONE_REPAIR_RC"
+
 echo "== C5 member integration =="
 set +e
 docker_php 'php /tests/php/member-integration.php' | tee "$EV/member-integration.out"

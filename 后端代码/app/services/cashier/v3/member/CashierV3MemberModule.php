@@ -1439,6 +1439,12 @@ final class CashierV3MemberModule
         if ($name === '') {
             throw self::validation('name', '请填写会员姓名。');
         }
+        $phoneSupplied = array_key_exists('phone', $payload) || array_key_exists('mobile', $payload);
+        $phone = trim((string)($payload['phone'] ?? $payload['mobile'] ?? $member['phone'] ?? ''));
+        if ($phoneSupplied && !preg_match('/^1[3-9]\d{9}$/', $phone)) {
+            throw self::validation('phone', '请填写正确的手机号。');
+        }
+        $phoneChanged = $phoneSupplied && $phone !== (string)($member['phone'] ?? '');
         $sex = (int)($payload['sex'] ?? $member['sex'] ?? 0);
         if (!in_array($sex, [0, 1, 2], true)) {
             throw self::validation('sex', '会员性别参数无效。');
@@ -1481,6 +1487,17 @@ final class CashierV3MemberModule
             );
         } catch (\Throwable $e) {
             throw self::validation('profileFields', '会员档案信息校验失败，请检查后重试。');
+        }
+        if ($phoneChanged) {
+            // 手机号是跨端登录身份；只通过统一身份服务换绑，保留原 UID 和历史业务快照。
+            try {
+                app()->make(\app\services\user\CanonicalUserIdentityServices::class)->replacePhoneIdentity(
+                    (int)$member['uid'], $phone,
+                    ['operator_type' => 'STORE', 'operator_id' => $operatorScope->operatorId(), 'source' => 'CASHIER_V3_MEMBER_EDIT']
+                );
+            } catch (\mohe\exceptions\AdminException $exception) {
+                throw self::validation('phone', $exception->getMessage());
+            }
         }
         // ThinkPHP returns 0 when the submitted values equal the current row;
         // that is still a successful edit and must not surface as a false error.
@@ -1525,6 +1542,7 @@ final class CashierV3MemberModule
         }
         $current = Db::name('user')->where('uid', (int)$member['uid'])->lock(true)->find();
         $changedFields = ['name', 'sex', 'birthday', 'address', 'note', 'idCard', 'profileFields', 'memberLevelId', 'memberTagIds'];
+        if ($phoneChanged) $changedFields[] = 'phone';
         if ($referrerSupplied) $changedFields[] = 'referrerMemberId';
         $mutationPayload = [
             'changed_fields' => $changedFields,
