@@ -281,6 +281,29 @@ class OrganizationWorkspaceWriteGate
     }
 
     /**
+     * 岗位保存复用岗位策略功能授权，不再额外要求超级管理员。
+     * 实时读取有效平台账号与角色，防止未登记 API 的旧放行策略变成任意账号自授权。
+     * 此能力不授予组织写入、岗位发布或其他管理操作。
+     */
+    public function assertJobPositionSavePermission(array $adminInfo): void
+    {
+        $id = (int)($adminInfo['id'] ?? 0);
+        $row = $id > 0 ? Db::name('system_admin')->where('id', $id)->where('is_del', 0)->find() : null;
+        if (!$row || (int)($row['status'] ?? 0) !== 1 || (int)($row['admin_type'] ?? 0) === 3) {
+            throw new \Exception('当前账号无权保存岗位');
+        }
+        $level = (int)($row['level'] ?? 1);
+        if ($level === 0) return;
+        $roleIds = array_values(array_filter(array_map('intval', explode(',', (string)($row['roles'] ?? '')))));
+        if ($roleIds) {
+            $menus = app()->make(\app\services\system\SystemMenusServices::class);
+            [, $auth] = $menus->getMenusList($roleIds, $level, 1, (int)($row['admin_type'] ?? 0));
+            if (in_array('admin-store-region-job_positions', (array)$auth, true)) return;
+        }
+        throw new \Exception('当前账号无权保存岗位');
+    }
+
+    /**
      * 人员维护权限之外，还必须校验目标组织在操作者的数据权限范围内。
      * 总部超管返回通过；普通“集团/组织”权限按组织及下级范围判断。
      *

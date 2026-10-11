@@ -123,7 +123,8 @@ export default {
     },
     resetToken() { this.pendingToken = ''; this.pendingFingerprint = ''; },
     save(form) {
-      if (!this.canWrite) return this.showToast(this.writeStatus.reason_text || READONLY_TIP);
+      // 通用 can_write 包含超管限制；岗位保存只遵守总写开关，功能权限由后端复核。
+      if (!this.writeStatus.write_enabled) return this.showToast(this.writeStatus.reason_text || READONLY_TIP);
       if (this.saving) return;
       const payload = {
         id: Number(form.id || 0), name: String(form.name || '').trim(), status: Number(form.status) === 1 ? 1 : 0,

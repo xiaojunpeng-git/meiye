@@ -3837,7 +3837,8 @@ export default {
       });
     },
     onJobPositionFormSave(formPayload) {
-      if (!this.canWrite) {
+      // 与独立岗位页共用保存边界，不使用其他组织操作的超管 can_write 阻断。
+      if (!this.writeStatus.write_enabled) {
         this.blockWrite();
         return;
       }

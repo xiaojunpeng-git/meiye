@@ -1,0 +1,41 @@
+{
+  "version": "JP-20261011-save-authority-v1",
+  "initial_head": "2bb1eb7dc6bc0b1b3a11342422918bd7a9f3b996",
+  "baseline": "ea8e205421b99c27df13b5fce6f95090c63eb2ef",
+  "status": "selftested-awaiting-PM-acceptance",
+  "files": [
+    {
+      "path": "前端代码/admin/src/pages/store/region/job-positions/index.vue",
+      "sha256": "9bec6d3b94ed7a2705c2a42c774896163e90e51ad6cdd5e70143f50ccae811f1"
+    },
+    {
+      "path": "前端代码/admin/src/pages/store/region/workspace/index.vue",
+      "sha256": "ad2300b7255478cd09ee8ec81eb027d55f2e0cd36e0348dc8e70c2f72e0c71d8"
+    },
+    {
+      "path": "后端代码/app/services/organization/JobPositionPolicyServices.php",
+      "sha256": "064e7fbfe0622aa0a36d24d5c19e5c648c52bfe70cc9b1a4ea8c601c8e731624"
+    },
+    {
+      "path": "后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php",
+      "sha256": "de0d56b86598cad7416726665fe0b053e02c97b91f88dccd4683d69c79387524"
+    },
+    {
+      "path": "tests/organization-store-v3/js/job-position-save-authority.mjs",
+      "sha256": "3ac14f49165c46be969b94a833849e9503e9fca62b2a34c0c92e5abcd3cd663a"
+    },
+    {
+      "path": "tests/organization-store-v3/php/job-position-save-local.php",
+      "sha256": "ac76482dc47eb3ea0de54ed71bc32818b071b0a8b11ccc9c6c08528df40e9514"
+    },
+    {
+      "path": "tests/organization-store-v3/evidence/job-position-save-authority-2026-10-11.png",
+      "sha256": "f153ddc9b356bb1a2ec6c9b7605c8c4c3bc8d6a757b069d59c5e10bc4a162544"
+    },
+    {
+      "path": "tests/organization-store-v3/evidence/job-position-save-authority-selftest-2026-10-11.md",
+      "sha256": "b3a076da12772799b80d15c464d380a8239579301efdc4899fa66a0c44b26cfd"
+    }
+  ],
+  "patch_sha256": "c5f5642dd501d0425ece2385770e078e9f903362d4c26de003a68c050c2a18cd"
+}
