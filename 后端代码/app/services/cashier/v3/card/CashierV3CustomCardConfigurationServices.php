@@ -38,14 +38,14 @@ final class CashierV3CustomCardConfigurationServices
         // Browser snapshot checkout has no pre-submit catalogue eligibility
         // phase. The final transaction itself locks and materializes the
         // custom-card shell and components, then performs the applicable
-        // entitlement/balance/inventory checks. A later show/verify flag must
-        // not reject the browser snapshot before that final boundary.
+        // entitlement/balance/inventory checks. Component eligibility is
+        // rechecked under those locks; warehouse projects remain eligible.
         if ($directSnapshot) {
             return [];
         }
         $resources = $this->catalog->discoverCustomCardShellResources($operatorScope, $dataScope);
         foreach ($input['components'] as $component) {
-            foreach ($this->catalog->discoverItemResources($component['skuId'], $operatorScope, $dataScope) as $resource) {
+            foreach ($this->catalog->discoverCustomCardComponentResources($component['skuId'], $operatorScope, $dataScope) as $resource) {
                 $resources[] = $resource;
             }
         }
@@ -99,20 +99,10 @@ final class CashierV3CustomCardConfigurationServices
         $components = [];
         $configuredCostTotalCents = 0;
         foreach ($input['components'] as $index => $component) {
-            $line = $directSnapshot
-                ? $this->catalog->selectDraftSaleLineAfterGatewayLocksInTx(
-                    $component['skuId'],
-                    $idempotencyKey . '-C' . ($index + 1),
-                    $operatorScope,
-                    $dataScope
-                )
-                : $this->catalog->selectSaleLineAfterGatewayLocksInTx(
-                    $component['skuId'],
-                    $idempotencyKey . '-C' . ($index + 1),
-                    $lockedContexts,
-                    $operatorScope,
-                    $dataScope
-                );
+            // 两种结账入口统一锁定并验证定制卡组件；仓库中项目不按普通直售下架拒绝。
+            $line = $this->catalog->selectCustomCardComponentAfterGatewayLocksInTx(
+                $component['skuId'], $idempotencyKey . '-C' . ($index + 1), $operatorScope, $dataScope
+            );
             if ((int)($line['catalog_product_type'] ?? 0) !== 6) {
                 throw self::failure('custom_card_component_not_project', '定制卡只能配置项目。');
             }

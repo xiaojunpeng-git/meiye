@@ -10,7 +10,18 @@ const emit = defineEmits(['close', 'confirm'])
 
 const step = ref(1)
 const cardName = ref('')
-const expiryDate = ref(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
+// 定制卡默认按上海业务日加三个自然年；闰日取目标年的月末，不改动赠送口径。
+function defaultCustomCardExpiry(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
+  const date = Object.fromEntries(parts.map(({ type, value }) => [type, value]))
+  const year = Number(date.year) + 3
+  const month = Number(date.month)
+  const day = Math.min(Number(date.day), new Date(Date.UTC(year, month, 0)).getUTCDate())
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+const expiryDate = ref(props.mode === 'gift'
+  ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  : defaultCustomCardExpiry())
 const openImmediately = ref(true)
 const giftScope = ref('当前门店')
 const reason = ref('客户关怀')
@@ -19,6 +30,7 @@ const selectedGiftIds = ref(['gift-project-1'])
 const selectedCustomIds = ref([])
 const customError = ref('')
 const customKeyword = ref('')
+const customSaleStatus = ref('selling')
 const showSelectedCustomItems = ref(false)
 
 const giftOptions = [
@@ -41,6 +53,8 @@ const customTotal = computed(() => selectedCustomItems.value.reduce((sum, item) 
 const visibleCustomOptions = computed(() => {
   const normalizedKeyword = customKeyword.value.trim().toLocaleLowerCase()
   return customOptions.value.filter((item) => {
+    // 状态只缩小候选列表，不清空已选项目或改写已填次数/金额。
+    if (customSaleStatus.value === 'selling' && item.saleStatus !== 'selling') return false
     if (showSelectedCustomItems.value && !selectedCustomIds.value.includes(item.id)) return false
     if (!normalizedKeyword) return true
     return [item.name, item.specification]
@@ -59,6 +73,7 @@ watch(() => props.catalogItems, (items) => {
         id: item.id,
         name: item.name,
         specification: item.specification || '',
+        saleStatus: item.saleStatus || 'selling',
         times: previous?.times || 1,
         amount: previous?.amount ?? Number(item.price || 0)
       }
@@ -187,22 +202,28 @@ function confirm() {
               <span class="sr-only">搜索卡内项目</span>
               <input v-model="customKeyword" type="search" placeholder="搜索项目名称或规格">
             </label>
-            <button
-              type="button"
-              class="button button--secondary"
-              :class="{ 'is-active': showSelectedCustomItems }"
-              :aria-pressed="showSelectedCustomItems"
-              @click="showSelectedCustomItems = !showSelectedCustomItems"
-            >显示已选</button>
-            <button
-              type="button"
-              class="button button--secondary"
-              :disabled="!selectedCustomIds.length"
-              @click="clearSelectedCustomItems"
-            >取消已选</button>
+            <div class="cashier-guided-panel__sale-status" role="radiogroup" aria-label="卡内项目销售状态">
+              <label><input v-model="customSaleStatus" type="radio" value="selling" name="custom-card-sale-status">销售中</label>
+              <label><input v-model="customSaleStatus" type="radio" value="all" name="custom-card-sale-status">全部</label>
+            </div>
+            <div class="cashier-guided-panel__selection-actions">
+              <button
+                type="button"
+                class="button button--secondary"
+                :class="{ 'is-active': showSelectedCustomItems }"
+                :aria-pressed="showSelectedCustomItems"
+                @click="showSelectedCustomItems = !showSelectedCustomItems"
+              >显示已选</button>
+              <button
+                type="button"
+                class="button button--secondary"
+                :disabled="!selectedCustomIds.length"
+                @click="clearSelectedCustomItems"
+              >取消已选</button>
+            </div>
           </div>
-          <p v-if="!customOptions.length" class="cashier-guided-panel__empty">当前门店没有可配置的在售项目。</p>
-          <p v-else-if="!visibleCustomOptions.length" class="cashier-guided-panel__empty">未找到匹配的在售项目。</p>
+          <p v-if="!customOptions.length" class="cashier-guided-panel__empty">当前门店没有可配置的项目。</p>
+          <p v-else-if="!visibleCustomOptions.length" class="cashier-guided-panel__empty">未找到匹配的项目。</p>
           <article v-for="item in visibleCustomOptions" :key="item.id" class="cashier-custom-option" :class="{ 'is-selected': selectedCustomIds.includes(item.id) }">
             <label><input type="checkbox" :checked="selectedCustomIds.includes(item.id)" @change="toggleCustom(item.id)"><strong>{{ item.name }}</strong><small v-if="item.specification">{{ item.specification }}</small></label>
             <label>次数<input v-model.number="item.times" type="number" min="1" step="1"></label>

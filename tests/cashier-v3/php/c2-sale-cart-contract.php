@@ -110,6 +110,14 @@ final class SaleFakeAuthority implements CashierV3SaleCatalogAuthority
         return $storeId === 7 ? $this->rows : [];
     }
 
+    /** 夹具候选保持与真实适配器一致：仅正常项目，排除定制卡隐藏壳。 */
+    public function listCustomCardProjects(int $storeId): array
+    {
+        return array_values(array_filter($this->listStoreItems($storeId), static function (array $row): bool {
+            return (int)$row['product_product_type'] === 6 && (int)$row['product_pid'] !== 8154;
+        }));
+    }
+
     public function lockStoreItemBySkuId(int $storeId, int $skuId)
     {
         foreach ($this->rows as $row) {

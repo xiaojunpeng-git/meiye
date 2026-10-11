@@ -1,0 +1,84 @@
+{
+  "version": "R10-custom-card-2026-10-11",
+  "createdAt": "2026-10-11T11:09:02.671Z",
+  "baselineHead": "6b8ae2c4784169f4781910477cd043ecd732a643",
+  "status": "development_and_targeted_selftests_complete_pending_product_manager_acceptance",
+  "patchSha256": "d604cb3a983ad31b9b8c4236b2aefad1852c634eec0a64003a96c733f3f086ff",
+  "sourceAndTestFiles": [
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CashierGuidedBusinessPanel.vue",
+      "sha256": "9d126c3f839b7b195326643f99e1d09a6d86c7c1bcf6376fbe8d9f5a19bb2086"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+      "sha256": "56bca288451745ac6c37906cac57307d159ed2c24aa2e13d095f63c62466978b"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/styles/base.css",
+      "sha256": "4fd59fd03ac91fd80910694460443cfdd55adae241cb969ea654bb7aaecb9d05"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogAuthority.php",
+      "sha256": "61840a663ef4c87e54ec666c4c2cc7650933eb9004be6da9bbba8492b0a96024"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php",
+      "sha256": "0f56c496cd3722a99b38f0d9c5412377eeb64a76f4fdfb36ce32da35a6c4f1c1"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php",
+      "sha256": "e64b4e0dc83c41da4e56874d75bc22245540fe60254d7aaa0cb84d2fde98830e"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CustomCardConfigurationServices.php",
+      "sha256": "89cd0c49cb84e9aa9176d4c9a4ae63c2f245864730e90cd9cbf78adb14052c89"
+    },
+    {
+      "path": "tests/cashier-v3/js/r10-custom-card-options.mjs",
+      "sha256": "87e38aab71915edad1d00682f802acfa2de8d74a75607ac110a88f7d15d71ddd"
+    },
+    {
+      "path": "tests/cashier-v3/php/r10-custom-card-projects-local.php",
+      "sha256": "d73b667331a560fae6cccaff47313f06e15553528ff6ef7aa891048906b9fa0f"
+    },
+    {
+      "path": "tests/cashier-v3/php/c2-sale-cart-contract.php",
+      "sha256": "103faa781819e550f4a2d1a8f9c3e018bcb19e74bc912d0dd90f2b93afef0004"
+    },
+    {
+      "path": "tests/cashier-v3/php/custom-card-configuration-contract.php",
+      "sha256": "71c4e82817894eeb143fcf5a1ed4069c608df7e84ad53d478ff94bf02b7561c9"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "tests/cashier-v3/evidence/R10-custom-card-local-selftest-2026-10-11.md",
+      "sha256": "056decd3affd12c1393489441d5498a6fd58e063d26d5dfcba1e291da921763d"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R10-custom-card-tests-2026-10-11.json",
+      "sha256": "aa390693395b8933e287cac434d1fad42dc2fd5616216f1d060db37211cdfbba"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R10-custom-card-expiry-2026-10-11.png",
+      "sha256": "5292af23f772f301880fd523270cefc5b29fbf11cde274de25fd47904d67609c"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R10-custom-card-expiry-desktop-2026-10-11.png",
+      "sha256": "6cbd4696fa6709dc127cdff57b441b3b79c24a18187602d19c14ae255397a15e"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R10-custom-card-all-desktop-2026-10-11.png",
+      "sha256": "fb426d517c2049edc4ebe9fcd452c41b87d64399f61bd9f97ee3b3003c15b9ac"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R10-custom-card-all-compact-2026-10-11.png",
+      "sha256": "03875b1e8a6f45180f09d56ddab88fa50917df59644178b23e2e4175c69a0cf5"
+    }
+  ],
+  "existingStagedSha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "noCommit": true,
+  "noDeployment": true,
+  "noPush": true,
+  "regressionCaveat": "3 pre-existing assertion failures reproduced on HEAD; details in selftest and test output"
+}
