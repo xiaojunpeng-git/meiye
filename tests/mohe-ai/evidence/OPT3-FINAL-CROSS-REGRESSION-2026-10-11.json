@@ -1,0 +1,50 @@
+{
+  "recorded_at": "2026-10-11T15:05:28.188671+00:00",
+  "scope": "Root independent targeted regression after complete-condition builder extraction; synthetic only, host PHP8.5",
+  "source_before_sha256": "5d0aca446001f8ebc4ec2b47a46392753d7ccad8d9ec274a8bd0c3f0c0925872",
+  "source_after_sha256": "5d0aca446001f8ebc4ec2b47a46392753d7ccad8d9ec274a8bd0c3f0c0925872",
+  "source_unchanged": true,
+  "results": [
+    {
+      "suite": "condition-set",
+      "exit_code": 0,
+      "output": "PASS condition set: 124 checks (synthetic data only)"
+    },
+    {
+      "suite": "query-context",
+      "exit_code": 0,
+      "output": "PASS intent context merger: 67 checks (synthetic protocol only)"
+    },
+    {
+      "suite": "context-delta-gateway",
+      "exit_code": 0,
+      "output": "PASS context delta gateway: 102 checks (SQLite, synthetic model/facts only)"
+    },
+    {
+      "suite": "semantic-guidance",
+      "exit_code": 0,
+      "output": "Semantic guidance offline: 106 checks PASS"
+    },
+    {
+      "suite": "registry-execution",
+      "exit_code": 0,
+      "output": "PASS registry-execution: 105 checks (offline fixtures; not business acceptance)"
+    },
+    {
+      "suite": "opt3-ordinal-clarification-boundary",
+      "exit_code": 0,
+      "output": "{\"suite\":\"OPT3-ordinal-clarification-boundary\",\"checks\":92,\"failures\":[],\"pass\":true}"
+    },
+    {
+      "suite": "opt3-group-reconciliation",
+      "exit_code": 0,
+      "output": "PASS OPT3 grouped reconciliation: independent ownership, shared cleanup, topic metadata and missing-metric fences"
+    },
+    {
+      "suite": "opt3-gateway-recovery",
+      "exit_code": 0,
+      "output": "PASS OPT3 gateway recovery: member topic, metric delta, failure relation and transport audit (synthetic)"
+    }
+  ],
+  "pass": true
+}

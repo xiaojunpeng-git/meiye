@@ -81,8 +81,14 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const turn = el('section', null, 'conversation-turn');
     message(questionText, 'question', turn);
     appendCompletedElapsed(turn, elapsedSeconds);
-    renderAnswer(answer, false, turn);
-    if (answer && answer.failure_guidance) renderFailureCard(questionText, answer, turn);
+    // Local history may predate the platform failure contract. Reopening it
+    // must not resurrect a retired recovery menu or ask for a nonexistent
+    // choice. The saved transcript remains unchanged for server context review.
+    const oldFailureMenu = presentation === 'workspace' && answer && answer.terminal_status === 'FAILED'
+      && Array.isArray(answer.failure_guidance && answer.failure_guidance.options);
+    const displayedAnswer = oldFailureMenu ? { ...answer, summary: '这次暂时未能完成查询，请稍后重试。', failure_guidance: null } : answer;
+    renderAnswer(displayedAnswer, false, turn);
+    if (displayedAnswer && displayedAnswer.failure_guidance) renderFailureCard(questionText, displayedAnswer, turn);
     // Keep the reading runway at the physical transcript end. Reopened
     // history remains chronological instead of being appended after its gap.
     body.insertBefore(turn, readingRunway && readingRunway.parentNode === body ? readingRunway : null);
@@ -101,6 +107,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       }, presentation.clarification_choices || {}, turn);
       return;
     }
+    // The platform uses live clarification fields for missing conditions.
+    // Retain legacy recovery actions only for the separately approved drawer.
+    if (host.dataset.moheAiPresentation === 'workspace') return;
     const options = guidance && guidance.options;
     if (!Array.isArray(options) || options.length !== 3 || options.some(item => !item || typeof item.label !== 'string'
       || !['retry_original', 'edit_original', 'new_conversation'].includes(item.value))) return;
@@ -133,23 +142,29 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     sendSupplement.onclick = () => { const text = supplement.value.trim(); if (text) start(text); };
     card.append(custom, supplement, sendSupplement); turn.appendChild(card);
   }
-  // Staged server/client versions may differ. Keep one safe customer card for
-  // every confirmed failure, but never turn a failed Run into a data answer.
-  function safeFailureGuidance(value, reason = '') {
-    if (presentation === 'workspace' && reason === 'CLARIFICATION_EXPIRED') return {
-      kind: 'clarification_expired', question: '补充等待已超时，尚未执行查询。已确认条件已保留，可继续原查询。'
-    };
-    // The platform asks for missing business conditions inside the live Run.
-    // A terminal technical/authority failure cannot be repaired by a generic
-    // four-action card, so keep it as a short explanation in that workspace.
-    if (presentation === 'workspace' && reason !== 'AI_INTENT_UNRESOLVED' && reason !== 'AI_CAPABILITY_CHANGED') {
-      // A model transport failure has not evaluated the business conditions.
-      // Do not ask the customer to change those conditions to repair an outage.
-      if (reason === 'AI_MODEL_RESULT_UNKNOWN') return { kind: 'capability_help',
-        question: 'AI 服务暂时未返回结果，请稍后重试。' };
-      return { kind: 'capability_help', question: value && typeof value.question === 'string'
-        ? value.question.replace('请选择一种方式继续。', '请稍后重试。')
-        : '这次暂时未能完成查询，请稍后重试。' };
+  // The server owns failure classification. Platform failures explain that
+  // boundary without inventing missing conditions or replacing an admission
+  // refusal with a generic retry card. Drawer compatibility stays below.
+  function safeFailureGuidance(value, reason = '', detail = {}) {
+    if (presentation === 'workspace') {
+      if (reason === 'CLARIFICATION_EXPIRED') return {
+        kind: 'clarification_expired', question: '补充等待已超时，尚未执行查询。已确认条件已保留，可继续原查询。'
+      };
+      const typed = value && ['technical_error', 'capability_help'].includes(value.kind)
+        && typeof value.question === 'string' && value.question.trim();
+      const fallback = reason === 'AI_MODEL_RESULT_UNKNOWN' ? 'AI 服务暂时未返回结果，请稍后重试。'
+        : reason === 'AI_CAPABILITY_CHANGED' ? '查询能力已更新，请刷新页面后重新查询。'
+          : '这次暂时未能完成查询，请稍后重试。';
+      // Untyped legacy options describe a recovery menu, not a classified
+      // failure. An explicit admission message remains valid even if an old
+      // server also sends that menu; terminal legacy menu copy is discarded.
+      const explanation = typed ? value.question.trim()
+        : detail.accepted === false || !Array.isArray(value && value.options)
+          ? customerErrorMessage(detail.message || reason, fallback) : fallback;
+      const retryAfterMs = typed && Number.isSafeInteger(value.retry_after_ms) ? value.retry_after_ms : detail.retry_after_ms;
+      const retryHint = Number.isSafeInteger(retryAfterMs) && retryAfterMs > 0
+        ? '\n预计 ' + Math.ceil(retryAfterMs / 1000) + ' 秒后可重试。' : '';
+      return { kind: typed ? value.kind : 'technical_error', question: explanation + retryHint };
     }
     // A server-confirmed absence of business-query meaning needs a short
     // capability explanation, not three ways to repeat an unrelated question.
@@ -173,19 +188,19 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const key = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
     return key(first) === key(second);
   }
-  // A known admission refusal has no Run ID. Record it as a non-contextual
-  // turn so the customer gets the same recovery choices without pretending
-  // data was queried; an unknown transport outcome remains recoverable instead.
-  function recordAdmissionRefusal(submitted, explanation, guidance, reason = '') {
-    const safeGuidance = safeFailureGuidance(guidance, reason);
-    const customerText = safeGuidance.kind === 'capability_help' ? safeGuidance.question : explanation;
+  // A known admission refusal has no Run ID. Keep its server explanation as
+  // a non-contextual turn; an unknown transport outcome remains recoverable
+  // with the same admission key instead of being called a confirmed failure.
+  function recordAdmissionRefusal(submitted, explanation, guidance, reason = '', detail = {}) {
+    const safeGuidance = safeFailureGuidance(guidance, reason, { ...detail, accepted: false, message: explanation });
+    const customerText = ['capability_help', 'technical_error'].includes(safeGuidance.kind) ? safeGuidance.question : explanation;
     const deliveredQuestion = ensureQuestionVisible();
     const elapsedSeconds = completedElapsedSeconds();
     finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds); progress.textContent = '';
     const turn = activeConversationTurn() || body;
     message(customerText, '', turn);
     const presentation = { summary: customerText, terminal_status: 'FAILED', failure_guidance: safeGuidance };
-    if (safeGuidance.kind !== 'capability_help') presentation.recovery_origin = { conversation_id: conversation,
+    if (Array.isArray(safeGuidance.options)) presentation.recovery_origin = { conversation_id: conversation,
       history: submitted.history, context_ref: submitted.context_ref || null, created_at: Date.now() };
     renderFailureCard(deliveredQuestion, presentation, turn);
     try { sessions.append(conversation, deliveredQuestion, customerText, presentation, null,
@@ -611,7 +626,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // refusal is still a complete customer turn, so restore the original
         // wording before showing it as well.
         const deliveredQuestion = ensureQuestionVisible();
-        const safeGuidance = run.status === 'FAILED' ? safeFailureGuidance(run.failure_guidance, run.reason) : null;
+        const safeGuidance = run.status === 'FAILED' ? safeFailureGuidance(run.failure_guidance, run.reason, run) : null;
         const terminalMessage = run.status === 'CANCELLED' ? '已取消' : safeGuidance
           ? (safeGuidance.question || '这次没能给出可靠结果。请选择一种方式继续。')
           : customerErrorMessage(run.message, '本次未能完成，请重新提问。');
@@ -629,7 +644,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
             source: { run_id: run.run_id, ...deliveryBinding(run), clarification_id: run.clarification.id } };
           failurePresentation.clarification_choices = expiredChoices;
           renderFailureCard(deliveredQuestion, failurePresentation, answerTurn);
-        } else if (safeGuidance && safeGuidance.kind !== 'capability_help') {
+        } else if (safeGuidance && Array.isArray(safeGuidance.options)) {
           // A remounted task can retain its Run and visible original question
           // after the admission envelope was retired. No newer turn can enter
           // this active conversation, so its stored transcript is the same
@@ -972,7 +987,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       }
       if (accepted && accepted.accepted === false) {
         admissionRetryCount = 0;
-        recordAdmissionRefusal(submitted, customerErrorMessage(accepted.message, '当前使用人数较多，请稍后再问。'), accepted.failure_guidance, accepted.reason); return;
+        recordAdmissionRefusal(submitted, customerErrorMessage(accepted.message, '当前使用人数较多，请稍后再问。'), accepted.failure_guidance, accepted.reason, accepted); return;
       }
       admissionRetryCount = 0;
       await update(accepted); persistActive();

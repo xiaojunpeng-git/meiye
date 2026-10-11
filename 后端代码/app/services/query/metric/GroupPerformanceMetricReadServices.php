@@ -10,9 +10,10 @@ final class GroupPerformanceMetricReadServices
 {
     private $registered;
 
-    public function __construct(?callable $queryFactory = null, ?callable $normalScope = null, ?callable $normalServiceScope = null, ?bool $useRightsIndex = null)
+    /** Only transaction-owned readers may reuse an immutable service-customer projection. */
+    public function __construct(?callable $queryFactory = null, ?callable $normalScope = null, ?callable $normalServiceScope = null, ?bool $useRightsIndex = null, bool $cacheServiceCustomers = false)
     {
-        $this->registered = new RegisteredMetricReadServices($queryFactory, $normalScope, $normalServiceScope, $useRightsIndex);
+        $this->registered = new RegisteredMetricReadServices($queryFactory, $normalScope, $normalServiceScope, $useRightsIndex, $cacheServiceCustomers);
     }
 
     public function metricTotal(string $tenantId, array $stores, array $range, string $metricCode): int

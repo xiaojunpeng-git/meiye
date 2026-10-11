@@ -1,0 +1,136 @@
+{
+  "task": "OPT3 independent ordinal clarification boundary",
+  "recorded_at": "2026-10-11T22:32:02.662474+08:00",
+  "scope": "Synthetic real Gateway/SQLite + private reflection boundary; no business request, provider, application bootstrap or business database",
+  "tests": [
+    "tests/mohe-ai/opt3-ordinal-clarification-boundary.php"
+  ],
+  "php74_isolation": {
+    "image": "mohe-app:local",
+    "network": "none",
+    "rootfs": "readonly",
+    "source_bind": "readonly",
+    "tmp": "private tmpfs",
+    "capabilities": "ALL dropped",
+    "no_new_privileges": true
+  },
+  "results": [
+    {
+      "label": "php74_behavior",
+      "exit_code": 0,
+      "elapsed_ms": 1094,
+      "output": "{\"suite\":\"OPT3-ordinal-clarification-boundary\",\"checks\":92,\"failures\":[],\"pass\":true}\n"
+    },
+    {
+      "label": "php74_fixture_syntax",
+      "exit_code": 0,
+      "elapsed_ms": 148,
+      "output": "No syntax errors detected in tests/mohe-ai/opt3-ordinal-clarification-boundary.php\n"
+    },
+    {
+      "label": "host_behavior",
+      "exit_code": 0,
+      "elapsed_ms": 837,
+      "output": "{\"suite\":\"OPT3-ordinal-clarification-boundary\",\"checks\":92,\"failures\":[],\"pass\":true}\n"
+    }
+  ],
+  "host_php_behavior": {
+    "checks": 92,
+    "pass": true
+  },
+  "source_sha256_before": {
+    "后端代码/app/services/ai/AiGatewayServices.php": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728",
+    "后端代码/app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac",
+    "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+    "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+    "tests/mohe-ai/opt3-ordinal-clarification-boundary.php": "51a608975fd6601957aa792e30dd6d648b9d3e6393c0a59686dd2bec88ad2456"
+  },
+  "source_sha256_after": {
+    "后端代码/app/services/ai/AiGatewayServices.php": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728",
+    "后端代码/app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac",
+    "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+    "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+    "tests/mohe-ai/opt3-ordinal-clarification-boundary.php": "51a608975fd6601957aa792e30dd6d648b9d3e6393c0a59686dd2bec88ad2456"
+  },
+  "source_changed_during_verification": [],
+  "coverage": [
+    "Actual dual-board source triggers same-Run semantic clarification without extra model or fact calls",
+    "Only executable rows become options; missing second row yields supplement only",
+    "Both click choices complete exact prior identity with original date and retained primary metric, using existing detail profile",
+    "Free-text group selection preserves the original second ordinal and exact group identity",
+    "Permission revision after card blocks fact execution",
+    "Model top without current group evidence cannot select top; explicit current bottom selects its own second row",
+    "Mixed new metric/time never receive old-detail execution suggestions and remain in encrypted meaning after group supplementation",
+    "Mixed free text does not use a precompiled old-detail candidate",
+    "Unrelated question, confirmed new topic and one actual board do not produce a board card",
+    "Overlong supplement and extra input keys retain original protocol validation",
+    "Both object_detail and legacy member_detail preserve summary/rights mode, exact member ordinal identity and original signed query/view after board choice",
+    "When ordinal is absent from every actual board, message explicitly identifies that missing position"
+  ],
+  "review_findings": [
+    {
+      "severity": "fixed_before_delivery",
+      "location": "semanticRecommendationChoice ordinal free-text fast path",
+      "issue": "Returning a matched board plan before semanticClarificationReply bypassed its 1000-character limit",
+      "reproduction": "Valid group label followed by 1001 spaces normalized to a valid reply",
+      "fix_owner": "review_stability_plan",
+      "resolution": "Existing semanticClarificationReply validates input before closed group matching; independent assertion now PASS"
+    }
+  ],
+  "fixture_adjustments": [
+    "R6 fixture fact provider only has store1, so end-to-end authority [1] is used; distinct group identity2/4 checked by synthetic signed-source reflection",
+    "Existing detail profile legitimately adds registered overview metrics; assert source primary measurement remains, rather than requiring a one-metric detail array",
+    "Supplemented mixed meaning uses complete original metric/time text and real clarification_context evidence"
+  ],
+  "scope_limits": [
+    "Synthetic verification does not replace local real-model 5x10 and product manager acceptance",
+    "Gateway is still parent/stability integration-owned; hashes record this verification only, not frozen acceptance manifest"
+  ],
+  "no_business_source_edits_by_this_reviewer": true,
+  "previous_75_check_validation": {
+    "source_sha256": {
+      "后端代码/app/services/ai/AiGatewayServices.php": "0c5934a0f3884ae7fa893deb4570a3ec8624586e61272b34de6e0fd1a70f91f0",
+      "后端代码/app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac",
+      "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+      "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+      "tests/mohe-ai/opt3-ordinal-clarification-boundary.php": "7fc8119498ed0184483ca88b289b87395522c62af8cfc56be117541c551beeff"
+    },
+    "results": [
+      {
+        "label": "php74_behavior",
+        "exit_code": 0,
+        "elapsed_ms": 1058,
+        "output": "{\"suite\":\"OPT3-ordinal-clarification-boundary\",\"checks\":75,\"failures\":[],\"pass\":true}\n"
+      },
+      {
+        "label": "php74_fixture_syntax",
+        "exit_code": 0,
+        "elapsed_ms": 146,
+        "output": "No syntax errors detected in tests/mohe-ai/opt3-ordinal-clarification-boundary.php\n"
+      }
+    ]
+  },
+  "previous_91_check_validation": {
+    "source_sha256": {
+      "后端代码/app/services/ai/AiGatewayServices.php": "b6a4c8a8cba0b4ba2d5be9a1543f794e0e45b8a935cfe25b0a609423ffeeafa6",
+      "后端代码/app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac",
+      "后端代码/app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+      "后端代码/app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+      "tests/mohe-ai/opt3-ordinal-clarification-boundary.php": "d8d41f9f59f804330550f2bc8509514b8154798a214ebc10faae95a301b27350"
+    },
+    "results": [
+      {
+        "label": "php74_behavior",
+        "exit_code": 0,
+        "elapsed_ms": 866,
+        "output": "{\"suite\":\"OPT3-ordinal-clarification-boundary\",\"checks\":91,\"failures\":[],\"pass\":true}\n"
+      },
+      {
+        "label": "php74_fixture_syntax",
+        "exit_code": 0,
+        "elapsed_ms": 114,
+        "output": "No syntax errors detected in tests/mohe-ai/opt3-ordinal-clarification-boundary.php\n"
+      }
+    ]
+  }
+}

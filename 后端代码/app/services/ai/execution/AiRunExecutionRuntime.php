@@ -62,7 +62,7 @@ final class AiRunExecutionRuntime
         }
     }
 
-    /** Called by the independent supervisor; never guesses across hosts. */
+    /** Called by the supervisor and dedicated consumer; never guesses across hosts. */
     public static function recoverStoppedWorkers(AiRunStore $runs): int
     {
         $settings=function_exists('config')?(array)config('mohe_ai.execution',[]):[];
@@ -71,9 +71,17 @@ final class AiRunExecutionRuntime
         // mode.  Invalid optional configuration must not cause an exception
         // or reclaim a worker too aggressively.
         if ($stale<30 || $stale>300) $stale=210;
-        $local=self::host();
-        return $runs->recoverStoppedExecutionWorkers($stale,static function(string $host,int $pid) use($local): bool {
-            if ($host!==$local || !function_exists('posix_kill')) return false;
+        $local=self::host(); $currentId=(string)getenv('MOHE_AI_EXECUTION_WORKER_ID');
+        return $runs->recoverStoppedExecutionWorkers($stale,static function(string $host,int $pid,string $workerId) use($local,$currentId): bool {
+            if ($host!==$local) return false;
+            // The dedicated command generates one immutable random ID at
+            // process start. Only that same host/PID may prove its old owner
+            // was replaced. Heartbeat expiry or another host's registration
+            // cannot prove physical stop (Docker commonly reuses PID 1).
+            $dedicated='/^ai-exec-'.getmypid().'-[a-f0-9]{24}$/D';
+            if ($pid===getmypid() && preg_match($dedicated,$currentId) && preg_match($dedicated,$workerId)
+                && !hash_equals($currentId,$workerId)) return true;
+            if (!function_exists('posix_kill')) return false;
             if (@posix_kill($pid,0)) return false;
             // EPERM means the PID may still exist but is owned by another
             // account. Only ESRCH proves that this exact process is gone.

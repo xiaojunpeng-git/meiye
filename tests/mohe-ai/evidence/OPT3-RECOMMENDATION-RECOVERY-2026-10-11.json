@@ -1,0 +1,351 @@
+{
+  "before": {
+    "suite": "OPT3 recommendation transport regression",
+    "phase": "before_authorized_minimal_fix",
+    "created_at": "2026-10-11T21:43:26.107547+08:00",
+    "gateway_sha256": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca",
+    "test_sha256": "68daea22f2c3eeccdb0f6793fe0c1e77d8127852a24fa096cea6472602c39991",
+    "exit_code": 1,
+    "result": {
+      "pass": false,
+      "checks": 21,
+      "failed": [
+        "ordinary returns a preflighted choice before querying facts",
+        "recommendation uses the existing 30 second model profile instead of a separate 10 second cap",
+        "recommendation timeout keeps its real reason instead of AI_ATTEMPT_UNRESOLVED",
+        "recommendation keeps bounded transport diagnosis under its own attempt"
+      ],
+      "observations": [
+        {
+          "case": "ordinary",
+          "timeout_ms": [
+            10000
+          ],
+          "transport_calls": 1,
+          "status": "FAILED",
+          "reason": "AI_ATTEMPT_UNRESOLVED",
+          "attempt": {
+            "state": "UNKNOWN",
+            "input_tokens": null,
+            "output_tokens": null
+          },
+          "diagnostic": null
+        },
+        {
+          "case": "short_remaining",
+          "timeout_ms": [
+            1064
+          ],
+          "transport_calls": 1,
+          "status": "WAITING_CLARIFICATION",
+          "reason": "",
+          "attempt": {
+            "state": "SUCCEEDED",
+            "input_tokens": 20,
+            "output_tokens": 10
+          },
+          "diagnostic": null
+        },
+        {
+          "case": "unknown",
+          "timeout_ms": [
+            10000
+          ],
+          "transport_calls": 1,
+          "status": "FAILED",
+          "reason": "AI_ATTEMPT_UNRESOLVED",
+          "attempt": {
+            "state": "UNKNOWN",
+            "input_tokens": null,
+            "output_tokens": null
+          },
+          "diagnostic": null
+        }
+      ],
+      "network": "synthetic curl; no network"
+    },
+    "boundary": "Synthetic cURL, isolated SQLite, no business source modification, no real model or business data."
+  },
+  "after": {
+    "phase": "after_recommendation_fix_integration_continues",
+    "created_at": "2026-10-11T21:55:07.033473+08:00",
+    "gateway_sha256_before": "6a759b28e4ed6f5dd575ab3fa612faa58f2e01cd9b662dc92c08b8607f540633",
+    "gateway_sha256_after": "6a759b28e4ed6f5dd575ab3fa612faa58f2e01cd9b662dc92c08b8607f540633",
+    "stable_during_test": true,
+    "test_sha256": "b8adf691733a40ecbc8194fdb8e4d71c3d20c7c9964803eeb7cfa10ade64a904",
+    "results": [
+      {
+        "runtime": "PHP8.5.8 host",
+        "exit_code": 0,
+        "result": {
+          "pass": true,
+          "checks": 33,
+          "failed": [],
+          "observations": [
+            {
+              "case": "ordinary",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "attempt": {
+                "state": "SUCCEEDED",
+                "input_tokens": 20,
+                "output_tokens": 10
+              },
+              "diagnostic": null
+            },
+            {
+              "case": "short_remaining",
+              "timeout_ms": [
+                1017
+              ],
+              "transport_calls": 1,
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "attempt": {
+                "state": "SUCCEEDED",
+                "input_tokens": 20,
+                "output_tokens": 10
+              },
+              "diagnostic": null
+            },
+            {
+              "case": "unknown",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "FAILED",
+              "reason": "AI_MODEL_RESULT_UNKNOWN",
+              "attempt": {
+                "state": "UNKNOWN",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": {
+                "stage": "transport",
+                "predicate": "timeout",
+                "transport_errno": 28,
+                "http_status": 0,
+                "elapsed_ms": 0
+              }
+            },
+            {
+              "case": "account_permission",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "FAILED",
+              "reason": "AI_MODEL_ACCOUNT_UNAVAILABLE",
+              "attempt": {
+                "state": "FAILED",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": {
+                "stage": "transport",
+                "predicate": "http_rejected",
+                "http_status": 401,
+                "elapsed_ms": 0
+              }
+            },
+            {
+              "case": "provider_failure",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "FAILED",
+              "reason": "AI_MODEL_REQUEST_FAILED",
+              "attempt": {
+                "state": "FAILED",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": {
+                "stage": "transport",
+                "predicate": "http_server",
+                "http_status": 503,
+                "elapsed_ms": 0
+              }
+            },
+            {
+              "case": "invalid_selection",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "attempt": {
+                "state": "FAILED",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": null
+            }
+          ],
+          "network": "synthetic curl; no network"
+        }
+      },
+      {
+        "runtime": "PHP7.4.33 isolated",
+        "exit_code": 0,
+        "result": {
+          "pass": true,
+          "checks": 33,
+          "failed": [],
+          "observations": [
+            {
+              "case": "ordinary",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "attempt": {
+                "state": "SUCCEEDED",
+                "input_tokens": "20",
+                "output_tokens": "10"
+              },
+              "diagnostic": null
+            },
+            {
+              "case": "short_remaining",
+              "timeout_ms": [
+                1040
+              ],
+              "transport_calls": 1,
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "attempt": {
+                "state": "SUCCEEDED",
+                "input_tokens": "20",
+                "output_tokens": "10"
+              },
+              "diagnostic": null
+            },
+            {
+              "case": "unknown",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "FAILED",
+              "reason": "AI_MODEL_RESULT_UNKNOWN",
+              "attempt": {
+                "state": "UNKNOWN",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": {
+                "stage": "transport",
+                "predicate": "timeout",
+                "transport_errno": 28,
+                "http_status": 0,
+                "elapsed_ms": 0
+              }
+            },
+            {
+              "case": "account_permission",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "FAILED",
+              "reason": "AI_MODEL_ACCOUNT_UNAVAILABLE",
+              "attempt": {
+                "state": "FAILED",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": {
+                "stage": "transport",
+                "predicate": "http_rejected",
+                "http_status": 401,
+                "elapsed_ms": 0
+              }
+            },
+            {
+              "case": "provider_failure",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "FAILED",
+              "reason": "AI_MODEL_REQUEST_FAILED",
+              "attempt": {
+                "state": "FAILED",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": {
+                "stage": "transport",
+                "predicate": "http_server",
+                "http_status": 503,
+                "elapsed_ms": 0
+              }
+            },
+            {
+              "case": "invalid_selection",
+              "timeout_ms": [
+                30000
+              ],
+              "transport_calls": 1,
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "attempt": {
+                "state": "FAILED",
+                "input_tokens": null,
+                "output_tokens": null
+              },
+              "diagnostic": null
+            }
+          ],
+          "network": "synthetic curl; no network"
+        }
+      }
+    ],
+    "limits": "No extra model attempt, no total Run budget increase; 30 seconds does not guarantee upstream completion.",
+    "additional_checks": [
+      {
+        "path": "后端代码/app/services/ai/AiGatewayServices.php",
+        "kind": "PHP7.4 syntax",
+        "sha256": "6a759b28e4ed6f5dd575ab3fa612faa58f2e01cd9b662dc92c08b8607f540633",
+        "exit_code": 0,
+        "output": "No syntax errors detected in 后端代码/app/services/ai/AiGatewayServices.php\n"
+      },
+      {
+        "path": "tests/mohe-ai/opt3-recommendation-recovery.php",
+        "kind": "PHP7.4 syntax",
+        "sha256": "b8adf691733a40ecbc8194fdb8e4d71c3d20c7c9964803eeb7cfa10ade64a904",
+        "exit_code": 0,
+        "output": "No syntax errors detected in tests/mohe-ai/opt3-recommendation-recovery.php\n"
+      },
+      {
+        "path": "tests/mohe-ai/runtime-contract.php",
+        "kind": "PHP7.4 syntax",
+        "sha256": "8654149ee5ccb787071a0ad816e1a5f05adf1073219e0326e864a8b2fa52bb33",
+        "exit_code": 0,
+        "output": "No syntax errors detected in tests/mohe-ai/runtime-contract.php\n"
+      },
+      {
+        "path": "tests/mohe-ai/runtime-contract.php",
+        "kind": "PHP7.4 fixture",
+        "sha256": "8654149ee5ccb787071a0ad816e1a5f05adf1073219e0326e864a8b2fa52bb33",
+        "exit_code": 0,
+        "output": "MOHE_AI_RUNTIME_CONTRACT=PASS passed=105 failed=0\nBOUNDARY=pure-policy-only; no-storage-atomicity/no-physical-cancellation/no-capacity-load-test/no-network/no-database"
+      },
+      {
+        "kind": "targeted diff check",
+        "exit_code": 0,
+        "output": ""
+      }
+    ]
+  }
+}

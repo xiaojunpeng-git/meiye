@@ -904,7 +904,13 @@ final class SiliconFlowClient
             'stage'=>'transport','predicate'=>$oversized?'response_too_large':self::transportPredicate($errno),
             'transport_errno'=>$errno,'http_status'=>$status,'elapsed_ms'=>$elapsedMs,
         ]);
-        if ($status !== 200) throw new AiContractException($status === 401 || $status === 403 ? 'AI_MODEL_ACCOUNT_UNAVAILABLE' : 'AI_MODEL_REQUEST_FAILED');
+        // Keep only status/timing, never the response body or credentials.
+        // The model breaker needs transport evidence to distinguish an
+        // upstream 5xx outage from permission/configuration and semantic errors.
+        if ($status !== 200) throw new AiContractException($status === 401 || $status === 403 ? 'AI_MODEL_ACCOUNT_UNAVAILABLE' : 'AI_MODEL_REQUEST_FAILED',[
+            'stage'=>'transport','predicate'=>$status>=500?'http_server':'http_rejected',
+            'http_status'=>$status,'elapsed_ms'=>$elapsedMs,
+        ]);
         $checkpoint();
         $decoded = json_decode($response, true);
         if (!is_array($decoded)) throw new AiContractException('AI_MODEL_RESPONSE_ENVELOPE_INVALID',['stage'=>'response_envelope','predicate'=>'not_json_object','content_bytes'=>strlen($response)]);

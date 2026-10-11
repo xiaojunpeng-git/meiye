@@ -9,6 +9,9 @@ use RuntimeException;
 /** Transactional execution metadata only: never pass questions, history, prompts or answers here. */
 final class AiRunStore
 {
+    private const MODEL_CIRCUIT_OBSERVATION_MS = 600000;
+    private const MODEL_CIRCUIT_COOLDOWN_MS = 120000;
+    private const MODEL_CIRCUIT_FAILURE_LIMIT = 5;
     private $db;
     private $prefix;
     private $instance;
@@ -510,27 +513,30 @@ final class AiRunStore
     }
 
     /**
-     * A claimed Run is never retried.  It becomes failed only when the local
-     * supervisor proves the recorded worker PID is gone. A terminal fence
-     * prevents a delayed/duplicate worker from publishing afterwards.
+     * A claimed Run is never retried. The local process check must prove its
+     * worker is gone (including a replaced dedicated consumer at the same
+     * PID). Deadline/cancellation alone is not that proof. Already terminal
+     * Runs keep their original reason while their physical slot is reclaimed.
      */
     public function recoverStoppedExecutionWorkers(int $staleSeconds,callable $isStopped): int
     {
         if ($staleSeconds<30 || $staleSeconds>300) throw new RuntimeException('AI_EXECUTION_WORKER_INVALID');
         return $this->transaction(function () use($staleSeconds,$isStopped) {
             $now=$this->now(); $recovered=0;
-            $rows=$this->rows('SELECT run_id,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND status=\'WORKFLOW_EXECUTING\' AND worker_token<>\'\'',[$this->instance]);
+            $rows=$this->rows('SELECT run_id,status,reason,counters_json FROM '.$this->table('run').' WHERE instance_id=? AND slot_held=1 AND worker_token<>\'\' AND status IN (\'WORKFLOW_EXECUTING\',\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\')',[$this->instance]);
             foreach ($rows as $row) {
                 $counts=json_decode($row['counters_json'],true)?:[]; $worker=$counts['execution_worker']??null;
                 if (!is_array($worker) || !is_string($worker['id']??null) || !is_string($worker['host']??null)
                     || !is_int($worker['pid']??null) || !is_int($worker['started_at']??null) || $now-$worker['started_at']<$staleSeconds*1000) continue;
-                if (!$isStopped($worker['host'],$worker['pid'])) continue;
+                if (!$isStopped($worker['host'],$worker['pid'],$worker['id'])) continue;
                 $this->execute('UPDATE '.$this->table('attempt').' SET state=\'UNKNOWN\' WHERE instance_id=? AND run_id=? AND state IN (\'PREPARED\',\'IN_FLIGHT\')',[$this->instance,$row['run_id']]);
                 unset($counts['execution_worker']); $counts['execution_worker_lost_at']=$now;
-                // PID absence is the terminal fence: clearing this token both
-                // prevents a late Worker from publishing and makes its now
-                // unusable encrypted request eligible for immediate cleanup.
-                $this->execute('UPDATE '.$this->table('run').' SET status=\'FAILED\',reason=\'AI_EXECUTION_WORKER_LOST\',slot_held=0,worker_token=\'\',last_clock_at=?,counters_json=?,version=version+1 WHERE instance_id=? AND run_id=?',[$now,json_encode($counts),$this->instance,$row['run_id']]);
+                // Physical stop is established before clearing the token.
+                // Late publication is fenced and encrypted input may retire;
+                // UNKNOWN attempts remain auditable and are never replayed.
+                $status=$this->terminal($row)?$row['status']:'FAILED';
+                $reason=$this->terminal($row)?$row['reason']:'AI_EXECUTION_WORKER_LOST';
+                $this->execute('UPDATE '.$this->table('run').' SET status=?,reason=?,slot_held=0,worker_token=\'\',last_clock_at=?,counters_json=?,version=version+1 WHERE instance_id=? AND run_id=?',[$status,$reason,$now,json_encode($counts),$this->instance,$row['run_id']]);
                 ++$recovered;
             }
             // Keep consumer heartbeat cleanup out of recovery.  Recovery must
@@ -602,6 +608,12 @@ final class AiRunStore
         });
     }
 
+    /**
+     * Reserve an immutable I/O receipt before sending. Model outage admission
+     * shares this transaction with PREPARED, so only one half-open probe can be
+     * reserved across workers; a rejected call creates no phantom Attempt.
+     * Tools retain their existing admission and physical-capacity boundaries.
+     */
     public function prepareAttempt(array $owner,string $runId,int $generation,string $workerToken,string $attemptCode,string $kind,string $payloadHash,string $targetCode): array
     {
         $attemptCode=$this->semanticAttemptCode($runId,$workerToken,$attemptCode);
@@ -613,6 +625,10 @@ final class AiRunStore
             if ($existing) {
                 if ($existing['payload_hash']!==$payloadHash || $existing['kind']!==$kind || $existing['target_code']!==$targetCode) { throw new RuntimeException('AI_ATTEMPT_CONFLICT'); }
                 return ['prepared'=>false,'state'=>$existing['state']];
+            }
+            $halfOpen=false;
+            if ($kind==='model' && $this->modelCircuitRetryMs($r,$targetCode,$this->now(),$halfOpen)>0) {
+                throw new RuntimeException('AI_MODEL_CIRCUIT_OPEN');
             }
             $counter=$kind==='model'?'model_attempt_count':'tool_call_count';
             $counts=json_decode($r['counters_json'],true);
@@ -626,6 +642,11 @@ final class AiRunStore
             $counts['attempt_kinds'][$attemptCode]=$kind;
             $counts['attempt_targets']=$counts['attempt_targets']??[];
             $counts['attempt_targets'][$attemptCode]=$targetCode;
+            if ($halfOpen) {
+                // Keep the physical probe reservation even when its triggering
+                // failure samples later leave the observation window.
+                $counts['model_circuit_probes'][$attemptCode]=true;
+            }
             // Each model attempt belongs to one customer-triggered execution
             // segment.  Keeping this bounded numeric relation prevents a
             // clarification continuation from being reported as though its
@@ -683,6 +704,10 @@ final class AiRunStore
                 $counts['attempt_elapsed_ms'][$attemptCode]=min(180000,max(0,$this->now()-$started));
                 unset($counts['attempt_started_at'][$attemptCode]);
             }
+            // Concurrent calls may finish in a different order from their
+            // reservation. Circuit recovery follows actual receipt completion,
+            // never the Run's later rendering or release timestamp.
+            $counts['attempt_finished_at'][$attemptCode]=$this->now();
             $this->execute('UPDATE '.$this->table('attempt').' SET state=?, input_tokens=?, output_tokens=? WHERE instance_id=? AND run_id=? AND attempt_code=?',[$state,$inputTokens,$outputTokens,$this->instance,$runId,$attemptCode]);
             $this->execute('UPDATE '.$this->table('run').' SET counters_json=?, version=version+1 WHERE instance_id=? AND run_id=?',[json_encode($counts),$this->instance,$runId]);
             // UNKNOWN means the provider outcome is not known.  The gateway
@@ -1044,17 +1069,86 @@ final class AiRunStore
     private function admissionReason(array $owner,int $now): string
     {
         $n=$this->one('SELECT COUNT(*) AS n FROM '.$this->table('run').' WHERE instance_id=? AND account_id=? AND terminal=? AND created_at>?',[$this->instance,$owner['account_id'],$owner['terminal'],$now-600000]);
-        if ((int)$n['n']>=20) return 'RATE_LIMITED';
-        $recent=$this->rows('SELECT status,reason,last_clock_at FROM '.$this->table('run').' WHERE instance_id=? AND account_id=? AND terminal=? AND expires_at>? AND status IN (\'COMPLETED\',\'PARTIAL_SUCCEEDED\',\'FAILED\',\'CANCELLED\') ORDER BY last_clock_at DESC,created_at DESC LIMIT 10000',[$this->instance,$owner['account_id'],$owner['terminal'],$now]);
-        $failures=0; $latest=0;
-        foreach ($recent as $r) {
-            $class=self::outcomeClass($r);
-            if ($class==='success' || $class==='partial') break;
-            if ($class!=='technical') continue;
-            if ($latest===0) $latest=(int)$r['last_clock_at'];
-            if (++$failures>=5) return $latest+120000>$now?'CIRCUIT_OPEN':'';
+        // A provider outage cannot reject a deterministic local query. The
+        // model boundary checks its own receipts in prepareAttempt instead.
+        return (int)$n['n']>=20?'RATE_LIMITED':'';
+    }
+
+    /**
+     * Read-only retry information for an owned Run after model admission was
+     * refused. No new state is written, and this method does not grant sending
+     * permission: prepareAttempt must still reserve under the instance mutex.
+     */
+    public function modelCircuitRetryAfterMs(array $owner,string $runId,int $generation,string $targetCode='siliconflow'): int
+    {
+        $this->identifier($targetCode);
+        return $this->transaction(function () use($owner,$runId,$generation,$targetCode) {
+            return $this->modelCircuitRetryMs($this->read($owner,$runId,$generation),$targetCode,$this->now());
+        });
+    }
+
+    /**
+     * Derive model health from retained, payload-free I/O receipts. Scope stays
+     * at instance/account/terminal and adds the frozen configuration and target;
+     * one account's outage never blocks another account or a new configuration.
+     * Semantic rejections, tools, cancellations and UNKNOWN without a recorded
+     * network failure are neutral. UNKNOWN usage/audit records are not changed.
+     */
+    private function modelCircuitRetryMs(array $run,string $targetCode,int $now,?bool &$halfOpen=null): int
+    {
+        $halfOpen=false;
+        $version=(json_decode($run['snapshot_json'],true)?:[])['model_config_version']??null;
+        $observedSince=$now-self::MODEL_CIRCUIT_OBSERVATION_MS;
+        // Normal history is bounded by the existing 20 Runs/10 minutes quota.
+        // Include the maximum permitted Run budget before the window because a
+        // receipt can start earlier and finish inside it. Recent terminal Run
+        // clocks also retain a delayed completion; physical holders never age
+        // out of the probe fence merely because their logical deadline passed.
+        $rows=$this->rows('SELECT a.run_id,a.attempt_code,a.state,a.created_at AS attempt_created_at,r.status AS run_status,r.snapshot_json,r.counters_json,r.worker_token,r.slot_held,r.deadline_at FROM '.$this->table('attempt').' a INNER JOIN '.$this->table('run').' r ON r.instance_id=a.instance_id AND r.run_id=a.run_id WHERE a.instance_id=? AND r.account_id=? AND r.terminal=? AND a.kind=\'model\' AND a.target_code=? AND a.expires_at>? AND (a.created_at>=? OR r.last_clock_at>=? OR (r.worker_token<>\'\' AND r.slot_held=1)) ORDER BY a.created_at DESC,a.run_id DESC,a.attempt_code DESC',[$this->instance,$run['account_id'],$run['terminal'],$targetCode,$now,$observedSince-300000,$observedSince]);
+        $outcomes=[]; $pendingUntil=0; $pendingProbeUntil=0;
+        foreach ($rows as $row) {
+            if (((json_decode($row['snapshot_json'],true)?:[])['model_config_version']??null)!==$version) continue;
+            $counts=json_decode($row['counters_json'],true)?:[]; $code=$row['attempt_code'];
+            if (in_array($row['state'],['PREPARED','IN_FLIGHT','UNKNOWN'],true)
+                && $row['worker_token']!=='' && (int)$row['slot_held']===1) {
+                // An expired logical deadline cannot prove physical I/O ended.
+                // Keep the probe fenced until release or stopped-worker recovery.
+                $pendingUntil=max($pendingUntil,max($now+1,(int)$row['deadline_at']));
+                if (($counts['model_circuit_probes'][$code]??false)===true) {
+                    $pendingProbeUntil=max($pendingProbeUntil,max($now+1,(int)$row['deadline_at']));
+                }
+            }
+            $diagnostic=$counts['model_diagnostics'][$code]??[];
+            $transportFailure=in_array($row['state'],['FAILED','UNKNOWN'],true)
+                && $row['run_status']!=='CANCELLED'
+                && ($diagnostic['stage']??null)==='transport'
+                && (in_array($diagnostic['predicate']??null,['timeout','connection','name_resolution','tls'],true)
+                    || ((int)($diagnostic['http_status']??0)>=500 && (int)($diagnostic['http_status']??0)<=599));
+            if ($row['state']!=='SUCCEEDED' && !$transportFailure) continue;
+            $finished=(int)($counts['attempt_finished_at'][$code]
+                ??((int)$row['attempt_created_at']+(int)($counts['attempt_elapsed_ms'][$code]??0)));
+            if ($finished<$observedSince) continue;
+            $outcomes[]=['at'=>$finished,'created_at'=>(int)$row['attempt_created_at'],
+                'success'=>$row['state']==='SUCCEEDED'];
         }
-        return '';
+        usort($outcomes,function(array $a,array $b): int {
+            return $b['at']<=>$a['at'] ?: $b['created_at']<=>$a['created_at'] ?: (int)$b['success']<=>(int)$a['success'];
+        });
+        if ($pendingProbeUntil>0) return min(self::MODEL_CIRCUIT_COOLDOWN_MS,max(1,$pendingProbeUntil-$now));
+        $failures=0; $latest=0;
+        foreach ($outcomes as $outcome) {
+            if ($outcome['success']) return 0;
+            if ($failures===0) $latest=$outcome['at'];
+            if (++$failures<self::MODEL_CIRCUIT_FAILURE_LIMIT) continue;
+            $remaining=$latest+self::MODEL_CIRCUIT_COOLDOWN_MS-$now;
+            if ($remaining>0) return $remaining;
+            // After cooldown, the first PREPARED receipt is the shared half-open
+            // reservation. Further calls wait for that receipt's real outcome.
+            if ($pendingUntil>0) return min(self::MODEL_CIRCUIT_COOLDOWN_MS,max(1,$pendingUntil-$now));
+            $halfOpen=true;
+            return 0;
+        }
+        return 0;
     }
 
     /**

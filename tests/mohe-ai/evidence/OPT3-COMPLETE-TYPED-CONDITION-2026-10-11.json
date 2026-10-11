@@ -1,0 +1,955 @@
+{
+  "task": "OPT3 complete typed condition",
+  "phase": "prepatch failing regression",
+  "generated_at": "2026-10-11T14:46:15.350874+00:00",
+  "business_source_changed": false,
+  "network_or_business_database_requests": false,
+  "gateway_sha256_before": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728",
+  "gateway_sha256_after": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728",
+  "source_stable": true,
+  "fixture": "tests/mohe-ai/opt3-complete-typed-condition.php",
+  "fixture_sha256": "10475e30d2b76bc81466b48feb8a0e1b5d59641396092cab8b79d8ec85973116",
+  "command": "php tests/mohe-ai/opt3-complete-typed-condition.php",
+  "exit_code": 1,
+  "result": {
+    "suite": "OPT3-complete-typed-condition",
+    "checks": 39,
+    "failures": [
+      "count/needs_clarification directly answers complete typed meaning",
+      "list/needs_clarification directly answers complete typed meaning",
+      "all/two-conditions/needs_clarification executes the whole complete condition set",
+      "any/two-conditions/needs_clarification executes the whole complete condition set",
+      "complete new topic answers after accepted reset"
+    ],
+    "observations": {
+      "count/understood": {
+        "status": "COMPLETED",
+        "reason": "",
+        "queries": 1,
+        "model_stages": [
+          "understand_meaning"
+        ],
+        "fixture_query": {
+          "aggregate_condition": {
+            "conditions": [
+              {
+                "metric_code": "cash_performance",
+                "operator": "lt",
+                "quantity": "500",
+                "unit": "yuan"
+              }
+            ],
+            "relation": "all",
+            "result_form": "count",
+            "subject": "member"
+          },
+          "business_filters": {
+            "object_kind": "member"
+          },
+          "compare_range": null,
+          "condition_set": {
+            "conditions": [
+              {
+                "metric_code": "cash_performance",
+                "operator": "lt",
+                "value": 50000
+              }
+            ],
+            "relation": "all",
+            "subject": "member"
+          },
+          "end_date": "2026-10-11",
+          "metric_codes": [
+            "cash_performance"
+          ],
+          "query_shape": "condition_count",
+          "ranking": null,
+          "ranking_presentation_metrics": [],
+          "start_date": "2026-10-01",
+          "store_ids": []
+        }
+      },
+      "count/needs_clarification": {
+        "status": "WAITING_CLARIFICATION",
+        "reason": "",
+        "queries": 0,
+        "model_stages": [
+          "understand_meaning"
+        ],
+        "fixture_query": null
+      },
+      "list/understood": {
+        "status": "COMPLETED",
+        "reason": "",
+        "queries": 1,
+        "model_stages": [
+          "understand_meaning"
+        ],
+        "fixture_query": {
+          "aggregate_condition": {
+            "conditions": [
+              {
+                "metric_code": "cash_performance",
+                "operator": "lt",
+                "quantity": "500",
+                "unit": "yuan"
+              }
+            ],
+            "relation": "all",
+            "result_form": "list",
+            "subject": "member"
+          },
+          "business_filters": {
+            "object_kind": "member"
+          },
+          "compare_range": null,
+          "condition_set": {
+            "conditions": [
+              {
+                "metric_code": "cash_performance",
+                "operator": "lt",
+                "value": 50000
+              }
+            ],
+            "relation": "all",
+            "subject": "member"
+          },
+          "end_date": "2026-10-11",
+          "metric_codes": [
+            "cash_performance"
+          ],
+          "query_shape": "condition_list",
+          "ranking": null,
+          "ranking_presentation_metrics": [],
+          "start_date": "2026-10-01",
+          "store_ids": []
+        }
+      },
+      "list/needs_clarification": {
+        "status": "WAITING_CLARIFICATION",
+        "reason": "",
+        "queries": 0,
+        "model_stages": [
+          "understand_meaning"
+        ],
+        "fixture_query": null
+      },
+      "all/two-conditions/understood": {
+        "status": "COMPLETED",
+        "reason": "",
+        "queries": 1,
+        "model_stages": [
+          "understand_meaning"
+        ]
+      },
+      "all/two-conditions/needs_clarification": {
+        "status": "WAITING_CLARIFICATION",
+        "reason": "",
+        "queries": 0,
+        "model_stages": [
+          "understand_meaning"
+        ]
+      },
+      "any/two-conditions/understood": {
+        "status": "COMPLETED",
+        "reason": "",
+        "queries": 1,
+        "model_stages": [
+          "understand_meaning"
+        ]
+      },
+      "any/two-conditions/needs_clarification": {
+        "status": "WAITING_CLARIFICATION",
+        "reason": "",
+        "queries": 0,
+        "model_stages": [
+          "understand_meaning"
+        ]
+      }
+    },
+    "pass": false
+  },
+  "stderr": "FAIL count/needs_clarification directly answers complete typed meaning\nFAIL list/needs_clarification directly answers complete typed meaning\nFAIL all/two-conditions/needs_clarification executes the whole complete condition set\nFAIL any/two-conditions/needs_clarification executes the whole complete condition set\nFAIL complete new topic answers after accepted reset",
+  "note": "Synthetic Gateway/SQLite controls pass; five advisory-status branches are intentionally red before the approved implementation. No status rewrite or recommendation defaults are accepted as completeness proof.",
+  "php74_prepatch": {
+    "image": "mohe-app:local",
+    "isolation": {
+      "network": "none",
+      "source_mount": "read_only",
+      "rootfs": "read_only",
+      "capabilities": "drop_all",
+      "tmpfs": "/tmp 128m"
+    },
+    "command": "docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,size=128m -v \"$PWD:/src:ro\" -w /src --entrypoint php mohe-app:local tests/mohe-ai/opt3-complete-typed-condition.php",
+    "exit_code": 1,
+    "checks": 39,
+    "failures": [
+      "count/needs_clarification directly answers complete typed meaning",
+      "list/needs_clarification directly answers complete typed meaning",
+      "all/two-conditions/needs_clarification executes the whole complete condition set",
+      "any/two-conditions/needs_clarification executes the whole complete condition set",
+      "complete new topic answers after accepted reset"
+    ],
+    "matches_host_failures": true
+  },
+  "postpatch": {
+    "generated_at": "2026-10-11T15:05:59.241584+00:00",
+    "gateway_sha256_before": "5d0aca446001f8ebc4ec2b47a46392753d7ccad8d9ec274a8bd0c3f0c0925872",
+    "gateway_sha256_after": "5d0aca446001f8ebc4ec2b47a46392753d7ccad8d9ec274a8bd0c3f0c0925872",
+    "source_stable": true,
+    "fixture_sha256": "6d1db1916e335e23d1b8590dfee89e8f86e564bc9d62211b776bf62ef2a207b8",
+    "results": [
+      {
+        "runtime": "host",
+        "suite": "opt3-complete-typed-condition.php",
+        "exit_code": 0,
+        "stderr": "",
+        "structured_result": {
+          "suite": "OPT3-complete-typed-condition",
+          "checks": 74,
+          "failures": [],
+          "observations": {
+            "count/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "count",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_count",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "count/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "count",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_count",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "list/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "list",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_list",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "list/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "list",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_list",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "all/two-conditions/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "all/two-conditions/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "any/two-conditions/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "any/two-conditions/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/missing period": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/unknown additional typed field": {
+              "status": "FAILED",
+              "reason": "AI_MODEL_INTENT_CONTRACT_INVALID",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning",
+                "understand_repair"
+              ]
+            },
+            "guard/unknown object": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/unanchored model evidence": {
+              "status": "FAILED",
+              "reason": "AI_MODEL_INTENT_CONTRACT_INVALID",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning",
+                "understand_repair"
+              ]
+            },
+            "guard/conflicting period requirement": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/private object selection": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/unsupported condition unit": {
+              "status": "FAILED",
+              "reason": "AI_UNSUPPORTED_CONDITION",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/inconsistent result form": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/independent result groups": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/private previous result reference": {
+              "status": "FAILED",
+              "reason": "AI_MODEL_INTENT_CONTRACT_INVALID",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning",
+                "understand_repair"
+              ]
+            },
+            "guard/extra metric requirement": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            }
+          },
+          "pass": true
+        }
+      },
+      {
+        "runtime": "host",
+        "suite": "condition-set.php",
+        "exit_code": 0,
+        "stdout": "PASS condition set: 124 checks (synthetic data only)",
+        "stderr": ""
+      },
+      {
+        "runtime": "host",
+        "suite": "opt3-gateway-recovery.php",
+        "exit_code": 0,
+        "stdout": "PASS OPT3 gateway recovery: member topic, metric delta, failure relation and transport audit (synthetic)",
+        "stderr": ""
+      },
+      {
+        "runtime": "host",
+        "suite": "query-context.php",
+        "exit_code": 0,
+        "stdout": "PASS intent context merger: 67 checks (synthetic protocol only)",
+        "stderr": ""
+      },
+      {
+        "runtime": "php74_isolated",
+        "suite": "opt3-complete-typed-condition.php",
+        "exit_code": 0,
+        "stderr": "",
+        "structured_result": {
+          "suite": "OPT3-complete-typed-condition",
+          "checks": 74,
+          "failures": [],
+          "observations": {
+            "count/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "count",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_count",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "count/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "count",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_count",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "list/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "list",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_list",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "list/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ],
+              "fixture_query": {
+                "aggregate_condition": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "quantity": "500",
+                      "unit": "yuan"
+                    }
+                  ],
+                  "relation": "all",
+                  "result_form": "list",
+                  "subject": "member"
+                },
+                "business_filters": {
+                  "object_kind": "member"
+                },
+                "compare_range": null,
+                "condition_set": {
+                  "conditions": [
+                    {
+                      "metric_code": "cash_performance",
+                      "operator": "lt",
+                      "value": 50000
+                    }
+                  ],
+                  "relation": "all",
+                  "subject": "member"
+                },
+                "end_date": "2026-10-11",
+                "metric_codes": [
+                  "cash_performance"
+                ],
+                "query_shape": "condition_list",
+                "ranking": null,
+                "ranking_presentation_metrics": [],
+                "start_date": "2026-10-01",
+                "store_ids": []
+              }
+            },
+            "all/two-conditions/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "all/two-conditions/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "any/two-conditions/understood": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "any/two-conditions/needs_clarification": {
+              "status": "COMPLETED",
+              "reason": "",
+              "queries": 1,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/missing period": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/unknown additional typed field": {
+              "status": "FAILED",
+              "reason": "AI_MODEL_INTENT_CONTRACT_INVALID",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning",
+                "understand_repair"
+              ]
+            },
+            "guard/unknown object": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/unanchored model evidence": {
+              "status": "FAILED",
+              "reason": "AI_MODEL_INTENT_CONTRACT_INVALID",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning",
+                "understand_repair"
+              ]
+            },
+            "guard/conflicting period requirement": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/private object selection": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/unsupported condition unit": {
+              "status": "FAILED",
+              "reason": "AI_UNSUPPORTED_CONDITION",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/inconsistent result form": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/independent result groups": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            },
+            "guard/private previous result reference": {
+              "status": "FAILED",
+              "reason": "AI_MODEL_INTENT_CONTRACT_INVALID",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning",
+                "understand_repair"
+              ]
+            },
+            "guard/extra metric requirement": {
+              "status": "WAITING_CLARIFICATION",
+              "reason": "",
+              "queries": 0,
+              "model_stages": [
+                "understand_meaning"
+              ]
+            }
+          },
+          "pass": true
+        }
+      },
+      {
+        "runtime": "php74_isolated",
+        "suite": "condition-set.php",
+        "exit_code": 255,
+        "stdout": "Fatal error: Uncaught ReflectionException: Trying to invoke private method app\\services\\ai\\AiGatewayServices::applyUniqueRegisteredMetricTermBinding() from scope ReflectionMethod in /src/tests/mohe-ai/condition-set.php:285\nStack trace:\n#0 /src/tests/mohe-ai/condition-set.php(285): ReflectionMethod->invoke(Object(app\\services\\ai\\AiGatewayServices), Array, Array, Array, NULL, Array)\n#1 {main}\n  thrown in /src/tests/mohe-ai/condition-set.php on line 285",
+        "stderr": ""
+      },
+      {
+        "runtime": "php74_isolated",
+        "suite": "opt3-gateway-recovery.php",
+        "exit_code": 0,
+        "stdout": "PASS OPT3 gateway recovery: member topic, metric delta, failure relation and transport audit (synthetic)",
+        "stderr": ""
+      },
+      {
+        "runtime": "php74_isolated",
+        "suite": "query-context.php",
+        "exit_code": 0,
+        "stdout": "PASS intent context merger: 67 checks (synthetic protocol only)",
+        "stderr": ""
+      }
+    ],
+    "stored_real_carrier_check": "OPT3-COMPLETE-TYPED-STORED-CARRIER-2026-10-11.json",
+    "fixture_amendment": "Original two redundant-slot inputs remain positive controls because pre-existing projectAggregateConditionFields and alignExplicitConditionResponseForm normalize them from accepted condition/current response-form evidence. Independent r2 unknown object and conflicting operation are additional negative controls. Original prepatch red outcome is preserved above.",
+    "source_changes": [
+      "Gateway only: completeTypedConditionProof; shared compileConditionPlan extracted from existing condition path; proof-only bypass of both advisory-status guidance gates; reuse normalized intent and compiled plan with unchanged-semantic-slot guard."
+    ],
+    "no_status_rewrite": true,
+    "no_new_model_or_fact_request_in_proof": true,
+    "no_new_retry_or_total_budget": true,
+    "no_worker_reload": true,
+    "syntax": {
+      "host": {
+        "gateway": true,
+        "fixture": true
+      },
+      "php74_isolated": {
+        "gateway": true,
+        "fixture": true
+      }
+    },
+    "legacy_fixture_incompatibility": {
+      "file": "tests/mohe-ai/condition-set.php",
+      "line": 285,
+      "reason": "PHP 7.4 private ReflectionMethod invoke requires setAccessible(true); existing fixture omits it.",
+      "unchanged_from_current_HEAD": true,
+      "host_assertions": 124,
+      "business_source_failure": false,
+      "not_modified": true
+    },
+    "source_structure": {
+      "added": [
+        "completeTypedConditionProof",
+        "compileConditionPlan shared extraction"
+      ],
+      "removed": [
+        "former inline condition-plan construction now served by compileConditionPlan"
+      ],
+      "callers": {
+        "completeTypedConditionProof": 1,
+        "compileConditionPlan": 2
+      },
+      "ordinary_condition_behavior_retained": "The same AiConditionSetCompiler and AiWorkflowPlanner calls remain the only condition-plan path; original explicit date fallback/current-snapshot behavior stays intact.",
+      "authority_and_budget": "Registry preflight is advisory admission only. Existing executor refreshes permission and actual remaining budget; no exceptions from condition/plan preflight are converted to guidance."
+    },
+    "independent_parent_cross_review": {
+      "reviewer": "root",
+      "source_sha256": "5d0aca446001f8ebc4ec2b47a46392753d7ccad8d9ec274a8bd0c3f0c0925872",
+      "result": "8/8 suites PASS, source stable, reported by root",
+      "suites": [
+        "condition-set",
+        "query-context",
+        "context-delta-gateway",
+        "semantic-guidance",
+        "registry-execution",
+        "ordinal-clarification",
+        "group-reconciliation",
+        "gateway-recovery"
+      ],
+      "not_claimed_as_own_execution": true
+    }
+  }
+}

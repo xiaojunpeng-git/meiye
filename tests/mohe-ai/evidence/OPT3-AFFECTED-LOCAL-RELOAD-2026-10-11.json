@@ -1,0 +1,34 @@
+{
+  "recorded_at": "2026-10-11T15:09:00.001901+00:00",
+  "freeze_verification": {
+    "version": "OPT3-20261011-final-5c02b1cbf288",
+    "freeze_file_sha256": "88db722a8aa4504f9a406bd76c7b4384a9af458e63127ced85fe9118897ec474",
+    "verified_files": 20,
+    "mismatches": [],
+    "latest_source_mtime": "2026-10-11T15:00:22.231161+00:00",
+    "current_head": "be821109147b046734c27fcf69472af44289e1b1",
+    "driver_sha256": "4f0db1c43a7f2dc3e5bf182eea865055c82312680b58925659a72b91199eaf0a"
+  },
+  "before": {
+    "phase": "affected_preflight",
+    "at": "2026-10-11T23:07:01+08:00",
+    "server_uuid": "3506c91f-98cb-11f1-af5f-9e1a52451c2a",
+    "active": 0,
+    "held": 0,
+    "quarantined_slots": 0
+  },
+  "after": {
+    "phase": "affected_postflight",
+    "at": "2026-10-11T23:08:40+08:00",
+    "server_uuid": "3506c91f-98cb-11f1-af5f-9e1a52451c2a",
+    "active": 0,
+    "held": 0,
+    "quarantined_slots": 0
+  },
+  "execution_worker_started_at": "2026-10-11T15:07:53.889546936Z",
+  "supervisor_started_at": "2026-10-11T15:08:29.1153786Z",
+  "started_after_latest_source_mtime": true,
+  "reload_exit_code": 0,
+  "production_changed": false,
+  "slot_or_quota_state_changed_directly": false
+}

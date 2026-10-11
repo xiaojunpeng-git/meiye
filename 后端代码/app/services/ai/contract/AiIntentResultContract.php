@@ -32,7 +32,15 @@ final class AiIntentResultContract
             foreach (['store_term','aggregate_condition','condition_update','object_detail','result_reference'] as $field) {
                 if (isset($values[$field]) && $values[$field]!==[] && $values[$field]!=='') return true;
             }
-            if ($verifiedContinuation && !empty($values['periods'])) return true;
+            // A verified predecessor already owns the business measurement
+            // and population. A partial change to its time, response form,
+            // ranking or exclusions remains business meaning even when that
+            // change needs clarification. Without that predecessor these
+            // fragments must not manufacture a metric or an executable query.
+            if ($verifiedContinuation && (!empty($values['periods'])
+                || !empty($values['ranking']) || !empty($values['metric_exclusions'])
+                || in_array($values['operation']??null,['summary','breakdown','trend','ranking','comparison',
+                    'threshold_count','condition_count','condition_list','definition'],true))) return true;
             if (in_array($values['scope']??null,['current_store','authorized'],true)) return true;
         }
         return false;
@@ -756,6 +764,9 @@ final class AiIntentResultContract
     {
         $presentationOrigin=$contextMeaning['presentation_origin']??'customer_or_verified_context';
         if (($understanding['status']??null)!=='understood'
+            // Typed reuse never overrides the accepted topic boundary, even
+            // when a caller still holds the earlier signed query in memory.
+            || ($understanding['topic_relation']??null)==='new_topic'
             || !in_array($presentationOrigin,['customer_or_verified_context','platform_observation','platform_recommendation'],true)) return null;
         $requirements=AiIntentUnderstandingContract::requirements($understanding);
         if (count($requirements)!==1) return null;
@@ -824,6 +835,9 @@ final class AiIntentResultContract
     {
         $presentationOrigin=$contextMeaning['presentation_origin']??'customer_or_verified_context';
         if (($understanding['status']??null)!=='understood'
+            // A ranking-only fast path may retain conditions only inside the
+            // accepted prior topic; it cannot reopen an explicitly reset one.
+            || ($understanding['topic_relation']??null)==='new_topic'
             ||!in_array($presentationOrigin,['customer_or_verified_context','platform_observation','platform_recommendation'],true)) return null;
         $requirements=AiIntentUnderstandingContract::requirements($understanding);
         if ($requirements===[] || count($requirements)>2) return null;
@@ -871,6 +885,8 @@ final class AiIntentResultContract
     public static function inheritedConditionContinuationContextIntent(array $understanding,array $sourceQuery,array $contextMeaning=[]): ?array
     {
         if (($understanding['status']??null)!=='understood'
+            // A former cohort is never an implicit population for a new topic.
+            || ($understanding['topic_relation']??null)==='new_topic'
             ||($contextMeaning['presentation_origin']??'customer_or_verified_context')!=='customer_or_verified_context') return null;
         $requirements=AiIntentUnderstandingContract::requirements($understanding);
         if ($requirements===[] || count($requirements)>8 || isset($understanding['groups'])) return null;
@@ -1931,6 +1947,10 @@ final class AiIntentResultContract
      */
     public static function canUseRegisteredRankDefault(array $understanding,array $intent): bool
     {
+        // Inheritance is already an accepted measurement decision, even
+        // before the merger fills metric_codes. A first-answer default must
+        // not replace it or make review and execution see different metrics.
+        if (($intent['context_delta']['metric_codes']??null)==='inherit') return false;
         if (($understanding['status']??null)!=='understood' || self::hasUnboundRequirement($understanding)
             || ($intent['operation']??null)!=='ranking'
             || ($intent['object_relation']??'analysis')!=='analysis'
@@ -1955,6 +1975,10 @@ final class AiIntentResultContract
      */
     public static function canUseRegisteredBreakdownDefault(array $understanding,array $intent): bool
     {
+        // Keep inherited measurements on the merger/capability path. If a
+        // new object is incompatible, silently substituting a default would
+        // change the customer's meaning rather than resolve that conflict.
+        if (($intent['context_delta']['metric_codes']??null)==='inherit') return false;
         if (($understanding['status']??null)!=='understood' || self::hasUnboundRequirement($understanding)
             || ($intent['operation']??null)!=='breakdown'
             || ($intent['object_relation']??'analysis')!=='analysis'

@@ -683,7 +683,7 @@ $check($resolvedStandalonePeriod['requirements'][1]['values']['periods']===[['ki
 // R46: the same explicit calendar condition can be repeated across metrics.
 // Exercise the real shared gateway resolver without a provider or customer DB.
 $calendarGateway=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
-$calendarResolver=new ReflectionMethod($calendarGateway,'resolveExactStatedSinglePeriod');
+$calendarResolver=new ReflectionMethod($calendarGateway,'resolveExactStatedPeriods');
 if (PHP_VERSION_ID<80100) $calendarResolver->setAccessible(true);
 $multiCalendar=['status'=>'understood','requirements'=>[]];
 foreach (['现金业绩','消耗业绩','退款业绩'] as $index=>$term) {

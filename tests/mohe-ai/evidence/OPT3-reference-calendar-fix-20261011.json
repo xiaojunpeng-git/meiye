@@ -1,0 +1,122 @@
+{
+  "recorded_at": "2026-10-11T22:03:00.127928+08:00",
+  "baseline_commit": "8f5610d5b609041e862e76c38be2c9426226c33e",
+  "scope": "OPT3 displayed ordinal detail and ordered comparison calendar correction; no provider or business queries for these checks.",
+  "source_sha256": {
+    "后端代码/app/services/ai/AiGatewayServices.php": "94fd9f7d0c41df48c68f1c5bfd0c52b240af51f1a73323bd04df5cb8ccd86c17",
+    "tests/mohe-ai/opt3-result-reference-detail.php": "2ad2bbbe34824243c5e31fd0bb57a47217e5534032b975346b0b56310f906a03",
+    "tests/mohe-ai/opt3-comparison-calendar.php": "5c125e1a1c2bb9f81b77b077a4b8599819e8ae3fd1dbb803edb0d66ccacccf5d",
+    "tests/mohe-ai/intent-understanding-contract.php": "df67a490a2921e2ae7a8ee757ec2f71d7498e5588327a7bac22eb33a256a0333",
+    "tests/mohe-ai/r50-calendar-range.php": "1f987bb74b839e0852845befd06303a3d23aa8b2e0231b0dbc978abd35fad2c4",
+    "tests/mohe-ai/opt3-local-regression.php": "8ee9661e925333010c75a421d273413c4c23ef3a9e0d57b34aa9ee67fd657a9c"
+  },
+  "changes": [
+    {
+      "method": "compileObjectDetailContinuation",
+      "contract": "Pure current result_reference resolves exact group/ordinal from the signed predecessor and reuses existing store breakdown/person summary detail path. New topic and extra metric/period/ranking remain outside the shortcut."
+    },
+    {
+      "method": "resolveExactStatedPeriods",
+      "contract": "Existing one-period correction retained; a single current comparison period owner with two complete ordered calendar windows can be corrected. Grouped, split, historical and incomplete calendar carriers remain unchanged; future dates remain future."
+    }
+  ],
+  "tests": [
+    {
+      "runtime": "PHP 7.4.33 / isolated no-network source-readonly container",
+      "suite": "opt3-result-reference-detail.php",
+      "status": "PASS",
+      "checks": 21,
+      "before_fix_failed_checks": 16
+    },
+    {
+      "runtime": "PHP 7.4.33 / isolated no-network source-readonly container",
+      "suite": "opt3-comparison-calendar.php",
+      "status": "PASS",
+      "checks": 11,
+      "before_fix_failed_checks": 2
+    },
+    {
+      "runtime": "PHP 7.4.33",
+      "suite": "r50-calendar-range.php",
+      "status": "PASS",
+      "checks": 37
+    },
+    {
+      "runtime": "PHP 7.4.33",
+      "suite": "query-context.php",
+      "status": "PASS",
+      "checks": 67
+    },
+    {
+      "runtime": "PHP 7.4.33",
+      "suite": "context-delta-gateway.php",
+      "status": "PASS",
+      "checks": 102
+    },
+    {
+      "runtime": "PHP 7.4.33",
+      "suite": "r54-detail-profiles.php",
+      "status": "PASS",
+      "checks": 5
+    },
+    {
+      "runtime": "host PHP",
+      "suite": "intent-understanding-contract.php",
+      "status": "PASS",
+      "checks": 263
+    },
+    {
+      "runtime": "host PHP",
+      "suite": "object-detail-continuation.php",
+      "status": "PASS",
+      "checks": 78
+    },
+    {
+      "runtime": "host PHP",
+      "suite": "result-reference.php",
+      "status": "PASS"
+    },
+    {
+      "runtime": "PHP 7.4.33",
+      "suite": "AiGatewayServices.php syntax",
+      "status": "PASS"
+    },
+    {
+      "runtime": "git",
+      "suite": "diff --check",
+      "status": "PASS"
+    }
+  ],
+  "preexisting_limits": [
+    {
+      "suite": "member-detail-continuation.php:213",
+      "status": "FAIL unchanged legacy wording assertion",
+      "baseline_proof": "OPT3-legacy-member-message-baseline-20261011.json"
+    },
+    {
+      "suite": "intent-understanding-contract.php on PHP7.4",
+      "status": "BLOCKED by pre-existing str_contains() fixture usage; host passed"
+    },
+    {
+      "suite": "result-reference.php / object-detail-continuation.php / member-detail-continuation.php on PHP7.4",
+      "status": "BLOCKED by legacy private Reflection invocation without setAccessible; narrow new PHP7.4 fixtures cover edited methods"
+    }
+  ],
+  "old_run_semantic_evidence": {
+    "run_id": "e47ab96ef14aa022b4c92e664e8ed16a474798afd0ad807e",
+    "retained_query_shape": "ranking",
+    "retained_ranking": {
+      "direction": "top",
+      "limit": 3
+    },
+    "accepted_understanding_retained": false,
+    "clarification_envelope_retained": false,
+    "context_meaning_fields": [
+      "presentation_origin"
+    ],
+    "limitation": "New fixtures are synthetic structural reproductions. Exact original accepted model carrier cannot be reconstructed from retained evidence; new live replay is required."
+  },
+  "live_5x10_status": "Earlier run interrupted after 26 recorded/27 admitted; next full run not started pending parent readiness.",
+  "original_task_baseline": "89f54ce7",
+  "baseline_note": "Current HEAD advanced through unrelated receipt commits after the old live run; parent verified no OPT3 AI files in those commits."
+}

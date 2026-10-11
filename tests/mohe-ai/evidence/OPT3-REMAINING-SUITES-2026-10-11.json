@@ -1,0 +1,206 @@
+{
+  "recorded_at": "2026-10-11T13:28:45.467280+00:00",
+  "scope": "run-all.sh remaining suites after r5-holdout; host synthetic fixtures; no application bootstrap/customer database/model",
+  "php_version": "8.5.8",
+  "node_version": "v16.20.2",
+  "results": [
+    {
+      "suite": "management-core",
+      "exit_code": 0,
+      "elapsed_ms": 79,
+      "output": "PASS management core: 47 checks"
+    },
+    {
+      "suite": "management-gateway",
+      "exit_code": 255,
+      "elapsed_ms": 552,
+      "output": "Fatal error: Uncaught RuntimeException: FAIL step metric_code in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/r6-gateway-harness.php:11\nStack trace:\n#0 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/r6-gateway-harness.php(34): r6hCheck(false, 'step metric_cod...')\n#1 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/management-gateway.php(56): R6GatewayHarness->step(Array, 'metric_code', 1)\n#2 {main}\n  thrown in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/r6-gateway-harness.php on line 11\nPHP Fatal error:  Uncaught RuntimeException: FAIL step metric_code in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/r6-gateway-harness.php:11\nStack trace:\n#0 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/r6-gateway-harness.php(34): r6hCheck(false, 'step metric_cod...')\n#1 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/management-gateway.php(56): R6GatewayHarness->step(Array, 'metric_code', 1)\n#2 {main}\n  thrown in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/r6-gateway-harness.php on line 11"
+    },
+    {
+      "suite": "management-menu",
+      "exit_code": 0,
+      "elapsed_ms": 62,
+      "output": "R6 account-owned menu policy: 21 checks PASS (pure projections; no DB)"
+    },
+    {
+      "suite": "analysis-capability-catalog",
+      "exit_code": 0,
+      "elapsed_ms": 64,
+      "output": "PASS analysis capability catalog: 21 checks"
+    },
+    {
+      "suite": "analysis-object-resolution",
+      "exit_code": 0,
+      "elapsed_ms": 57,
+      "output": "PASS object resolution / safe question: 16 checks"
+    },
+    {
+      "suite": "personnel-analysis",
+      "exit_code": 0,
+      "elapsed_ms": 75,
+      "output": "PASS personnel analysis: 56 checks (synthetic data only)"
+    },
+    {
+      "suite": "member-analysis",
+      "exit_code": 0,
+      "elapsed_ms": 57,
+      "output": "PASS member analysis: 32 checks (synthetic data only)"
+    },
+    {
+      "suite": "query-context",
+      "exit_code": 0,
+      "elapsed_ms": 65,
+      "output": "PASS intent context merger: 67 checks (synthetic protocol only)"
+    },
+    {
+      "suite": "context-delta-gateway",
+      "exit_code": 0,
+      "elapsed_ms": 4604,
+      "output": "PASS context delta gateway: 102 checks (SQLite, synthetic model/facts only)"
+    },
+    {
+      "suite": "date-policy",
+      "exit_code": 0,
+      "elapsed_ms": 63,
+      "output": "PASS date-policy: 56 checks (offline)"
+    },
+    {
+      "suite": "mobile-ai-entry-transport-contract",
+      "exit_code": 255,
+      "elapsed_ms": 54,
+      "output": "Fatal error: Uncaught RuntimeException: FAIL the mobile answer keeps its one-second observer while the separate Excel task polls less often in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8\nStack trace:\n#0 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php(100): {closure:/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8}(false, 'the mobile answ...')\n#1 {main}\n  thrown in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php on line 8\nPHP Fatal error:  Uncaught RuntimeException: FAIL the mobile answer keeps its one-second observer while the separate Excel task polls less often in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8\nStack trace:\n#0 /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php(100): {closure:/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php:8}(false, 'the mobile answ...')\n#1 {main}\n  thrown in /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/mohe-ai/mobile-ai-entry-transport-contract.php on line 8"
+    },
+    {
+      "suite": "device-session-contract",
+      "exit_code": 0,
+      "elapsed_ms": 108,
+      "output": "Device history / identity / retention / delivery / version ordering / context reference / single removal: PASS"
+    },
+    {
+      "suite": "browser-entry-contract",
+      "exit_code": 0,
+      "elapsed_ms": 5435,
+      "output": "Browser entry queued create/status polling/cancel/lost-create-replay/late-admission/recovery-visible-question/expiry/retired-terminal/XSS/capability/admin-no-config/workspace: PASS"
+    },
+    {
+      "suite": "browser-single-entry-contract",
+      "exit_code": 0,
+      "elapsed_ms": 2499,
+      "output": "Browser single-entry runtime handoff: 7 checks PASS"
+    },
+    {
+      "suite": "browser-transport-contract",
+      "exit_code": 0,
+      "elapsed_ms": 30,
+      "output": "Browser transport no URL credentials: 11 checks PASS"
+    },
+    {
+      "suite": "browser-workflow-contract",
+      "exit_code": 0,
+      "elapsed_ms": 6286,
+      "output": "Browser workflow + transport: 42 checks PASS (DOM/HTTP fixtures, no live account)"
+    },
+    {
+      "suite": "browser-independent-export-contract",
+      "exit_code": 0,
+      "elapsed_ms": 395,
+      "output": "Browser independent Excel after answer: PASS"
+    },
+    {
+      "suite": "browser-guidance-contract",
+      "exit_code": 0,
+      "elapsed_ms": 3062,
+      "output": "R5 browser guidance: 226 checks PASS (DOM + HTTP fixtures only; no model, customer data or real browser layout)"
+    },
+    {
+      "suite": "opt3-browser-failure-contract",
+      "exit_code": 0,
+      "elapsed_ms": 692,
+      "output": "OPT3 platform failure messages / retry metadata / topic handoff / drawer compatibility: PASS"
+    },
+    {
+      "suite": "browser-mobile-guidance-contract",
+      "exit_code": 0,
+      "elapsed_ms": 185,
+      "output": "R5/R47 mobile production-controller: 218 checks PASS (TS-lowered controller + callback fixtures; not H5/native UI acceptance)\nR45 nested presentation, grouped facts and no additional requests: PASS\nR52 one-column composer menu, history isolation and clear confirmation: PASS"
+    },
+    {
+      "suite": "order-export-snapshot",
+      "exit_code": 0,
+      "elapsed_ms": 94,
+      "output": "PASS actual PHP normalizer: legacy rejection, preserved dates, query/page scopes\nPASS order export snapshot: source unchanged, aliases converted, dates and other filters retained"
+    },
+    {
+      "suite": "management-ui-contract",
+      "exit_code": 0,
+      "elapsed_ms": 29,
+      "output": "Management UI scene contract: PASS"
+    },
+    {
+      "suite": "admin-router-contract",
+      "exit_code": 0,
+      "elapsed_ms": 29,
+      "output": "Admin router management navigation contract: PASS"
+    },
+    {
+      "suite": "management-route-access",
+      "exit_code": 0,
+      "elapsed_ms": 29,
+      "output": "Management route access: PASS"
+    },
+    {
+      "suite": "group-dashboard-stability-contract",
+      "exit_code": 0,
+      "elapsed_ms": 54,
+      "output": "group dashboard stability contract: PASS"
+    },
+    {
+      "suite": "order-center-unified-export-contract",
+      "exit_code": 1,
+      "elapsed_ms": 52,
+      "output": "[PASS] sales 页签登记统一查询导出页码\n[PASS] sales 页签前端绑定同一导出页码\n[PASS] recharge 页签登记统一查询导出页码\n[PASS] recharge 页签前端绑定同一导出页码\n[PASS] refund 页签登记统一查询导出页码\n[PASS] refund 页签前端绑定同一导出页码\n[PASS] debt 页签登记统一查询导出页码\n[PASS] debt 页签前端绑定同一导出页码\n[PASS] service 页签登记统一查询导出页码\n[PASS] service 页签前端绑定同一导出页码\n[PASS] supplement 页签登记统一查询导出页码\n[PASS] supplement 页签前端绑定同一导出页码\n[PASS] gift 页签登记统一查询导出页码\n[PASS] gift 页签前端绑定同一导出页码\n[PASS] card_operation 页签登记统一查询导出页码\n[PASS] card_operation 页签前端绑定同一导出页码\n[FAIL] 销售日期与其余七类业务日期均为当天默认的起止日期范围\n[FAIL] 销售列表区分销售归属日与真实下单时间，旧单不以支付时间冒充下单\n[PASS] 订单中心日期范围会传给销售与其余七类记录的真实查询\n[FAIL] 八类订单首屏与平台只读入口均把真实查询锁定为当天\n[PASS] 订单中心统一查询 registrar 已登记\n[PASS] 八类订单记录 provider 已登记\n[PASS] 异步导出 worker 会重建订单中心权限上下文\n[PASS] 导出只读取现有 V3 订单中心权威投影\n[PASS] 导出冻结最近一次成功查询，而不是浏览器当前行\n[PASS] 导出切换账号或门店时清除旧快照\n[PASS] 订单中心导出快照不会携带旧列表 status 参数\n[PASS] 服务记录前后端字段合同一致，能力不会因工资项目数字段降级\n[PASS] 服务记录固定显示来源及同次销售单号，列表与导出字段合同一致\n[PASS] 补交记录在欠款摘要右侧固定显示当前分类和商品名称\n[PASS] 退款记录来源固定为 K 且列表与导出读取同一投影\n[PASS] 工作台上下文就绪后会重试当前页签统一查询能力\n[PASS] 订单中心导出位于设置右侧且固定导出当前查询结果\n[PASS] 导出是查询权限的附属能力，不额外要求导出功能权限\n[PASS] 订单中心下载导出文件会携带门店会话并校验 xlsx 二进制\n[PASS] 导出下载按任务冻结页签重建上下文并二次校验\n[PASS] 销售订单只显示结账时选择的最终客户来源\n[PASS] 导出任务创建后会投递后台执行器\nASSERT_PASSED=35\nASSERT_FAILED=3\nORDER_CENTER_UNIFIED_EXPORT=FAIL"
+    },
+    {
+      "suite": "local-entrypoint-permissions",
+      "exit_code": 0,
+      "elapsed_ms": 812,
+      "output": "PASS 16 isolated entrypoint permission checks; fake PHP only, no application/runtime/secrets accessed"
+    }
+  ],
+  "syntax_checks": {
+    "total": 219,
+    "failed": []
+  },
+  "rechecks": [
+    {
+      "suite": "mobile-ai-entry-transport-contract",
+      "comparison": "Execute Git HEAD test and read all text dependencies from Git HEAD in memory; no working files replaced",
+      "exit_code": 255,
+      "output": "Fatal error: Uncaught RuntimeException: FAIL the mobile answer keeps its one-second observer while the separate Excel task polls less often in Standard input code:21\nStack trace:\n#0 Standard input code(113): {closure:Standard input code:21}(false, 'the mobile answ...')\n#1 {main}\n  thrown in Standard input code on line 21\nPHP Fatal error:  Uncaught RuntimeException: FAIL the mobile answer keeps its one-second observer while the separate Excel task polls less often in Standard input code:21\nStack trace:\n#0 Standard input code(113): {closure:Standard input code:21}(false, 'the mobile answ...')\n#1 {main}\n  thrown in Standard input code on line 21",
+      "diagnosis": "The static check requires the exact text },1500), while both HEAD and working mobile source use setTimeout(pollStatus,1500). The 1500 ms export polling behavior remains present; OPT3 did not edit mobile source."
+    },
+    {
+      "suite": "order-center-unified-export-contract",
+      "comparison": "Execute Git HEAD test and read all text dependencies from Git HEAD in memory; no working files replaced",
+      "exit_code": 1,
+      "output": "[PASS] sales 页签登记统一查询导出页码\n[PASS] sales 页签前端绑定同一导出页码\n[PASS] recharge 页签登记统一查询导出页码\n[PASS] recharge 页签前端绑定同一导出页码\n[PASS] refund 页签登记统一查询导出页码\n[PASS] refund 页签前端绑定同一导出页码\n[PASS] debt 页签登记统一查询导出页码\n[PASS] debt 页签前端绑定同一导出页码\n[PASS] service 页签登记统一查询导出页码\n[PASS] service 页签前端绑定同一导出页码\n[PASS] supplement 页签登记统一查询导出页码\n[PASS] supplement 页签前端绑定同一导出页码\n[PASS] gift 页签登记统一查询导出页码\n[PASS] gift 页签前端绑定同一导出页码\n[PASS] card_operation 页签登记统一查询导出页码\n[PASS] card_operation 页签前端绑定同一导出页码\n[FAIL] 销售日期与其余七类业务日期均为当天默认的起止日期范围\n[FAIL] 销售列表区分销售归属日与真实下单时间，旧单不以支付时间冒充下单\n[PASS] 订单中心日期范围会传给销售与其余七类记录的真实查询\n[FAIL] 八类订单首屏与平台只读入口均把真实查询锁定为当天\n[PASS] 订单中心统一查询 registrar 已登记\n[PASS] 八类订单记录 provider 已登记\n[PASS] 异步导出 worker 会重建订单中心权限上下文\n[PASS] 导出只读取现有 V3 订单中心权威投影\n[PASS] 导出冻结最近一次成功查询，而不是浏览器当前行\n[PASS] 导出切换账号或门店时清除旧快照\n[PASS] 订单中心导出快照不会携带旧列表 status 参数\n[PASS] 服务记录前后端字段合同一致，能力不会因工资项目数字段降级\n[PASS] 服务记录固定显示来源及同次销售单号，列表与导出字段合同一致\n[PASS] 补交记录在欠款摘要右侧固定显示当前分类和商品名称\n[PASS] 退款记录来源固定为 K 且列表与导出读取同一投影\n[PASS] 工作台上下文就绪后会重试当前页签统一查询能力\n[PASS] 订单中心导出位于设置右侧且固定导出当前查询结果\n[PASS] 导出是查询权限的附属能力，不额外要求导出功能权限\n[PASS] 订单中心下载导出文件会携带门店会话并校验 xlsx 二进制\n[PASS] 导出下载按任务冻结页签重建上下文并二次校验\n[PASS] 销售订单只显示结账时选择的最终客户来源\n[PASS] 导出任务创建后会投递后台执行器\nASSERT_PASSED=35\nASSERT_FAILED=3\nORDER_CENTER_UNIFIED_EXPORT=FAIL",
+      "diagnosis": "All three static date/default/field assertions fail identically when both test and source text are read from HEAD. Unrelated to the OPT3 AI changes; no cashier UI change made."
+    },
+    {
+      "suite": "management-gateway",
+      "comparison": "Original fixture also failed with all five OPT3 AI classes restored from Git HEAD in memory. Corrected only the fixture to specify today; business source unchanged for this correction.",
+      "initial_head_result": "FAIL step metric_code",
+      "previous_assumption": "An ambiguous platform metric with no date defaults to today",
+      "current_policy": "Missing metric and period use semantic guidance; explicit today isolates the configurable metric slot and management-version freezing",
+      "source_sha256": "f9432a66877d1653a71837e7e02cfc2296b603c7092d876ee38f570ff71393ce",
+      "exit_code": 0,
+      "output": "R6 management gateway: 36 checks PASS (SQLite, synthetic model/facts; not live acceptance)",
+      "historical_evidence": {
+        "commit": "4a8fd8ca4",
+        "head_source_lines": "AiGatewayServices.php:3132-3140",
+        "change": "OPT1 already requires period clarification for broad platform requests missing both metric and period."
+      }
+    }
+  ],
+  "updated_at": "2026-10-11T13:31:04.820975+00:00"
+}

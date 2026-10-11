@@ -382,7 +382,10 @@ final class MetricReadViewServices
         foreach ($groups as $points) foreach ($points as $point) $ids[]=$point[$personnel===null?'store_id':'employee_id'];
         $ids=array_values(array_unique($ids));
         if (!$ids) return [];
-        $out=[];
+        // Owned by this detail projection inside the read transaction. The
+        // resolver rechecks each metric's authority even on a raw-row hit;
+        // neither another period nor a later ranking can reuse this cache.
+        $out=[];$populationCache=[];
         foreach ($codes as $code) {
             $values=array_fill_keys($ids,0);
             if ($personnel===null) {
@@ -392,7 +395,7 @@ final class MetricReadViewServices
                 // authorised store. Resolve that metric's fact pairs before
                 // intersecting identities; primary sales pairs would omit it.
                 $selection=($query['business_filters']['selection_ref']??null)===MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF
-                    ? $this->personnel->factParticipantSelection([$code],$binding['tenant_id'],$range) : $personnel;
+                    ? $this->personnel->factParticipantSelection([$code],$binding['tenant_id'],$range,$populationCache) : $personnel;
                 $pairs=array_values(array_filter($selection['pairs'],static function(array $pair)use($ids): bool { return in_array($pair['employee_id'],$ids,true); }));
                 foreach ($pairs?$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$range,$code,$pairs):[] as $point) {
                     $values[$point['employee_id']]=$this->addAmount($values[$point['employee_id']],$point['amount_cents']);

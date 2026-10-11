@@ -92,8 +92,10 @@ checkRuntime('model transport timeout preserves finalization reserve from live d
 checkRuntime('model transport timeout never exceeds stage or configured cap', Budget::callTimeout($liveDeadline, 'model', 5000, 90000) === 1500);
 checkRuntime('binding uses the same bounded model window as other semantic stages', Budget::callTimeout($spent, 'model', 30000, 22000) === 30000);
 $gatewaySource = file_get_contents(dirname(__DIR__, 2) . '/后端代码/app/services/ai/AiGatewayServices.php');
+// Recommendations now share the same bounded window as understanding and
+// binding; the transport fixture separately exercises the live deadline cap.
 checkRuntime('gateway derives model transport timeout at each provider send boundary', is_string($gatewaySource)
-    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 7
+    && substr_count($gatewaySource, 'modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS)') === 8
     && strpos($gatewaySource, 'UNDERSTANDING_TRANSPORT_RETRY_LIMIT_MS') === false
     && strpos($gatewaySource, 'BIND_INITIAL_STAGE_LIMIT_MS') === false
     && strpos($gatewaySource, 'BIND_RECOVERY_STAGE_LIMIT_MS') === false

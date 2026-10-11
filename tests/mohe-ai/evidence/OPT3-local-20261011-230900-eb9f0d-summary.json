@@ -1,0 +1,165 @@
+{
+  "recorded_at": "2026-10-11T23:13:30.282861+08:00",
+  "version": "OPT3-20261011-final-5c02b1cbf288",
+  "raw_report": "OPT3-local-20261011-230900-eb9f0d.json",
+  "raw_report_sha256": "d92aa96d8ee1e7edebb528f459142f8aa3a1269a9395feea9a74a776aa9c4d8a",
+  "raw_passed": 11,
+  "total": 15,
+  "overall_raw_pass": false,
+  "classifications": {
+    "provider_dependency_failure": 1,
+    "unverified_upstream_dependency": 3,
+    "passed": 11
+  },
+  "independent_functional_failures": 0,
+  "provider_dependency_failures": 1,
+  "unverified_upstream_dependency_cases": 3,
+  "unnecessary_guidance_cases": 0,
+  "raw_outcomes_unchanged": true,
+  "source_unchanged": true,
+  "all_20_freeze_files_unchanged": true,
+  "freeze_mismatches": [],
+  "postflight": {
+    "recorded_at": "2026-10-11T23:12:49+08:00",
+    "active": 0,
+    "held": 0,
+    "quarantined_slots": 0
+  },
+  "round_passed": [
+    3,
+    3,
+    5
+  ],
+  "failures": [
+    {
+      "case": "R2T1",
+      "run_id": "7120d7d202c89a2057a1f66df01b6fb4530136cf313f3fd9",
+      "classification": "provider_dependency_failure",
+      "reason": "AI_MODEL_RESULT_UNKNOWN",
+      "checks": {
+        "completed": false,
+        "required_guidance": false
+      },
+      "upstream_failures": [],
+      "explanation": "Initial recommendation transport timeout prevented the planned month supplement; later three queries completed with same-authority Reader parity but cannot establish the expected month chain."
+    },
+    {
+      "case": "R2T2",
+      "run_id": "455b10a9b7c2b35524bbf38aa8b443614931a67c0a1f90af",
+      "classification": "unverified_upstream_dependency",
+      "reason": "",
+      "checks": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "authorized_scope": true,
+        "period": false,
+        "fresh_reader_results": true,
+        "same_authority": true
+      },
+      "upstream_failures": [
+        1
+      ],
+      "explanation": "Initial recommendation transport timeout prevented the planned month supplement; later three queries completed with same-authority Reader parity but cannot establish the expected month chain."
+    },
+    {
+      "case": "R2T3",
+      "run_id": "25ee1400fb5db6c0e7cb53d79ed0a72d0f12ae0ec4086769",
+      "classification": "unverified_upstream_dependency",
+      "reason": "",
+      "checks": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "authorized_scope": true,
+        "period": false,
+        "ranking": true,
+        "fresh_reader_results": true,
+        "same_authority": true
+      },
+      "upstream_failures": [
+        2,
+        1
+      ],
+      "explanation": "Initial recommendation transport timeout prevented the planned month supplement; later three queries completed with same-authority Reader parity but cannot establish the expected month chain."
+    },
+    {
+      "case": "R2T4",
+      "run_id": "99472dfb29602c9b6716cf358eb702408050390180b9731f",
+      "classification": "unverified_upstream_dependency",
+      "reason": "",
+      "checks": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "authorized_scope": true,
+        "period": false,
+        "ranking": true,
+        "fresh_reader_results": true,
+        "same_authority": true
+      },
+      "upstream_failures": [
+        3,
+        2,
+        1
+      ],
+      "explanation": "Initial recommendation transport timeout prevented the planned month supplement; later three queries completed with same-authority Reader parity but cannot establish the expected month chain."
+    }
+  ],
+  "guidance_audit": [
+    {
+      "case": "R2T3",
+      "steps": 1,
+      "fields": [
+        [
+          "rank_direction"
+        ]
+      ],
+      "assessment": "Ranking direction genuinely missing; one structured answer, no repeated submission"
+    }
+  ],
+  "employee_reader_performance": [
+    {
+      "case": "R3T1",
+      "run_id": "30e0bc57b430fe48b2d7721c21c596e5500c1860012759ce",
+      "execution_ms": 9897,
+      "query_ms": [
+        4140
+      ],
+      "same_authority": true,
+      "fresh_reader_results": true
+    },
+    {
+      "case": "R3T2",
+      "run_id": "303197a2dc81af4e0cebc13adaba4076d147a4d8e22e730b",
+      "execution_ms": 5719,
+      "query_ms": [
+        3972
+      ],
+      "same_authority": true,
+      "fresh_reader_results": true
+    },
+    {
+      "case": "R3T3",
+      "run_id": "0af6aa443ae176d8a3d4533a05d2c711973c4e50c19fcd15",
+      "execution_ms": 1574,
+      "query_ms": [
+        164
+      ],
+      "same_authority": true,
+      "fresh_reader_results": true
+    }
+  ],
+  "complete_condition_direct_answers": [
+    "R2T9",
+    "R2T10"
+  ],
+  "functional_chains_passed": [
+    "R3T1-3 employee ranking/quantity/month continuation",
+    "R5T4-8 cash/actual/month-highest/top-three/consume ranking change"
+  ],
+  "remaining": "Parent will conduct one authorized browser chain of 5 Runs to restore the recommendation-dependent month precondition and verify UI. No further API questions scheduled."
+}

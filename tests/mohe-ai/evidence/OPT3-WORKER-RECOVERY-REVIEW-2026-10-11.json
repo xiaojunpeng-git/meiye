@@ -1,0 +1,129 @@
+{
+  "recorded_at": "2026-10-11T21:58:15.012652+08:00",
+  "scope": "Read-only source review and synthetic in-memory state branches; no business or remote database",
+  "source_sha256": {
+    "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "tests/mohe-ai/opt3-worker-recovery.php": "c5d53da7fd130b8ac49aea79a0f2f4f8c1b7fef69edbae29b1042e4219253826"
+  },
+  "extra_test_source": "<?php\nrequire 'tests/mohe-ai/state-store-contract.php';\nrequire_once '后端代码/app/services/ai/execution/AiRunExecutionRuntime.php';\nuse app\\services\\ai\\execution\\AiRunStore;\nuse app\\services\\ai\\execution\\AiRunExecutionRuntime;\n$base=$checks;$saved=getenv('MOHE_AI_EXECUTION_WORKER_ID');$pid=getmypid();$host=(string)php_uname('n');\nif(!preg_match('/^[A-Za-z0-9_.:-]{1,128}$/D',$host))$host='host-'.substr(hash('sha256',$host),0,32);\nputenv('MOHE_AI_EXECUTION_WORKER_ID=ai-exec-'.$pid.'-'.str_repeat('a',24));$out=[];\ntry {\n foreach(['completed','partial','failed_known','failed_unknown'] as $case){\n  $db=new PDO('sqlite::memory:');installAiStateFixture($db);$now=1000000;\n  $store=new AiRunStore($db,'','opt3.worker.extra',static function()use(&$now):int{return $now;});\n  $owner=['account_id'=>21,'terminal'=>'platform','conversation_id'=>'conversation','window_id'=>'window'];\n  $run=$store->create($owner,'request',hash('sha256','query'),$snapshot,300000)['run'];$id=$run['run_id'];$g=$run['generation'];$token='old-worker-token';\n  $ref='request-'.str_repeat('c',48);$store->queueExecution($owner,$id,$g,'execute',$ref,hash('sha256','input'));$store->queuedExecution($id);\n  $store->startQueuedExecutionWorker($id,'ai-exec-'.$pid.'-'.str_repeat('b',24),$pid,$host);$store->claim($owner,$id,$g,$token);\n  $store->reserve($owner,$id,$g,$token,'stage_count');$store->prepareAttempt($owner,$id,$g,$token,'model','model',hash('sha256','synthetic payload'),'siliconflow');$store->sendAttempt($owner,$id,$g,$token,'model');\n  $unknown=$case==='failed_unknown';$store->finishAttempt($owner,$id,$g,$token,'model',$unknown?'UNKNOWN':'SUCCEEDED',$unknown?null:3,$unknown?null:2);\n  if($case==='completed'||$case==='partial')$store->publish($owner,$id,$g,$token,'evidence','answer',$case==='partial'?'data_only_export_failed':'complete');\n  else $store->fail($owner,$id,$g,$token,$unknown?'AI_MODEL_RESULT_UNKNOWN':'AI_EXECUTION_CHECK_FAILED');\n  $before=$store->get($owner,$id,$g);$attemptBefore=$db->query('SELECT state,input_tokens,output_tokens FROM mohe_ai_attempt')->fetch(PDO::FETCH_ASSOC);$now+=210001;\n  checkState(AiRunExecutionRuntime::recoverStoppedWorkers($store)===1,$case.' reclaims proven dead consumer');$after=$store->get($owner,$id,$g);\n  $attemptAfter=$db->query('SELECT state,input_tokens,output_tokens FROM mohe_ai_attempt')->fetch(PDO::FETCH_ASSOC);\n  checkState($after['status']===$before['status']&&$after['reason']===$before['reason'],$case.' preserves exact terminal outcome');\n  checkState($attemptAfter===$attemptBefore,$case.' preserves known/unknown receipt and exact usage');\n  checkState($after['slot_held']===0&&$after['answer_ref']===$before['answer_ref']&&$after['evidence_ref']===$before['evidence_ref'],$case.' releases only physical reservation');\n  checkState($store->queuedExecution($id)===null&&AiRunExecutionRuntime::recoverStoppedWorkers($store)===0,$case.' no replay and idempotent recovery');\n  $out[]=['case'=>$case,'status'=>$after['status'],'reason'=>$after['reason'],'attempt'=>$attemptAfter,'slot_held'=>$after['slot_held']];\n }\n}finally{putenv($saved===false?'MOHE_AI_EXECUTION_WORKER_ID':'MOHE_AI_EXECUTION_WORKER_ID='.$saved);}\necho 'EXTRA_WORKER_RESULT='.json_encode(['pass'=>true,'assertions'=>$checks-$base,'cases'=>$out]).PHP_EOL;\n",
+  "results": [
+    {
+      "runtime": "PHP8.5 host",
+      "exit_code": 0,
+      "result": {
+        "pass": true,
+        "assertions": 20,
+        "cases": [
+          {
+            "case": "completed",
+            "status": "COMPLETED",
+            "reason": "",
+            "attempt": {
+              "state": "SUCCEEDED",
+              "input_tokens": 3,
+              "output_tokens": 2
+            },
+            "slot_held": 0
+          },
+          {
+            "case": "partial",
+            "status": "PARTIAL_SUCCEEDED",
+            "reason": "DATA_ONLY_EXPORT_FAILED",
+            "attempt": {
+              "state": "SUCCEEDED",
+              "input_tokens": 3,
+              "output_tokens": 2
+            },
+            "slot_held": 0
+          },
+          {
+            "case": "failed_known",
+            "status": "FAILED",
+            "reason": "AI_EXECUTION_CHECK_FAILED",
+            "attempt": {
+              "state": "SUCCEEDED",
+              "input_tokens": 3,
+              "output_tokens": 2
+            },
+            "slot_held": 0
+          },
+          {
+            "case": "failed_unknown",
+            "status": "FAILED",
+            "reason": "AI_MODEL_RESULT_UNKNOWN",
+            "attempt": {
+              "state": "UNKNOWN",
+              "input_tokens": null,
+              "output_tokens": null
+            },
+            "slot_held": 0
+          }
+        ]
+      },
+      "summary": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nEXTRA_WORKER_RESULT={\"pass\":true,\"assertions\":20,\"cases\":[{\"case\":\"completed\",\"status\":\"COMPLETED\",\"reason\":\"\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":3,\"output_tokens\":2},\"slot_held\":0},{\"case\":\"partial\",\"status\":\"PARTIAL_SUCCEEDED\",\"reason\":\"DATA_ONLY_EXPORT_FAILED\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":3,\"output_tokens\":2},\"slot_held\":0},{\"case\":\"failed_known\",\"status\":\"FAILED\",\"reason\":\"AI_EXECUTION_CHECK_FAILED\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":3,\"output_tokens\":2},\"slot_held\":0},{\"case\":\"failed_unknown\",\"status\":\"FAILED\",\"reason\":\"AI_MODEL_RESULT_UNKNOWN\",\"attempt\":{\"state\":\"UNKNOWN\",\"input_tokens\":null,\"output_tokens\":null},\"slot_held\":0}]}"
+    },
+    {
+      "runtime": "PHP7.4 isolated",
+      "exit_code": 0,
+      "result": {
+        "pass": true,
+        "assertions": 20,
+        "cases": [
+          {
+            "case": "completed",
+            "status": "COMPLETED",
+            "reason": "",
+            "attempt": {
+              "state": "SUCCEEDED",
+              "input_tokens": "3",
+              "output_tokens": "2"
+            },
+            "slot_held": 0
+          },
+          {
+            "case": "partial",
+            "status": "PARTIAL_SUCCEEDED",
+            "reason": "DATA_ONLY_EXPORT_FAILED",
+            "attempt": {
+              "state": "SUCCEEDED",
+              "input_tokens": "3",
+              "output_tokens": "2"
+            },
+            "slot_held": 0
+          },
+          {
+            "case": "failed_known",
+            "status": "FAILED",
+            "reason": "AI_EXECUTION_CHECK_FAILED",
+            "attempt": {
+              "state": "SUCCEEDED",
+              "input_tokens": "3",
+              "output_tokens": "2"
+            },
+            "slot_held": 0
+          },
+          {
+            "case": "failed_unknown",
+            "status": "FAILED",
+            "reason": "AI_MODEL_RESULT_UNKNOWN",
+            "attempt": {
+              "state": "UNKNOWN",
+              "input_tokens": null,
+              "output_tokens": null
+            },
+            "slot_held": 0
+          }
+        ]
+      },
+      "summary": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nEXTRA_WORKER_RESULT={\"pass\":true,\"assertions\":20,\"cases\":[{\"case\":\"completed\",\"status\":\"COMPLETED\",\"reason\":\"\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":\"3\",\"output_tokens\":\"2\"},\"slot_held\":0},{\"case\":\"partial\",\"status\":\"PARTIAL_SUCCEEDED\",\"reason\":\"DATA_ONLY_EXPORT_FAILED\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":\"3\",\"output_tokens\":\"2\"},\"slot_held\":0},{\"case\":\"failed_known\",\"status\":\"FAILED\",\"reason\":\"AI_EXECUTION_CHECK_FAILED\",\"attempt\":{\"state\":\"SUCCEEDED\",\"input_tokens\":\"3\",\"output_tokens\":\"2\"},\"slot_held\":0},{\"case\":\"failed_unknown\",\"status\":\"FAILED\",\"reason\":\"AI_MODEL_RESULT_UNKNOWN\",\"attempt\":{\"state\":\"UNKNOWN\",\"input_tokens\":null,\"output_tokens\":null},\"slot_held\":0}]}"
+    },
+    {
+      "runtime": "PHP7.4 fixture",
+      "exit_code": 0,
+      "result": null,
+      "summary": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nPASS OPT3 worker recovery 46 assertions"
+    }
+  ]
+}

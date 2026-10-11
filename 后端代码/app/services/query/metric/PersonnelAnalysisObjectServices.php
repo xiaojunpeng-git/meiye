@@ -102,8 +102,11 @@ final class PersonnelAnalysisObjectServices
      *
      * @param array<int,string> $metrics
      * @param array{start:string,end:string} $range
+     * @param array|null $transactionPopulationCache Optional caller-owned raw
+     * rows for one read-transaction invocation only. Each metric still checks
+     * current authority before/after use and produces its own binding hash.
      */
-    public function factParticipantSelection(array $metrics,string $tenant,array $range): array
+    public function factParticipantSelection(array $metrics,string $tenant,array $range,?array &$transactionPopulationCache=null): array
     {
         if (!$metrics || count($metrics)>4 || count(array_unique($metrics))!==count($metrics)
             || $tenant==='' || !$this->validRange($range)) {
@@ -124,17 +127,25 @@ final class PersonnelAnalysisObjectServices
         }
         if (!$stores) throw new \RuntimeException('AI_PERSONNEL_PERMISSION_REQUIRED');
         $scope=$scopes[$metrics[0]];$scope['store_ids']=$stores;
-        $query=call_user_func($this->query,'cashier_v3_performance_fact');
-        $query->alias('p')->where('p.tenant_id',$tenant)->whereIn('p.store_id',$stores)
-            ->where('p.status','effective')->whereIn('p.performance_type',array_keys($performanceTypes))
-            ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.employee_id','>',0);
-        if ($scope['employee_id']>0) $query->where('p.employee_id',$scope['employee_id']);
-        // A person may have more than one historical name snapshot in the
-        // period. Group by that snapshot, sort by its last occurrence, then
-        // keep the first name for the stable employee ID below.
-        $rows=$query->fieldRaw('p.store_id,p.employee_id,p.employee_name_snapshot employee_name,MAX(p.business_date) last_business_date')
-            ->group('p.store_id,p.employee_id,p.employee_name_snapshot')->order('last_business_date','desc')
-            ->order('p.employee_id','asc')->limit(1001)->select()->toArray();
+        // Several detail columns own the same immutable fact population.
+        // Reuse only identical source types, dates and complete authority;
+        // do not cache authorization or share rows across transactions.
+        $types=array_keys($performanceTypes);sort($types,SORT_STRING);
+        $cacheKey=hash('sha256',\app\services\query\UnifiedQueryJson::encode([$tenant,$range,$types,$scope,array_values($scopes)]));
+        $rows=$transactionPopulationCache[$cacheKey]??null;
+        if ($rows===null) {
+            $query=call_user_func($this->query,'cashier_v3_performance_fact');
+            $query->alias('p')->where('p.tenant_id',$tenant)->whereIn('p.store_id',$stores)
+                ->where('p.status','effective')->whereIn('p.performance_type',array_keys($performanceTypes))
+                ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.employee_id','>',0);
+            if ($scope['employee_id']>0) $query->where('p.employee_id',$scope['employee_id']);
+            // A person may have more than one historical name snapshot in the
+            // period. Group by that snapshot, sort by its last occurrence, then
+            // keep the first name for the stable employee ID below.
+            $rows=$query->fieldRaw('p.store_id,p.employee_id,p.employee_name_snapshot employee_name,MAX(p.business_date) last_business_date')
+                ->group('p.store_id,p.employee_id,p.employee_name_snapshot')->order('last_business_date','desc')
+                ->order('p.employee_id','asc')->limit(1001)->select()->toArray();
+        }
         if (count($rows)>1000) throw new \RuntimeException('AI_OBJECT_SCOPE_TOO_LARGE');
         $pairs=[];$names=[];
         foreach ($rows as $row) {
@@ -150,6 +161,8 @@ final class PersonnelAnalysisObjectServices
         foreach ($scopes as $metric=>$before) if (call_user_func($this->authorize,$metric)!==$before) {
             throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
         }
+        // Populate only after row validation and the post-read authority fence.
+        if ($transactionPopulationCache!==null) $transactionPopulationCache[$cacheKey]=$rows;
         $selection=['ref'=>MetricDefinitionRegistry::PERSONNEL_FACT_PARTICIPANT_REF,'label'=>'本期有业绩归属的人员','pairs'=>array_values($pairs),
             'names'=>$names,'scope'=>$scope,'metric_codes'=>array_values($metrics),'range'=>$range];
         $selection['binding_hash']=hash('sha256',json_encode($selection,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));

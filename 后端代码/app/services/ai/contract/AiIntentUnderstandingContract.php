@@ -94,9 +94,11 @@ final class AiIntentUnderstandingContract
             if ($fields===[]) unset($requirements[$deicticIndex]);
             else $requirements[$deicticIndex]['fields']=$fields;
         } elseif ($misplaced===[]) return $understanding;
-        return self::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>array_values($requirements),'status'=>'understood',
-        ],$safeQuestion);
+        // This repair owns only requirement packaging. Rebuilding a partial
+        // envelope used to discard the accepted topic relation and could
+        // reopen an old topic at later context/recommendation gates.
+        $understanding['requirements']=array_values($requirements);
+        return self::normalize($understanding,$safeQuestion);
     }
 
     /**
@@ -111,6 +113,9 @@ final class AiIntentUnderstandingContract
     {
         $sole=$safeQuestion['prior_query']['sole_result_reference']??null;
         if (($understanding['status']??null)!=='understood' || isset($understanding['groups'])
+            // A local deictic repair cannot overrule an accepted new topic
+            // by selecting an identity from the preceding answer.
+            || ($understanding['topic_relation']??null)==='new_topic'
             || ($safeQuestion['prior_query']['object_kind']??null)!=='store'
             || !is_array($sole) || !in_array($sole['group']??null,['top','bottom'],true)
             || ($sole['ordinal']??null)!==1) return $understanding;
@@ -177,9 +182,10 @@ final class AiIntentUnderstandingContract
                 elseif ($requirements[$candidate]['values']===[]) unset($requirements[$candidate]['values']);
             }
         }
-        return self::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>array_values($requirements),'status'=>'understood',
-        ],$safeQuestion);
+        // The prior identity is a signed reference; keep the accepted turn
+        // relation alongside it so later binding cannot reinterpret scope.
+        $understanding['requirements']=array_values($requirements);
+        return self::normalize($understanding,$safeQuestion);
     }
 
     /**
@@ -228,9 +234,9 @@ final class AiIntentUnderstandingContract
                 (array)$requirements[$index]['fields'],['object_kind','object_relation']
             )));
         }
-        return self::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
-        ],$safeQuestion);
+        // Reclassifying the selected role changes no topic or request kind.
+        $understanding['requirements']=$requirements;
+        return self::normalize($understanding,$safeQuestion);
     }
 
     /**
@@ -277,9 +283,10 @@ final class AiIntentUnderstandingContract
         }
         if (!$overlap) return $understanding;
         $requirements[$objectIndex]['values']['object_kind']='person';
-        return self::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
-        ],$safeQuestion);
+        // A registry-owned object correction preserves every turn-level
+        // decision; only the corrected typed requirements are revalidated.
+        $understanding['requirements']=$requirements;
+        return self::normalize($understanding,$safeQuestion);
     }
 
     public static function modelInstruction(): string

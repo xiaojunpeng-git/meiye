@@ -9,6 +9,30 @@ use RuntimeException;
  */
 final class ResultReferenceResolver
 {
+    /**
+     * Legacy detail ordinals have no top/bottom field. Their position is
+     * meaningful only inside one displayed board, never a concatenation of
+     * independent results or opposite ranking groups. Whole-set requests and
+     * explicit group references do not use this restriction.
+     */
+    public static function assertSingleOrdinalGroup(array $view): void
+    {
+        $results=$view['results']??null;
+        if (!is_array($results)||$results===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        if (count($results)!==1) throw new RuntimeException('AI_OBJECT_DETAIL_SELECTION_REQUIRED');
+        $rows=$results[0]['rows']??null;
+        if (!is_array($rows)||array_diff(array_keys($rows),['top','bottom'])!==[]) {
+            throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        }
+        $groups=0;
+        foreach ($rows as $points) {
+            if (!is_array($points)) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+            if ($points!==[]) ++$groups;
+        }
+        if ($groups>1) throw new RuntimeException('AI_OBJECT_DETAIL_SELECTION_REQUIRED');
+        if ($groups!==1) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+    }
+
     /** Only disclose a unique displayed position, never its identity or value.
      * A top-1 request can contain ties: uniqueness must come from its actual
      * immutable rows, not the requested limit or the first array element.

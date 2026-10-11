@@ -1,0 +1,42 @@
+{
+  "baseline_commit": "8f5610d5b609041e862e76c38be2c9426226c33e",
+  "method_sha256": {
+    "Baseline": {
+      "progressText": "cb0c8980e4a46db22d7a03c13cdde7c3970238bf215ba17e917fd887e0959931",
+      "failureGuidance": "feef726c2569ad5910d3fda2b5bd8ea7c0c84f5e8dd768bf0e75d9740cc9d029",
+      "outcomeClass": "63949c8674411cda2d13dcf1e409737a6d02b56baad3650a112d74eedd88cdb7"
+    },
+    "Current": {
+      "progressText": "cb0c8980e4a46db22d7a03c13cdde7c3970238bf215ba17e917fd887e0959931",
+      "failureGuidance": "1a626d7a709e4fbd19939a32d9bebf527c19ba2cc39a73468c2a90fd78e0e8e1",
+      "outcomeClass": "63949c8674411cda2d13dcf1e409737a6d02b56baad3650a112d74eedd88cdb7"
+    }
+  },
+  "isolated_php74_method_execution": {
+    "Baseline": {
+      "AI_MEMBER_DETAIL_SELECTION_REQUIRED": {
+        "message": "这次没能给出可靠结果。请选择一种方式继续。",
+        "outcome": "neutral",
+        "assertion_pass": false
+      },
+      "AI_MEMBER_DETAIL_SET_NOT_READY": {
+        "message": "这次没能给出可靠结果。请选择一种方式继续。",
+        "outcome": "neutral",
+        "assertion_pass": false
+      }
+    },
+    "Current": {
+      "AI_MEMBER_DETAIL_SELECTION_REQUIRED": {
+        "message": "这次没能给出可靠结果。请选择一种方式继续。",
+        "outcome": "neutral",
+        "assertion_pass": false
+      },
+      "AI_MEMBER_DETAIL_SET_NOT_READY": {
+        "message": "这次没能给出可靠结果。请选择一种方式继续。",
+        "outcome": "neutral",
+        "assertion_pass": false
+      }
+    }
+  },
+  "proof": "Methods are extracted verbatim from Git HEAD and current source and evaluated in memory in a no-network PHP 7.4 container; no application boot or business source copy."
+}

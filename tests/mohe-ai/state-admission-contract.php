@@ -15,11 +15,14 @@ for($i=0;$i<4;$i++) $finish('AI_EXECUTION_FAILED');
 $finish('CAPACITY_STOPPED'); $finish('AI_PERMISSION_DENIED'); $finish('METRIC_QUERY_COVERAGE_UNAVAILABLE');
 $finish('AI_EXPORT_FAILED');
 $finish('AI_EXECUTION_FAILED');
-checkState($store->create($owner,'blocked',$hash,$snapshot)['reason']==='CIRCUIT_OPEN','five technical failures count across neutral/export outcomes');
-$now+=120001;
+// Run admission remains available after infrastructure failures: model
+// receipt health is checked only if a query actually needs a provider call.
+$local=$store->create($owner,'local-after-failures',$hash,$snapshot);
+checkState($local['accepted'],'technical failures do not reject a deterministic Run');
+$store->cancel($owner,$local['run']['run_id'],$local['run']['generation']);
 $finish('','data_only_export_failed');
 for($i=0;$i<4;$i++) $finish('AI_EXECUTION_FAILED');
-checkState($store->create($owner,'after-partial',$hash,$snapshot)['accepted'],'partial clears technical consecutive count');
+checkState($store->create($owner,'after-partial',$hash,$snapshot)['accepted'],'partial and technical outcomes do not affect Run admission');
 $active=$store->create($owner,'after-partial',$hash,$snapshot)['run']; $store->cancel($owner,$active['run_id'],$active['generation']);
 $diag=$store->diagnostics();
 checkState($diag['export']===1 && $diag['partial']===1 && $diag['capacity']===1,'independent diagnostics retain root-cause classifications');
@@ -30,4 +33,4 @@ checkState($store->create($rateOwner,'rate20',$hash,$snapshot)['reason']==='RATE
 checkState($store->create($rateOwner,'rate0',$hash,$snapshot)['replayed'],'idempotent replay bypasses new-Run quota');
 $now+=600001;
 checkState($store->create($rateOwner,'rate-new-window',$hash,$snapshot)['accepted'],'rate window expires');
-echo "PASS 6 admission/circuit/diagnostic checks against actual transactional SQLite store.\n";
+echo "PASS 6 admission/rate/diagnostic checks against actual transactional SQLite store.\n";

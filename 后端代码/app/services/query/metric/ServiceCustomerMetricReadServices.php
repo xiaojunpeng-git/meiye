@@ -42,8 +42,67 @@ final class ServiceCustomerMetricReadServices
     public function employeeMetrics(string $tenantId, array $stores, array $range): array
     {
         $this->assertScope($tenantId, $stores, $range);
-        $rows = $this->rows($tenantId, $stores, $range);
+        $lines = $this->serviceLines($this->rows($tenantId, $stores, $range), $stores, true);
+        $daily = []; $period = [];
+        $this->collectGroups($lines, $daily, $period, true);
+        return $this->projectGroups($daily, $period, $lines, true);
+    }
 
+    /**
+     * Summary/ranking projection: stream complete service facts, then retain
+     * only one store/customer's employee sets until its last service. Never
+     * prefilter employees: all co-workers must remain in the allocation divisor.
+     * The same group splitter owns detail and aggregate values, including
+     * cross-day people, point visits and independent-position allocations.
+     *
+     * @return array{summary_by_store_employee:array,daily_by_store_employee:array}
+     */
+    public function aggregateEmployeeMetrics(string $tenantId, array $stores, array $range): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        $summary = []; $dailyTotals = []; $daily = []; $period = [];
+        $summaryNameOrder = []; $dailyNameOrder = [];
+        $serviceRows = []; $serviceKey = null; $subjectKey = null;
+        $flushService = function () use (&$serviceRows, &$daily, &$period, $stores): void {
+            if ($serviceRows === []) return;
+            $this->collectGroups($this->serviceLines($serviceRows, $stores, false), $daily, $period, false);
+            $serviceRows = [];
+        };
+        $flushSubject = function () use (&$daily, &$period, &$summary, &$dailyTotals, &$summaryNameOrder, &$dailyNameOrder): void {
+            $totals = $this->projectGroups($daily, $period, [], false);
+            foreach ($totals['summary_by_store_employee'] as $key => $row) {
+                $this->initSummary($summary, $key, '');
+                $this->retainSourceName($summary[$key], $summaryNameOrder, $key, $row['employee_name'], $totals['_summary_name_order'][$key]);
+                foreach (['visit_tenths', 'people_tenths', 'point_visit_tenths'] as $field) $summary[$key][$field] += $row[$field];
+            }
+            foreach ($totals['daily_by_store_employee'] as $key => $row) {
+                if (!isset($dailyTotals[$key])) $dailyTotals[$key] = ['visit_tenths' => 0, 'employee_name' => ''];
+                $dailyTotals[$key]['visit_tenths'] += $row['visit_tenths'];
+                $this->retainSourceName($dailyTotals[$key], $dailyNameOrder, $key, $row['employee_name'], $totals['_daily_name_order'][$key]);
+            }
+            $daily = []; $period = [];
+        };
+        foreach ($this->aggregateRows($tenantId, $stores, $range) as $row) {
+            $storeId = $this->positive($row['service_store_id'] ?? null);
+            $factId = $this->token($row['service_fact_id'] ?? null, 'METRIC_SERVICE_SOURCE_INVALID');
+            $nextSubject = $storeId . '|' . ($this->subjectKey($row, $factId) ?? 'excluded:' . $factId);
+            $nextService = $storeId . '|' . $factId;
+            if ($serviceKey !== null && $serviceKey !== $nextService) $flushService();
+            if ($subjectKey !== null && $subjectKey !== $nextSubject) $flushSubject();
+            $serviceRows[] = $row;
+            // A malformed service with unbounded adjustment history must fail
+            // before memory exhaustion; never truncate a divisor or reversal set.
+            if (count($serviceRows) > 10000) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+            $serviceKey = $nextService; $subjectKey = $nextSubject;
+        }
+        $flushService(); $flushSubject();
+        ksort($summary, SORT_STRING); ksort($dailyTotals, SORT_STRING);
+        return ['summary_by_store_employee' => $summary, 'daily_by_store_employee' => $dailyTotals];
+    }
+
+    /** Resolve immutable service participants before any display projection. */
+    private function serviceLines(array $rows, array $stores, bool $details): array
+    {
         // Adjustment reversals remain immutable facts.  Removing an original
         // allocation therefore means ignoring the forward fact named by its
         // effective reversal, then taking the replacement forward allocation.
@@ -83,6 +142,7 @@ final class ServiceCustomerMetricReadServices
                     'labor_amount_cents' => $this->integer($row['labor_amount_cents'] ?? 0),
                     'labor_fee_amount_cents' => $this->integer($row['labor_fee_amount_cents'] ?? 0),
                     'had_labor_fact' => false,
+                    'first_row_order' => (int)($row['id'] ?? 0),
                 ];
             }
             if (trim((string)($row['fact_id'] ?? '')) !== '') $services[$serviceLineKey]['had_labor_fact'] = true;
@@ -126,8 +186,9 @@ final class ServiceCustomerMetricReadServices
                     'allocation_group' => $this->factAllocationGroup($row)
                         ?? ($services[$serviceLineKey]['allocation_groups'][$employeeId] ?? 'normal'),
                     'service_line_key' => $serviceLineKey,
-                    'service' => $services[$serviceLineKey],
                 ];
+                if ($details) { $lines[$lineKey]['service'] = $services[$serviceLineKey]; unset($lines[$lineKey]['service']['first_row_order']); }
+                else $lines[$lineKey]['source_order'] = [0, (int)($row['id'] ?? 0), $serviceFactId];
             } elseif ($lines[$lineKey]['business_date'] !== $businessDate || $lines[$lineKey]['subject'] !== $subject) {
                 $this->fail('METRIC_SERVICE_SOURCE_INVALID');
             }
@@ -148,15 +209,20 @@ final class ServiceCustomerMetricReadServices
                     'employee_name' => $employeeName, 'point' => isset($pointEmployees[$employeeId]),
                     'allocation_group' => $service['allocation_groups'][$employeeId] ?? 'normal',
                     'service_line_key' => $serviceLineKey,
-                    'service' => $service,
                 ];
+                if ($details) { $lines[$lineKey]['service'] = $service; unset($lines[$lineKey]['service']['first_row_order']); }
+                else $lines[$lineKey]['source_order'] = [1, $service['first_row_order'], $service['service_fact_id']];
             }
         }
 
+        return $lines;
+    }
+
+    /** Merge sets before splitting: separate services can share one daily/period customer. */
+    private function collectGroups(array $lines, array &$daily, array &$period, bool $details): void
+    {
         /** @var array<string,array{employees:array<int,string>,lines:array<int,array<int,string>>}> $daily */
-        $daily = [];
         /** @var array<string,array{employees:array<int,string>}> $period */
-        $period = [];
         foreach ($lines as $lineKey => $line) {
             $storeId = (int)$line['store_id'];
             $employeeId = (int)$line['employee_id'];
@@ -165,9 +231,23 @@ final class ServiceCustomerMetricReadServices
             $periodKey = $storeId . '|' . (string)$line['subject'];
             if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => [], 'point_employees' => [], 'allocation_groups' => []];
             if (!isset($period[$periodKey])) $period[$periodKey] = ['employees' => [], 'allocation_groups' => [], 'lines' => []];
-            $daily[$dailyKey]['employees'][$employeeId] = $this->name($daily[$dailyKey]['employees'][$employeeId] ?? '', $employeeName);
-            $daily[$dailyKey]['lines'][$employeeId][] = $lineKey;
-            $period[$periodKey]['lines'][$employeeId][$lineKey] = (string)$line['business_date'];
+            if ($details) $daily[$dailyKey]['employees'][$employeeId] = $this->name($daily[$dailyKey]['employees'][$employeeId] ?? '', $employeeName);
+            else {
+                // Global p.id order selected legacy snapshot names. Preserve
+                // each daily group's first participant and first nonempty name
+                // even though the bounded stream visits customers in a new order.
+                $order = $line['source_order'];
+                if (!isset($daily[$dailyKey]['first_order']) || $order < $daily[$dailyKey]['first_order']) $daily[$dailyKey]['first_order'] = $order;
+                if (!isset($daily[$dailyKey]['employees'][$employeeId])) $daily[$dailyKey]['employees'][$employeeId] = '';
+                if ($employeeName !== '' && (!isset($daily[$dailyKey]['name_orders'][$employeeId]) || $order < $daily[$dailyKey]['name_orders'][$employeeId])) {
+                    $daily[$dailyKey]['employees'][$employeeId] = $employeeName;
+                    $daily[$dailyKey]['name_orders'][$employeeId] = $order;
+                }
+            }
+            if ($details) {
+                $daily[$dailyKey]['lines'][$employeeId][] = $lineKey;
+                $period[$periodKey]['lines'][$employeeId][$lineKey] = (string)$line['business_date'];
+            }
             if (!empty($line['point'])) $daily[$dailyKey]['point_employees'][$employeeId] = true;
             $period[$periodKey]['employees'][$employeeId] = $this->name($period[$periodKey]['employees'][$employeeId] ?? '', $employeeName);
             // A member may have several service lines in one day or period.
@@ -177,11 +257,18 @@ final class ServiceCustomerMetricReadServices
             $period[$periodKey]['allocation_groups'][$employeeId] = $this->preferredAllocationGroup($period[$periodKey]['allocation_groups'][$employeeId] ?? null, $allocationGroup);
         }
 
+    }
+
+    /** One allocation algorithm serves both detailed rows and compact totals. */
+    private function projectGroups(array $daily, array $period, array $lines, bool $details): array
+    {
         $detail = [];
         $peopleDetail = [];
         $detailContext = [];
         $summary = [];
         $dailyTotals = [];
+        $summaryNameOrder = []; $dailyNameOrder = [];
+        if (!$details) uasort($daily, static function (array $left, array $right): int { return $left['first_order'] <=> $right['first_order']; });
         foreach ($daily as $dailyKey => $group) {
             $parts = $this->splitAllocationGroups($group['allocation_groups']);
             [$storeId, $businessDate] = explode('|', $dailyKey, 3);
@@ -190,6 +277,8 @@ final class ServiceCustomerMetricReadServices
                 $summaryKey = (int)$storeId . '|' . $employeeId;
                 $dailyTotalKey = (int)$storeId . '|' . $businessDate . '|' . $employeeId;
                 $this->initSummary($summary, $summaryKey, $employeeName);
+                if (!$details && !isset($summaryNameOrder[$summaryKey])) $summaryNameOrder[$summaryKey] = $employeeName !== '' ? $group['first_order'] : null;
+                if (!$details) $dailyNameOrder[$dailyTotalKey] = $group['first_order'];
                 if (!isset($dailyTotals[$dailyTotalKey])) $dailyTotals[$dailyTotalKey] = ['visit_tenths' => 0, 'employee_name' => $employeeName];
                 $summary[$summaryKey]['visit_tenths'] += $tenths;
                 // 点客属于被明确指定的技师，不按共同服务人数分摊。
@@ -197,6 +286,7 @@ final class ServiceCustomerMetricReadServices
                 if (isset($group['point_employees'][$employeeId])) $summary[$summaryKey]['point_visit_tenths'] += 10;
                 $dailyTotals[$dailyTotalKey]['visit_tenths'] += $tenths;
                 $dailyTotals[$dailyTotalKey]['employee_name'] = $this->name($dailyTotals[$dailyTotalKey]['employee_name'], $employeeName);
+                if (!$details) continue;
                 $lineKeys = $group['lines'][$employeeId] ?? [];
                 sort($lineKeys, SORT_STRING);
                 if ($lineKeys === []) $this->fail('METRIC_SERVICE_SOURCE_INVALID');
@@ -217,6 +307,7 @@ final class ServiceCustomerMetricReadServices
                 $summary[$summaryKey]['people_tenths'] += $tenths;
                 // Period-deduplicated people belong to one stable service line;
                 // summing these projected rows must reproduce the period total.
+                if (!$details) continue;
                 $candidates = $group['lines'][$employeeId] ?? [];
                 if ($candidates === []) $this->fail('METRIC_SERVICE_SOURCE_INVALID');
                 asort($candidates, SORT_STRING);
@@ -239,20 +330,60 @@ final class ServiceCustomerMetricReadServices
             'detail_context_by_labor_key' => $detailContext,
             'summary_by_store_employee' => $summary,
             'daily_by_store_employee' => $dailyTotals,
-        ];
+        ] + ($details ? [] : ['_summary_name_order' => $summaryNameOrder, '_daily_name_order' => $dailyNameOrder]);
     }
 
     /** @return array<int,array<string,mixed>> */
     private function rows(string $tenantId, array $stores, array $range): array
+    {
+        return $this->serviceQuery($tenantId, $stores, $range)->order('p.id', 'asc')->select()->toArray();
+    }
+
+    /**
+     * Keep a complete customer and complete service contiguous. MySQL's default
+     * buffered cursor also materializes the whole result, so disable buffering
+     * only for this statement and close it before restoring the shared connection.
+     * No other query is issued while this iterator is active.
+     */
+    private function aggregateRows(string $tenantId, array $stores, array $range): \Generator
+    {
+        $query = $this->serviceQuery($tenantId, $stores, $range)
+            ->order('sv.store_id', 'asc')
+            ->orderRaw("CASE WHEN COALESCE(sv.friend_counts_as_customer,1)=1 AND LOWER(TRIM(sv.service_object))='self' AND sv.member_id>0 THEN CONCAT('member:',sv.member_id) ELSE CONCAT('record:',sv.service_fact_id) END ASC")
+            ->order('sv.service_fact_id', 'asc')->order('p.id', 'asc');
+        if (!$query instanceof \think\db\Query) {
+            // Injectable sources obey the same ordered streaming contract.
+            yield from $query->cursor();
+            return;
+        }
+        // Clone only the ORM statement holder, as Query::cursor() itself
+        // does. Both holders retain the same PDO/read transaction.
+        $connection = clone $query->getConnection();
+        $pdo = $connection->getPdo() ?: $connection->connect();
+        $buffered = $pdo->getAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY);
+        $cursor = null;
+        try {
+            $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+            $cursor = $connection->cursor($query);
+            yield from $cursor;
+        } finally {
+            unset($cursor);
+            $connection->free(); // Release the statement even after a contract rejection.
+            $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, $buffered);
+        }
+    }
+
+    /** Same fact joins, normal-service scope and source fields for both projections. */
+    private function serviceQuery(string $tenantId, array $stores, array $range)
     {
         $query = call_user_func($this->queryFactory, 'cashier_v3_entitlement_service_fact')->alias('sv')
             ->leftJoin('cashier_v3_performance_fact p', "p.tenant_id=sv.tenant_id AND p.checkout_request_id=sv.checkout_request_id AND p.source_line_id=sv.source_line_id AND p.status='effective' AND p.performance_type='labor_performance_allocated'")
             ->leftJoin('cashier_v3_service_customer_group_fact cg', 'cg.tenant_id=p.tenant_id AND cg.performance_fact_id=p.fact_id AND cg.store_id=sv.store_id AND cg.service_fact_id=sv.id AND cg.employee_id=p.employee_id')
             ->where('sv.tenant_id', $tenantId)->whereIn('sv.store_id', $stores)
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
-            ->where('sv.service_status', 'completed')->order('p.id', 'asc');
+            ->where('sv.service_status', 'completed');
         call_user_func($this->normalServices, $query, 'sv');
-        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,cg.allocation_group_key fact_allocation_group,cg.position_id fact_position_id,cg.performance_independent fact_performance_independent,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type')->select()->toArray();
+        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,cg.allocation_group_key fact_allocation_group,cg.position_id fact_position_id,cg.performance_independent fact_performance_independent,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type');
     }
 
     /** An adjustment group must be internally consistent; never infer it from today's position. */
@@ -377,6 +508,14 @@ final class ServiceCustomerMetricReadServices
         if (!isset($summary[$key])) $summary[$key] = ['visit_tenths' => 0, 'people_tenths' => 0,
             'point_visit_tenths' => 0, 'employee_name' => $employeeName];
         else $summary[$key]['employee_name'] = $this->name($summary[$key]['employee_name'], $employeeName);
+    }
+
+    /** Keep the original first nonempty daily-group snapshot, not stream order. */
+    private function retainSourceName(array &$row, array &$orders, string $key, string $name, ?array $order): void
+    {
+        if ($name !== '' && $order !== null && (!isset($orders[$key]) || $order < $orders[$key])) {
+            $row['employee_name'] = $name; $orders[$key] = $order;
+        }
     }
 
     private function name(string $left, string $right): string
