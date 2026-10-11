@@ -30,8 +30,7 @@ import {
 } from '@/services/storeBusinessReportApi'
 
 const LEGACY_COVERAGE_START = '2026-08-10'
-// All 22 store-operation reports use one date-range default: current month
-// from day 1 through today. Explicit route dates still override this default.
+// 门店数据报表首次进入和切换页签均查当天；显式查询/下钻日期优先，平台端保留原周期。
 const DEFAULT_LIMIT = 20
 // 门店运营报表目录。经营看板是数据入口，不属于本目录；
 // 报表结果、金额和筛选能力全部由统一查询服务返回，浏览器不参与计算。
@@ -100,8 +99,9 @@ const result = ref({})
 const loading = ref(false)
 const exporting = ref(false)
 const errorMessage = ref('')
-const startDate = ref(`${today().slice(0, 7)}-01`)
-const endDate = ref(today())
+const initialDateRange = defaultReportDateRange()
+const startDate = ref(initialDateRange.start)
+const endDate = ref(initialDateRange.end)
 const selectedMonth = ref(today().slice(0, 7))
 const selectedYear = ref(today().slice(0, 4))
 const categoryId = ref('')
@@ -422,14 +422,14 @@ const filterSchema = computed(() => {
 })
 const usesAnnualYearFilter = computed(() => PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
-// 页面统一选择周期；月报和年报的显示范围必须与实际提交的自然周期一致。
-const reportPeriodMode = computed(() => usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+// 门店所有报表按实际日期查询；仅平台端保留已确认的自然年/月限制，不能静默扩大门店查询范围。
+const reportPeriodMode = computed(() => !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
-  if (usesAnnualYearFilter.value) {
+  if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
     return { min: start, max: end }
   }
-  if (usesNaturalMonthFilter.value) {
+  if (reportPeriodMode.value === 'month') {
     const { start, end } = monthBounds(selectedMonth.value)
     return { min: start, max: end }
   }
@@ -815,10 +815,18 @@ const salarySummaryReturnLocation = computed(() => {
     : null
 })
 
-function today() {
-  const date = new Date()
-  const offset = date.getTimezoneOffset() * 60000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 10)
+function today(now = new Date()) {
+  // 与后端业务日统一使用上海时区，避免异地浏览器在午夜前后查错一天。
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(now)
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function defaultReportDateRange() {
+  const end = today()
+  return { start: isPlatformRuntimeRoute() ? `${end.slice(0, 7)}-01` : end, end }
 }
 
 function monthBounds(month) {
@@ -834,17 +842,17 @@ function yearBounds(year) {
 }
 
 function reportParams(overrides = {}) {
-  const dates = usesAnnualYearFilter.value
+  const dates = reportPeriodMode.value === 'year'
     ? yearBounds(selectedYear.value)
-    : usesNaturalMonthFilter.value
+    : reportPeriodMode.value === 'month'
     ? monthBounds(selectedMonth.value)
     : { start: startDate.value, end: endDate.value }
   return {
     report: activeReport.value,
     start_date: dates.start,
     end_date: dates.end,
-    ...(usesAnnualYearFilter.value ? { year: selectedYear.value } : {}),
-    ...(usesNaturalMonthFilter.value ? { month: selectedMonth.value } : {}),
+    ...(reportPeriodMode.value === 'year' ? { year: selectedYear.value } : {}),
+    ...(reportPeriodMode.value === 'month' ? { month: selectedMonth.value } : {}),
     category_id: categoryId.value,
     category_path: categoryPath.value,
     product_type: productType.value,
@@ -1008,10 +1016,10 @@ function syncActiveReportFromRoute() {
   activeReport.value = allowedReportTabs.value.some((item) => item.code === requested)
     ? requested
     : String(allowedReportTabs.value[0]?.code || '')
-  if (!route.query?.start_date && !route.query?.end_date) {
-    startDate.value = `${today().slice(0, 7)}-01`
-    endDate.value = today()
-  }
+  // 每次导航重建默认值，禁止上一个报表的筛选泄漏到无日期的新入口；单边日期按单日处理。
+  const defaults = defaultReportDateRange()
+  startDate.value = String(route.query?.start_date || route.query?.end_date || defaults.start)
+  endDate.value = String(route.query?.end_date || route.query?.start_date || defaults.end)
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 

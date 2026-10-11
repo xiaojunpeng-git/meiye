@@ -7475,10 +7475,11 @@ onBeforeUnmount(() => {
 
     <div class="cashier-workbench__body">
       <section class="catalog-panel" aria-label="选择商品和项目">
+        <!-- 定制卡使用独立项目候选，仓库中项目不进入普通直售目录。 -->
         <CashierGuidedBusinessPanel
           v-if="guidedBusinessMode"
           :mode="guidedBusinessMode"
-          :catalog-items="catalog.items || []"
+          :catalog-items="catalog.customCardProjects || []"
           :submitting="isCreatingCustomCard"
           @close="guidedBusinessMode = ''"
           @confirm="confirmGuidedBusiness"

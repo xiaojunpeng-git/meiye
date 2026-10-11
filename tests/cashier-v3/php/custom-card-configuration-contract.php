@@ -45,7 +45,8 @@ customCardCheck('CCC-01 action is registered by both client and server manifests
 customCardCheck('CCC-02 creation locks server-discovered card shell and project SKU resources',
     strpos($configuration, 'discoverCreateResources(') !== false
     && strpos($configuration, 'discoverCustomCardShellResources(') !== false
-    && strpos($configuration, 'discoverItemResources(') !== false
+    && strpos($configuration, 'discoverCustomCardComponentResources(') !== false
+    && strpos($configuration, 'selectCustomCardComponentAfterGatewayLocksInTx(') !== false
     && strpos($module, 'registerCreateCustomCardConfigurationPolicy') !== false);
 customCardCheck('CCC-03 configuration is immutable, idempotent, and member/workspace-bound',
     strpos($configuration, "'immutable_fingerprint'") !== false

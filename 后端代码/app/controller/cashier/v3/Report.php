@@ -117,6 +117,7 @@ class Report extends AuthController
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         try {
             $input = $request->getMore($this->inputRules());
+            $input = $this->withDefaultDates($input);
             if ($this->isPlatformOnlyReport((string)($input['report'] ?? ''))) {
                 return app('json')->fail('该报表仅支持平台端访问');
             }
@@ -145,6 +146,17 @@ class Report extends AuthController
         } catch (\InvalidArgumentException $exception) {
             return app('json')->fail($exception->getMessage());
         }
+    }
+
+    /** 门店查询与导出共用缺省业务日；不改平台周期，也不覆盖用户显式选择/下钻的日期。 */
+    private function withDefaultDates(array $input): array
+    {
+        $today = (new \DateTimeImmutable('now', new \DateTimeZone('Asia/Shanghai')))->format('Y-m-d');
+        $start = trim((string)($input['start_date'] ?? ''));
+        $end = trim((string)($input['end_date'] ?? ''));
+        $input['start_date'] = $start !== '' ? $start : ($end !== '' ? $end : $today);
+        $input['end_date'] = $end !== '' ? $end : ($start !== '' ? $start : $today);
+        return $input;
     }
 
     private function inputRules(): array

@@ -74,6 +74,28 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
         return $rows;
     }
 
+    /** 仅读取定制卡组件候选；is_show=0 为仓库中，仍要求审核、SKU 可用及本店归属。 */
+    public function listCustomCardProjects(int $storeId): array
+    {
+        if ($storeId <= 0) return [];
+        $query = Db::name('store_product_attr_value')->alias('sku')
+            ->join('store_product p', 'p.id=sku.product_id')
+            ->where('p.type', 1)->where('p.relation_id', $storeId)
+            ->where('p.is_del', 0)->where('p.is_verify', 1)
+            ->whereIn('p.is_show', [0, 1])->where('p.product_type', 6)
+            ->where('p.pid', '<>', 8154)
+            ->where('sku.type', 0)->where('sku.is_show', 1)
+            ->field($this->joinedFields());
+        $rows = $this->rows(StoreProductSaleUsagePolicy::excludeHistoricalCarriers($query, 'p')
+            ->order('p.sort desc,p.id desc,sku.id asc')->limit(self::LIST_LIMIT_WITH_SENTINEL)->select());
+        $categories = $this->categoryMap($storeId, $rows);
+        foreach ($rows as &$row) {
+            $row['category_names'] = $this->categoryNames((string)($row['product_cate_id'] ?? ''), $categories);
+        }
+        unset($row);
+        return $rows;
+    }
+
     /** Hidden legacy custom-card shells are configuration hosts, not catalog items. */
     private function customCardShellRows(int $storeId): array
     {

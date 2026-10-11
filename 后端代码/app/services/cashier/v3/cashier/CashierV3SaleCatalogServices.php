@@ -102,11 +102,71 @@ final class CashierV3SaleCatalogServices
             'types' => ['项目', '产品', '卡项', '定制卡'],
             'categories' => array_merge(['全部'], array_keys($categories)),
             'items' => $items,
+            // 卡内组件独立投影；仓库中项目不能混入普通收银销售 items。
+            'customCardProjects' => $this->customCardProjects($operatorScope->storeId()),
             'itemCount' => count($items),
             'complete' => true,
             'priceAuthority' => 'store_product_attr_value.price',
             'dataScope' => ['storeId' => $operatorScope->storeId()],
         ];
+    }
+
+    /** 有界加载定制卡候选，并复用提交端的资格检查与价格/分类规范化。 */
+    private function customCardProjects(int $storeId): array
+    {
+        $rows = $this->authority->listCustomCardProjects($storeId);
+        if (count($rows) > self::MAX_CATALOG_ITEMS) {
+            throw self::failure(CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '当前门店可配置项目过多，请联系管理员优化分类。', 'custom_card_project_limit_exceeded');
+        }
+        $items = [];
+        foreach ($rows as $row) {
+            $item = $this->customCardComponent($row, $storeId, (int)($row['sku_id'] ?? 0));
+            $public = $this->publicCatalogItem($item, null);
+            $public['saleStatus'] = (int)$row['product_is_show'] === 1 ? 'selling' : 'warehouse';
+            $items[] = $public;
+        }
+        return $items;
+    }
+
+    /** 项目组件不依赖目录版本上下文；Gateway 事务内仍须重新锁定权威行。 */
+    public function discoverCustomCardComponentResources($itemId, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): array
+    {
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $skuId = self::positiveId($itemId, 'itemId');
+        $this->customCardComponent($this->authority->readStoreItemBySkuId($operatorScope->storeId(), $skuId), $operatorScope->storeId(), $skuId);
+        return [];
+    }
+
+    /** 仅定制卡组件允许仓库中项目；不能用于普通商品添加或绕过最终事务锁。 */
+    public function selectCustomCardComponentAfterGatewayLocksInTx($itemId, string $idempotencyKey, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('customCardComponentSelect');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $skuId = self::positiveId($itemId, 'itemId');
+        $item = $this->customCardComponent($this->authority->lockStoreItemBySkuId($operatorScope->storeId(), $skuId), $operatorScope->storeId(), $skuId);
+        return $this->saleLineFromItem($item, $idempotencyKey);
+    }
+
+    /** 列表/发现/提交共用同一资格口径，不接受其他门店、回收站、未审核、停用 SKU 或历史承载。 */
+    private function customCardComponent($row, int $storeId, int $skuId): array
+    {
+        if (!is_array($row) || (int)($row['product_type'] ?? -1) !== 1
+            || (int)($row['product_relation_id'] ?? 0) !== $storeId
+            || (int)($row['product_product_type'] ?? -1) !== 6
+            || (int)($row['product_pid'] ?? 0) === self::CUSTOM_CARD_SHELL_PRODUCT_ID
+            || (int)($row['product_is_del'] ?? 1) !== 0
+            || (int)($row['product_is_verify'] ?? 0) !== 1
+            || !in_array((int)($row['product_is_show'] ?? -1), [0, 1], true)
+            || (int)($row['sku_id'] ?? 0) !== $skuId || $skuId <= 0
+            || (int)($row['sku_type'] ?? -1) !== 0 || (int)($row['sku_is_show'] ?? 0) !== 1
+            || StoreProductSaleUsagePolicy::isHistoricalCarrier([
+                'type' => $row['product_type'] ?? 0, 'relation_id' => $row['product_relation_id'] ?? 0,
+                'keyword' => $row['product_keyword'] ?? '',
+            ])) {
+            throw self::notAvailable($skuId);
+        }
+        return $this->normalizeAuthorityRow($row, false);
     }
 
     public function selectSaleLineInTx(

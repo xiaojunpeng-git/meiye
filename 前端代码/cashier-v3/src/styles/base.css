@@ -5483,9 +5483,39 @@ button:disabled {
 
 .cashier-guided-panel__search-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto;
-  gap: 8px;
+  /* 定制卡筛选与已选操作固定同一行，紧凑文字为搜索输入保留空间。 */
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 12px;
+}
+
+.cashier-guided-panel__sale-status,
+.cashier-guided-panel__sale-status label,
+.cashier-guided-panel__selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.cashier-guided-panel__sale-status {
+  font-size: 12px;
+}
+
+.cashier-guided-panel__sale-status input {
+  margin: 0;
+  accent-color: #1677cc;
+}
+
+.cashier-guided-panel__selection-actions {
+  justify-content: flex-end;
+}
+
+.cashier-guided-panel__selection-actions .button {
+  min-height: 30px;
+  padding: 0 6px;
+  font-size: 12px;
 }
 
 .cashier-guided-panel__search input {
@@ -5496,16 +5526,6 @@ button:disabled {
   padding: 0 10px;
   color: #1d2939;
   background: #fff;
-}
-
-@media (max-width: 720px) {
-  .cashier-guided-panel__search-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .cashier-guided-panel__search {
-    grid-column: 1 / -1;
-  }
 }
 
 .cashier-guided-option.is-selected,
