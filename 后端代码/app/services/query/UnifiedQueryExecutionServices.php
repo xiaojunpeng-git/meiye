@@ -41,6 +41,7 @@ class UnifiedQueryExecutionServices
 
     /**
      * @param callable $dataScopeFilter 服务端权限闭包；返回 true 的行才允许进入计算
+     * @param callable|null $additionalKeywordMatch 领域提供器的服务端关键词补充匹配；仅在标准关键词过滤未命中时参与 OR，不改变权限或其他筛选
      */
     public function execute(
         string $pageCode,
@@ -48,7 +49,8 @@ class UnifiedQueryExecutionServices
         array $customDefinitions,
         array $query,
         array $context,
-        callable $dataScopeFilter
+        callable $dataScopeFilter,
+        ?callable $additionalKeywordMatch = null
     ): array {
         $page = $this->registry->page($pageCode);
         $query = $this->normalizeUiQuery(
@@ -161,7 +163,8 @@ class UnifiedQueryExecutionServices
             $filteredRows,
             $query['keywordFilters'] ?? [],
             $fieldIndex,
-            'any'
+            'any',
+            $additionalKeywordMatch
         );
         $sorts = $this->normalizeSorts(
             $query['sorts'] ?? [],
@@ -638,7 +641,8 @@ class UnifiedQueryExecutionServices
         array $rows,
         array $filters,
         array $fieldIndex,
-        string $filterRelation
+        string $filterRelation,
+        ?callable $additionalMatch = null
     ): array
     {
         $filters = $this->normalizeFilters($filters, $fieldIndex);
@@ -649,7 +653,8 @@ class UnifiedQueryExecutionServices
         return array_values(array_filter($rows, function (array $row) use (
             $filters,
             $fieldIndex,
-            $filterRelation
+            $filterRelation,
+            $additionalMatch
         ): bool {
             $matched = 0;
             foreach ($filters as $filter) {
@@ -668,7 +673,9 @@ class UnifiedQueryExecutionServices
                     return false;
                 }
             }
-            return $filterRelation === 'all' || $matched > 0;
+            // 领域补充匹配只扩展关键词 OR；常规字段过滤和 DataScope 不能被绕过。
+            return $filterRelation === 'all' || $matched > 0
+                || ($additionalMatch !== null && $additionalMatch($row));
         }));
     }
 

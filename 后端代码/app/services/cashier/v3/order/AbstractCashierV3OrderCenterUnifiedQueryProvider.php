@@ -131,6 +131,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
     {
         $payload['pageCode'] = $this->pageCode();
         unset($payload['queryCutoffDate'], $payload['query_cutoff_date']);
+        $memberInitials = $this->memberInitialKeyword($payload);
         $this->sourcePayload = $this->sourceQuery($payload);
         // 领域日期/权限/下钻参数由源 Reader 消费；不传入通用表达式白名单。
         $payload = array_intersect_key($payload, array_flip([
@@ -139,6 +140,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'visibleFields','export','fieldVersions','keywordFilters','topFilterConditions',
         ]));
         $rows = $this->authorizedSourceRows($context);
+        $rows = $this->attachMemberInitials($rows, $memberInitials);
         $payload = $this->identityFilters($payload);
         if (empty($payload['sorts'])) {
             $dates = ['sales'=>'payment_completed_at','recharge'=>'payment_completed_at','refund'=>'refund_completed_at',
@@ -157,8 +159,62 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 // consistent without allowing an exported task to broaden that scope.
                 // 状态代码已在权威 Reader 中执行，不能再与中文展示标签比较。
                 return true;
+            },
+            $memberInitials === '' ? null : static function (array $row) use ($memberInitials): bool {
+                return strncmp((string)($row['_member_name_initials'] ?? ''), $memberInitials, strlen($memberInitials)) === 0;
             }
         );
+    }
+
+    /** 只解释综合查询的标准关键词组，不把高级筛选或客户端自造字段当成会员搜索。 */
+    protected function memberInitialKeyword(array $payload): string
+    {
+        $keyword = trim((string)($payload['keyword'] ?? ''));
+        $filters = (array)($payload['keywordFilters'] ?? []);
+        if ($keyword !== '' && $filters) {
+            return '';
+        }
+        if ($keyword === '' && $filters) {
+            $expected = (array)CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode())['keywordFields'];
+            if (count($filters) !== count($expected)) {
+                return '';
+            }
+            $values = [];
+            foreach ($filters as $filter) {
+                if (!is_array($filter) || (string)($filter['operator'] ?? '') !== 'contains'
+                    || !is_scalar($filter['value'] ?? null)) {
+                    return '';
+                }
+                $field = (string)($filter['field_key'] ?? ($filter['fieldKey'] ?? ($filter['field'] ?? '')));
+                if (!in_array($field, $expected, true) || isset($values[$field])) {
+                    return '';
+                }
+                $values[$field] = (string)$filter['value'];
+            }
+            if (count($values) !== count($expected) || count(array_unique(array_values($values), SORT_STRING)) !== 1) {
+                return '';
+            }
+            $keyword = trim((string)reset($values));
+        }
+        return preg_match('/^[A-Za-z]{1,60}$/D', $keyword) === 1 ? strtoupper($keyword) : '';
+    }
+
+    /** 候选订单已被权威 Reader 按门店裁剪；只按这些会员 ID 批读可重建索引，不改历史姓名快照。 */
+    protected function attachMemberInitials(array $rows, string $keyword): array
+    {
+        if ($keyword === '' || !$rows) {
+            return $rows;
+        }
+        $ids = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'memberId')))));
+        $initials = [];
+        foreach (array_chunk($ids, 500) as $batch) {
+            $initials += Db::name('member_name_initial_search')->whereIn('uid', $batch)->column('initials', 'uid');
+        }
+        foreach ($rows as &$row) {
+            $row['_member_name_initials'] = (string)($initials[(int)($row['memberId'] ?? 0)] ?? '');
+        }
+        unset($row);
+        return $rows;
     }
 
     protected function authorizedSourceRows(array $context): array

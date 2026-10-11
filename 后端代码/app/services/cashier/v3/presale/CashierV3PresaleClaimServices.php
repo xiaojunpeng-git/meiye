@@ -346,32 +346,44 @@ final class CashierV3PresaleClaimServices
             throw new \InvalidArgumentException('presale_claim_source_kind_invalid');
         }
         if ($startDate !== '' && $endDate !== '' && $startDate > $endDate) throw new \InvalidArgumentException('presale_claim_sales_date_range_invalid');
-        $query = Db::name(self::CLAIMABLE_TABLE)->where('tenant_id', (string)$scope['tenantId']);
+        $query = Db::name(self::CLAIMABLE_TABLE)->alias('claimable')
+            ->where('claimable.tenant_id', (string)$scope['tenantId']);
         $storeIds = array_values(array_unique(array_filter(array_map('intval', (array)($scope['storeIds'] ?? [])))));
         if (!$storeIds) return ['list' => [], 'count' => 0, 'page' => $page, 'limit' => $limit, 'data_as_of' => time()];
-        $query->whereIn('store_id', $storeIds);
-        $query->where('source_kind', $sourceKind);
+        $query->whereIn('claimable.store_id', $storeIds);
+        $query->where('claimable.source_kind', $sourceKind);
         // Historical imports persisted OPEN while current checkout writes
         // AVAILABLE. Keep the database unchanged and admit only positive
         // remaining legacy rights into the default "可领用" result.
         if ($status === self::STATUS_AVAILABLE) {
-            $query->whereIn('claim_status', [self::STATUS_AVAILABLE, self::STATUS_LEGACY_OPEN])
-                ->whereRaw('quantity > claimed_quantity');
+            $query->whereIn('claimable.claim_status', [self::STATUS_AVAILABLE, self::STATUS_LEGACY_OPEN])
+                ->whereRaw('claimable.quantity > claimable.claimed_quantity');
         } elseif ($status !== '') {
-            $query->where('claim_status', $status);
+            $query->where('claimable.claim_status', $status);
         }
-        if ($startDate !== '') $query->where('business_date', '>=', $startDate);
-        if ($endDate !== '') $query->where('business_date', '<=', $endDate);
+        if ($startDate !== '') $query->where('claimable.business_date', '>=', $startDate);
+        if ($endDate !== '') $query->where('claimable.business_date', '<=', $endDate);
         if ($keyword !== '') {
-            $query->where(function ($inner) use ($keyword): void {
-                $inner->whereLike('source_order_no_snapshot', '%' . $keyword . '%')
-                    ->whereOr('member_name_snapshot', 'like', '%' . $keyword . '%')
-                    ->whereOr('member_phone_snapshot', 'like', '%' . $keyword . '%')
-                    ->whereOr('product_name_snapshot', 'like', '%' . $keyword . '%');
+            $initials = preg_match('/^[A-Za-z]{1,60}$/D', $keyword) === 1 ? strtoupper($keyword) : '';
+            // The derived current-name index only widens member search; all eligibility scope and
+            // status constraints remain on the outer query, and historical snapshots stay unchanged.
+            $query->where(function ($inner) use ($keyword, $initials): void {
+                $inner->whereLike('claimable.source_order_no_snapshot', '%' . $keyword . '%')
+                    ->whereOr('claimable.member_name_snapshot', 'like', '%' . $keyword . '%')
+                    ->whereOr('claimable.member_phone_snapshot', 'like', '%' . $keyword . '%')
+                    ->whereOr('claimable.product_name_snapshot', 'like', '%' . $keyword . '%');
+                if ($initials !== '') {
+                    $inner->whereExists(function ($nameSearch) use ($initials): void {
+                        $nameSearch->name('member_name_initial_search')->alias('name_search')
+                            ->whereRaw('name_search.uid = claimable.member_id')
+                            ->whereLike('name_search.initials', $initials . '%');
+                    }, 'OR');
+                }
             });
         }
         $count = (int)(clone $query)->count();
-        $rows = $query->order('business_date', 'desc')->order('id', 'desc')->page($page, $limit)->select()->toArray();
+        $rows = $query->field('claimable.*')->order('claimable.business_date', 'desc')
+            ->order('claimable.id', 'desc')->page($page, $limit)->select()->toArray();
         return ['list' => array_map(function (array $row): array {
             $quantity = (int)$row['quantity']; $claimed = (int)$row['claimed_quantity'];
             return [
