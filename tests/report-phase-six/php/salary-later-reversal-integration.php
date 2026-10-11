@@ -87,7 +87,7 @@ foreach ($groups as $group) {
     $summaryCash = 0;
     foreach ($summary['columns'] as $column) {
         $key = (string)($column['key'] ?? '');
-        if (strpos($key, 'salary_category_cash_') === 0) {
+        if ($key === 'salary_presale_cash' || strpos($key, 'salary_category_cash_') === 0) {
             $summaryCash += $toCents($summary['summary_row'][$key] ?? 0);
         }
     }
@@ -101,7 +101,9 @@ foreach ($groups as $group) {
         if ((int)($summaryRow['employee_id'] ?? 0) <= 0) continue;
         foreach ($summary['columns'] as $column) {
             $columnKey = (string)($column['key'] ?? '');
-            if (!str_starts_with($columnKey, 'salary_category_cash_') || $toCents($summaryRow[$columnKey] ?? 0) <= 0) continue;
+            if ($columnKey !== 'salary_presale_cash'
+                && !str_starts_with($columnKey, 'salary_category_cash_')) continue;
+            if ($toCents($summaryRow[$columnKey] ?? 0) <= 0) continue;
             $drilldown = (array)($column['drilldown'] ?? []);
             if (($drilldown['report'] ?? '') !== 'phase_six_salary_detail') {
                 throw new RuntimeException('salary category amount has no detail drilldown');
@@ -153,7 +155,7 @@ foreach ($groups as $group) {
         $filteredSummaryCash = 0;
         foreach ($filteredSummary['columns'] as $column) {
             $key = (string)($column['key'] ?? '');
-            if (strpos($key, 'salary_category_cash_') === 0) {
+            if ($key === 'salary_presale_cash' || strpos($key, 'salary_category_cash_') === 0) {
                 $filteredSummaryCash += $toCents($filteredSummary['summary_row'][$key] ?? 0);
             }
         }

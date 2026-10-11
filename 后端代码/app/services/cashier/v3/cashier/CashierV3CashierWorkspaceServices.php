@@ -1236,6 +1236,7 @@ final class CashierV3CashierWorkspaceServices
                 $selection = [
                     'staffId' => (int)($person['staffId'] ?? $person['id'] ?? 0),
                     'allocationWeight' => (int)($person['allocationWeight'] ?? 0),
+                    'isPreSale' => !empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked']),
                 ];
                 if (array_key_exists('performanceAmountCents', $person)) {
                     $selection['performanceAmountCents'] = (int)$person['performanceAmountCents'];
@@ -1293,6 +1294,7 @@ final class CashierV3CashierWorkspaceServices
                 $selection = [
                     'staffId' => (int)($person['staffId'] ?? $person['id'] ?? 0),
                     'allocationWeight' => (int)($person['allocationWeight'] ?? 0),
+                    'isPreSale' => !empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked']),
                 ];
                 if (array_key_exists('performanceAmountCents', $person)) {
                     $selection['performanceAmountCents'] = (int)$person['performanceAmountCents'];
@@ -2340,7 +2342,8 @@ final class CashierV3CashierWorkspaceServices
 
     /**
      * Re-read every selected salesperson under the current store lock. Client
-     * names, employee types and allocation snapshots are never persisted.
+     * names and employee types are never trusted. The cashier's presale choice
+     * is a line-level business snapshot and must survive identity revalidation.
      *
      * @param array<int,array{staffId:int,allocationWeight:int}> $selections
      * @return array<int,array>
@@ -2357,6 +2360,7 @@ final class CashierV3CashierWorkspaceServices
             throw $this->incompleteLineSettings('', 'salespeople_too_many');
         }
         $weights = [];
+        $presaleByStaff = [];
         $requestedPerformanceAmounts = [];
         $requestedPerformanceAmountManual = [];
         foreach ($selections as $selection) {
@@ -2366,6 +2370,8 @@ final class CashierV3CashierWorkspaceServices
                 throw $this->incompleteLineSettings('', 'salesperson_selection_invalid');
             }
             $weights[$staffId] = $weight;
+            $presaleByStaff[$staffId] = !empty($selection['isPreSale'])
+                || !empty($selection['is_presale']) || !empty($selection['marked']);
             if (array_key_exists('performanceAmountCents', (array)$selection)
                 || array_key_exists('performance_amount_cents', (array)$selection)) {
                 $requestedPerformanceAmounts[$staffId] = max(0, (int)($selection['performanceAmountCents'] ?? $selection['performance_amount_cents'] ?? 0));
@@ -2427,6 +2433,7 @@ final class CashierV3CashierWorkspaceServices
                 'storeId' => (int)$row['store_id'],
                 'name' => $name,
                 'allocationWeight' => (int)$selection['allocationWeight'],
+                'isPreSale' => $presaleByStaff[$staffId],
                 'sequence' => $index + 1,
                 'employeeTypeCodeSnapshot' => $type,
                 'employeeTypeAuthorityVersion' => $typeVersion,

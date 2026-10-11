@@ -293,6 +293,7 @@ function checkoutProjectionAggregate(array $result): array
             'is_experience' => $line['isExperience'],
             'catalog_sku_id' => $line['catalogSkuId'],
             'craftsmen_snapshot_json' => $line['craftsmenSnapshotJson'],
+            'salespeople_snapshot_json' => $line['salespeopleSnapshotJson'],
             'guide_selections_json' => $line['guideSelectionsJson'],
             'sales_manager_selections_json' => $line['salesManagerSelectionsJson'],
             'manual_labor_fee_cents' => $line['manualLaborFeeCents'],
@@ -375,6 +376,27 @@ checkoutAssert(
 $snapshot = checkoutSnapshot();
 $saveCommand = checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 1);
 $draft = CashierV3CheckoutSettlementKernel::saveDraft($saveCommand, $snapshot, null, $secret);
+// A checked presale salesperson must remain on the immutable request line;
+// leaving it out turns both the order display and salary fact into postsale.
+$presaleSnapshot = checkoutSnapshot();
+$presaleSnapshot['saleLines'][0]['salespeople'] = [[
+    'staffId' => 1178,
+    'allocationWeight' => 100,
+    'isPreSale' => true,
+]];
+checkoutResign($presaleSnapshot);
+$presaleDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 104),
+    $presaleSnapshot,
+    null,
+    $secret
+);
+$presaleLine = json_decode((string)($presaleDraft['lineDrafts'][0]['salespeopleSnapshotJson'] ?? ''), true);
+checkoutAssert('presale salesperson survives checkout request persistence',
+    ($presaleLine[0]['isPreSale'] ?? null) === true);
+$postsaleLine = json_decode((string)($draft['lineDrafts'][0]['salespeopleSnapshotJson'] ?? ''), true);
+checkoutAssert('historical sale line without salesperson retains its sparse snapshot',
+    $postsaleLine === null || $postsaleLine === []);
 $couponSnapshot = checkoutSnapshot();
 $couponSnapshot['saleLines'][0]['couponUserId'] = 123;
 $couponSnapshot['saleLines'][0]['couponNameSnapshot'] = '测试抵用券';
@@ -421,6 +443,18 @@ checkoutAssert('final authority rebuild retains coupon tender and gross sale',
     && $rebuiltCouponSnapshot['saleLines'][0]['couponPaymentCents'] === 500
     && $rebuiltCouponSnapshot['saleLines'][0]['couponDiscountCents'] === 0
     && $rebuiltCouponSnapshot['saleLines'][0]['saleAmountCents'] === 9000);
+$presaleAggregate = checkoutProjectionAggregate($presaleDraft);
+$presaleAggregate['request'] += $couponAggregate['request'];
+$presaleAggregate['currentRequest'] = [];
+$presaleAggregate['verifiedSources'] = $couponAggregate['verifiedSources'];
+$rebuiltPresale = (new CashierV3CheckoutDraftAuthorityRebuilder())->rebuild(
+    $presaleAggregate,
+    $presaleAggregate['workspaceCurrentVersion'],
+    'roles:' . str_repeat('a', 32),
+    1785258003
+);
+checkoutAssert('final authority rebuild keeps the selected presale salesperson',
+    ($rebuiltPresale['saleLines'][0]['salespeople'][0]['isPreSale'] ?? null) === true);
 $untracedCoupon = $couponSnapshot;
 $untracedCoupon['saleLines'][0]['couponUserId'] = 0;
 $untracedCoupon['saleLines'][0]['couponNameSnapshot'] = '';
@@ -554,6 +588,12 @@ $checkoutProjectionAggregate = checkoutProjectionAggregate($draft);
 $checkoutProjection = CashierV3CheckoutProjectionServices::projectPersistedAggregate(
     $checkoutProjectionAggregate
 );
+$presaleProjection = CashierV3CheckoutProjectionServices::projectPersistedAggregate(
+    checkoutProjectionAggregate($presaleDraft)
+);
+checkoutAssert('presale checkout projection retains the locked request fingerprint',
+    $presaleProjection['checkoutRequestId'] === $presaleDraft['requestId']
+    && $presaleProjection['snapshotReady'] === true);
 checkoutAssert('current editing checkout projection freezes request identity and correlation token',
     $checkoutProjection['contractVersion'] === 'cashier-v3-checkout-projection-v2'
         && $checkoutProjection['checkoutRequestId'] === $draft['requestId']

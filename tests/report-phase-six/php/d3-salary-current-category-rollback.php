@@ -47,8 +47,8 @@ $assert($cardSale!==null && $cardSale['source_type']==='card','historical card a
 $componentFixture=['target_type'=>'card','card_component_id'=>4123033,'card_holder_id'=>1746649,'store_id'=>126];
 $assert($componentRead->invoke($s,[$componentFixture],[126])===[],
     'historical card component with an invalid current category remains unclassified');
-$assert($before['metric_version']==='report-phase-six-v2:salary-current-product-category-v1',
-    'salary explicitly identifies the new current-product classification version');
+$assert($before['metric_version']==='report-phase-six-v2:salary-presale-allocation-v1',
+    'salary identifies the presale allocation and current-product classification version');
 $strip=static function(array $rows):array{
     foreach($rows as &$row)unset($row['performance_category']);unset($row);return $rows;
 };

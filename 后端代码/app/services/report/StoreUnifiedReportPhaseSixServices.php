@@ -18,6 +18,7 @@ use think\facade\Db;
 final class StoreUnifiedReportPhaseSixServices
 {
     public const METRIC_VERSION = 'report-phase-six-v2';
+    private const SALARY_PRESALE_KEY = 'salary_presale_cash';
 
     public const REPORTS = [
         'phase_six_garden_item_analysis' => ['name' => '花园品项分析表', 'both_ends' => false],
@@ -229,7 +230,8 @@ final class StoreUnifiedReportPhaseSixServices
         if($metricKey!==''&&$categoryKey!=='')throw new \InvalidArgumentException('工资指标与商品分类不能同时下钻');
         if($metricKey!==''&&($employeeId===0||$storeId===0))
             throw new \InvalidArgumentException('请从员工薪资汇总表选择员工和门店后查看指标明细');
-        if($categoryKey!=='' && !preg_match('/^salary_category_cash_(?:\d+|historical_\d+|unclassified)$/D',$categoryKey))
+        if($categoryKey!=='' && $categoryKey!==self::SALARY_PRESALE_KEY
+            && !preg_match('/^salary_category_cash_(?:\d+|historical_\d+|unclassified)$/D',$categoryKey))
             throw new \InvalidArgumentException('商品分类筛选条件不正确');
         if($categoryKey!=='' && ($employeeId===0 || $storeId===0))
             throw new \InvalidArgumentException('请从员工薪资汇总表选择员工和门店后查看分类明细');
@@ -240,7 +242,7 @@ final class StoreUnifiedReportPhaseSixServices
         if($storeId>0)$facts=array_values(array_filter($facts,static fn(array $fact):bool=>(int)$fact['store_id']===$storeId));
         $orderReferences=$this->salaryOrderReferences($facts);
         $categories=$categoryKey!==''?$this->salaryCategoryDefinitions($this->observedSalaryCategories($facts)):null;
-        $categoryLabel='';
+        $categoryLabel=$categoryKey===self::SALARY_PRESALE_KEY?'售前':'';
         if($categoryKey!=='')foreach($categories['columns'] as $column){
             if($column['key']===$categoryKey){$categoryLabel=(string)$column['label'];break;}
         }
@@ -283,7 +285,7 @@ final class StoreUnifiedReportPhaseSixServices
                 'member_name' => $f['member_name'],
                 'document_no' => (string)($orderReference['number']??'-'),
                 'document_order_id' => (string)($orderReference['id']??''),
-                'performance_category' => $categoryKey!==''?$categoryLabel:$f['category_path'], 'detail' => $f['item_name'],
+                'performance_category' => $categoryKey!==''?$categoryLabel:($this->salaryIsPresale($f)?'售前':$f['category_path']), 'detail' => $f['item_name'],
                 'project_count' => (string)$f['project_count'],
                 'consumption_amount' => $this->money((int)$f['consumption_cents']),
                 'cash_amount' => $this->money($cashCents), 'cash_amount_cents' => $cashCents,
@@ -307,7 +309,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('document_no','单据号','显示订单中心对应的订单编号；点击可查看该订单详情。没有对应订单时显示“-”。',false,false,180,[
                 'report'=>'order_center_order_detail','param_map'=>['order_id'=>'document_order_id','order_no'=>'document_no'],
             ]),
-            $this->column('performance_category','商品分类','统一读取关联商品的当前分类，历史记录也随商品分类调整；没有有效分类时留空。卡项按卡内项目当前分类拆分，分类下钻只显示所点分类，金额和次数不变。'),
+            $this->column('performance_category','商品分类','售前销售人分得的业绩显示“售前”；其他销售和服务读取关联商品的当前分类。卡项按卡内项目当前分类拆分，分类下钻只显示所点分类。'),
             $this->column('detail','明细','显示该笔业务记录的服务项目、卡项或产品名称。'),
             $this->column('project_count','项目数','该员工分得的服务项目数；多人服务按实际分配份额计算，后续人工调整按调整后的有效结果显示。',true),
         ];
@@ -317,7 +319,7 @@ final class StoreUnifiedReportPhaseSixServices
         if($metricKey==='service_people_count')$columns[]=$this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店服务多天只计一次；分得的人数只在其中一条明细显示。',true);
         $columns=array_merge($columns,[
             $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后分配给该员工的消耗金额；后来作废的记录不再统计。',true),
-            $this->column('cash_amount','现金业绩','销售分配金额减去退款日分配给该员工的退款业绩；原销售分配不回写。分类下钻只显示该分类金额。',true),
+            $this->column('cash_amount','现金业绩','销售分配金额减去退款日分配给该员工的退款业绩；售前分配单独归入售前，其他分配按商品分类。原销售分配不回写。',true),
             $this->column('labor_fee','手工费','该笔服务最终分配给员工的手工费；后续人员调整按有效结果显示，作废后不再统计。',true),
             $this->manualColumn('备注','备注','有权限的用户手动填写，保存后刷新页面仍会显示。')
         ]);
@@ -405,16 +407,18 @@ final class StoreUnifiedReportPhaseSixServices
             $this->salaryFactsWithReportingDimensions($stores,$range),$employeeName
         ) as $f){
             $key=(int)$f['store_id'].'|'.(int)$f['employee_id'];
-            if(!isset($rows[$key]))$rows[$key]=['store_id'=>(int)$f['store_id'],'employee_id'=>(int)$f['employee_id'],'company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'position_name'=>$f['position_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'labor_fee_cents'=>0];
+            if(!isset($rows[$key]))$rows[$key]=['store_id'=>(int)$f['store_id'],'employee_id'=>(int)$f['employee_id'],'company_name'=>$f['company_name'],'store_name'=>$f['store_name'],'employee_name'=>$f['employee_name'],'position_name'=>$f['position_name'],'project_count_micros'=>0,'service_visit_tenths'=>0,'service_people_tenths'=>0,'consumption_cents'=>0,'cash_cents'=>0,'presale_cash_cents'=>0,'labor_fee_cents'=>0];
             // 工资项目数是人员服务份额，不是销售数量；用百万分位整数累加，保留入库 DECIMAL(20,6) 的精度。
             $rows[$key]['project_count_micros']+=$this->projectCountMicros((string)$f['project_count']);
             $rows[$key]['service_visit_tenths']+=(int)($f['service_visit_tenths'] ?? 0);
             $rows[$key]['consumption_cents']+=(int)$f['consumption_cents'];
             $rows[$key]['cash_cents']+=(int)($f['cash_cents'] ?? 0);
+            $rows[$key]['presale_cash_cents']+=(int)($f['presale_cash_cents']??0);
             // Sales performance belongs to the employee and sale line; card
-            // amounts have already been split by their contained projects.
+            // amounts have already been split by their contained projects. Presale
+            // belongs to the selected salesperson, not the product category.
             $categoryAmounts=(array)($f['sales_category_cents']??[]);
-            $unclassified=(int)($f['cash_cents']??0)-array_sum($categoryAmounts);
+            $unclassified=(int)($f['cash_cents']??0)-(int)($f['presale_cash_cents']??0)-array_sum($categoryAmounts);
             if($unclassified!==0)$categoryAmounts[0]=($categoryAmounts[0]??0)+$unclassified;
             foreach($categoryAmounts as $categoryId=>$cents){
                 $rows[$key]['sales_category_cents'][$categoryId]=($rows[$key]['sales_category_cents'][$categoryId]??0)+(int)$cents;
@@ -434,10 +438,11 @@ final class StoreUnifiedReportPhaseSixServices
             $r['service_visit_count']=$this->tenth((int)$r['service_visit_tenths']);
             $r['service_people_count']=$this->tenth((int)$r['service_people_tenths']);
             $r['consumption_amount']=$this->money($r['consumption_cents']);$r['labor_fee']=$this->money($r['labor_fee_cents']);
+            $r[self::SALARY_PRESALE_KEY]=$this->money((int)$r['presale_cash_cents']);
             foreach($categories['columns'] as $categoryColumn)$r[$categoryColumn['key']]='0';
             $projectedCents=$this->salaryCategoryAmountsByColumn($r,$categories['targets']);
             foreach($projectedCents as $columnKey=>$cents)$r[$columnKey]=$this->money($cents);
-            unset($r['project_count_micros'],$r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
+            unset($r['project_count_micros'],$r['service_visit_tenths'],$r['service_people_tenths'],$r['consumption_cents'],$r['cash_cents'],$r['presale_cash_cents'],$r['labor_fee_cents'],$r['sales_category_cents']);
         }unset($r);
         $columns=[
             $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
@@ -449,6 +454,11 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店服务多天只计一次；朋友及无会员的顾客按每次有效服务计算。不计人数人次的服务排除，普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_people_count')),
             $this->column('consumption_amount','消耗','所选日期内服务完成或卡项核销后分配给该员工的消耗金额之和；作废后不再统计，点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('consumption_amount')),
             $this->column('labor_fee','手工','所选日期内最终分配给该员工的手工费之和；后续人员调整按有效结果显示，作废后不再统计。',true),
+            $this->column(self::SALARY_PRESALE_KEY,'售前业绩','结账、补交或退款时，该员工被选为售前销售人的业绩净额；只计该员工分得的金额，退款按退款业务日扣减，不再重复计入商品分类。',true,false,140,[
+                'report'=>'phase_six_salary_detail',
+                'params'=>['employee_name'=>'','salary_category_key'=>self::SALARY_PRESALE_KEY],
+                'param_map'=>['salary_employee_id'=>'employee_id','salary_store_id'=>'store_id'],
+            ]),
         ];
         foreach($categories['columns'] as $categoryColumn){
             // 分类列自己声明精确下钻条件；页面仅传递 ID 与列键，不推断名称或重算金额。
@@ -494,8 +504,9 @@ final class StoreUnifiedReportPhaseSixServices
     {
         $observed=[];
         foreach($facts as $fact){
+            if($this->salaryIsPresale($fact))continue;
             $amounts=(array)($fact['sales_category_cents']??[]);
-            $unclassified=(int)($fact['cash_cents']??0)-array_sum($amounts);
+            $unclassified=(int)($fact['cash_cents']??0)-(int)($fact['presale_cash_cents']??0)-array_sum($amounts);
             if($unclassified!==0)$amounts[0]=($amounts[0]??0)+$unclassified;
             foreach($amounts as $id=>$cents)$observed[$id]=(string)($fact['sales_category_paths'][$id]??'');
         }
@@ -505,8 +516,9 @@ final class StoreUnifiedReportPhaseSixServices
     /** Project one salary fact by the same current/historical category targets used in the summary. */
     private function salaryCategoryAmountsByColumn(array $fact,array $targets): array
     {
+        if($this->salaryIsPresale($fact))return [self::SALARY_PRESALE_KEY=>(int)($fact['presale_cash_cents']??0)];
         $amounts=(array)($fact['sales_category_cents']??[]);
-        $unclassified=(int)($fact['cash_cents']??0)-array_sum($amounts);
+        $unclassified=(int)($fact['cash_cents']??0)-(int)($fact['presale_cash_cents']??0)-array_sum($amounts);
         if($unclassified!==0)$amounts[0]=($amounts[0]??0)+$unclassified;
         $projected=[];
         foreach($amounts as $id=>$cents){
@@ -514,6 +526,12 @@ final class StoreUnifiedReportPhaseSixServices
             $projected[$key]=($projected[$key]??0)+(int)$cents;
         }
         return $projected;
+    }
+
+    /** Only the persisted per-person allocation role can move cash out of product categories. */
+    private function salaryIsPresale(array $fact): bool
+    {
+        return (string)($fact['role_snapshot']??'')==='salesperson:presale';
     }
 
     /**
@@ -547,8 +565,8 @@ final class StoreUnifiedReportPhaseSixServices
             'key'=>'document_no','label'=>'单据号','show_label'=>false,'aria_label'=>'单据号',
             'type'=>'text','placeholder'=>'输入单据号',
         ];
-        // 产品于 2026-10-09 确认薪资分类改为现行商品维度；历史金额事实及其他报表版本不变。
-        $result['metric_version']=self::METRIC_VERSION.':salary-current-product-category-v1';
+        // 售前只重排薪资报表的人员现金分配；现行商品分类、原始事实和其他报表版本不变。
+        $result['metric_version']=self::METRIC_VERSION.':salary-presale-allocation-v1';
         $result['filters']['employee_name']=$employeeName;
         if($documentFilter)$result['filters']['document_no']=$documentNo;
         return $result;
@@ -1003,7 +1021,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','sales_performance_allocated')->where('pf.status','effective')
             ->where('pf.employee_id','>',0)
-            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.order_id,pf.source_document_type,pf.source_line_id,pf.amount_cents,pf.member_id pf_member_id,pf.member_name_snapshot pf_member_name,pf.store_name_snapshot pf_store_name,pf.organization_name_snapshot pf_company_name,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,s.item_id product_id,d.item_name_snapshot item_name')
+            ->field('pf.id,pf.fact_id,pf.reversal_of,pf.fact_direction,pf.role_snapshot,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.order_id,pf.source_document_type,pf.source_line_id,pf.amount_cents,pf.member_id pf_member_id,pf.member_name_snapshot pf_member_name,pf.store_name_snapshot pf_store_name,pf.organization_name_snapshot pf_company_name,s.fact_id sale_fact_id,s.member_id,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.organization_name_snapshot company_name,s.source_type,s.item_id product_id,d.item_name_snapshot item_name')
             ->order('pf.id','asc');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($salesQuery, 'pf.tenant_id', 'pf.order_id');
@@ -1016,18 +1034,22 @@ final class StoreUnifiedReportPhaseSixServices
         $salesGrouped=[];
         foreach($salesRows as $sale){
             if((string)$sale['fact_direction']!=='forward'||isset($salesReversed[(string)$sale['fact_id']]))continue;
-            $allocation=isset($sale['supplement_category_weights'])
+            $isPresale=$this->salaryIsPresale($sale);
+            $allocation=$isPresale?[]:(isset($sale['supplement_category_weights'])
                 ? $this->salaryCategoryAllocationFromWeights(
                     (int)$sale['amount_cents'],
                     (array)$sale['supplement_category_weights'],
                     (array)($sale['supplement_category_paths']??[])
                 )
-                : $this->salarySaleCategoryAmounts($sale,$cardAllocations[(string)($sale['sale_fact_id']??'')]??[]);
-            if((string)$sale['source_type']==='card'||isset($sale['supplement_category_weights']))
+                : $this->salarySaleCategoryAmounts($sale,$cardAllocations[(string)($sale['sale_fact_id']??'')]??[]));
+            if(!$isPresale&&((string)$sale['source_type']==='card'||isset($sale['supplement_category_weights'])))
                 $sale['category_path']=$this->salaryAllocationCategoryPath($allocation);
-            $salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'];
-            if(!isset($salesGrouped[$salesKey])){$salesGrouped[$salesKey]=$sale;$salesGrouped[$salesKey]['amount_cents']=0;$salesGrouped[$salesKey]['sales_category_cents']=[];$salesGrouped[$salesKey]['sales_category_paths']=[];}
+            // A presale salesperson's cash is an independent reporting component.
+            // Keep it off the service row so service counts and consumption retain their product category.
+            $salesKey=(int)$sale['store_id'].'|'.(int)$sale['employee_id'].'|'.(string)$sale['checkout_request_id'].'|'.(string)$sale['source_line_id'].($isPresale?'|presale':'');
+            if(!isset($salesGrouped[$salesKey])){$salesGrouped[$salesKey]=$sale;$salesGrouped[$salesKey]['amount_cents']=0;$salesGrouped[$salesKey]['presale_cash_cents']=0;$salesGrouped[$salesKey]['sales_category_cents']=[];$salesGrouped[$salesKey]['sales_category_paths']=[];}
             $salesGrouped[$salesKey]['amount_cents']+=(int)$sale['amount_cents'];
+            if($isPresale)$salesGrouped[$salesKey]['presale_cash_cents']+=(int)$sale['amount_cents'];
             foreach($allocation as $categoryId=>$part){
                 $salesGrouped[$salesKey]['sales_category_cents'][$categoryId]=($salesGrouped[$salesKey]['sales_category_cents'][$categoryId]??0)+(int)$part['cents'];
                 $salesGrouped[$salesKey]['sales_category_paths'][$categoryId]=(string)$part['path'];
@@ -1086,7 +1108,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->where('pf.performance_type','refund_sales_deduction')->where('pf.fact_direction','forward')
             ->where('pf.status','effective')->where('pf.employee_id','>',0)
             ->whereRaw('(ra.id IS NOT NULL OR op.id IS NOT NULL)')
-            ->field('pf.fact_id,pf.fact_direction,pf.reversal_of,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.member_id,pf.member_name_snapshot member_name,pf.store_name_snapshot store_name,ra.target_name_snapshot item_name,ra.source_sales_order_id,ra.source_sales_line_id,ra.target_type,ra.catalog_item_id,ra.catalog_kind,ra.card_holder_id,ra.card_component_id,op.request_json imported_request_json,op.source_order_no_snapshot imported_source_no,op.operation_id imported_operation_id')
+            ->field('pf.fact_id,pf.fact_direction,pf.reversal_of,pf.role_snapshot,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.member_id,pf.member_name_snapshot member_name,pf.store_name_snapshot store_name,ra.target_name_snapshot item_name,ra.source_sales_order_id,ra.source_sales_line_id,ra.target_type,ra.catalog_item_id,ra.catalog_kind,ra.card_holder_id,ra.card_component_id,op.request_json imported_request_json,op.source_order_no_snapshot imported_source_no,op.operation_id imported_operation_id')
             ->order('pf.id','asc')->select()->toArray();
         $reversed=$this->reversedPerformanceFactIds($rows);
         $saleLineIds=array_values(array_unique(array_filter(array_column($rows,'source_sales_line_id'))));
@@ -1106,6 +1128,7 @@ final class StoreUnifiedReportPhaseSixServices
         $out=[];
         foreach($rows as $row){
             if(isset($reversed[(string)$row['fact_id']]))continue;
+            $isPresale=$this->salaryIsPresale($row);
             if((string)($row['imported_operation_id']??'')!==''){
                 $request=json_decode((string)($row['imported_request_json']??''),true);
                 $row['item_name']=(string)(is_array($request)?($request['cardName']??''):'');
@@ -1121,7 +1144,7 @@ final class StoreUnifiedReportPhaseSixServices
             }
             $sale=$source+['amount_cents'=>(int)$row['amount_cents'],'source_type'=>'','category_id'=>0,'category_path'=>''];
             $sale['amount_cents']=(int)$row['amount_cents'];
-            $allocation=$this->salarySaleCategoryAmounts($sale,$cardFacts[(string)($source['sale_fact_id']??'')]??[]);
+            $allocation=$isPresale?[]:$this->salarySaleCategoryAmounts($sale,$cardFacts[(string)($source['sale_fact_id']??'')]??[]);
             $categoryCents=[];$categoryPaths=[];
             foreach($allocation as $categoryId=>$part){$categoryCents[$categoryId]=(int)$part['cents'];$categoryPaths[$categoryId]=(string)$part['path'];}
             $row['row_key']=(string)$row['fact_id'];
@@ -1129,6 +1152,7 @@ final class StoreUnifiedReportPhaseSixServices
             $row['source_type']=(string)($row['imported_operation_id']??'')!==''?'imported_card_refund':'manual_refund';
             $row['category_path']=$this->salaryAllocationCategoryPath($allocation);
             $row['sales_category_cents']=$categoryCents;$row['sales_category_paths']=$categoryPaths;
+            $row['presale_cash_cents']=$isPresale?(int)$row['amount_cents']:0;
             $row['cash_cents']=(int)$row['amount_cents'];$row['consumption_cents']=0;
             $row['labor_fee_amount_cents']=0;$row['project_count_half_units']=0;
             $row['project_count_decimal_micros']=0;$row['legacy_project_count_half_units']=0;

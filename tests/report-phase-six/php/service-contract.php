@@ -145,7 +145,7 @@ assertPhaseSix(
     preg_match('/后来(?:已)?作废的记录不再统计/u',$service)===1
     && str_contains($service, '页面可输入姓名中的任意文字进行筛选')
     && str_contains($service, '卡项按卡内项目当前分类和原有金额比例拆分')
-    && str_contains($service, '统一读取关联商品的当前分类，历史记录也随商品分类调整')
+    && str_contains($service, '售前销售人分得的业绩显示“售前”；其他销售和服务读取关联商品的当前分类')
     && !str_contains($service, "'business_date','日期','事实业务日期。'")
     && !str_contains($service, "'cash_amount','现金业绩','销售明细现金业绩分摊事实。'"),
     'salary column-source descriptions use business language and explain filtering, voiding and card allocation'

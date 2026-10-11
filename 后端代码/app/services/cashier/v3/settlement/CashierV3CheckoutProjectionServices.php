@@ -1583,6 +1583,10 @@ final class CashierV3CheckoutProjectionServices
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
             ];
+            // False was absent from older fingerprints; only persist a selected presale role.
+            if (!empty($row['isPreSale']) || !empty($row['is_presale']) || !empty($row['marked'])) {
+                $resultRow['isPreSale'] = true;
+            }
             $hasPerformanceAmount = array_key_exists('performanceAmountCents', $row)
                 || array_key_exists('performance_amount_cents', $row);
             $hasPerformanceAmountManual = array_key_exists('performanceAmountManual', $row)

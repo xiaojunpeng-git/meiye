@@ -957,7 +957,12 @@ final class CashierV3CheckoutSettlementKernel
                     $performanceIndependent = !empty($person['performanceIndependent'])
                         || !empty($person['performance_independent']);
                     $groupKey = $performanceIndependent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
+                    // Presale belongs to this salesperson's immutable sale-line choice,
+                    // not to the catalog item or current employee profile.
                     $normalizedPerson = ['staffId' => $staffId, 'allocationWeight' => $allocation];
+                    if (!empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked'])) {
+                        $normalizedPerson['isPreSale'] = true;
+                    }
                     $hasPerformanceAmount = array_key_exists('performanceAmountCents', $person)
                         || array_key_exists('performance_amount_cents', $person);
                     $hasPerformanceAmountManual = array_key_exists('performanceAmountManual', $person)

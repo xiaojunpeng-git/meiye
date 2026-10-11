@@ -1657,6 +1657,11 @@ final class CashierV3SalesOrderPlanV1
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
             ];
+            // Keep historical post-sale fingerprints unchanged while freezing
+            // an explicitly selected presale role on new order lines.
+            if (!empty($row['isPreSale']) || !empty($row['is_presale']) || !empty($row['marked'])) {
+                $resultRow['isPreSale'] = true;
+            }
             if (array_key_exists('performanceAmountCents', $row)
                 || array_key_exists('performance_amount_cents', $row)) {
                 $resultRow['performanceAmountCents'] = self::nonNegativeInt(
