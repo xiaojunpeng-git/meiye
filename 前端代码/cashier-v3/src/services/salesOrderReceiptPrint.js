@@ -12,11 +12,11 @@ const DEFAULT_RECEIPT_PAPER_KEY = '76'
 // Fifteen 1/6-inch impact-printer lines, now owned by the receipt instead of the driver.
 const RECEIPT_TEAR_GUIDE_MM = 64
 const RECEIPT_TRAILING_SAFETY_MM = 4
-// Release only vertical viewport clipping. Horizontal constraints must retain
-// their established behavior: changing them can change native shrink-to-fit
-// scaling even when CSS font sizes are unchanged.
+// Release both overflow axes: overflow-x:auto computes overflow-y:visible back
+// to auto, leaving the app scroll container active during native pagination.
+// Preserve width/min-width and receipt typography to retain native sizing.
 const RECEIPT_PRINT_ROOT_STYLES = Object.freeze({
-  height: 'auto', 'min-height': '0', 'max-height': 'none', 'overflow-y': 'visible'
+  height: 'auto', 'min-height': '0', 'max-height': 'none', 'overflow-x': 'visible', 'overflow-y': 'visible'
 })
 const RECEIPT_PRINT_ROOT_CSS = Object.entries(RECEIPT_PRINT_ROOT_STYLES)
   .map(([property, value]) => `${property}: ${value} !important;`).join(' ')
@@ -335,6 +335,8 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     .receipt h1 { font-size: 1.3em; }
     .receipt h2 { font-size: 1em; }
     .receipt .tear-guide { font-size: .6em; }
+    /* Keep handwriting space and its feed marker together; never create a blank-only tear-guide page. */
+    .signatures { break-inside: avoid; page-break-inside: avoid; }
     .meta, tr, .summary, .store-address, .note, .signature-row, .tear-guide { break-inside: avoid; page-break-inside: avoid; }
     h2 { break-after: avoid; page-break-after: avoid; }
   }
@@ -369,8 +371,8 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     <div class="signature-row">客户签字:</div>
     <div class="signature-row">前台签字:</div>
     <div class="signature-row">店长签字:</div>
+    <div class="tear-guide" aria-hidden="true"></div>
   </div>
-  <div class="tear-guide" aria-hidden="true"></div>
   </main>
   <script>
     (() => {
@@ -514,8 +516,8 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       .map((child) => [child, child.style.display])
     hiddenPrintSiblings.forEach(([child]) => { child.style.display = 'none' })
     // Native hosts may snapshot screen layout before print CSS. Release the app's
-    // vertical clipping as well as its children, so long mixed receipts can flow
-    // beyond one screen without changing width-based native print scaling.
+    // scroll container on both axes as well as its children, so long receipts
+    // can paginate without changing the existing width/min-width constraints.
     // Keep exact inline values/priorities for cancel/close.
     printRootStyles = [documentRef.documentElement, documentRef.body]
       .filter((element) => typeof element?.style?.setProperty === 'function')
@@ -622,6 +624,8 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
         ${root} h1 { font-size: 1.3em !important; }
         ${root} h2 { font-size: 1em !important; }
         ${root} .tear-guide { font-size: .6em !important; }
+        /* Match the standalone document: signatures and the feed marker form one printable footer. */
+        ${root} .signatures { break-inside: avoid; page-break-inside: avoid; }
         ${root} .meta, ${root} tr, ${root} .summary, ${root} .store-address, ${root} .note, ${root} .signature-row, ${root} .tear-guide { break-inside: avoid; page-break-inside: avoid; }
         ${root} h2 { break-after: avoid; page-break-after: avoid; }
       }
