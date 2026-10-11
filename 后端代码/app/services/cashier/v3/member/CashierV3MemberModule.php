@@ -165,21 +165,23 @@ final class CashierV3MemberModule
             $handlers->registerProjection('query-member-selector', function (array $scope): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
                 $selectorContext = (string)($payload['selectorContext'] ?? $payload['selector_context'] ?? $payload['selectorEntry'] ?? $payload['selector_entry'] ?? '');
-                $supportsExplicitStoreScope = in_array($selectorContext, ['cashier', 'reservation'], true);
+                // 退款选择会员与收银/预约共用服务端范围口径，但仍由 order_center entry 独立判权。
+                $supportsExplicitStoreScope = in_array($selectorContext, ['cashier', 'reservation', 'imported-card-refund'], true);
+                // 退款入口原本不筛掉注销历史会员，也不支持首字母检索；范围按钮不改变原搜索口径。
+                $supportsNameInitials = in_array($selectorContext, ['cashier', 'reservation'], true);
                 $isAllScope = strtolower(trim((string)($payload['memberScope'] ?? $payload['member_scope'] ?? 'store'))) === 'all';
                 return [
                     'data' => self::querySelector(
                         $payload,
                         $scope['operator_scope'],
                         $scope['data_scope'],
-                        // 收银与预约选择会员默认只查本店；只有明确选择“全部”才查全集团。
+                        // 收银、预约、退款选择会员默认只查本店；只有明确选择“全部”才查全集团。
                         // 推荐人固定只能查本店，不能通过查询范围扩大权限。
                         $selectorContext !== 'member-referrer'
                             && (!$supportsExplicitStoreScope || $isAllScope),
                         $supportsExplicitStoreScope && !$isAllScope,
-                        // 首字母检索只开放本轮批准的收银/预约选择器，其他复用入口不扩散。
-                        $supportsExplicitStoreScope,
-                        $supportsExplicitStoreScope
+                        $supportsNameInitials,
+                        $supportsNameInitials
                     ),
                 ];
             });
@@ -854,7 +856,7 @@ final class CashierV3MemberModule
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(100, max(1, (int)($payload['pageSize'] ?? 20)));
         $keyword = trim((string)($payload['keyword'] ?? $payload['search'] ?? ''));
-        // 收银和预约选择器默认只查当前操作门店；调用方明确选择全部时才读取全集团。
+        // 收银、预约和退款选择器默认只查当前操作门店；调用方明确选择全部时才读取全集团。
         // 其他选择器保持原有 DataScope 范围，避免影响会员中心等调用方。
         $storeIds = $globalSelector
             ? null

@@ -798,6 +798,26 @@ class CashierV3ActionManifest
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
                 'consumers' => ['manual_refund.personnel_adjusted' => []],
             ],
+            'adjust-refund-attribution' => [
+                'required_event_types' => ['manual_refund.attribution_adjusted'],
+                'allowed_event_types' => ['manual_refund.attribution_adjusted'],
+                'event_rules' => ['manual_refund.attribution_adjusted' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'manual_refund', 'source_type' => 'adjust-refund-attribution',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['manual_refund.attribution_adjusted' => []],
+            ],
+            'adjust-imported-refund-personnel' => [
+                'required_event_types' => ['imported_card_refund.personnel_adjusted'],
+                'allowed_event_types' => ['imported_card_refund.personnel_adjusted'],
+                'event_rules' => ['imported_card_refund.personnel_adjusted' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'imported_card_refund', 'source_type' => 'adjust-imported-refund-personnel',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['imported_card_refund.personnel_adjusted' => []],
+            ],
             'void-sales-order' => [
                 'required_event_types' => ['sales_order.voided'], 'allowed_event_types' => ['sales_order.voided'],
                 'event_rules' => ['sales_order.voided' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'sales_order', 'source_type' => 'void-sales-order']],

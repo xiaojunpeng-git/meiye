@@ -1075,16 +1075,18 @@ final class StoreUnifiedReportPhaseSixServices
         return $out;
     }
 
-    /** 退款来源只定位实际商品/卡内项目；现行分类复用统一读取器，原销售及退款金额不回写。 */
+    /** 退款人员事实按退款操作定位；旧卡无原销售项目，保留空分类而不猜卡内分摊。 */
     private function salaryRefundSalespersonFacts(array $stores,array $range):array
     {
         $rows=Db::name('cashier_v3_performance_fact')->alias('pf')
-            ->join('cashier_v3_refund_adjustment ra','ra.tenant_id=pf.tenant_id AND ra.operation_id=pf.order_id AND ra.status=\'effective\'')
+            ->leftJoin('cashier_v3_refund_adjustment ra','ra.tenant_id=pf.tenant_id AND ra.operation_id=pf.order_id AND ra.status=\'effective\'')
+            ->leftJoin('cashier_v3_order_lifecycle_operation op',"op.tenant_id=pf.tenant_id AND op.operation_id=pf.order_id AND op.source_type='imported_card' AND op.operation_type='refund' AND op.status='succeeded'")
             ->where('pf.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('pf.store_id',$stores)->whereBetween('pf.business_date',[$range['start'],$range['end']])
             ->where('pf.performance_type','refund_sales_deduction')->where('pf.fact_direction','forward')
             ->where('pf.status','effective')->where('pf.employee_id','>',0)
-            ->field('pf.fact_id,pf.fact_direction,pf.reversal_of,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.member_id,pf.member_name_snapshot member_name,pf.store_name_snapshot store_name,ra.target_name_snapshot item_name,ra.source_sales_order_id,ra.source_sales_line_id,ra.target_type,ra.catalog_item_id,ra.catalog_kind,ra.card_holder_id,ra.card_component_id')
+            ->whereRaw('(ra.id IS NOT NULL OR op.id IS NOT NULL)')
+            ->field('pf.fact_id,pf.fact_direction,pf.reversal_of,pf.store_id,pf.employee_id,pf.employee_name_snapshot employee_name,pf.business_date,pf.checkout_request_id,pf.source_line_id,pf.amount_cents,pf.member_id,pf.member_name_snapshot member_name,pf.store_name_snapshot store_name,ra.target_name_snapshot item_name,ra.source_sales_order_id,ra.source_sales_line_id,ra.target_type,ra.catalog_item_id,ra.catalog_kind,ra.card_holder_id,ra.card_component_id,op.request_json imported_request_json,op.source_order_no_snapshot imported_source_no,op.operation_id imported_operation_id')
             ->order('pf.id','asc')->select()->toArray();
         $reversed=$this->reversedPerformanceFactIds($rows);
         $saleLineIds=array_values(array_unique(array_filter(array_column($rows,'source_sales_line_id'))));
@@ -1104,6 +1106,11 @@ final class StoreUnifiedReportPhaseSixServices
         $out=[];
         foreach($rows as $row){
             if(isset($reversed[(string)$row['fact_id']]))continue;
+            if((string)($row['imported_operation_id']??'')!==''){
+                $request=json_decode((string)($row['imported_request_json']??''),true);
+                $row['item_name']=(string)(is_array($request)?($request['cardName']??''):'');
+                if($row['item_name']==='')$row['item_name']=(string)($row['imported_source_no']??'');
+            }
             $source=$saleDimensions[(string)$row['source_sales_order_id'].'|'.(string)$row['source_sales_line_id']]??[];
             // 无原单退款的 catalog_item_id 是 SKU ID，不是商品 ID；不能用同号商品或退款名称猜分类。
             // 原销售事实同样已经过当前商品分类读取；来源不同不能产生另一套分类口径。
@@ -1118,7 +1125,8 @@ final class StoreUnifiedReportPhaseSixServices
             $categoryCents=[];$categoryPaths=[];
             foreach($allocation as $categoryId=>$part){$categoryCents[$categoryId]=(int)$part['cents'];$categoryPaths[$categoryId]=(string)$part['path'];}
             $row['row_key']=(string)$row['fact_id'];
-            $row['service_fact_id']='';$row['service_object']='';$row['source_type']='manual_refund';
+            $row['service_fact_id']='';$row['service_object']='';
+            $row['source_type']=(string)($row['imported_operation_id']??'')!==''?'imported_card_refund':'manual_refund';
             $row['category_path']=$this->salaryAllocationCategoryPath($allocation);
             $row['sales_category_cents']=$categoryCents;$row['sales_category_paths']=$categoryPaths;
             $row['cash_cents']=(int)$row['amount_cents'];$row['consumption_cents']=0;

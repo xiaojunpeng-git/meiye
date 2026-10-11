@@ -213,6 +213,8 @@ final class CashierV3UnifiedRefundServices
         $sourceOrderId = (string)$snapshot['sourceOrderId'];
         $sourceOrderNo = (string)$snapshot['sourceOrderNo'];
         $requestSnapshot = $payload;
+        // 无原单没有原销售明细；退款落账时冻结目录分类，避免历史列表回读可变档案。
+        if ($mode === 'catalog') $requestSnapshot['_productCategoryNameSnapshot'] = (string)($target['categoryName'] ?? '');
         if ($rightsBefore !== null) $requestSnapshot['_reversal'] = [
             'rightsBefore' => $rightsBefore,
             'rightsAfter' => $this->refundReversalRightsSnapshotInTx($scope->tenantId(), $holderId),
@@ -339,6 +341,7 @@ final class CashierV3UnifiedRefundServices
         foreach ($this->catalogItems($operator, $scope) as $item) {
             if ((int)($item['skuId'] ?? 0) !== $skuId) continue;
             return ['id' => 'catalog:' . $skuId, 'name' => (string)$item['name'],
+                'categoryName' => (string)($item['category'] ?? ''),
                 'kind' => (string)$item['kind'], 'sourceOrderId' => '', 'sourceOrderNo' => '',
                 'remainingAmountCents' => 0, 'remainingTimes' => 0, 'voided' => false,
                 'canRefund' => true, 'unavailableReason' => ''];

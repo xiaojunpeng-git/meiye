@@ -8,6 +8,8 @@ const props = defineProps({
   showSalespeople: { type: Boolean, default: true },
   showGuides: { type: Boolean, default: false },
   showSalesManagers: { type: Boolean, default: false },
+  // 退款只记录导购归属，不参与原销售/服务的会员轮次。
+  hideGuideRounds: { type: Boolean, default: false },
   // 游客没有会员导购轮次；仍可记录导购归属，但不能占用会员的第 1～3 轮。
   guestCustomer: { type: Boolean, default: false },
   // 订单中心单行调整复用同一控件，但需要直接进入完整分配模式；收银默认行为不变。
@@ -78,7 +80,7 @@ const otherCraftsmanCandidates = ref([])
 const salespeople = ref([])
 const guides = ref([])
 const salesManagers = ref([])
-const guideRoundNo = ref(props.guestCustomer ? 'none' : '')
+const guideRoundNo = ref(props.guestCustomer || props.hideGuideRounds ? 'none' : '')
 const attributionSearchOpen = ref(false)
 const attributionSearchRole = ref('guide')
 const otherCraftsmanSearchOpen = ref(false)
@@ -481,7 +483,7 @@ watch(
       .map((item) => Number(item?.guideRoundNo ?? item?.guide_round_no ?? 0))
       .filter((round) => Number.isInteger(round) && round >= 0 && round <= 3))]
     // 游客继续默认“无”；会员只有已保存明确选择时才回显，0 对应可选的“无”。
-    guideRoundNo.value = props.guestCustomer
+    guideRoundNo.value = props.guestCustomer || props.hideGuideRounds
       ? 'none'
       : (rounds.length === 1 ? (rounds[0] === 0 ? 'none' : String(rounds[0])) : '')
   },
@@ -489,7 +491,7 @@ watch(
 )
 watch(() => props.guestCustomer, (guest) => {
   // 客户身份变化时不能沿用另一身份的轮次选择。
-  guideRoundNo.value = guest ? 'none' : ''
+  guideRoundNo.value = guest || props.hideGuideRounds ? 'none' : ''
 })
 watch(
   () => [props.salesManagerCandidates, props.selectedSalesManagers],
@@ -730,7 +732,7 @@ function addOtherCraftsman(item) {
 }
 
 function addGuide(item) {
-  if (!guides.value.some((record) => record.selected)) guideRoundNo.value = props.guestCustomer ? 'none' : ''
+  if (!guides.value.some((record) => record.selected)) guideRoundNo.value = props.guestCustomer || props.hideGuideRounds ? 'none' : ''
   const guide = guides.value.find((record) => record.id === item.id)
   if (guide) guide.selected = true
   attributionSearchOpen.value = false
@@ -745,7 +747,7 @@ function removeAttribution(item, role) {
   const records = role === 'guide' ? guides.value : salesManagers.value
   const target = records.find((record) => record.id === item.id)
   if (target) target.selected = false
-  if (role === 'guide' && !guides.value.some((record) => record.selected)) guideRoundNo.value = props.guestCustomer ? 'none' : ''
+  if (role === 'guide' && !guides.value.some((record) => record.selected)) guideRoundNo.value = props.guestCustomer || props.hideGuideRounds ? 'none' : ''
 }
 
 function setMarked(item, checked) {
@@ -870,7 +872,7 @@ function attributionRoleAllows(item = {}, role = '') {
 function selectedGuidePayload(records = []) {
   // 传输层 0 表示明确选择“无”；正式事实层使用 NULL，不制造第 0 轮，
   // 且“无”不占用会员第 1～3 轮的跨日期名额。
-  const roundNo = guideRoundNo.value === 'none' ? 0 : Number(guideRoundNo.value)
+  const roundNo = props.hideGuideRounds || guideRoundNo.value === 'none' ? 0 : Number(guideRoundNo.value)
   return selectedAttributionPayload(records.filter((record) => attributionRoleAllows(record, 'guide')))
     .map((record) => ({ ...record, guideRoundNo: roundNo }))
 }
@@ -940,7 +942,7 @@ function confirm() {
     activateInvalidTab('craftsmen', '消耗业绩和手工费按最终输入金额保存；消耗业绩需为整元，项目数必须为非负数字，最多保留六位小数。')
     return
   }
-  const selectedGuideRoundNo = guideRoundNo.value === 'none' ? 0 : Number(guideRoundNo.value)
+  const selectedGuideRoundNo = props.hideGuideRounds || guideRoundNo.value === 'none' ? 0 : Number(guideRoundNo.value)
   if (selectedGuides.length && ![0, 1, 2, 3].includes(selectedGuideRoundNo)) {
     activateInvalidTab('guides', '已选择导购，请选择本次导购第几轮。')
     return
@@ -1061,7 +1063,7 @@ function searchGroupPersonnel(scope) {
               <span v-for="item in selectedGuides" :key="`selected-guide-${item.id}`">{{ item.name }}<button type="button" :aria-label="`移除导购 ${item.name}`" @click="removeAttribution(item, 'guide')">×</button></span>
               <em v-if="!selectedGuides.length">暂未添加</em>
             </div>
-            <fieldset v-if="selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
+            <fieldset v-if="selectedGuides.length && !hideGuideRounds" class="personnel-guide-round" aria-label="本次导购轮次">
               <legend>导购第几轮<strong v-if="!guestCustomer">*</strong></legend>
               <label><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
               <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
@@ -1093,7 +1095,7 @@ function searchGroupPersonnel(scope) {
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
           <strong>已选择 {{ selectedRecords.length }} 人<span v-if="historyAdjustment">，{{ historyAllocationSummary }}</span><span v-else-if="!activeIsNonPerformance">，{{ activeAllocationSummary }}</span><span v-else>（仅记录归属，不分配比例）</span></strong>
         </div>
-        <fieldset v-if="activeTab === 'guides' && selectedGuides.length" class="personnel-guide-round" aria-label="本次导购轮次">
+        <fieldset v-if="activeTab === 'guides' && selectedGuides.length && !hideGuideRounds" class="personnel-guide-round" aria-label="本次导购轮次">
           <legend>导购第几轮<strong v-if="!guestCustomer">*</strong></legend>
           <label><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
           <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>

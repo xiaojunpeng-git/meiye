@@ -51,7 +51,9 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 // 当前退款业务归属固定为 K；列表和导出使用同一只读来源列。
                 ['refund_order_no', '退款单号', 'text', true, true], ['source', '来源'], ['business_date', '退款日期', 'date', true, true],
                 ['source_order_no', '来源订单号'], ['member_name', '会员姓名／游客'], ['phone', '手机号'], ['refund_summary', '退款内容'],
-                ['refund_amount', '退款金额', 'amount'], ['salesperson', '退款销售人'], ['refund_method', '退款方式'], ['store', '办理门店'], ['operator', '操作人'],
+                // 一笔退款仍是一行；多明细名称按退款时的快照汇总，缺失历史快照不回读当前商品档案。
+                ['product_category', '商品分类'], ['product_name', '商品名称'], ['refund_amount', '退款金额', 'amount'],
+                ['salesperson', '退款销售人'], ['refund_attribution', '导购/销售经理'], ['refund_method', '退款方式'], ['store', '办理门店'], ['operator', '操作人'],
                 ['refund_status', '退款状态'], ['refund_completed_at', '退款完成时间', 'datetime'],
             ], ['refund_order_no', 'source_order_no', 'member_name', 'phone', 'refund_summary']],
             'debt' => ['欠款管理', [

@@ -1775,7 +1775,7 @@ class CashierV3CommandGatewayServices extends BaseServices
         // 夹带的版本或只依赖 store_id/operator_id，否则数据范围收窄后会泄露旧 data。
         $storedContexts = json_decode((string)($existing['contexts_json'] ?? ''), true);
         if (!is_array($storedContexts) || ($storedContexts === []
-            && !in_array($canonicalAction, ['refund-card-or-line', 'adjust-refund-personnel', 'void-order-center-refund'], true))) {
+            && !in_array($canonicalAction, ['refund-card-or-line', 'adjust-refund-personnel', 'adjust-imported-refund-personnel', 'void-order-center-refund'], true))) {
             return $this->replayDenied(
                 $stateContext,
                 $txnDataScope,
@@ -1789,7 +1789,7 @@ class CashierV3CommandGatewayServices extends BaseServices
         $scopeFailure = $storedContexts === []
             ? ($canonicalAction === 'void-order-center-refund'
                 ? $this->refundVoidReplayScopeFailure($existing, $operatorScope, $txnDataScope)
-                : ($canonicalAction === 'adjust-refund-personnel'
+                : (in_array($canonicalAction, ['adjust-refund-personnel', 'adjust-imported-refund-personnel'], true)
                 ? $this->refundPersonnelReplayScopeFailure($existing, $operatorScope, $txnDataScope)
                 : $this->unifiedRefundReplayScopeFailure($existing, $operatorScope, $txnDataScope)))
             : $this->historicalReplayScopeFailure($storedContexts, $operatorScope, $txnDataScope);

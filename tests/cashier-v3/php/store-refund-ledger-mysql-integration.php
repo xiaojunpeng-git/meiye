@@ -45,12 +45,15 @@ foreach ($byStoreAndDate as $group) {
         || count(array_intersect(array_column($group, 'operation_id'), $ids)) !== count($group)
         || $actualCents !== $expectedCents
         || (int)($result['totals']['refund_amount_cents'] ?? -1) !== $expectedCents
-        || (string)($result['metric_version'] ?? '') !== 'store-refund-ledger-v3'
+        || (string)($result['metric_version'] ?? '') !== 'store-refund-ledger-v5'
         || in_array('market', $columnKeys, true)
         || ($columnLabels['store_name'] ?? '') !== '门店'
         || ($columnLabels['customer'] ?? '') !== '会员'
         || ($columnLabels['phone'] ?? '') !== '手机'
         || array_search('phone', $columnKeys, true) !== array_search('customer', $columnKeys, true) + 1
+        || array_slice($columnKeys, array_search('refund_items', $columnKeys, true) - 4, 5)
+            !== ['salesperson', 'guide', 'sales_manager', 'category', 'refund_items']
+        || in_array('attribution', $columnKeys, true)
         || array_column($export['records'], 'operation_id') !== $ids
         || array_column($export['columns'], 'key') !== $columnKeys
         || $export['summary_row'] !== ($result['summary_row'] ?? [])) {
@@ -62,6 +65,68 @@ foreach ($byStoreAndDate as $group) {
             || trim((string)($row['original_sale_date'] ?? '')) === ''
             || (string)($row['phone'] ?? '') !== $currentPhone) {
             throw new RuntimeException('Refund target, original sale date or member phone was lost');
+        }
+        // 导出必须沿用同一笔退款的当前投影；不得在客户端重新补人名或分类。
+        $exportRow = $export['records'][array_search((string)$row['operation_id'], $ids, true)] ?? [];
+        foreach (['salesperson', 'guide', 'sales_manager', 'category'] as $key) {
+            if (!array_key_exists($key, $row) || ($exportRow[$key] ?? null) !== $row[$key]) {
+                throw new RuntimeException("Refund ledger {$key} diverged from export");
+            }
+        }
+        $operationId = (string)$row['operation_id'];
+        $tenantId = (string)$row['tenant_id'];
+        $revision = Db::name('cashier_v3_refund_attribution_revision')->where('tenant_id', $tenantId)
+            ->where('operation_id', $operationId)->order('id desc')->find();
+        $attributionQuery = Db::name($revision ? 'cashier_v3_refund_attribution_revision_person'
+            : 'cashier_v3_refund_attribution')->where('tenant_id', $tenantId)->where('operation_id', $operationId);
+        if ($revision) $attributionQuery->where('revision_no', (int)$revision['revision_no']);
+        $guide = []; $manager = [];
+        foreach ($attributionQuery->order('id asc')->select()->toArray() as $person) {
+            if ((string)$person['role'] === 'guide') $guide[(int)$person['employee_id']] = (string)$person['employee_name_snapshot'];
+            if ((string)$person['role'] === 'sales_manager') $manager[(int)$person['employee_id']] = (string)$person['employee_name_snapshot'];
+        }
+        if ((string)$row['guide'] !== implode('、', $guide)
+            || (string)$row['sales_manager'] !== implode('、', $manager)
+            || array_key_exists('attribution', $row)) {
+            throw new RuntimeException('Refund ledger did not split the latest complete attribution version');
+        }
+        $sourceType = (string)$row['source_type'];
+        if (in_array($sourceType, ['card', 'document', 'catalog'], true)) {
+            $adjustment = (array)Db::name('cashier_v3_refund_adjustment')
+                ->where('tenant_id', $tenantId)->where('operation_id', $operationId)->find();
+            $people = json_decode((string)($adjustment['salespeople_snapshot_json'] ?? '[]'), true);
+            $names = [];
+            foreach (is_array($people) ? $people : [] as $person) {
+                if (!is_array($person)) continue;
+                $name = trim((string)($person['name'] ?? ''));
+                if ($name !== '') $names[(string)($person['employeeId'] ?? $name)] = $name;
+            }
+            if ((string)$row['salesperson'] !== implode('、', array_values($names))) {
+                throw new RuntimeException('Manual refund salesperson did not match the current saved snapshot');
+            }
+        }
+        if ($sourceType === 'imported_card') {
+            $revision = Db::name('cashier_v3_refund_salesperson_revision')
+                ->where('tenant_id', $tenantId)->where('operation_id', $operationId)->order('id desc')->find();
+            $people = json_decode((string)($revision['new_snapshot_json'] ?? '[]'), true);
+            $names = [];
+            foreach (is_array($people) ? $people : [] as $person) {
+                if (!is_array($person)) continue;
+                $name = trim((string)($person['name'] ?? ''));
+                if ($name !== '') $names[(string)($person['employeeId'] ?? $name)] = $name;
+            }
+            if ((string)$row['salesperson'] !== implode('、', array_values($names))
+                || (string)$row['category'] !== '') {
+                throw new RuntimeException('Imported-card refund projected unverified personnel or category');
+            }
+        }
+        if ($sourceType === 'catalog') {
+            $operation = Db::name('cashier_v3_order_lifecycle_operation')
+                ->where('tenant_id', $tenantId)->where('operation_id', $operationId)->find();
+            $request = json_decode((string)($operation['request_json'] ?? ''), true);
+            if ((string)$row['category'] !== trim((string)($request['_productCategoryNameSnapshot'] ?? ''))) {
+                throw new RuntimeException('Catalog refund category must use the refund-time snapshot');
+            }
         }
     }
     echo "PASS store={$storeId} date={$date} count=" . count($group) . " cents={$expectedCents}\n";

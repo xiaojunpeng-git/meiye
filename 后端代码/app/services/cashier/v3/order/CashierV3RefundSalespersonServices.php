@@ -23,7 +23,12 @@ final class CashierV3RefundSalespersonServices
     public function selection(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
     {
         $this->assertAccess($operator, $scope, false);
-        return $this->sourceSelection($payload, $operator, $scope);
+        $selection = $this->sourceSelection($payload, $operator, $scope);
+        // 原单导购/经理只在新退款选择时充当默认草稿；编辑历史退款不反查覆盖已保存快照。
+        $attribution = (new CashierV3RefundAttributionServices())->selection([
+            'orderId' => $selection['sourceSalesOrderId'], 'lineId' => $selection['sourceSalesLineId'],
+        ], (int)$payload['memberId'], $operator, $scope);
+        return $selection + $attribution;
     }
 
     /** 编辑旧退款只读取原单作为候选草稿，不要求账号同时拥有新建退款权限。 */
@@ -64,7 +69,7 @@ final class CashierV3RefundSalespersonServices
         $row = $this->refundRow((string)($payload['recordId'] ?? ''), $operator, $scope, false);
         $selected = json_decode((string)($row['salespeople_snapshot_json'] ?? '[]'), true);
         if (!is_array($selected)) $selected = [];
-        if ((int)$row['salespeople_version'] === 0) {
+        if ((int)$row['salespeople_version'] === 0 && (string)$row['target_type'] !== 'imported_card') {
             // 迁移前退款没有人员字段；编辑时只提供原单默认草稿，不追写旧事实。
             $defaults = $this->sourceSelection([
                 'mode' => (string)$row['target_type'], 'memberId' => (int)$row['member_id'],
@@ -96,6 +101,9 @@ final class CashierV3RefundSalespersonServices
             ]);
         $this->writeFacts($operation, $snapshot, (string)$event['event_no'],
             (string)$operation['command_idempotency_key'], $operator, $scope, 'create');
+        // 导购/销售经理仅是本次退款的独立归属快照，不写回原销售人员事实。
+        (new CashierV3RefundAttributionServices())->createInTx($operation, $payload, $source,
+            $event, $operator, $scope);
     }
 
     /** 调整是独立退款事件，幂等及版本锁保护多人分配；原销售分配无任何写路径。 */
@@ -107,6 +115,11 @@ final class CashierV3RefundSalespersonServices
         $this->assertAccess($operator, $data, true);
         $payload = (array)($scope['payload'] ?? []);
         $row = $this->refundRow((string)($payload['recordId'] ?? ''), $operator, $data, true);
+        $importedCard = (string)$row['target_type'] === 'imported_card';
+        $action = $importedCard ? 'adjust-imported-refund-personnel' : 'adjust-refund-personnel';
+        if ((string)($scope['action'] ?? '') !== $action) {
+            throw CashierV3CommandException::invalidContext('退款销售人操作类型与退款记录不一致。');
+        }
         $people = $this->normalize((array)($payload['personnel'] ?? []), $operator);
         $snapshot = $this->withShares($people, $this->allocate($people, (int)$row['refund_amount_cents']));
         $reason = trim((string)($payload['reason'] ?? ''));
@@ -125,15 +138,22 @@ final class CashierV3RefundSalespersonServices
             throw CashierV3CommandException::invalidContext('退款销售人已被修改，请刷新后重试。');
         }
         $oldSnapshot = (string)($row['salespeople_snapshot_json'] ?? '[]');
-        $source = $this->sourceIdentity((string)$row['target_type'], [
+        // 迁入旧卡没有可信的 V3 原销售明细；只给退款自身分配负向业绩。
+        $source = $importedCard ? ['orderId' => '', 'lineId' => ''] : $this->sourceIdentity((string)$row['target_type'], [
             'holderId' => (int)$row['card_holder_id'], 'lineId' => (string)$row['source_line_id'],
         ], (int)$row['member_id'], $data->tenantId());
         $now = time();
         $revisionId = 'RSP-' . strtoupper(substr(hash('sha256', $data->tenantId() . '|' . $key), 0, 40));
+        // 退款导购/经理改派和销售人改派共用退款聚合；不能各按自身版本生成重复事件序号。
+        $aggregateType = $importedCard ? 'imported_card_refund' : 'manual_refund';
+        $aggregateVersion = (int)Db::name('cashier_v3_business_event')->where('tenant_id', $data->tenantId())
+            ->where('aggregate_type', $aggregateType)->where('aggregate_id', (string)$row['operation_id'])
+            ->max('aggregate_version') + 1;
         $event = $scope['event_recorder']->recordInTx($scope['event_execution'], (array)($scope['event_contract'] ?? []), [
-            'event_type' => 'manual_refund.personnel_adjusted', 'aggregate_type' => 'manual_refund',
-            'aggregate_id' => (string)$row['operation_id'], 'aggregate_version' => (int)$row['salespeople_version'] + 1,
-            'event_version' => 1, 'source_type' => 'adjust-refund-personnel', 'source_id' => $revisionId,
+            'event_type' => $importedCard ? 'imported_card_refund.personnel_adjusted' : 'manual_refund.personnel_adjusted',
+            'aggregate_type' => $aggregateType,
+            'aggregate_id' => (string)$row['operation_id'], 'aggregate_version' => $aggregateVersion,
+            'event_version' => 1, 'source_type' => $action, 'source_id' => $revisionId,
             'member_id' => (int)$row['member_id'], 'business_date' => (string)$row['business_date'],
             'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
             'aggregate_name_snapshot' => (string)$row['target_name_snapshot'],
@@ -158,13 +178,16 @@ final class CashierV3RefundSalespersonServices
         }
         $this->writeFacts($row + ['cash_refund_cents' => (int)$row['refund_amount_cents']],
             $snapshot, (string)$event['event_no'], $key, $operator, $data, $revisionId);
-        Db::name(CashierV3UnifiedRefundServices::TABLE)->where('id', (int)$row['id'])
-            ->where('salespeople_version', (int)$row['salespeople_version'])->update([
-                'salespeople_snapshot_json' => self::json($snapshot),
-                'salespeople_version' => (int)$row['salespeople_version'] + 1,
-                'source_sales_order_id' => $source['orderId'],
-                'source_sales_line_id' => $source['lineId'],
-            ]);
+        if (!$importedCard) {
+            Db::name(CashierV3UnifiedRefundServices::TABLE)->where('id', (int)$row['id'])
+                ->where('salespeople_version', (int)$row['salespeople_version'])->update([
+                    'salespeople_snapshot_json' => self::json($snapshot),
+                    'salespeople_version' => (int)$row['salespeople_version'] + 1,
+                    'source_sales_order_id' => $source['orderId'],
+                    'source_sales_line_id' => $source['lineId'],
+                ]);
+        }
+        // 旧卡退款无 adjustment 主行；操作行锁序列化写入，末条改派审计即当前人员快照。
         Db::name(self::REVISION_TABLE)->insert([
             'revision_id' => $revisionId, 'operation_id' => (string)$row['operation_id'],
             'tenant_id' => $data->tenantId(), 'store_id' => $operator->storeId(), 'operator_id' => $operator->operatorId(),
@@ -303,7 +326,10 @@ final class CashierV3RefundSalespersonServices
                 'business_date' => (string)$operation['business_date'], 'business_timezone' => 'Asia/Shanghai',
                 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
                 'checkout_request_id' => (string)$operation['operation_id'], 'order_id' => (string)$operation['operation_id'],
-                'order_no_snapshot' => (string)$operation['operation_no'], 'source_document_type' => 'manual_refund',
+                'order_no_snapshot' => (string)$operation['operation_no'],
+                // New refunds pass a lifecycle operation (source_type); later reassignment passes an adjustment (target_type).
+                'source_document_type' => (string)($operation['target_type'] ?? $operation['source_type'] ?? '') === 'imported_card'
+                    ? 'imported_card_refund' : 'manual_refund',
                 'source_line_id' => (string)$operation['operation_id'], 'performance_type' => 'refund_sales_deduction',
                 'employee_id' => (int)$person['employeeId'], 'employee_name_snapshot' => (string)$person['name'],
                 'employee_type_snapshot' => (string)$person['employeeTypeCode'],
@@ -331,8 +357,28 @@ final class CashierV3RefundSalespersonServices
             ->where('op.operation_type', 'refund')->where('op.status', 'succeeded')
             ->field('ra.*,op.operation_no');
         $row = $lock ? $query->lock(true)->find() : $query->find();
-        if (!$row) throw self::fail('找不到当前门店的退款记录。');
-        return (array)$row;
+        if ($row) return (array)$row;
+        // 历史迁入旧卡退款只存在于生命周期主表；不伪造一条统一退款 adjustment。
+        $query = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
+            ->where('operation_id', $id)->where('tenant_id', $scope->tenantId())
+            ->where('store_id', $operator->storeId())->where('source_type', 'imported_card')
+            ->where('operation_type', 'refund')->where('status', 'succeeded');
+        if ($lock) $query->lock(true);
+        $operation = (array)$query->find();
+        if ($operation === []) throw self::fail('找不到当前门店的退款记录。');
+        $revisionQuery = Db::name(self::REVISION_TABLE)->where('tenant_id', $scope->tenantId())
+            ->where('operation_id', $id);
+        $version = (int)(clone $revisionQuery)->count();
+        $revision = (array)$revisionQuery->order('id desc')->field('new_snapshot_json')->find();
+        $request = json_decode((string)($operation['request_json'] ?? ''), true);
+        $request = is_array($request) ? $request : [];
+        return $operation + [
+            'target_type' => 'imported_card',
+            'target_name_snapshot' => (string)($request['cardName'] ?? $operation['source_order_no_snapshot']),
+            'refund_amount_cents' => (int)$operation['cash_refund_cents'],
+            'salespeople_version' => $version,
+            'salespeople_snapshot_json' => (string)($revision['new_snapshot_json'] ?? '[]'),
+        ];
     }
 
     private function unreversed(array $rows, string $tenant): array

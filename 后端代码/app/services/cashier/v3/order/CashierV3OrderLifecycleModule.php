@@ -40,6 +40,7 @@ final class CashierV3OrderLifecycleModule
         $importedCardRefund = new CashierV3ImportedCardRefundServices();
         $unifiedRefund = new CashierV3UnifiedRefundServices();
         $refundPersonnel = new CashierV3RefundSalespersonServices();
+        $refundAttribution = new CashierV3RefundAttributionServices();
         $dispatcher->handlers()->registerProjection('query-unified-refund-candidates', static function (array $scope) use ($unifiedRefund): array {
             return ['data' => ['unifiedRefundCandidates' => $unifiedRefund->candidates(
                 (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],
@@ -52,6 +53,11 @@ final class CashierV3OrderLifecycleModule
         $dispatcher->handlers()->registerProjection('open-refund-personnel-adjustment', static function (array $scope) use ($refundPersonnel): array {
             return ['data' => ['personnelAdjustment' => $refundPersonnel->entry((array)($scope['payload'] ?? []),
                 $scope['operator_scope'], $scope['data_scope'])], 'message' => '退款销售人已读取。'];
+        });
+        // 归属改派与销售人业绩改派使用不同投影和写命令，防止误改退款金额事实。
+        $dispatcher->handlers()->registerProjection('open-refund-attribution-adjustment', static function (array $scope) use ($refundAttribution): array {
+            return ['data' => ['refundAttributionAdjustment' => $refundAttribution->entry((array)($scope['payload'] ?? []),
+                $scope['operator_scope'], $scope['data_scope'])], 'message' => '退款导购/销售经理已读取。'];
         });
         $dispatcher->handlers()->registerCommand('refund-card-or-line', static function (array $scope) use ($unifiedRefund): array {
             return $unifiedRefund->executeInTx($scope);
@@ -66,8 +72,26 @@ final class CashierV3OrderLifecycleModule
             return ['data' => ['refundPersonnelAdjustment' => $result], 'business_no' => (string)$result['operationNo'],
                 'message' => (string)$result['message']];
         });
+        $dispatcher->handlers()->registerCommand('adjust-refund-attribution', static function (array $scope) use ($refundAttribution): array {
+            $result = $refundAttribution->adjustInTx($scope);
+            return ['data' => ['refundAttributionAdjustment' => $result], 'business_no' => (string)$result['operationNo'],
+                'message' => (string)$result['message']];
+        });
+        $dispatcher->handlers()->registerCommand('adjust-imported-refund-personnel', static function (array $scope) use ($refundPersonnel): array {
+            $result = $refundPersonnel->adjustInTx($scope);
+            return ['data' => ['refundPersonnelAdjustment' => $result], 'business_no' => (string)$result['operationNo'],
+                'message' => (string)$result['message']];
+        });
         // The refund row itself provides the locked version; this command never inherits the cashier draft.
         $dispatcher->policies()->register(new CashierV3ContextPolicy('adjust-refund-personnel', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('adjust-refund-attribution', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('adjust-imported-refund-personnel', [], [], static function (): array {
             return ['required' => [], 'allowed' => [], 'identities' => [],
                 'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
         }, [], [], [], true));

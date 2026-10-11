@@ -18,7 +18,9 @@ assert.match(page, /defaultOrderCenterDateQuery\(businessDate\), recordType: 're
 assert.match(page, /unified-refund-dialog__field-row/)
 assert.match(page, /editableRefundSourceTypes = new Set\(\['card', 'document', 'catalog'\]\)/)
 assert.match(page, /field === 'business_date'\s*&& editableRefundSourceTypes\.has\(record\?\.refundSourceType\)/)
-assert.match(page, /fieldItem\.key === 'salesperson'.*editableRefundSourceTypes\.has\(record\.refundSourceType\)/)
+// Old-card refunds gain personnel reassignment only; date correction keeps its narrower source set.
+assert.match(page, /editableRefundPersonnelSourceTypes = new Set\(\[\.\.\.editableRefundSourceTypes, 'imported_card'\]\)/)
+assert.match(page, /fieldItem\.key === 'salesperson'.*editableRefundPersonnelSourceTypes\.has\(record\.refundSourceType\)/)
 assert.match(refund, /\$date = self::refundBusinessDate\(\$payload\['businessDate'\] \?\? \$actualDate, \$actualDate\)/)
 assert.match(refund, /'unified_refund', \$operationId, \$actualDate, \$now/)
 assert.match(refund, /'business_date' => \$date, 'occurred_at' => \$now/)

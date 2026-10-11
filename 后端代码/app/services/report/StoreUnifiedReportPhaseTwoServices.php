@@ -5,6 +5,7 @@ use app\services\query\metric\StoreCustomerVisitEligibility;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\order\CashierV3RefundAttributionServices;
 use think\facade\Db;
 
 /**
@@ -1053,9 +1054,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->join('cashier_v3_sales_order o','o.order_id=r.source_order_id AND o.tenant_id=r.tenant_id')
             ->whereBetween('r.business_date',[$range['start'],$range['end']])
             ->where('r.source_type','sales')->where('r.operation_type','refund')->where('r.status','succeeded')
-            ->field('r.id refund_sequence,r.settled_at refund_settled_at,r.operation_id,r.store_id,r.business_date,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_id,o.organization_path_snapshot,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_id,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
+            ->field('r.id refund_sequence,r.tenant_id,r.business_event_no,r.settled_at refund_settled_at,r.operation_id,r.store_id,r.business_date,r.business_date refund_date,r.source_order_id order_id,r.reason_snapshot refund_reason,r.request_json,r.cash_refund_cents refund_amount_cents,r.restored_principal_cents,r.restored_bonus_cents,o.organization_id,o.organization_path_snapshot,o.organization_name_snapshot market,o.store_name_snapshot store_name,o.member_id,o.member_name_snapshot customer,o.business_date original_sale_date,o.order_note original_remark')
             ->order('r.business_date','desc')->order('r.id','desc')->select()->toArray();
-        foreach($rows as &$row){$request=json_decode((string)$row['request_json'],true);$names=[];foreach((array)($request['refundLines']??[])as$line){$name=trim((string)($line['itemName']??''));if($name!=='')$names[]=$name;}$row['refund_items']=implode('、',array_values(array_unique($names)));$row['refund_amount']=$this->money((int)$row['refund_amount_cents']);$row['refund_remark']=trim((string)$row['refund_reason'])?:trim((string)$row['original_remark']);}unset($row);
+        foreach($rows as &$row){$row['source_type']='sales';$request=json_decode((string)$row['request_json'],true);$names=[];foreach((array)($request['refundLines']??[])as$line){$name=trim((string)($line['itemName']??''));if($name!=='')$names[]=$name;}$row['refund_items']=implode('、',array_values(array_unique($names)));$row['refund_amount']=$this->money((int)$row['refund_amount_cents']);$row['refund_remark']=trim((string)$row['refund_reason'])?:trim((string)$row['original_remark']);}unset($row);
         // 退款调整事实提供组织/会员历史快照并执行与市场 K 相同的权限过滤；
         // 生命周期成功操作决定台账资格、业务日和实际登记退款金额。
         $adjustments=$this->marketRefundAdjustmentFacts($stores,'ledger_refund')
@@ -1069,11 +1070,15 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 "refund_operation.source_type='card' AND card_receipt.tenant_id=refund_operation.tenant_id AND card_receipt.card_holder_id=adjustment.card_holder_id AND card_receipt.legacy_order_id=refund_operation.source_order_id AND card_receipt.status='completed'")
             ->leftJoin('cashier_v3_sales_order card_sale',
                 'card_sale.tenant_id=card_receipt.tenant_id AND card_sale.order_id=card_receipt.sales_order_id')
+            ->leftJoin('cashier_v3_sales_order_line card_line',
+                'card_line.tenant_id=card_receipt.tenant_id AND card_line.order_line_id=card_receipt.sales_order_line_id')
+            ->leftJoin('cashier_v3_sales_order_line document_line',
+                "refund_operation.source_type='document' AND document_line.tenant_id=adjustment.tenant_id AND document_line.order_line_id=adjustment.source_line_id")
             ->leftJoin('store_order legacy_card_sale',
                 "refund_operation.source_type='card' AND legacy_card_sale.id=refund_operation.source_order_id AND legacy_card_sale.uid=refund_operation.member_id")
             ->whereBetween('ledger_refund.business_date',[$range['start'],$range['end']])
             ->whereIn('refund_operation.source_type',['card','document','imported_card'])
-            ->field('refund_operation.id refund_sequence,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,ledger_refund.store_id,ledger_refund.organization_id,ledger_refund.organization_path_snapshot,ledger_refund.organization_name_snapshot refund_market,ledger_refund.store_name_snapshot refund_store_name,ledger_refund.member_id,ledger_refund.member_name_snapshot refund_customer,adjustment.target_name_snapshot,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time')
+            ->field('refund_operation.id refund_sequence,refund_operation.tenant_id,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,ledger_refund.store_id,ledger_refund.organization_id,ledger_refund.organization_path_snapshot,ledger_refund.organization_name_snapshot refund_market,ledger_refund.store_name_snapshot refund_store_name,ledger_refund.member_id,ledger_refund.member_name_snapshot refund_customer,adjustment.target_name_snapshot,adjustment.salespeople_snapshot_json,card_line.category_name_snapshot card_category,document_line.category_name_snapshot document_category,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time')
             ->order('refund_operation.business_date','desc')->order('refund_operation.id','desc')->select()->toArray();
         // 导入旧卡使用成功操作保存的原订单 ID，不回读会员当前持卡关系。
         $importedOrderIds=[];
@@ -1104,6 +1109,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $adjustment['store_name']=(string)(($isCard?$adjustment['card_store_name']:$adjustment['document_store_name'])?:$adjustment['refund_store_name']);
             $adjustment['customer']=(string)(($isCard?$adjustment['card_customer']:$adjustment['document_customer'])?:$adjustment['refund_customer']);
             $adjustment['refund_items']=trim((string)($adjustment['target_name_snapshot']??''))?:trim((string)($request['cardName']??''));
+            $adjustment['category']=(string)($adjustment['source_type']==='card'?$adjustment['card_category']:
+                ($adjustment['source_type']==='document'?$adjustment['document_category']:
+                    ($request['_productCategoryNameSnapshot']??'')));
             $adjustment['refund_amount']=$this->money((int)$adjustment['refund_amount_cents']);
             $adjustment['refund_remark']=(string)$adjustment['refund_reason'];
             $rows[]=$adjustment;
@@ -1113,6 +1121,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 ?: ((int)$right['refund_settled_at']<=>(int)$left['refund_settled_at'])
                 ?: ((int)$right['refund_sequence']<=>(int)$left['refund_sequence']);
         });
+        $this->refundLedgerPersonnelAndSalesCategories($rows);
         // 退款事实只保存会员身份，没有历史手机快照。权限过滤完成后批量读取
         // 当前会员手机号；号码变更会反映在台账中，不伪装为退款时的历史号码。
         $memberIds=array_values(array_unique(array_filter(array_map('intval',array_column($rows,'member_id')))));
@@ -1122,12 +1131,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             unset($row['refund_sequence'],$row['refund_settled_at']);
         }unset($row);
         // 市场归属仍供客户退款分析使用，本台账只移除其展示及导出列。
-        $columns=$this->columns(['store_name'=>'门店','customer'=>'会员','phone'=>'手机','refund_date'=>'退款申请时间','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']);
+        $columns=$this->columns(['store_name'=>'门店','customer'=>'会员','phone'=>'手机','refund_date'=>'退款申请时间','salesperson'=>'销售人','guide'=>'导购','sales_manager'=>'销售经理','category'=>'分类','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']);
         $explanations=[
             'store_name'=>'优先显示原销售单保存的门店；旧卡没有原销售快照时显示办理退款的门店。',
             'customer'=>'优先显示原销售单保存的会员姓名；旧卡没有原销售快照时显示退款记录保存的姓名。',
             'phone'=>'显示会员当前登记的手机号；退款时没有保存历史号码，会员改号后此列会更新。',
             'refund_date'=>'成功办理退款的业务日期，不按原销售日期回填。',
+            'salesperson'=>'显示本笔退款分配的销售人；改派后显示当前有效人员。原销售退款取当次负向销售业绩人员，旧记录没有可靠快照时留空。',
+            'guide'=>'显示本笔退款选择的导购；改派后显示当前有效人员。未保存归属的旧退款留空，不回填原销售导购。',
+            'sales_manager'=>'显示本笔退款选择的销售经理；改派后显示当前有效人员。未保存归属的旧退款留空，不回填原销售经理。',
+            'category'=>'显示退款对象在原销售或退款时保存的分类；多项退款合并显示，旧卡没有可靠分类快照时留空。',
             'refund_items'=>'显示本次成功退款时保存的项目或卡项名称。',
             'original_sale_date'=>'显示原销售单的业务日期；旧卡按原订单支付时间、无支付时间时按创建时间显示。',
             'refund_amount'=>'统计成功退款时登记的金额；转入余额独立记账，不重复计入，也不表示已通过支付渠道退钱。',
@@ -1135,6 +1148,114 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         ];
         foreach($columns as &$column)$column['source_explanation']=$explanations[$column['key']];unset($column);
         return $this->result('院店退款台账',$columns,$rows,$input,[],['refund_amount_cents'=>$this->sumField($rows,'refund_amount_cents')]);
+    }
+
+    /**
+     * 台账仍是一笔退款一行：只批量补充该退款的有效人员与历史分类快照。
+     * 改派版本是完整人员集，空版本必须覆盖初始选择；无快照的旧单不能回读现值冒充历史。
+     */
+    private function refundLedgerPersonnelAndSalesCategories(array &$rows): void
+    {
+        foreach (array_chunk(array_keys($rows), 400) as $indexes) {
+            $ids = []; $tenants = []; $events = []; $salesIds = []; $importedIds = [];
+            foreach ($indexes as $index) {
+                $row = $rows[$index];
+                $ids[] = (string)$row['operation_id'];
+                $tenants[] = (string)$row['tenant_id'];
+                if ((string)$row['source_type'] === 'sales') {
+                    $salesIds[] = (string)$row['operation_id'];
+                    $events[] = (string)$row['business_event_no'];
+                } elseif ((string)$row['source_type'] === 'imported_card') {
+                    $importedIds[] = (string)$row['operation_id'];
+                }
+            }
+            $ids = array_values(array_unique($ids));
+            $tenants = array_values(array_unique($tenants));
+            $categories = []; $salespeople = []; $attributions = []; $importedSnapshots = [];
+            if ($salesIds !== []) {
+                foreach (Db::name('cashier_v3_order_lifecycle_refund_line')->alias('refund_line')
+                    ->leftJoin('cashier_v3_sales_order_line sale_line',
+                        'sale_line.tenant_id=refund_line.tenant_id AND sale_line.order_line_id=refund_line.sales_order_line_id')
+                    ->whereIn('refund_line.tenant_id', $tenants)->whereIn('refund_line.operation_id', $salesIds)
+                    ->field('refund_line.tenant_id,refund_line.operation_id,sale_line.category_name_snapshot')
+                    ->order('refund_line.line_no asc')->order('refund_line.id asc')->select()->toArray() as $line) {
+                    $name = trim((string)($line['category_name_snapshot'] ?? ''));
+                    if ($name !== '') $categories[(string)$line['tenant_id'] . '|' . (string)$line['operation_id']][$name] = true;
+                }
+                foreach (Db::name('cashier_v3_performance_fact')
+                    ->whereIn('tenant_id', $tenants)->whereIn('business_event_no', array_values(array_unique($events)))
+                    ->where('performance_type', 'sales_performance_allocated')
+                    ->where('fact_direction', 'reversal')->where('status', 'effective')
+                    ->field('tenant_id,business_event_no,employee_id,employee_name_snapshot')
+                    ->order('id asc')->select()->toArray() as $person) {
+                    $name = trim((string)$person['employee_name_snapshot']);
+                    if ($name !== '') $salespeople[(string)$person['tenant_id'] . '|' . (string)$person['business_event_no']][(int)$person['employee_id']] = $name;
+                }
+            }
+            foreach (Db::name(CashierV3RefundAttributionServices::TABLE)
+                ->whereIn('tenant_id', $tenants)->whereIn('operation_id', $ids)
+                ->field('tenant_id,operation_id,role,employee_id,employee_name_snapshot')
+                ->order('id asc')->select()->toArray() as $person) {
+                $key = (string)$person['tenant_id'] . '|' . (string)$person['operation_id'];
+                $attributions[$key][(string)$person['role']][(int)$person['employee_id']] = (string)$person['employee_name_snapshot'];
+            }
+            $versions = Db::name(CashierV3RefundAttributionServices::REVISION_TABLE)
+                ->whereIn('tenant_id', $tenants)->whereIn('operation_id', $ids)
+                ->field('tenant_id,operation_id,MAX(id) AS id')->group('tenant_id,operation_id')->select()->toArray();
+            foreach ($versions as $version) {
+                $attributions[(string)$version['tenant_id'] . '|' . (string)$version['operation_id']] = [];
+            }
+            $versionIds = array_map('intval', array_column($versions, 'id'));
+            if ($versionIds !== []) {
+                foreach (Db::name(CashierV3RefundAttributionServices::REVISION_PERSON_TABLE)->alias('person')
+                    ->join(CashierV3RefundAttributionServices::REVISION_TABLE . ' revision',
+                        'revision.tenant_id=person.tenant_id AND revision.operation_id=person.operation_id AND revision.revision_no=person.revision_no')
+                    ->whereIn('revision.id', $versionIds)
+                    ->field('person.tenant_id,person.operation_id,person.role,person.employee_id,person.employee_name_snapshot')
+                    ->order('person.id asc')->select()->toArray() as $person) {
+                    $key = (string)$person['tenant_id'] . '|' . (string)$person['operation_id'];
+                    $attributions[$key][(string)$person['role']][(int)$person['employee_id']] = (string)$person['employee_name_snapshot'];
+                }
+            }
+            if ($importedIds !== []) {
+                $latest = Db::name('cashier_v3_refund_salesperson_revision')
+                    ->whereIn('tenant_id', $tenants)->whereIn('operation_id', $importedIds)
+                    ->field('tenant_id,operation_id,MAX(id) AS id')->group('tenant_id,operation_id')->select()->toArray();
+                $latestIds = array_map('intval', array_column($latest, 'id'));
+                if ($latestIds !== []) {
+                    foreach (Db::name('cashier_v3_refund_salesperson_revision')->whereIn('id', $latestIds)
+                        ->field('tenant_id,operation_id,new_snapshot_json')->select()->toArray() as $revision) {
+                        $importedSnapshots[(string)$revision['tenant_id'] . '|' . (string)$revision['operation_id']] = (string)$revision['new_snapshot_json'];
+                    }
+                }
+            }
+            foreach ($indexes as $index) {
+                $row = &$rows[$index];
+                $key = (string)$row['tenant_id'] . '|' . (string)$row['operation_id'];
+                $sourceType = (string)$row['source_type'];
+                $row['category'] = $sourceType === 'sales' ? implode('、', array_keys($categories[$key] ?? []))
+                    : trim((string)($row['category'] ?? ''));
+                if ($sourceType === 'sales') {
+                    $row['salesperson'] = implode('、', array_values($salespeople[(string)$row['tenant_id'] . '|' . (string)$row['business_event_no']] ?? []));
+                } else {
+                    $snapshot = $sourceType === 'imported_card' ? ($importedSnapshots[$key] ?? '[]')
+                        : (string)($row['salespeople_snapshot_json'] ?? '[]');
+                    $people = json_decode($snapshot, true);
+                    $names = [];
+                    foreach (is_array($people) ? $people : [] as $person) {
+                        if (!is_array($person)) continue;
+                        $name = trim((string)($person['name'] ?? ''));
+                        if ($name !== '') $names[(string)($person['employeeId'] ?? $name)] = $name;
+                    }
+                    $row['salesperson'] = implode('、', array_values($names));
+                }
+                $roles = $attributions[$key] ?? [];
+                // 分列仅改变展示，不合并角色，也不让旧的合并文本进入导出契约。
+                $row['guide'] = implode('、', array_values($roles['guide'] ?? []));
+                $row['sales_manager'] = implode('、', array_values($roles['sales_manager'] ?? []));
+                unset($row);
+            }
+        }
     }
 
     private function primarySources():array{return Db::name('cashier_v3_business_source')->where('parent_id',0)->where('status',1)->order('sort','asc')->order('id','asc')->field('id,name,sort')->select()->toArray();}
@@ -1566,8 +1687,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 有效人员按日达标，K 人次按有效退款会员日；普通来源体验人次规则保持不变。
         $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
         if ($isMarketReport) $metricVersion = 'market-refund-member-day-v5';
-        // 台账 v3 纳入登记退款，并明确会员手机读取当前档案而非历史快照。
-        if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v3';
+        // v5 将退款导购和销售经理拆列；金额、资格及退款日口径不变。
+        if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v5';
         // 护理槽位与首次到店日期原先误用了人员标记；相关报表单独升级口径，其他报表不变。
         if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
             $metricVersion = 'store-customer-service-events-v2';

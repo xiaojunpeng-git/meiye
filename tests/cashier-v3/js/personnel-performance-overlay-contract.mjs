@@ -143,7 +143,7 @@ assert.match(workbench, /async function openCartLineAttributions\(line\)/, '购�
 assert.match(workbench, /:guest-customer="currentCustomerMode === 'guest'"/, '人员弹窗必须收到权威游客身份')
 assert.doesNotMatch(workbench, /GUEST_ATTRIBUTION_NOT_ALLOWED|reportGuestAttributionBlocked/, '游客归属不能再被购物车或结账前置拦截')
 assert.match(component, /<label><input v-model="guideRoundNo" type="radio" value="none"><span>无<\/span><\/label>/, '游客和会员均展示无轮次选项')
-assert.match(component, /guideRoundNo = ref\(props\.guestCustomer \? 'none' : ''\)/, '游客默认无轮次，会员不默认代选')
+assert.match(component, /guideRoundNo = ref\(props\.guestCustomer \|\| props\.hideGuideRounds \? 'none' : ''\)/, '游客和退款默认无轮次，普通会员不默认代选')
 assert.match(component, /guestCustomer \? \[\] : \[1, 2, 3\]/, '会员除无轮次外继续展示第 1～3 轮')
 assert.match(component, /personnel-attribution-role-header[\s\S]*?<strong>导购<\/strong>[\s\S]*?查询导购<\/button>/, '查询导购必须与导购标题同行')
 assert.match(component, /personnel-attribution-role-header[\s\S]*?<strong>销售经理<\/strong>[\s\S]*?查询销售经理<\/button>/, '查询销售经理必须与销售经理标题同行')

@@ -943,13 +943,14 @@ async function queryMemberSelector(query) {
   const selectorContext = memberSelectorContext.value === 'card-transfer'
     ? 'cashier'
     : memberSelectorContext.value === 'imported-card-refund'
-      ? 'order_center'
+      ? 'imported-card-refund'
     : memberSelectorContext.value
   // member-referrer constrains the result set, but is not an authorization
   // entry. This selector is opened from cashier and must use its grant.
+  // 退款会员范围须由后端按本店/全部处理，授权仍固定走订单中心入口。
   const selectorEntry = selectorContext === 'member-referrer'
     ? 'cashier'
-    : selectorContext
+    : selectorContext === 'imported-card-refund' ? 'order_center' : selectorContext
   const result = await requestCashierV3Action('query-member-selector', {
     ...query,
     selectorContext,
@@ -3132,7 +3133,9 @@ onBeforeUnmount(() => {
     :allow-guest="isCashierWorkflowPage && memberSelectorContext !== 'reservation' && !memberSelectorRequiresMember"
     :title="memberSelectorContext === 'imported-card-refund' ? '选择退款会员' : '选择会员'"
     :allow-create="memberSelectorContext !== 'imported-card-refund' && canUseFeature('cashier.v3.member') && (isCashierWorkflowPage || memberSelectorInitialView === 'creator')"
-    :show-scope-toggle="['cashier', 'reservation'].includes(memberSelectorContext)"
+    :show-scope-toggle="['cashier', 'reservation', 'imported-card-refund'].includes(memberSelectorContext)"
+    :align-scope-right="memberSelectorContext === 'imported-card-refund'"
+    :show-name-initials-hint="memberSelectorContext !== 'imported-card-refund'"
     :current-store-name="state.storeName || ''"
     :initial-view="memberSelectorInitialView"
     :on-query="queryMemberSelector"

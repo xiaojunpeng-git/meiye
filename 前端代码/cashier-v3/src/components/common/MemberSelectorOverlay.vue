@@ -79,6 +79,14 @@ const props = defineProps({
   showScopeToggle: {
     type: Boolean,
     default: false
+  },
+  alignScopeRight: {
+    type: Boolean,
+    default: false
+  },
+  showNameInitialsHint: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -269,10 +277,10 @@ async function handleCreated(payload = {}) {
       </header>
 
       <template v-if="activeView === 'selector'">
-      <form class="member-selector__search" @submit.prevent="submitQuery">
+      <form class="member-selector__search" :class="{ 'member-selector__search--scope-right': alignScopeRight }" @submit.prevent="submitQuery">
         <label class="member-selector__search-field">
           <span>查询会员</span>
-          <input v-model="keyword" type="search" autocomplete="off" :placeholder="showScopeToggle ? '姓名或拼音首字母、完整手机号或会员编号' : '姓名、完整手机号或会员编号'" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
+          <input v-model="keyword" type="search" autocomplete="off" :placeholder="showScopeToggle && showNameInitialsHint ? '姓名或拼音首字母、完整手机号或会员编号' : '姓名、完整手机号或会员编号'" :disabled="isBusy || selectingRecordId !== null" @keydown.enter.prevent="submitQuery">
         </label>
         <fieldset v-if="showScopeToggle" class="member-selector__scope-toggle" :disabled="isBusy || selectingRecordId !== null">
           <legend>查询范围</legend>
@@ -487,6 +495,11 @@ async function handleCreated(payload = {}) {
   color: #475467;
   font-size: 13px;
   white-space: nowrap;
+}
+
+/* The refund picker keeps its scope beside the search field, even in a narrow dialog. */
+.member-selector__search--scope-right .member-selector__scope-toggle {
+  margin-left: auto;
 }
 
 .member-selector__scope-toggle legend {
@@ -767,6 +780,10 @@ async function handleCreated(payload = {}) {
 
   .member-selector__search-field {
     min-width: 100%;
+  }
+
+  .member-selector__search--scope-right .member-selector__search-field {
+    min-width: min(220px, 50%);
   }
 
   .member-selector__footer {

@@ -860,9 +860,11 @@ final class CashierV3OrderCenterRecordQueryServices
         // compatibility projection for this workbench.
         $query = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)->alias('rlo')
             ->leftJoin('cashier_v3_refund_adjustment ra', 'ra.operation_id = rlo.operation_id AND ra.tenant_id = rlo.tenant_id')
+            ->leftJoin('cashier_v3_sales_order_line refund_line', "rlo.source_type = 'document' AND refund_line.tenant_id = rlo.tenant_id AND refund_line.order_line_id = ra.source_line_id")
             // The holder's issuance receipt is unique per tenant. It restores the
             // customer-facing sale number for older refunds without rewriting facts.
             ->leftJoin('cashier_v3_card_purchase_receipt cpr', "rlo.source_type = 'card' AND cpr.tenant_id = rlo.tenant_id AND cpr.card_holder_id = ra.card_holder_id AND cpr.legacy_order_id = rlo.source_order_id AND cpr.status = 'completed'")
+            ->leftJoin('cashier_v3_sales_order_line card_product', 'card_product.tenant_id = cpr.tenant_id AND card_product.order_line_id = cpr.sales_order_line_id')
             ->leftJoin('cashier_v3_sales_order cso', 'cso.tenant_id = cpr.tenant_id AND cso.order_id = cpr.sales_order_id')
             ->leftJoin('user u', 'u.uid = rlo.member_id')
             ->leftJoin('system_store s', 's.id = rlo.store_id')
@@ -881,19 +883,90 @@ final class CashierV3OrderCenterRecordQueryServices
         ]);
         $total = (int)(clone $query)->count('rlo.id');
         $rows = $this->pageRows($query, $criteria, 'rlo.settled_at', 'rlo.id', implode(',', [
-            'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_no_snapshot',
+            'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_no_snapshot', 'rlo.request_json',
             'rlo.member_id', 'rlo.store_id', 'rlo.reason_snapshot', 'rlo.cash_refund_cents',
             'rlo.status', 'rlo.business_date', 'rlo.settled_at', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name', 'cso.order_no AS card_sales_order_no',
+            'card_product.category_name_snapshot AS card_category_name,card_product.item_name_snapshot AS card_product_name',
             'ra.target_type AS adjustment_target_type,ra.target_name_snapshot AS adjustment_target_name,ra.catalog_item_id,ra.catalog_kind,ra.balance_credit_cents,ra.balance_kind,ra.void_target,ra.remaining_after_cents,ra.times_after,ra.closed_remaining_cents,ra.salespeople_snapshot_json',
+            'refund_line.category_name_snapshot AS adjustment_category_name',
         ]));
-        return [array_map(function (array $row): array {
-            $salespeople = json_decode((string)($row['salespeople_snapshot_json'] ?? '[]'), true);
+        $refundAttribution = [];
+        $refundIds = array_values(array_unique(array_map(static fn(array $row): string => (string)$row['operation_id'], $rows)));
+        if ($refundIds !== []) {
+            // 归属快照只按当前页的退款操作号读取，列表与导出使用同一个投影。
+            foreach (Db::name(CashierV3RefundAttributionServices::TABLE)
+                ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('operation_id', $refundIds)
+                ->field('operation_id,role,employee_id,employee_name_snapshot')->order('id asc')->select()->toArray() as $item) {
+                $refundAttribution[(string)$item['operation_id']][(string)$item['role']][] = $item;
+            }
+            // 改派版本是完整快照；即使人员被全部清空，也必须覆盖原始退款归属。
+            $versions = Db::name(CashierV3RefundAttributionServices::REVISION_TABLE)
+                ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('operation_id', $refundIds)
+                ->field('operation_id,MAX(id) AS id')->group('operation_id')->select()->toArray();
+            foreach ($versions as $revision) {
+                $refundAttribution[(string)$revision['operation_id']] = [];
+            }
+            $revisionIds = array_map('intval', array_column($versions, 'id'));
+            if ($revisionIds !== []) {
+                foreach (Db::name(CashierV3RefundAttributionServices::REVISION_PERSON_TABLE)
+                    ->alias('person')->join(CashierV3RefundAttributionServices::REVISION_TABLE . ' revision',
+                        'revision.tenant_id=person.tenant_id AND revision.operation_id=person.operation_id AND revision.revision_no=person.revision_no')
+                    ->where('person.tenant_id', (string)$criteria['tenantId'])->whereIn('revision.id', $revisionIds)
+                    ->field('person.operation_id,person.role,person.employee_id,person.employee_name_snapshot')
+                    ->order('person.id asc')->select()->toArray() as $item) {
+                    $refundAttribution[(string)$item['operation_id']][(string)$item['role']][] = $item;
+                }
+            }
+        }
+        $importedIds = array_values(array_map(static fn(array $row): string => (string)$row['operation_id'],
+            array_filter($rows, static fn(array $row): bool => (string)$row['source_type'] === 'imported_card')));
+        $importedSnapshots = [];
+        if ($importedIds !== []) {
+            // 旧卡退款无统一退款 adjustment；按本页操作号批量读取最后一次改派快照。
+            $latest = Db::name('cashier_v3_refund_salesperson_revision')
+                ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('operation_id', $importedIds)
+                ->field('operation_id,MAX(id) AS id')->group('operation_id')->select()->toArray();
+            $latestIds = array_map(static fn(array $row): int => (int)$row['id'], $latest);
+            if ($latestIds !== []) {
+                foreach (Db::name('cashier_v3_refund_salesperson_revision')
+                    ->where('tenant_id', (string)$criteria['tenantId'])->whereIn('id', $latestIds)
+                    ->field('operation_id,new_snapshot_json')->select()->toArray() as $revision) {
+                    $importedSnapshots[(string)$revision['operation_id']] = (string)$revision['new_snapshot_json'];
+                }
+            }
+        }
+        $salesRefundLines = [];
+        $salesRefundIds = array_values(array_map(static fn(array $row): string => (string)$row['operation_id'],
+            array_filter($rows, static fn(array $row): bool => (string)$row['source_type'] === 'sales')));
+        if ($salesRefundIds !== []) {
+            // 整单退款可以包含多种商品；只批量读取当前页退款明细的历史快照。
+            foreach (Db::name(CashierV3OrderLifecycleServices::REFUND_LINE_TABLE)
+                ->alias('rl')->leftJoin('cashier_v3_sales_order_line sale_line',
+                    'sale_line.tenant_id = rl.tenant_id AND sale_line.order_line_id = rl.sales_order_line_id')
+                ->where('rl.tenant_id', (string)$criteria['tenantId'])->whereIn('rl.operation_id', $salesRefundIds)
+                ->field('rl.operation_id,rl.item_name_snapshot,sale_line.category_name_snapshot')
+                ->order('rl.line_no asc')->order('rl.id asc')->select()->toArray() as $line) {
+                $salesRefundLines[(string)$line['operation_id']][] = $line;
+            }
+        }
+        return [array_map(function (array $row) use ($importedSnapshots, $refundAttribution, $salesRefundLines): array {
+            $snapshot = (string)$row['source_type'] === 'imported_card'
+                ? ($importedSnapshots[(string)$row['operation_id']] ?? '[]')
+                : (string)($row['salespeople_snapshot_json'] ?? '[]');
+            $salespeople = json_decode($snapshot, true);
             $salespeople = is_array($salespeople) ? $salespeople : [];
             // 列表和导出只使用退款保存的当前快照，不从原销售单回读人员。
             $salespersonSummary = implode('、', array_map(static function (array $person): string {
                 return (string)($person['name'] ?? '') . '（-' . number_format((int)($person['performanceAmountCents'] ?? 0) / 100, 0, '.', ',') . '）';
             }, $salespeople));
+            $attribution = $refundAttribution[(string)$row['operation_id']] ?? [];
+            $guideNames = array_column($attribution['guide'] ?? [], 'employee_name_snapshot');
+            $managerNames = array_column($attribution['sales_manager'] ?? [], 'employee_name_snapshot');
+            $attributionSummary = implode('；', array_filter([
+                $guideNames === [] ? '' : '导购:' . implode('、', $guideNames),
+                $managerNames === [] ? '' : '销售经理:' . implode('、', $managerNames),
+            ]));
             $isManual = in_array((string)$row['source_type'], ['card', 'document', 'catalog'], true);
             $targetLabel = (string)$row['source_type'] === 'card' ? '卡项退款'
                 : ((string)$row['source_type'] === 'catalog' ? '无原单退款' : '单据退款');
@@ -910,6 +983,7 @@ final class CashierV3OrderCenterRecordQueryServices
                     . ' ¥' . number_format((int)round((int)($row['balance_credit_cents'] ?? 0) / 100), 0, '.', ',')
                     . '；' . $voidLabel . '；' . (string)$row['reason_snapshot']
                 : (string)$row['reason_snapshot']);
+            $product = self::refundProductColumns($row, $salesRefundLines[(string)$row['operation_id']] ?? []);
             return [
                 'id' => 'refund:' . (string)$row['operation_id'],
                 'refundOrderNo' => (string)$row['operation_no'],
@@ -923,8 +997,14 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberName' => $this->memberName($row),
                 'phone' => (string)$row['phone'],
                 'refundSummary' => $summary,
+                'productCategory' => $product['category'],
+                'productName' => $product['name'],
                 'refundAmount' => $this->centsToMoney((int)$row['cash_refund_cents']),
                 'salespersonSummary' => $salespersonSummary,
+                'refundAttributionSummary' => $attributionSummary,
+                'refund_attribution_query_ids' => array_values(array_unique(array_map('strval', array_merge(
+                    array_column($attribution['guide'] ?? [], 'employee_id'),
+                    array_column($attribution['sales_manager'] ?? [], 'employee_id'))))),
                 'salesperson_query_ids' => array_values(array_unique(array_map(
                     static fn(array $person): string => (string)($person['employeeId'] ?? ''), $salespeople))),
                 // R26 只登记退款统计与会员余额，不能暗示已调用支付渠道对外退款。
@@ -937,6 +1017,43 @@ final class CashierV3OrderCenterRecordQueryServices
                 'refundSourceType' => (string)$row['source_type'],
             ];
         }, $rows), $total];
+    }
+
+    /** Refund product columns describe the refunded target at that operation, never today's catalog. */
+    private static function refundProductColumns(array $row, array $salesLines): array
+    {
+        $sourceType = (string)$row['source_type'];
+        if ($sourceType === 'sales') {
+            $categories = [];
+            $names = [];
+            foreach ($salesLines as $line) {
+                $category = trim((string)($line['category_name_snapshot'] ?? ''));
+                $name = trim((string)($line['item_name_snapshot'] ?? ''));
+                if ($category !== '') $categories[$category] = true;
+                if ($name !== '') $names[$name] = true;
+            }
+            return ['category' => implode('、', array_keys($categories)), 'name' => implode('、', array_keys($names))];
+        }
+        if ($sourceType === 'imported_card') {
+            $request = json_decode((string)($row['request_json'] ?? ''), true);
+            return ['category' => '', 'name' => is_array($request) ? trim((string)($request['cardName'] ?? '')) : ''];
+        }
+        if ($sourceType === 'card') {
+            // V3 购卡回执能定位原销售商品快照；旧卡只有退款目标快照，分类保持空白。
+            return ['category' => trim((string)($row['card_category_name'] ?? '')),
+                'name' => trim((string)($row['card_product_name'] ?? ''))
+                    ?: trim((string)($row['adjustment_target_name'] ?? ''))];
+        }
+        if ($sourceType === 'document') {
+            return ['category' => trim((string)($row['adjustment_category_name'] ?? '')),
+                'name' => trim((string)($row['adjustment_target_name'] ?? ''))];
+        }
+        if ($sourceType === 'catalog') {
+            $request = json_decode((string)($row['request_json'] ?? ''), true);
+            return ['category' => is_array($request) ? trim((string)($request['_productCategoryNameSnapshot'] ?? '')) : '',
+                'name' => trim((string)($row['adjustment_target_name'] ?? ''))];
+        }
+        return ['category' => '', 'name' => ''];
     }
 
     /**
