@@ -74,12 +74,14 @@ interface CashierV3CheckoutSubmissionExecutionPort
         array $businessEvents
     ): array;
 
+    /** Mixed sales must carry the issued-card result into both category and item allocations. */
     public function persistSaleFactsInTx(
         array $authority,
         array $salesOrder,
         array $paymentCollection,
         array $businessEvents,
-        ?array $balancePayment
+        ?array $balancePayment,
+        array $saleSettlementEffects
     ): array;
 
     public function markSucceededInTx(

@@ -31,6 +31,17 @@ $check('mixed effect port settles both product stock and card issuance from the 
     && str_contains($port, 'new CashierV3CardPurchaseIssuanceServices()')
     && str_contains($port, '->issueInTx(')
 );
+$mixedFactWriter = substr($port, strpos($port, 'public function persistSaleFactsInTx('));
+$mixedFactWriter = substr($mixedFactWriter, 0, strpos($mixedFactWriter, 'public function markSucceededInTx('));
+$check('mixed checkout writes card category and item allocations from its issued receipt',
+    str_contains($interface, 'array $saleSettlementEffects')
+    && str_contains($orchestrator, '$balancePayment,')
+    && str_contains($orchestrator, '$saleSettlementEffects')
+    && str_contains($mixedFactWriter, "\$saleSettlementEffects['cardPurchase'] ?? null")
+    && str_contains($mixedFactWriter, "throw self::failure('checkout_card_purchase_receipt_missing')")
+    && str_contains($mixedFactWriter, '(new CardSaleCategoryAllocationFactServices())->persistInTx($plan, $cardPurchase)')
+    && str_contains($mixedFactWriter, '(new CardSaleItemAllocationFactServices())->persistInTx($plan, $cardPurchase)')
+);
 $check('mixed result exposes both effects and replay status includes both',
     str_contains($orchestrator, "'saleInventory' => \$saleSettlementEffects['inventory'] ?? null")
     && str_contains($orchestrator, "'cardPurchase' => \$saleSettlementEffects['cardPurchase'] ?? null")

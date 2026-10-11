@@ -37,6 +37,8 @@ use app\services\cashier\v3\settlement\payment\CashierV3PaymentCollectionPlanV1;
 use app\services\cashier\v3\settlement\payment\ThinkPhpCashierV3PaymentCollectionAuthorityWriter;
 use app\services\product\inventory\completion\InventoryCompletionContractException;
 use app\services\product\inventory\completion\InventoryEntitlementCompletionContract;
+use app\services\report\CardSaleCategoryAllocationFactServices;
+use app\services\report\CardSaleItemAllocationFactServices;
 
 /**
  * Stateless production implementation of the final checkout execution port.
@@ -674,14 +676,16 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         array $salesOrder,
         array $paymentCollection,
         array $businessEvents,
-        ?array $balancePayment
+        ?array $balancePayment,
+        array $saleSettlementEffects
     ): array {
         return $this->domainCall(function () use (
             $authority,
             $salesOrder,
             $paymentCollection,
             $businessEvents,
-            $balancePayment
+            $balancePayment,
+            $saleSettlementEffects
         ): array {
             $context = $this->context($authority);
             $salesPlan = $this->salesPlan($context, $authority);
@@ -750,11 +754,25 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                     $context->dataScope()
                 );
             }
-            return $this->facts->persistInTx(
+            $cardPurchase = $saleSettlementEffects['cardPurchase'] ?? null;
+            if (!is_array($cardPurchase) || !is_array($cardPurchase['receipts'] ?? null)) {
+                throw self::failure('checkout_card_purchase_result_missing');
+            }
+            foreach ((array)($plan->rows()['sale'] ?? []) as $sale) {
+                if ((string)($sale['source_type'] ?? '') === 'card' && $cardPurchase['receipts'] === []) {
+                    throw self::failure('checkout_card_purchase_receipt_missing');
+                }
+            }
+            $result = $this->facts->persistInTx(
                 $plan,
                 $context->operatorScope(),
                 $context->dataScope()
             );
+            // Mixed checkout must project the issued card's actual projects in the
+            // same transaction as its sale facts; the card shell is not a salary category.
+            (new CardSaleCategoryAllocationFactServices())->persistInTx($plan, $cardPurchase);
+            (new CardSaleItemAllocationFactServices())->persistInTx($plan, $cardPurchase);
+            return $result;
         });
     }
 
