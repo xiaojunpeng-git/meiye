@@ -1,0 +1,92 @@
+{
+  "verifiedAt": "2026-10-11T14:18:43.272Z",
+  "sourceCommit": "1f022a626b88b2c616fa440d0de92ea57ba8f196",
+  "releaseCommit": "b19e3d4ab32381c1f7e971e505f79bbdb45af8ea",
+  "results": [
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "bytes": 939632,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "bytes": 661541,
+      "sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-6d347f40.js",
+      "status": 200,
+      "bytes": 2071215,
+      "sha256": "24f24df5754589ebb6e2956a18207e85248b40b8035683021cf33a37c3c6fa04",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "bytes": 1159059,
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "status": 200,
+      "bytes": 484,
+      "sha256": "dfb9b43e059536e801e27db5a11694abdbbea585bd8012354c4891aedd81880e",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "bytes": 939632,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "bytes": 661541,
+      "sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-6d347f40.js",
+      "status": 200,
+      "bytes": 2071215,
+      "sha256": "24f24df5754589ebb6e2956a18207e85248b40b8035683021cf33a37c3c6fa04",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "bytes": 1159059,
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "matches": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "status": 200,
+      "bytes": 510,
+      "sha256": "d5fd15d581023987f737296b36b72da992d1b20cacb3edac93ebd547b9708948",
+      "matches": true
+    }
+  ],
+  "bundle": {
+    "orderedSignatureLabels": [
+      "客户签字:",
+      "前台签字:",
+      "店长签字:"
+    ],
+    "signatureRows20mmRules": 2,
+    "printFont21pxBranchPresent": true,
+    "fontUnchangedVerifiedByNormalizedBundleEquality": true
+  },
+  "anonymousConfig": {
+    "status": 410000,
+    "message": "请登录"
+  },
+  "limitations": "No authenticated production cashier session; no post-login receipt UI or physical print claim; no business data writes; preview 20801 backend is an unchanged pre-existing limitation"
+}
