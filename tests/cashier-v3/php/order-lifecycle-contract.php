@@ -16,6 +16,7 @@ $queryModule = file_get_contents($root . '/后端代码/app/services/cashier/v3/
 $dashboard = file_get_contents($root . '/后端代码/app/services/cashier/v3/dashboard/CashierV3BusinessDashboardReadModel.php');
 $salesQuery = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php');
 $serviceVoid = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordVoidServices.php');
+$presaleClaim = file_get_contents($root . '/后端代码/app/services/cashier/v3/presale/CashierV3PresaleClaimServices.php');
 $entitlementVersionProvider = file_get_contents($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementResourceVersionProvider.php');
 
 $attributionAdjustmentStart = strpos($service, 'private function adjustAttributionFact');
@@ -182,6 +183,11 @@ $checks = [
         && strpos($service, "\$nested->where('source_id', \$requestId)") !== false
         && strpos($service, "'checkout' => isset(\$types['checkout.completed'])") !== false
         && strpos($service, "'attribution' => isset(\$types['service.completed'])") === false,
+    'pure_presale_void_closes_claimable_without_restocking' => strpos($service, "->where('source_kind', 'PRESALE')") !== false
+        && strpos($service, "'presale' => isset(\$types['gift.consumed'])") !== false
+        && strpos($service, 'closeForSalesOrderReversalInTx') !== false
+        && strpos($presaleClaim, "->where('source_kind', self::SOURCE_PRESALE)") !== false
+        && strpos($presaleClaim, 'Financial reversal closes only presale eligibility; delivered claims and inventory stay untouched.') !== false,
     'detail_reads_optional_domains_from_event_set' => strpos($salesQuery, 'eventTypesByOrder') !== false
         && strpos($salesQuery, "checkout.completed") !== false
         && strpos($salesQuery, "if (\$refundOrderIds !== [])") !== false
