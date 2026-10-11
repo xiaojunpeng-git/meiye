@@ -76,6 +76,9 @@ final class CashierV3ReservationModule
                     $draft = self::editorDraft($header, $options);
                     $contexts[] = ['kind' => 'reservation', 'id' => (string)$reservationId, 'expectedVersion' => (int)$header['version']];
                 } else {
+                    // 仅新增时生成可编辑的时间建议；编辑必须保留已保存时段，
+                    // 后续选择会员、项目或提交也不得重新按当前时钟覆盖草稿。
+                    $draft = array_merge($draft, self::newReservationSchedule());
                     $options = self::catalogOptions($catalog, $entitlementProjection, $operator, $dataScope, $selectedMemberId);
                     $stateContextId = (string)($scope['state_context_id'] ?? '');
                     $workspaceId = \app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity::id($operator->storeId(), $stateContextId);
@@ -912,6 +915,33 @@ final class CashierV3ReservationModule
         $ids = [];
         foreach ($options as $option) if ((int)($option['projectId'] ?? 0) === $projectId) $ids[(int)$option['skuId']] = (int)$option['skuId'];
         return count($ids) === 1 ? (int)reset($ids) : 0;
+    }
+
+    /**
+     * 新增草稿按上海业务日建议下一个整点，不写预约事实。
+     * 23 点后只保留今天、时间留空；一小时建议若跨日则不填结束时间，
+     * 由既有当天校验要求人工调整，不能静默约到明天。
+     */
+    private static function newReservationSchedule(?\DateTimeImmutable $now = null): array
+    {
+        $zone = new \DateTimeZone('Asia/Shanghai');
+        $now = ($now ?? new \DateTimeImmutable('now', $zone))->setTimezone($zone);
+        $draft = ['appointmentDate' => $now->format('Y-m-d'), 'appointmentTime' => '', 'appointmentStartAt' => '', 'appointmentEndAt' => '', 'expectedEndAt' => ''];
+        $hour = (int)$now->format('H');
+        if ($hour === 23) return $draft;
+
+        $start = $now->setTime($hour + 1, 0, 0);
+        $draft['appointmentTime'] = $start->format('Y-m-d\TH:i');
+        $draft['appointmentStartAt'] = $draft['appointmentTime'];
+        $end = $start->modify('+1 hour');
+        if ($end->format('Y-m-d') !== $draft['appointmentDate']) {
+            $draft['durationSummary'] = '项目时长已超过当日可预约时段，请调整预约日期或开始时间后再选择结束时间。';
+            return $draft;
+        }
+        $draft['appointmentEndAt'] = $end->format('Y-m-d\TH:i');
+        $draft['expectedEndAt'] = $draft['appointmentEndAt'];
+        $draft['durationSummary'] = '未填写项目，结束时间默认开始后60分钟；仍可手动调整。';
+        return $draft;
     }
 
     /**

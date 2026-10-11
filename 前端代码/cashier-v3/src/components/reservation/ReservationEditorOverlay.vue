@@ -184,7 +184,9 @@ const summaryRows = computed(() => [
   { label: '备注', value: draft.value.remark || '未填写' }
 ])
 const appointmentStartValue = computed(() => readAppointmentStart(draft.value))
-const appointmentDateValue = computed(() => datePart(appointmentStartValue.value))
+// 完整开始时段优先；23 点后的新增草稿只有后端给出的今天，不能
+// 为显示日期伪造开始时间，也不能影响已有预约的日期回填。
+const appointmentDateValue = computed(() => datePart(appointmentStartValue.value) || draft.value.appointmentDate || '')
 const appointmentStartTimeValue = computed(() => timePart(appointmentStartValue.value))
 const appointmentEndValue = computed(() => readAppointmentEnd(draft.value))
 const appointmentEndTimeValue = computed(() => timePart(appointmentEndValue.value))
@@ -407,7 +409,8 @@ function updateAppointmentDate(value) {
   // 先存在完整 datetime，会让受控 input 在下一次渲染时被清空。
   // 先落一个可编辑的 09:00 起点，再由使用者调整开始/结束时间。
   const appointmentStartAt = composeDateTime(value, appointmentStartTimeValue.value || defaultAppointmentStartTime)
-  applyScheduleChange({ ...draft.value, appointmentTime: appointmentStartAt, appointmentStartAt })
+  // 独立日期随用户修改/清空一起更新，避免无开始时间时回显旧的默认日期。
+  applyScheduleChange({ ...draft.value, appointmentDate: value, appointmentTime: appointmentStartAt, appointmentStartAt })
   clearValidation('预约时间')
 }
 
