@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ProjectLaborDefault;
 use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\checkout\provider\CashierV3EntitlementProviderContracts;
 use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
 
@@ -392,7 +393,13 @@ final class CashierV3QueryEntitySelectorServices
             ->where('oe.is_del', 0)
             ->where('e.status', 1)
             ->where('e.is_del', 0)
-            ->where('e.id', '>', 0);
+            ->where('e.id', '>', 0)
+            // 与结账锁内员工档案校验一致，未建立类型版本的组织员工不能先进入可选列表。
+            ->where('e.employment_type_version', '>', 0)
+            ->where(function ($subQuery) {
+                $subQuery->whereIn('e.employment_type_code', CashierV3EntitlementProviderContracts::staffTypes())
+                    ->whereNull('e.employment_type_code', 'OR');
+            });
         if ($keyword !== '') {
             $like = '%' . addcslashes($keyword, '%_') . '%';
             $query->where(function ($subQuery) use ($like) {
@@ -403,8 +410,8 @@ final class CashierV3QueryEntitySelectorServices
         }
         $total = (int)(clone $query)->count('DISTINCT e.id');
         $rows = $query
-            ->field('e.id as employee_id,e.name as employee_name,MAX(o.name) as organization_name')
-            ->group('e.id,e.name')
+            ->field('e.id as employee_id,e.name as employee_name,e.employment_type_code,e.employment_type_version,MAX(o.name) as organization_name')
+            ->group('e.id,e.name,e.employment_type_code,e.employment_type_version')
             ->order('e.id asc')
             ->page($page, $pageSize)
             ->select()
@@ -423,8 +430,8 @@ final class CashierV3QueryEntitySelectorServices
                 'staffName' => $name,
                 'staffNo' => '',
                 'storeName' => '组织：' . trim((string)($row['organization_name'] ?? '')),
-                'employeeTypeCode' => 'internal',
-                'employeeTypeAuthorityVersion' => 1,
+                'employeeTypeCode' => (string)($row['employment_type_code'] ?? 'internal'),
+                'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'],
                 'partnerDefaultRatio' => 0,
                 'salespersonEligible' => false,
                 'craftsmanEligible' => true,

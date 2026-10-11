@@ -1340,6 +1340,11 @@ class WriteOffOrderServices extends BaseServices
         bool $allowRowLock = true
     ): float
     {
+        // 替换命令已按来源可用次数锁内扣减。目标行不再承接原订单欠款；
+        // 若目标行自身确有明示欠款，仍须按该行事实限制核销。
+        if (\app\services\cashier\v3\card\CashierV3ProjectReplacementDebtPolicy::isTransferredRight($cartRow)) {
+            return (float)$this->calcCartPendingDebt($cartRow);
+        }
         // R50：取消是不再收取、也不再可用的金额，不得随欠款状态3解除核销限制。
         // 沿用固定来源明细权重分摊；清除旧行欠款字段，避免取消额与旧欠款重复扣除。
         $cancelled = $this->cancelledEntitlementAmount($orderInfo, $allowRowLock);
@@ -1405,6 +1410,10 @@ class WriteOffOrderServices extends BaseServices
             $lineDebt = $this->calcCartPendingDebt($row);
             if (bccomp($lineDebt, '0', 2) > 0) {
                 $explicitDebt = bcadd($explicitDebt, $lineDebt, 2);
+                continue;
+            }
+            // 转入金额不是新的销售额；原订单欠款只在原购买权益间分摊。
+            if (\app\services\cashier\v3\card\CashierV3ProjectReplacementDebtPolicy::isTransferredRight($row)) {
                 continue;
             }
             $detailId = (int)($row['id'] ?? 0);
