@@ -1,0 +1,11 @@
+{
+  "target": "origin/release/store-cashier-c14-main",
+  "source_commit": "fc30a0b7108b7b3898664e5a3aa8b62b4e76acf3",
+  "remote_parent": "f9e2be28310c9ba07190897a2d4ed1d216934e15",
+  "integration_commit": "0a999b7d571c1c95cacc4894fc5e6ba2b247d7bf",
+  "patch_sha256": "4b039cabe8eb54deceaf1c5d6b76cdbb284922d15b5300ee1035ebabc2e3eb4b",
+  "exact_patch_verified": true,
+  "online_checks": "R9-menu-rh-online-2026-10-11.json",
+  "method": "isolated Git index; normal fast-forward push; unrelated local history excluded",
+  "created_at": "2026-10-11T06:18:30.483Z"
+}
