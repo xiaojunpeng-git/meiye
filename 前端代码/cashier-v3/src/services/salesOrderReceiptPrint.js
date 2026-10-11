@@ -312,9 +312,9 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   /* 地址比正文小一号；预览与顶层打印保持相同的相对字号。 */
   .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
   .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
-  /* Paper-only handwriting space, not electronic signatures or order data. */
+  /* Double the paper-only handwriting space to 20mm per row; no electronic signature data. */
   .signatures { margin-top: 10px; }
-  .signature-row { min-height: 10mm; padding-top: 4px; }
+  .signature-row { min-height: 20mm; padding-top: 4px; }
   .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
   @page { size: ${paperProfile.paperWidthMm}mm ${paperProfile.fixedPageHeightMm || 297}mm; margin: 0; }
   @media print {
@@ -579,9 +579,9 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       /* 与预览一致，地址相对正文缩小，不改变金额和明细字号。 */
       ${root} .store-address { margin-top: 8px; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
       ${root} .note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6b7280; white-space: pre-wrap; overflow-wrap: anywhere; }
-      /* Keep the same handwriting space when the iframe content is mounted for native printing. */
+      /* Keep the doubled 20mm handwriting space when mounting the same receipt for native printing. */
       ${root} .signatures { margin-top: 10px; }
-      ${root} .signature-row { min-height: 10mm; padding-top: 4px; }
+      ${root} .signature-row { min-height: 20mm; padding-top: 4px; }
       ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
       @page { size: ${profile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }
       @media print {
