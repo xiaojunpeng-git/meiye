@@ -1,0 +1,418 @@
+{
+  "task": "R10-00010",
+  "acceptance": "Explicit PM acceptance and commit/deploy Ruihao/push authorization",
+  "install": {
+    "phase": "installed",
+    "source_commit": "a07403dc235244534ee956bd8915e155a7567692",
+    "release_commit": "208b4c7048a39dd37f7e944f8480d5c770cb36fb",
+    "backup": "/www/backups/rh.cc3798.com/20261011-r10-208b4c70",
+    "time": "2026-10-11T20:15:38+08:00",
+    "restart": [
+      "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)",
+      "ruihao swoole started pid=13654 port=20800"
+    ],
+    "health": [
+      "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)",
+      "manager_count=1",
+      "manager_pids=13654"
+    ],
+    "anonymous_api_status": 410000,
+    "installed_files": 10,
+    "database_migrations": [],
+    "business_writes": false,
+    "formal_index_sha256": "ea9245c6b75004fe36a52314db92302aeaf44787e02c8be2cea3555c780b97c1",
+    "preview_index_sha256": "ea9245c6b75004fe36a52314db92302aeaf44787e02c8be2cea3555c780b97c1"
+  },
+  "backup": {
+    "target": "rh.cc3798.com",
+    "database": "ruihao",
+    "backup": "/www/backups/rh.cc3798.com/20261011-r10-208b4c70",
+    "artifacts": [
+      {
+        "path": "/www/backups/rh.cc3798.com/20261011-r10-208b4c70/backend-before.tar.gz",
+        "bytes": 34290,
+        "sha256": "89c1c43aafb07aac4a38d5aa67fb5d90aee50aa3ba632a88edc9c3c46399dced"
+      },
+      {
+        "path": "/www/backups/rh.cc3798.com/20261011-r10-208b4c70/formal-before.tar.gz",
+        "bytes": 43939976,
+        "sha256": "a73c08d12f9ec8ea0347e146ff3e21ceabd2cd72bc947ee2a14f297c8c9d52b8"
+      },
+      {
+        "path": "/www/backups/rh.cc3798.com/20261011-r10-208b4c70/preview-before.tar.gz",
+        "bytes": 43939955,
+        "sha256": "c98de38f900b3479ac78ae1a2b99108b60d6fd86f0bc59659b5311c19362fcf2"
+      },
+      {
+        "path": "/www/backups/rh.cc3798.com/20261011-r10-208b4c70/ruihao-before.sql.gz",
+        "bytes": 207753774,
+        "sha256": "723ec150bead40f817e7a720773f77025e2f1b10b6c6ca4083b14f5dbe469710"
+      }
+    ],
+    "before": {
+      "target": "iZbp1fif4p5s7gj96nnec0Z",
+      "database": "ruihao",
+      "before": {
+        "app/controller/cashier/v3/Report.php": "7312a49ed992de821144f0f79938bee84e080ddcdec90ebbe8696028336b287c",
+        "app/services/cashier/v3/card/CashierV3CustomCardConfigurationServices.php": "98ab2392db400ae88c48576a36b49ae07e9325de16a7b962e42f00a46b9d2f9b",
+        "app/services/cashier/v3/cashier/CashierV3SaleCatalogAuthority.php": "ed4bf2b0b72972f58b4a6f502f3f1c091b3b72b0e2039dcbc80c2c915cc5713d",
+        "app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php": "3fb8cda3ffe79cbd24b7cae20ba3e32c76becd7b913c8d20f9df36c3a88cacf1",
+        "app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php": "a9d8a48e038e8c1f9fae5daddfa05accf57c547ca4661c0c8d75c89e110fbd77"
+      },
+      "php": "7.4.33",
+      "formal_index_sha256": "e949f1a464d3e8253e18aa50af2926f76f43b8de9129917aa77e4cadb5b1d2cd",
+      "preview_index_sha256": "e949f1a464d3e8253e18aa50af2926f76f43b8de9129917aa77e4cadb5b1d2cd",
+      "database_version": [
+        {
+          "version": "5.7.44-log"
+        }
+      ]
+    },
+    "latest_upgrade": {
+      "id": 221,
+      "upgrade_key": "20261011-003-inventory-no-expiry",
+      "code_version": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf"
+    },
+    "swoole_log_bytes": 408953,
+    "completed_at": "2026-10-11T20:14:05+08:00"
+  },
+  "online_assets": {
+    "verified_at": "2026-10-11T12:17:03.393Z",
+    "checks": [
+      {
+        "url": "https://rh.cc3798.com/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+        "status": 200,
+        "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+        "actual_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-00a53f34.css",
+        "status": 200,
+        "expected_sha256": "00a53f34615ff68030260966746d7228543630e2e135751b1b20c651409f6d69",
+        "actual_sha256": "00a53f34615ff68030260966746d7228543630e2e135751b1b20c651409f6d69",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-ef624cf3.js",
+        "status": 200,
+        "expected_sha256": "90b1aca91d9121ca4d1b50dd590fc3ae9c19fee785862a42e0e6e9ed9cb84eb6",
+        "actual_sha256": "90b1aca91d9121ca4d1b50dd590fc3ae9c19fee785862a42e0e6e9ed9cb84eb6",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+        "status": 200,
+        "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+        "actual_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+        "status": 200,
+        "expected_sha256": "ea9245c6b75004fe36a52314db92302aeaf44787e02c8be2cea3555c780b97c1",
+        "actual_sha256": "ea9245c6b75004fe36a52314db92302aeaf44787e02c8be2cea3555c780b97c1",
+        "pass": true
+      }
+    ],
+    "anonymous_api_status": 410000,
+    "preview_http_status": 200,
+    "preview_checks": [
+      {
+        "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+        "status": 200,
+        "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+        "actual_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-00a53f34.css",
+        "status": 200,
+        "expected_sha256": "00a53f34615ff68030260966746d7228543630e2e135751b1b20c651409f6d69",
+        "actual_sha256": "00a53f34615ff68030260966746d7228543630e2e135751b1b20c651409f6d69",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-ef624cf3.js",
+        "status": 200,
+        "expected_sha256": "90b1aca91d9121ca4d1b50dd590fc3ae9c19fee785862a42e0e6e9ed9cb84eb6",
+        "actual_sha256": "90b1aca91d9121ca4d1b50dd590fc3ae9c19fee785862a42e0e6e9ed9cb84eb6",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+        "status": 200,
+        "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+        "actual_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+        "pass": true
+      },
+      {
+        "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+        "status": 200,
+        "expected_sha256": "cda28bed56222f6534aa5748e55350d3b3223a985c7b19d304374735b4dd18ae",
+        "actual_sha256": "cda28bed56222f6534aa5748e55350d3b3223a985c7b19d304374735b4dd18ae",
+        "pass": true,
+        "original_file_sha256": "ea9245c6b75004fe36a52314db92302aeaf44787e02c8be2cea3555c780b97c1",
+        "response_transform": "Existing Nginx sub_filter prefixes src/href with /preview-8080/; no config changes"
+      }
+    ],
+    "preview_verified": false,
+    "browser": {
+      "url": "https://rh.cc3798.com/view_cashier_v3/?release=r10-208b4c70#/login",
+      "login_page_rendered": true,
+      "console_errors": 0,
+      "authenticated_business_ui_tested": false,
+      "reason": "No production cashier session available; no credentials extracted, no login bypass. Functional production checks use read-only service transaction.",
+      "screenshot": "R10-rh-online-entry-2026-10-11.png"
+    },
+    "preview_static_verified": true,
+    "preview_api_status": 502,
+    "preview_boundary": "Static assets synced and verified. Existing isolated preview backend 20801 is not listening; API returns 502. No preview backend/config/service changes; formal backend 20800 is healthy. Do not claim full preview functionality."
+  },
+  "readonly_services": {
+    "verified_at": "2026-10-11T20:17:01+08:00",
+    "mode": "production service-level read-only transaction; no authentication bypass or HTTP session assertions",
+    "database": "ruihao",
+    "today": "2026-10-11",
+    "store_count": 3,
+    "reports": [
+      {
+        "report": "partner_item_summary",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 2,
+        "query_export_equal": true
+      },
+      {
+        "report": "partner_item_detail",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 8,
+        "query_export_equal": true
+      },
+      {
+        "report": "member_consumption_detail",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 29,
+        "query_export_equal": true
+      },
+      {
+        "report": "store_item_analysis",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 3,
+        "query_export_equal": true
+      },
+      {
+        "report": "store_craftsman_consumption",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 22,
+        "query_export_equal": true
+      },
+      {
+        "report": "store_craftsman_consumption_detail",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 108,
+        "query_export_equal": true
+      },
+      {
+        "report": "store_salesperson_performance",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 3,
+        "query_export_equal": true
+      },
+      {
+        "report": "market_performance",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 3,
+        "query_export_equal": true
+      },
+      {
+        "report": "market_detail",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 56,
+        "query_export_equal": true
+      },
+      {
+        "report": "member_visit_analysis",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 5,
+        "query_export_equal": true
+      },
+      {
+        "report": "member_visit_annual_summary",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 12,
+        "query_export_equal": true
+      },
+      {
+        "report": "field_acquisition_detail",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 0,
+        "query_export_equal": true
+      },
+      {
+        "report": "field_acquisition_summary",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 0,
+        "query_export_equal": true
+      },
+      {
+        "report": "cross_industry_customer_detail",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 0,
+        "query_export_equal": true
+      },
+      {
+        "report": "cross_industry_customer_summary",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 3,
+        "query_export_equal": true
+      },
+      {
+        "report": "new_customer_analysis",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 0,
+        "query_export_equal": true
+      },
+      {
+        "report": "new_customer_analysis_summary",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 0,
+        "query_export_equal": true
+      },
+      {
+        "report": "salesperson_large_order_statistics",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 0,
+        "query_export_equal": true
+      },
+      {
+        "report": "store_refund_ledger",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 0,
+        "query_export_equal": true
+      },
+      {
+        "report": "six_dimension_analysis",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 1,
+        "query_export_equal": true
+      },
+      {
+        "report": "phase_six_other_multi_payment",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 20,
+        "query_export_equal": true
+      },
+      {
+        "report": "phase_six_salary_summary",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 22,
+        "query_export_equal": true
+      },
+      {
+        "report": "phase_six_salary_detail",
+        "range": {
+          "start": "2026-10-11",
+          "end": "2026-10-11"
+        },
+        "rows": 113,
+        "query_export_equal": true
+      }
+    ],
+    "explicit_range_preserved": true,
+    "historical_exclusion": {
+      "month_rows": 115,
+      "today_rows": 29,
+      "excluded_historical_rows": 86
+    },
+    "custom_card_projects": {
+      "selling": 54,
+      "warehouse": 401,
+      "store_scoped": true
+    },
+    "latest_upgrade": {
+      "id": 221,
+      "upgrade_key": "20261011-003-inventory-no-expiry",
+      "code_version": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf"
+    },
+    "business_writes": false
+  },
+  "release_recheck": {
+    "custom_card_vue": "PASS",
+    "report_vue_23_codes": "PASS",
+    "report_contract": "44/44 PASS",
+    "period_picker": "PASS",
+    "local_mysql_reports": "23 actual queries/exports PASS; month 66, today 0, excluded 66",
+    "custom_card_local_transaction": "28 PASS; rollback verified",
+    "php74_lint": "5/5 PASS",
+    "existing_baseline_failures": 3
+  },
+  "validation_boundary": "Production service-level SELECT-only transaction, static hashes, anonymous auth and login page rendering. No authenticated production business UI session; no production business writes.",
+  "push_target": "origin release/store-cashier-c14-main",
+  "push_at_evidence_generation": false
+}
