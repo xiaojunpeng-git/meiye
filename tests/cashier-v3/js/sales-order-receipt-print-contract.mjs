@@ -68,12 +68,13 @@ ok('长小票在原生窗口打开前解除根容器裁剪，结束、取消、�
           assert.equal(root.style.getPropertyValue('height'), 'auto')
           assert.equal(root.style.getPropertyValue('min-height'), '0')
           assert.equal(root.style.getPropertyValue('max-height'), 'none')
-          // Protect physical font scaling: vertical unclipping must not alter
-          // the existing horizontal constraints, even during the native call.
+          // Preserve sizing, but remove both overflow axes: retaining x:auto
+          // would compute y:visible back to auto in a real browser.
           assert.equal(root.style.getPropertyValue('width'), '960px')
           assert.equal(root.style.getPropertyValue('min-width'), '1120px')
           assert.equal(root.style.getPropertyPriority('min-width'), 'important')
-          assert.equal(root.style.getPropertyValue('overflow-x'), 'auto')
+          assert.equal(root.style.getPropertyValue('overflow-x'), 'visible')
+          assert.equal(root.style.getPropertyPriority('overflow-x'), 'important')
           assert.equal(root.style.getPropertyValue('overflow-y'), 'visible')
           assert.equal(root.style.getPropertyPriority('overflow-y'), 'important')
         }
@@ -93,13 +94,15 @@ ok('长小票在原生窗口打开前解除根容器裁剪，结束、取消、�
     roots.forEach((root, index) => assert.deepEqual([...root.style.values], original[index], outcome))
     assert.match(printCss.textContent, /html, body \{[^}]*height: auto !important;[^}]*overflow-y: visible !important;/)
     const rootCss = printCss.textContent.match(/html, body \{([^}]+)\}/)[1]
-    assert.doesNotMatch(rootCss, /(?:^|;)\s*(?:width|min-width|overflow-x):/)
+    assert.match(rootCss, /overflow-x: visible !important;/)
+    assert.doesNotMatch(rootCss, /(?:^|;)\s*(?:width|min-width):/)
     assert.match(printCss.textContent, /@page \{ size: 63mm 210mm;/)
   }
   for (const paperSize of ['58', '76', '80']) {
     const html = buildSalesOrderReceiptHtml({}, { paperSize })
     assert.match(html, /html, body \{[^}]*height: auto !important;[^}]*overflow-y: visible !important;/)
-    assert.doesNotMatch(html.match(/html, body \{([^}]+)\}/)[1], /(?:^|;)\s*(?:width|min-width|overflow-x):/)
+    assert.match(html.match(/html, body \{([^}]+)\}/)[1], /overflow-x: visible !important;/)
+    assert.doesNotMatch(html.match(/html, body \{([^}]+)\}/)[1], /(?:^|;)\s*(?:width|min-width):/)
   }
 })
 
@@ -419,6 +422,8 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
   assert.match(headChildren[0].textContent, /\.tear-guide .*height: 64mm/)
   assert.match(headChildren[0].textContent, /width: 63mm !important; margin: 0 !important; padding: \.5mm !important; font-size: 21px !important/)
   assert.match(headChildren[0].textContent, /\.signature-row \{ min-height: 20mm; padding-top: 4px; \}/)
+  assert.match(headChildren[0].textContent, /#sales-order-receipt-print-document-v1 \.signatures \{ break-inside: avoid; page-break-inside: avoid; \}/)
+  assert.match(bodyChildren[1].innerHTML, /店长签字:<\/div>\s*<div class="tear-guide" aria-hidden="true"><\/div>\s*<\/div>/)
   assert.match(headChildren[0].textContent, /\.meta div:first-child span:last-child \{ font-size: \.78em; \}/)
   assert.doesNotMatch(bodyChildren[1].innerHTML, /本小票仅展示已结账订单快照/)
   assert.match(bodyChildren[1].innerHTML, /客户签字:[\s\S]*前台签字:[\s\S]*店长签字:/)
@@ -571,6 +576,9 @@ ok('三种纸宽和各类小票底部均有三行空白签字栏', () => {
       assert.deepEqual(labels, ['客户签字:', '前台签字:', '店长签字:'])
       assert.ok(html.indexOf('<div class="signatures">') > html.indexOf('<div class="note">'))
       assert.ok(html.indexOf('<div class="signatures">') < html.indexOf('<div class="tear-guide"'))
+    // The feed marker must stay inside the indivisible signature footer, including standalone printing.
+    assert.match(html, /店长签字:<\/div>\s*<div class="tear-guide" aria-hidden="true"><\/div>\s*<\/div>/)
+    assert.match(html, /\.signatures \{ break-inside: avoid; page-break-inside: avoid; \}/)
       assert.match(html, /\.signature-row \{ min-height: 20mm; padding-top: 4px; \}/)
       assert.match(html, /\.signature-row, \.tear-guide \{ break-inside: avoid/)
       assert.equal(JSON.stringify(order), before)
