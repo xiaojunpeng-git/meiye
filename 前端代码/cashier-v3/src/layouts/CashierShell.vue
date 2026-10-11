@@ -366,10 +366,8 @@ const menuItems = [
     key: 'inventory',
     label: '库存',
     icon: Boxes,
-    // 库存是门店日常业务入口，不应因“管理”中心未授权而在收银侧栏消失。
-    // 入口跟随已进入收银台的账号显示；库存应用自己的接口继续强制门店、
-    // 仓位和成本字段权限，不能由这个导航入口扩大数据范围。
-    featureCode: 'cashier.v3.cashier',
+    // 库存入口只由已授权的库存子功能决定，不继承收银或管理权限；
+    // 子功能和接口仍各自校验门店、仓位及成本字段权限。
     submenu: inventoryFeatureItems
   }
 ]
@@ -2788,7 +2786,7 @@ onBeforeUnmount(() => {
               >{{ entry.label }}</RouterLink>
             </div>
           </div>
-          <div v-else-if="item.key === 'inventory' && canUseFeature(item.featureCode) && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
+          <div v-else-if="item.key === 'inventory' && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
             <div class="cashier-inventory-entry" :class="{ 'cashier-inventory-entry--open': isInventoryMenuExpanded }">
               <a
                 href="#/cashier"
