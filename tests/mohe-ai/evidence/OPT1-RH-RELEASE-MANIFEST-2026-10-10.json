@@ -1,0 +1,395 @@
+{
+  "source_commit": "4a8fd8ca4122037ae4eef5ea432c6424ff78062d",
+  "platform_dev_source": "美容源码/前端代码/admin/ (18081)",
+  "build_source": "git archive from approved commit; source mounted read-only",
+  "target": "rh.cc3798.com",
+  "database": "ruihao",
+  "migration_applied": false,
+  "backend_file_count": 11,
+  "backup_dir": "/www/backups/rh.cc3798.com/20261010-opt1-4a8fd8ca.SHYANg",
+  "backup_sha256": "096189062dc3177cb14f4e5bd21886b5aabc159a3b9b55d7e45574b98ef170e5",
+  "source_files": [
+    {
+      "file": "前端代码/shared/mohe-ai/browser-entry.mjs",
+      "sha256": "02a5bfd14d97b10420d2a592cda96446d607a2d3f26f7b0708cce7712c27b98b"
+    },
+    {
+      "file": "后端代码/app/services/ai/AiGatewayServices.php",
+      "sha256": "27e0b3595b1a1857b38cc6828d98d4d8c46af7270c76c593523a795403625a46"
+    },
+    {
+      "file": "后端代码/app/services/ai/execution/AiAnalysisGuidancePlanner.php",
+      "sha256": "f236ea53ebe274d8b8ba8b9e021fba6806c0652106e9875d0c5e2558e3e9df5b"
+    },
+    {
+      "file": "后端代码/app/services/ai/execution/AiDimensionGuidancePlanner.php",
+      "sha256": "b055fa308476ffb060cfc700c89ff55cab17645cdccdf85581fee6a479d9b242"
+    },
+    {
+      "file": "后端代码/app/services/ai/execution/AiSemanticRecommendationPlanner.php",
+      "sha256": "85afb5060e3a9fc7a9d8733f15f11f5a85ec4fc6dc06cf68b5314696c3917c8f"
+    },
+    {
+      "file": "后端代码/app/services/ai/execution/AiWorkflowPlanner.php",
+      "sha256": "8d02e375ae58a29802516f344ef61ff9ae64da636a0925b70d15bc5d1e9b143f"
+    },
+    {
+      "file": "后端代码/app/services/ai/execution/AiRunBudgetPolicy.php",
+      "sha256": "62302685fb9dd7f9edbdf580534bc73a8d622b2e468e6627ead0aeea01340832"
+    },
+    {
+      "file": "后端代码/app/services/ai/execution/AiRunStore.php",
+      "sha256": "2ca5d57db6bd2ffb602b843a9c1b2fc55807c06ec1bb827bd48988634071dc19"
+    },
+    {
+      "file": "后端代码/app/services/ai/model/AiSafeQuestionProjector.php",
+      "sha256": "8dbcbd27d7b4ea34661f09d9da1c2c4192c78449d2f05c7d5caa729d5c909af3"
+    },
+    {
+      "file": "后端代码/app/services/ai/model/SiliconFlowClient.php",
+      "sha256": "0e67a654ae14797012b3a4648ff7a234db8da0b188d4f212b3c79c2f6473f7f2"
+    },
+    {
+      "file": "后端代码/app/services/query/metric/MemberAnalysisObjectServices.php",
+      "sha256": "7593bf40df2e3797ba3e8b03f8465ae3704ec66349be2d0cac6f70e3349fd931"
+    },
+    {
+      "file": "tests/mohe-ai/browser-guidance-contract.mjs",
+      "sha256": "39551fe7e43528056aeb791ce7d61b2f1d61a50ff63712533b7068a26d7ecef8"
+    },
+    {
+      "file": "tests/mohe-ai/gateway-components.php",
+      "sha256": "09509a7ac7012d4647150b79fd483420b2f6b20f04276b1170aff11ac9425564"
+    },
+    {
+      "file": "tests/mohe-ai/gateway-integration.php",
+      "sha256": "e048fc9ac1c66cbf1ab94bb415c70b6ebc7d4e1da67dfef94b430c35e1470030"
+    },
+    {
+      "file": "tests/mohe-ai/member-analysis.php",
+      "sha256": "2b83dfdc6b7185f8889b6c0871a32cc41c335695e3416c2a402160a10317f4e0"
+    },
+    {
+      "file": "tests/mohe-ai/semantic-guidance.php",
+      "sha256": "bcd1e9966a59582c727f5f6d06e3364222f0601a7c3f4927b5a91b8214885745"
+    },
+    {
+      "file": "tests/mohe-ai/runtime-contract.php",
+      "sha256": "cb483e848b104194bf72e5f28614d34327b314279e4233af9e51a3faddeb3e24"
+    },
+    {
+      "file": "tests/mohe-ai/opt1-guidance-gateway.php",
+      "sha256": "27be15547ea5226383439c047627b49b0b268eb386e7967602097f56adffd0d1"
+    },
+    {
+      "file": "tests/mohe-ai/opt1-member-guidance-gateway.php",
+      "sha256": "e54e62a62b8074ec2c2abff0f8f1a453bc147c53c7b9ef6d5f66d1a3e41f0fba"
+    },
+    {
+      "file": "tests/mohe-ai/opt1-transport-recovery-gateway.php",
+      "sha256": "00027d0bd906fdc5c1d1e45806573bf4941956c99782a9df0d328252af9f49de"
+    },
+    {
+      "file": "后端代码/app/services/ai/execution/AiExecutionEnvelope.php",
+      "sha256": "f682de71ae4a7c63052e9846bf9cab215be2aedaf530e8693e3fc2d117a65b1d"
+    },
+    {
+      "file": "tests/mohe-ai/async-execution-envelope-contract.php",
+      "sha256": "673ae98a357dfa4aa73d00afabb1a8f9a768af45b5bfc280db5c92c241a1a955"
+    }
+  ],
+  "build": {
+    "status": "passed",
+    "runtime": "Node 14.21.3 linux/arm64",
+    "image": "docker.m.daocloud.io/library/node:14.21.3-bullseye",
+    "image_manifest_digest": "sha256:c0bff0d29a742f40650d5f0305dd581351c10954e6cb6676fc96f47590b9666e",
+    "resource_control": "external os.cpus projection to two CPUs; Node max-old-space-size=3072; container memory 4GiB",
+    "warning_count": 2,
+    "warnings": "asset size and entrypoint size",
+    "previous_attempt": "amd64 emulation killed by confirmed Docker OOM; no deployment during that attempt",
+    "html_sha256": "725233fcf8ad21ffc39ba15a84f73d2f34f09dcd86d9c625f7280feb40d2a6ca",
+    "asset_count": 1165,
+    "new_assets": [
+      {
+        "file": "public/view_admin/css/app.b6208b14.css",
+        "sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+        "size": 486959
+      },
+      {
+        "file": "public/view_admin/css/app.b6208b14.css.gz",
+        "sha256": "b8d623a98a50696eb9502500c74543790b6b14b1b34d83aefb1ed66ab6c75e35",
+        "size": 101885
+      },
+      {
+        "file": "public/view_admin/css/chunk-5b4e1bc6.eeb7486e.css",
+        "sha256": "c389b9e10fe3173ab76cdb1046a78dbc7d460dd0d266342576f76e9d5a2554f2",
+        "size": 14186
+      },
+      {
+        "file": "public/view_admin/css/chunk-5b4e1bc6.eeb7486e.css.gz",
+        "sha256": "bce88d9b8b114c72e42115b806a1fb9ffc12fa6972e56c5311daf930adadfc57",
+        "size": 3241
+      },
+      {
+        "file": "public/view_admin/js/app.1ceadfba.js",
+        "sha256": "50338f00d62be844e48e7d44bced0674622daddd8f23f525736ce573ca14efb9",
+        "size": 1816085
+      },
+      {
+        "file": "public/view_admin/js/app.1ceadfba.js.gz",
+        "sha256": "05f56a9d8f168c30dcd7050a0b897aaf1d75a3b59dcb0c47f7fb807928e882de",
+        "size": 492096
+      },
+      {
+        "file": "public/view_admin/js/chunk-0bd7308b.ee73415f.js",
+        "sha256": "e8d324bec3dfbf066ae19b7e3e22675bf33ff0a43dcf4b85556e569612c795a3",
+        "size": 2384
+      },
+      {
+        "file": "public/view_admin/js/chunk-25738c1c.275a5849.js",
+        "sha256": "d9b2a15d5f704079f862c23b4c9b80c165a959ce15ada8517ec1a62702ab9117",
+        "size": 878635
+      },
+      {
+        "file": "public/view_admin/js/chunk-25738c1c.275a5849.js.gz",
+        "sha256": "7644fe82a4c5d6de9424c5c6e84676f05879a4a1dc81405c70f0ba6c28b4e7ce",
+        "size": 319424
+      },
+      {
+        "file": "public/view_admin/js/chunk-2727d4f4.5f1423e4.js",
+        "sha256": "7339aa2bc984ac4b59eaea3ed958e300e87fef018d3f6695377048ab45d1898c",
+        "size": 3062
+      },
+      {
+        "file": "public/view_admin/js/chunk-273b7956.e0c627c7.js",
+        "sha256": "64c999408b9fbb5e79a760ddb7956a352fa55d9732466dab8737014d40d10ca6",
+        "size": 2489
+      },
+      {
+        "file": "public/view_admin/js/chunk-2d87b70c.96eaca0c.js",
+        "sha256": "72f4bdabebf5c3542064ba4ae42eccfef44000bcac27ebcd8152efae6f723ee7",
+        "size": 1692
+      },
+      {
+        "file": "public/view_admin/js/chunk-32ec6485.1fda1a83.js",
+        "sha256": "c6708b3e332178486ef130fa4784fdf308e1eb228f74bfbcbe6fcf8e436194f4",
+        "size": 2419
+      },
+      {
+        "file": "public/view_admin/js/chunk-36f1f93d.4c7dc4a3.js",
+        "sha256": "a28dc4a665bc03bb362945e1db75e94e934600296c7fb37cf28cfc7d4560692d",
+        "size": 1965
+      },
+      {
+        "file": "public/view_admin/js/chunk-3b9de414.79c57ac0.js",
+        "sha256": "8619766b77df6cca024b4cefedbcf9227ec64ec3d84b5a359941b8babcf2473b",
+        "size": 5271
+      },
+      {
+        "file": "public/view_admin/js/chunk-4140edfe.5fa9c821.js",
+        "sha256": "68deffd26e7f5ba05590fb5c8829acbc584ef9d1f8f469b463a3024284a1e127",
+        "size": 21612
+      },
+      {
+        "file": "public/view_admin/js/chunk-4140edfe.5fa9c821.js.gz",
+        "sha256": "be439048e505308698ad2e749d24bee744298f68d73ab862e1986e91a18158f0",
+        "size": 6326
+      },
+      {
+        "file": "public/view_admin/js/chunk-43e780ce.0e80ab0a.js",
+        "sha256": "e5ffad47857a832d01e3ae803acf277d7d9c9eb3ae94a5b7cc883668e6d8a393",
+        "size": 45945
+      },
+      {
+        "file": "public/view_admin/js/chunk-43e780ce.0e80ab0a.js.gz",
+        "sha256": "14cb70d534537bad9dff79fe779336dbfd8dd77050069eaa3d668d7557b87eee",
+        "size": 11934
+      },
+      {
+        "file": "public/view_admin/js/chunk-5b4e1bc6.0d246373.js",
+        "sha256": "ffcc7f827b53012e137c49360c42f9c60b293654368c02acbcca8cfbceb909ea",
+        "size": 242891
+      },
+      {
+        "file": "public/view_admin/js/chunk-5b4e1bc6.0d246373.js.gz",
+        "sha256": "e0bf46a964179d98920b618f517abb63de440da05ff59eea06916cd085d9b725",
+        "size": 61138
+      },
+      {
+        "file": "public/view_admin/js/chunk-68b9754e.60918517.js",
+        "sha256": "7ff76ebe3761f38f37362e58cdb0a30c75d7c8588e8bedfb802d781842d4aac4",
+        "size": 2388
+      },
+      {
+        "file": "public/view_admin/js/chunk-9383ffca.9afeb5c5.js",
+        "sha256": "9e8ad73715c2d90b37b76862bee4d58e4a1ffb33d8ac1584b425cb1638899984",
+        "size": 2903
+      },
+      {
+        "file": "public/view_admin/js/chunk-eeea2eb4.9edb2b47.js",
+        "sha256": "dd015bf6ac812004ead653400b4c88cd9b7cc27e604c61e59efaafca22419a7b",
+        "size": 2347
+      },
+      {
+        "file": "public/view_admin/js/chunk-vendors.256a48e4.js",
+        "sha256": "78174425a121f4bc04f0a221f0aa11f65b16dd5216b98b7faf5a02170a7e4969",
+        "size": 7152554
+      },
+      {
+        "file": "public/view_admin/js/chunk-vendors.256a48e4.js.gz",
+        "sha256": "a8034420e67c56135dbb4fcb14ffdf178b8459ea4bfe110004315ab0cc4073a2",
+        "size": 1975118
+      }
+    ],
+    "retained_gzip_equivalent_count": 276,
+    "log_sha256": "3a2037a7cc7d1bb2e500cf47e17fd8c548fb2c6b3316a6bef694e48a21194988",
+    "preload_sha256": "7685baeb8216bd0f68fab54af0f11028a5bac0b6b35248a8e5b6cf3dd6f4e601"
+  },
+  "deployment": {
+    "source_commit": "4a8fd8ca4122037ae4eef5ea432c6424ff78062d",
+    "backend_verified": true,
+    "frontend_verified": true,
+    "https_html_matches": true,
+    "protected_files_unchanged": true,
+    "systemd_units_active": 4,
+    "swoole_manager_count": 1
+  },
+  "online_validation": {
+    "status": "core_paths_passed",
+    "cases": [
+      {
+        "case": "connection",
+        "result": "passed",
+        "model": "gpt-5.6-terra",
+        "config_version": 9
+      },
+      {
+        "case": "out_of_domain",
+        "question": "今天天气怎么样",
+        "result": "capability_help",
+        "guidance_card": false,
+        "seconds": 7
+      },
+      {
+        "case": "complete_question",
+        "question": "今天现金业绩多少",
+        "result": "direct_answer",
+        "metric": "cash_performance",
+        "period": [
+          "2026-10-10",
+          "2026-10-10"
+        ],
+        "guidance_card": false,
+        "seconds": 2
+      },
+      {
+        "case": "context_follow_up",
+        "question": "上个月呢",
+        "result": "direct_answer",
+        "inherited_metric": "cash_performance",
+        "period": [
+          "2026-09-01",
+          "2026-09-30"
+        ],
+        "guidance_card": false,
+        "seconds": 1
+      },
+      {
+        "case": "broad_store",
+        "question": "门店怎么样",
+        "result": "metric_choice_then_date_then_answer",
+        "chosen_metric": "sales_amount",
+        "period": [
+          "2026-10-10",
+          "2026-10-10"
+        ],
+        "first_card_filler_options": false,
+        "result_seconds_after_date": 1
+      },
+      {
+        "case": "member_browser_guidance",
+        "question": "会员王丽在上个月消费多少",
+        "result": "registered_metric_choice_then_same_name_phone_guidance",
+        "chosen_metric": "sales_collected_amount",
+        "raw_phone_typed_in_browser": false,
+        "cancelled_after_observation": true
+      }
+    ],
+    "member_phone_server_probe": {
+      "status": "PASS",
+      "run_id": "263be182efdc87cbde5f613c3747ee4b8260fbb385964029",
+      "same_run": true,
+      "member_identity_uniquely_bound": true,
+      "metric": "sales_collected_amount",
+      "period": [
+        "2026-09-01",
+        "2026-09-30"
+      ],
+      "model_attempts_before_phone": 2,
+      "model_attempts_after_phone": 2,
+      "successful_reader_calls": 1,
+      "business_facts_modified": false,
+      "phone_exported": false,
+      "scope_store_count": 102
+    },
+    "boundaries": [
+      "会员原宽泛问题的浏览器验证止于统计口径和完整手机号引导，之后正常取消。",
+      "完整手机号补充闭环使用明确统计口径的问题，在瑞昊服务端通过正常 Gateway/队列/Worker/Reader 执行；手机号来自瑞昊当前授权会员数据且不打印、不出站。",
+      "没有注入生产时钟、模型假结果或权限；没有写经营事实。金额未进行本轮全库财务审计。"
+    ],
+    "known_provider_failures": [
+      {
+        "status": "FAIL",
+        "reason": "RH_MEMBER_METRIC_GUIDANCE_REQUIRED",
+        "run_id": "269c9351522e351e199b6be10052c64845f8b7613d65253d",
+        "run_status": "FAILED",
+        "run_reason": "AI_MODEL_RESULT_UNKNOWN"
+      },
+      {
+        "status": "FAIL",
+        "reason": "RH_MEMBER_METRIC_GUIDANCE_REQUIRED",
+        "run_id": "cc40cf588664a81e1b3a24706c39df6cc05156ddb51705c5",
+        "run_status": "FAILED",
+        "run_reason": "AI_MODEL_RESULT_UNKNOWN"
+      }
+    ],
+    "timeout_policy": "understand_meaning curl errno28 / interim HTTP100 / about30000ms; failed closed without query; outside the approved HTTP0 one-recovery predicate",
+    "probe_correction": "first probe returned on old WAITING_CLARIFICATION acknowledgement; cancelled that run, then fixed probe polling to wait for a changed clarification id",
+    "source_push_observed_remote_tip": "e124f80f2b2cc929fd6cf854f3d0bf77294d4201",
+    "source_commit_already_in_remote": true
+  },
+  "configuration_alignment": {
+    "provider": "openlux",
+    "model": "gpt-5.6-terra",
+    "version": 9,
+    "key_matches_local": true,
+    "changed": true,
+    "enabled": true,
+    "external_processing_authorized": true,
+    "external_scope_version": "sanitized-question-v1",
+    "instance": "instance-c26461884cf7b5b9ed9fb90c1ea09a051c5616de2f4de03758da21f647e7270d",
+    "backup_sha256": "568f798e11038fea6881aff59835ec8344d8ba4be622975285897a686594dffa",
+    "authorization": "产品经理先确认切换 gpt-5.6-terra，后明确要求线上 API 和模型按本地对齐",
+    "plaintext_secret_written_to_evidence": false,
+    "config_backup_path": "/www/backups/rh.cc3798.com/20261010-opt1-4a8fd8ca.SHYANg/config-before-alignment.json"
+  },
+  "runtime_backend_sha256": {
+    "app/services/ai/AiGatewayServices.php": "27e0b3595b1a1857b38cc6828d98d4d8c46af7270c76c593523a795403625a46",
+    "app/services/ai/execution/AiAnalysisGuidancePlanner.php": "f236ea53ebe274d8b8ba8b9e021fba6806c0652106e9875d0c5e2558e3e9df5b",
+    "app/services/ai/execution/AiDimensionGuidancePlanner.php": "b055fa308476ffb060cfc700c89ff55cab17645cdccdf85581fee6a479d9b242",
+    "app/services/ai/execution/AiSemanticRecommendationPlanner.php": "85afb5060e3a9fc7a9d8733f15f11f5a85ec4fc6dc06cf68b5314696c3917c8f",
+    "app/services/ai/execution/AiWorkflowPlanner.php": "8d02e375ae58a29802516f344ef61ff9ae64da636a0925b70d15bc5d1e9b143f",
+    "app/services/ai/execution/AiRunBudgetPolicy.php": "62302685fb9dd7f9edbdf580534bc73a8d622b2e468e6627ead0aeea01340832",
+    "app/services/ai/execution/AiRunStore.php": "2ca5d57db6bd2ffb602b843a9c1b2fc55807c06ec1bb827bd48988634071dc19",
+    "app/services/ai/model/AiSafeQuestionProjector.php": "8dbcbd27d7b4ea34661f09d9da1c2c4192c78449d2f05c7d5caa729d5c909af3",
+    "app/services/ai/model/SiliconFlowClient.php": "0e67a654ae14797012b3a4648ff7a234db8da0b188d4f212b3c79c2f6473f7f2",
+    "app/services/query/metric/MemberAnalysisObjectServices.php": "7593bf40df2e3797ba3e8b03f8465ae3704ec66349be2d0cac6f70e3349fd931",
+    "app/services/ai/execution/AiExecutionEnvelope.php": "f682de71ae4a7c63052e9846bf9cab215be2aedaf530e8693e3fc2d117a65b1d"
+  },
+  "frontend_expected_manifest_sha256": "9524758597269cd8f4fa1141faf34ec5b85fbb053ea7705bc71a3ac4eeff54d7",
+  "retained_config_env_and_reader_hashes": [
+    "b89eb945fa029d397a057428e9a7c69ff6610c6471e72b635af334452a6eee34  .env",
+    "1b92afb85e95ddf83f4724f2d5a18d8ef264b75e18a1bba4ebd87880768183c9  config/mohe_ai.php",
+    "ffba153395789c1315819e9930770c40ad1f0641db7c6972e0131e2e2be8f30f  app/services/query/metric/RegisteredMetricReadServices.php"
+  ]
+}

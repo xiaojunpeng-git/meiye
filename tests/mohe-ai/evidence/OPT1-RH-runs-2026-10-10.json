@@ -1,0 +1,177 @@
+[
+    {
+        "run_id": "1ce15dd186e42ed6392c268a4e08a98831ab40cdf0f14bce",
+        "status": "FAILED",
+        "reason": "AI_MODEL_REQUEST_FAILED",
+        "created_at": 1791563415075,
+        "last_clock_at": 1791563419233,
+        "model_attempt_count": 1,
+        "tool_call_count": 2,
+        "model_diagnostics": {
+            "understand_meaning": {
+                "stage": "intent_parse",
+                "predicate": "error_reason:ai_model_request_failed"
+            },
+            "terminal_contract": {
+                "stage": "intent_parse",
+                "predicate": "error_reason:ai_model_request_failed"
+            }
+        },
+        "successful_unified_query_count": 0
+    },
+    {
+        "run_id": "f7fb203a88ad2c3a960436cb57365acc4bfe2b9d40ae4754",
+        "status": "FAILED",
+        "reason": "AI_INTENT_UNRESOLVED",
+        "created_at": 1791563701585,
+        "last_clock_at": 1791563708084,
+        "model_attempt_count": 1,
+        "tool_call_count": 2,
+        "model_diagnostics": null,
+        "successful_unified_query_count": 0
+    },
+    {
+        "run_id": "d05c02e15c7884c912a5de3b0c7a020f31bd0fef4aa7b6e3",
+        "status": "COMPLETED",
+        "reason": "",
+        "created_at": 1791563757632,
+        "last_clock_at": 1791563758942,
+        "model_attempt_count": 0,
+        "tool_call_count": 1,
+        "model_diagnostics": null,
+        "successful_unified_query_count": 1
+    },
+    {
+        "run_id": "4b1c5b8fbcd78bbf9247cbb286d308a91bdc9942d9df10e0",
+        "status": "COMPLETED",
+        "reason": "",
+        "created_at": 1791563785770,
+        "last_clock_at": 1791563786609,
+        "model_attempt_count": 0,
+        "tool_call_count": 1,
+        "model_diagnostics": null,
+        "successful_unified_query_count": 1
+    },
+    {
+        "run_id": "961a78145bc1967925ef909d40b5a7e1a636095aab5afe4b",
+        "status": "COMPLETED",
+        "reason": "",
+        "created_at": 1791563832427,
+        "last_clock_at": 1791563868949,
+        "model_attempt_count": 2,
+        "tool_call_count": 3,
+        "model_diagnostics": null,
+        "successful_unified_query_count": 1
+    },
+    {
+        "run_id": "bef262a260adf2c355e21e08551e104cc00179e754f57384",
+        "status": "CANCELLED",
+        "reason": "USER_CANCELLED",
+        "created_at": 1791563901161,
+        "last_clock_at": 1791563992279,
+        "model_attempt_count": 3,
+        "tool_call_count": 4,
+        "model_diagnostics": {
+            "registered_coordinated_probe_reply1": {
+                "stage": "analysis_binding",
+                "predicate": "registered_coordinated_miss_metric_projection"
+            },
+            "exact_binding_probe_reply1": {
+                "stage": "analysis_binding",
+                "predicate": "exact_registry_binding:r1:o1:t1:m1:s0:x0:e0",
+                "needs_metric_choice": false,
+                "selected_metric_count": 1,
+                "metric_requirement_count": 1,
+                "binding_row_count": 1
+            }
+        },
+        "successful_unified_query_count": 0
+    },
+    {
+        "run_id": "7d82f66fe02889cacadeefd95946ae28b56dd960ed4d83f5",
+        "status": "CANCELLED",
+        "reason": "USER_CANCELLED",
+        "created_at": 1791564094835,
+        "last_clock_at": 1791564106098,
+        "model_attempt_count": 1,
+        "tool_call_count": 2,
+        "model_diagnostics": null,
+        "successful_unified_query_count": 0
+    },
+    {
+        "run_id": "269c9351522e351e199b6be10052c64845f8b7613d65253d",
+        "status": "FAILED",
+        "reason": "AI_MODEL_RESULT_UNKNOWN",
+        "created_at": 1791564150277,
+        "last_clock_at": 1791564181539,
+        "model_attempt_count": 1,
+        "tool_call_count": 2,
+        "model_diagnostics": {
+            "understand_meaning": {
+                "stage": "transport",
+                "predicate": "timeout",
+                "transport_errno": 28,
+                "http_status": 100,
+                "elapsed_ms": 30007
+            },
+            "terminal_contract": {
+                "stage": "transport",
+                "predicate": "timeout",
+                "transport_errno": 28,
+                "http_status": 100,
+                "elapsed_ms": 30007
+            }
+        },
+        "successful_unified_query_count": 0
+    },
+    {
+        "run_id": "cc40cf588664a81e1b3a24706c39df6cc05156ddb51705c5",
+        "status": "FAILED",
+        "reason": "AI_MODEL_RESULT_UNKNOWN",
+        "created_at": 1791564238393,
+        "last_clock_at": 1791564269419,
+        "model_attempt_count": 1,
+        "tool_call_count": 2,
+        "model_diagnostics": {
+            "understand_meaning": {
+                "stage": "transport",
+                "predicate": "timeout",
+                "transport_errno": 28,
+                "http_status": 100,
+                "elapsed_ms": 30007
+            },
+            "terminal_contract": {
+                "stage": "transport",
+                "predicate": "timeout",
+                "transport_errno": 28,
+                "http_status": 100,
+                "elapsed_ms": 30007
+            }
+        },
+        "successful_unified_query_count": 0
+    },
+    {
+        "run_id": "263be182efdc87cbde5f613c3747ee4b8260fbb385964029",
+        "status": "COMPLETED",
+        "reason": "",
+        "created_at": 1791564331223,
+        "last_clock_at": 1791564355138,
+        "model_attempt_count": 2,
+        "tool_call_count": 3,
+        "model_diagnostics": {
+            "registered_coordinated_probe": {
+                "stage": "analysis_binding",
+                "predicate": "registered_coordinated_miss_metric_projection"
+            },
+            "exact_binding_probe": {
+                "stage": "analysis_binding",
+                "predicate": "exact_registry_binding:r1:o1:t1:m1:s0:x0:e0",
+                "needs_metric_choice": false,
+                "selected_metric_count": 1,
+                "metric_requirement_count": 1,
+                "binding_row_count": 1
+            }
+        },
+        "successful_unified_query_count": 1
+    }
+]
