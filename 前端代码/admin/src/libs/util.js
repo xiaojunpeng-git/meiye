@@ -90,7 +90,9 @@ function isExternalOrScreenMenu(item) {
  */
 util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
   const fallback = `${Setting.roterPre}/home/`;
-  if (!menus) return fallback;
+  // 空菜单不是首页授权；登录及刷新后的默认落地均保持业务内容为空。
+  const emptyWorkspace = `${Setting.roterPre}/workspace`;
+  if (!menus) return emptyWorkspace;
 
   const pickLeaf = (node) => {
     if (!node) return '';
@@ -106,7 +108,7 @@ util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
   };
 
   if (Array.isArray(menus)) {
-    if (!menus.length) return fallback;
+    if (!menus.length) return emptyWorkspace;
     for (let i = 0; i < menus.length; i++) {
       const hit = (function findOverview(list) {
         for (let j = 0; j < list.length; j++) {

@@ -23,7 +23,8 @@ final class InventoryStockRequestServices
     public function suppliersForHeadquarters(array $adminInfo, int $hqLocationId, string $requestPartyType = 'HQ', int $requestPartyId = 0): array
     {
         $hq = new InventoryHqLocationServices();
-        $resolved = $hq->writableLocation($adminInfo, $hqLocationId);
+        // 筛选目录只需要可读范围；实际请货申请仍独立检查可写仓库。
+        $resolved = $hq->readableLocation($adminInfo, $hqLocationId);
         $scope = $this->requestPartyScope($adminInfo, $resolved, $requestPartyType, $requestPartyId);
         return $this->suppliers($scope);
     }
@@ -39,7 +40,8 @@ final class InventoryStockRequestServices
 
     public function acceptancePartiesForHeadquarters(array $adminInfo, int $hqLocationId): array
     {
-        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $hqLocationId);
+        // 查询受理部门不改变库存，也不替代请货写授权。
+        $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $hqLocationId);
         $scope = (new InventoryHqLocationServices())->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
         return $this->acceptanceParties($scope);
     }
@@ -47,7 +49,8 @@ final class InventoryStockRequestServices
     public function requestPartiesForHeadquarters(array $adminInfo, int $hqLocationId): array
     {
         $hq = new InventoryHqLocationServices();
-        $resolved = $hq->writableLocation($adminInfo, $hqLocationId);
+        // 可选请货方仍按原组织范围裁剪，只移除查询对写权限的错误依赖。
+        $resolved = $hq->readableLocation($adminInfo, $hqLocationId);
         $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
         $root = explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? '';
         $query = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->field('id,name')->order('id asc');
@@ -81,7 +84,8 @@ final class InventoryStockRequestServices
     public function requesterForHeadquarters(array $adminInfo, int $hqLocationId, string $requestPartyType = 'HQ', int $requestPartyId = 0): array
     {
         $hq = new InventoryHqLocationServices();
-        $resolved = $hq->writableLocation($adminInfo, $hqLocationId);
+        // 请货表单依赖与申请共用已授权的请货功能，不要求另勾新版隐藏节点。
+        $resolved = $hq->writableLocation($adminInfo, $hqLocationId, 'request');
         $scope = $this->requestPartyScope($adminInfo, $resolved, $requestPartyType, $requestPartyId);
         $list = $this->requesterCandidates($scope, $resolved);
         $currentName = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 64);
@@ -107,7 +111,8 @@ final class InventoryStockRequestServices
     {
         $command = $this->normalize($input);
         $hq = new InventoryHqLocationServices();
-        $resolved = $hq->writableLocation($adminInfo, $hqLocationId);
+        // 仅申请使用请货单编辑授权，取消/终止/冲销不借此自动放行。
+        $resolved = $hq->writableLocation($adminInfo, $hqLocationId, 'request');
         $scope = $this->requestPartyScope($adminInfo, $resolved, (string)($command['requestPartyType'] ?? 'HQ'), (int)($command['requestPartyId'] ?? 0));
         return Db::transaction(function () use ($scope, $resolved, $command): array {
             $location = ($scope['requestPartyType'] ?? 'HQ') === 'STORE'

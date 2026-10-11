@@ -385,7 +385,8 @@ export default {
       if (menus.length && !state.indexPath) {
         state.indexPath = util.resolveDefaultMenuPath(menus);
       } else if (!menus.length && !state.indexPath) {
-        return `${Setting.roterPre}/home/`;
+        // 空菜单刷新后仍进入空工作区，不隐式打开需要业务授权的首页。
+        return util.resolveDefaultMenuPath(menus);
       }
       return state.indexPath;
     }

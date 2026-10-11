@@ -93,6 +93,13 @@ class SystemAdminServices extends BaseServices
 			$loginAuthServices->setErrorNum($account, 'admin');
             throw new AdminException('账号或密码错误，请重新输入');
         }
+        // 手机验证码及旧账号兼容入口也必须校验员工岗位的登录开关，不能绕过统一入口。
+        // 无员工关联的历史管理员继续遵循原账号状态，不改变超级管理员/代理商口径。
+        if ($adminType === 0 && (int)$adminInfo['employee_id'] > 0
+            && !app()->make(\app\services\employee\EmployeeInternalLoginServices::class)
+                ->employeeHasPlatformEntry((int)$adminInfo['employee_id'])) {
+            throw new AdminException('无权登录');
+        }
         $adminInfo->last_time = time();
         $adminInfo->last_ip = app('request')->ip();
         $adminInfo->login_count++;
@@ -124,7 +131,7 @@ class SystemAdminServices extends BaseServices
                     /** @var \app\services\employee\EmployeeInternalLoginServices $loginSvc */
                     $loginSvc = app()->make(\app\services\employee\EmployeeInternalLoginServices::class);
                     if (!$loginSvc->employeeHasPlatformEntry((int)$auth['employee_id'])) {
-                        throw new AdminException('当前账号无平台后台权限');
+                        throw new AdminException('无权登录');
                     }
                     $adminArr = $loginSvc->resolvePlatformAdmin(
                         (int)$auth['employee_id'],

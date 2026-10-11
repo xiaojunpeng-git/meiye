@@ -32,8 +32,9 @@ draftEditAssert('detail exposes a token derived from persisted document and orde
     strpos($service, "\$document['edit_token'] = \$this->draftEditToken(\$document, \$lines)") !== false
     && strpos($service, 'return hash(\'sha256\'') !== false);
 draftEditAssert('edit locks draft and rejects stale versions or existing dispatch allocations',
-    strpos($update, 'lockedStoreDocument($source, $documentId, true)') !== false
-    && strpos($update, "\$document['document_status'] !== 'DRAFT'") !== false
+    strpos($update, 'lockedSubjectDocument($source, $documentId, true)') !== false
+    && strpos($update, '$this->assertSourceDraft($source, $document, \'edit\')') !== false
+    && strpos($service, "\$document['document_status'] !== 'DRAFT'") !== false
     && strpos($update, 'hash_equals($this->draftEditToken($document, $previousLines), $expectedToken)') !== false
     && strpos($update, "inventory_cross_transfer_batch_allocation')->where('document_id', \$documentId)->lock(true)") !== false);
 draftEditAssert('request association and receiving subject remain fixed for linked drafts',

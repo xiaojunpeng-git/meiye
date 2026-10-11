@@ -67,7 +67,9 @@ final class InventoryStockRequestQueryServices
                     || in_array((int)$row['supply_party_id'], array_map('intval', (array)($access['store_ids'] ?? [])), true));
             // 旧取消/终止入口也不能绕过“曾生成调拨即不可作废”的单据边界。
             $hasTransfer = $this->hasLinkedTransfer((int)$row['id']);
-            $row['can_cancel']=$status==='APPLIED' && !$hasTransfer; $row['can_terminate']=$status==='PARTIAL' && !$hasTransfer;
+            // 单据状态不能替代平台写授权；旧菜单查询只展示详情。
+            $canManage = in_array('inventory.location.manage', (array)$access['features'], true);
+            $row['can_cancel']=$canManage && $status==='APPLIED' && !$hasTransfer; $row['can_terminate']=$canManage && $status==='PARTIAL' && !$hasTransfer;
             $row['can_void'] = $this->canVoidForPlatform((int)$row['id'], $status, (string)$row['supply_party_type'], (int)$row['supply_party_id'], $access, $hasTransfer);
             if (!$canViewCost) $row['estimated_amount_cents'] = null;
             $row['status_name'] = $this->statusName($status);
@@ -92,7 +94,9 @@ final class InventoryStockRequestQueryServices
         unset($line);
         $document['status_name'] = $this->statusName((string)$document['document_status']);
         $hasTransfer = $this->hasLinkedTransfer($requestId);
-        return ['document' => $document, 'lines' => $lines, 'can_edit' => false, 'can_cancel' => (string)$document['document_status'] === 'APPLIED' && !$hasTransfer, 'can_terminate' => (string)$document['document_status'] === 'PARTIAL' && !$hasTransfer, 'can_void' => $this->canVoidForPlatform($requestId, (string)$document['document_status'], (string)$document['supply_party_type'], (int)$document['supply_party_id'], $access, $hasTransfer)];
+        // 详情与列表使用同一后端能力，防止只读用户出现取消/终止按钮。
+        $canManage = in_array('inventory.location.manage', (array)$access['features'], true);
+        return ['document' => $document, 'lines' => $lines, 'can_edit' => false, 'can_cancel' => $canManage && (string)$document['document_status'] === 'APPLIED' && !$hasTransfer, 'can_terminate' => $canManage && (string)$document['document_status'] === 'PARTIAL' && !$hasTransfer, 'can_void' => $this->canVoidForPlatform($requestId, (string)$document['document_status'], (string)$document['supply_party_type'], (int)$document['supply_party_id'], $access, $hasTransfer)];
     }
 
     public function list(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 20, bool $canViewCost = false, string $dateFrom = '', string $dateTo = ''): array
@@ -203,6 +207,8 @@ final class InventoryStockRequestQueryServices
     /** 平台需同时满足供货方授权与零关联调拨；已取消或冲销的历史调拨也关闭作废。 */
     private function canVoidForPlatform(int $requestId, string $status, string $supplierType, int $supplierId, array $access, ?bool $hasTransfer = null): bool
     {
+        // 供货方范围和状态都满足时，仍须具备原生仓库管理授权。
+        if (!in_array('inventory.location.manage', (array)$access['features'], true)) return false;
         if (!in_array($status, ['APPLIED', 'PARTIAL', 'DONE'], true)) return false;
         $allowedStores = array_map('intval', (array)($access['store_ids'] ?? []));
         if ($supplierType === 'HQ' && $supplierId !== 0) return false;

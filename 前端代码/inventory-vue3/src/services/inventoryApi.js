@@ -248,6 +248,9 @@ export function createInventoryApi(options = {}) {
     hqCrossTransferStaffs(query = {}) { return request('/v3/hq/cross-transfer/transfer-staffs', { query }) },
     hqCrossTransferDetail(id, query = {}) { return request(`/v3/hq/cross-transfer/${Number(id)}/detail`, { query }) },
     createHqCrossTransfer(body) { return request('/v3/hq/cross-transfer', { method: 'POST', body }) },
+    // 平台只切换认证入口，草稿版本和库存事实仍由同一领域服务处理。
+    updateHqCrossTransfer(id, body) { return request(`/v3/hq/cross-transfer/${Number(id)}/update`, { method: 'POST', body }) },
+    deleteHqCrossTransferDraft(id, body) { return request(`/v3/hq/cross-transfer/${Number(id)}/delete-draft`, { method: 'POST', body }) },
     dispatchHqCrossTransfer(id, body) { return request(`/v3/hq/cross-transfer/${Number(id)}/dispatch`, { method: 'POST', body }) },
     receiveHqCrossTransfer(id, body) { return request(`/v3/hq/cross-transfer/${Number(id)}/receive`, { method: 'POST', body }) },
     searchCatalog(query = {}) { return request(catalogPath, { query }) },

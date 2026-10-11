@@ -35,6 +35,8 @@ final class InventoryPlatformUnifiedQueryContextFactory
         $access = !empty($adminInfo['id'])
             ? $policy->resolve($adminInfo)
             : $policy->resolveByAdminId($adminId);
+        // 共用接口的参数只能选择已授权页面，不能借其他库存菜单扩大读取业务域。
+        $policy->assertQueryPage($access, $pageCode);
         $subject = strtoupper(trim($subject));
         if (!in_array($subject, ['HQ', 'STORE'], true)) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存主体参数不合法。', []);
         if ($subject === 'STORE' && empty($access['is_super_admin']) && empty($access['store_ids'])) {

@@ -49,6 +49,13 @@ const frameIn = [
     component: BasicLayout,
     children: [
       {
+        // 登录资格与业务菜单分离：此空工作区仅需登录态，不请求业务数据。
+        path: `${Setting.roterPre}/workspace`,
+        name: 'platform_workspace',
+        meta: { auth: true, title: '' },
+        component: { render: h => h('div', { attrs: { 'data-testid': 'platform-empty-workspace' } }) }
+      },
+      {
         path: `${Setting.roterPre}/system/log`,
         name: 'log',
         meta: {

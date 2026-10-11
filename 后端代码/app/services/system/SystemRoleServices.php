@@ -106,6 +106,16 @@ class SystemRoleServices extends BaseServices
             return trim(strtolower($item['methods'])) === $method
                 && trim(strtolower(str_replace(' ', '', $item['api_url']))) === $rule;
         }));
+        // 旧权限目录漏登记了部分 V3 只读接口；源码精确白名单与对应有效菜单共同构成
+        // 兼容授权，不依赖目录恰好完整。未知路由、其他页面与写方法仍进入下方拒绝路径。
+        if (($isPlatformInventoryV3 || strpos($rule, 'product/inventory/recipe/') === 0)
+            && (new \app\services\product\inventory\InventoryPlatformAccessPolicy())
+            ->allowsLegacyMenuRead((int)($request->adminInfo()['id'] ?? 0), $rule, $method, (array)$request->get())) {
+            return true;
+        }
+        // 旧“添加/编辑单据”功能已是操作授权，只衔接对应命令和表单依赖，不授予通用写权限。
+        if ($isPlatformInventoryV3 && (new \app\services\product\inventory\InventoryPlatformAccessPolicy())
+            ->allowsFunctionRoute((int)($request->adminInfo()['id'] ?? 0), $rule, $method)) return true;
         if (!$registered) {
             // V3 平台库存不得沿用历史接口“未登记即放行”的兜底；其他
             // 路由维持旧行为，避免本次权限补洞扩大成全平台兼容性改造。
@@ -134,10 +144,8 @@ class SystemRoleServices extends BaseServices
             }
             return true;
         }
-        //验证访问接口是否有权限
-        if ($auth) {
-            throw new AuthException(ApiErrorCode::ERR_AUTH);
-        }
+        // 已登记业务接口必须显式授权；允许空菜单账号登录不等于允许空权限默认放行。
+        throw new AuthException(ApiErrorCode::ERR_AUTH);
     }
 
 	/**

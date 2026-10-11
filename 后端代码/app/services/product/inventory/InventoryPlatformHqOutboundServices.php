@@ -38,6 +38,9 @@ final class InventoryPlatformHqOutboundServices
         $list = (new InventoryManualDocumentReversalProjectionServices())->apply(
             $list, (string)$location['tenant_id'], InventoryManualDocumentReversalServices::OUTBOUND, [(int)$location['id']]
         );
+        // 冲销状态与平台写授权共同决定按钮，查询菜单本身不提供写能力。
+        foreach ($list as &$row) $row['can_void'] = !empty($row['can_void']) && in_array('inventory.location.manage', $access['features'], true);
+        unset($row);
         // Shared form attributes must survive read-back for headquarters callers as well.
         $list = (new InventoryOutboundHeaderServices())->apply($list, (string)$location['tenant_id'], [(int)$location['id']]);
         return ['count' => $count, 'list' => $list];
@@ -70,7 +73,8 @@ final class InventoryPlatformHqOutboundServices
             'source_type' => 'manual_outbound', 'source_id' => $sourceId, 'order_type_name' => '总部手工出库',
             'order_sn' => (string)$facts[0]['order_sn'], 'business_date' => (string)$facts[0]['business_date'],
             'recorded_at' => (int)$facts[0]['recorded_at'], 'location_name' => (string)($location['location_name'] ?? '总部仓'),
-            'status_name' => $voided ? '已作废' : '已完成', 'can_void' => $voided === null,
+            // 详情与列表保持相同的作废授权，不改变真实冲销命令。
+            'status_name' => $voided ? '已作废' : '已完成', 'can_void' => $voided === null && in_array('inventory.location.manage', $access['features'], true),
             'void_reason' => $voided ? (string)$voided['reason'] : '', 'voided_at' => $voided ? (int)$voided['settled_at'] : 0,
         ];
         $document = (new InventoryOutboundHeaderServices())->apply([$document], (string)$location['tenant_id'], [(int)$location['id']])[0];
@@ -80,7 +84,8 @@ final class InventoryPlatformHqOutboundServices
     public function create(array $adminInfo, int $locationId, array $input): array
     {
         $hq = new InventoryHqLocationServices();
-        $resolved = $hq->writableLocation($adminInfo, $locationId);
+        // 添加出库单功能只授权本次新建，不替代其他库存操作权限。
+        $resolved = $hq->writableLocation($adminInfo, $locationId, 'outbound');
         $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
         $scope['operatorType'] = 'PLATFORM_ADMIN';
         $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);

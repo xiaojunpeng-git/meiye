@@ -332,6 +332,10 @@ class Common extends AuthController
 
 			$roles = is_string($roles) ? explode(',', $roles) : $roles;
 			$ids = $roleServices->getRoleIds($roles);
+			// 无规则账号的搜索菜单也保持为空；不能复用超级管理员的空规则全量缓存。
+			if (!array_filter(array_map('intval', $ids), static function ($id) { return $id > 0; })) {
+				return app('json')->success([]);
+			}
 			$where = ['rule' => $ids];
 		}
 		// 菜单树受角色规则裁剪，缓存键必须包含规则集合；否则同一管理员类型

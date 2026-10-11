@@ -106,7 +106,8 @@ final class InventoryPlatformHqCatalogServices
 
     private function source(array $adminInfo, int $locationId, string $sourcePartyType, int $sourceStoreId): array
     {
-        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId);
+        // 商品目录供已授权新建表单复用；只读菜单不能因此访问写表单目录。
+        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId, 'catalog');
         $location = (array)$resolved['location'];
         $access = (array)$resolved['access'];
         $type = strtoupper(trim($sourcePartyType));

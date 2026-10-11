@@ -16,10 +16,10 @@ final class InventoryStockCountDraftServices
         return $this->saveAtScope($scope, $input);
     }
 
-    /** 总部草稿绑定真实总部仓和平台创建人；绝不伪造门店身份或产生库存事实。 */
+    /** 添加盘点单功能可保存总部草稿；绑定真实仓库和创建人，不产生库存事实。 */
     public function saveForHeadquarters(array $adminInfo, int $locationId, array $input): array
     {
-        return $this->saveAtScope($this->headquartersScope($adminInfo, $locationId), $input);
+        return $this->saveAtScope($this->headquartersScope($adminInfo, $locationId, 'count'), $input);
     }
 
     private function saveAtScope(array $scope, array $input): array
@@ -69,10 +69,10 @@ final class InventoryStockCountDraftServices
         return $this->detailAtScope($scope, $id);
     }
 
-    /** 总部续编只读取当前平台创建人的同仓草稿。 */
+    /** 添加盘点单功能可续编当前创建人的同仓草稿，不开放他人草稿或删除权限。 */
     public function detailForHeadquarters(array $adminInfo, int $locationId, int $id): array
     {
-        return $this->detailAtScope($this->headquartersScope($adminInfo, $locationId), $id);
+        return $this->detailAtScope($this->headquartersScope($adminInfo, $locationId, 'count'), $id);
     }
 
     private function detailAtScope(array $scope, int $id): array
@@ -153,10 +153,10 @@ final class InventoryStockCountDraftServices
             'operator_type' => $actor['type']];
     }
 
-    /** 使用现有平台仓库管理授权；ID 相同的门店人员与平台账号也不能串读。 */
-    private function headquartersScope(array $adminInfo, int $locationId): array
+    /** 保存/续编识别添加盘点单权限，删除默认仍需管理能力；主体和创建人不变。 */
+    private function headquartersScope(array $adminInfo, int $locationId, string $createPage = ''): array
     {
-        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId);
+        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId, $createPage);
         return ['tenant_id' => (string)$resolved['location']['tenant_id'], 'store_id' => 0,
             'location_id' => (int)$resolved['location']['id'], 'operator_id' => (int)$resolved['access']['admin_id'],
             'operator_type' => 'PLATFORM_ADMIN'];

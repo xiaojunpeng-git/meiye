@@ -26,12 +26,16 @@ final class InventoryHqLocationServices
         return $this->locationForAccess($access, $locationId);
     }
 
-    /** @return array{access:array,location:array} */
-    public function writableLocation(array $adminInfo, int $locationId = 0): array
+    /** 具体新建入口可用对应功能授权；未指定操作的管理/冲销路径仍强制原生仓库管理。 */
+    public function writableLocation(array $adminInfo, int $locationId = 0, string $createPage = ''): array
     {
         $policy = new InventoryPlatformAccessPolicy();
         $access = $policy->resolve($adminInfo);
-        $policy->assertFeature($access, 'inventory.location.manage', '当前岗位未配置“平台仓库管理”权限。');
+        if ($createPage !== '') {
+            if (!$policy->canCreate($access, $createPage)) throw new \app\services\query\UnifiedQueryException('INVENTORY_PLATFORM_ACCESS_DENIED', '当前岗位未配置对应单据的功能操作权限。', []);
+        } else {
+            $policy->assertFeature($access, 'inventory.location.manage', '当前岗位未配置“平台仓库管理”权限。');
+        }
 
         return $this->locationForAccess($access, $locationId);
     }

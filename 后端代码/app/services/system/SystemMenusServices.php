@@ -193,7 +193,14 @@ class SystemMenusServices extends BaseServices
 			/** @var SystemRoleServices $systemRoleServices */
 			$systemRoleServices = app()->make(SystemRoleServices::class);
 			$rules = $systemRoleServices->getRoleArray(['status' => 1, 'id' => $roleId], $type == 3 ? 'cashier_rules' : 'rules');
-			$rulesStr = Arr::unique($rules);
+			$rulesStr = array_values(array_filter(array_map('intval', Arr::unique($rules)), static function ($id) {
+				return $id > 0;
+			}));
+			// 普通账号无菜单规则必须保持空权限；不能让空值触发全量权限查询。
+			// 登录资格由入口开关独立决定，这里不补父菜单、不授予其他业务权限。
+			if (!$rulesStr) {
+				return [[], []];
+			}
 		}
         $menusList = $this->dao->getMenusRoule(['auth_type' => 1, 'is_show' => 1, 'is_del' => 0, 'type' => $type, 'route' => $rulesStr]);
         $unique = $this->dao->getMenusUnique(['type' => $type, 'unique' => $rulesStr]);

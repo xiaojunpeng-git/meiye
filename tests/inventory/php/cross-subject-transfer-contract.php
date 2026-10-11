@@ -43,9 +43,11 @@ crossAssert('headquarters stock writes use the V3 batch fact inbound path',
     && strpos($manualInbound, 'createForHeadquarters') !== false
     && strpos($manualInbound, "'HQ'") !== false
     && strpos($adminRoutes, 'v3/hq/inbound') !== false);
-crossAssert('HQ product selection and inbound history are both constrained by the writable headquarters subject',
-    strpos($hqCatalog, 'writableLocation($adminInfo, $locationId)') !== false
-    && strpos($hqCatalog, "->where('p.type', 0)") !== false
+// 商品选择需要具体编辑功能，数据源按 HQ/STORE 精确裁剪；不能把共享目录写死成全局 HQ。
+crossAssert('product selection and HQ inbound history retain authorized source subjects',
+    strpos($hqCatalog, "writableLocation(\$adminInfo, \$locationId, 'catalog')") !== false
+    && strpos($hqCatalog, "->where('p.type', \$source['type'] === 'HQ' ? 0 : 1)") !== false
+    && strpos($hqCatalog, "->where('p.relation_id', \$source['type'] === 'HQ' ? 0 : \$source['storeId'])") !== false
     && strpos($hqInbound, 'public function index') !== false
     && strpos($hqInbound, "->where('f.store_id', 0)") !== false
     && strpos($adminRoutes, 'v3/hq/catalog') !== false);
@@ -55,7 +57,8 @@ crossAssert('HQ and store share the same in-transit transfer authority while pla
     && strpos($service, 'receiveForHeadquarters') !== false
     && strpos($service, 'cancelForHeadquarters') !== false
     && strpos($service, "'partyType' => 'HQ'") !== false
-    && strpos($service, 'writableLocation($adminInfo, $hqLocationId)') !== false
+    && strpos($service, 'writableLocation($adminInfo, $hqLocationId, $createPage)') !== false
+    && strpos($service, "bool \$writable = true, string \$createPage = ''") !== false
     && strpos($service, 'allowedStoreIds') !== false
     && strpos($service, 'target_party_type') !== false);
 crossAssert('HQ platform routes are registered and use the existing warehouse-management capability',
