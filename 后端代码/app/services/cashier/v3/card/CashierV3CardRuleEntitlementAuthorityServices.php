@@ -22,6 +22,9 @@ final class CashierV3CardRuleEntitlementAuthorityServices
      */
     public function debtLimitForDetail(array $detail, array $order, bool $allowRowLock = true): ?int
     {
+        // 任选次数卡的卡级债务上限已在替换来源选择时校验；目标按自身转入
+        // 次数使用，不能再被原卡同一笔欠款限制一次。
+        if (CashierV3ProjectReplacementDebtPolicy::isTransferredRight($detail)) return null;
         // A read-only AI snapshot cannot issue FOR UPDATE. Checkout keeps the
         // default lock; the member detail reader explicitly opts out.
         $lock = $allowRowLock && CashierV3TransactionGuard::isInTransaction();
