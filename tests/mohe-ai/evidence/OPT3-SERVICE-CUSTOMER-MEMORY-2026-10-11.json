@@ -1,0 +1,142 @@
+{
+  "task": "OPT3-service-customer-memory",
+  "scope": "local source + read-only local MySQL, no remote/model request/business write/commit/push",
+  "baseline_head": "8f5610d5b609041e862e76c38be2c9426226c33e",
+  "files": {
+    "backend": [
+      "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php",
+      "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php",
+      "后端代码/app/services/query/metric/MetricReadTransaction.php"
+    ],
+    "tests": [
+      "tests/mohe-ai/opt3-service-customer-aggregate.php",
+      "tests/mohe-ai/opt3-service-customer-local.php",
+      "tests/mohe-ai/personnel-analysis.php"
+    ],
+    "migrations": [],
+    "frontend": [],
+    "scripts": []
+  },
+  "sha256": {
+    "后端代码/app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+    "后端代码/app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+    "后端代码/app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+    "tests/mohe-ai/opt3-service-customer-aggregate.php": "8b26b4ddb44af4523eb06a021969e7351f6a5559f62437f3930714863e24aa4e",
+    "tests/mohe-ai/opt3-service-customer-local.php": "ac93d263f77745bc2a1720a7b78fda8af711057b5c93a2008354071a4a90d4ef",
+    "tests/mohe-ai/personnel-analysis.php": "71fb689fa2698f94cf4269cc956d0b8b84c6adc0564bcd6ab369a1b567389c06"
+  },
+  "root_cause": {
+    "php_memory_limit_bytes": 134217728,
+    "stage": "unified_metric_query service-customer supplements",
+    "legacy_detail_materialization_peak_bytes": 177356800
+  },
+  "changes": [
+    "Complete service fact/reversal group stream, compact customer/day/period employee unions, shared allocation splitter",
+    "PDO buffering disabled only during statement; same PDO transaction; cursor released and attribute restored on completion or interruption",
+    "Legacy daily-group snapshot-name order retained with compact source-order metadata",
+    "Single exact-scope aggregate cache opt-in only in MetricReadTransaction; ordinary long-lived readers default uncached",
+    "One service exceeding 10000 joined rows is rejected whole; no employee prefilter or partial denominator"
+  ],
+  "local_same_snapshot_reference": {
+    "suite": "OPT3-service-customer-local",
+    "mode": "baseline",
+    "php": "7.4.33",
+    "memory_limit": "512M",
+    "store_count": 102,
+    "range": {
+      "start": "2026-10-01",
+      "end": "2026-10-11"
+    },
+    "elapsed_ms": 6251,
+    "peak_bytes": 177356800,
+    "projection_sha256": {
+      "summary_by_store_employee": "45735d0853f4be6353a626b1a0ec7563516a7b75b63fd6fca92658b28b67118d",
+      "daily_by_store_employee": "ce7012bfdce207e0558345d3b161bc4cce59ab72c989e770f408be53ad106bc2"
+    },
+    "reference_sha256": {
+      "summary_by_store_employee": "45735d0853f4be6353a626b1a0ec7563516a7b75b63fd6fca92658b28b67118d",
+      "daily_by_store_employee": "ce7012bfdce207e0558345d3b161bc4cce59ab72c989e770f408be53ad106bc2"
+    },
+    "row_counts": {
+      "summary_by_store_employee": 635,
+      "daily_by_store_employee": 3803
+    },
+    "totals_tenths": {
+      "visit_tenths": 96880,
+      "people_tenths": 80330,
+      "point_visit_tenths": 30060
+    },
+    "same_snapshot_equal": true,
+    "pdo_buffer_restored": true,
+    "pass": true
+  },
+  "local_128mb": {
+    "suite": "OPT3-service-customer-local",
+    "mode": "stream",
+    "php": "7.4.33",
+    "memory_limit": "128M",
+    "store_count": 102,
+    "range": {
+      "start": "2026-10-01",
+      "end": "2026-10-11"
+    },
+    "elapsed_ms": 7513,
+    "peak_bytes": 12582912,
+    "projection_sha256": {
+      "summary_by_store_employee": "45735d0853f4be6353a626b1a0ec7563516a7b75b63fd6fca92658b28b67118d",
+      "daily_by_store_employee": "ce7012bfdce207e0558345d3b161bc4cce59ab72c989e770f408be53ad106bc2"
+    },
+    "reference_sha256": [],
+    "row_counts": {
+      "summary_by_store_employee": 635,
+      "daily_by_store_employee": 3803
+    },
+    "totals_tenths": {
+      "visit_tenths": 96880,
+      "people_tenths": 80330,
+      "point_visit_tenths": 30060
+    },
+    "same_snapshot_equal": null,
+    "pdo_buffer_restored": true,
+    "interrupted_cursor_restored": true,
+    "pass": true
+  },
+  "cross_process_projection_hash_equal": true,
+  "isolated_php74_pressure_128mb": [
+    {
+      "pressure": "one_customer",
+      "services": 100000,
+      "joined_rows": 200000,
+      "elapsed_ms": 3775,
+      "peak_bytes": 6291456
+    },
+    {
+      "pressure": "many_customers",
+      "services": 100000,
+      "joined_rows": 200000,
+      "elapsed_ms": 3630,
+      "peak_bytes": 8388608
+    },
+    {
+      "suite": "OPT3-service-customer-aggregate",
+      "checks": 21,
+      "pass": true
+    }
+  ],
+  "regressions": {
+    "personnel-analysis": 56,
+    "r54-detail-profiles": 5,
+    "independent-service-customer-allocation": 16,
+    "query-read-view": 65,
+    "cash-report-projection": 29,
+    "metric-registry-contract_host": 98
+  },
+  "notes": [
+    "All modified backend methods include responsibility/boundary comments.",
+    "RegisteredMetricReadServices contains pre-existing refund hunks; only 2 owned hunks are in OPT3-service-customer-registered-owned.patch.",
+    "No production memory configuration changed; 512M applied solely to isolated local read-only reference test process.",
+    "Real end-to-end 5x10 conversation rerun is owned by parent and remains pending."
+  ]
+}

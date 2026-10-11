@@ -2,6 +2,7 @@
 // Result references are resolved from the prior encrypted read view, never
 // from a newly issued ranking or a model-supplied name/ID.
 require __DIR__.'/r6-gateway-harness.php';
+// Private reflection fixtures explicitly enable access on the production PHP 7.4 runtime.
 
 // A previous question is background only. It cannot itself authorize a new
 // narrowing to one row of a prior ranking.
@@ -50,6 +51,7 @@ echo "PASS R51 unique result and cross-subject store scope\n";
 // registry's monetary first-answer default before semantic verification.
 $policy=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
 $method=new ReflectionMethod($policy,'applyRegisteredRankDefaultPolicy');
+if (PHP_VERSION_ID<80100) $method->setAccessible(true);
 $measurement=['status'=>'understood','requirements'=>[
     ['id'=>'r1','fields'=>['metric_codes'],'values'=>['metric_terms'=>['做的单数']]],
 ]];
@@ -62,6 +64,7 @@ if ($method->invoke($policy,$quantityIntent,$measurement,$monetaryDefault)!==$qu
 echo "PASS R51 customer measurement survives registry default policy\n";
 
 $storeReferenceMethod=new ReflectionMethod($policy,'currentNamedStoreReference');
+if (PHP_VERSION_ID<80100) $storeReferenceMethod->setAccessible(true);
 $storeEvidence=['requirements'=>[['id'=>'r1','fields'=>['store_term'],'values'=>['store_term'=>'这个门店'],
     'evidence'=>[['message_id'=>'current','quote'=>'门店 [local_condition_1] 这个门店的技师']]]]];
 $storeSafe=['outbound'=>['question'=>'门店 [local_condition_1] 这个门店的技师'],'local_conditions'=>['local_condition_1'=>'合成门店']];

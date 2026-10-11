@@ -1,0 +1,112 @@
+{
+  "recorded_at": "2026-10-11T13:25:12.162956+00:00",
+  "scope": "local read-only process/source inspection; no business database access; no process restarted",
+  "baseline_head": "89f54ce74a2ceeb72ebfa18c8195a53759cfddc5",
+  "local_source_sha256": {
+    "app/services/ai/AiGatewayServices.php": "44e0d2ddd7a150a986e69f4eb97dc96ac7b3ed89303d3c86b92e1bc6db6c3cbf",
+    "app/services/ai/execution/AiRunStore.php": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+    "app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f"
+  },
+  "process_observations": [
+    {
+      "container": "mohe-platform-app",
+      "started_at": "2026-10-10T12:13:43.86172067Z",
+      "status": "running",
+      "entrypoint": [
+        "/entrypoint.sh"
+      ],
+      "command": null,
+      "mounts": [
+        {
+          "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/后端代码",
+          "destination": "/var/www/html",
+          "read_write": true
+        }
+      ],
+      "processes": "PID                 PPID                ELAPSED             COMMAND\n360512              360486              1-00:56:56          swoole: manager process process for ThinkPHP\n514598              360512              00:10               swoole: http server #0 process for ThinkPHP\n514599              360512              00:10               swoole: http server #1 process for ThinkPHP\n514600              360512              00:10               swoole: http server #2 process for ThinkPHP\n514601              360512              00:10               swoole: http server #3 process for ThinkPHP\n514602              360512              00:10               swoole: http server #4 process for ThinkPHP\n514603              360512              00:10               swoole: http server #5 process for ThinkPHP\n514604              360512              00:10               swoole: http server #6 process for ThinkPHP\n514605              360512              00:10               swoole: http server #7 process for ThinkPHP\n514606              360512              00:10               swoole: queue [MOHE_PRO] #0 process for ThinkPHP\n514607              360512              00:10               swoole: queue [MOHE_PRO_BATCH] #0 process for ThinkPHP\n514608              360512              00:10               swoole: queue [MOHE_PRO_TASK] #0 process for ThinkPHP\n514609              360512              00:10               swoole: queue [MOHE_PRO_ERP] #0 process for ThinkPHP\n514610              360512              00:10               swoole: queue [MOHE_PRO_LOG] #0 process for ThinkPHP\n514611              360512              00:10               swoole: queue [MOHE_PRO_SOCKET] #0 process for ThinkPHP\n514624              360512              00:10               swoole: hot update process for ThinkPHP",
+      "mounted_source_sha256": {
+        "app/services/ai/AiGatewayServices.php": "44e0d2ddd7a150a986e69f4eb97dc96ac7b3ed89303d3c86b92e1bc6db6c3cbf",
+        "app/services/ai/execution/AiRunStore.php": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+        "app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+        "app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f"
+      }
+    },
+    {
+      "container": "mohe-ai-execution-worker",
+      "started_at": "2026-10-10T21:41:17.258454181Z",
+      "status": "running",
+      "entrypoint": [
+        "/bin/sh"
+      ],
+      "command": [
+        "-lc",
+        "exec php think mohe-ai:execution-worker --sleep=1"
+      ],
+      "mounts": [
+        {
+          "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/后端代码",
+          "destination": "/var/www/html",
+          "read_write": true
+        }
+      ],
+      "processes": "PID                 PPID                ELAPSED             COMMAND\n382956              382909              15:29:23            php think mohe-ai:execution-worker --sleep=1",
+      "mounted_source_sha256": {
+        "app/services/ai/AiGatewayServices.php": "44e0d2ddd7a150a986e69f4eb97dc96ac7b3ed89303d3c86b92e1bc6db6c3cbf",
+        "app/services/ai/execution/AiRunStore.php": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+        "app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+        "app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f"
+      }
+    },
+    {
+      "container": "mohe-ai-supervisor",
+      "started_at": "2026-10-10T21:41:17.258787806Z",
+      "status": "running",
+      "entrypoint": [
+        "/bin/sh"
+      ],
+      "command": [
+        "-lc",
+        "exec php think mohe-ai:supervise --watch"
+      ],
+      "mounts": [
+        {
+          "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/后端代码",
+          "destination": "/var/www/html",
+          "read_write": true
+        }
+      ],
+      "processes": "PID                 PPID                ELAPSED             COMMAND\n382955              382907              15:29:23            php think mohe-ai:supervise --watch",
+      "mounted_source_sha256": {
+        "app/services/ai/AiGatewayServices.php": "44e0d2ddd7a150a986e69f4eb97dc96ac7b3ed89303d3c86b92e1bc6db6c3cbf",
+        "app/services/ai/execution/AiRunStore.php": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+        "app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+        "app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f"
+      }
+    }
+  ],
+  "all_mounted_source_hashes_equal_local": true,
+  "loaded_code_fingerprint_available": false,
+  "loaded_code_limitation": "Execution-worker heartbeats carry worker ID, PID, host and times only. Filesystem hashes or a fresh docker exec PHP process do not prove the resident PHP process has reloaded those classes. The worker has no hot-reload/signal handler in its application loop.",
+  "safe_reload_preconditions": [
+    "Fix the acceptance source fingerprint before reload.",
+    "Confirm no active executing/queued query or export and no worker-held physical slot using the existing instance diagnostics.",
+    "Keep test submissions paused while reloading the identified local AI worker and supervisor.",
+    "Check mounted hashes, changed process start times, renewed dedicated-worker heartbeat and an end-to-end Run without AI_CAPABILITY_CHANGED after reload."
+  ],
+  "reload_command_not_executed": [
+    "docker restart --time 35 mohe-ai-execution-worker mohe-ai-supervisor"
+  ],
+  "read_only_commands": [
+    "docker inspect mohe-ai-execution-worker --format {{.State.StartedAt}}",
+    "docker top mohe-ai-execution-worker -eo pid,ppid,etime,args",
+    "docker exec mohe-ai-execution-worker sha256sum /var/www/html/app/services/ai/AiGatewayServices.php /var/www/html/app/services/ai/execution/AiRunStore.php /var/www/html/app/services/ai/contract/AiIntentResultContract.php /var/www/html/app/services/ai/contract/AiIntentUnderstandingContract.php",
+    "docker exec mohe-platform-app sha256sum /var/www/html/app/services/ai/AiGatewayServices.php /var/www/html/app/services/ai/execution/AiRunStore.php /var/www/html/app/services/ai/contract/AiIntentResultContract.php /var/www/html/app/services/ai/contract/AiIntentUnderstandingContract.php"
+  ],
+  "existing_start_sources": [
+    "scripts/start-local.sh",
+    "scripts/run-mohe-ai-execution-worker.sh",
+    "后端代码/app/command/MoheAiExecutionWorker.php"
+  ],
+  "broad_restart_not_recommended": "scripts/start-local.sh removes/recreates multiple development containers; it is not the targeted reload command for this fix."
+}

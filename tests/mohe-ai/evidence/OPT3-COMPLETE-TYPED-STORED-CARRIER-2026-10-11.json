@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "run_id": "9941419fa0ab7852f235cab5ab4d8d24405d7f8b1aa3a98c",
+      "same_authority": true,
+      "advisory_status": "needs_clarification",
+      "topic_relation": "new_topic",
+      "has_groups": false,
+      "has_request_kind": false,
+      "local_condition_count": 0,
+      "body_has_context_ref": false,
+      "body_has_clarification_context": false,
+      "proof_pass": true,
+      "original_status_unchanged": true,
+      "compiled_kind": "plan",
+      "predicate_count": 1,
+      "business_queries_or_models_executed": 0
+    },
+    {
+      "run_id": "ceda650f83f0549f596f6925339ecbdf45718f3b3013adea",
+      "same_authority": true,
+      "advisory_status": "needs_clarification",
+      "topic_relation": "new_topic",
+      "has_groups": false,
+      "has_request_kind": false,
+      "local_condition_count": 0,
+      "body_has_context_ref": false,
+      "body_has_clarification_context": false,
+      "proof_pass": true,
+      "original_status_unchanged": true,
+      "compiled_kind": "plan",
+      "predicate_count": 1,
+      "business_queries_or_models_executed": 0
+    }
+  ],
+  "gateway_sha256": "5d0aca446001f8ebc4ec2b47a46392753d7ccad8d9ec274a8bd0c3f0c0925872",
+  "read_only": true
+}

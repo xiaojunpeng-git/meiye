@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__.'/fixture-autoload.php';
+// Private reflection fixtures explicitly enable access on the production PHP 7.4 runtime.
 
 use app\services\ai\contract\AiContractException;
 use app\services\ai\contract\AiIntentUnderstandingContract;
@@ -194,6 +195,7 @@ try {$projection::capture(array_merge($members,$members),'rights');throw new Log
 catch(RuntimeException $e){$check($e->getMessage()==='AI_EXPORT_SOURCE_MISMATCH','duplicate members cannot double-count exported assets');}
 $exportClass=new ReflectionClass(app\services\ai\execution\AiExportRuntime::class);
 $exportSourceGuard=$exportClass->getMethod('assertMetricExportSource');
+if (PHP_VERSION_ID<80100) $exportSourceGuard->setAccessible(true);
 $exportWithoutDependencies=$exportClass->newInstanceWithoutConstructor();
 $exportSourceGuard->invoke($exportWithoutDependencies,['workflow_code'=>'wf_performance_condition_list']);
 $check(true,'ordinary registered member-list exports retain their source contract');
@@ -207,7 +209,9 @@ try {$exportSourceGuard->invoke($exportWithoutDependencies,['workflow_code'=>'wf
 $gatewayClass=new ReflectionClass(app\services\ai\AiGatewayServices::class);
 $gateway=$gatewayClass->newInstanceWithoutConstructor();
 $progress=$gatewayClass->getMethod('progressText');
+if (PHP_VERSION_ID<80100) $progress->setAccessible(true);
 $outcome=(new ReflectionClass(app\services\ai\execution\AiRunStore::class))->getMethod('outcomeClass');
+if (PHP_VERSION_ID<80100) $outcome->setAccessible(true);
 foreach (['AI_MEMBER_DETAIL_SELECTION_REQUIRED','AI_MEMBER_DETAIL_SET_NOT_READY'] as $reason) {
     $run=['status'=>'FAILED','reason'=>$reason];
     $check(strpos($progress->invoke($gateway,$run),'第几位')!==false

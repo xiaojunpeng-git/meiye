@@ -1,0 +1,248 @@
+{
+  "recorded_at": "2026-10-11T22:56:35.473310+08:00",
+  "batch": "OPT3-local-20261011-223237-50d385",
+  "raw_report_sha256": "9a13389a38dc5e21b8dcf997c750fe8ec75ed8056886cb40d16b8327825bb8ee",
+  "raw_report_unchanged": true,
+  "raw_passed": 41,
+  "total": 50,
+  "corrected_functional_passed": 42,
+  "provider_dependency_failures": 0,
+  "async_driver_protocol_failures": 0,
+  "oracle_compatibility_errors": 1,
+  "independent_primary_failing_cases": 3,
+  "upstream_dependent_failing_cases": 5,
+  "unnecessary_guidance_cases": 2,
+  "overall_pass": false,
+  "round_raw_passed": [
+    10,
+    7,
+    7,
+    10,
+    7
+  ],
+  "source_unchanged": true,
+  "postflight": {
+    "recorded_at": "2026-10-11T22:54:39+08:00",
+    "active": 0,
+    "held": 0,
+    "quarantined_slots": 0,
+    "gateway_sha256": "37d1268275faf57b5ff17d42b3d256811508f01bc59cfb3aa59fafda56b6e728"
+  },
+  "failures": [
+    {
+      "round": 2,
+      "turn": 3,
+      "run_id": "b6867a846ab11366b6bf6430c339998c4c5568b53c3d198a",
+      "raw_status": "FAILED",
+      "raw_reason": "AI_BINDING_SEMANTIC_REJECTED",
+      "raw_classification": "failed_run",
+      "raw_checks": {
+        "completed": false
+      },
+      "upstream_failures": [],
+      "corrected_functional_pass": false,
+      "adjudication": "functional failure requires fix"
+    },
+    {
+      "round": 2,
+      "turn": 4,
+      "run_id": "d47d7bbce12e1372bcbc27f3dedf236bf58432d30e1f258e",
+      "raw_status": "FAILED",
+      "raw_reason": "AI_BINDING_SEMANTIC_REJECTED",
+      "raw_classification": "failed_run",
+      "raw_checks": {
+        "completed": false
+      },
+      "upstream_failures": [
+        3
+      ],
+      "corrected_functional_pass": false,
+      "adjudication": "unestablished prior expected meaning"
+    },
+    {
+      "round": 2,
+      "turn": 10,
+      "run_id": "ceda650f83f0549f596f6925339ecbdf45718f3b3013adea",
+      "raw_status": "COMPLETED",
+      "raw_reason": "AI_UNSUPPORTED_CONDITION",
+      "raw_classification": "semantic_mismatch",
+      "raw_checks": {
+        "completed": true
+      },
+      "upstream_failures": [],
+      "corrected_functional_pass": true,
+      "adjudication": "legacy oracle incompatibility; same-authority independent Reader parity confirmed"
+    },
+    {
+      "round": 3,
+      "turn": 1,
+      "run_id": "3a43ef2c17bdadcbcf3798562b768db2e0a06316e1a126e7",
+      "raw_status": "FAILED",
+      "raw_reason": "AI_QUERY_FAILED",
+      "raw_classification": "failed_run",
+      "raw_checks": {
+        "completed": false
+      },
+      "upstream_failures": [],
+      "corrected_functional_pass": false,
+      "adjudication": "functional failure requires fix"
+    },
+    {
+      "round": 3,
+      "turn": 2,
+      "run_id": "0501819a4332a4592e92f7f918913c5c36376971e806f288",
+      "raw_status": "FAILED",
+      "raw_reason": "AI_INTENT_UNRESOLVED",
+      "raw_classification": "failed_run",
+      "raw_checks": {
+        "completed": false
+      },
+      "upstream_failures": [
+        1
+      ],
+      "corrected_functional_pass": false,
+      "adjudication": "unestablished prior expected meaning"
+    },
+    {
+      "round": 3,
+      "turn": 3,
+      "run_id": "f4bf6eddd3f8ea533fdc118200e07b14a77ff50b8ef48884",
+      "raw_status": "FAILED",
+      "raw_reason": "AI_INTENT_UNRESOLVED",
+      "raw_classification": "failed_run",
+      "raw_checks": {
+        "completed": false
+      },
+      "upstream_failures": [
+        2,
+        1
+      ],
+      "corrected_functional_pass": false,
+      "adjudication": "unestablished prior expected meaning"
+    },
+    {
+      "round": 5,
+      "turn": 6,
+      "run_id": "9ed3cac0a040e89ed3ed6b36bbea2f73f1dc9aa87fe4a6b9",
+      "raw_status": "FAILED",
+      "raw_reason": "AI_BINDING_SEMANTIC_REJECTED",
+      "raw_classification": "failed_run",
+      "raw_checks": {
+        "completed": false
+      },
+      "upstream_failures": [],
+      "corrected_functional_pass": false,
+      "adjudication": "functional failure requires fix"
+    },
+    {
+      "round": 5,
+      "turn": 7,
+      "run_id": "34c73742a5c5d78d62e40c175631419e127bc21b0802bd79",
+      "raw_status": "FAILED",
+      "raw_reason": "AI_BINDING_SEMANTIC_REJECTED",
+      "raw_classification": "failed_run",
+      "raw_checks": {
+        "completed": false
+      },
+      "upstream_failures": [
+        6
+      ],
+      "corrected_functional_pass": false,
+      "adjudication": "unestablished prior expected meaning"
+    },
+    {
+      "round": 5,
+      "turn": 8,
+      "run_id": "bb97484f4c4059371fc0412082f258d72c7c2c89b87e12dc",
+      "raw_status": "COMPLETED",
+      "raw_reason": "",
+      "raw_classification": "unverified_upstream_dependency",
+      "raw_checks": {
+        "completed": true,
+        "metric": true,
+        "shape": false,
+        "object": true,
+        "authorized_scope": true,
+        "period": false,
+        "ranking": false,
+        "fresh_reader_results": true,
+        "same_authority": true
+      },
+      "upstream_failures": [
+        7,
+        6
+      ],
+      "corrected_functional_pass": false,
+      "adjudication": "unestablished prior expected meaning"
+    }
+  ],
+  "guidance_audit": [
+    {
+      "round": 2,
+      "turn": 1,
+      "run_id": "e0a8a65aa8402117f2988bb0cea7b350b67a0fb6c35f578f",
+      "steps": 1,
+      "fields": [
+        [
+          "semantic_reply"
+        ]
+      ],
+      "necessary": true,
+      "reason": "Missing measurement and period in broad store question; one semantic reply supplied both."
+    },
+    {
+      "round": 2,
+      "turn": 9,
+      "run_id": "9941419fa0ab7852f235cab5ab4d8d24405d7f8b1aa3a98c",
+      "steps": 1,
+      "fields": [
+        [
+          "semantic_reply"
+        ]
+      ],
+      "necessary": false,
+      "reason": "Date, customer population, monetary condition and requested count already stated; extra semantic reply unnecessary."
+    },
+    {
+      "round": 2,
+      "turn": 10,
+      "run_id": "ceda650f83f0549f596f6925339ecbdf45718f3b3013adea",
+      "steps": 1,
+      "fields": [
+        [
+          "semantic_reply"
+        ]
+      ],
+      "necessary": false,
+      "reason": "Date, monetary condition and requested count already stated; extra semantic reply unnecessary."
+    },
+    {
+      "round": 3,
+      "turn": 7,
+      "run_id": "7adcfb834f2d93c0bc3d3fe4ed0e455f591368c48f55dcd4",
+      "steps": 1,
+      "fields": [
+        [
+          "rank_direction"
+        ]
+      ],
+      "necessary": true,
+      "reason": "Ranking direction not specified; one rank_direction choice supplied top."
+    },
+    {
+      "round": 4,
+      "turn": 1,
+      "run_id": "79aa2fddb6be73c69a257910a8888241e12b7b3307f96688",
+      "steps": 1,
+      "fields": [
+        [
+          "semantic_reply"
+        ]
+      ],
+      "necessary": true,
+      "reason": "Missing measurement and period in broad performance question; one semantic reply supplied both."
+    }
+  ],
+  "legacy_reader_crosscheck_file": "OPT3-local-20261011-223237-50d385-legacy-reader-crosscheck.json",
+  "retest_plan_pending": "Original R2 T1-4,T8-10; R3 T1-3; R5 T4-8, 15 questions across 3 conversations. Await code fixes and reload. Original 50-case raw evidence will never be replaced."
+}

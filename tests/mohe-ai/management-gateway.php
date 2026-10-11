@@ -42,25 +42,23 @@ try {
     mgcheck($h->models===$beforeModels&&$h->queries===$beforeQueries,'management denials never call model/facts');
 
     // A running clarification retains its exact version across draft and
-    // publish. The current answer policy defaults an omitted period to today,
-    // so this contract verifies the still-executable metric clarification
-    // instead of reviving the retired date-after-metric interaction.
-    // This fixture models partial business meaning explicitly. Empty meaning
-    // now stops before binding and cannot test management-version freezing.
-    // This fixture deliberately reaches registered binding ambiguity to test
-    // management-version freezing, not the separate partial-language card.
-    $h->understandingOverride=['goal'=>'询问业绩','status'=>'understood','requirements'=>[
-        ['id'=>'r1','meaning'=>'尚未明确哪项业绩','fields'=>['metric_codes'],'values'=>['metric_terms'=>['业绩']],
-            'evidence'=>[['message_id'=>'current','quote'=>'业绩多少']]],
+    // publish. An explicit period leaves only the registered metric choice
+    // unresolved, so this fixture isolates management-version freezing. A
+    // broad platform question with neither metric nor period correctly uses
+    // semantic guidance and must not restore an implicit current-day default.
+    $h->understandingOverride=['goal'=>'询问今天业绩','status'=>'understood','requirements'=>[
+        ['id'=>'r1','meaning'=>'今天尚未明确哪项业绩','fields'=>['metric_codes','periods'],
+            'values'=>['metric_terms'=>['业绩'],'periods'=>[['kind'=>'relative_days','days'=>1,'end_offset_days'=>0]]],
+            'evidence'=>[['message_id'=>'current','quote'=>'今天业绩多少']]],
     ]];
-    $old=$h->start('业绩多少');$h->step($old,'metric_code',1);
+    $old=$h->start('今天业绩多少');$h->step($old,'metric_code',1);
     $document=$baseline;$document['guidance']['max_rounds']=5;
     $document['guidance']['slot_order']=['start_date','metric_code','compare_start','rank_direction','rank_limit'];
     $document['guidance']['prompts']['metric_code']='请选择本次要分析的登记指标（新版）';
     $saved=mgcall($h,'management_save',['expected_revision'=>$state['revision'],'document'=>$document]);
     mgcheck(mgboot($h)['max_clarification_rounds']===3,'draft does not affect active bootstrap');
     $beforeModels=$h->models;$beforeQueries=$h->queries;
-    $preview=mgcall($h,'management_preview',['expected_revision'=>$saved['revision'],'question'=>'业绩多少']);
+    $preview=mgcall($h,'management_preview',['expected_revision'=>$saved['revision'],'question'=>'今天业绩多少']);
     mgcheck($preview['kind']==='clarification'&&$preview['fields'][0]['key']==='metric_code'
         &&$preview['question']===$document['guidance']['prompts']['metric_code'],'preview uses draft metric prompt');
     mgcheck($h->models===$beforeModels&&$h->queries===$beforeQueries&&$preview['model_called']===false&&$preview['business_data_read']===false,'preview never calls model/facts');
@@ -71,7 +69,7 @@ try {
     mgcheck($old['clarification']['question']!==$document['guidance']['prompts']['metric_code'],'old Run retains old prompt');
     $old=$h->choose($old,['metric_code'=>'consume_amount']);
     mgcheck($old['status']==='COMPLETED','old Run completes under frozen source registry');
-    $new=$h->start('业绩多少');$h->step($new,'metric_code',1);
+    $new=$h->start('今天业绩多少');$h->step($new,'metric_code',1);
     mgcheck($new['clarification']['question']===$document['guidance']['prompts']['metric_code'],'new Run uses new metric prompt');
     mgcheck($new['clarification']['max_clarification_rounds']===5,'new Run freezes new rounds');
     $new=$h->choose($new,['metric_code'=>'consume_amount']);mgcheck($new['status']==='COMPLETED','new order completes');

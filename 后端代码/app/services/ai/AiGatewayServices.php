@@ -30,9 +30,8 @@ final class AiGatewayServices
 {
     // The profile is the authoritative transport cap.  Individual model
     // stages may request a tighter limit, but never a longer one.
-    // The configured 72B model can legitimately need more than 20 seconds to
-    // emit a complete typed carrier for multi-condition questions.  Keep the
-    // call bounded, but leave enough room for that single semantic stage so a
+    // Multi-condition questions can require a longer typed model response.
+    // Keep the call bounded, but leave enough room for that semantic stage so a
     // valid request is not reported as failed before any Reader is executed.
     private const MODEL_STAGE_LIMIT_MS = 30000;
     private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
@@ -183,9 +182,8 @@ final class AiGatewayServices
                 'intent_contract_version'=>AiIntentResultContract::VERSION];
             if ($this->management) $snapshot['management_revision']=$this->managementRevision;
             $created=$this->runs->create($owner,$this->identifier($input['client_request_id']??null),$this->bodyHash($body),$snapshot,$limits['run_budget_ms'],$limits['execution_slots'],$limits['active_run_limit']);
-            if (!$created['accepted']) return ['accepted'=>false,'reason'=>$created['reason'],'failure_guidance'=>$this->failureGuidance($created['reason']),'message'=>[
+            if (!$created['accepted']) return ['accepted'=>false,'reason'=>$created['reason'],'failure_guidance'=>$this->failureGuidance($created['reason'],($context['terminal']??null)==='platform'),'message'=>[
                 'RATE_LIMITED'=>'您近期提问较频繁，请稍后再问。',
-                'CIRCUIT_OPEN'=>'近期请求连续未能完成，已暂停新请求两分钟，请稍后重试。',
                 'OTHER_CONVERSATION_ACTIVE'=>'您还有一个对话正在执行，请先完成或停止该任务。',
             ][$created['reason']]??'当前使用人数较多，请稍后再问。'];
             $executionMode='compatibility';
@@ -918,6 +916,183 @@ final class AiGatewayServices
         return $guidance;
     }
 
+    /** A displayed ordinal belongs to a board, not a concatenated array.
+     * Only current group wording or a confirmed same-Run reply may select
+     * that board. Model-supplied top/bottom alone is never that evidence. */
+    private function ordinalGroupClarification(array &$understanding,array $safe,array $body,$sourceContext,array $caps,string $today): ?array
+    {
+        if (($understanding['topic_relation']??null)==='new_topic'
+            || ($sourceContext['query']['query_shape']??null)!=='ranking') return null;
+        $selection=$this->ordinalRequirement($understanding);
+        if ($selection===null) return null;
+        try { ResultReferenceResolver::assertSingleOrdinalGroup($sourceContext['view']); return null; }
+        catch (RuntimeException $error) {
+            if ($error->getMessage()!=='AI_OBJECT_DETAIL_SELECTION_REQUIRED') throw $error;
+        }
+        if ($selection['field']==='member_detail') {
+            // Stored legacy selectors resume through the generic detail
+            // meaning, preserving their exact requested view and ordinal.
+            $requirement=&$understanding['requirements'][$selection['index']];
+            $requirement['fields']=array_map(static function($field){return $field==='member_detail'?'object_detail':$field;},$requirement['fields']);
+            $requirement['values']['object_detail']=$requirement['values']['member_detail'];
+            unset($requirement['values']['member_detail']);unset($requirement);
+            $selection['field']='object_detail';
+        }
+        $results=$sourceContext['view']['results']??[];
+        $group=$this->statedOrdinalGroup((string)$safe['outbound']['question'],$selection['ordinal']);
+        $singleResult=count($results)===1;
+        // A bare group reply only has an ordinal when the same paused request
+        // already owns it. Ordinary questions cannot acquire one from labels.
+        if ($group===null && !empty($body['_clarification_context']['ordinal_group_required'])) {
+            $group=$this->ordinalGroupReply((string)$safe['outbound']['question']);
+        }
+        if ($singleResult && $group!==null) {
+            // Detail carries its requested view (including member rights).
+            // Selecting a board must not replace that view with a default
+            // overview. Mixed business fields still decline this shortcut.
+            $compiled=$this->compileOrdinalGroupDetail($understanding,$selection,$group,$sourceContext,$body['output_format']);
+            if ($compiled!==null) return $compiled;
+            if ($selection['field']==='result_reference'
+                || (($understanding['requirements'][$selection['index']]['values'][$selection['field']]['view']??null)==='summary'
+                    && in_array($sourceContext['query']['business_filters']['object_kind']??'store',['store','person'],true))) {
+                // For a mixed query the confirmed reference is only a filter;
+                // its new metrics/dates stay with normal semantic binding.
+                $understanding=$this->withOrdinalGroup($understanding,$selection,$group);
+            }
+            return null;
+        }
+        $candidates=[];$groups=[];
+        if ($singleResult) foreach (['top'=>'最高榜单','bottom'=>'最低榜单'] as $key=>$label) {
+            if (empty($results[0]['rows'][$key])) continue;
+            try {
+                // The ordinary detail compiler rejects additional metrics,
+                // periods and filters. Such requests retain all their meaning
+                // in the supplement carrier and never get an old-detail plan.
+                $compiled=$this->compileOrdinalGroupDetail($understanding,$selection,$key,$sourceContext,$body['output_format']);
+                if ($compiled===null || !in_array($compiled['kind']??null,['plan','member_detail'],true)) continue;
+                if ($compiled['kind']==='plan') {
+                    (new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;}))
+                        ->compile($compiled['plan'],$caps);
+                }
+                $candidates[]=['label'=>$label.'第'.$selection['ordinal'].'名','compiled'=>$compiled];
+                $groups[$key]='suggestion_'.count($candidates);
+            } catch (RuntimeException $error) {
+                // Missing rows, unsupported detail or current capability
+                // rejection cannot become a suggested executable choice.
+                if (!in_array($error->getMessage(),['AI_RESULT_REFERENCE_UNAVAILABLE','AI_OBJECT_DETAIL_NOT_READY'],true)
+                    && !($error instanceof \app\services\ai\contract\AiContractException)
+                    && !($error instanceof \app\services\query\metric\MetricQueryContractException)) throw $error;
+            }
+        }
+        $guidance=$this->semanticClarification($understanding,$safe,$body,$candidates);
+        $ordinalExists=!$singleResult;
+        foreach (['top','bottom'] as $key) {
+            if (isset($results[0]['rows'][$key][$selection['ordinal']-1])) $ordinalExists=true;
+        }
+        // A position absent from every board is not a group-choice problem.
+        // Explain that actual boundary rather than propose nonexistent rows.
+        $guidance['question']=!$ordinalExists
+            ?'前面的榜单中没有第'.$selection['ordinal'].'名，请指定要查看的对象或调整名次。'
+            :($singleResult?'前面的结果包含最高和最低两个榜单，您要看哪个榜单的第'.$selection['ordinal'].'名？'
+                :'前面的结果包含多个榜单，请说明要看哪项指标、哪个榜单的第'.$selection['ordinal'].'名。');
+        $guidance['fields'][0]['label']='选择榜单';
+        $guidance['_semantic_reply_state']['ordinal_group_required']=true;
+        $guidance['_ordinal_group_options']=$groups;
+        return $guidance;
+    }
+
+    /** Reuse the existing detail resolver inside one confirmed display board.
+     * The original signed view reference/query remain unchanged; only the
+     * ordinal lookup sees that group's rows, preserving member detail modes. */
+    private function compileOrdinalGroupDetail(array $meaning,array $selection,string $group,array $sourceContext,string $format): ?array
+    {
+        if (count($sourceContext['view']['results']??[])!==1
+            || empty($sourceContext['view']['results'][0]['rows'][$group])) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
+        if ($selection['field']==='result_reference') $meaning=$this->withOrdinalGroup($meaning,$selection,$group);
+        else $sourceContext['view']['results'][0]['rows']=[$group=>$sourceContext['view']['results'][0]['rows'][$group]];
+        return $this->compileObjectDetailContinuation($meaning,$sourceContext,$format);
+    }
+
+    /** One typed single-object ordinal can be completed without changing
+     * other accepted fields. Independent/multiple selections stay unmerged. */
+    private function ordinalRequirement(array $understanding): ?array
+    {
+        $found=null;
+        foreach ((array)($understanding['requirements']??[]) as $index=>$requirement) {
+            foreach (['result_reference','object_detail','member_detail'] as $field) {
+                $value=$requirement['values'][$field]??null;
+                if (!is_array($value) || !is_int($value['ordinal']??null)
+                    || ($field!=='result_reference' && ($value['target']??null)!=='single')) continue;
+                if ($found!==null) return null;
+                $found=['index'=>$index,'field'=>$field,'ordinal'=>$value['ordinal']];
+            }
+        }
+        return $found;
+    }
+
+    /** Replace only the selected board carrier; new measurements, dates and
+     * independent requirement IDs keep their existing binding obligations. */
+    private function withOrdinalGroup(array $meaning,array $selection,string $group): array
+    {
+        $requirement=&$meaning['requirements'][$selection['index']];
+        $requirement['fields']=array_values(array_unique(array_map(static function($field)use($selection){
+            return $field===$selection['field']?'result_reference':$field;
+        },$requirement['fields'])));
+        unset($requirement['values'][$selection['field']]);
+        $requirement['values']['result_reference']=['group'=>$group,'ordinal'=>$selection['ordinal']];
+        return $meaning;
+    }
+
+    /** These are structural board labels only, not a business intent parser.
+     * Require adjacency to the ordinal so a new personnel top-N condition
+     * cannot select an unrelated predecessor's store board by accident. */
+    private function statedOrdinalGroup(string $question,int $ordinal): ?string
+    {
+        $groups=[];
+        foreach (['top'=>'最高|最多|最好|最大|前[0-9一二两三四五六七八九十百几]+|top',
+            'bottom'=>'最低|最少|最差|最小|倒数|后[0-9一二两三四五六七八九十百几]+|bottom'] as $group=>$words) {
+            if (!preg_match_all('/(?:'.$words.')(?:的)?(?:榜单|榜|名|位|组)?(?:中|里|里面)?(?:的)?\s*第([0-9]+|[一二三四五六七八九十])(?:名|位|个)/iu',$question,$matches)) continue;
+            foreach ($matches[1] as $position) {
+                $number=['一'=>1,'二'=>2,'三'=>3,'四'=>4,'五'=>5,'六'=>6,'七'=>7,'八'=>8,'九'=>9,'十'=>10][$position]??(int)$position;
+                if ($number===$ordinal) { $groups[]=$group;break; }
+            }
+        }
+        return count($groups)===1?$groups[0]:null;
+    }
+
+    /** A free-text answer may confirm the same displayed group as a click.
+     * Extra words must return to normal understanding, preserving new intent. */
+    private function ordinalGroupReply(string $reply): ?string
+    {
+        $reply=preg_replace('/[\s，,。？！?!]/u','',$reply);
+        foreach (['top'=>'最高|最多|最好|最大|前[0-9一二两三四五六七八九十百几]+|top',
+            'bottom'=>'最低|最少|最差|最小|后[0-9一二两三四五六七八九十百几]+|bottom'] as $group=>$words) {
+            if (preg_match('/^(?:'.$words.')(?:的)?(?:榜单|榜|名|位|组)?$/iuD',$reply)) return $group;
+        }
+        return null;
+    }
+
+    /** Complete the paused ordinal slot from a closed group-only reply. All
+     * original business fields keep original evidence and ordinary binding;
+     * this typed merge cannot swallow a new metric, period or object phrase. */
+    private function confirmedOrdinalGroupUnderstanding(array $body,array $outbound): ?array
+    {
+        $previous=$body['_clarification_context']??null;
+        if (empty($previous['ordinal_group_required'])) return null;
+        $group=$this->ordinalGroupReply((string)$outbound['question']);
+        $selection=$this->ordinalRequirement($previous['understanding']);
+        if ($group===null || $selection===null) return null;
+        $meaning=$previous['understanding'];
+        if ($selection['field']==='result_reference') $meaning=$this->withOrdinalGroup($meaning,$selection,$group);
+        $meaning['status']='understood';$meaning['topic_relation']='continuation';
+        foreach ($meaning['requirements'] as $index=>&$requirement) {
+            $requirement['evidence']=[['message_id'=>'original','quote'=>$previous['safe_question']]];
+            if ($index===$selection['index']) $requirement['evidence'][]=['message_id'=>'current','quote'=>$outbound['question']];
+        }
+        unset($requirement);
+        return AiIntentUnderstandingContract::normalize($meaning,$outbound);
+    }
+
     /** A model-suggested first view does not make an object-only question
      * executable. Only the customer's accepted measurement/result request or
      * signed predecessor can supply that missing meaning. */
@@ -1007,17 +1182,28 @@ final class AiGatewayServices
         $this->runs->sendAttempt($owner,$id,$generation,$worker,$code);
         try {
             $checkpoint();
-            $timeout=$this->model===null?$this->modelCallTimeout($owner,$id,$generation,$worker,10000):null;
+            // Recommendations share the ordinary model window. The frozen
+            // profile and remaining Run budget still cap it; this neither
+            // grants another attempt nor extends the total execution budget.
+            $timeout=$this->model===null?$this->modelCallTimeout($owner,$id,$generation,$worker,self::MODEL_STAGE_LIMIT_MS):null;
             $reply=$this->model
                 ?call_user_func($this->model,$safe['outbound'],$metadata,$configuration,$checkpoint,null,'recommendations',$understanding)
                 :(new SiliconFlowClient($configuration['provider']))->selectRecommendations($safe['outbound'],$understanding,$metadata,$configuration['model'],$configuration['api_key'],$timeout,$checkpoint);
             $recommendations=($reply['selections']??null)===[]?[]:$planner->select($pool,$reply['selections']??null);
             $this->runs->finishAttempt($owner,$id,$generation,$worker,$code,'SUCCEEDED',$reply['usage']['input_tokens']??null,$reply['usage']['output_tokens']??null);
         } catch (\Throwable $error) {
-            $this->runs->finishAttempt($owner,$id,$generation,$worker,$code,$error->getMessage()==='AI_MODEL_RESULT_UNKNOWN'?'UNKNOWN':'FAILED');
-            // A failed recommendation call must leave the usable supplement
-            // flow available. Cancellation and authority changes still stop.
-            if (in_array($error->getMessage(),['AI_CANCELLED','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED'],true)
+            if ($error instanceof AiContractException) $this->recordModelDiagnostic($owner,$id,$generation,$worker,$error,$code);
+            $diagnostic=$error instanceof AiContractException?$error->diagnostic():[];
+            $reason=$error->getMessage();
+            $this->runs->finishAttempt($owner,$id,$generation,$worker,$code,
+                in_array($reason,['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED'],true)?'UNKNOWN':'FAILED');
+            // An unresolved provider call cannot publish a clarification: its
+            // UNKNOWN receipt and usage must remain intact. Preserve transport
+            // and control failures instead of masking them as missing meaning
+            // or letting pauseForClarification replace them with a guard error.
+            // A received but unusable recommendation can still offer free text.
+            if (($diagnostic['stage']??null)==='transport'
+                || in_array($reason,['AI_MODEL_RESULT_UNKNOWN','AI_CANCELLED','AI_AUTHORIZATION_CHANGED','AI_CAPABILITY_CHANGED'],true)
                 || (!($error instanceof AiContractException) && $error->getMessage()!=='AI_RECOMMENDATION_INVALID')) throw $error;
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'recommendation_selection_failed');
             $recommendations=[];
@@ -1033,13 +1219,113 @@ final class AiGatewayServices
         $choices=$input['choices']??null;
         if (!is_array($choices)) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         $value=$choices['semantic_reply']??null;
-        if ($value==='__supplement__') return null;
+        if ($value==='__supplement__') {
+            // The exact group-only reply confirms an already compiled option;
+            // mixed prose stays on the ordinary supplement understanding path.
+            if (!empty($envelope['_semantic_reply_state']['ordinal_group_required'])) {
+                // Keep the existing length/UTF-8/control/revision boundary;
+                // matching a known label cannot bypass supplement validation.
+                $reply=$this->semanticClarificationReply($envelope,$input);
+                $group=$this->ordinalGroupReply($reply);
+                $choice=$group!==null?($envelope['_ordinal_group_options'][$group]??null):null;
+                if ($choice!==null) return $envelope['_semantic_recommendations'][$choice]??null;
+            }
+            return null;
+        }
         // A selected-member metric is a catalog-owned reply, not a plan:
         // identity still needs local resolution before any Reader call.
         if (is_string($value) && isset($envelope['_member_metric_replies'][$value])) return null;
         if (array_keys($choices)!==['semantic_reply'] || !is_string($value)
             || isset($input['revise_clarification_id']) || !isset($envelope['_semantic_recommendations'][$value])) throw new RuntimeException('AI_CLARIFICATION_INVALID');
         return $envelope['_semantic_recommendations'][$value];
+    }
+
+    /**
+     * Prove one self-contained typed condition without overruling the model's
+     * advisory status. Every accepted field must be accounted for; unknown
+     * fields, result groups, private selections and unresolved continuations
+     * retain their established binding/guidance path. No slot is supplied by
+     * recommendation defaults or by a sentence-specific parser.
+     */
+    private function completeTypedConditionProof(array $understanding,array $safe,array $body,array $projection,array $caps,array $summaries,string $today,$sourceContext): ?array
+    {
+        if (($understanding['status']??null)!=='needs_clarification'
+            || $sourceContext!==null
+            || isset($body['context_ref']) || isset($body['_clarification_context'])
+            || ($safe['outbound']['prior_query']??null)!==null
+            || isset($understanding['groups']) || isset($understanding['request_kind'])
+            || !empty($safe['local_conditions']) || !empty($projection['date_grouping_ambiguous'])) return null;
+        $allowed=['metric_codes','object_kind','object_relation','operation','periods','scope','aggregate_condition'];
+        $valueKeys=['metric_terms','object_kind','object_relation','operation','periods','scope','aggregate_condition'];
+        $values=[];$hasCondition=false;
+        $metricCodes=array_values(array_filter(array_column($summaries,'metric_code'),'is_string'));
+        foreach (AiIntentUnderstandingContract::requirements($understanding) as $requirement) {
+            $fields=(array)($requirement['fields']??[]);$row=(array)($requirement['values']??[]);
+            if ($fields===[] || array_diff($fields,$allowed) || array_diff(array_keys($row),$valueKeys)) return null;
+            $evidence=(array)($requirement['evidence']??[]);
+            if ($evidence===[]) return null;
+            foreach ($evidence as $item) if (($item['message_id']??null)!=='current') return null;
+            foreach ($fields as $field) {
+                $key=$field==='metric_codes'?'metric_terms':$field;
+                if (!array_key_exists($key,$row)) return null;
+            }
+            foreach ($row as $field=>$value) {
+                // The strict condition contract below combines compatible
+                // predicate fragments and accounts for their metric owners.
+                // Every other typed slot must have one unambiguous value.
+                if ($field==='metric_terms') {
+                    if (!is_array($value) || $value===[]) return null;
+                    foreach ($value as $term) if (!is_string($term)
+                        || \app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([$term],$metricCodes)===null) return null;
+                } elseif ($field==='aggregate_condition') {
+                    if (!is_array($value) || empty($value['conditions'])) return null;
+                    foreach ($value['conditions'] as $condition) if (!is_string($condition['metric_term']??null)
+                        || \app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms([$condition['metric_term']],$metricCodes)===null) return null;
+                    $hasCondition=true;
+                } else {
+                    if (array_key_exists($field,$values) && $values[$field]!==$value) return null;
+                    $values[$field]=$value;
+                }
+            }
+        }
+        if (!$hasCondition || !isset($values['object_kind'],$values['object_relation'],$values['operation'],$values['periods'])
+            || $values['object_kind']==='unknown' || $values['object_relation']!=='analysis'
+            || !in_array($values['operation'],['condition_count','condition_list'],true)
+            || count($values['periods'])!==1
+            || !in_array($values['scope']??'unspecified',['authorized','unspecified'],true)) return null;
+        $intent=$this->registeredConditionIntent($understanding,$summaries,$safe['outbound']);
+        if ($intent===null) return null;
+        AiIntentResultContract::assertEffectiveRequirementValues($understanding,$intent,$today);
+        $projection['dates']=[];
+        $projection['date_terms']=$this->naturalPeriodTerms($intent['periods'],$today);
+        $projection['require_period_clarification']=true;
+        // Once complete meaning is bound, capability and compiler failures
+        // are real failures, not evidence that the customer must rephrase.
+        // The normal executor still refreshes authority and remaining budget.
+        $compiled=$this->compileConditionPlan($intent,$projection,$caps,$body['output_format'],$today);
+        if (($compiled['kind']??null)!=='plan') return null;
+        (new AiRegisteredPlanCompiler($this->registry(),static function()use($today):string{return $today;}))
+            ->compile($compiled['plan'],$caps);
+        return ['intent'=>$intent,'compiled'=>$compiled];
+    }
+
+    /** One condition-plan builder serves normal binding and local preflight.
+     * Unit scaling and current-snapshot dates remain registry-owned; callers
+     * must settle semantic coverage and private scope before executing it. */
+    private function compileConditionPlan(array $intent,array $projection,array $caps,string $format,string $today): array
+    {
+        $conditionCompiler=new AiConditionSetCompiler();
+        $conditionSet=$conditionCompiler->compile($intent['aggregate_condition'],$caps,$intent['operation']);
+        if (($projection['date_terms']??[])===[] && $conditionCompiler->usesCurrentSnapshot($conditionSet,$caps)) {
+            $projection['date_terms']=[['code'=>'TODAY']];
+        }
+        $projection['signals']=array_values(array_unique(array_merge($intent['metric_codes'],[$intent['operation']])));
+        $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
+        return (new AiWorkflowPlanner())->compile($projection,[
+            'decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],
+            'ranking'=>$intent['ranking'],'aggregate_condition'=>$intent['aggregate_condition'],
+            'condition_set'=>$conditionSet,'object_kind'=>$intent['object_kind']
+        ],$caps,$format,$today);
     }
 
     /** After natural-language supplementation, an exact registered metric
@@ -1120,6 +1406,10 @@ final class AiGatewayServices
                 // scope carrier as a unit; never restore its removed filter.
                 if (in_array($field,['scope','store_term','result_reference'],true)
                     && (isset($present['scope']) || isset($present['store_term']) || isset($present['result_reference']))) continue;
+                // Confirming the paused board replaces its legacy detail
+                // selector; restoring that selector would create two targets.
+                if (!empty($previous['ordinal_group_required']) && isset($present['result_reference'])
+                    && in_array($field,['object_detail','member_detail'],true)) continue;
                 if (($requirement['values'][$field]??null)==='unknown') continue;
                 $keys=$field==='metric_codes'?['metric_terms','metric_exclusions']:[$field];
                 foreach ($keys as $key) if (array_key_exists($key,$requirement['values'])) $values[$key]=$requirement['values'][$key];
@@ -1182,6 +1472,14 @@ final class AiGatewayServices
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 $compiled['kind']==='plan'?'member_identity_locally_confirmed':'member_identity_not_found');
         } elseif ($selected!==null) {
+            if (!empty($stored['envelope']['_semantic_reply_state']['ordinal_group_required'])) {
+                // A suggested ordinal is still tied to the original signed
+                // view. Recheck its expiry/current authority before executing
+                // the frozen choice, just as a natural-language continuation.
+                $reference=$stored['envelope']['_request_body']['context_ref']??null;
+                if (!is_string($reference)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
+                $this->restoreContext($context,$owner,$reference);
+            }
             // The option was compiled before the card was issued.
             // Current capability/config/authority snapshots were
             // checked above; execution still recompiles and guards
@@ -1789,32 +2087,38 @@ final class AiGatewayServices
             :$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe);
         $localOrdinalDetailUnderstanding=$sourceContext===null?null
             :$this->localVerifiedOrdinalDetailUnderstanding($safe['outbound'],$safe,$sourceContext);
+        $localMetricUnderstanding=$sourceQuery===null || $sourceCollection!==[]?null
+            :$this->localVerifiedMetricOnlyUnderstanding($safe['outbound'],$safe,$sourceQuery,$closedMetricOnlyProjection,$caps);
         $localConditionUnderstanding=$sourceQuery===null?null:$this->localVerifiedConditionDeltaUnderstanding($safe['outbound'],$safe,$today);
-        // A fresh money predicate is safe to admit locally. With a prior
-        // result, even a complete-looking count may refer to its store or
-        // population, so the relation must be decided by understanding.
-        $localCountUnderstanding=$sourceContext===null
+        // The existing closed count grammar owns the complete current period,
+        // measurement and predicate. An unrestricted predecessor contributes
+        // no implicit store/cohort filter, so it cannot force this independent
+        // question through another model call. Restricted scopes and paused
+        // clarification replies still require the normal relation decision.
+        $localCountUnderstanding=($sourceContext===null || ($independent && $sourceQuery!==null))
             ?$this->localClosedMemberMoneyCountUnderstanding($safe['outbound'],$safe,$today,$caps):null;
         // A reply belongs to a paused semantic request, not merely the last
         // verified result. Narrow fast paths cannot ignore its preserved fields.
         if (isset($body['_clarification_context'])) {
             $localPeriodUnderstanding=$localRankingUnderstanding=$localOrdinalDetailUnderstanding=null;
-            $localConditionUnderstanding=$localCountUnderstanding=null;
+            $localConditionUnderstanding=$localCountUnderstanding=$localMetricUnderstanding=null;
+            $localOrdinalDetailUnderstanding=$this->confirmedOrdinalGroupUnderstanding($body,$safe['outbound']);
         }
         // Understanding has no metric catalogue. Binding receives accepted
         // meaning afterwards and may only propose registered execution fields.
         if ($localPeriodUnderstanding!==null || $localRankingUnderstanding!==null
             || $localOrdinalDetailUnderstanding!==null
-            || $localConditionUnderstanding!==null || $localCountUnderstanding!==null) {
+            || $localConditionUnderstanding!==null || $localCountUnderstanding!==null || $localMetricUnderstanding!==null) {
             // Keep this observable without inventing a model attempt: the
             // date-only grammar gate is a server-owned context optimization.
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
                 $localPeriodUnderstanding!==null?'context_period_only_local_reuse':($localRankingUnderstanding!==null
                     ?'context_ranking_only_local_reuse':($localOrdinalDetailUnderstanding!==null
                         ?'context_ordinal_detail_local_reuse':($localConditionUnderstanding!==null
-                        ?'context_condition_delta_local_reuse':'registered_member_count_local_understanding'))));
+                        ?'context_condition_delta_local_reuse':($localMetricUnderstanding!==null
+                            ?'context_metric_only_local_reuse':'registered_member_count_local_understanding')))));
             $understanding=$localPeriodUnderstanding??$localRankingUnderstanding??$localOrdinalDetailUnderstanding
-                ??$localConditionUnderstanding??$localCountUnderstanding;
+                ??$localConditionUnderstanding??$localCountUnderstanding??$localMetricUnderstanding;
         } else {
             $this->runs->reserve($owner,$id,$generation,$worker,'stage_count');
             $this->runs->reserve($owner,$id,$generation,$worker,'input_tokens',$this->inputTokenReservation([$safe['outbound'],$runtimeSkills,$objectVocabulary,$measurementVocabulary],1024));
@@ -1916,6 +2220,12 @@ final class AiGatewayServices
         // binding, retaining the original question for plain-language help.
         if (($understanding['status']??null)==='needs_clarification'
             && ($understanding['requirements']??[])===[]) {
+            // Even an out-of-scope new topic can have a verified relation;
+            // record that relation before ending this turn without a query.
+            if (($sourceContext!==null || isset($body['_clarification_context']))
+                && ($understanding['topic_relation']??null)==='new_topic') {
+                $this->runs->markTopicReset($owner,$id,$generation,$worker);
+            }
             throw new RuntimeException('AI_INTENT_UNRESOLVED');
         }
         if ($sourceContext===null && $this->unanchoredCalendarQuestion((string)$body['question'],$understanding)) {
@@ -1925,7 +2235,7 @@ final class AiGatewayServices
             throw new RuntimeException('AI_INTENT_UNRESOLVED');
         }
         $understanding=$this->mergeClarificationMeaning($understanding,$body,$safe['outbound']);
-        $understanding=$this->resolveExactStatedSinglePeriod($understanding,$safe['outbound'],$today);
+        $understanding=$this->resolveExactStatedPeriods($understanding,$safe['outbound'],$today);
         // One relation decision gates every later merger and result-reference
         // path. Contextual business questions never infer this boundary from
         // a closed grammar alone.
@@ -1940,6 +2250,10 @@ final class AiGatewayServices
             // into its later supplement merely because the browser sent it.
             unset($body['context_ref']);$body['history']=[];
         }
+        // Resolve missing board ownership before any local detail or model
+        // binding can turn a guessed top/bottom into an executable identity.
+        $ordinalGuidance=$this->ordinalGroupClarification($understanding,$safe,$body,$sourceContext,$caps,$today);
+        if ($ordinalGuidance!==null) return $ordinalGuidance;
         // A missing selected-member metric is a specific question. Keep the
         // member reference and time in the private reply state; never relabel
         // a broad word as the sole available metric merely to execute.
@@ -1950,7 +2264,16 @@ final class AiGatewayServices
             return $this->verifiedSemanticClarification($owner,$id,$generation,$worker,$understanding,$safe,$body,$caps,$today,$configuration,$checkpoint,$sourceQuery,
                 \app\services\ai\execution\AiAuthority::currentStoreId($freshContext));
         }
-        if (($understanding['status']??null)==='needs_clarification') {
+        // A provider's advisory status can contradict its complete typed
+        // condition. Only a current, fully covered registered plan may cross
+        // this gate; preserve the original status for audit and guidance.
+        $completeTypedCondition=$this->completeTypedConditionProof(
+            $understanding,$safe,$body,$projection,$caps,$summaries,$today,$sourceContext
+        );
+        if ($completeTypedCondition!==null) {
+            $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'complete_typed_condition_compiled');
+        }
+        if (($understanding['status']??null)==='needs_clarification' && $completeTypedCondition===null) {
             // Incomplete meaning is a waiting task, not a failed execution.
             // Topic reset and clear calendar conditions are settled first;
             // no extra binding call is spent on genuinely missing meaning.
@@ -2241,7 +2564,7 @@ final class AiGatewayServices
             ||$reusedRankingIntent!==null;
         $registeredConditionFailure=null;
         $registeredConditionContractFailure=null;
-        $registeredConditionIntent=$this->registeredConditionIntent(
+        $registeredConditionIntent=$completeTypedCondition['intent']??$this->registeredConditionIntent(
             $understanding,$summaries,$safe['outbound'],$registeredConditionFailure,$registeredConditionContractFailure
         );
         $registeredCoordinatedFailure=null;
@@ -3256,6 +3579,7 @@ final class AiGatewayServices
             throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
         }
         if (is_array($understanding) && ($understanding['status']??null)==='needs_clarification'
+            && $completeTypedCondition===null
             && !$intent['needs_metric_choice'] && $intent['unresolved_fragments']===[] && !$merged['pending']) {
             return $this->semanticClarification($understanding,$safe,$body);
         }
@@ -3368,8 +3692,6 @@ final class AiGatewayServices
                     'analysis_object_condition_metric_unavailable',[],'condition_metric_probe');
                 throw new RuntimeException('AI_ANALYSIS_COMBINATION_UNAVAILABLE');
             }
-            $conditionCompiler=new AiConditionSetCompiler();
-            $conditionSet=$conditionCompiler->compile($intent['aggregate_condition'],$caps,$intent['operation']);
             // A model may correctly bind every condition yet omit an explicit
             // calendar carrier such as “本月”. Reuse only the existing local
             // grammar's single unambiguous period in that case; otherwise
@@ -3382,18 +3704,23 @@ final class AiGatewayServices
                     $projection['date_terms']=$literalCalendar['date_terms'];
                 }
             }
-            if (($projection['date_terms']??[])===[]
-                &&$conditionCompiler->usesCurrentSnapshot($conditionSet,$caps)) {
-                $projection['date_terms']=[['code'=>'TODAY']];
-            }
-            $projection['signals']=array_values(array_unique(array_merge($intent['metric_codes'],[$intent['operation']]))) ;
-            $projection['blocking_reason']=null;$projection['unresolved_condition']=false;$projection['semantic_intent']['constraints']=[];
             $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
-            return $finish((new AiWorkflowPlanner())->compile($projection,[
-                'decision'=>'query','query_shape'=>$intent['operation'],'metric_codes'=>$intent['metric_codes'],
-                'ranking'=>$intent['ranking'],'aggregate_condition'=>$intent['aggregate_condition'],
-                'condition_set'=>$conditionSet,'object_kind'=>$subject
-            ],$caps,$body['output_format'],$today));
+            if ($completeTypedCondition!==null) {
+                // Reuse the proven plan only if the ordinary binding pipeline
+                // retained every semantic slot. A later rewrite must not be
+                // hidden by executing a stale preflight result.
+                foreach (['object_kind','object_relation','operation','metric_codes','periods','scope','aggregate_condition','ranking'] as $field) {
+                    if (($intent[$field]??null)!==($completeTypedCondition['intent'][$field]??null)) {
+                        throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
+                            'stage'=>'intent_contract','predicate'=>'complete_condition_changed','field'=>$field,
+                        ]);
+                    }
+                }
+                $conditionPlan=$completeTypedCondition['compiled'];
+            } else {
+                $conditionPlan=$this->compileConditionPlan($intent,$projection,$caps,$body['output_format'],$today);
+            }
+            return $finish($conditionPlan);
         }
         // "Each/every" is a result grain, not a store-specific phrase rule.
         // Once the model has preserved operation=breakdown, every registered
@@ -4439,8 +4766,9 @@ final class AiGatewayServices
     /** A closed ordinal-detail follow-up needs no fresh language model call:
      * its only new input is a display position. Identity is resolved solely
      * from the permission-replayed signed ranking view; mixed business words,
-     * private references and ambiguous/out-of-range positions stay on the
-     * ordinary understanding path. */
+     * private references and out-of-range positions stay on ordinary
+     * understanding. A missing board remains accepted ordinal meaning so
+     * the shared clarification gate can ask without a model guessing it. */
     private function localVerifiedOrdinalDetailUnderstanding(array $outbound,array $safe,array $sourceContext): ?array
     {
         if (!empty($safe['local_conditions']??[]) || !is_string($outbound['question']??null)
@@ -4456,7 +4784,9 @@ final class AiGatewayServices
             (new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
                 $sourceContext['query'],$sourceContext['view'],$detail
             );
-        } catch (\RuntimeException $error) { return null; }
+        } catch (\RuntimeException $error) {
+            if ($error->getMessage()!=='AI_OBJECT_DETAIL_SELECTION_REQUIRED') return null;
+        }
         return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
             'goal'=>'inspect a verified ranking position','status'=>'understood','requirements'=>[[
                 'id'=>'r1','meaning'=>'inspect the stated displayed position','fields'=>['object_detail'],
@@ -4499,7 +4829,8 @@ final class AiGatewayServices
             || ($projection['date_grouping_ambiguous']??true)) return null;
         $range=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($projection['date_terms'][0],$today);
         $predicate['metric_term']=$term;
-        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize(
+            (($outbound['prior_query']??null)!==null?['topic_relation'=>'new_topic']:[])+[
             'goal'=>'count members meeting one registered monetary condition',
             'requirements'=>[[
                 'id'=>'r1','meaning'=>'registered monetary condition and member count',
@@ -4621,7 +4952,10 @@ final class AiGatewayServices
      */
     private function reconcileClosedMetricOnlyUnderstanding(array $understanding,bool $closedMetricOnlyProjection,?array $sourceQuery): array
     {
-        if (!$closedMetricOnlyProjection || $sourceQuery===null || ($understanding['status']??null)!=='understood') return $understanding;
+        // Independent result groups own their object/operation carriers. A
+        // single-view cleanup cannot discard those referenced requirements.
+        if (!$closedMetricOnlyProjection || $sourceQuery===null || ($understanding['status']??null)!=='understood'
+            || isset($understanding['groups'])) return $understanding;
         $metricRequirements=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             if (!is_array($requirement) || !in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
@@ -4642,11 +4976,46 @@ final class AiGatewayServices
         // Several independent current measurements are not a single view
         // change. Leave them to the ordinary model-owned multi-result path.
         if (count($metricRequirements)!==1) return $understanding;
-        return [
-            'goal'=>$understanding['goal'],
+        // Requirement cleanup must not discard the accepted topic relation
+        // or overview policy and reopen inheritance under a different meaning.
+        return array_replace($understanding,[
             'requirements'=>$metricRequirements,
             'status'=>'understood',
-        ];
+        ]);
+    }
+
+    /**
+     * A closed single-measurement edit can reuse a verified ordinary query.
+     * The existing structural projection excludes time, objects, predicates
+     * and result references; registry evidence identifies the stated term.
+     * Only meaning is projected here. Binding still validates compatibility
+     * and current permissions, and condition queries cannot change predicates
+     * implicitly by replacing their measurement.
+     */
+    private function localVerifiedMetricOnlyUnderstanding(array $outbound,array $safe,array $sourceQuery,bool $closed,array $caps): ?array
+    {
+        if (!$closed || !empty($safe['local_conditions']) || ($outbound['prior_query']??null)===null
+            || !in_array($sourceQuery['query_shape']??null,['summary','breakdown','trend','ranking'],true)
+            || !empty($sourceQuery['aggregate_condition']) || !empty($sourceQuery['condition_set'])) return null;
+        // The longest registered phrase is not proof of a single metric.
+        // Count every non-overlapping registry term, including an unavailable
+        // metric, so this shortcut cannot silently discard a second request.
+        $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            (string)$outbound['question'],array_keys(\app\services\query\metric\MetricDefinitionRegistry::all())
+        );
+        $byCode=[];
+        foreach ($matches as $match) $byCode[$match['metric_code']]=$match;
+        if (count($byCode)!==1) return null;
+        $match=reset($byCode);
+        if (!array_key_exists($match['metric_code'],(array)($caps['metric_readiness']??[]))) return null;
+        return AiIntentUnderstandingContract::normalize([
+            'goal'=>'change the measurement of the verified query',
+            'topic_relation'=>'continuation','status'=>'understood','requirements'=>[[
+                'id'=>'r1','meaning'=>'use the stated registered measurement','fields'=>['metric_codes'],
+                'values'=>['metric_terms'=>[$match['term']]],
+                'evidence'=>[['message_id'=>'current','quote'=>$match['term']]],
+            ]],
+        ],$outbound);
     }
 
     /**
@@ -4747,20 +5116,54 @@ final class AiGatewayServices
 
     /**
      * Both terminals resolve explicit calendar wording against the run's server
-     * date. Only one unambiguous current period may correct model date values;
-     * the contract preserves independent carriers and all non-date semantics.
+     * date. A single period or one accepted comparison's two ordered windows
+     * may correct model date values. Independent carriers, historical evidence
+     * and every non-date meaning remain outside this correction boundary.
      */
-    private function resolveExactStatedSinglePeriod(array $understanding,array $safeQuestion,string $today): array
+    private function resolveExactStatedPeriods(array $understanding,array $safeQuestion,string $today): array
     {
         // A clear calendar condition is normalizable even while the metric
         // remains ambiguous. This does not complete or execute that request.
         if (!in_array($understanding['status']??null,['understood','needs_clarification'],true)) return $understanding;
         $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse((string)($safeQuestion['question']??''));
-        if (($projection['date_grouping_ambiguous']??true) || count((array)($projection['date_terms']??[]))!==1) return $understanding;
-        $range=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($projection['date_terms'][0],$today);
-        return \app\services\ai\contract\AiIntentUnderstandingContract::withResolvedSinglePeriod($understanding,[
-            ['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']],
-        ]);
+        $terms=(array)($projection['date_terms']??[]);
+        if (($projection['date_grouping_ambiguous']??true) || !in_array(count($terms),[1,2],true)) return $understanding;
+        $planner=new AiWorkflowPlanner();
+        if (count($terms)===1) {
+            $range=$planner->normalizePeriod($terms[0],$today);
+            return AiIntentUnderstandingContract::withResolvedSinglePeriod($understanding,[
+                ['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']],
+            ]);
+        }
+        // The shared calendar preserves wording order. It may replace two
+        // dates only when one current comparison owns them together; array
+        // order between independent questions is never evidence of ownership.
+        if (!empty($understanding['groups'])) return $understanding;
+        $periodOwner=null;$comparison=false;
+        foreach ((array)($understanding['requirements']??[]) as $index=>$requirement) {
+            $fields=(array)($requirement['fields']??[]);
+            if (!array_intersect($fields,['periods','operation'])) continue;
+            if (empty($requirement['evidence'])) return $understanding;
+            foreach ($requirement['evidence'] as $evidence) {
+                if (($evidence['message_id']??null)!=='current') return $understanding;
+            }
+            if (in_array('operation',$fields,true)) {
+                if (($requirement['values']['operation']??null)!=='comparison') return $understanding;
+                $comparison=true;
+            }
+            if (in_array('periods',$fields,true)) {
+                if ($periodOwner!==null || count((array)($requirement['values']['periods']??[]))!==2) return $understanding;
+                $periodOwner=$index;
+            }
+        }
+        if (!$comparison || $periodOwner===null) return $understanding;
+        $periods=[];
+        foreach ($terms as $term) {
+            $range=$planner->normalizePeriod($term,$today);
+            $periods[]=['kind'=>'date_range','start'=>$range['start'],'end'=>$range['end']];
+        }
+        $understanding['requirements'][$periodOwner]['values']['periods']=$periods;
+        return $understanding;
     }
 
     /**
@@ -4810,6 +5213,19 @@ final class AiGatewayServices
             // separately resolvable code remain deliberate ambiguity and are
             // never collapsed by this registry boundary.
             if (count($metricIndexes)>1) {
+                // Equal metric words do not make independent results one
+                // query. Merge duplicate carriers only when every carrier
+                // belongs to exactly the same declared result groups.
+                $metricGroups=null;
+                foreach ($metricIndexes as $index) {
+                    $owned=[];
+                    foreach ((array)($understanding['groups']??[]) as $group) {
+                        if (in_array($originalRequirements[$index]['id'],(array)$group['requirement_ids'],true)) $owned[]=$group['id'];
+                    }
+                    sort($owned);
+                    if ($metricGroups!==null && $owned!==$metricGroups) return $understanding;
+                    $metricGroups=$owned;
+                }
                 // Some models duplicate one explicitly stated measurement
                 // across an object, ranking and metric requirement. Collapse
                 // only the duplicated metric field when every carrier quotes
@@ -4847,9 +5263,19 @@ final class AiGatewayServices
                     if ($fields===[]) unset($requirements[$index]);
                     else $requirements[$index]['fields']=$fields;
                 }
-                return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
-                    'goal'=>$understanding['goal'],'requirements'=>array_values($requirements),'status'=>'understood',
-                ],$safeQuestion);
+                if (isset($understanding['groups'])) {
+                    // The retained metric has the same owners as every
+                    // removed duplicate, so pruning only stale IDs preserves
+                    // each independent group's complete measurement meaning.
+                    $retainedIds=array_column($requirements,'id');
+                    foreach ($understanding['groups'] as &$group) {
+                        $group['requirement_ids']=array_values(array_intersect($group['requirement_ids'],$retainedIds));
+                    }
+                    unset($group);
+                }
+                return \app\services\ai\contract\AiIntentUnderstandingContract::normalize(array_replace($understanding,[
+                    'requirements'=>array_values($requirements),'status'=>'understood',
+                    ]),$safeQuestion);
             }
             $index=$metricIndexes[0];$requirement=$originalRequirements[$index];
             if (!empty($requirement['values']['metric_exclusions'])) return $understanding;
@@ -4859,10 +5285,17 @@ final class AiGatewayServices
             $requirements=$originalRequirements;
             $requirements[$index]['values']['metric_terms']=[$match['term']];
             $requirements[$index]['evidence']=[['message_id'=>'current','quote'=>$match['term']]];
-            return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
-                'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
-            ],$safeQuestion);
+            return \app\services\ai\contract\AiIntentUnderstandingContract::normalize(array_replace($understanding,[
+                'requirements'=>$requirements,'status'=>'understood',
+                ]),$safeQuestion);
         }
+        // With several accepted result groups and no metric carrier, a global
+        // lexical match cannot identify which group owns the omitted metric.
+        // Refuse an incomplete group contract rather than attaching a new ID
+        // arbitrarily or silently returning only part of the stated request.
+        if (!empty($understanding['groups'])) throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
+            'stage'=>'intent_understanding_contract','predicate'=>'groups',
+        ]);
         $labelsByKind=[];
         foreach ($objectVocabulary as $item) if (is_array($item) && is_string($item['object_kind']??null)
             && is_string($item['object_label']??null) && $item['object_label']!=='') {
@@ -4906,9 +5339,9 @@ final class AiGatewayServices
             'values'=>['metric_terms'=>[$match['term']]],
             'evidence'=>[['message_id'=>'current','quote'=>$match['term']]],
         ];
-        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
-        ],$safeQuestion);
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize(array_replace($understanding,[
+            'requirements'=>$requirements,'status'=>'understood',
+            ]),$safeQuestion);
     }
 
     /**
@@ -4965,19 +5398,44 @@ final class AiGatewayServices
                 if ($code!==null) $accountedCodes[$code]=true;
             }
         }
+        $addedRequirement=false;
         foreach (\app\services\query\metric\MetricSemanticCatalog::registeredTermsInText($question,$allowed) as $match) {
             if (isset($accounted[$match['term']])||isset($accountedCodes[$match['metric_code']])) continue;
             if (count($requirements)>=12) return $understanding;
             $next=1;while(isset($used['r'.$next])&&$next<1000)$next++;
             if ($next>999) return $understanding;
             $id='r'.$next;$used[$id]=true;$accounted[$match['term']]=true;
+            $addedRequirement=true;
             $requirements[]=['id'=>$id,'meaning'=>'使用“'.$match['term'].'”作为衡量指标','fields'=>['metric_codes'],
                 'values'=>['metric_terms'=>[$match['term']]],'evidence'=>[['message_id'=>'current','quote'=>$match['term']]]];
         }
         if ($requirements===(array)($understanding['requirements']??[])) return $understanding;
-        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
-        ],$safeQuestion);
+        if (!empty($understanding['groups'])) {
+            // A new measurement has no proven group owner. The existing
+            // contract failure preserves that uncertainty instead of omitting
+            // a stated metric or assigning it to every independent result.
+            if ($addedRequirement) throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
+                'stage'=>'intent_understanding_contract','predicate'=>'groups',
+            ]);
+            $retainedIds=array_column($requirements,'id'); $metricIds=[];
+            foreach ($requirements as $requirement) {
+                if (in_array('metric_codes',(array)$requirement['fields'],true)) $metricIds[]=$requirement['id'];
+            }
+            $groups=$understanding['groups'];
+            foreach ($groups as &$group) {
+                $originalIds=$group['requirement_ids'];
+                $group['requirement_ids']=array_values(array_intersect($originalIds,$retainedIds));
+                // Removing a redundant unregistered echo is safe only when
+                // its original group still owns an explicit metric carrier.
+                if ($group['requirement_ids']===[] || (array_diff($originalIds,$retainedIds)!==[]
+                    && array_intersect($group['requirement_ids'],$metricIds)===[])) return $understanding;
+            }
+            unset($group);
+            $understanding['groups']=$groups;
+        }
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize(array_replace($understanding,[
+            'requirements'=>$requirements,'status'=>'understood',
+            ]),$safeQuestion);
     }
 
     /**
@@ -5011,6 +5469,12 @@ final class AiGatewayServices
         foreach ($requirements as $index=>$requirement) if (is_array($requirement)
             && in_array('object_kind',(array)($requirement['fields']??[]),true)) $objectIndexes[]=$index;
         if ($objectIndexes===[]) {
+            // An omitted object has no proven owner among independent result
+            // groups. Let the existing contract repair recover that ownership;
+            // silently appending an ungrouped carrier would drop the groups.
+            if (isset($understanding['groups'])) throw new AiContractException('AI_MODEL_INTENT_CONTRACT_INVALID',[
+                'stage'=>'intent_understanding_contract','predicate'=>'groups',
+            ]);
             if (count($requirements)>=12) return $understanding;
             $used=[];$next=1;
             foreach ($requirements as $requirement) if (is_array($requirement) && is_string($requirement['id']??null)) $used[$requirement['id']]=true;
@@ -5049,9 +5513,9 @@ final class AiGatewayServices
                 $requirements[$index]=$requirement;
             }
         }
-        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
-        ],$safeQuestion);
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize(array_replace($understanding,[
+            'requirements'=>$requirements,'status'=>'understood',
+            ]),$safeQuestion);
     }
 
     /**
@@ -5194,10 +5658,20 @@ final class AiGatewayServices
             // period. Any object, filter, ranking, condition or response-form
             // carrier keeps the groups intact for the ordinary multi-query
             // compiler, so genuine multi-subject requests are never merged.
-            $metricRequirementIds=[];$metricTerms=[];$allowedGroupedFields=['metric_codes'=>true,'periods'=>true];
+            $metricRequirementIds=[];$metricTerms=[];$sharedOperationIds=[];
+            $allowedGroupedFields=['metric_codes'=>true,'periods'=>true,'operation'=>true];
             foreach ($requirements as $requirement) {
                 if (!is_array($requirement) || array_diff((array)($requirement['fields']??[]),array_keys($allowedGroupedFields))) {
                     return $understanding;
+                }
+                // A shared aggregate/breakdown echo can survive removal of
+                // an invented metric term. Preserve its topic metadata, but
+                // let this proven coordinated-summary rule correct the common
+                // response form. Independent group operations remain separate.
+                if (in_array('operation',(array)($requirement['fields']??[]),true)) {
+                    if (!in_array($requirement['values']['operation']??null,['summary','breakdown'],true)
+                        || !is_string($requirement['id']??null)) return $understanding;
+                    $sharedOperationIds[]=$requirement['id'];
                 }
                 if (!in_array('metric_codes',(array)($requirement['fields']??[]),true)) continue;
                 $terms=(array)($requirement['values']['metric_terms']??[]);
@@ -5208,7 +5682,7 @@ final class AiGatewayServices
             }
             $groupedMetricIds=[];
             foreach ((array)$understanding['groups'] as $group) {
-                if (!is_array($group)) return $understanding;
+                if (!is_array($group) || array_diff($sharedOperationIds,(array)($group['requirement_ids']??[]))!==[]) return $understanding;
                 $owned=array_values(array_intersect((array)($group['requirement_ids']??[]),array_keys($metricRequirementIds)));
                 if (count($owned)!==1) return $understanding;
                 $groupedMetricIds[$owned[0]]=true;
@@ -5251,9 +5725,9 @@ final class AiGatewayServices
             $changed=true;
         }
         if (!$changed) return $understanding;
-        return AiIntentUnderstandingContract::normalize([
-            'goal'=>$understanding['goal'],'requirements'=>$requirements,'status'=>'understood',
-        ],$safeQuestion);
+        return AiIntentUnderstandingContract::normalize(array_replace($understanding,[
+            'requirements'=>$requirements,'status'=>'understood',
+            ]),$safeQuestion);
     }
 
     private function bindingSummariesForUnderstanding(array $summaries,array $understanding): array
@@ -6107,10 +6581,14 @@ final class AiGatewayServices
      */
     private function compileObjectDetailContinuation(array $understanding,$sourceContext,string $outputFormat,?array &$rejection=null): ?array
     {
-        if (($understanding['status']??null)!=='understood') return null;
-        $detail=null;$statedObjectKind=null;
+        if (($understanding['status']??null)!=='understood' || ($understanding['topic_relation']??null)==='new_topic') return null;
+        $detail=null;$reference=null;$statedObjectKind=null;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             $fields=(array)($requirement['fields']??[]);
+            if (in_array('result_reference',$fields,true)) {
+                if ($reference!==null) return null;
+                $reference=$requirement['values']['result_reference']??null;
+            }
             if (in_array('object_detail',$fields,true)||in_array('member_detail',$fields,true)) {
                 if ($detail!==null) throw new RuntimeException('AI_INTENT_UNRESOLVED');
                 // member_detail remains accepted only as a compatibility input
@@ -6119,14 +6597,18 @@ final class AiGatewayServices
                 $detail=$requirement['values']['object_detail']??$requirement['values']['member_detail']??null;
             }
         }
-        if (!is_array($detail)) return null;
+        if (!is_array($detail) && !is_array($reference)) return null;
+        // A bare displayed position requests that frozen object's detail.
+        // Additional detail instructions or independently grouped questions
+        // stay on normal binding; no ordinal is inferred or flattened here.
+        if ($reference!==null && ($detail!==null || !empty($understanding['groups']))) return null;
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             $fields=(array)($requirement['fields']??[]);
             // A model can echo the predecessor's unchanged ranking beside a
             // pure detail request. The signed query, not that echo, remains
             // authoritative; discard only an exactly matching carrier. A
             // new rank or any metric/period/filter still enters normal binding.
-            if (is_array($sourceContext['query']??null)
+            if ($reference===null && is_array($sourceContext['query']??null)
                 &&($sourceContext['query']['query_shape']??null)==='ranking') {
                 // A model may describe expanding the signed ranked set as a
                 // summary or breakdown. Those are presentation words here,
@@ -6156,7 +6638,9 @@ final class AiGatewayServices
             // A pure continuation may restate only its referenced object. Any
             // metric, period, condition, ranking or operation must go through
             // the normal registered query planner first.
-            $extra=array_values(array_diff($fields,['object_detail','member_detail','object_kind','object_relation']));
+            $allowed=['object_detail','member_detail','object_kind','object_relation'];
+            if ($reference!==null) $allowed[]='result_reference';
+            $extra=array_values(array_diff($fields,$allowed));
             if ($extra!==[]) {
                 $field=$extra[0];
                 $rejection=['field'=>is_string($field)&&preg_match('/^[a-z_]{1,32}$/D',$field)?$field:'other'];
@@ -6170,9 +6654,18 @@ final class AiGatewayServices
         }
         if (!is_array($sourceContext)||!is_array($sourceContext['query']??null)
             ||!is_array($sourceContext['view']??null)) throw new RuntimeException('AI_CONTEXT_REQUIRED');
-        $resolved=(new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
-            $sourceContext['query'],$sourceContext['view'],$detail
-        );
+        if ($reference!==null) {
+            // group+ordinal is resolved by the existing immutable-view guard.
+            // In particular, bottom #2 cannot become top #2 or a new TOP 1.
+            $selection=ResultReferenceResolver::resolve($sourceContext['query'],$sourceContext['view'],$reference);
+            $resolved=['object_kind'=>$selection['object_kind']];
+            if ($selection['object_kind']==='person') $resolved['selection_ref']=$selection['business_filters']['selection_ref'];
+            else $resolved['store_id']=$selection['store_ids'][0];
+        } else {
+            $resolved=(new \app\services\ai\context\ObjectDetailContinuationResolver())->resolve(
+                $sourceContext['query'],$sourceContext['view'],$detail
+            );
+        }
         // An explicitly stated object may narrow what the customer means but
         // may never overwrite the object proven by the preceding result.
         if ($statedObjectKind!==null&&$statedObjectKind!==($resolved['object_kind']??null)) {
@@ -7382,16 +7875,22 @@ final class AiGatewayServices
             }
         }
         if ($run['status']==='FAILED') {
-            $result['failure_guidance']=$this->failureGuidance($run['reason']);
+            $result['failure_guidance']=$this->failureGuidance($run['reason'],($context['terminal']??null)==='platform');
+            if (($context['terminal']??null)==='platform') {
+                $result['message']=$result['progress']=$result['failure_guidance']['question'];
+                if ($run['reason']==='AI_MODEL_CIRCUIT_OPEN') {
+                    $result['retry_after_ms']=$this->runs->modelCircuitRetryAfterMs($owner,$run['run_id'],$run['generation']);
+                    $result['failure_guidance']['retry_after_ms']=$result['retry_after_ms'];
+                }
+            }
             if ($context['terminal']==='platform' && $run['reason']==='CLARIFICATION_EXPIRED') {
                 $result['message']=$result['progress']='补充等待已超时，尚未执行查询。已确认条件已保留，可继续原查询。';
                 $result['failure_guidance']=['kind'=>'clarification_expired','question'=>$result['message']];
             }
-            // A wholly unrelated question receives capability help and ends
-            // the prior analysis topic. Without this boundary, device clients
-            // may revive the last signed business result for a later bare
-            // follow-up such as “上周呢”, crossing the intervening topic.
-            if ($run['reason']==='AI_INTENT_UNRESOLVED') $result['topic_boundary']='reset';
+            // A failure code does not prove a topic change: a continuation
+            // may be unresolved or interrupted by transport. Preserve only
+            // the server-confirmed boundary already carried by publicRun().
+            // Failed turns never become verified query contexts themselves.
             // A revoked account can still read its own failed task. The
             // optional administrator diagnostic must not hide that response.
             try {
@@ -7406,8 +7905,46 @@ final class AiGatewayServices
     /** A failed Run stays failed. No query meaning and a pre-understanding
      * capability drift need plain capability help, not a retry card. Other
      * failures offer customer actions, never an executable substitute plan. */
-    private function failureGuidance(?string $reason): array
+    private function failureGuidance(?string $reason,bool $platform=false): array
     {
+        // Platform failures describe the actual boundary. They are not
+        // missing business conditions and cannot be repaired by a fixed menu.
+        // Keep the legacy drawer contract below until its UI is approved.
+        if ($platform) {
+            if ($reason==='AI_INTENT_UNRESOLVED') return ['kind'=>'capability_help',
+                'question'=>'暂未确定这次要查询的业务内容。您可以补充要查询的对象或指标；我可以查询系统内的经营、会员和员工业绩数据。'];
+            $messages=[
+                'AI_MODEL_CIRCUIT_OPEN'=>'AI 理解服务连续响应异常，已暂时暂停调用；明确指标和时间的查询仍可尝试。',
+                'CIRCUIT_OPEN'=>'查询服务暂时暂停受理，请稍后重试。',
+                'RATE_LIMITED'=>'您近期提问较频繁，请稍后再问。',
+                'OTHER_CONVERSATION_ACTIVE'=>'您还有一个对话正在执行，请先完成或停止该任务。',
+                'CAPACITY_REJECTED'=>'当前查询任务较多，请稍后重试。',
+                'CAPACITY_STOPPED'=>'当前查询服务繁忙，请稍后重试。',
+                'AI_MODEL_RESULT_UNKNOWN'=>'AI 理解服务未及时返回结果，请稍后重试。',
+                'AI_MODEL_REQUEST_FAILED'=>'AI 理解服务响应异常，请稍后重试。',
+                'AI_MODEL_ACCOUNT_UNAVAILABLE'=>'AI 服务配置暂不可用，请管理员检查连接配置。',
+                'AI_MODEL_CONFIG_INVALID'=>'AI 服务配置不完整，请管理员检查连接配置。',
+                'AI_CAPABILITY_CHANGED'=>'查询能力已更新，本次未能继续。请重新提交原问题。',
+                'AI_AUTHORIZATION_CHANGED'=>'当前权限已变化，请刷新页面后重新查询。',
+                'AI_PERMISSION_DENIED'=>'当前账号没有这项查询权限。',
+                'METRIC_PERMISSION_DENIED'=>'当前账号没有这项数据的查看权限。',
+                'METRIC_PERMISSION_CHANGED'=>'数据权限已变化，请刷新页面后重新查询。',
+                'METRIC_PERMISSION_GRAIN_UNAVAILABLE'=>'当前权限范围不支持这项明细查询。',
+                'AI_CAPABILITY_NOT_READY'=>'当前系统尚不能执行这项查询。',
+                'AI_ANALYSIS_COMBINATION_UNAVAILABLE'=>'当前系统尚不能完整执行这些对象、指标和条件的组合。',
+                'AI_PERSONNEL_PERMISSION_REQUIRED'=>'当前账号没有员工业绩查询权限。',
+                'AI_NODE_TIMEOUT'=>'数据查询未能在规定时间内完成，请稍后重试。',
+                'DEADLINE_EXCEEDED'=>'本次处理超时，尚未获得可交付的结果，请稍后重试。',
+                'AI_ATTEMPT_UNRESOLVED'=>'本次处理结果暂未确认，未交付查询结果，请稍后重试。',
+                'AI_BINDING_SEMANTIC_REJECTED'=>'本次未能准确对应您的查询条件，请重新提交原问题。',
+                'AI_CONTEXT_REQUIRED'=>'前面的查询条件已无法继续使用，请补充本次要查询的对象、指标和时间。',
+                'AI_RESULT_REFERENCE_UNAVAILABLE'=>'前面的结果中没有可确认的对应对象，请指定对象或重新查询排名。',
+            ];
+            // This kind selects a terminal notification, not a network-error
+            // classification. The exact reason retains permission, capability
+            // and transport distinctions for diagnostics and client recovery.
+            return ['kind'=>'technical_error','question'=>$messages[$reason]??'本次暂未完成查询，请稍后重试。'];
+        }
         if ($reason==='AI_INTENT_UNRESOLVED') return ['kind'=>'capability_help',
             'question'=>'我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接用平常的话提问。'];
         if ($reason==='AI_CAPABILITY_CHANGED') return ['kind'=>'capability_help',

@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-10-11T14:06:54.936256+00:00",
+  "scope": "verified local mysql/ruihao instance only",
+  "original_task_baseline": "89f54ce74a2ceeb72ebfa18c8195a53759cfddc5",
+  "current_head": "8f5610d5b609041e862e76c38be2c9426226c33e",
+  "before": {
+    "active": 0,
+    "held": 1,
+    "quarantined_slots": 0,
+    "worker_pid": 1,
+    "worker_host": "96bfdb21a240",
+    "worker_id": "ai-exec-1-ec9e051e41fd834ffd30ab48"
+  },
+  "after": {
+    "active": 0,
+    "held": 0,
+    "quarantined_slots": 0,
+    "old_run_status": "FAILED",
+    "old_run_reason": "DEADLINE_EXCEEDED",
+    "old_token_cleared": true,
+    "old_worker_lost_at": 1791727569814,
+    "consumer_live": true
+  },
+  "recovery": "dedicated consumer startup proved former process replaced; normal application recovery; no direct slot reset, no replay",
+  "source_sha256": {
+    "后端代码/app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+    "后端代码/app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10"
+  },
+  "production_changed": false
+}

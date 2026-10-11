@@ -1,0 +1,71 @@
+{
+    "batch": "OPT3-new-mixed-local-5x10",
+    "audited_at": "2026-10-11T21:52:05+08:00",
+    "driver_stopped": true,
+    "driver_exit_code": 143,
+    "new_submissions_disabled": true,
+    "recorded_questions": 26,
+    "admitted_runs": 27,
+    "original_report_sha256": "47fdd317ab8c462d4c441f45d3628f13d022dd8985d03f7226903fb44433718f",
+    "stop_reason": "Parent requested controlled stop after employee Reader worker OOM and held execution slot; original report and verdicts preserved. No business facts or run state edited.",
+    "unrecorded_admitted_runs": [
+        {
+            "run_id": "eb56680a90727597ae5d71c61cde3d460bec93603f96b21e",
+            "conversation_id": "opt3-local-e8cb0542a42adf59",
+            "status": "WAITING_CLARIFICATION",
+            "reason": "",
+            "progress_code": "UNDERSTANDING",
+            "slot_held": 0,
+            "created_at": 1791726634371,
+            "attempts": [
+                {
+                    "attempt_code": "analysis_members",
+                    "kind": "tool",
+                    "state": "SUCCEEDED",
+                    "created_at": 1791726635544
+                },
+                {
+                    "attempt_code": "analysis_objects",
+                    "kind": "tool",
+                    "state": "SUCCEEDED",
+                    "created_at": 1791726635145
+                },
+                {
+                    "attempt_code": "bind_intent",
+                    "kind": "model",
+                    "state": "SUCCEEDED",
+                    "created_at": 1791726653642
+                },
+                {
+                    "attempt_code": "understand_meaning",
+                    "kind": "model",
+                    "state": "SUCCEEDED",
+                    "created_at": 1791726635607
+                }
+            ]
+        }
+    ],
+    "held_runs": [
+        {
+            "run_id": "dbb299a8d23426e33b7c6933d2662ab0f5d5d78baaf4f5ff",
+            "conversation_id": "opt3-local-e8cb0542a42adf59",
+            "status": "FAILED",
+            "reason": "DEADLINE_EXCEEDED",
+            "progress_code": "QUERYING",
+            "slot_held": 1,
+            "created_at": 1791726329425
+        }
+    ],
+    "active_runs": [
+        {
+            "run_id": "eb56680a90727597ae5d71c61cde3d460bec93603f96b21e",
+            "conversation_id": "opt3-local-e8cb0542a42adf59",
+            "status": "WAITING_CLARIFICATION",
+            "reason": "",
+            "progress_code": "UNDERSTANDING",
+            "slot_held": 0,
+            "created_at": 1791726634371
+        }
+    ],
+    "current_instance_quarantined_slots": 0
+}

@@ -1,0 +1,9 @@
+{
+  "file": "\u540e\u7aef\u4ee3\u7801/app/services/query/metric/RegisteredMetricReadServices.php",
+  "ownership": "Only constructor/cache fields and serviceCustomerMetrics; existing refund hunks excluded",
+  "baseline_head": "8f5610d5b609041e862e76c38be2c9426226c33e",
+  "worktree_before_sha256": "50313aedae96c4bd907b2d7dd5d5f5e7113582cc9297e686a920c3dc48fd9e6e",
+  "worktree_after_sha256": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+  "owned_patch_sha256": "8bcc702832af180ce6948fb41fc828d1fb62794131211b89dc80f0189684194a",
+  "reverse_reapply_in_memory_equal": true
+}

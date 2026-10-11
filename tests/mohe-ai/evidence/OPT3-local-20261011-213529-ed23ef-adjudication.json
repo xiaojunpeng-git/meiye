@@ -1,0 +1,520 @@
+{
+  "suite": "OPT3-new-mixed-local-5x10",
+  "original_report": "OPT3-local-20261011-213529-ed23ef.json",
+  "original_sha256": "47fdd317ab8c462d4c441f45d3628f13d022dd8985d03f7226903fb44433718f",
+  "original_report_edited": false,
+  "scope": "Recheck only the 26 fully recorded questions from the interrupted run; not a completed 50-question run.",
+  "oracle_correction": {
+    "source": "后端代码/app/services/metric/MetricDictionaryServices.php",
+    "source_lines": "30-34",
+    "source_sha256": "e56ca10e7fb1d159b820024971fdaea3a2018cbd2c42eb6bc236ff644dc058a7",
+    "reason": "Shared pre-existing dictionary maps plain 消费 to cash_performance. Original script expected sales_collected_amount in error."
+  },
+  "turns": [
+    {
+      "round": 1,
+      "turn": 1,
+      "run_id": "f25094ea79a0509e55de298a6ea7b8cca5f13b37d81bb325",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 2,
+      "run_id": "3a3a015a0346796c8f10818914705e52b1cc5ac5b092e9fb",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 3,
+      "run_id": "fa6877027b28859eec3931ac4f099ec865cf3403ba35a14c",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 4,
+      "run_id": "68196b205f6f81a42ecce35173de2215653a0cc954c899d9",
+      "raw_pass": false,
+      "oracle_corrected_checks": [
+        "metric",
+        "condition",
+        "condition_carrier_equivalence"
+      ],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "period": true,
+        "condition_carrier_equivalence": true,
+        "condition": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 5,
+      "run_id": "f36fa8c6666b0ce6ac4d96b9dcecb43a197ac3827acf901e",
+      "raw_pass": false,
+      "oracle_corrected_checks": [
+        "metric",
+        "condition",
+        "condition_carrier_equivalence"
+      ],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "period": true,
+        "condition_carrier_equivalence": true,
+        "condition": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 6,
+      "run_id": "33049b4c2b3fb36460f970f4de32a632d75925c9e9668f94",
+      "raw_pass": false,
+      "oracle_corrected_checks": [
+        "metric",
+        "condition",
+        "condition_carrier_equivalence"
+      ],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "period": true,
+        "condition_carrier_equivalence": true,
+        "condition": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 7,
+      "run_id": "4ebc2842dc2feba1a8d78f0bf1f117e6c155688f8c1e888c",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "period": true,
+        "ranking": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 8,
+      "run_id": "5f7c70ddeba58d146012b5312b2ce0552746c2d82610afad",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "period": true,
+        "ranking": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 9,
+      "run_id": "e47ab96ef14aa022b4c92e664e8ed16a474798afd0ad807e",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "period": true,
+        "displayed_reference": true,
+        "reference_not_reranked": false,
+        "fresh_reader_results": true,
+        "same_authority": true
+      },
+      "pass_after_review": false,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 1,
+      "turn": 10,
+      "run_id": "9e0bc63936b17b60ba82fb6c4c70e6c7053a8063c7509612",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "capability_boundary": true
+      },
+      "pass_after_review": true,
+      "status": "FAILED",
+      "reason": "AI_INTENT_UNRESOLVED"
+    },
+    {
+      "round": 2,
+      "turn": 1,
+      "run_id": "6dbbd3793acbe2e1db89df2fe234513b6db9d27b5899a750",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": false,
+        "required_guidance": false
+      },
+      "pass_after_review": false,
+      "status": "FAILED",
+      "reason": "AI_ATTEMPT_UNRESOLVED"
+    },
+    {
+      "round": 2,
+      "turn": 2,
+      "run_id": "e310474353a6419363e74dc58c7f536798b018caa53addf5",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": false,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": false,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 2,
+      "turn": 3,
+      "run_id": "6f606b8457516fe02626ce75d9059364f51641598e7b9466",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": false
+      },
+      "pass_after_review": false,
+      "status": "FAILED",
+      "reason": "AI_MODEL_RESULT_UNKNOWN"
+    },
+    {
+      "round": 2,
+      "turn": 4,
+      "run_id": "8c4e32e4b7f6734f7c0dc571886467acc4d2c75794ada104",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": false
+      },
+      "pass_after_review": false,
+      "status": "FAILED",
+      "reason": "AI_MODEL_RESULT_UNKNOWN"
+    },
+    {
+      "round": 2,
+      "turn": 5,
+      "run_id": "63551c94d85934e5dcbe86c60e93bd8067484c49ac90f2b9",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 2,
+      "turn": 6,
+      "run_id": "8e41b2dbd9bad8ca15d0dc8adf31617b7c1add173b7d3239",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 2,
+      "turn": 7,
+      "run_id": "ea6b2d3c738bf2b90718d6dd09c03d6e5f3ab0a218ddf072",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 2,
+      "turn": 8,
+      "run_id": "6d4d0a1f276b80e0850bc97e3e1b0ded94e6f53f456caa6a",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": false
+      },
+      "pass_after_review": false,
+      "status": "FAILED",
+      "reason": "AI_FUTURE_ACTUALS_UNAVAILABLE"
+    },
+    {
+      "round": 2,
+      "turn": 9,
+      "run_id": "7d8d022542cb73b9e934aaccec9fd67eae211cea1290f09a",
+      "raw_pass": false,
+      "oracle_corrected_checks": [
+        "metric",
+        "condition",
+        "condition_carrier_equivalence"
+      ],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "period": true,
+        "condition_carrier_equivalence": true,
+        "condition": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 2,
+      "turn": 10,
+      "run_id": "f30365a808bce6e351d326385cdf55fd28f85d6624c15c73",
+      "raw_pass": false,
+      "oracle_corrected_checks": [
+        "metric",
+        "condition",
+        "condition_carrier_equivalence"
+      ],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "object": true,
+        "period": true,
+        "condition_carrier_equivalence": true,
+        "condition": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 3,
+      "turn": 1,
+      "run_id": "dbb299a8d23426e33b7c6933d2662ab0f5d5d78baaf4f5ff",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": false
+      },
+      "pass_after_review": false,
+      "status": "FAILED",
+      "reason": "DEADLINE_EXCEEDED"
+    },
+    {
+      "round": 3,
+      "turn": 2,
+      "run_id": "ee26c0e539288a655b05542531d515294a5e05b9d2029634",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": false
+      },
+      "pass_after_review": false,
+      "status": "FAILED",
+      "reason": "AI_MODEL_RESULT_UNKNOWN"
+    },
+    {
+      "round": 3,
+      "turn": 3,
+      "run_id": "5df73a5e54f956cae46343e451ed47a9b987b8bc6c051329",
+      "raw_pass": false,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": false
+      },
+      "pass_after_review": false,
+      "status": "FAILED",
+      "reason": "AI_INTENT_UNRESOLVED"
+    },
+    {
+      "round": 3,
+      "turn": 4,
+      "run_id": "fa54e829666ea16aba29a56e9e234b3850b21dcb8bd5ecba",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 3,
+      "turn": 5,
+      "run_id": "2c6772c1da55b75e98e0754821da00c070c169349c343129",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    },
+    {
+      "round": 3,
+      "turn": 6,
+      "run_id": "aee762232199a110065b512021835e8b47bb7d5e481a2297",
+      "raw_pass": true,
+      "oracle_corrected_checks": [],
+      "checks_after_review": {
+        "completed": true,
+        "metric": true,
+        "shape": true,
+        "period": true,
+        "fresh_reader_results": true,
+        "same_authority": true,
+        "authorized_scope": true,
+        "object": true
+      },
+      "pass_after_review": true,
+      "status": "COMPLETED",
+      "reason": ""
+    }
+  ],
+  "recorded": 26,
+  "raw_passed": 12,
+  "reviewed_passed": 17,
+  "complete_5x10": false,
+  "baseline_metadata_note": {
+    "raw_reported_baseline": "89f54ce7",
+    "raw_baseline_verified": true,
+    "verification": "Parent checked git reflog: old live began 21:35 while HEAD was 89f54; unrelated receipt commits at 21:55:52 and 22:01:21 advanced HEAD to 8f561 without changing OPT3 AI files.",
+    "source_file_hashes_are_preserved": true
+  }
+}

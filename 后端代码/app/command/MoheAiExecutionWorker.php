@@ -2,6 +2,7 @@
 namespace app\command;
 
 use app\services\ai\execution\AiRunExecutionQueue;
+use app\services\ai\execution\AiRunExecutionRuntime;
 use app\services\ai\execution\AiRuntimeFactory;
 use think\console\Command;
 use think\console\Input;
@@ -37,6 +38,10 @@ final class MoheAiExecutionWorker extends Command
         do {
             try {
                 $runtime['runs']->heartbeatExecutionConsumer($workerId,getmypid(),$host);
+                // A separately hosted supervisor cannot inspect this PID
+                // namespace. This consumer can prove a crashed predecessor
+                // is gone, including PID reuse after a container restart.
+                AiRunExecutionRuntime::recoverStoppedWorkers($runtime['runs']);
                 // One job at a time provides a real, auditable execution slot;
                 // the Run store remains the cross-process capacity authority.
                 // Console listing instantiates configured command classes

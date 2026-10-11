@@ -48,7 +48,7 @@ $check($admission->match('2026年3月到今天，扣除退款的营业额最高�
 // Exercise the exact gateway correction that previously replaced a correct
 // model interval with TODAY; partial evidence must leave that result untouched.
 $gateway=(new ReflectionClass(app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
-$method=new ReflectionMethod($gateway,'resolveExactStatedSinglePeriod');
+$method=new ReflectionMethod($gateway,'resolveExactStatedPeriods');
 if (PHP_VERSION_ID<80100) $method->setAccessible(true);
 $understanding=['status'=>'understood','requirements'=>[['fields'=>['periods'],'values'=>['periods'=>[['kind'=>'date_range','start'=>'2026-03-01','end'=>'2026-09-27']]]]]];
 $corrected=$method->invoke($gateway,$understanding,['question'=>'2026年3月到今天，最高营业额是哪个门店'],'2026-09-27');

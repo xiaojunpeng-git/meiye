@@ -97,6 +97,8 @@ class PaQuery {
  public function __call($name,$args){self::$calls[]=[$name,$args];if(isset($args[0])&&is_callable($args[0]))$args[0]($this);if(in_array($name,['field','fieldRaw'],true))$this->field=$args[0];return $this;}
  public function find(){return ['amount_cents'=>self::$amount];}
  public function select(){return $this;}
+ // Service-customer supplements now use the ordered streaming source contract.
+ public function cursor(): Generator { yield from $this->toArray(); }
  public function toArray(){
   // This fixture has no completed service rows; supplementary visit/point
   // columns must be zero rather than invented from performance amounts.

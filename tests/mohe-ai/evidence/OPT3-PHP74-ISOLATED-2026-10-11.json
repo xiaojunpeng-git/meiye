@@ -1,0 +1,169 @@
+{
+  "recorded_at": "2026-10-11T13:35:03.165608+00:00",
+  "baseline_head": "89f54ce74a2ceeb72ebfa18c8195a53759cfddc5",
+  "runtime": {
+    "image": "mohe-app:local",
+    "image_id": "sha256:5d57fdefcba481a13461f840c4ff87c42298d575dbefc6c02bba8d5b09227c19",
+    "php": "7.4.33",
+    "pdo_drivers": [
+      "sqlite",
+      "mysql"
+    ],
+    "pcntl_available": false,
+    "concurrency_runner": "proc_open PHP_BINARY children with stdin barrier"
+  },
+  "isolation": {
+    "network": "none",
+    "source_mount": "read-only",
+    "root_filesystem": "read-only",
+    "writable_tmpfs": "/tmp",
+    "business_database_connection": false,
+    "application_bootstrap": false,
+    "other_containers_changed": false
+  },
+  "results": [
+    {
+      "kind": "syntax",
+      "path": "后端代码/app/services/ai/execution/AiRunStore.php",
+      "source_sha256": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in 后端代码/app/services/ai/execution/AiRunStore.php"
+    },
+    {
+      "kind": "syntax",
+      "path": "后端代码/app/services/ai/contract/AiIntentResultContract.php",
+      "source_sha256": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in 后端代码/app/services/ai/contract/AiIntentResultContract.php"
+    },
+    {
+      "kind": "syntax",
+      "path": "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php",
+      "source_sha256": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in 后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php"
+    },
+    {
+      "kind": "syntax",
+      "path": "tests/mohe-ai/opt3-context-relation-contract.php",
+      "source_sha256": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in tests/mohe-ai/opt3-context-relation-contract.php"
+    },
+    {
+      "kind": "syntax",
+      "path": "tests/mohe-ai/opt3-model-circuit.php",
+      "source_sha256": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in tests/mohe-ai/opt3-model-circuit.php"
+    },
+    {
+      "kind": "syntax",
+      "path": "tests/mohe-ai/state-admission-contract.php",
+      "source_sha256": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in tests/mohe-ai/state-admission-contract.php"
+    },
+    {
+      "kind": "fixture",
+      "path": "tests/mohe-ai/opt3-context-relation-contract.php",
+      "source_sha256": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "PASS OPT3 context relation contract checks=23"
+    },
+    {
+      "kind": "fixture",
+      "path": "tests/mohe-ai/state-admission-contract.php",
+      "source_sha256": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nPASS 6 admission/rate/diagnostic checks against actual transactional SQLite store."
+    },
+    {
+      "kind": "fixture",
+      "path": "tests/mohe-ai/opt3-model-circuit.php",
+      "source_sha256": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "PASS 51 transactional state checks (isolated SQLite; no production DB).\nPASS 132 state/model-circuit assertions, including independent-process half-open race."
+    },
+    {
+      "kind": "fixture",
+      "path": "tests/mohe-ai/management-gateway.php",
+      "source_sha256": "f9432a66877d1653a71837e7e02cfc2296b603c7092d876ee38f570ff71393ce",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "R6 management gateway: 36 checks PASS (SQLite, synthetic model/facts; not live acceptance)",
+      "business_source_sha256_at_check": "51e7e4ac78efce7bccaa402bd8d16df0d1ecff8e66e16db747e6f7258895a165"
+    },
+    {
+      "kind": "syntax",
+      "path": "后端代码/app/services/ai/AiGatewayServices.php",
+      "source_sha256": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in 后端代码/app/services/ai/AiGatewayServices.php",
+      "business_source_sha256_at_check": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca"
+    },
+    {
+      "kind": "syntax",
+      "path": "tests/mohe-ai/opt3-group-reconciliation.php",
+      "source_sha256": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in tests/mohe-ai/opt3-group-reconciliation.php",
+      "business_source_sha256_at_check": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca"
+    },
+    {
+      "kind": "syntax",
+      "path": "tests/mohe-ai/opt3-gateway-recovery.php",
+      "source_sha256": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "No syntax errors detected in tests/mohe-ai/opt3-gateway-recovery.php",
+      "business_source_sha256_at_check": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca"
+    },
+    {
+      "kind": "fixture",
+      "path": "tests/mohe-ai/opt3-group-reconciliation.php",
+      "source_sha256": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "PASS OPT3 grouped reconciliation: independent ownership, shared cleanup, topic metadata and missing-metric fences",
+      "business_source_sha256_at_check": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca"
+    },
+    {
+      "kind": "fixture",
+      "path": "tests/mohe-ai/opt3-gateway-recovery.php",
+      "source_sha256": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+      "source_unchanged_during_check": true,
+      "exit_code": 0,
+      "output": "PASS OPT3 gateway recovery: member topic, metric delta, failure relation and transport audit (synthetic)",
+      "business_source_sha256_at_check": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca"
+    }
+  ],
+  "previous_limitation": "Initial model-circuit fixture required pcntl; the maintained fixture now uses portable proc_open children and a shared SQLite barrier.",
+  "version_status": "Earlier fixed-source pass preserved; superseded by authorized recommendation and reference/date integration fixes. Final integration fingerprint pending.",
+  "final_gateway_sha256": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca",
+  "final_source_sha256": {
+    "后端代码/app/services/ai/execution/AiRunStore.php": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "tests/mohe-ai/opt3-context-relation-contract.php": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+    "tests/mohe-ai/opt3-model-circuit.php": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+    "tests/mohe-ai/state-admission-contract.php": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+    "tests/mohe-ai/management-gateway.php": "f9432a66877d1653a71837e7e02cfc2296b603c7092d876ee38f570ff71393ce",
+    "后端代码/app/services/ai/AiGatewayServices.php": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca",
+    "tests/mohe-ai/opt3-group-reconciliation.php": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+    "tests/mohe-ai/opt3-gateway-recovery.php": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab"
+  },
+  "all_recorded_test_source_hashes_match_current": false,
+  "supplemental_evidence": "OPT3-RECOMMENDATION-RECOVERY-2026-10-11.json"
+}

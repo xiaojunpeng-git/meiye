@@ -38,6 +38,11 @@ final class MemberDetailContinuationResolver
         // checked its signed read-view reference. Use the Reader-normalized
         // query carried by that replay; comparing it byte-for-byte with the
         // planner input would reject harmless normalization such as ranges.
+        // Legacy member_detail can enter directly, so it owns the same
+        // single-board guard as generic object details before unioning rows.
+        if (($view['query']['query_shape']??null)==='ranking'&&($request['ordinal']??null)!==null) {
+            ResultReferenceResolver::assertSingleOrdinalGroup($view);
+        }
         $rows=$this->populationRows($view);
         if ($rows===[]) throw new RuntimeException('AI_RESULT_REFERENCE_UNAVAILABLE');
         $target=$request['target']??null;$ordinal=$request['ordinal']??null;

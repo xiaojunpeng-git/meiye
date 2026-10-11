@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__.'/fixture-autoload.php';
+// Private reflection fixtures explicitly enable access on the production PHP 7.4 runtime.
 
 use app\services\ai\AiGatewayServices;
 use app\services\ai\contract\AiIntentUnderstandingContract;
@@ -65,6 +66,7 @@ $check(($second['selection_ref']??null)==='person:8','explicit ordinal stays ins
 $gatewayClass=new ReflectionClass(AiGatewayServices::class);
 $gateway=$gatewayClass->newInstanceWithoutConstructor();
 $separatePopulationDetail=$gatewayClass->getMethod('separatePopulationDetail');
+if (PHP_VERSION_ID<80100) $separatePopulationDetail->setAccessible(true);
 $compoundUnderstanding=['goal'=>'查看会员业绩前五名及详情','status'=>'understood','requirements'=>[
     ['id'=>'r1','meaning'=>'分析会员','fields'=>['object_kind','object_relation'],
         'values'=>['object_kind'=>'member','object_relation'=>'analysis']],
@@ -87,6 +89,7 @@ $personCompound['requirements'][0]['values']['object_kind']='person';
 $check(($personDetail['_ranking_object_kind']??null)==='person' && $unchangedPerson!==$personCompound,
     'person ranking detail is retained as registered presentation, not member assets');
 $compile=$gatewayClass->getMethod('compileObjectDetailContinuation');
+if (PHP_VERSION_ID<80100) $compile->setAccessible(true);
 $understanding=['goal'=>'继续查看','status'=>'understood','requirements'=>[[
     'id'=>'r1','meaning'=>'展开上一对象','fields'=>['object_detail'],
     'values'=>['object_detail'=>['view'=>'summary','target'=>'single','ordinal'=>null]],
@@ -103,8 +106,11 @@ $check(($compiled['kind']??null)==='plan'&&($query['query_shape']??null)==='summ
     'detail continuation skips binding and changes only ranking into stable-object summary');
 $readViewClass=new ReflectionClass(app\services\query\metric\MetricReadViewServices::class);
 $readView=$readViewClass->newInstanceWithoutConstructor();
-$readViewClass->getProperty('clock')->setValue($readView,static function():int { return strtotime('2026-09-25 12:00:00'); });
+$clockProperty=$readViewClass->getProperty('clock');
+if (PHP_VERSION_ID<80100) $clockProperty->setAccessible(true);
+$clockProperty->setValue($readView,static function():int { return strtotime('2026-09-25 12:00:00'); });
 $readerQuery=$readViewClass->getMethod('query');
+if (PHP_VERSION_ID<80100) $readerQuery->setAccessible(true);
 $check(($readerQuery->invoke($readView,$query)['metric_codes']??null)===$query['metric_codes'],
     'the Reader admits the exact registered six-column single-person detail profile');
 $forgedSix=$query;$forgedSix['metric_codes'][5]='service_people';
@@ -152,6 +158,7 @@ $expandedMany=$many;
 $expandedMany['query']['condition_set']=null;
 $expandedMany['results'][0]['ranking_detail_metrics']=[['metric_code'=>'staff_labor_yeji']];
 $localOrdinal=$gatewayClass->getMethod('localVerifiedOrdinalDetailUnderstanding');
+if (PHP_VERSION_ID<80100) $localOrdinal->setAccessible(true);
 $ordinalSafe=['schema_version'=>'sanitized-question-v2','question'=>'第二位具体看看',
     'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-25',
     'recent_questions'=>[],'evidence_messages'=>[['id'=>'current','text'=>'第二位具体看看']],
@@ -235,6 +242,7 @@ $check($compile->invoke($gateway,$newPeriodSet,['query'=>$storeQuery,'view'=>$st
 // referring to exactly the stores displayed by the signed ranking. The
 // returned query must read those IDs again through the normal Reader.
 $setValues=$gatewayClass->getMethod('compileVerifiedStoreSetValuesContinuation');
+if (PHP_VERSION_ID<80100) $setValues->setAccessible(true);
 $setQuestion='这两家上个月的消耗业绩分别是多少';
 $setSafe=['schema_version'=>'sanitized-question-v2','question'=>$setQuestion,
     'has_unresolved_conditions'=>false,'server_resolved_fields'=>[],'reference_date'=>'2026-09-25',
@@ -291,6 +299,7 @@ $check(($nextPlan['plan']['query']['store_ids']??null)===[3,4]
 // Closed grammar plus a registered metric must still use the signed set,
 // without another model call or a store-selection prompt.
 $localSetValues=$gatewayClass->getMethod('localVerifiedStoreSetValuesContinuation');
+if (PHP_VERSION_ID<80100) $localSetValues->setAccessible(true);
 $anchoredSource=['query'=>$mixedQuery,'view'=>['query'=>$mixedQuery,'results'=>[]],
     'meaning'=>$mixedPlan['_context_meaning']];
 $localThird=$localSetValues->invoke($gateway,$anchoredSource,$nextSafe,$setCaps,'screen','2026-09-25');
@@ -401,7 +410,9 @@ catch (RuntimeException $error) {$check($error->getMessage()==='AI_RESULT_REFERE
     'a stated object cannot overwrite the object proven by the previous result');}
 
 $progress=$gatewayClass->getMethod('progressText');
+if (PHP_VERSION_ID<80100) $progress->setAccessible(true);
 $outcome=(new ReflectionClass(app\services\ai\execution\AiRunStore::class))->getMethod('outcomeClass');
+if (PHP_VERSION_ID<80100) $outcome->setAccessible(true);
 foreach (['AI_OBJECT_DETAIL_SELECTION_REQUIRED','AI_OBJECT_DETAIL_NOT_READY'] as $reason) {
     $run=['status'=>'FAILED','reason'=>$reason];
     $check($progress->invoke($gateway,$run)!=='本次查询未完成，系统没有读取或计算数据，请稍后重试。'
@@ -423,6 +434,7 @@ foreach (['project','product'] as $kind) {
 // replays the exact existing population, rather than fabricating condition
 // criteria or issuing a fresh Reader query. No customer phrases are matched.
 $listCompile=$gatewayClass->getMethod('compileVerifiedPopulationPresentation');
+if (PHP_VERSION_ID<80100) $listCompile->setAccessible(true);
 $listMeaning=['status'=>'understood','topic_relation'=>'continuation','requirements'=>[[
     'fields'=>['operation','object_kind','object_relation'],
     'values'=>['operation'=>'condition_list','object_kind'=>'member','object_relation'=>'analysis']]]];

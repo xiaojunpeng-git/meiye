@@ -1,0 +1,72 @@
+{
+  "version": "OPT3-20261011-final-5c02b1cbf288",
+  "scope": "local browser only",
+  "turns": [
+    {
+      "question": "门店怎么样",
+      "guidance": true,
+      "supplement": "我想查本月实际业绩",
+      "answer_metric": "actual_performance",
+      "period": [
+        "2026-10-01",
+        "2026-10-11"
+      ],
+      "visible_amount_yuan": 1991304,
+      "passed": true
+    },
+    {
+      "question": "那消耗业绩呢",
+      "guidance": false,
+      "answer_metric": "consume_amount",
+      "period": [
+        "2026-10-01",
+        "2026-10-11"
+      ],
+      "visible_amount_yuan": 1582485,
+      "passed": true
+    },
+    {
+      "question": "按门店排名",
+      "guidance": true,
+      "supplement": "业绩较高",
+      "clarified_only": "rank_direction",
+      "answer_metric": "consume_amount",
+      "period": [
+        "2026-10-01",
+        "2026-10-11"
+      ],
+      "ranking_direction": "top",
+      "result_rows": 20,
+      "passed": true
+    },
+    {
+      "question": "最低的三家",
+      "guidance": false,
+      "answer_metric": "consume_amount",
+      "period": [
+        "2026-10-01",
+        "2026-10-11"
+      ],
+      "ranking_direction": "bottom",
+      "result_rows": 3,
+      "passed": true
+    },
+    {
+      "question": "今年消费4980有多少人",
+      "guidance": false,
+      "new_topic": true,
+      "answer_metric": "cash_performance",
+      "period": [
+        "2026-01-01",
+        "2026-10-11"
+      ],
+      "amount_operator": "eq",
+      "amount_cents": 498000,
+      "result_count": 1,
+      "passed": true
+    }
+  ],
+  "completed_at": "2026-10-11T15:20:27.655Z",
+  "passed": 5,
+  "total": 5
+}

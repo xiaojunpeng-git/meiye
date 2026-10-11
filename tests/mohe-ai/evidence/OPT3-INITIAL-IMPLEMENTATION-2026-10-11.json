@@ -1,0 +1,96 @@
+{
+  "title": "第3轮：魔核AI上下文衔接与查询稳定性优化",
+  "recorded_at": "2026-10-11T13:35:49.073083+00:00",
+  "baseline_head": "89f54ce74a2ceeb72ebfa18c8195a53759cfddc5",
+  "status": "implemented; real local 5x10 regression in progress",
+  "scope": "local platform workspace; customer production unchanged",
+  "files": {
+    "frontend": [
+      "前端代码/shared/mohe-ai/browser-entry.mjs"
+    ],
+    "backend": [
+      "后端代码/app/services/ai/AiGatewayServices.php",
+      "后端代码/app/services/ai/contract/AiIntentResultContract.php",
+      "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php",
+      "后端代码/app/services/ai/execution/AiRunStore.php",
+      "后端代码/app/services/ai/model/SiliconFlowClient.php"
+    ],
+    "migrations": [],
+    "tests": [
+      "tests/mohe-ai/browser-entry-contract.mjs",
+      "tests/mohe-ai/state-admission-contract.php",
+      "tests/mohe-ai/management-gateway.php",
+      "tests/mohe-ai/run-all.sh",
+      "tests/mohe-ai/opt3-browser-failure-contract.mjs",
+      "tests/mohe-ai/opt3-context-relation-contract.php",
+      "tests/mohe-ai/opt3-gateway-recovery.php",
+      "tests/mohe-ai/opt3-model-circuit.php",
+      "tests/mohe-ai/opt3-group-reconciliation.php",
+      "tests/mohe-ai/opt3-local-regression.php"
+    ],
+    "engineering_scripts": [],
+    "generated_builds": []
+  },
+  "file_sha256": {
+    "前端代码/shared/mohe-ai/browser-entry.mjs": "71ed2ace30e322720173540e5565d80a082bb3a5b83d0b4af34651144f9fb220",
+    "后端代码/app/services/ai/AiGatewayServices.php": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+    "tests/mohe-ai/browser-entry-contract.mjs": "5e367549ca4573d66880c4f4c9218c9ea979a64de51082c481712141efb0e6a0",
+    "tests/mohe-ai/state-admission-contract.php": "592df2291f9b5fe262cd46ccbba9e0344af679efd47db270c5b3ed4afe157514",
+    "tests/mohe-ai/management-gateway.php": "f9432a66877d1653a71837e7e02cfc2296b603c7092d876ee38f570ff71393ce",
+    "tests/mohe-ai/run-all.sh": "e2cfb2fcea18b3a663fdffa857b19a74e8ff92007a76f4d15238188c93e44f2c",
+    "tests/mohe-ai/opt3-browser-failure-contract.mjs": "6c9be4d42e083a739a1482c013cf26f35721e0aef2d96ea4d078f2a265e199de",
+    "tests/mohe-ai/opt3-context-relation-contract.php": "0855cfe7e6ae9f214e68e6acfd40221385774335f4291e12099e4ca6fef84b73",
+    "tests/mohe-ai/opt3-gateway-recovery.php": "01138c02a2d00e12c290cb192669bc1631c7e1a2178a8b23612813d9d8b623ab",
+    "tests/mohe-ai/opt3-model-circuit.php": "c3072b6ae55802171e1fd835241fb85f3e262ec259986d94f2f4e08965831e0d",
+    "tests/mohe-ai/opt3-group-reconciliation.php": "d36e9f96cb1a6c2ead555b2510c26865b9744e06452841447ffa294f12d94233",
+    "tests/mohe-ai/opt3-local-regression.php": "1252bfa74d18745ddc48410170debd6c4845bfe8488f2c7c7d2b72fc92a5cab7"
+  },
+  "change_fingerprint_sha256": "f4c510fbe15103e4d427ffeab01f520dd85ba8537884542fb572ec9fff9ce604",
+  "fingerprint_method": "SHA256 of ordered path, NUL, HEAD bytes (or <new-file>), NUL, working bytes per listed file",
+  "comments_updated_in": [
+    "前端代码/shared/mohe-ai/browser-entry.mjs",
+    "后端代码/app/services/ai/AiGatewayServices.php",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php",
+    "后端代码/app/services/ai/execution/AiRunStore.php",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php"
+  ],
+  "removed_replaced_logic": [
+    "Run admission circuit based on general failed Run outcomes; replaced with model transport attempt circuit at actual model call",
+    "Unconditional context reset for every AI_INTENT_UNRESOLVED outcome; reset now requires accepted new-topic relation",
+    "Workspace fixed recovery menu and unnecessary recovery origin for terminal technical failures; current drawer and clarification expiry behavior retained"
+  ],
+  "validation": {
+    "php74": "OPT3-PHP74-ISOLATED-2026-10-11.json",
+    "remaining_suites": "OPT3-REMAINING-SUITES-2026-10-11.json",
+    "local_baseline": "OPT3-LOCAL-LIVE-BASELINE-2026-10-11.json",
+    "live_5x10": "running",
+    "known_legacy_failures": [
+      {
+        "suite": "r5-holdout",
+        "result": "27 matched / 13 mismatched, scope_adjudicated 8",
+        "prior_identical_evidence": [
+          "R54-MEMBER-COUNT-LOCAL-FIX-SELFTEST-2026-09-29.md",
+          "R59-local-semantic-clarification-2026-10-01.md"
+        ]
+      },
+      {
+        "suite": "mobile-ai-entry-transport-contract",
+        "result": "same obsolete static polling-text assertion fails at HEAD"
+      },
+      {
+        "suite": "order-center-unified-export-contract",
+        "result": "same 3 static assertions fail at HEAD"
+      }
+    ]
+  },
+  "product_manager_accepted": false,
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "unrelated_changes": "Existing staged and unstaged changes outside this explicit file list were preserved."
+}

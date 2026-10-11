@@ -1,0 +1,48 @@
+{
+  "recorded_at": "2026-10-11T13:34:05.836279+00:00",
+  "scope": "local source fixed before real 5x10 regression; no commit or remote deployment",
+  "baseline_head": "89f54ce74a2ceeb72ebfa18c8195a53759cfddc5",
+  "source_sha256": {
+    "后端代码/app/services/ai/AiGatewayServices.php": "82382761f9584ec2ab561a4b0f61bc1fb2d097dbbc0364d91c370c6b1cac9eca",
+    "后端代码/app/services/ai/execution/AiRunStore.php": "17d30c0444e9a4d526121773bd602b5afa23e29ecb94913167623ef851e45fca",
+    "后端代码/app/services/ai/contract/AiIntentResultContract.php": "4310f8b0a482430456f7754f655a311281c97e3bddb5b8870618ab1b21c98fad",
+    "后端代码/app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+    "后端代码/app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+    "前端代码/shared/mohe-ai/browser-entry.mjs": "71ed2ace30e322720173540e5565d80a082bb3a5b83d0b4af34651144f9fb220"
+  },
+  "local_worker_reload": {
+    "verified_no_active_or_held_runs": true,
+    "command": "docker restart --time 35 mohe-ai-execution-worker mohe-ai-supervisor",
+    "processes": [
+      {
+        "container": "/mohe-ai-execution-worker",
+        "status": "running",
+        "started_at": "2026-10-11T13:34:31.741210818Z"
+      },
+      {
+        "container": "/mohe-ai-supervisor",
+        "status": "running",
+        "started_at": "2026-10-11T13:35:06.980627878Z"
+      }
+    ]
+  },
+  "existing_worktree_dependencies_observed_during_live_test": {
+    "后端代码/app/services/metric/MetricDictionaryServices.php": {
+      "sha256": "e56ca10e7fb1d159b820024971fdaea3a2018cbd2c42eb6bc236ff644dc058a7",
+      "mtime": "2026-10-11T06:23:49.918605+00:00"
+    },
+    "后端代码/app/services/query/metric/MetricDefinitionRegistry.php": {
+      "sha256": "b107d93ad729bf6b8a5eeadddafc9e409c7e58c43c7e1aa68a6f4fe0ae967c59",
+      "mtime": "2026-10-07T18:26:37.277499+00:00"
+    },
+    "后端代码/app/services/query/metric/RegisteredMetricReadServices.php": {
+      "sha256": "50313aedae96c4bd907b2d7dd5d5f5e7113582cc9297e686a920c3dc48fd9e6e",
+      "mtime": "2026-10-08T17:11:44.058121+00:00"
+    },
+    "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php": {
+      "sha256": "f400d1424c15595b57f5c811d7337becc8b14b430bf5b84b2b2602792138e4e5",
+      "mtime": "2026-10-11T04:46:17.867592+00:00"
+    }
+  },
+  "dependency_note": "These pre-existing dirty dependency files are not modified or owned by OPT3 implementation; record their active fingerprints separately from this change list."
+}

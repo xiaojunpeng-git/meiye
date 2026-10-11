@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-10-11T22:30:01.688885+08:00",
+  "scope": "Test driver only; no business source or live query performed",
+  "source_sha256": {
+    "tests/mohe-ai/opt3-local-regression.php": "66ae4f0e6f298a0ad0fc3f9241a25505b474a1b25816d6f55538560672019e6d",
+    "tests/mohe-ai/opt3-local-driver-protocol.php": "22137b79f1c49ce21fd155d43e2552d12f8791c4ebdc25dea960ddddba10b47f",
+    "tests/mohe-ai/run-all.sh": "4c64cedb92910ac8b60cce4f03852fd8730567f58d74696dffb3507b71c9e37a"
+  },
+  "verification": {
+    "runtime": "PHP 7.4 mohe-app:local, no network, read-only source mount",
+    "command": "php tests/mohe-ai/opt3-local-driver-protocol.php",
+    "exit_code": 0,
+    "checks": 24,
+    "result": "PASS"
+  },
+  "changes": [
+    "Submit a clarification id/step_revision/intent_revision only once, then poll unchanged asynchronous acknowledgement until terminal or a genuinely new revision.",
+    "Supply scenario date, metric, operation and retained condition in semantic free-text replies; structured date fields receive the actual window.",
+    "Record failed earlier source turns explicitly for elliptical questions, without turning failed Runs into PASS.",
+    "No business identity chosen arbitrarily; unsupported missing business identity fails the test honestly.",
+    "Provider dependency failures require an actual terminal transport diagnostic; Reader deadlines stay distinct.",
+    "Track all three changed context resolver hashes and record driver hash passed by the local launch command.",
+    "Protocol regression is registered in run-all.sh.",
+    "Record the actual generated semantic supplement from public fixture data; customer names, phone numbers and provider text remain excluded."
+  ],
+  "raw_evidence_preserved": [
+    "OPT3-local-20261011-213529-ed23ef.json",
+    "OPT3-local-20261011-220706-fcc67f.json"
+  ],
+  "new_full_run": "awaiting parent source freeze and worker reload"
+}

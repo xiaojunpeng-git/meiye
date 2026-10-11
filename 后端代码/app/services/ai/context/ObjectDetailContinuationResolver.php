@@ -43,6 +43,11 @@ final class ObjectDetailContinuationResolver
             ||!in_array($request['target']??null,['single','set'],true)||($request['view']??null)!=='summary') {
             throw new RuntimeException('AI_OBJECT_DETAIL_NOT_READY');
         }
+        // Only whole-set presentation may union boards. A numbered detail
+        // must identify one board before any rows are flattened or deduplicated.
+        if ($shape==='ranking'&&($request['ordinal']??null)!==null) {
+            ResultReferenceResolver::assertSingleOrdinalGroup($view);
+        }
         $rows=$shape==='ranking'?$this->rankingRows($view,$kind):$this->selectedRows($effective,$view,$kind);
         // A plural request denotes the entire displayed ranked population,
         // never its first row. Identities and order come only from this view.
