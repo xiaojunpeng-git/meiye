@@ -285,6 +285,8 @@ class JobPositionPolicyServices extends BaseServices
      */
     public function savePosition(array $data, array $adminInfo, array $requestCtx): array
     {
+        // 已授权岗位策略功能即可保存；仅取消额外超管限制，不放宽其他组织写命令。
+        app()->make(OrganizationWorkspaceWriteGate::class)->assertJobPositionSavePermission($adminInfo);
         $positionId = (int)($data['id'] ?? 0);
         $name = trim((string)($data['name'] ?? ''));
         $status = (int)($data['status'] ?? 1) === 1 ? 1 : 0;
@@ -428,7 +430,8 @@ class JobPositionPolicyServices extends BaseServices
                         'use_platform' => $usePlatform,
                     ],
                 ];
-            }
+            },
+            false
         );
     }
 
