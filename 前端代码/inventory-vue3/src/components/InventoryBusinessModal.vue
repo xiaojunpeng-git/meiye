@@ -8,6 +8,7 @@ import { inventoryStatusLabel } from '../statusLabels'
 import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorksheet'
 import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, sumCountBookQuantities, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
+import { formatBatchNumber } from '../batchNumberDisplay.js'
 
 const props = defineProps({
   pageKey: { type: String, default: '' },
@@ -238,12 +239,12 @@ const productRows = computed(() => {
   if (['inbound', 'outbound'].includes(props.pageKey)) {
     return selectedRows.value.map((row) => props.pageKey === 'inbound'
       ? [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.batch_no, row.manufactured_date, row.expire_date, row.quantity, row.unit_cost, row.detail_remark, '']
-      : [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', '系统优先扣减最早到期的可用批次', '提交后返回', row.quantity, '系统计算', row.detail_remark, '系统计算'])
+      : [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.available_quantity ?? '-', '系统优先扣减最早到期的可用批次', '提交后返回', row.quantity, '系统计算', row.detail_remark, '系统计算'])
   }
   if (props.pageKey === 'count') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.barcode, row.book_quantity, row.counted_quantity, Number(row.counted_quantity || 0) - Number(row.book_quantity || 0), row.surplus_batch_no, row.surplus_unit_cost, row.surplus_manufactured_date, row.surplus_expire_date])
   if (props.pageKey === 'request') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.available_quantity || '-', row.quantity, row.detail_remark])
   if (props.pageKey === 'transfer') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', '发货时优先扣减最早到期的可用批次', '收货时入账', row.quantity, row.detail_remark])
-  if (props.pageKey === 'usage') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.quantity, '系统优先扣减最早到期的可用批次', row.detail_remark])
+  if (props.pageKey === 'usage') return selectedRows.value.map((row) => [row.product_id, row.product_name, row.sku_name, row.stock_unit || '-', row.available_quantity ?? '-', row.quantity, '系统优先扣减最早到期的可用批次', row.detail_remark])
   return []
 })
 
@@ -253,8 +254,9 @@ const columns = computed(() => {
   if (props.pageKey === 'count') return [...product, '商品条码', '账面库存', '实盘库存', '库存盈亏', '盘盈批次号', '盘盈单价', '生产日期', '到期日']
   if (props.pageKey === 'request') return [...product, '当前库存', '申请数量', '明细备注']
   if (props.pageKey === 'transfer') return [...product, '发货批次', '收货状态', '调拨数量', '明细备注']
-  if (props.pageKey === 'usage') return [...product, '领用数量', '成本单价', '明细备注']
-  if (props.pageKey === 'outbound') return [...product, '扣减批次', '到期日', '出库数量', '成本单价', '明细备注', '成本金额']
+  // 总库存与业务录入数量分列；禁止用领用/出库数量或单个批次替代总库存。
+  if (props.pageKey === 'usage') return [...product, '库存数量', '领用数量', '成本单价', '明细备注']
+  if (props.pageKey === 'outbound') return [...product, '库存数量', '扣减批次', '到期日', '出库数量', '成本单价', '明细备注', '成本金额']
   return [...product, ...batch, '入库数量', '入库单价', '明细备注', '入库金额']
 })
 
@@ -290,6 +292,8 @@ function applyBulkValues() {
   selectedRows.value.forEach((row, index) => {
     if (!selectedLineIndexes.value.includes(index)) return
     bulkFields.value.forEach((field) => {
+      // 同一单可混合两种商品；批量填写不得给免录行补造日期或覆盖历史批次身份。
+      if (Number(row.no_expiry_management) === 1 && ['batch_no', 'manufactured_date', 'expire_date', 'surplus_batch_no', 'surplus_manufactured_date', 'surplus_expire_date'].includes(field.key)) return
       const value = values[field.key]
       if (value !== '' && value !== undefined && value !== null) {
         row[field.key] = value
@@ -523,7 +527,7 @@ async function acceptCatalogRows(rows) {
   catalogError.value = ''
   const selectedSkuIds = new Set(selectedRows.value.map((item) => Number(item.sku_id)))
   for (const row of rows) {
-    if (props.pageKey === 'count' && Array.isArray(row.count_batches) && row.count_batches.length) {
+    if (props.pageKey === 'count' && Number(row.no_expiry_management) !== 1 && Array.isArray(row.count_batches) && row.count_batches.length) {
       // 选品以仓库当前批次为粒度；相同 SKU 的每个批次只补一次，保留已经录入的实盘数。
       if (selectedRows.value.some((item) => Number(item.sku_id) === Number(row.sku_id) && item.count_mode !== 'BATCH')) {
         catalogError.value = `「${row.product_name}」已有按总量盘点的行，请删除该行后再加载库存批次。`
@@ -546,8 +550,9 @@ async function acceptCatalogRows(rows) {
     if (props.pageKey === 'count') {
       // 商品目录已经按当前库存主体返回权威可用数；避免对每个 SKU 再发一次库存查询。
       // 手工重复选择形成独立待填批次，不能复制商品总库存到每个批次。
-      selected.count_mode = 'BATCH'
-      selected.book_quantity = '0'
+      // 不管理有效期按规格总量盘点；内部成本层由服务端保留，不要求员工挑选系统批次。
+      selected.count_mode = Number(row.no_expiry_management) === 1 ? 'SKU' : 'BATCH'
+      selected.book_quantity = selected.count_mode === 'SKU' ? selected.available_quantity : '0'
       selected.counted_quantity = ''
     }
     selectedRows.value.push(selected)
@@ -636,6 +641,15 @@ async function loadCurrentInventoryCountRows(zeroCounted = false) {
     const catalog = await allCountCatalog(true, true)
     const additions = []
     for (const sku of catalog) {
+      // 失效目录仅能按真实批次盘亏；保留身份不意味着让员工补录有效期资料。
+      if (Number(sku.no_expiry_management) === 1 && !sku.count_requires_batch_identity) {
+        const row = countDraftRow(sku)
+        if (zeroCounted) row.counted_quantity = '0'
+        additions.push(row)
+        // 免录商品虽然不展开批次，也受同一明细上限保护，不能绕过大单限制。
+        if (additions.length > 10000) throw new Error('本次库存批次超过 10000 行，请分批盘点；未导入任何行。')
+        continue
+      }
       const batches = Array.isArray(sku.count_batches) ? sku.count_batches : []
       for (const batch of batches) {
         const row = countBatchRow(sku, batch)
@@ -668,7 +682,7 @@ async function loadAllCountProducts() {
   try {
     const catalog = await allCountCatalog(true)
     // 有库存按真实批次展开，无库存保留待填写行；不混入上一次盘点列表。
-    const additions = catalog.flatMap((row) => Array.isArray(row.count_batches) && row.count_batches.length
+    const additions = catalog.flatMap((row) => Number(row.no_expiry_management) !== 1 && Array.isArray(row.count_batches) && row.count_batches.length
         ? row.count_batches.map((batch) => countBatchRow(row, batch)) : [countDraftRow(row)])
     replaceCountRows(additions)
     countProgress.value = `已加载 ${catalog.length} 个有效规格、${additions.length} 行；原列表已替换。`
@@ -718,7 +732,7 @@ async function importCountRows(event) {
       if (cells[9] && !/^\d+(?:\.\d{1,2})?$/.test(cells[9])) throw new Error(`第 ${rowNumber} 行盘盈单价无效。`)
       if ([cells[10], cells[11]].some((value) => value && !/^\d{4}-\d{2}-\d{2}$/.test(value))) throw new Error(`第 ${rowNumber} 行日期格式无效。`)
       const batch = (sku.count_batches || []).find((item) => String(item.batch_no) === String(cells[8]))
-      const row = { ...(existing.get(identity) || countDraftRow(sku)), count_mode: mode,
+      const row = { ...(existing.get(identity) || countDraftRow(sku)), no_expiry_management: Number(sku.no_expiry_management || 0), count_mode: mode,
         book_quantity: String(mode === 'BATCH' ? (batch?.quantity ?? 0) : (sku.available_quantity ?? 0)), counted_quantity: cells[6], surplus_batch_no: cells[8],
         surplus_unit_cost: cells[9], surplus_manufactured_date: cells[10], surplus_expire_date: cells[11] }
       matched.push(row)
@@ -1077,8 +1091,9 @@ async function submitInbound() {
       idempotency_key: inboundIdempotencyKey(), business_date: inboundDate.value, remark: inboundRemark.value,
       lines: selectedRows.value.map((row) => ({
         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique,
-        batch_no: row.batch_no, quantity: row.quantity, unit_cost: row.unit_cost,
-        manufactured_date: row.manufactured_date, expire_date: row.expire_date, detail_remark: String(row.detail_remark || '')
+        batch_no: Number(row.no_expiry_management) === 1 ? '' : row.batch_no, quantity: row.quantity, unit_cost: row.unit_cost,
+        manufactured_date: Number(row.no_expiry_management) === 1 ? '' : row.manufactured_date,
+        expire_date: Number(row.no_expiry_management) === 1 ? '' : row.expire_date, detail_remark: String(row.detail_remark || '')
       }))
     }
     if (isPlatformHeadquarters.value) {
@@ -1254,24 +1269,24 @@ function submitPrimaryEditor() {
           <template v-else-if="isDetail">
             <template v-if="isInboundOutboundDetail && detail?.document">
               <div class="detail-meta"><span>入库单号：<b>{{ detail.document.order_sn || '历史入库记录' }}</b></span><span>库存仓：{{ detail.document.location_name }}</span><span>后续出库：{{ detail.document.outbound_count || 0 }} 条</span></div>
-              <section class="line-section"><header><div><h3>实际出库记录</h3><p>这里只显示该入库批次后续已生效且未被作废的出库记录。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>出库日期</th><th>出库单号</th><th>出库类型</th><th>商品</th><th>规格</th><th>批次号</th><th>出库数量</th><th>单位</th><th>出库时间</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="9" class="modal-empty">该入库批次目前没有出库记录</td></tr><tr v-for="line in detail.lines || []" :key="line.movement_fact_id"><td>{{ line.business_date }}</td><td>{{ line.order_sn }}</td><td>{{ line.outbound_type_name }}</td><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.operation_at ? new Date(Number(line.operation_at) * 1000).toLocaleString() : '-' }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>实际出库记录</h3><p>这里只显示该入库批次后续已生效且未被作废的出库记录。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>出库日期</th><th>出库单号</th><th>出库类型</th><th>商品</th><th>规格</th><th>批次号</th><th>出库数量</th><th>单位</th><th>出库时间</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="9" class="modal-empty">该入库批次目前没有出库记录</td></tr><tr v-for="line in detail.lines || []" :key="line.movement_fact_id"><td>{{ line.business_date }}</td><td>{{ line.order_sn }}</td><td>{{ line.outbound_type_name }}</td><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ formatBatchNumber(line.batch_no) }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.operation_at ? new Date(Number(line.operation_at) * 1000).toLocaleString() : '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'inbound' && detail?.document">
               <div class="detail-meta"><span>入库单号：<b>{{ detail.document.order_sn }}</b></span><span>入库日期：{{ detail.document.business_date }}</span><span>入库时间：{{ detail.document.operation_at || detail.document.recorded_at ? new Date(Number(detail.document.operation_at || detail.document.recorded_at) * 1000).toLocaleString() : '-' }}</span><span>入库主体：{{ detail.document.location_name }}</span></div>
-              <section class="line-section"><header><div><h3>入库商品</h3><p>明细由已结算入库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次号</th><th>生产日期</th><th>到期日</th><th>入库数量</th><th>库存单位</th><th>入库单价</th><th>明细备注</th><th>入库金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该入库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>入库商品</h3><p>明细由已结算入库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>批次号</th><th>生产日期</th><th>到期日</th><th>入库数量</th><th>库存单位</th><th>入库单价</th><th>明细备注</th><th>入库金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该入库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ formatBatchNumber(line.batch_no) }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'outbound' && detail?.document">
               <div class="detail-meta"><span>出库类型：{{ detail.document.order_type_name || '手工出库' }}</span><span>出库对象：{{ detail.document.outbound_recipient || '-' }}</span></div>
               <div class="detail-meta"><span>出库单号：<b>{{ detail.document.order_sn }}</b></span><span>出库日期：{{ detail.document.business_date }}</span><span>出库时间：{{ detail.document.recorded_at ? new Date(Number(detail.document.recorded_at) * 1000).toLocaleString() : '-' }}</span><span>出库主体：{{ detail.document.location_name }}</span></div>
-              <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>成本单价</th><th>明细备注</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.batch_no }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>出库商品</h3><p>明细由已结算出库事实生成，不可在详情中修改。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>扣减批次</th><th>生产日期</th><th>到期日</th><th>出库数量</th><th>库存单位</th><th>成本单价</th><th>明细备注</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="10" class="modal-empty">该出库单没有已结算明细</td></tr><tr v-for="(line, index) in detail.lines" :key="index"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ formatBatchNumber(line.batch_no) }}</td><td>{{ line.manufactured_date }}</td><td>{{ line.expire_date }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit }}</td><td>{{ line.unit_cost_cents === null ? '-' : `¥${(Number(line.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ line.detail_remark || '-' }}</td><td>{{ line.cost_amount_cents === null ? '-' : `¥${(Number(line.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'count' && detail?.document">
               <div class="detail-meta"><span>盘点单号：<b>{{ detail.document.order_sn || '-' }}</b></span><span>库存仓：{{ detail.document.location_name || scopeName }}</span><span>盘点日期：{{ detail.document.count_date || '-' }}</span><span>盘点状态：{{ detailStatus(detail.document) }}</span></div>
-              <section class="line-section"><header><div><h3>盘点明细</h3><p>{{ detail.document.remark || '盘点数据已确认，明细仅供查看。' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>库存单位</th><th>盘盈批次号</th><th>盘盈单价</th><th>金额</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="12" class="modal-empty">该盘点单没有商品明细</td></tr><tr v-for="line in detail.lines || []" :key="line.id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity }}</td><td>{{ line.difference_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost_cents === null || line.surplus_unit_cost_cents === undefined ? '-' : `¥${(Number(line.surplus_unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ countAmount(line.change_amount_cents) }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>盘点明细</h3><p>{{ detail.document.remark || '盘点数据已确认，明细仅供查看。' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>库存单位</th><th>盘盈批次号</th><th>盘盈单价</th><th>金额</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="12" class="modal-empty">该盘点单没有商品明细</td></tr><tr v-for="line in detail.lines || []" :key="line.id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity }}</td><td>{{ line.difference_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ formatBatchNumber(line.surplus_batch_no) }}</td><td>{{ line.surplus_unit_cost_cents === null || line.surplus_unit_cost_cents === undefined ? '-' : `¥${(Number(line.surplus_unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ countAmount(line.change_amount_cents) }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="isCountDraftDetail && detail?.draft_id">
               <div class="detail-meta"><span>草稿编号：<b>草稿-{{ detail.draft_id }}</b></span><span>盘点日期：未完成盘点</span><span>业务日期：{{ detail.business_date || '-' }}</span><span>状态：草稿</span><span>备注：{{ detail.remark || '-' }}</span></div>
-              <section class="line-section"><header><div><h3>草稿明细</h3><p>保存的数据仅供查看；点击编辑后才能继续填写或完成盘点。</p></div><button class="modal-primary" @click="emit('edit-count-draft')">编辑草稿</button></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>单位</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-for="(line, index) in detail.lines || []" :key="`${line.sku_id}-${index}`"><td>{{ line.product_name || '-' }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity === '' ? '未填写' : line.counted_quantity }}</td><td>{{ line.counted_quantity === '' ? '-' : Number(line.counted_quantity) - Number(line.book_quantity) }}</td><td>{{ line.surplus_batch_no || '-' }}</td><td>{{ line.surplus_unit_cost || '-' }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>草稿明细</h3><p>保存的数据仅供查看；点击编辑后才能继续填写或完成盘点。</p></div><button class="modal-primary" @click="emit('edit-count-draft')">编辑草稿</button></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>单位</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-for="(line, index) in detail.lines || []" :key="`${line.sku_id}-${index}`"><td>{{ line.product_name || '-' }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity === '' ? '未填写' : line.counted_quantity }}</td><td>{{ line.counted_quantity === '' ? '-' : Number(line.counted_quantity) - Number(line.book_quantity) }}</td><td>{{ formatBatchNumber(line.surplus_batch_no) }}</td><td>{{ line.surplus_unit_cost || '-' }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'usage' && detail?.document">
               <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot || '未关联项目' }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>
@@ -1283,9 +1298,9 @@ function submitPrimaryEditor() {
             </template>
             <template v-else-if="pageKey === 'stock' && detail?.product">
               <div class="detail-meta"><span>商品：<b>{{ detail.product.product_name }}</b></span><span>单位：{{ detail.product.stock_unit }}</span><span>规格：{{ detail.product.sku_name || '默认规格' }}</span><span>总可用库存：<b>{{ detail.total_available_quantity }} {{ detail.product.stock_unit }}</b></span><span>库存对账：{{ detail.reconciliation?.status === 'MATCHED' ? '正常' : '异常' }}</span></div>
-              <section class="line-section"><header><div><h3>当前批次库存</h3><p>总可用库存由服务端按当前有效批次余额汇总并完成对账。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>仓库</th><th>批号</th><th>当前剩余库存</th><th>正式入库日</th><th>生产日期</th><th>到期日</th><th>单位成本</th><th>库存金额</th></tr></thead><tbody><tr v-if="!detail.batches?.length"><td colspan="8" class="modal-empty">暂无批次库存</td></tr><tr v-for="batch in detail.batches" :key="batch.batch_id"><td>{{ batch.location_name }}</td><td>{{ batch.batch_no || '-' }}</td><td>{{ batch.available_quantity }} {{ batch.stock_unit }}</td><td>{{ batch.received_date || '-' }}</td><td>{{ batch.manufactured_date || '-' }}</td><td>{{ batch.expire_date || '-' }}</td><td>{{ batch.unit_cost === null ? '-' : `¥${batch.unit_cost}` }}</td><td>{{ batch.inventory_amount_cents === null ? '-' : `¥${(Number(batch.inventory_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>当前批次库存</h3><p>总可用库存由服务端按当前有效批次余额汇总并完成对账。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>仓库</th><th>批号</th><th>当前剩余库存</th><th>正式入库日</th><th>生产日期</th><th>到期日</th><th>单位成本</th><th>库存金额</th></tr></thead><tbody><tr v-if="!detail.batches?.length"><td colspan="8" class="modal-empty">暂无批次库存</td></tr><tr v-for="batch in detail.batches" :key="batch.batch_id"><td>{{ batch.location_name }}</td><td>{{ formatBatchNumber(batch.batch_no) }}</td><td>{{ batch.available_quantity }} {{ batch.stock_unit }}</td><td>{{ batch.received_date || '-' }}</td><td>{{ batch.manufactured_date || '-' }}</td><td>{{ batch.expire_date || '-' }}</td><td>{{ batch.unit_cost === null ? '-' : `¥${batch.unit_cost}` }}</td><td>{{ batch.inventory_amount_cents === null ? '-' : `¥${(Number(batch.inventory_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
               <!-- 流水标签由后端按已授权业务快照解析；技术来源 ID 仅用于追溯，不作为中文明细展示。 -->
-              <section class="line-section"><header><div><h3>出入库流水</h3><p>仅展示当前商品最近 200 条已结算批次事实；冲销流水保留原流水编号。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>业务日期</th><th>单据号</th><th>批号</th><th>生产日期</th><th>到期日</th><th>业务类型</th><th>方向</th><th>数量</th><th>单位</th><th>来源明细</th><th>冲销关系</th><th>单位成本</th><th>发生仓库</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.movements?.length"><td colspan="14" class="modal-empty">暂无出入库流水</td></tr><tr v-for="movement in detail.movements" :key="movement.id"><td>{{ movement.business_date }}</td><td>{{ movement.order_sn }}</td><td>{{ movement.batch_no || '-' }}</td><td>{{ movement.manufactured_date || '-' }}</td><td>{{ movement.expire_date || '-' }}</td><td>{{ movement.source_type_name || '其他库存业务' }}</td><td>{{ Number(movement.direction) > 0 ? '入库' : '出库' }}</td><td>{{ formatQuantity(movement.quantity_units, movement.quantity_scale) }}</td><td>{{ movement.stock_unit || detail.product.stock_unit }}</td><td>{{ movement.source_detail_name || '历史业务明细' }}</td><td>{{ Number(movement.reversal_of || 0) > 0 ? `冲销流水 #${movement.reversal_of}` : '-' }}</td><td>{{ movement.unit_cost_cents === null ? '-' : `¥${(Number(movement.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ movement.location_name }}</td><td>{{ movement.cost_amount_cents === null ? '-' : `¥${(Number(movement.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>出入库流水</h3><p>仅展示当前商品最近 200 条已结算批次事实；冲销流水保留原流水编号。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>业务日期</th><th>单据号</th><th>批号</th><th>生产日期</th><th>到期日</th><th>业务类型</th><th>方向</th><th>数量</th><th>单位</th><th>来源明细</th><th>冲销关系</th><th>单位成本</th><th>发生仓库</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.movements?.length"><td colspan="14" class="modal-empty">暂无出入库流水</td></tr><tr v-for="movement in detail.movements" :key="movement.id"><td>{{ movement.business_date }}</td><td>{{ movement.order_sn }}</td><td>{{ formatBatchNumber(movement.batch_no) }}</td><td>{{ movement.manufactured_date || '-' }}</td><td>{{ movement.expire_date || '-' }}</td><td>{{ movement.source_type_name || '其他库存业务' }}</td><td>{{ Number(movement.direction) > 0 ? '入库' : '出库' }}</td><td>{{ formatQuantity(movement.quantity_units, movement.quantity_scale) }}</td><td>{{ movement.stock_unit || detail.product.stock_unit }}</td><td>{{ movement.source_detail_name || '历史业务明细' }}</td><td>{{ Number(movement.reversal_of || 0) > 0 ? `冲销流水 #${movement.reversal_of}` : '-' }}</td><td>{{ movement.unit_cost_cents === null ? '-' : `¥${(Number(movement.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ movement.location_name }}</td><td>{{ movement.cost_amount_cents === null ? '-' : `¥${(Number(movement.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'request' && detail?.document">
               <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span v-if="String(detail.document.supply_party_type) === 'HQ'">受理部门：{{ detail.document.acceptance_party_name_snapshot || '历史单据未设置' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
@@ -1359,11 +1374,13 @@ function submitPrimaryEditor() {
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>
             <section v-if="bulkEditorVisible" class="bulk-editor"><strong>批量填写已选 {{ selectedLineIndexes.length }} 项</strong><label v-for="field in bulkFields" :key="field.key">{{ field.label }}<input v-model="bulkValues[field.key]" :type="field.type" :placeholder="`不填写则不覆盖`" /></label><div><button class="modal-secondary" @click="bulkEditorVisible = false">取消</button><button class="modal-primary" @click="applyBulkValues">应用到已选行</button></div></section>
             <div class="modal-table-scroll"><table><thead><tr><th><input type="checkbox" :checked="allLinesSelected" @change="toggleAllLines" /></th><th v-for="column in columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody ref="lineTableBody"><tr v-if="!productRows.length && ['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(pageKey)"><td :colspan="columns.length + 2" class="modal-empty">请扫描商品条码或搜索并选择商品</td></tr><tr v-for="(row, rowIndex) in productRows" :key="`${selectedRows[rowIndex]?.sku_id || rowIndex}:${selectedRows[rowIndex]?.sku_unique || ''}:${rowIndex}`" :class="{ 'count-row-invalid': pageKey === 'count' && countValidationRowIndexes.includes(rowIndex) }"><td><input v-model="selectedLineIndexes" type="checkbox" :value="rowIndex" /></td><td v-for="(cell, cellIndex) in row" :key="cellIndex">
-              <template v-if="pageKey === 'inbound' && cellIndex === 4"><input v-model="selectedRows[rowIndex].batch_no" class="table-input" /></template>
+              <!-- 免录只隐藏对应行的资料输入；混合单保留列，既有批次身份不在页面清空。 -->
+              <template v-if="Number(selectedRows[rowIndex].no_expiry_management) === 1 && ((pageKey === 'inbound' && [4, 5, 6].includes(cellIndex)) || (pageKey === 'count' && [8, 10, 11].includes(cellIndex)))">{{ (pageKey === 'inbound' && cellIndex === 4) || (pageKey === 'count' && cellIndex === 8) ? '' : '-' }}</template>
+              <template v-else-if="pageKey === 'inbound' && cellIndex === 4"><input v-model="selectedRows[rowIndex].batch_no" class="table-input" /></template>
               <template v-else-if="pageKey === 'inbound' && cellIndex === 5"><input :value="selectedRows[rowIndex].manufactured_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].manufactured_date_bad_input" @input="updateInboundDate(rowIndex, 'manufactured_date', $event)" /></template>
               <template v-else-if="pageKey === 'inbound' && cellIndex === 6"><input :value="selectedRows[rowIndex].expire_date" class="table-input" type="date" :aria-invalid="selectedRows[rowIndex].expire_date_bad_input" @input="updateInboundDate(rowIndex, 'expire_date', $event)" /></template>
               <template v-else-if="pageKey === 'inbound' && cellIndex === 8"><input v-model="selectedRows[rowIndex].unit_cost" class="table-input" /></template>
-              <template v-else-if="(pageKey === 'inbound' && cellIndex === 7) || (pageKey === 'outbound' && cellIndex === 6) || (pageKey === 'request' && cellIndex === 5) || (pageKey === 'transfer' && cellIndex === 6) || (pageKey === 'usage' && cellIndex === 4)"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template>
+              <template v-else-if="(pageKey === 'inbound' && cellIndex === 7) || (pageKey === 'outbound' && cellIndex === 7) || (pageKey === 'request' && cellIndex === 5) || (pageKey === 'transfer' && cellIndex === 6) || (pageKey === 'usage' && cellIndex === 5)"><input v-model="selectedRows[rowIndex].quantity" class="table-input" /></template>
               <template v-else-if="columns[cellIndex] === '明细备注'"><input v-model="selectedRows[rowIndex].detail_remark" class="table-input table-input--remark" maxlength="500" aria-label="明细备注" placeholder="填写备注" /></template>
               <template v-else-if="pageKey === 'count' && cellIndex === 6"><input v-model="selectedRows[rowIndex].counted_quantity" class="table-input" /></template><template v-else-if="pageKey === 'count' && cellIndex === 8"><input v-model="selectedRows[rowIndex].surplus_batch_no" class="table-input" :placeholder="selectedRows[rowIndex].count_mode === 'BATCH' ? '新批次必填' : '盘盈必填'" /></template><template v-else-if="pageKey === 'count' && cellIndex === 9"><input v-model="selectedRows[rowIndex].surplus_unit_cost" class="table-input" :placeholder="selectedRows[rowIndex].count_mode === 'BATCH' ? '新批次必填' : '盘盈必填'" /></template><template v-else-if="pageKey === 'count' && cellIndex === 10"><input v-model="selectedRows[rowIndex].surplus_manufactured_date" class="table-input" type="date" /></template><template v-else-if="pageKey === 'count' && cellIndex === 11"><input v-model="selectedRows[rowIndex].surplus_expire_date" class="table-input" type="date" /></template><template v-else>{{ cell }}</template></td><td><button class="modal-link" @click="removeCatalogRow(rowIndex)">删除</button></td></tr></tbody></table></div>
             <footer v-if="['inbound', 'outbound', 'request', 'transfer'].includes(pageKey)" class="line-total"><span>明细数量：{{ selectedRows.length }} 项</span><strong v-if="pageKey === 'inbound'">入库金额按填写单价计算</strong><strong v-else-if="pageKey === 'outbound'">出库成本由服务端按实际批次计算</strong></footer>

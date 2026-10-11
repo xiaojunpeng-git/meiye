@@ -214,6 +214,8 @@ final class InventoryStockCountServices
             // 无成本查看权限时导入不泄露单价；已有批次调整使用服务端权威成本和日期。
             if ($batch) {
                 if (!$line['costProvided'] || $difference <= 0) $line['cost'] = (int)$batch['unit_cost_cents'];
+                // 已存在批次的成本来自锁定记录，无查看权限的客户端无须补录该成本。
+                $line['costProvided'] = true;
                 if (!$line['manufacturedDate']) $line['manufacturedDate'] = $batch['manufactured_date'];
                 if (!$line['expireDate']) $line['expireDate'] = $batch['expire_date'];
                 if ($difference <= 0) { $line['manufacturedDate'] = $batch['manufactured_date']; $line['expireDate'] = $batch['expire_date']; }
@@ -256,7 +258,7 @@ final class InventoryStockCountServices
             ->where('p.relation_id', (string)$location['location_type'] === 'HQ' ? 0 : (int)$scope['storeId'])
             ->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
             ->where('a.unique', $line['unique'])->where('a.type', 0)
-            ->field('a.stock_unit,p.salon_stock_enabled')->lock(true)->find();
+            ->field('a.stock_unit,p.salon_stock_enabled,p.no_expiry_management')->lock(true)->find();
         // 上游已做整单目录核验；这里再锁定失效商品的现有批次，防止确认途中转为盘盈。
         if (!$catalog && !$this->retiredBatchCanBeCountedWithoutGain($scope, $location, $line)) {
             throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]);
@@ -267,7 +269,8 @@ final class InventoryStockCountServices
             ->where('sku_id', $line['skuId'])
             ->where('stock_status', InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD);
         $stock = $query->lock(true)->find();
-        if ($stock) return (array)$stock;
+        // 配置是当前目录权威值，不写入库存余额，也不接受客户端免录标志。
+        if ($stock) return array_merge((array)$stock, ['no_expiry_management' => (int)($catalog['no_expiry_management'] ?? 0)]);
         if (!$catalog) throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]);
         // 未盘或零差异的全量目录行不能因确认请求而创建零库存主体。
         if (!$createMissing) return [
@@ -293,7 +296,7 @@ final class InventoryStockCountServices
             if (!$stock) throw $exception;
         }
         if (!$stock) throw new \RuntimeException('inventory_stock_count_stock_not_found');
-        return (array)$stock;
+        return array_merge((array)$stock, ['no_expiry_management' => (int)$catalog['no_expiry_management']]);
     }
 
     private function countLoss(array $scope, array $location, array $stock, int $units, array $document, array $line, array $command): void
@@ -315,9 +318,21 @@ final class InventoryStockCountServices
     private function countGain(array $scope, array $location, array $stock, int $units, array $document, array $line, array $command): array
     {
         // The locked stock decides whether this is a gain; return its original input position so stale drafts can identify the failed row.
-        if ($line['batchNo'] === '' || $line['cost'] < 0 || !$line['manufacturedDate'] || !$line['expireDate'] || $line['manufacturedDate'] > $line['expireDate']) throw new InventoryStockCountLineException('inventory_stock_count_surplus_batch_required', $line['index'] + 1);
+        $withoutExpiry = (int)($stock['no_expiry_management'] ?? 0) === 1;
+        // 免录有效期不免成本：新盘盈仍须明确单价，独立自动批次不能合并不同成本层。
+        if ($withoutExpiry && $line['batchNo'] === '') {
+            $line['batchNo'] = 'AUTO-COUNT-' . substr(hash('sha256', $command['key'] . ':' . $line['index']), 0, 48);
+        }
+        if ($line['batchNo'] === '' || $line['cost'] < 0
+            || ($withoutExpiry && !$line['costProvided'])
+            || (!$withoutExpiry && (!$line['manufacturedDate'] || !$line['expireDate']))
+            || ($line['manufacturedDate'] && !$this->validDate($line['manufacturedDate']))
+            || ($line['expireDate'] && !$this->validDate($line['expireDate']))
+            || ($line['manufacturedDate'] && $line['expireDate'] && $line['manufacturedDate'] > $line['expireDate'])) {
+            throw new InventoryStockCountLineException('inventory_stock_count_surplus_batch_required', $line['index'] + 1);
+        }
         $batch = Db::name('inventory_batch')->where('stock_id', (int)$stock['id'])->where('batch_no', $line['batchNo'])->lock(true)->find();
-        if ($batch && ((string)$batch['batch_status'] !== 'ACTIVE' || (int)$batch['unit_cost_cents'] !== $line['cost'] || (string)$batch['manufactured_date'] !== $line['manufacturedDate'] || (string)$batch['expire_date'] !== $line['expireDate'])) throw new \RuntimeException('inventory_stock_count_surplus_batch_conflict');
+        if ($batch && ((string)$batch['batch_status'] !== 'ACTIVE' || (int)$batch['unit_cost_cents'] !== $line['cost'] || (string)$batch['manufactured_date'] !== (string)$line['manufacturedDate'] || (string)$batch['expire_date'] !== (string)$line['expireDate'])) throw new \RuntimeException('inventory_stock_count_surplus_batch_conflict');
         if (!$batch) { $catalog=Db::name('store_product_attr_value')->alias('a')->join('store_product p','p.id=a.product_id')->where('p.id',$line['productId'])->where('p.relation_id',$scope['storeId'])->where('p.is_del',0)->where('p.is_inventory',1)->where('a.id',$line['skuId'])->where('a.unique',$line['unique'])->where('a.type',0)->field('p.store_name,p.code,a.suk,a.bar_code')->lock(true)->find(); if(!$catalog)throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]); $id = Db::name('inventory_batch')->insertGetId(['stock_id' => (int)$stock['id'], 'origin_batch_id' => 0, 'source_batch_id' => 0, 'batch_no' => $line['batchNo'], 'manufactured_date' => $line['manufacturedDate'], 'expire_date' => $line['expireDate'], 'received_at' => $command['now'], 'received_business_date' => $command['businessDate'], 'available_quantity_units' => 0, 'unit_cost_cents' => $line['cost'], 'cost_allocated_quantity_units' => 0, 'batch_status' => 'ACTIVE', 'version' => 1, 'product_name_snapshot' => (string)$catalog['store_name'], 'sku_name_snapshot' => (string)$catalog['suk'], 'product_code_snapshot' => (string)$catalog['code'], 'barcode_snapshot' => (string)$catalog['bar_code'], 'brand_name_snapshot' => '', 'category_name_snapshot' => '', 'source_order_no_snapshot' => (string)$document['count_no'], 'data_quality' => 'COMPLETE', 'created_at' => $command['now'], 'updated_at' => $command['now']]); Db::name('inventory_batch')->where('id', $id)->update(['origin_batch_id' => $id]); $batch = Db::name('inventory_batch')->where('id', $id)->lock(true)->find(); }
         $old = (int)$stock['available_quantity_units']; $available = $old + $units; $cost = intdiv($old * (int)$stock['estimated_unit_cost_cents'] + $units * $line['cost'], $available);
         if (Db::name('inventory_stock')->where('id', (int)$stock['id'])->where('version', (int)$stock['version'])->update(['available_quantity_units' => $available, 'estimated_unit_cost_cents' => $cost, 'version' => (int)$stock['version'] + 1, 'updated_at' => $command['now']]) !== 1) throw new \RuntimeException('inventory_stock_count_stock_changed');
@@ -373,7 +388,7 @@ final class InventoryStockCountServices
         $dateText = trim((string)$input['business_date']);
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $dateText);
         if (!$date || $date->format('Y-m-d') !== $dateText) throw new \InvalidArgumentException('inventory_stock_count_date_invalid');
-        $lines = []; $seen = []; $modes = [];
+        $lines = []; $seen = []; $modes = []; $providedCosts = [];
         foreach (array_values($input['lines']) as $i => $line) {
             $keys = ['product_id','sku_id','sku_unique','counted_quantity','surplus_batch_no','surplus_unit_cost','surplus_manufactured_date','surplus_expire_date'];
             $withBook = [...$keys, 'expected_book_quantity'];
@@ -396,6 +411,7 @@ final class InventoryStockCountServices
             if (isset($seen[$rowIdentity])) throw new \InvalidArgumentException('inventory_stock_count_duplicate_sku');
             $seen[$rowIdentity] = true;
             $cost = trim((string)$line['surplus_unit_cost']);
+            $providedCosts[] = $cost !== '';
             if ($cost !== '' && !preg_match('/^\d+(?:\.\d{1,2})?$/D', $cost)) throw new \InvalidArgumentException('inventory_stock_count_cost_invalid');
             [$w, $f] = array_pad(explode('.', $cost === '' ? '0' : $cost, 2), 2, '');
             $expected = $line['expected_book_quantity'] ?? null;
@@ -417,6 +433,16 @@ final class InventoryStockCountServices
         }
         $remark = mb_substr(trim((string)$input['remark']), 0, 500);
         $fingerprint = hash('sha256', json_encode(['business_date' => $dateText, 'remark' => $remark, 'lines' => $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        // 运行时校验保留是否明确填写成本，但不改变已上线 SKU 命令的幂等指纹结构。
+        foreach ($lines as $index => &$line) $line['costProvided'] = $providedCosts[$index];
+        unset($line);
         return ['key' => $key, 'businessDate' => $dateText, 'remark' => $remark, 'lines' => $lines, 'fingerprint' => $fingerprint, 'now' => time()];
+    }
+
+    /** 免录只允许空日期；若提供日期，禁止无效日历值流入批次事实。 */
+    private function validDate(string $value): bool
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        return $date && $date->format('Y-m-d') === $value;
     }
 }

@@ -1,0 +1,181 @@
+{
+  "id": "R9-20261011-no-expiry-v1",
+  "frozen_at": "2026-10-11T07:47:26.245Z",
+  "starting_head": "88eea4f10738733e099aaecd2a9ee84371712475",
+  "head_at_freeze": "83cafadecb3a2104e60d680f3d95740049323b54",
+  "scope_files": 22,
+  "files": [
+    {
+      "path": "前端代码/admin/src/pages/product/productAdd/components/inventorySet.vue",
+      "sha256": "49bfd3107544488b0c6fd88fda2a6a3ed1ebd00e02352419fccfd9cb043fa98c"
+    },
+    {
+      "path": "前端代码/admin/src/pages/product/productAdd/formModel.js",
+      "sha256": "a27be72dbd7a5b4cd517f8527316588a6f3a56c3575b3a795528ab464743dfbd"
+    },
+    {
+      "path": "前端代码/admin/src/pages/product/productAdd/index.vue",
+      "sha256": "e1bb1b00b5cccc70e05f2d7492cee9fd4646a5c1d7e90b0ebd974cca2c1b669f"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryProductSelector.vue",
+      "sha256": "5156043e6b0eb611be66a968cf68d2e6ea5232eb5110290ee39cd07983fcd2f8"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+      "sha256": "365fa40d599377427e007cfc0e67eb8e015c914c57256cccb381e552eb130bef"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/inboundDateValidation.js",
+      "sha256": "43816b8eead751f6547c38874258d1522554417d4fde7584dc5ac26e2d677d42"
+    },
+    {
+      "path": "前端代码/inventory-vue3/src/utils/countSubmission.js",
+      "sha256": "de5365605df6a0cbebb651d6153303525dca609a4fe268ff83ad084673b0645a"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/product/StoreProduct.php",
+      "sha256": "2f5c4cecfb21348d3e199a9ded1ca8f5a2f998ab34d6a974a40bcf4a0a5f448a"
+    },
+    {
+      "path": "后端代码/app/controller/store/product/StoreProduct.php",
+      "sha256": "e15d39944ae6b3a534ae9fbbbd39729fbfa7a7f4e58b05f90fdc1a86726f1d86"
+    },
+    {
+      "path": "后端代码/app/services/product/product/StoreProductServices.php",
+      "sha256": "74cbac2e0fb1f23a4a2555bf3250977e7fdf4bd81d35c6e475f49a25ff1b68c8"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryManualInboundServices.php",
+      "sha256": "2c5ce2c950160d2136760bac5ec84328b59cdf10746e6e72e392b084f6759a32"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryStockCountServices.php",
+      "sha256": "e992d52b90b6904756fec343a4d3965e54f38dff9ba797d73bd59639ba94623b"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryStockCountDraftServices.php",
+      "sha256": "9581aa26464d45782ccacacbad2ee82054a2de602b23728290ede6b5b16ced85"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryStoreCatalogServices.php",
+      "sha256": "2c4aafd0e817158f950f507b456dffffda397ee5ce68cd0b6cfd2a5ba5a5dd40"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryPlatformHqCatalogServices.php",
+      "sha256": "01dece6c9d097410a3e8814bab8b1c153d5ffe75b84b75d38cda97e85ad7686e"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryCatalogStockProjection.php",
+      "sha256": "01e6b2e0b5be2cecd4a6831a5d77e1d5fc61c8ea878547a7619f01cb68038f1b"
+    },
+    {
+      "path": "后端代码/app/services/product/inventory/InventoryV3ExcelImportServices.php",
+      "sha256": "5f5648e5d477a9dda740a342b5727d033b9a7c4402d6fa67a0b37d14f5ddba44"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-11-商品免录有效期/01-up.sql",
+      "sha256": "ad146a34ca14c27d7c1770306a38504173c14e23973139762a1b338b00fd1849"
+    },
+    {
+      "path": "tests/inventory/js/no-expiry-product-selector-contract.mjs",
+      "sha256": "89be10a43b461cc96f57a8532c315728eafa7f26668d1be0f0f8b30af1ba4e22"
+    },
+    {
+      "path": "tests/inventory/php/no-expiry-local-integration.php",
+      "sha256": "12ce59e8c51a1fa55e48714916f0044810b02e67f42798316f499d680bc764fe"
+    },
+    {
+      "path": "tests/inventory/php/manual-test-bootstrap.php",
+      "sha256": "fad93e4ff583e8e0f5a59388c20335e2adfb7cad161d6e4805aa6c6f7af2eb09"
+    },
+    {
+      "path": "tests/inventory/mysql56-matrix.sh",
+      "sha256": "9710992c15c65672175baec55ccfdad50f6ca04c2124b3433befba2778df4b88"
+    }
+  ],
+  "source_fingerprint_sha256": "ae52cf243e95eb31394a863aba7a5963cf1e74343a3bc6103efbe3a3636d7d90",
+  "patch_sha256": "fbb8bb9cced2d67ada6a8162112a15617039caab3f51867b7712fe3bb787e66c",
+  "unrelated_staged_diff_sha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "groups": {
+    "frontend": [
+      "前端代码/admin/src/pages/product/productAdd/components/inventorySet.vue",
+      "前端代码/admin/src/pages/product/productAdd/formModel.js",
+      "前端代码/admin/src/pages/product/productAdd/index.vue",
+      "前端代码/inventory-vue3/src/components/InventoryProductSelector.vue",
+      "前端代码/inventory-vue3/src/components/InventoryBusinessModal.vue",
+      "前端代码/inventory-vue3/src/inboundDateValidation.js",
+      "前端代码/inventory-vue3/src/utils/countSubmission.js"
+    ],
+    "backend": [
+      "后端代码/app/controller/admin/v1/product/StoreProduct.php",
+      "后端代码/app/controller/store/product/StoreProduct.php",
+      "后端代码/app/services/product/product/StoreProductServices.php",
+      "后端代码/app/services/product/inventory/InventoryManualInboundServices.php",
+      "后端代码/app/services/product/inventory/InventoryStockCountServices.php",
+      "后端代码/app/services/product/inventory/InventoryStockCountDraftServices.php",
+      "后端代码/app/services/product/inventory/InventoryStoreCatalogServices.php",
+      "后端代码/app/services/product/inventory/InventoryPlatformHqCatalogServices.php",
+      "后端代码/app/services/product/inventory/InventoryCatalogStockProjection.php",
+      "后端代码/app/services/product/inventory/InventoryV3ExcelImportServices.php"
+    ],
+    "migrations": [
+      "后端代码/database/upgrades/2026-10-11-商品免录有效期/01-up.sql"
+    ],
+    "tests": [
+      "tests/inventory/js/no-expiry-product-selector-contract.mjs",
+      "tests/inventory/php/no-expiry-local-integration.php",
+      "tests/inventory/php/manual-test-bootstrap.php",
+      "tests/inventory/mysql56-matrix.sh"
+    ],
+    "engineering_scripts": [],
+    "generated": [
+      "前端代码/inventory-vue3/dist/"
+    ],
+    "evidence": [
+      "tests/inventory/evidence/R9-no-expiry-selftest-2026-10-11.md",
+      "tests/inventory/evidence/R9-no-expiry-validation-2026-10-11.json",
+      "tests/inventory/evidence/R9-no-expiry-product-settings-2026-10-11.png",
+      "tests/inventory/evidence/R9-no-expiry-outbound-columns-2026-10-11.png",
+      "tests/inventory/evidence/R9-no-expiry-product-selector-2026-10-11.png"
+    ]
+  },
+  "evidence_hashes": [
+    {
+      "path": "tests/inventory/evidence/R9-no-expiry-selftest-2026-10-11.md",
+      "sha256": "259a19fdb3f2d2f9696d19f778171705f8c57f3fb740bc2fc41364132a800071"
+    },
+    {
+      "path": "tests/inventory/evidence/R9-no-expiry-validation-2026-10-11.json",
+      "sha256": "b8e2f357032e7aa78f25434a542f3ff1dd98c0725928b1ee50ad9e5ccc216bbd"
+    },
+    {
+      "path": "tests/inventory/evidence/R9-no-expiry-product-settings-2026-10-11.png",
+      "sha256": "d513d1b3b6fac2d485b004d580beda83719dd4ed16b7a7ee1508c1c7ae84d94d"
+    },
+    {
+      "path": "tests/inventory/evidence/R9-no-expiry-outbound-columns-2026-10-11.png",
+      "sha256": "d7877550f3a5353d0411c79858621f68ffdedfe40a973156de45e8277fd4203c"
+    },
+    {
+      "path": "tests/inventory/evidence/R9-no-expiry-product-selector-2026-10-11.png",
+      "sha256": "a7460ed1641f9b698b9874faede396ec27da6bf320ac6b17556fe58e97ca8bcd"
+    }
+  ],
+  "build": {
+    "source": "前端代码/inventory-vue3",
+    "modules": 1924,
+    "js": "index-1677a6ce.js",
+    "css": "index-d51007af.css",
+    "integrated_8080_package": false
+  },
+  "local_migration": {
+    "database": "ruihao",
+    "host": "de34b8634512",
+    "remote": false
+  },
+  "acceptance": "pending_product_manager",
+  "commit": false,
+  "deployment": false,
+  "push": false
+}

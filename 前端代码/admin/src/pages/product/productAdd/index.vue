@@ -3871,6 +3871,8 @@ export default {
 	  this.$set(formData, 'is_inventory', this.formData.product_type == 0 ? (this.formData.is_inventory != null ? this.formData.is_inventory : 1) : 0);
 	  this.$set(formData, 'allow_negative_stock', this.formData.product_type == 0 ? (this.formData.allow_negative_stock != null ? this.formData.allow_negative_stock : 1) : 1);
 	  this.$set(formData, 'salon_stock_enabled', (this.formData.product_type == 0 && (this.formData.is_inventory != null ? this.formData.is_inventory : 1) == 1) ? (this.formData.salon_stock_enabled != null ? this.formData.salon_stock_enabled : 0) : 0);
+      // 库存设置独立于基础信息子表；必须显式汇入保存请求，不能只改变页面开关。
+      this.$set(formData, 'no_expiry_management', this.formData.product_type == 0 ? Number(this.formData.no_expiry_management || 0) : 0);
 	  this.$set(formData, 'reservation_time_type', this.formData.reservation_time_type);
 	  this.$set(formData, 'reservation_times', this.formData.reservation_times);
 	  this.$set(formData, 'reservation_time_interval', this.formData.reservation_time_interval);

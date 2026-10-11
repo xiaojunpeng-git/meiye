@@ -1,0 +1,56 @@
+{
+  "target": "rh.cc3798.com",
+  "database": "ruihao",
+  "source_commit": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf",
+  "backup": "/www/backups/rh.cc3798.com/20261011-r9-product-selector-c1ad95d4",
+  "artifacts": [
+    {
+      "path": "/www/backups/rh.cc3798.com/20261011-r9-product-selector-c1ad95d4/backend-before.tar.gz",
+      "bytes": 120126,
+      "sha256": "576153c89b7f29828ebff3e939f1190c17b36d40208946896712b88da503d508"
+    },
+    {
+      "path": "/www/backups/rh.cc3798.com/20261011-r9-product-selector-c1ad95d4/static-before.tar.gz",
+      "bytes": 152369445,
+      "sha256": "0a2f2c749772c7d931bf674f1409e9bb6a3cce029104e6ac2f950a48756e7f22"
+    },
+    {
+      "path": "/www/backups/rh.cc3798.com/20261011-r9-product-selector-c1ad95d4/preview-static-before.tar.gz",
+      "bytes": 42595908,
+      "sha256": "22c4c0b5845459c68ca3fc218f844db44130c8d3a5f15db8b4d11b4e8236403f"
+    },
+    {
+      "path": "/www/backups/rh.cc3798.com/20261011-r9-product-selector-c1ad95d4/ruihao-before.sql.gz",
+      "bytes": 247696311,
+      "sha256": "4ad858a810ec198f0dbc0b938e43d603aaa082ee490803e580132f90ddd0d6d4"
+    }
+  ],
+  "before": {
+    "backend": {
+      "app/controller/admin/v1/product/StoreProduct.php": "1588450b7087e47bd7da4d6622ee5c5cbe25cfd389ea455a16c1279d37c7c6e1",
+      "app/controller/store/product/StoreProduct.php": "5f552a6e307908e0e948c3bb77e2782d8ac025b869339e8eb262da3db5be0ea6",
+      "app/services/cashier/v3/manifest/CashierV3C5MemberOrderModule.php": "58938ec9e6045fb4c9beeba46d98f013aaa5f204b715719677e3a56b622aac2b",
+      "app/services/cashier/v3/member/CashierV3DirectGiftIssuanceServices.php": "b77fd01586fbb91bb3a03c787e6a005c1c5bd5ce3333eb9a42ee0745c71b56e2",
+      "app/services/cashier/v3/member/CashierV3MemberModule.php": "6fabd250d68891f5af2ca840bebb7ed985f560fac2b32c7cbb6f5bf700e3a8ce",
+      "app/services/product/inventory/InventoryCatalogStockProjection.php": null,
+      "app/services/product/inventory/InventoryManualInboundServices.php": "c52c154a32b821ce398a563669fcd09c9aad741bc423ff1ee29601ebd67bc452",
+      "app/services/product/inventory/InventoryPlatformHqCatalogServices.php": "2dc3ef1dc378c5813e02ca6135a859c627b4d35cb592a8d8fcad56e14c55a182",
+      "app/services/product/inventory/InventoryStockCountDraftServices.php": "06f74c80a4af8adb7e707d2d9704eae4d00d816cc3190f6bbc2761a5ca192edd",
+      "app/services/product/inventory/InventoryStockCountServices.php": "017bc61b1c10f9ec12d7ea4da62617de1de0361d00983cfc481e98f21b480920",
+      "app/services/product/inventory/InventoryStoreCatalogServices.php": "a458a80462f6277bb8326c181f61db5f7d4523a4c453b54b09be5d0ddf0a9040",
+      "app/services/product/inventory/InventoryV3ExcelImportServices.php": "9fe7c68361720858016be8c571f647e51a3e70b1879b10e26d71da21ccefd58b",
+      "app/services/product/product/PhysicalProductSelectionPolicy.php": null,
+      "app/services/product/product/StoreProductServices.php": "dd37bbf7243a2b23c1918dafba16b8e1f5c651e7304d30f861e0907b41f69917"
+    },
+    "product_count": 348258,
+    "expiry_column": [],
+    "latest_upgrade": [
+      {
+        "id": 220,
+        "upgrade_key": "20261011-001-other-collection-name-repair",
+        "code_version": "e1b6c6510554db2ab56678dfb3961c157a2f562f"
+      }
+    ]
+  },
+  "completed_at": "2026-10-11T16:41:57+08:00"
+}

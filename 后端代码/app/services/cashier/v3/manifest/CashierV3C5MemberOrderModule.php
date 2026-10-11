@@ -170,6 +170,8 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $projection['open-order-gifts'] = self::FEATURE_ORDER_CENTER;
         $projection['open-gift-records'] = self::FEATURE_ORDER_CENTER;
         $projection['open-gift'] = self::FEATURE_GIFT;
+        // 商品查询沿用赠送权限，不能要求同时拥有库存操作权限。
+        $projection['query-gift-products'] = self::FEATURE_GIFT;
         $projection['open-card-batch'] = self::FEATURE_MEMBER;
         $projection['open-card-benefits'] = self::FEATURE_MEMBER;
 

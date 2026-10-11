@@ -1,0 +1,80 @@
+{
+  "version": "R9-20261011-blank-batch-v3",
+  "runs": [
+    {
+      "command": "node tests/inventory/js/batch-number-display-contract.mjs",
+      "exit_code": 0,
+      "output": "BATCH_NUMBER_DISPLAY_OK: exact internal format, blank/real batches, grouped in/out and seven rendered detail tables; raw identities unchanged\n"
+    },
+    {
+      "command": "node tests/inventory/js/no-expiry-product-selector-contract.mjs",
+      "exit_code": 0,
+      "output": "NO_EXPIRY_SHARED_EDITOR_OK: actual Vue2 save, dual-mode rendered columns, mixed dates, count loading, cost validation and submit payload\n"
+    },
+    {
+      "command": "node tests/inventory/js/shared-gift-product-selector-contract.mjs",
+      "exit_code": 0,
+      "output": "SHARED_GIFT_PRODUCT_SELECTOR_OK: seven entries, gift scope, draft reconciliation, empty confirm, pagination and stale-response isolation\n"
+    },
+    {
+      "command": "docker exec -i -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 mohe-platform-app php < tests/inventory/php/no-expiry-local-integration.php",
+      "exit_code": 0,
+      "output": "PASS product DAO persists and reloads switch off\nPASS product DAO persists and reloads switch on\nPASS blank batch/dates inbound replays once\nPASS internal cost layer has no fabricated dates\nPASS different inbound retains separate cost layers\nPASS catalog returns persisted flag and total across batches\nPASS other warehouse cannot leak stock\nPASS other tenant cannot leak stock\nPASS reject inventory_manual_inbound_dates_required got inventory_manual_inbound_dates_required\nPASS reject inventory_manual_inbound_dates_required got inventory_manual_inbound_dates_required\nPASS mixed invalid inbound rolls back whole command\nPASS blank batch/date count gain replays once\nPASS count gain records two units with internal layer and null expiry\nPASS reject inventory_stock_count_surplus_batch_required got inventory_stock_count_surplus_batch_required\nPASS count loss allocates existing cost layers without requiring batch or dates\nPASS zero difference creates no balance change\nPASS reject inventory_stock_count_surplus_batch_required got inventory_stock_count_surplus_batch_required\nPASS draft reload rehydrates current product setting\nPASS old unfinished batch draft resumes without requiring a batch number\nPASS existing draft batch identity remains intact\nPASS draft cannot freeze or forge exemption\nPASS inbound replay survives later flag change\nPASS flag change never rewrites historical dates\nPASS Excel accepts exempt blank batch and dates\nPASS catalog formats fractional stock using authoritative SKU scale\nPASS store catalog shares persisted setting and SKU stock total\nPASS active exempt stock permits total count\nPASS retired exempt stock retains real batch identity without losing exemption\nROLLBACK synthetic expiry fixtures and inventory facts\nPASS no synthetic administrator remains\n"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "output": ""
+    }
+  ],
+  "builds": [
+    {
+      "source": "前端代码/inventory-vue3",
+      "command": "docker exec mohe-inventory-v3-src npm run build",
+      "exit_code": 0,
+      "modules": 1925,
+      "js": "index-e3d36734.js",
+      "css": "index-9eb79dda.css"
+    },
+    {
+      "source": "前端代码/cashier-v3",
+      "command": "docker exec mohe-cashier-v3-src npm run build",
+      "exit_code": 0,
+      "modules": 1999,
+      "js": "index-31f21346.js",
+      "css": "index-f889a039.css"
+    }
+  ],
+  "browser": {
+    "url": "http://127.0.0.1:18091/view_cashier_v3/#/cashier",
+    "inbound": {
+      "order_sn": "RK2610110002",
+      "batch_cell": "",
+      "quantity": "1"
+    },
+    "stock_detail": {
+      "product": "瑞昊坐灸仪器",
+      "total_quantity": "5",
+      "reconciliation": "正常",
+      "batch_cells": [
+        "",
+        ""
+      ],
+      "movement_batch_cells": [
+        "",
+        ""
+      ],
+      "batch_quantities": [
+        "1",
+        "4"
+      ],
+      "inventory_amount_yuan": "20.00",
+      "refreshed_latest_source": true
+    },
+    "actions": "Read-only list/search/detail navigation; no business writes"
+  },
+  "limitations": [
+    "Seven shared detail tables exercised through real Vue SSR templates; manual browser check covered store inbound and stock detail, not independent platform browser acceptance.",
+    "No 8080 integrated package, remote operation, commit, deployment or push. Existing large chunk warnings remain."
+  ]
+}

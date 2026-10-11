@@ -1,0 +1,124 @@
+{
+  "target": "rh.cc3798.com",
+  "source_commit": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf",
+  "checked_at": "2026-10-11T09:05:34.944Z",
+  "checks": [
+    {
+      "url": "https://rh.cc3798.com/system.html",
+      "status": 200,
+      "expected_sha256": "73faffc42481a8553f273f57e4fcdb0f1484e8b8a5df74e5f962e34b2331d554",
+      "actual_sha256": "73faffc42481a8553f273f57e4fcdb0f1484e8b8a5df74e5f962e34b2331d554",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/chunk-vendors.256a48e4.js",
+      "status": 200,
+      "expected_sha256": "78174425a121f4bc04f0a221f0aa11f65b16dd5216b98b7faf5a02170a7e4969",
+      "actual_sha256": "78174425a121f4bc04f0a221f0aa11f65b16dd5216b98b7faf5a02170a7e4969",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/app.1b165706.js",
+      "status": 200,
+      "expected_sha256": "ab88373181478f38b2c7902978171e99b6e85ec35e075e047e632ec6e86a9ba0",
+      "actual_sha256": "ab88373181478f38b2c7902978171e99b6e85ec35e075e047e632ec6e86a9ba0",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/css/chunk-vendors.48272356.css",
+      "status": 200,
+      "expected_sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+      "actual_sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/css/app.b6208b14.css",
+      "status": 200,
+      "expected_sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+      "actual_sha256": "993a7b1812d7d11268e3470a48e0973954aec2f801f80a25508565b7c9e8dfbd",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_inventory_v3/index.html",
+      "status": 200,
+      "expected_sha256": "1af5705b7106b1ed2ff5b02c18d847b9dc6cfe1ae075691f66e277739d93cd02",
+      "actual_sha256": "1af5705b7106b1ed2ff5b02c18d847b9dc6cfe1ae075691f66e277739d93cd02",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_inventory_v3/assets/index-e3d36734.js",
+      "status": 200,
+      "expected_sha256": "5b3b250cd47250b7633b3314513e37f2137cafe189efec8424f3f18d73dbda71",
+      "actual_sha256": "5b3b250cd47250b7633b3314513e37f2137cafe189efec8424f3f18d73dbda71",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_inventory_v3/assets/index-9eb79dda.css",
+      "status": 200,
+      "expected_sha256": "9eb79ddaaf6d776458e0c18a44c2d543fa9381627a0edecca7d2153b63affceb",
+      "actual_sha256": "9eb79ddaaf6d776458e0c18a44c2d543fa9381627a0edecca7d2153b63affceb",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "status": 200,
+      "expected_sha256": "5a614d1cef1a387767aa9a2217a4ec3eed4d13f4ce054a3c70de5ccb55d038db",
+      "actual_sha256": "5a614d1cef1a387767aa9a2217a4ec3eed4d13f4ce054a3c70de5ccb55d038db",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-db2cde1b.js",
+      "status": 200,
+      "expected_sha256": "53a53f215b1f11d2c06876a2ea7fb5653d53c2a514540516469249de4707cf40",
+      "actual_sha256": "53a53f215b1f11d2c06876a2ea7fb5653d53c2a514540516469249de4707cf40",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-69cab3e9.css",
+      "status": 200,
+      "expected_sha256": "69cab3e963dafbdc758afc1154779a89150c4d98fc1e3f74a880ad66c0efe139",
+      "actual_sha256": "69cab3e963dafbdc758afc1154779a89150c4d98fc1e3f74a880ad66c0efe139",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "status": 200,
+      "expected_sha256": "5a614d1cef1a387767aa9a2217a4ec3eed4d13f4ce054a3c70de5ccb55d038db",
+      "actual_sha256": "5a614d1cef1a387767aa9a2217a4ec3eed4d13f4ce054a3c70de5ccb55d038db",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-db2cde1b.js",
+      "status": 200,
+      "expected_sha256": "53a53f215b1f11d2c06876a2ea7fb5653d53c2a514540516469249de4707cf40",
+      "actual_sha256": "53a53f215b1f11d2c06876a2ea7fb5653d53c2a514540516469249de4707cf40",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-69cab3e9.css",
+      "status": 200,
+      "expected_sha256": "69cab3e963dafbdc758afc1154779a89150c4d98fc1e3f74a880ad66c0efe139",
+      "actual_sha256": "69cab3e963dafbdc758afc1154779a89150c4d98fc1e3f74a880ad66c0efe139",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/chunk-5b4e1bc6.82532e93.js",
+      "status": 200,
+      "expected_sha256": "5c7f2c3f83c22888ddc531ddb01d346dffe761aacd85725cf8f468f8dd3ef974",
+      "actual_sha256": "5c7f2c3f83c22888ddc531ddb01d346dffe761aacd85725cf8f468f8dd3ef974",
+      "pass": true
+    },
+    {
+      "url": "https://rh.cc3798.com/view_admin/js/chunk-65f3f4a9.e1175c0c.js",
+      "status": 200,
+      "expected_sha256": "b63dbd7c2ba3a5bfda7bd06adc798a9ea4c7df580acbc84a09113b8bb9fb4ff7",
+      "actual_sha256": "b63dbd7c2ba3a5bfda7bd06adc798a9ea4c7df580acbc84a09113b8bb9fb4ff7",
+      "pass": true
+    }
+  ],
+  "anonymous_api": {
+    "status": 200,
+    "business_status": 410000
+  },
+  "business_writes": false
+}

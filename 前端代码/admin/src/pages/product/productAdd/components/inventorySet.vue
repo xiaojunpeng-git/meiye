@@ -42,6 +42,13 @@
         开启后，该商品（如面膜、精油）可被项目配方选用，核销项目时按配方自动扣减、撤销核销时按原量退回；关闭后不能被新配方选择，历史耗材流水仍保留。仅参与库存管理的商品可开启。开启后可按片、ml、g 等用量管理，数量保留 2 位小数。
       </div>
     </FormItem>
+    <!-- 只控制后续入库、盘点的批次资料录入，历史批次及成本流水不随开关改写。 -->
+    <FormItem label="不管理有效期：" v-if="baseInfo.is_inventory == 1">
+      <i-switch v-model="baseInfo.no_expiry_management" :true-value="1" :false-value="0" size="large">
+        <span slot="open">开启</span>
+        <span slot="close">关闭</span>
+      </i-switch>
+    </FormItem>
   </div>
 </template>
 

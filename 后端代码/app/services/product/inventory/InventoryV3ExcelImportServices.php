@@ -403,7 +403,8 @@ final class InventoryV3ExcelImportServices
             if (!$this->businessType($direction, $type)) $rowErrors[] = '出入库类型不正确';
             $line = ['row' => (int)$row['row'], 'data' => $data];
             if ($direction === self::DIRECTION_INBOUND) {
-                foreach ([[11, '批次号'], [12, '生产日期'], [13, '到期日'], [14, '入库单价']] as $required) {
+                // 批次/日期是否必填须在目录身份解析后按商品配置决定；成本仍无条件必填。
+                foreach ([[14, '入库单价']] as $required) {
                     if (trim((string)($data[$required[0]] ?? '')) === '') $rowErrors[] = $required[1] . '不能为空';
                 }
                 if (trim((string)($data[11] ?? '')) !== '' && strlen(trim((string)$data[11])) > 64) $rowErrors[] = '批次号过长';
@@ -443,6 +444,11 @@ final class InventoryV3ExcelImportServices
                 $rowErrors[] = '同一文件出入库类型须一致';
             }
             if ($catalogRow) {
+                if ($direction === self::DIRECTION_INBOUND && (int)$catalogRow['no_expiry_management'] !== 1) {
+                    foreach ([[11, '批次号'], [12, '生产日期'], [13, '到期日']] as $required) {
+                        if (trim((string)($data[$required[0]] ?? '')) === '') $rowErrors[] = $required[1] . '不能为空';
+                    }
+                }
                 try {
                     InventoryEntitlementCompletionContract::decimalToUnits($line['quantity'], (int)$catalogRow['quantity_scale']);
                 } catch (\Throwable $exception) {
@@ -479,7 +485,7 @@ final class InventoryV3ExcelImportServices
         $query = Db::name('store_product')->alias('p')
             ->join('store_product_attr_value a', 'a.product_id=p.id')
             ->where('p.type', $partyType === 'HQ' ? 0 : 1)->where('p.relation_id', $partyType === 'HQ' ? 0 : $storeId)->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.type', 0)
-            ->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,p.unit_name,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit');
+            ->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,p.no_expiry_management,p.unit_name,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit');
         if (!$all) {
             if (!$productIds || !$uniques) return [];
             $query->whereIn('p.id', $productIds)->whereIn('a.unique', $uniques);
