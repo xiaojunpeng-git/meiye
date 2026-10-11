@@ -1,0 +1,19 @@
+{
+  "verified_at": "2026-10-11T21:10:18+08:00",
+  "database": "ruihao",
+  "current_clock_defaults": {
+    "appointmentDate": "2026-10-11",
+    "appointmentTime": "2026-10-11T22:00",
+    "appointmentStartAt": "2026-10-11T22:00",
+    "appointmentEndAt": "2026-10-11T23:00",
+    "expectedEndAt": "2026-10-11T23:00",
+    "durationSummary": "未填写项目，结束时间默认开始后60分钟；仍可手动调整。"
+  },
+  "latest_upgrade": {
+    "id": 221,
+    "upgrade_key": "20261011-003-inventory-no-expiry",
+    "code_version": "c1ad95d4fca704fdd99825ebb5b973b47d0a2edf"
+  },
+  "mode": "SELECT-only transaction; real deployed domain method; not authenticated HTTP UI",
+  "business_writes": false
+}
