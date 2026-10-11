@@ -120,6 +120,19 @@ function opt3Plan(string $mode): array
 {
     $full=opt3Cases();
     if ($mode==='full') return $full;
+    if ($mode==='rank-followup') {
+        // Keep the original guidance → metric → ranking chain. Only the final
+        // wording changes to the production failure, so a signed predecessor
+        // and a fresh Reader must both be exercised by this focused run.
+        $round=$full[1];$round['name']='rank-followup';$round['original_round']=2;
+        $round['turns']=array_slice($round['turns'],0,4);
+        foreach ($round['turns'] as $index=>&$turn) {
+            $turn['original_round']=2;$turn['original_turn']=$index+1;
+        }
+        unset($turn);
+        $round['turns'][3]['question']='最低的三家呢';
+        return [$round];
+    }
     if ($mode!=='affected') throw new RuntimeException('TEST_PLAN_UNSUPPORTED');
     $selection=[2=>[1,2,3,4,8,9,10],3=>[1,2,3],5=>[4,5,6,7,8]];$out=[];
     foreach ($selection as $round=>$turns) {
@@ -141,6 +154,13 @@ function opt3Plan(string $mode): array
         $out[]=$selected;
     }
     return $out;
+}
+
+/** Keep the public plan label aligned with the number of real questions run. */
+function opt3SuiteName(string $mode): string
+{
+    return ['full'=>'OPT3-new-mixed-local-5x10','affected'=>'OPT3-affected-local-15',
+        'rank-followup'=>'OPT3-rank-followup-local-4'][$mode]??'TEST_PLAN_UNSUPPORTED';
 }
 
 /** Only bounded internal codes may leave an exception; SQL, credentials,
@@ -506,7 +526,7 @@ function opt3Run(): void
         'app/services/metric/MetricDictionaryServices.php','app/services/query/metric/MetricDefinitionRegistry.php',
         'app/services/report/StoreUnifiedReportPhaseTwoServices.php'];$hashes=[];
     foreach ($files as $file) $hashes[$file]=hash_file('sha256',getcwd().'/'.$file);
-    $report=['suite'=>$planName==='full'?'OPT3-new-mixed-local-5x10':'OPT3-affected-local-15',
+    $report=['suite'=>opt3SuiteName($planName),
         'test_plan'=>$planName,'original_transcript_replay'=>false,'started_at'=>date('c'),
         'original_task_baseline'=>(string)getenv('MOHE_OPT3_TASK_BASELINE'),
         'execution_start_head'=>(string)getenv('MOHE_OPT3_BASELINE'),'driver_sha256'=>$driverHash,'source_sha256'=>$hashes,
@@ -665,7 +685,7 @@ if (defined('MOHE_OPT3_DRIVER_LIBRARY') && MOHE_OPT3_DRIVER_LIBRARY===true) retu
 try {
     if (getenv('MOHE_OPT3_LOCAL')==='PLAN') {
         $planName=(string)(getenv('MOHE_OPT3_TEST_PLAN')?:'full');$cases=opt3Plan($planName);
-        opt3Emit(['suite'=>$planName==='full'?'OPT3-new-mixed-local-5x10':'OPT3-affected-local-15','rounds'=>count($cases),
+        opt3Emit(['suite'=>opt3SuiteName($planName),'rounds'=>count($cases),
             'questions'=>array_sum(array_map(static function(array $round):int{return count($round['turns']);},$cases)),
             'cases'=>$cases]);
     } elseif (getenv('MOHE_OPT3_LOCAL')==='RUN') opt3Run();

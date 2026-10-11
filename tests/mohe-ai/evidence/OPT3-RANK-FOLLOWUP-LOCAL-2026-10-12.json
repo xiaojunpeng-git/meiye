@@ -1,0 +1,629 @@
+{
+    "suite": "OPT3-rank-followup-local-4",
+    "test_plan": "rank-followup",
+    "original_transcript_replay": false,
+    "started_at": "2026-10-12T01:37:21+08:00",
+    "original_task_baseline": "52410ce0c61b102f07e4625339bd50433e0ceb45",
+    "execution_start_head": "6d9709d5ab94c95761569f6964dfc1e5cda43555",
+    "driver_sha256": "04496828efb5939adc0cfa683a4488866d74e2b036ac027e7e460308909489e2",
+    "source_sha256": {
+        "app/services/ai/AiGatewayServices.php": "4c117d4f34e03208c83791a4a5fa35eb0a79855be6ad7ef664642042344b3d96",
+        "app/services/ai/execution/AiRunStore.php": "dea2e5dfe23ee96a4f7260e07557cd34df2ec66bcb65ddc6de5db91137699e10",
+        "app/services/ai/execution/AiRuntimeFactory.php": "2eb1dff747832b392a506113db91f54c17a99202aec83dd18f2a8e2433668302",
+        "app/services/ai/execution/AiRunExecutionRuntime.php": "1efcac27e1af2cce768f0ced354dfb0e42b0c49c0fe3b18332a9851c6cb6dda1",
+        "app/command/MoheAiExecutionWorker.php": "ddf09c26efc6e02f523cd4b0a37f1f17cf227861d60d9215bf3833f52d3be6ca",
+        "app/services/ai/contract/AiIntentUnderstandingContract.php": "7f6f7c3999516d96e436ee100edc2d631424320f77f0420a1df4b0455a20c97f",
+        "app/services/ai/contract/AiIntentResultContract.php": "0e5cd1ca9ecd0ff90db5e96709cc6239af66eeb9cd4eef79f63aaa4458b4e484",
+        "app/services/ai/context/ResultReferenceResolver.php": "4096d7c165fe8ec130d6db18715ffb748c7d6131a48ecafb180bb49b613d75ac",
+        "app/services/ai/context/ObjectDetailContinuationResolver.php": "32a5d0f05da362aec7a3fc4b4a2cb6e3ab63a8bba3342a15713afe4961f62b54",
+        "app/services/ai/context/MemberDetailContinuationResolver.php": "97aa8e3ff2ce54f683cfa69ff53b0768ca7fbf46b21569b4bfd65848c9a53c9b",
+        "app/services/ai/model/SiliconFlowClient.php": "a029e22a2159adca05357db001b219d4a361cd5704c7b4fa215a9d8d35b94731",
+        "app/services/query/metric/ServiceCustomerMetricReadServices.php": "4afcd92ef24eeff41ba2e8a15055fe04cc29a02b096b19bde26b70268570bfcb",
+        "app/services/query/metric/RegisteredMetricReadServices.php": "3e5ba4905efbdaefaf89ebbb8473c8fbfa47cbca2005d07006fd88b7fc7bb08c",
+        "app/services/query/metric/GroupPerformanceMetricReadServices.php": "9e39fe1a9cd820fd92937ba127a975007ae0b54b5ec99f12e946883bbe32de51",
+        "app/services/query/metric/MetricReadTransaction.php": "02e7bc7e0a164063756d0e6de3dda4a26c6e6e75bebc17e6f938f35c8738cbdb",
+        "app/services/query/metric/MetricReadViewServices.php": "bedc101ca0437b40ec1dc7843b04a6a37b6eff49ee25561869b204b046eb31d9",
+        "app/services/query/metric/PersonnelAnalysisObjectServices.php": "4d8cd07d2fad7a2f7b167854bbb106d9725cec989130a3c881dfd16c8a49d2d9",
+        "app/services/metric/MetricDictionaryServices.php": "e56ca10e7fb1d159b820024971fdaea3a2018cbd2c42eb6bc236ff644dc058a7",
+        "app/services/query/metric/MetricDefinitionRegistry.php": "b107d93ad729bf6b8a5eeadddafc9e409c7e58c43c7e1aa68a6f4fe0ae967c59",
+        "app/services/report/StoreUnifiedReportPhaseTwoServices.php": "f400d1424c15595b57f5c811d7337becc8b14b430bf5b84b2b2602792138e4e5"
+    },
+    "target": {
+        "container": "mohe-platform-app",
+        "database": "ruihao",
+        "server_uuid": "3506c91f-98cb-11f1-af5f-9e1a52451c2a"
+    },
+    "boundary": "local AI audit and immutable query snapshots only; fresh same-authority Reader cross-check",
+    "rounds": [
+        {
+            "round": 1,
+            "name": "rank-followup",
+            "conversation_id": "opt3-local-caa5035ec154f28d",
+            "turns": [
+                {
+                    "turn": 1,
+                    "question": "门店怎么样",
+                    "expected": {
+                        "question": "门店怎么样",
+                        "metric": "actual_performance",
+                        "period": "month",
+                        "shape": "summary",
+                        "kind": "store",
+                        "guidance_required": true,
+                        "supplement": "我想查本月实际业绩",
+                        "original_round": 2,
+                        "original_turn": 1
+                    },
+                    "status": "COMPLETED",
+                    "reason": "",
+                    "guidance": [
+                        {
+                            "step": 1,
+                            "fields": [
+                                "semantic_reply"
+                            ],
+                            "step_revision": 1,
+                            "intent_revision": 1,
+                            "choices": {
+                                "semantic_reply": "__supplement__"
+                            },
+                            "supplement_provided": true,
+                            "supplement_text": "我想查本月实际业绩"
+                        }
+                    ],
+                    "admission_wait_ms": 0,
+                    "checks": {
+                        "completed": true,
+                        "metric": true,
+                        "shape": true,
+                        "object": true,
+                        "authorized_scope": true,
+                        "period": true,
+                        "fresh_reader_results": true,
+                        "same_authority": true,
+                        "required_guidance": true
+                    },
+                    "pass": true,
+                    "upstream_failures": [],
+                    "run_id": "963f34c7a13f5497e8a705fdc6da064a8c673d35d89ff48c",
+                    "elapsed_ms": 52702,
+                    "topic_boundary": null,
+                    "query": {
+                        "query_shape": "summary",
+                        "metric_codes": [
+                            "actual_performance"
+                        ],
+                        "start_date": "2026-10-01",
+                        "end_date": "2026-10-12",
+                        "compare_range": null,
+                        "ranking": null,
+                        "aggregate_condition": null,
+                        "object_kind": "store",
+                        "requested_store_count": 0,
+                        "business_filter_fields": []
+                    },
+                    "result_summary": [
+                        {
+                            "amount_cents": 199463700,
+                            "metric_code": "actual_performance",
+                            "period": "current",
+                            "storage_unit": "fen",
+                            "row_count": 0
+                        }
+                    ],
+                    "answer_summary": "查询完成；1组已核对指标结果；姓名与联系方式不进入证据",
+                    "telemetry": {
+                        "created_at_ms": 1791740241531,
+                        "attempts": [
+                            {
+                                "attempt_code": "analysis_objects",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740241668,
+                                "elapsed_ms": 438
+                            },
+                            {
+                                "attempt_code": "analysis_members",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740242131,
+                                "elapsed_ms": 100
+                            },
+                            {
+                                "attempt_code": "understand_meaning",
+                                "kind": "model",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740242257,
+                                "elapsed_ms": 24296
+                            },
+                            {
+                                "attempt_code": "select_recommendations",
+                                "kind": "model",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740266754,
+                                "elapsed_ms": 11403
+                            },
+                            {
+                                "attempt_code": "analysis_objects_reply1",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740279261,
+                                "elapsed_ms": 368
+                            },
+                            {
+                                "attempt_code": "analysis_members_reply1",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740279642,
+                                "elapsed_ms": 34
+                            },
+                            {
+                                "attempt_code": "understand_meaning_reply1",
+                                "kind": "model",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740279709,
+                                "elapsed_ms": 13728
+                            },
+                            {
+                                "attempt_code": "query_reply1",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740293509,
+                                "elapsed_ms": 554
+                            }
+                        ],
+                        "diagnostics": [],
+                        "latest_diagnostic": {
+                            "stage": "analysis_binding",
+                            "predicate": "verified_supplement_local_binding"
+                        }
+                    },
+                    "classification": "passed",
+                    "total_wall_ms": 53088
+                },
+                {
+                    "turn": 2,
+                    "question": "那消耗业绩呢",
+                    "expected": {
+                        "question": "那消耗业绩呢",
+                        "metric": "consume_amount",
+                        "period": "month",
+                        "shape": "summary",
+                        "kind": "store",
+                        "depends_on_turn": 1,
+                        "original_round": 2,
+                        "original_turn": 2
+                    },
+                    "status": "COMPLETED",
+                    "reason": "",
+                    "guidance": [],
+                    "admission_wait_ms": 0,
+                    "checks": {
+                        "completed": true,
+                        "metric": true,
+                        "shape": true,
+                        "object": true,
+                        "authorized_scope": true,
+                        "period": true,
+                        "fresh_reader_results": true,
+                        "same_authority": true
+                    },
+                    "pass": true,
+                    "upstream_failures": [],
+                    "run_id": "14c8c6782e3c58449dc592fa2615c77b5dcb3c888a48fd4b",
+                    "elapsed_ms": 24717,
+                    "topic_boundary": null,
+                    "query": {
+                        "query_shape": "summary",
+                        "metric_codes": [
+                            "consume_amount"
+                        ],
+                        "start_date": "2026-10-01",
+                        "end_date": "2026-10-12",
+                        "compare_range": null,
+                        "ranking": null,
+                        "aggregate_condition": null,
+                        "object_kind": "store",
+                        "requested_store_count": 0,
+                        "business_filter_fields": []
+                    },
+                    "result_summary": [
+                        {
+                            "amount_cents": 158256000,
+                            "metric_code": "consume_amount",
+                            "period": "current",
+                            "storage_unit": "fen",
+                            "row_count": 0
+                        }
+                    ],
+                    "answer_summary": "查询完成；1组已核对指标结果；姓名与联系方式不进入证据",
+                    "telemetry": {
+                        "created_at_ms": 1791740294622,
+                        "attempts": [
+                            {
+                                "attempt_code": "analysis_objects",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740295250,
+                                "elapsed_ms": 363
+                            },
+                            {
+                                "attempt_code": "analysis_members",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740295624,
+                                "elapsed_ms": 29
+                            },
+                            {
+                                "attempt_code": "bind_intent",
+                                "kind": "model",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740295705,
+                                "elapsed_ms": 20617
+                            },
+                            {
+                                "attempt_code": "query",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740316402,
+                                "elapsed_ms": 2644
+                            }
+                        ],
+                        "diagnostics": {
+                            "exact_ranking_admission": {
+                                "stage": "analysis_binding",
+                                "predicate": "deterministic_registered_ranking_collection_rejected"
+                            },
+                            "collection_context_probe": {
+                                "stage": "analysis_binding",
+                                "predicate": "collection_context_probe"
+                            },
+                            "registered_breakdown_continuation_probe": {
+                                "stage": "analysis_binding",
+                                "predicate": "registered_breakdown_continuation_miss_meaning_shape"
+                            },
+                            "registered_coordinated_probe": {
+                                "stage": "analysis_binding",
+                                "predicate": "registered_coordinated_miss_metric_projection"
+                            },
+                            "exact_binding_probe": {
+                                "stage": "analysis_binding",
+                                "predicate": "exact_registry_binding:r1:o1:t1:m1:s0:x0:e0"
+                            }
+                        },
+                        "latest_diagnostic": {
+                            "stage": "analysis_binding",
+                            "predicate": "closed_metric_context_reconciled"
+                        }
+                    },
+                    "classification": "passed",
+                    "total_wall_ms": 27077
+                },
+                {
+                    "turn": 3,
+                    "question": "按门店排名",
+                    "expected": {
+                        "question": "按门店排名",
+                        "metric": "consume_amount",
+                        "period": "month",
+                        "shape": "ranking",
+                        "kind": "store",
+                        "ranking": {
+                            "direction": "top",
+                            "limit": 3
+                        },
+                        "ranking_limit_unspecified": true,
+                        "supplement": "按消耗业绩从高到低查看本月前三家门店",
+                        "depends_on_turn": 2,
+                        "original_round": 2,
+                        "original_turn": 3
+                    },
+                    "status": "COMPLETED",
+                    "reason": "",
+                    "guidance": [
+                        {
+                            "step": 1,
+                            "fields": [
+                                "semantic_reply"
+                            ],
+                            "step_revision": 1,
+                            "intent_revision": 1,
+                            "choices": {
+                                "semantic_reply": "__supplement__"
+                            },
+                            "supplement_provided": true,
+                            "supplement_text": "按消耗业绩从高到低查看本月前三家门店"
+                        }
+                    ],
+                    "admission_wait_ms": 0,
+                    "checks": {
+                        "completed": true,
+                        "metric": true,
+                        "shape": true,
+                        "object": true,
+                        "authorized_scope": true,
+                        "period": true,
+                        "ranking": true,
+                        "fresh_reader_results": true,
+                        "same_authority": true
+                    },
+                    "pass": true,
+                    "upstream_failures": [],
+                    "run_id": "bb33179498bcab5f29ee010a5e5c4aa3c7ffde7e61fa65c4",
+                    "elapsed_ms": 76599,
+                    "topic_boundary": null,
+                    "query": {
+                        "query_shape": "ranking",
+                        "metric_codes": [
+                            "consume_amount"
+                        ],
+                        "start_date": "2026-10-01",
+                        "end_date": "2026-10-12",
+                        "compare_range": null,
+                        "ranking": {
+                            "direction": "top",
+                            "limit": 3
+                        },
+                        "aggregate_condition": null,
+                        "object_kind": "store",
+                        "requested_store_count": 0,
+                        "business_filter_fields": []
+                    },
+                    "result_summary": [
+                        {
+                            "metric_code": "consume_amount",
+                            "period": "current",
+                            "storage_unit": "fen",
+                            "ranking": {
+                                "top": [
+                                    {
+                                        "position": 1,
+                                        "amount_cents": 6506200
+                                    },
+                                    {
+                                        "position": 2,
+                                        "amount_cents": 3696500
+                                    },
+                                    {
+                                        "position": 3,
+                                        "amount_cents": 3611600
+                                    }
+                                ]
+                            }
+                        }
+                    ],
+                    "answer_summary": "查询完成；1组已核对指标结果；姓名与联系方式不进入证据",
+                    "telemetry": {
+                        "created_at_ms": 1791740321699,
+                        "attempts": [
+                            {
+                                "attempt_code": "analysis_objects",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740322290,
+                                "elapsed_ms": 393
+                            },
+                            {
+                                "attempt_code": "analysis_members",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740322695,
+                                "elapsed_ms": 39
+                            },
+                            {
+                                "attempt_code": "understand_meaning",
+                                "kind": "model",
+                                "state": "UNKNOWN",
+                                "created_at": 1791740322770,
+                                "elapsed_ms": 30037,
+                                "diagnostic": {
+                                    "stage": "transport",
+                                    "predicate": "timeout",
+                                    "transport_errno": 28,
+                                    "http_status": 0,
+                                    "elapsed_ms": 30007
+                                }
+                            },
+                            {
+                                "attempt_code": "understand_transport_retry",
+                                "kind": "model",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740352836,
+                                "elapsed_ms": 23552
+                            },
+                            {
+                                "attempt_code": "analysis_objects_reply1",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740376545,
+                                "elapsed_ms": 435
+                            },
+                            {
+                                "attempt_code": "analysis_members_reply1",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740376989,
+                                "elapsed_ms": 42
+                            },
+                            {
+                                "attempt_code": "understand_meaning_reply1",
+                                "kind": "model",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740377060,
+                                "elapsed_ms": 18108
+                            },
+                            {
+                                "attempt_code": "query_reply1",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740395239,
+                                "elapsed_ms": 2842
+                            }
+                        ],
+                        "diagnostics": {
+                            "exact_ranking_admission": {
+                                "stage": "analysis_binding",
+                                "predicate": "deterministic_registered_ranking_collection_rejected"
+                            },
+                            "understand_meaning": {
+                                "stage": "transport",
+                                "predicate": "timeout",
+                                "transport_errno": 28,
+                                "http_status": 0,
+                                "elapsed_ms": 30007
+                            }
+                        },
+                        "latest_diagnostic": {
+                            "stage": "analysis_binding",
+                            "predicate": "verified_supplement_local_binding"
+                        }
+                    },
+                    "classification": "passed",
+                    "total_wall_ms": 79021
+                },
+                {
+                    "turn": 4,
+                    "question": "最低的三家呢",
+                    "expected": {
+                        "question": "最低的三家呢",
+                        "metric": "consume_amount",
+                        "period": "month",
+                        "shape": "ranking",
+                        "kind": "store",
+                        "ranking": {
+                            "direction": "bottom",
+                            "limit": 3
+                        },
+                        "depends_on_turn": 3,
+                        "original_round": 2,
+                        "original_turn": 4
+                    },
+                    "status": "COMPLETED",
+                    "reason": "",
+                    "guidance": [],
+                    "admission_wait_ms": 0,
+                    "checks": {
+                        "completed": true,
+                        "metric": true,
+                        "shape": true,
+                        "object": true,
+                        "authorized_scope": true,
+                        "period": true,
+                        "ranking": true,
+                        "fresh_reader_results": true,
+                        "same_authority": true
+                    },
+                    "pass": true,
+                    "upstream_failures": [],
+                    "run_id": "4b91e12dac77ffac60e388f023525423aaa40cdda8d8e937",
+                    "elapsed_ms": 3918,
+                    "topic_boundary": null,
+                    "query": {
+                        "query_shape": "ranking",
+                        "metric_codes": [
+                            "consume_amount"
+                        ],
+                        "start_date": "2026-10-01",
+                        "end_date": "2026-10-12",
+                        "compare_range": null,
+                        "ranking": {
+                            "direction": "bottom",
+                            "limit": 3
+                        },
+                        "aggregate_condition": null,
+                        "object_kind": "store",
+                        "requested_store_count": 0,
+                        "business_filter_fields": []
+                    },
+                    "result_summary": [
+                        {
+                            "metric_code": "consume_amount",
+                            "period": "current",
+                            "storage_unit": "fen",
+                            "ranking": {
+                                "bottom": [
+                                    {
+                                        "position": 1,
+                                        "amount_cents": 0
+                                    },
+                                    {
+                                        "position": 2,
+                                        "amount_cents": 33800
+                                    },
+                                    {
+                                        "position": 3,
+                                        "amount_cents": 43500
+                                    }
+                                ]
+                            }
+                        }
+                    ],
+                    "answer_summary": "查询完成；1组已核对指标结果；姓名与联系方式不进入证据",
+                    "telemetry": {
+                        "created_at_ms": 1791740400723,
+                        "attempts": [
+                            {
+                                "attempt_code": "analysis_objects",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740401331,
+                                "elapsed_ms": 413
+                            },
+                            {
+                                "attempt_code": "analysis_members",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740401756,
+                                "elapsed_ms": 35
+                            },
+                            {
+                                "attempt_code": "query",
+                                "kind": "tool",
+                                "state": "SUCCEEDED",
+                                "created_at": 1791740401901,
+                                "elapsed_ms": 2544
+                            }
+                        ],
+                        "diagnostics": {
+                            "exact_ranking_admission": {
+                                "stage": "analysis_binding",
+                                "predicate": "deterministic_registered_ranking_collection_rejected"
+                            },
+                            "registered_breakdown_continuation_probe": {
+                                "stage": "analysis_binding",
+                                "predicate": "registered_breakdown_continuation_miss_source_shape"
+                            },
+                            "registered_coordinated_probe": {
+                                "stage": "analysis_binding",
+                                "predicate": "registered_coordinated_miss_metric_projection"
+                            },
+                            "exact_binding_probe": {
+                                "stage": "analysis_binding",
+                                "predicate": "exact_registry_binding_miss:r0:o0:t0:m0:s0:x0:e0"
+                            }
+                        },
+                        "latest_diagnostic": {
+                            "stage": "analysis_binding",
+                            "predicate": "exact_registry_binding_miss:r0:o0:t0:m0:s0:x0:e0"
+                        }
+                    },
+                    "classification": "passed",
+                    "total_wall_ms": 6324
+                }
+            ],
+            "passed": 4,
+            "classifications": {
+                "passed": 4
+            }
+        }
+    ],
+    "pass": true,
+    "finished_at": "2026-10-12T01:40:07+08:00",
+    "total": 4,
+    "passed": 4,
+    "classifications": {
+        "passed": 4
+    },
+    "active_suite_runs": 0,
+    "source_unchanged": true
+}
