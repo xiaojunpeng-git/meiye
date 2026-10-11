@@ -1,0 +1,26 @@
+{
+  "task": "R9-00003",
+  "baseline_head": "b3628f801e9b8c64f8a59ea31a6e804f6b7552f5",
+  "status": "local-selftest-complete-awaiting-product-acceptance",
+  "files": [
+    {
+      "path": "后端代码/app/services/system/SystemMenusServices.php",
+      "sha256": "07d1968b7b1a0cdb0caa904340925afa8716792f4e0859b4811d832a24db3fe4"
+    },
+    {
+      "path": "tests/organization-store-v3/php/platform-menu-ancestor-integration.php",
+      "sha256": "fe67b316879c695543e30dd5fb69fc1c3aeadd915a698d701eab463abca61ac4"
+    },
+    {
+      "path": "tests/organization-store-v3/evidence/R9-platform-menu-ancestor-selftest-2026-10-11.md",
+      "sha256": "6020dcce47587fe360a1acef2dbf18145d5b0012c34b3ae6f3a82ff1e56aa80b"
+    },
+    {
+      "path": "tests/organization-store-v3/evidence/R9-platform-menu-ancestor-tests-2026-10-11.json",
+      "sha256": "5ea664f3d97d282a7873c4f91c5775fb0a28fc40e22e3d68341804c2e03cb514"
+    }
+  ],
+  "tracked_patch_sha256": "bbe9c46983ac553bd4d3c6aa0961710516bd134718d78e6acebdfce4f8c2fdad",
+  "tests_pass": 266,
+  "remote_changes": false
+}
