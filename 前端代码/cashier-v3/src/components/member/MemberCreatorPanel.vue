@@ -68,6 +68,10 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  saveFeedbackAsDialog: {
+    type: Boolean,
+    default: false
+  },
   mode: {
     type: String,
     default: 'create'
@@ -78,7 +82,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['cancel', 'created', 'select-existing', 'mode-change'])
+const emit = defineEmits(['cancel', 'created', 'select-existing', 'mode-change', 'save-feedback'])
 
 const PHONE_PATTERN = /^1[3-9]\d{9}$/
 const BUILTIN_PROFILE_PARAMS = new Set([
@@ -159,7 +163,6 @@ const referrerMemberName = computed(() => firstText(referrerMember.value, [
 const referrerLocked = computed(() => Boolean(props.initialMember?.referrerLocked))
 const canSubmit = computed(() => !isSubmitting.value && !isOutcomeUncertain.value)
 const isEditing = computed(() => props.mode === 'edit')
-const phoneReadonly = computed(() => isEditing.value)
 watch(
   () => props.initialKeyword,
   (value) => applyInitialKeyword(value),
@@ -380,6 +383,16 @@ function clearSubmitState() {
   fieldErrors.value = {}
 }
 
+// 会员列表用确认弹窗呈现保存结果；收银会员选择器仍沿用原有的表单内提示。
+function notifySave(kind, message) {
+  if (props.saveFeedbackAsDialog) {
+    emit('save-feedback', { kind, message })
+    return
+  }
+  submitMessageKind.value = kind
+  submitMessage.value = message
+}
+
 function clearFieldError(key) {
   if (!fieldErrors.value[key]) return
   const next = { ...fieldErrors.value }
@@ -519,7 +532,8 @@ function validateForm() {
   if (!Object.keys(errors).length) return true
   if (Object.keys(errors).some((key) => key.startsWith('profile.'))) activeTab.value = 'archive'
   else activeTab.value = 'basic'
-  nextTick(() => focusFirstInvalidField())
+  if (props.saveFeedbackAsDialog) notifySave('error', Object.values(errors)[0])
+  if (!props.saveFeedbackAsDialog) nextTick(() => focusFirstInvalidField())
   return false
 }
 
@@ -566,15 +580,15 @@ function buildPayload() {
 }
 
 async function submitMember() {
-  if (!canSubmit.value || !validateForm()) return
+  if (!canSubmit.value) return
+  clearSubmitState()
+  if (!validateForm()) return
   if (typeof props.onSubmit !== 'function') {
-    submitMessageKind.value = 'error'
-    submitMessage.value = '暂未接入会员建档服务。'
+    notifySave('error', '暂未接入会员建档服务。')
     return
   }
 
   isSubmitting.value = true
-  clearSubmitState()
   const payload = buildPayload()
   try {
     const response = await props.onSubmit(payload)
@@ -592,28 +606,24 @@ function handleSubmitResponse(response, payload, thrown = false) {
 
   if (outcome.existingMember) {
     existingMember.value = outcome.existingMember
-    submitMessageKind.value = 'warning'
-    submitMessage.value = props.allowSelectExisting
+    notifySave('warning', props.allowSelectExisting
       ? (outcome.message || '该手机号已存在会员，请直接选择已有会员。')
-      : '该手机号已存在会员，不能重复建档。'
+      : '该手机号已存在会员，不能重复建档。')
     return
   }
 
   if (outcome.status === 'result_unknown' || outcome.status === 'pending') {
     isOutcomeUncertain.value = true
-    submitMessageKind.value = 'warning'
-    submitMessage.value = outcome.message || '建档结果正在确认，请勿重复提交。'
+    notifySave('warning', outcome.message || (isEditing.value ? '保存结果正在确认，请勿重复提交。' : '建档结果正在确认，请勿重复提交。'))
     return
   }
 
   if (outcome.status !== 'succeeded') {
-    submitMessageKind.value = 'error'
-    submitMessage.value = outcome.message || '会员建档失败，请检查后重试。'
+    notifySave('error', outcome.message || (isEditing.value ? '会员资料保存失败，请检查后重试。' : '会员建档失败，请检查后重试。'))
     return
   }
 
-  submitMessageKind.value = 'success'
-  submitMessage.value = outcome.message || '会员建档成功。'
+  notifySave('success', outcome.message || (isEditing.value ? '会员资料已保存。' : '会员建档成功。'))
   emit('created', {
     member: outcome.member,
     response,
@@ -752,7 +762,7 @@ function cancelCreation() {
               maxlength="11"
               placeholder="请输入手机号"
               :aria-invalid="Boolean(fieldErrors.phone)"
-              :disabled="phoneReadonly || isSubmitting || isOutcomeUncertain"
+              :disabled="isSubmitting || isOutcomeUncertain"
               @input="clearFieldError('phone')"
             >
             <small v-if="fieldErrors.phone" class="member-creator__field-error">{{ fieldErrors.phone }}</small>
@@ -814,7 +824,7 @@ function cancelCreation() {
 
               <label class="member-creator__field" data-error-key="phone">
                 <span class="member-creator__label">手机号 <b>*</b></span>
-                <input v-model="form.phone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号" :aria-invalid="Boolean(fieldErrors.phone)" :disabled="phoneReadonly || isSubmitting || isOutcomeUncertain" @input="clearFieldError('phone')">
+                <input v-model="form.phone" type="tel" autocomplete="tel" inputmode="numeric" maxlength="11" placeholder="请输入手机号" :aria-invalid="Boolean(fieldErrors.phone)" :disabled="isSubmitting || isOutcomeUncertain" @input="clearFieldError('phone')">
                 <small v-if="fieldErrors.phone" class="member-creator__field-error">{{ fieldErrors.phone }}</small>
               </label>
 
@@ -981,7 +991,7 @@ function cancelCreation() {
       </template>
     </div>
 
-    <section v-if="existingMember" class="member-creator__conflict" aria-live="polite">
+    <section v-if="existingMember && !saveFeedbackAsDialog" class="member-creator__conflict" aria-live="polite">
       <div>
         <strong>{{ existingMember.name || existingMember.realName || existingMember.nickname || '已有会员' }}</strong>
         <span>{{ existingMember.phone || form.phone }}</span>

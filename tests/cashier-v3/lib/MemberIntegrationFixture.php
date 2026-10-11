@@ -641,6 +641,21 @@ final class MemberIntegrationFixture
               `is_del` tinyint NOT NULL DEFAULT 0,
               PRIMARY KEY (`id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+            "CREATE TABLE IF NOT EXISTS `eb_member_exclusive_service_selection` (
+              `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+              `member_id` int unsigned NOT NULL,
+              `staff_id` int unsigned NOT NULL,
+              `employee_id` int unsigned NOT NULL,
+              `store_id` int unsigned NOT NULL,
+              `staff_name` varchar(64) NOT NULL DEFAULT '',
+              `sort_order` int unsigned NOT NULL DEFAULT 0,
+              `status` tinyint unsigned NOT NULL DEFAULT 1,
+              `version` bigint unsigned NOT NULL DEFAULT 1,
+              `created_at` int unsigned NOT NULL DEFAULT 0,
+              `updated_at` int unsigned NOT NULL DEFAULT 0,
+              PRIMARY KEY (`id`), UNIQUE KEY `uk_member_staff` (`member_id`,`staff_id`),
+              KEY `idx_member_active` (`member_id`,`status`,`sort_order`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
             "CREATE TABLE IF NOT EXISTS `eb_user_label` (
               `id` int unsigned NOT NULL,
               `label_name` varchar(64) NOT NULL DEFAULT '',
@@ -722,6 +737,9 @@ final class MemberIntegrationFixture
         self::ensureColumn('eb_store_debt', 'update_time', "int unsigned NOT NULL DEFAULT 0");
         self::ensureColumn('eb_employee', 'employment_type_code', "varchar(16) DEFAULT NULL");
         self::ensureColumn('eb_employee', 'employment_type_version', "bigint unsigned NOT NULL DEFAULT 0");
+        // 会员编辑投影按真实等级目录读取名称与排序；夹具必须包含这两个字段。
+        self::ensureColumn('eb_system_user_level', 'name', "varchar(64) NOT NULL DEFAULT ''");
+        self::ensureColumn('eb_system_user_level', 'grade', "int NOT NULL DEFAULT 0");
     }
 
     public static function resetAndSeed(): void
@@ -754,6 +772,7 @@ final class MemberIntegrationFixture
             'user_phone_identity',
             'member_exclusive_service_change',
             'member_exclusive_service',
+            'member_exclusive_service_selection',
         ] as $table) {
             if (self::tableExists('eb_' . $table)) {
                 Db::execute('DELETE FROM `eb_' . $table . '`');

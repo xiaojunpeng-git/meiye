@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import TablePagination from '@/components/common/TablePagination.vue'
 import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
@@ -30,6 +30,8 @@ const restoringMember = ref(null)
 const memberRestoreError = ref('')
 const isMemberMutationSaving = ref(false)
 const memberEditConflictMessage = ref('')
+const memberSaveFeedback = ref(null)
+const memberSaveFeedbackButton = ref(null)
 
 const EMPTY_MEMBER_QUERY_PROJECTION = Object.freeze({
   records: [],
@@ -203,7 +205,24 @@ async function requestAction(action, payload = {}) {
 
 function openMemberCreator() {
   if (!canCreateMember.value) return
+  memberSaveFeedback.value = null
   isMemberCreatorOpen.value = true
+}
+
+// 保存反馈来自共用建档表单；仅会员列表入口弹窗，避免改变收银选会员流程。
+function showMemberSaveFeedback({ kind = 'error', message = '' } = {}) {
+  memberSaveFeedback.value = {
+    kind,
+    title: kind === 'success' ? '保存成功' : kind === 'warning' ? '操作提示' : '保存失败',
+    message
+  }
+  nextTick(() => memberSaveFeedbackButton.value?.focus())
+}
+
+function dismissMemberSaveFeedback() {
+  memberSaveFeedback.value = null
+  // 校验错误仍标在原字段上；关闭弹窗后把焦点带回待修正字段。
+  nextTick(() => document.querySelector('.member-mutation-modal__card--creator [aria-invalid="true"]')?.focus())
 }
 
 function closeMemberCreator() {
@@ -509,6 +528,7 @@ async function openMemberEditor(record) {
   }
   const member = data.member
   if (member && member.memberId) {
+    memberSaveFeedback.value = null
     memberEditConflictMessage.value = ''
     editingMember.value = { ...member }
   }
@@ -713,6 +733,7 @@ async function openBatchAction() {
             :mode="editingMember ? 'edit' : 'create'"
             :initial-member="editingMember"
             :allow-select-existing="false"
+            save-feedback-as-dialog
             :current-store-name="state.storeName || ''"
             :profile-fields="creatorSchema.profileFields || creatorSchema.fields || []"
             :member-levels="creatorSchema.memberLevels || creatorSchema.levels || []"
@@ -722,7 +743,15 @@ async function openBatchAction() {
             :on-select-referrer="selectMemberReferrer"
             @cancel="closeMemberMutation"
             @created="handleMemberMutationSaved"
+            @save-feedback="showMemberSaveFeedback"
           />
+        </section>
+      </div>
+      <div v-if="memberSaveFeedback" class="member-save-feedback" role="presentation">
+        <section class="member-save-feedback__dialog" :class="`member-save-feedback__dialog--${memberSaveFeedback.kind}`" role="dialog" aria-modal="true" aria-labelledby="member-save-feedback-title" aria-describedby="member-save-feedback-message">
+          <h2 id="member-save-feedback-title">{{ memberSaveFeedback.title }}</h2>
+          <p id="member-save-feedback-message">{{ memberSaveFeedback.message }}</p>
+          <footer><button ref="memberSaveFeedbackButton" type="button" class="button button--primary" @click="dismissMemberSaveFeedback">确认</button></footer>
         </section>
       </div>
       <div v-if="deletingMember" class="member-mutation-modal" role="dialog" aria-modal="true" aria-label="注销会员">
@@ -775,4 +804,12 @@ async function openBatchAction() {
 .member-mutation-modal__card textarea { resize: vertical; }
 .member-mutation-modal__card--creator { width: min(980px, 100%); max-height: min(820px, calc(100vh - 40px)); overflow: auto; padding: 24px; }
 .member-mutation-modal__card--creator > header { padding-bottom: 4px; border-bottom: 1px solid #edf0f5; }
+.member-save-feedback { position: fixed; inset: 0; z-index: 1300; display: grid; place-items: center; padding: 24px; background: rgba(20, 31, 48, .36); }
+.member-save-feedback__dialog { width: min(460px, 100%); display: grid; gap: 12px; padding: 22px 24px 20px; border: 1px solid #b9d4ff; border-radius: 8px; background: #fff; box-shadow: 0 18px 44px rgba(15, 23, 42, .28); }
+.member-save-feedback__dialog--error { border-color: #ffccc7; background: #fffafa; }
+.member-save-feedback__dialog--warning { border-color: #ffd591; background: #fffaf0; }
+.member-save-feedback__dialog h2 { margin: 0; color: #1f2329; font-size: 14px; }
+.member-save-feedback__dialog p { margin: 0; color: #697586; font-size: 13px; line-height: 1.55; }
+.member-save-feedback__dialog footer { display: flex; justify-content: flex-end; }
+.member-save-feedback__dialog footer .button { min-width: 88px; }
 </style>
