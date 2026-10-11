@@ -34,6 +34,23 @@ final class InventoryMovementQueryServices
     public function outboundDetail(int $storeId, int $operatorId, string $sourceId, bool $canViewCost = false): array
     {
         $location = $this->defaultLocation($storeId, $operatorId);
+        return $this->projectOutboundDetail($location, $sourceId, $canViewCost);
+    }
+
+    /** 平台沿用门店单据的事实投影，但必须独立验证后台范围，不使用门店员工身份。 */
+    public function outboundDetailForPlatform(array $adminInfo, string $sourceId, array $selection): array
+    {
+        $resolved = (new InventoryPlatformDocumentReadScope())->resolve($adminInfo, 0, 'inventory_outbound', $selection);
+        $detail = $this->projectOutboundDetail((array)$resolved['location'], $sourceId,
+            in_array('inventory.cost.view', (array)$resolved['access']['features'], true));
+        // 展开门店库存只提供只读详情，不能从共享布局推导总部作废命令。
+        $detail['document']['can_void'] = false;
+        return $detail;
+    }
+
+    /** 只接收本服务鉴权后取得的仓库，手工出库和预售领用继续保持原状态口径。 */
+    private function projectOutboundDetail(array $location, string $sourceId, bool $canViewCost): array
+    {
         $sourceId = trim($sourceId);
         if ($sourceId === '' || strlen($sourceId) > 96) {
             throw new \InvalidArgumentException('inventory_outbound_detail_invalid');
@@ -45,6 +62,7 @@ final class InventoryMovementQueryServices
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->leftJoin('cashier_v3_presale_claim pc', 'pc.tenant_id=f.tenant_id AND pc.claim_id=f.source_id AND f.source_type=\'presale_claim_outbound\'')
             ->where('f.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('f.store_id', (int)$location['store_id'])
             ->where('f.location_id', (int)$location['id'])->where('f.fact_status', 'SETTLED')
             ->where('f.source_id', $sourceId)->whereIn('f.source_type', ['manual_outbound', 'presale_claim_outbound'])
             ->fieldRaw("COALESCE(n.document_no, f.source_id) AS order_sn, f.source_type, pc.claim_status AS presale_claim_status, pc.void_reason_snapshot AS presale_void_reason, pc.voided_at AS presale_voided_at, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
