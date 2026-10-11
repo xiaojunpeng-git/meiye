@@ -197,14 +197,52 @@ class SystemMenusServices extends BaseServices
 				return $id > 0;
 			}));
 			// 普通账号无菜单规则必须保持空权限；不能让空值触发全量权限查询。
-			// 登录资格由入口开关独立决定，这里不补父菜单、不授予其他业务权限。
+			// 登录资格由入口开关独立决定；导航父级补齐不能让空规则变成有业务权限。
 			if (!$rulesStr) {
 				return [[], []];
 			}
 		}
         $menusList = $this->dao->getMenusRoule(['auth_type' => 1, 'is_show' => 1, 'is_del' => 0, 'type' => $type, 'route' => $rulesStr]);
         $unique = $this->dao->getMenusUnique(['type' => $type, 'unique' => $rulesStr]);
-        return [Arr::getMenuIviewList($this->getMenusData($menusList, $type)), $unique];
+        $menuData = $this->getMenusData($menusList, $type);
+        // 岗位可只授权叶子功能。平台导航需要完整祖先链，但 API/功能权限仍严格取原规则。
+        // 不改变其他终端或超级管理员的既有菜单构建行为。
+        if ($type === 1 && ($level || $adminType === 3)) {
+            $menuData = $this->completePlatformMenuAncestors($menuData);
+        }
+        return [Arr::getMenuIviewList($menuData), $unique];
+    }
+
+    /**
+     * 只为已选平台菜单补可见、未删除的同端祖先，不补兄弟节点、不改角色规则。
+     * 按层批量查询并记录已访问 ID，缺失/隐藏/跨端父级不穿透，异常循环也能终止。
+     * 返回值仅供导航树展示；禁止用于 unique_auth 或接口授权计算。
+     */
+    protected function completePlatformMenuAncestors(array $menuData): array
+    {
+        $nodes = array_column($menuData, null, 'id');
+        $visited = array_fill_keys(array_keys($nodes), true);
+        $pending = array_column($menuData, 'pid');
+        while ($pending) {
+            $parentIds = [];
+            foreach ($pending as $id) {
+                $id = (int)$id;
+                if ($id > 0 && !isset($visited[$id])) {
+                    $parentIds[] = $id;
+                    $visited[$id] = true;
+                }
+            }
+            if (!$parentIds) break;
+            $parents = $this->dao->getMenusRoule([
+                'auth_type' => 1, 'is_show' => 1, 'is_del' => 0, 'type' => 1, 'route' => $parentIds,
+            ]);
+            $pending = [];
+            foreach ($this->getMenusData($parents, 1) as $parent) {
+                $nodes[(int)$parent['id']] = $parent;
+                $pending[] = (int)$parent['pid'];
+            }
+        }
+        return array_values($nodes);
     }
 
     /**
