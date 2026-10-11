@@ -384,11 +384,13 @@ async function hydrateRequestEditor(detail) {
 
 watch(() => props.detail, (detail) => { hydrateRequestEditor(detail) }, { immediate: true })
 
-/** Resume only the source-store draft snapshot; dispatch still rechecks stock and request fulfillment. */
+/** 两端恢复权威草稿快照；源方保持固定，发货时再复核库存和请货余量。 */
 function hydrateTransferEditor(detail) {
   if (!isTransferEdit.value || !detail?.can_edit) return
   transferDate.value = String(detail.business_date || transferDate.value)
   transferRemark.value = String(detail.remark || '')
+  transferSourceSelection.value = `${String(detail.from_party_type || 'HQ')}:${Number(detail.from_party_id || 0)}`
+  transferStaffId.value = Number(detail.transfer_staff_id || 0)
   transferTargetSelection.value = `${String(detail.to_party_type || 'STORE')}:${Number(detail.to_party_id || 0)}`
   requestDocumentId.value = Number(detail.request_document_id || 0)
   selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({
@@ -845,6 +847,7 @@ async function loadTransferContext() {
 }
 
 async function loadTransferStaffs() {
+  const previousStaffId = transferStaffId.value
   transferStaffOptions.value = []
   transferStaffId.value = 0
   if (!isPlatformHeadquarters.value || props.pageKey !== 'transfer') return
@@ -856,7 +859,9 @@ async function loadTransferStaffs() {
       hq_location_id: Number(props.hqLocationId), source_party_type: sourcePartyType, source_store_id: Number(rawSourceId || 0), target_store_id: target.type === 'HQ' ? 0 : target.id
     })
     transferStaffOptions.value = Array.isArray(response?.list) ? response.list : []
-    transferStaffId.value = Number(response?.current_staff_id || 0)
+    // 编辑优先保留仍有效的记名人员；失效人员必须重新选择。
+    transferStaffId.value = transferStaffOptions.value.some((staff) => Number(staff.id) === previousStaffId)
+      ? previousStaffId : Number(response?.current_staff_id || 0)
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '调拨人员读取失败。' }
 }
 
@@ -1165,7 +1170,9 @@ async function submitTransfer() {
     if (isPlatformHeadquarters.value) {
       if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
       const [type, rawId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
-      await platformInventoryApi.createHqCrossTransfer({ ...commonPayload, source_party_type: type, source_store_id: Number(rawId || 0), transfer_staff_id: Number(transferStaffId.value), hq_location_id: Number(props.hqLocationId) })
+      const payload = { ...commonPayload, source_party_type: type, source_store_id: Number(rawId || 0), transfer_staff_id: Number(transferStaffId.value), hq_location_id: Number(props.hqLocationId) }
+      if (isTransferEdit.value) await platformInventoryApi.updateHqCrossTransfer(Number(props.detail?.id), { ...payload, expected_edit_token: String(props.detail?.edit_token || '') })
+      else await platformInventoryApi.createHqCrossTransfer(payload)
     } else if (isTransferEdit.value) {
       await inventoryApi.updateCrossTransfer(Number(props.detail?.id), { ...commonPayload, expected_edit_token: String(props.detail?.edit_token || '') })
     } else await inventoryApi.createCrossTransfer(commonPayload)
@@ -1311,7 +1318,7 @@ function submitPrimaryEditor() {
             </section>
 
             <section v-else-if="pageKey === 'transfer'" class="form-grid">
-              <label class="form-grid__inline"><span class="field-label">调出方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="scopeName" disabled /></label><label class="form-grid__inline"><span class="field-label">调入方<i>*</i></span><InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" :disabled="isTransferEdit && requestDocumentId > 0" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
+              <label class="form-grid__inline"><span class="field-label">调出方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" :disabled="isTransferEdit" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="scopeName" disabled /></label><label class="form-grid__inline"><span class="field-label">调入方<i>*</i></span><InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" searchable :disabled="isTransferEdit && requestDocumentId > 0" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">关联请货单</span><input v-if="isTransferEdit" :value="requestDocumentId > 0 ? `请货单 #${requestDocumentId}` : '不关联请货单'" disabled /><select v-else v-model.number="requestDocumentId" @focus="loadTransferContext" @change="applyIncomingRequest"><option :value="0">不关联请货单</option><option v-for="request in incomingRequests" :key="request.id" :value="Number(request.id)">{{ request.request_no }} · {{ request.request_party_name_snapshot || request.request_store_name || '总部仓' }}</option></select></label>
               <label class="form-grid__inline"><span class="field-label">调拨日期<i>*</i></span><input v-model="transferDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">{{ isPlatformHeadquarters ? '调拨人' : '当前操作人' }}<i v-if="isPlatformHeadquarters">*</i></span><select v-if="isPlatformHeadquarters" v-model.number="transferStaffId" :disabled="!transferTargetSelection || !transferStaffOptions.length"><option v-if="!transferStaffOptions.length" :value="0">{{ transferTargetSelection ? '暂无可选调拨人' : '请先选择调入方' }}</option><option v-for="staff in transferStaffOptions" :key="staff.id" :value="Number(staff.id)">{{ staff.employee_name || staff.staff_name }}（{{ staff.store_name || staff.store_name_snapshot || '平台账号' }}）{{ staff.is_current ? ' · 当前账户' : '' }}</option></select><input v-else value="当前登录人员" disabled /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="transferRemark" placeholder="请输入备注" /></label>

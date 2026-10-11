@@ -174,13 +174,17 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
 // 处理公共路由
 function handlePublicRoute(to, next) {
   const hasMenus = store.state.admin.menus.menusName && store.state.admin.menus.menusName.length;
+  // 空菜单登录态仍可显示公共错误页；业务路由继续由 handleAuthenticatedRoute 鉴权。
+  // 不可因访问无权限页面的 403 跳转而清空合法登录态、反复退回登录页。
+  const token = Vue.prototype.__getToken();
+  const hasSession = token && token !== 'undefined';
   const isLoginPage = [
     `${Setting.roterPre}/login`,
     `${Setting.routePreAgent}/login`,
     '/app/upload'
   ].includes(to.path);
 
-  if (hasMenus || isLoginPage) {
+  if (hasMenus || isLoginPage || hasSession) {
     return next();
   }
 

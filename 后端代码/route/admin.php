@@ -2246,6 +2246,9 @@ Route::group('adminapi', function () {
 			Route::get('v3/hq/cross-transfer/transfer-staffs', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/transferStaffs')->option(['real_name' => '平台总部仓调拨人员候选']);
 			Route::get('v3/hq/cross-transfer/:id/detail', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/detail')->option(['real_name' => '平台总部仓跨主体调拨详情']);
 			Route::post('v3/hq/cross-transfer', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/create')->option(['real_name' => '平台总部仓跨主体调拨草稿']);
+			// 草稿编辑/删除复用统一调拨内核，后端再次校验源方、状态与版本。
+			Route::post('v3/hq/cross-transfer/:id/update', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/update')->option(['real_name' => '平台调拨草稿编辑']);
+			Route::post('v3/hq/cross-transfer/:id/delete-draft', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/deleteDraft')->option(['real_name' => '平台调拨草稿删除']);
 			Route::post('v3/hq/cross-transfer/:id/dispatch', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/dispatch')->option(['real_name' => '平台总部仓跨主体调拨发货']);
 			Route::post('v3/hq/cross-transfer/:id/receive', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/receive')->option(['real_name' => '平台总部仓跨主体调拨收货']);
 			Route::post('v3/hq/cross-transfer/:id/cancel', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/cancel')->option(['real_name' => '平台总部仓跨主体调拨取消']);

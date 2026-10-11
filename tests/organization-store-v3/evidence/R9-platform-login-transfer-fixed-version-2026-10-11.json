@@ -1,0 +1,211 @@
+{
+  "round": "R9",
+  "title": "平台登录资格、空菜单工作区与调拨只读菜单兼容",
+  "date": "2026-10-11",
+  "baseline_head": "dac7aed256a477d375a77726fe71c67c6b5c9e79",
+  "patch_sha256": "57379695cf68dc277ee33456d6a9f9584f7d477f104834301d2af29db45aa1f0",
+  "patch_fingerprint_method": "git diff HEAD for scoped tracked frontend/backend/test files + path/newline/content for scoped untracked files in groups order; evidence hashed separately",
+  "status": "开发与专项自测完成，待产品经理确认验收",
+  "scope": [
+    "无平台登录入口提示无权登录",
+    "有登录入口允许登录，不以菜单/权限数组非空作为条件",
+    "有菜单沿用原导航，无菜单展示空工作区，刷新保留登录态",
+    "空规则不返回全量权限，搜索菜单不共用 root 空规则缓存，已登记业务 API 无授权拒绝",
+    "旧调拨菜单只衔接已登记 GET 库位、总部调拨列表与详情；不补发其他库存及写权限",
+    "调拨读写范围分离，按钮能力由后端写授权决定，取消无关页面预取"
+  ],
+  "groups": {
+    "frontend": [
+      {
+        "path": "前端代码/admin/src/libs/platformLogin.js",
+        "sha256": "c0ed5a665f96bf8d95982971063e0a7b18e856bc8bda7a4e78af5451fc140073"
+      },
+      {
+        "path": "前端代码/admin/src/libs/util.js",
+        "sha256": "e764909ba214a362862367ccf5372b3ab7efd86e166cdd4756f2f1774eaaa523"
+      },
+      {
+        "path": "前端代码/admin/src/main.js",
+        "sha256": "a67aed8d5a149c1f72f7d04c5e831ca259eb50c1af1059f9573b3f2d4e565e8d"
+      },
+      {
+        "path": "前端代码/admin/src/pages/account/login/index.vue",
+        "sha256": "f0fc07a9491cdc55a68429846d4fd1155181879346689442b3617f53cd03daeb"
+      },
+      {
+        "path": "前端代码/admin/src/router/index.js",
+        "sha256": "027216438cc92c107310bcf0d24efc426bf1e934662dbee450ebce0f6270a723"
+      },
+      {
+        "path": "前端代码/admin/src/router/routes.js",
+        "sha256": "404440f93f33310d1e393929eac036fddf1123124f04f82eed9902662c215e45"
+      },
+      {
+        "path": "前端代码/admin/src/store/modules/admin/modules/menus.js",
+        "sha256": "147cd82a9218323ffb3e40d6ee3a698b0abe6d2d935c0078e4174b6185d9e596"
+      },
+      {
+        "path": "前端代码/inventory-vue3/src/App.vue",
+        "sha256": "cfa821e85f253a14bf7f9ad6b65b2b0c322d734e5b6934fbd0ffd8f8b4307dc8"
+      }
+    ],
+    "backend": [
+      {
+        "path": "后端代码/app/controller/admin/Common.php",
+        "sha256": "8aa4b24cb1ac4a029270c7a5d873142244ff53b432444a2610a914083e5785b0"
+      },
+      {
+        "path": "后端代码/app/services/employee/EmployeeInternalLoginServices.php",
+        "sha256": "b6453e25e6c250495b7441eb4f9d3915722b745244ab9bb7b0dc3bdfa7c9d0eb"
+      },
+      {
+        "path": "后端代码/app/services/system/admin/SystemAdminServices.php",
+        "sha256": "5ad2bb9435058466467fb4d38b3d8ae5907a00a01a40ce0be765b0b4b54b9dea"
+      },
+      {
+        "path": "后端代码/app/services/system/SystemMenusServices.php",
+        "sha256": "76e4682de964e163f3154a0a04bc95f6b005b36596683e6c1d34e05d184665d9"
+      },
+      {
+        "path": "后端代码/app/services/system/SystemRoleServices.php",
+        "sha256": "f25938358384b2d4ab91a1606ae8053e05ea4e9b64c4dee88d4ae4cab8119be3"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryPlatformAccessPolicy.php",
+        "sha256": "763ab69befa23a58d89f6e33d5a8d8de8880cba321ad7081e1660da2a4e0224c"
+      },
+      {
+        "path": "后端代码/app/services/product/inventory/InventoryCrossSubjectTransferServices.php",
+        "sha256": "53924f6e89622636bbb0ed112fb3b47827ba7244ab706bcbfe085eb2da7d9c21"
+      }
+    ],
+    "tests": [
+      {
+        "path": "tests/organization-store-v3/js/platform-empty-menu-login.mjs",
+        "sha256": "f804ad127dcda59bd5996a5890ad19d7b7c426a574fc3ab86538687eadd79eee"
+      },
+      {
+        "path": "tests/organization-store-v3/php/platform-empty-menu-login.php",
+        "sha256": "affe4a57b24efaa91282e5dca674d36976239e75fa2f60e7ea953e751991f9d3"
+      },
+      {
+        "path": "tests/inventory/php/r9-platform-transfer-menu-access.php",
+        "sha256": "740b7fb68a534f9f7aa717e0331ea9577f9b920a3bf82d57e97d93069a0dfb28"
+      }
+    ],
+    "evidence": [
+      {
+        "path": "tests/organization-store-v3/evidence/R9-empty-workspace-refresh-2026-10-11.png",
+        "sha256": "10f0a876b87e04224bc16722a5e8e849f69bfc61e8b5111557e8da03228a81b8"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-no-login-permission-2026-10-11.png",
+        "sha256": "2df5a59a5eb38c41a93248d04fe3765f3f2e13a38ec0b4706b2c2650ce5a2efa"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-menu-selftest-2026-10-11.md",
+        "sha256": "44b99712ebbbb8559181889747ccc1e09a63d1443507288000496c52aea3e6ca"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-menu-list-2026-10-11.png",
+        "sha256": "b3c0f3d69ddd2eec5481b4303b4353265763ae10ccdda5e6d760ea955017ef55"
+      },
+      {
+        "path": "tests/organization-store-v3/evidence/R9-transfer-menu-detail-2026-10-11.png",
+        "sha256": "5db8f6e04e5afcdb35e66ee09d125825f946440178dbf513b2e0b462a34732f3"
+      }
+    ]
+  },
+  "migrations": [],
+  "engineering_scripts": [],
+  "build_outputs": [],
+  "comment_updated_files": [
+    "前端代码/admin/src/libs/platformLogin.js",
+    "前端代码/admin/src/libs/util.js",
+    "前端代码/admin/src/main.js",
+    "前端代码/admin/src/pages/account/login/index.vue",
+    "前端代码/admin/src/router/index.js",
+    "前端代码/admin/src/router/routes.js",
+    "前端代码/admin/src/store/modules/admin/modules/menus.js",
+    "后端代码/app/controller/admin/Common.php",
+    "后端代码/app/services/employee/EmployeeInternalLoginServices.php",
+    "后端代码/app/services/system/admin/SystemAdminServices.php",
+    "后端代码/app/services/system/SystemMenusServices.php",
+    "后端代码/app/services/system/SystemRoleServices.php",
+    "前端代码/inventory-vue3/src/App.vue",
+    "后端代码/app/services/product/inventory/InventoryPlatformAccessPolicy.php",
+    "后端代码/app/services/product/inventory/InventoryCrossSubjectTransferServices.php"
+  ],
+  "tests_run": [
+    {
+      "command": "node tests/organization-store-v3/js/platform-empty-menu-login.mjs",
+      "result": "PASS real helper execution + store/cookie adapters; three login branches; default/empty routes and 403 retention"
+    },
+    {
+      "command": "docker exec -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 -i mohe-platform-app php < tests/organization-store-v3/php/platform-empty-menu-login.php",
+      "result": "PASS 25 assertions; local MySQL hostname guarded; synthetic fixtures rolled back and tokens removed"
+    },
+    {
+      "command": "node tests/organization-store-v3/js/store-v3-login-entry-contract.mjs",
+      "result": "PASS 18 assertions; store V3 login contract unchanged"
+    },
+    {
+      "command": "PHP 7.4 lint (5 backend files)",
+      "result": "PASS"
+    },
+    {
+      "command": "Vue template compiler + Babel parse (7 frontend files)",
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "CUA localhost:18081 UI with synthetic intercepted API responses",
+      "result": "PASS empty menu/empty permissions login + refresh to workspace; direct business route goes 403; denied login message 无权登录"
+    },
+    {
+      "command": "docker exec -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 -i mohe-platform-app php < tests/inventory/php/r9-platform-transfer-menu-access.php",
+      "result": "PASS 36 assertions, local guarded synthetic transaction rolled back"
+    },
+    {
+      "command": "PHP 7.4 lint (3 transfer backend files), Vue SFC script/template compile, git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "php tests/inventory/php/cross-subject-transfer-contract.php",
+      "result": "12 PASS / 1 existing static FAIL; fixed p.type=0 expectation differs from unchanged dynamic source type filter; details in selftest"
+    },
+    {
+      "command": "CUA local18081 current real account, actual API responses",
+      "result": "PASS 16 monthly transfer records, detail HTTP200/rendered, create disabled and no dispatch/receive action"
+    },
+    {
+      "command": "R9 login PHP regression rerun 2026-10-11",
+      "result": "PASS 26 lines including synthetic fixture rollback; prior manifest count25 excluded rollback"
+    }
+  ],
+  "data_architecture": {
+    "authority": "有效岗位 use_platform 控制登录资格；岗位规则独立控制菜单/API，无前端补授权",
+    "events": "仅沿用登录审计与兼容账号投影；不产生经营事实、金额或库存事件",
+    "concurrency": "沿用现有投影、缓存与令牌机制，不更改业务写事务",
+    "permissions": "后端登录入口判断；既有前端业务路由鉴权不放宽；已登记 API 空授权不放行",
+    "snapshots": "覆盖当前用户菜单与权限，避免继承上一用户状态",
+    "performance": "移除登录入口的菜单规则查询；空规则菜单/搜索提前返回",
+    "reconciliation": "本地事务测试覆盖开关、岗位状态、绑定状态/结束/删除、空规则及有菜单",
+    "transfer_authority": "Live enabled roles/nondeleted legacy menu, exact registered GET allowlist only; organization/HQ/tenant scope retained; writes keep native VIEW + WAREHOUSE grants",
+    "transfer_events": "No production or business writes; synthetic fixture rollback; no schema migration"
+  },
+  "limits": [
+    "浏览器使用合成响应，不冒充瑞昊生产账号验收",
+    "本机 127.0.0.1:18081 已有 LocalStorage 配额不足，因此页面回归改用独立 localhost:18081；未清空原有业务缓存；仅移除本轮合成登录 Cookie",
+    "旧未登记接口兼容策略维持原状，不属于本轮全平台权限改造",
+    "未打包8080、未commit、未部署、未push；其余脏工作区及暂存区保持不动",
+    "本次调拨页面使用本地真实账号和接口；此前登录合成响应证据不改写为真实验收",
+    "仅旧调拨菜单只读衔接，其他库存菜单/API与写权限配置不变",
+    "旧跨主体契约有一项静态断言失败，未修改无关目录商品服务；详见自测记录"
+  ],
+  "supersedes": "tests/organization-store-v3/evidence/R9-platform-empty-menu-fixed-version-2026-10-11.json",
+  "supersedes_reason": "调拨权限兼容更新共享 SystemRoleServices；按新清单固定合并范围，旧清单保留历史"
+}

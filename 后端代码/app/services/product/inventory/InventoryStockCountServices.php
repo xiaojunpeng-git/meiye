@@ -106,7 +106,8 @@ final class InventoryStockCountServices
             throw new \InvalidArgumentException('inventory_stock_count_draft_invalid');
         }
         $hq = new InventoryHqLocationServices();
-        $resolved = $hq->writableLocation($adminInfo, $locationId);
+        // 添加盘点单是既有功能授权；确认仍沿用范围、版本和库存事务校验。
+        $resolved = $hq->writableLocation($adminInfo, $locationId, 'count');
         $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
         $scope['operatorType'] = 'PLATFORM_ADMIN';
         $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);

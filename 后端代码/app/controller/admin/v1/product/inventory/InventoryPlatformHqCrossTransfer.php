@@ -102,6 +102,40 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
         }
     }
 
+    /** 草稿写入只转交统一领域服务；控制器不自行改表或扣库存。 */
+    public function update(int $id)
+    {
+        try {
+            $input = (array)$this->request->post();
+            $locationId = (int)($input['hq_location_id'] ?? 0);
+            unset($input['hq_location_id']);
+            return $this->success('调拨草稿已更新。', $this->services->updateDraftForHeadquarters((array)$this->adminInfo, $locationId, $id, $input));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('调拨参数或草稿版本无效，请刷新后重试。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+        }
+    }
+
+    /** 删除仅适用于未形成库存事实的草稿，必须携带最新版本令牌。 */
+    public function deleteDraft(int $id)
+    {
+        try {
+            return $this->success('调拨草稿已删除。', $this->services->deleteDraftForHeadquarters(
+                (array)$this->adminInfo, (int)$this->request->post('hq_location_id', 0), $id,
+                (string)$this->request->post('expected_edit_token', '')
+            ));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('草稿版本无效，请刷新后重试。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+        }
+    }
+
     public function dispatch(int $id)
     {
         try {
@@ -153,6 +187,12 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
             'inventory_cross_transfer_request_quantity_exceeded' => '调拨数量超过请货单剩余可调数量，请刷新后重试。',
             'inventory_cross_transfer_dispatch_state_invalid' => '当前调拨单不可发货。',
             'inventory_cross_transfer_receive_state_invalid' => '当前调拨单不可收货。',
+            'inventory_cross_transfer_edit_state_invalid' => '仅调出方可编辑未发货草稿。',
+            'inventory_cross_transfer_delete_state_invalid' => '仅调出方可删除未发货草稿。',
+            'inventory_cross_transfer_draft_changed' => '草稿已被修改，请刷新后重试。',
+            'inventory_cross_transfer_delete_facts_exist' => '调拨已有库存或履约记录，不可删除。',
+            'inventory_cross_transfer_request_target_locked' => '关联请货单的调入方不可更改。',
+            'inventory_cross_transfer_scope_denied' => '当前账号无权操作该调拨单。',
             'inventory_cross_transfer_target_scope_denied' => '只能操作当前组织范围内的调拨。',
             'inventory_cross_transfer_transfer_staff_invalid' => '请选择当前授权组织范围内的在职员工。',
         ][$code] ?? '总部调拨未完成，请刷新后重试。';

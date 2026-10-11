@@ -97,8 +97,13 @@ final class InventorySalonUsageServices
 
     public function listForPlatform(array $adminInfo, int $storeId, string $keyword, string $from, string $to): array
     {
-        [$scope] = $this->platformScope($adminInfo, $storeId);
-        return $this->listForScope($scope, 0, $keyword, $from, $to);
+        // 只读院装菜单不要求领用写权限，门店范围仍由同一个后端策略决定。
+        [$scope] = $this->platformScope($adminInfo, $storeId, false);
+        $result = $this->listForScope($scope, 0, $keyword, $from, $to);
+        $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
+        foreach ($result['items'] as &$item) $item['can_void'] = !empty($item['can_void']) && in_array('inventory.location.manage', $access['features'], true);
+        unset($item);
+        return $result;
     }
 
     private function listForScope(array $scope, int $projectId, string $keyword, string $from, string $to): array
@@ -191,7 +196,8 @@ final class InventorySalonUsageServices
 
     public function detailForPlatform(array $adminInfo, int $storeId, int $documentId): array
     {
-        [$scope] = $this->platformScope($adminInfo, $storeId);
+        // 查看明细与领退命令分离；不开放越权门店或写入。
+        [$scope] = $this->platformScope($adminInfo, $storeId, false);
         return $this->detailForScope($scope, $documentId);
     }
 
@@ -259,9 +265,12 @@ final class InventorySalonUsageServices
     private function fefo(int $stockId,int $needed): array { $b=Db::name('inventory_batch')->where('stock_id',$stockId)->where('batch_status','ACTIVE')->where('available_quantity_units','>',0)->orderRaw('expire_date IS NULL ASC, expire_date ASC, received_business_date IS NULL ASC, received_business_date ASC, id ASC')->lock(true)->select()->toArray();$a=[];$left=$needed;foreach($b as $x){$n=min((int)$x['available_quantity_units'],$left);if($n)$a[]=['batch'=>$x,'units'=>$n];$left-=$n;if(!$left)break;}if($left)throw new \RuntimeException('inventory_salon_usage_stock_insufficient');return $a; }
     private function decrease(array $stock,array $allocations,int $units,int $now):void { if(Db::name('inventory_stock')->where('id',(int)$stock['id'])->where('version',(int)$stock['version'])->update(['available_quantity_units'=>(int)$stock['available_quantity_units']-$units,'version'=>(int)$stock['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_salon_usage_stock_changed');foreach($allocations as $a){$b=$a['batch'];if(Db::name('inventory_batch')->where('id',(int)$b['id'])->where('version',(int)$b['version'])->where('available_quantity_units','>=',$a['units'])->update(['available_quantity_units'=>(int)$b['available_quantity_units']-$a['units'],'version'=>(int)$b['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_salon_usage_batch_changed');} }
     private function fact(array $scope,array $stock,array $batch,int $direction,int $units,string $type,string $source,string $detail,array $c):int{return(new InventoryBatchMovementFactServices())->append(['factKey'=>$type.':'.hash('sha256',$source.':'.$detail),'tenantId'=>$scope['tenantId'],'organizationId'=>$scope['organizationId'],'organizationPath'=>$scope['organizationPath'],'storeId'=>$scope['storeId'],'stockId'=>(int)$stock['id'],'batchId'=>(int)$batch['id'],'direction'=>$direction,'quantityUnits'=>$units,'unitCostCents'=>(int)$batch['unit_cost_cents'],'costAmountCents'=>intdiv($units*(int)$batch['unit_cost_cents'],10**(int)$stock['quantity_scale']),'sourceType'=>$type,'sourceId'=>$source,'sourceDetailId'=>$detail,'reversalOf'=>0,'businessDate'=>$c['businessDate'],'occurredAt'=>$c['now'],'settledAt'=>$c['now'],'recordedAt'=>$c['now'],'operatorType'=>(string)($scope['operatorType']??''),'operatorId'=>(int)($scope['operatorId']??0),'operatorName'=>(string)($scope['operatorName']??'')]);}
-    private function platformScope(array $adminInfo, int $storeId): array
+    /** 写入口默认强制原生管理能力；查询必须显式选择只读，不能借兼容菜单扣减库存。 */
+    private function platformScope(array $adminInfo, int $storeId, bool $writable = true): array
     {
-        $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
+        $policy = new InventoryPlatformAccessPolicy();
+        $access = $policy->resolve($adminInfo);
+        if ($writable) $policy->assertFeature($access, 'inventory.location.manage', '当前岗位未配置仓库管理权限。');
         if ($storeId <= 0 || (empty($access['is_super_admin']) && !in_array($storeId, (array)$access['store_ids'], true))) {
             throw new \RuntimeException('inventory_salon_usage_platform_store_denied');
         }

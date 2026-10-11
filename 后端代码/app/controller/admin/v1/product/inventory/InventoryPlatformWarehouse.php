@@ -33,6 +33,13 @@ final class InventoryPlatformWarehouse extends AuthController
                 'list' => $this->services->locations((array)$this->adminInfo),
                 'permission_anchor' => InventoryBatchStockQueryContract::PERMISSION_VIEW,
                 'cost_visible' => in_array(InventoryBatchStockQueryContract::PERMISSION_COST, $access['features'], true),
+                // 页面只消费可信写能力；读取库位不会自动开放新建、导入或作废。
+                'can_manage' => in_array('inventory.location.manage', $access['features'], true),
+                // 按功能分别返回新建能力，不能由任一添加节点推导全部库存操作。
+                'can_create' => array_combine(['inbound', 'outbound', 'count', 'request', 'transfer'], array_map(
+                    static fn (string $page): bool => (new InventoryPlatformAccessPolicy())->canCreate($access, $page),
+                    ['inbound', 'outbound', 'count', 'request', 'transfer']
+                )),
             ]);
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);

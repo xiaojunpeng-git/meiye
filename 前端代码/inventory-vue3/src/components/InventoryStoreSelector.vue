@@ -8,6 +8,8 @@ const props = defineProps({
   placeholder: { type: String, default: '搜索并选择供货方' },
   loading: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
+  // 仅显式启用的接收目录可输入查找，不改变其他只读选择器的既有交互。
+  searchable: { type: Boolean, default: false },
   presentation: { type: String, default: 'dropdown' }
 })
 
@@ -38,7 +40,7 @@ function toggle() {
   expanded.value = !expanded.value
 }
 
-function close() { window.setTimeout(() => { expanded.value = false }, 120) }
+function close() { expanded.value = false; keyword.value = '' }
 function choose(option) {
   emit('update:modelValue', String(option.key || ''))
   keyword.value = ''
@@ -47,7 +49,7 @@ function choose(option) {
 </script>
 
 <template>
-  <div class="store-selector">
+  <div class="store-selector" @focusout="(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }" @keydown.esc="close">
     <button
       v-if="presentation === 'modal'"
       class="store-selector__modal-trigger"
@@ -66,13 +68,13 @@ function choose(option) {
     </button>
     <div v-else class="store-selector__input">
       <Search :size="15" />
-      <input :value="selected?.name || keyword" :placeholder="placeholder" :disabled="disabled" readonly @focus="open" @click="open" />
-      <button class="store-selector__toggle" type="button" :aria-label="expanded ? '收起供货方列表' : '展开供货方列表'" @mousedown.prevent @click="toggle"><ChevronDown :size="15" aria-hidden="true" /></button>
+      <input :value="searchable && expanded ? keyword : (selected?.name || keyword)" :placeholder="selected?.name || placeholder" :disabled="disabled" :readonly="!searchable" @input="keyword = $event.target.value; open()" @focus="open" @click="open" />
+      <button class="store-selector__toggle" type="button" :disabled="disabled" :aria-label="expanded ? '收起供货方列表' : '展开供货方列表'" @mousedown.prevent @click="toggle"><ChevronDown :size="15" aria-hidden="true" /></button>
     </div>
     <div v-if="expanded && presentation !== 'modal'" class="store-selector__menu">
       <p v-if="loading" class="store-selector__empty">正在读取供货方...</p>
       <p v-else-if="!visibleOptions.length" class="store-selector__empty">没有可选供货方</p>
-      <button v-for="option in visibleOptions" v-else :key="option.key" type="button" :class="{ active: String(option.key) === String(modelValue) }" @mousedown.prevent="choose(option)">
+      <button v-for="option in visibleOptions" v-else :key="option.key" type="button" :class="{ active: String(option.key) === String(modelValue) }" @mousedown.prevent @click="choose(option)">
         <span>{{ option.name }}</span><small>{{ option.type === 'HQ' ? '总部仓' : option.type === 'ALL' ? '全部' : '门店' }}</small>
       </button>
     </div>

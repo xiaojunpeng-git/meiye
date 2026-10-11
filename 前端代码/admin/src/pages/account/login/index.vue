@@ -99,10 +99,9 @@ import {
   copyrightInfoApi,
   isCaptcha,
 } from "@/api/account";
-import { getHeaderName, getHeaderSider, getMenuSider } from "@/libs/system";
+import { finishPlatformLogin } from "@/libs/platformLogin";
 import mixins from "../mixins";
 import Setting from "@/setting";
-import util from "@/libs/util";
 import axios from "axios";
 import Verify from "@/components/verifition/Verify";
 export default {
@@ -267,9 +266,6 @@ export default {
           this.$Message.error(res.msg);
         });
     },
-    getChilden(data) {
-      return util.resolveDefaultMenuPath(data);
-    },
     getCopyright() {
       copyrightInfoApi()
         .then((res) => {
@@ -320,65 +316,7 @@ export default {
         })
           .then(async (res) => {
             msg();
-            if (!res.data.unique_auth.length)
-              return this.$Message.error("您暂无任何菜单权限");
-            localStorage.setItem(
-              `adminType_${res.data.user_info.admin_type}`,
-              res.data.user_info.admin_type
-            );
-            this.$store.dispatch("admin/account/setPageTitle");
-            let expires = res.data.expires_time;
-            // 记录用户登陆信息
-            util.cookies.set("uuid", res.data.user_info.id, {
-              expires: expires,
-            });
-            util.cookies.set("token", res.data.token, {
-              expires: expires,
-            });
-            util.cookies.set("expires_time", res.data.expires_time, {
-              expires: expires,
-            });
-            const db = await this.$store.dispatch("admin/db/database", {
-              user: true,
-            });
-            localStorage.setItem("unique_auth", res.data.unique_auth);
-            db.set("user_info", res.data.user_info).write();
-            util.makeMenu(Setting.roterPre, res.data.menus);
-            const menuSider = res.data.menus;
-            this.$store.commit("admin/menus/getmenusNav", menuSider);
-            let headerSider = getHeaderSider(res.data.menus);
-            this.$store.commit("admin/menu/setHeader", headerSider);
-            let toPath = this.getChilden(res.data.menus);
-            // 获取侧边栏菜单
-            const headerName = getHeaderName(
-              {
-                path: toPath,
-                query: {},
-                params: {},
-              },
-              menuSider
-            );
-            const filterMenuSider = getMenuSider(menuSider, headerName);
-            // 指定当前显示的侧边菜单
-            this.$store.commit(
-              "admin/menu/setSider",
-              filterMenuSider[0].children
-            );
-            //设置首页path
-            this.$store.commit("admin/menus/setIndexPath", toPath);
-            // 记录用户信息
-            this.$store.dispatch("admin/user/set", {
-              name: res.data.user_info.account,
-              avatar: res.data.user_info.head_pic,
-              access: res.data.unique_auth,
-              logo: res.data.logo,
-              logoSmall: res.data.logo_square,
-              version: res.data.version,
-              newOrderAudioLink: res.data.newOrderAudioLink,
-            });
-            return this.$router.replace({
-              path: this.$route.query.redirect || toPath || "/",
-            });
+            return finishPlatformLogin(this, res.data);
           })
           .catch((res) => {
             msg();
@@ -398,67 +336,7 @@ export default {
         })
           .then(async (res) => {
             msg();
-            if (!res.data.unique_auth.length)
-              return this.$Message.error("您暂无任何菜单权限");
-            localStorage.setItem(
-              `adminType_${res.data.user_info.admin_type}`,
-              res.data.user_info.admin_type
-            );
-            this.$store.dispatch("admin/account/setPageTitle");
-            let expires = res.data.expires_time;
-            // 记录用户登陆信息
-            util.cookies.set("uuid", res.data.user_info.id, {
-              expires: expires,
-            });
-            util.cookies.set("token", res.data.token, {
-              expires: expires,
-            });
-            util.cookies.set("expires_time", res.data.expires_time, {
-              expires: expires,
-            });
-            const db = await this.$store.dispatch("admin/db/database", {
-              user: true,
-            });
-            util.cookies.set("unique_auth", res.data.unique_auth, {
-              expires: expires,
-            });
-            db.set("user_info", res.data.user_info).write();
-            util.makeMenu(Setting.roterPre, res.data.menus);
-            const menuSider = res.data.menus;
-            this.$store.commit("admin/menus/getmenusNav", menuSider);
-            let headerSider = getHeaderSider(res.data.menus);
-            this.$store.commit("admin/menu/setHeader", headerSider);
-            let toPath = this.getChilden(res.data.menus);
-            // 获取侧边栏菜单
-            const headerName = getHeaderName(
-              {
-                path: toPath,
-                query: {},
-                params: {},
-              },
-              menuSider
-            );
-            const filterMenuSider = getMenuSider(menuSider, headerName);
-            // 指定当前显示的侧边菜单
-            this.$store.commit(
-              "admin/menu/setSider",
-              filterMenuSider[0].children
-            );
-            //设置首页path
-            this.$store.commit("admin/menus/setIndexPath", toPath);
-            // 记录用户信息
-            this.$store.dispatch("admin/user/set", {
-              name: res.data.user_info.account,
-              avatar: res.data.user_info.head_pic,
-              access: res.data.unique_auth,
-              logo: res.data.logo,
-              logoSmall: res.data.logo_square,
-              version: res.data.version,
-              newOrderAudioLink: res.data.newOrderAudioLink,
-            });
-            return this.$router.replace({
-              path: this.$route.query.redirect || toPath || "/",
-            });
+            return finishPlatformLogin(this, res.data);
           })
           .catch((res) => {
             msg();
@@ -507,66 +385,7 @@ export default {
       AccountLogin(data)
         .then(async (res) => {
           msg();
-          if (!res.data.unique_auth.length)
-            return this.$Message.error("您暂无任何菜单权限");
-          localStorage.setItem(
-            `adminType_${res.data.user_info.admin_type}`,
-            res.data.user_info.admin_type
-          );
-          this.$store.dispatch("admin/account/setPageTitle");
-          let expires = res.data.expires_time;
-          // 记录用户登陆信息
-          util.cookies.set("uuid", res.data.user_info.id, {
-            expires: expires,
-          });
-          util.cookies.set("token", res.data.token, {
-            expires: expires,
-          });
-          util.cookies.set("expires_time", res.data.expires_time, {
-            expires: expires,
-          });
-          const db = await this.$store.dispatch("admin/db/database", {
-            user: true,
-          });
-          localStorage.setItem("unique_auth", res.data.unique_auth);
-          db.set("user_info", res.data.user_info).write();
-
-          util.makeMenu(Setting.roterPre, res.data.menus);
-          const menuSider = res.data.menus;
-          this.$store.commit("admin/menus/getmenusNav", menuSider);
-          let headerSider = getHeaderSider(res.data.menus);
-          this.$store.commit("admin/menu/setHeader", headerSider);
-          let toPath = this.getChilden(res.data.menus);
-          // 获取侧边栏菜单
-          const headerName = getHeaderName(
-            {
-              path: toPath,
-              query: {},
-              params: {},
-            },
-            menuSider
-          );
-          const filterMenuSider = getMenuSider(menuSider, headerName);
-          // 指定当前显示的侧边菜单
-          this.$store.commit(
-            "admin/menu/setSider",
-            filterMenuSider[0].children
-          );
-          //设置首页path
-          this.$store.commit("admin/menus/setIndexPath", toPath);
-          // 记录用户信息
-          this.$store.dispatch("admin/user/set", {
-            name: res.data.user_info.account,
-            avatar: res.data.user_info.head_pic,
-            access: res.data.unique_auth,
-            logo: res.data.logo,
-            logoSmall: res.data.logo_square,
-            version: res.data.version,
-            newOrderAudioLink: res.data.newOrderAudioLink,
-          });
-          return this.$router.replace({
-            path: this.$route.query.redirect || toPath || "/",
-          });
+          return finishPlatformLogin(this, res.data);
         })
         .catch((res) => {
           msg();

@@ -30,10 +30,14 @@ platformOperationalAssert('platform HQ inventory does not require a store appoin
     && strpos($policy, "'headquarters_only' => \$headquartersOnly") !== false
     && strpos($context, "if (\$subject === 'STORE' && empty(\$access['is_super_admin']) && empty(\$access['store_ids']))") !== false
     && strpos($hqLocations, "empty(\$access['headquarters_only'])") !== false);
-// 平台库存查看岗位在原有组织/仓库范围内同时可看单价与金额，不再依赖旧独立成本菜单。
+// 原生查看或对应旧菜单都只能读取既有组织/仓库范围；兼容菜单不替代写授权前提。
 platformOperationalAssert('platform inventory view grants cost visibility within its existing scope',
-    strpos($policy, 'if (!in_array(self::AUTH_VIEW, $uniqueAuth, true))') !== false
+    strpos($policy, '$hasNativeView = in_array(self::AUTH_VIEW, $uniqueAuth, true);') !== false
+    && strpos($policy, "!\$this->hasLegacyPage(\$uniqueAuth, '*')") !== false
     && strpos($policy, '$features = [InventoryBatchStockQueryContract::PERMISSION_VIEW, InventoryBatchStockQueryContract::PERMISSION_COST];') !== false);
+platformOperationalAssert('legacy menu compatibility keeps page and write capability boundaries',
+    strpos($context, '$policy->assertQueryPage($access, $pageCode);') !== false
+    && strpos($policy, '$hasNativeView && in_array(self::AUTH_WAREHOUSE_MANAGE, $uniqueAuth, true)') !== false);
 platformOperationalAssert('platform location listing keeps HQ-only accounts on server-derived HQ warehouses',
     strpos($warehouse, 'not emit an empty whereIn() branch') !== false
     && strpos($warehouse, "\$method = \$storeIds ? 'whereOr' : 'where'") !== false);

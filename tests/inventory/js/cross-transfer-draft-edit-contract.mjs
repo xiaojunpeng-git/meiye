@@ -9,9 +9,11 @@ const modal = readFileSync(resolve(root, '前端代码/inventory-vue3/src/compon
 const api = readFileSync(resolve(root, '前端代码/inventory-vue3/src/services/inventoryApi.js'), 'utf8')
 
 const checks = [
-  ['grouped and flat lists show edit only on a server-authorized store row', () => {
-    assert.match(app, /mode === 'store' && sourceRows\[index\]\.can_edit[^>]+openTransferEditor/)
-    assert.match(app, /active === 'transfer' && mode === 'store' && sourceRows\[index\]\.can_edit/)
+  // 两端按钮统一消费后端能力，不再用终端类型覆盖功能权限。
+  ['grouped and flat lists show edit only on a server-authorized row', () => {
+    assert.match(app, /sourceRows\[index\]\.can_edit[^>]+openTransferEditor/)
+    assert.match(app, /active === 'transfer' && sourceRows\[index\]\.can_edit/)
+    assert.doesNotMatch(app, /mode === 'store' && sourceRows\[index\]\.can_edit/)
   }],
   ['edit opens a fresh authorized detail with an optimistic token', () => {
     assert.match(app, /async function openTransferEditor\(row\)/)
@@ -32,10 +34,17 @@ const checks = [
     assert.match(api, /updateCrossTransfer\(id, body\).*v3\/cross-transfer\/\$\{Number\(id\)\}\/update/)
   }],
   ['draft deletion appears after edit and sends a fresh token to the guarded route', () => {
-    assert.match(app, /openTransferEditor\(sourceRows\[index\]\)">编辑<\/button><button v-if="active === 'transfer' && mode === 'store' && sourceRows\[index\]\.can_delete"/)
+    assert.match(app, /openTransferEditor\(sourceRows\[index\]\)">编辑<\/button><button v-if="active === 'transfer' && sourceRows\[index\]\.can_delete"/)
     assert.match(app, /async function requestDeleteTransferDraft\(row\)/)
     assert.match(app, /deleteCrossTransferDraft\(row\.id, \{ expected_edit_token: confirmation\.expectedEditToken \}\)/)
     assert.match(api, /deleteCrossTransferDraft\(id, body\).*v3\/cross-transfer\/\$\{Number\(id\)\}\/delete-draft/)
+  }],
+  ['platform draft commands and receiver searches share the existing form', () => {
+    assert.match(modal, /updateHqCrossTransfer\(Number\(props\.detail\?\.id\)/)
+    assert.match(app, /deleteHqCrossTransferDraft\(row\.id/)
+    assert.match(modal, /:options="transferTargetOptions" searchable/)
+    assert.match(app, /:options="platformTransferTargetOptions" searchable/)
+    assert.match(app, /hqCrossTransferCounterparties/)
   }],
 ]
 

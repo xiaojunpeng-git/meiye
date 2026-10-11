@@ -177,19 +177,14 @@ class EmployeeInternalLoginServices extends BaseServices
     }
 
     /**
-     * 平台后台：是否有平台入口岗位（不依赖门店任职）
+     * 平台后台登录只取有效岗位的入口开关，不依赖门店任职或菜单规则。
+     * 菜单/API 权限仍由岗位规则独立投影；入口开启且规则为空允许登录空工作区。
      */
     public function employeeHasPlatformEntry(int $employeeId): bool
     {
         if ($employeeId <= 0) {
             return false;
         }
-        $staffIds = Db::name('system_store_staff')
-            ->where('employee_id', $employeeId)
-            ->where('is_del', 0)
-            ->where('status', 1)
-            ->column('id');
-        $staffIds = array_map('intval', $staffIds ?: []);
         // 组织直属人员：通过岗位绑定到任一 staff 或直接查员工全部岗位绑
         $posIds = Db::name('staff_job_position')
             ->where('employee_id', $employeeId)
@@ -201,36 +196,11 @@ class EmployeeInternalLoginServices extends BaseServices
         if (!$posIds) {
             return false;
         }
-        $opened = (int)Db::name('position')
+        return (int)Db::name('position')
             ->whereIn('id', $posIds)
             ->where('status', 1)
             ->where('use_platform', 1)
-            ->count();
-        if ($opened <= 0) {
-            return false;
-        }
-        /** @var StaffJobPositionServices $jobSvc */
-        $jobSvc = app()->make(StaffJobPositionServices::class);
-        if ($staffIds) {
-            foreach ($staffIds as $sid) {
-                $rules = $jobSvc->computeChannelRulesUnion((int)$sid, JobPositionPolicyServices::CHANNEL_PLATFORM);
-                if ($rules) {
-                    return true;
-                }
-            }
-        }
-        // 无门店任职时：按岗位规则并集
-        $ruleRows = Db::name('job_position_channel_rule')
-            ->whereIn('position_id', $posIds)
-            ->where('channel', JobPositionPolicyServices::CHANNEL_PLATFORM)
-            ->where('status', 1)
-            ->column('rules');
-        foreach ($ruleRows as $r) {
-            if (trim((string)$r) !== '') {
-                return true;
-            }
-        }
-        return false;
+            ->count() > 0;
     }
 
     /**

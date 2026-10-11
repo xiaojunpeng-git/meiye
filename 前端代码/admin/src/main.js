@@ -346,6 +346,8 @@ new Vue({
           const openNames = getSiderSubmenu(to, menuSider);
           this.$store.commit('admin/menu/setOpenNames', openNames);
         } else {
+          // 空菜单账号切换/刷新时必须覆盖旧顶栏，不能残留上一账号的入口。
+          this.$store.commit('admin/menu/setHeader', getHeaderSider(menuSider));
           // 子路由给默认 如果你没有使用顶部菜单，则设置为默认的（一般为 home）名称即可
           this.$store.commit('admin/menu/setHeaderName', 'home');
           // 指定当前显示的侧边菜单
