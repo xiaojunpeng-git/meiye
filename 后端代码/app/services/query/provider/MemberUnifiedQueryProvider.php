@@ -72,7 +72,8 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
                 $context,
                 function (array $row, array $scope): bool {
                     return $this->rowAllowed($row, $scope);
-                }
+                },
+                $this->memberNameInitialMatcher($normalizedQuery)
             );
         }
 
@@ -137,7 +138,8 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             $context,
             function (array $row, array $scope): bool {
                 return $this->rowAllowed($row, $scope);
-            }
+            },
+            $this->memberNameInitialMatcher($query)
         );
     }
 
@@ -278,7 +280,8 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             $context,
             function (array $row, array $scope): bool {
                 return $this->rowAllowed($row, $scope);
-            }
+            },
+            $this->memberNameInitialMatcher($normalizedQuery)
         );
         $page = max(1, (int)$normalizedQuery['page']);
         $limit = (int)$normalizedQuery['limit'];
@@ -517,6 +520,10 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         if (isset($userColumns['now_money'])) {
             $selectedFields[] = 'u.now_money';
         }
+        $initials = $this->initialKeyword($payload);
+        if ($initials !== '') {
+            $selectedFields[] = 'name_search.initials AS member_name_initials';
+        }
         $query = Db::name('user')->alias('u')->field($selectedFields);
         if (!$allStores) {
             $storeUserColumns = $this->tableColumns('store_user');
@@ -531,14 +538,22 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             });
         }
         $this->applyStatusPushdown($query, $payload, $exactStatus);
+        if ($initials !== '') {
+            // 与收银会员选择器复用同一触发器索引；门店 DataScope 保持在本查询中。
+            $query->leftJoin('member_name_initial_search name_search', 'name_search.uid = u.uid');
+        }
         $keyword = $this->pushdownKeyword($payload);
         if ($keyword !== '') {
             $needle = function_exists('mb_strtolower')
                 ? mb_strtolower($keyword, 'UTF-8')
                 : strtolower($keyword);
+            // 同一 SQL 内完成关键词匹配与计数/分页，不能只搜索当前页。
             $query->whereRaw(
-                "(LOCATE(?,LOWER(CASE WHEN TRIM(IFNULL(u.real_name,''))<>'' THEN TRIM(u.real_name) WHEN TRIM(IFNULL(u.nickname,''))<>'' THEN TRIM(u.nickname) ELSE '未命名会员' END))>0 OR LOCATE(?,LOWER(IFNULL(u.phone,'')))>0 OR LOCATE(?,LOWER(IFNULL(u.bar_code,'')))>0)",
-                [$needle, $needle, $needle]
+                "(LOCATE(?,LOWER(CASE WHEN TRIM(IFNULL(u.real_name,''))<>'' THEN TRIM(u.real_name) WHEN TRIM(IFNULL(u.nickname,''))<>'' THEN TRIM(u.nickname) ELSE '未命名会员' END))>0 OR LOCATE(?,LOWER(IFNULL(u.phone,'')))>0 OR LOCATE(?,LOWER(IFNULL(u.bar_code,'')))>0"
+                . ($initials !== '' ? ' OR name_search.initials LIKE ?' : '') . ')',
+                $initials !== ''
+                    ? [$needle, $needle, $needle, $initials . '%']
+                    : [$needle, $needle, $needle]
             );
         }
         return [$query, $visibleStoreIds, $allStores];
@@ -588,6 +603,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             $result[] = [
                 'member_id' => $uid,
                 'member_name' => $name !== '' ? $name : '未命名会员',
+                '_member_name_initials' => (string)($row['member_name_initials'] ?? ''),
                 'phone' => (string)($row['phone'] ?? ''),
                 'member_no' => (string)($row['bar_code'] ?? ''),
                 'birthday' => $this->dateValue($row['birthday'] ?? 0),
@@ -1231,6 +1247,26 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             return '';
         }
         return trim((string)reset($values));
+    }
+
+    /** 只有已验证的标准三字段关键词允许使用姓名首字母索引；混合字符仍按原字段查询。 */
+    protected function initialKeyword(array $payload): string
+    {
+        $keyword = $this->pushdownKeyword($payload);
+        return preg_match('/^[A-Za-z]{1,60}$/D', $keyword) === 1
+            ? strtoupper($keyword) : '';
+    }
+
+    /** SQL 候选与统一执行器的二次筛选共用前缀口径，保持分页、导出和列表一致。 */
+    protected function memberNameInitialMatcher(array $payload): ?callable
+    {
+        $initials = $this->initialKeyword($payload);
+        if ($initials === '') {
+            return null;
+        }
+        return static function (array $row) use ($initials): bool {
+            return strncmp((string)($row['_member_name_initials'] ?? ''), $initials, strlen($initials)) === 0;
+        };
     }
 
     protected function executionPayload(array $payload): array
