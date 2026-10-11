@@ -1,0 +1,112 @@
+{
+  "task": "R9-00005",
+  "target": "rh.cc3798.com",
+  "database": "ruihao",
+  "source_commit": "8daec7d5bb0a97ed43e2f7fa47c49ee92d50aee7",
+  "fixed_version_sha256": "7fc2e14a729193749f85c64fe36c4f02e9d44c3da737be8107b4e22d55f9edce",
+  "source_trees": {
+    "cashier-v3": "6e411a6558db443b83061f61491397ee6d6e6701",
+    "inventory-vue3": "34f190170e9a0f6a250807785b86c9f63f63e33a",
+    "shared": "30a91137bf7a16f7da01fcdc324bfd64b067602d"
+  },
+  "hot_entries": [
+    "http://127.0.0.1:18081/admin/inbound/manage",
+    "http://127.0.0.1:18091/view_cashier_v3/#/cashier"
+  ],
+  "backend": [
+    {
+      "path": "app/services/product/inventory/InventoryPlatformDocumentReadScope.php",
+      "before": null,
+      "after": "7814b593b2c04959c5293389b574aef488c872432a635e62f440d4beebf2a5c9"
+    },
+    {
+      "path": "app/services/product/inventory/InventoryPlatformHqInboundServices.php",
+      "before": "e09cfd7c43f90770cfa91006c444235746767d24d403bc08a4e0cd99272d9b7d",
+      "after": "45734a9c640a1561665f560836aec1203d057f6a5c3ade420660d1e200c404ec"
+    },
+    {
+      "path": "app/services/product/inventory/InventoryPlatformHqOutboundServices.php",
+      "before": "6a5d94940cb52762a931baffb2925f95d1d089bff6195e5b7119ccafe503bda7",
+      "after": "34760339dd6fe2863912593d54b9416e869f886b2ed340ff18eb6abe1b21245d"
+    },
+    {
+      "path": "app/services/product/inventory/InventoryMovementQueryServices.php",
+      "before": "5b3c56cc7b75cd4aa2016c83ee46432b6ce08425b042b02cc96785ada212789d",
+      "after": "349edf6fb5b3c58e91f58e8f339e3c4c1516a07dad00d7512b95baa0009880ea"
+    },
+    {
+      "path": "app/controller/admin/v1/product/inventory/InventoryPlatformHqInbound.php",
+      "before": "27c7c8bef1f8bbc365a8d432a6352dd3047d8eeebe98fec6133bb7cfded19c95",
+      "after": "4a019197ebaf5839f49678e7959667100dcbe60ac6dbeda35e7119b531b0adf5"
+    },
+    {
+      "path": "app/controller/admin/v1/product/inventory/InventoryPlatformHqOutbound.php",
+      "before": "7d7b40898d50fbff09607210f1f3fda25204810a7f177f5fff01c1950736a6ba",
+      "after": "e2717ce5bfda4c26a76561902f2f263338c9ffb4b53cf4323254a2c5e47f5c2d"
+    }
+  ],
+  "inventory": [
+    {
+      "path": "assets/exceljs.min-a0d233a6.js",
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    {
+      "path": "assets/index-92b7c68f.css",
+      "sha256": "92b7c68f761018faf5261c37dce7920fddf560164df780f003aedb149cb7c7a3"
+    },
+    {
+      "path": "assets/index-b0d8fbfc.js",
+      "sha256": "04b9b9f6ecd944a2e1a98852546f7c31acc58caa85c5e152bccec677e4f2b80d"
+    },
+    {
+      "path": "index.html",
+      "sha256": "fbe79ae2da0f47b37c846eb75bb4923a0b3b4b9cbeab187a69cf5a41778f2194"
+    }
+  ],
+  "cashier": [
+    {
+      "path": "assets/exceljs.min-a0d233a6.js",
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    {
+      "path": "assets/index-0430fda6.css",
+      "sha256": "0430fda63cfa61bcbb891c49eebc0b4b214b2e623992d17ab97880361e1652ef"
+    },
+    {
+      "path": "assets/index-068c8998.js",
+      "sha256": "162f061f5309d539217f7bb3e354929ab4fd9b85c298d0756e06f084c6f4715e"
+    },
+    {
+      "path": "assets/login-beauty-quiet-826510a5.png",
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    {
+      "path": "index.html",
+      "sha256": "46a4606cea728fe3671f61fd63f38e559cbde97a8d0ea4ba154e47053fff6fd1"
+    }
+  ],
+  "roots": [
+    {
+      "root": "/www/wwwroot/rh.cc3798.com",
+      "bundle": "inventory",
+      "path": "public/view_inventory_v3",
+      "before_html": "16244a90fa73904171ae6f15256c9d1f2962ac524592fa32a9b406a48b7c135f"
+    },
+    {
+      "root": "/www/wwwroot/rh.cc3798.com",
+      "bundle": "cashier",
+      "path": "public/view_cashier_v3",
+      "before_html": "57d7bdc4e93f00c0ef972ae823d82787f3b67000f2ac1dd04b308ecdd06022b3"
+    },
+    {
+      "root": "/www/wwwroot/rh.cc3798.com-8080",
+      "bundle": "cashier",
+      "path": "public/view_cashier_v3",
+      "before_html": "57d7bdc4e93f00c0ef972ae823d82787f3b67000f2ac1dd04b308ecdd06022b3"
+    }
+  ],
+  "migrations": [],
+  "business_writes": false,
+  "built_at": "2026-10-11T06:58:49.783Z",
+  "note": "Git archive derived build only. Existing cashier/shared trees unchanged; R9 previously accepted inventory workflow retained. No admin rebuild, configuration change, preview backend change or other customer."
+}

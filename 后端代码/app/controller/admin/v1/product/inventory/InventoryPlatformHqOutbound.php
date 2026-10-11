@@ -34,7 +34,9 @@ final class InventoryPlatformHqOutbound extends AuthController
 
     public function detail(string $id)
     {
-        try { return $this->success($this->services->detail((array)$this->adminInfo, (int)$this->request->get('hq_location_id', 0), $id)); }
+        // 共用详情接口只接收缩小范围的选择值，服务端按当前后台身份重新鉴权。
+        try { return $this->success($this->services->detail((array)$this->adminInfo, (int)$this->request->get('hq_location_id', 0), $id, (array)$this->request->get())); }
+        catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\InvalidArgumentException $exception) { return $this->fail('总部出库详情不存在或无权查看。', ['code' => $exception->getMessage()]); }
         catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
     }

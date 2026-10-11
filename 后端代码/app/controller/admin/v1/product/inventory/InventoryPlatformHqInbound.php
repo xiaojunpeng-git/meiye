@@ -62,7 +62,10 @@ final class InventoryPlatformHqInbound extends AuthController
     {
         try {
             $locationId = (int)$this->request->get('hq_location_id', 0);
-            return $this->success($this->services->detail((array)$this->adminInfo, $locationId, $id));
+            // 服务端重新解析 subject/storeId/locationId；不信任浏览器声明的权限或租户。
+            return $this->success($this->services->detail((array)$this->adminInfo, $locationId, $id, (array)$this->request->get()));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('总部入库详情不存在或无权查看。', ['code' => $exception->getMessage()]);
         } catch (\RuntimeException $exception) {
@@ -74,8 +77,10 @@ final class InventoryPlatformHqInbound extends AuthController
     {
         try {
             return $this->success($this->services->outboundDetails(
-                (array)$this->adminInfo, (int)$this->request->get('hq_location_id', 0), $id
+                (array)$this->adminInfo, (int)$this->request->get('hq_location_id', 0), $id, (array)$this->request->get()
             ));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('总部入库单不存在或无权查看。', ['code' => $exception->getMessage()]);
         } catch (\RuntimeException $exception) {

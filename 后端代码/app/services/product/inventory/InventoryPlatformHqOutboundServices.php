@@ -5,7 +5,7 @@ namespace app\services\product\inventory;
 
 use think\facade\Db;
 
-/** Platform-only command and document projection for headquarters outbound. */
+/** 平台总部出库写边界及共用详情入口；门店详情复用原事实投影并保持只读。 */
 final class InventoryPlatformHqOutboundServices
 {
     public function index(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $dateFrom = '', string $dateTo = ''): array
@@ -46,10 +46,13 @@ final class InventoryPlatformHqOutboundServices
         return ['count' => $count, 'list' => $list];
     }
 
-    /** Read-only detail projected from the settled outbound facts. */
-    public function detail(array $adminInfo, int $locationId, string $sourceId): array
+    /** 共用展开支持授权门店；总部仍沿用原鉴权和冲销能力，门店复用原事实投影。 */
+    public function detail(array $adminInfo, int $locationId, string $sourceId, array $selection = []): array
     {
-        $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $locationId);
+        if (($selection['subject'] ?? 'HQ') === 'STORE') {
+            return (new InventoryMovementQueryServices())->outboundDetailForPlatform($adminInfo, $sourceId, $selection);
+        }
+        $resolved = (new InventoryPlatformDocumentReadScope())->resolve($adminInfo, $locationId, 'inventory_outbound', $selection);
         $access = (array)$resolved['access'];
         $location = (array)$resolved['location'];
         $sourceId = trim($sourceId);

@@ -1,0 +1,23 @@
+{
+    "phase": "installed",
+    "time": "2026-10-11T15:02:15+08:00",
+    "backup": "/www/backups/rh.cc3798.com/20261011-r9-shared-layout-8daec7d5",
+    "source_commit": "8daec7d5bb0a97ed43e2f7fa47c49ee92d50aee7",
+    "restart": "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\nruihao swoole started pid=32413 port=20800",
+    "health": "bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)\nmanager_count=1\nmanager_pids=32413",
+    "migration": {
+        "id": 219,
+        "upgrade_key": "20261011-002-refund-attribution-adjustment",
+        "title": "\u9000\u6b3e\u5bfc\u8d2d\u9500\u552e\u7ecf\u7406\u6539\u6d3e",
+        "task_file": "2026-10-11-\u9000\u6b3e\u5bfc\u8d2d\u9500\u552e\u7ecf\u7406\u6539\u6d3e/02-\u6b63\u5f0f\u5347\u7ea7.sql",
+        "sql_checksum": "179154446655afa79007d6c2557f494c46cb90be3822607ea8d1dd0d869f36a0",
+        "code_version": "0c870d08",
+        "executed_at": "2026-10-11 12:59:33",
+        "executed_by": "Codex",
+        "result_note": "\u745e\u660a\u72ec\u7acb\u5b9e\u4f8b\uff0c\u7248\u672c\u8868\u9a8c\u8bc1\u901a\u8fc7\uff0c\u65e0\u5386\u53f2\u56de\u586b",
+        "created_at": "2026-10-11 12:59:33"
+    },
+    "backend_count": 6,
+    "frontend_targets": 3,
+    "business_writes": false
+}

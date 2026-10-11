@@ -5,7 +5,7 @@ namespace app\services\product\inventory;
 
 use think\facade\Db;
 
-/** Platform-only write boundary for the V3 headquarters warehouse. */
+/** 平台总部仓写边界；单据读取可缩小到授权门店仓，绝不扩展总部写命令。 */
 final class InventoryPlatformHqInboundServices
 {
     public function index(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $dateFrom = '', string $dateTo = ''): array
@@ -57,10 +57,10 @@ final class InventoryPlatformHqInboundServices
         return ['count' => count($grouped), 'list' => $list];
     }
 
-    /** Read-only detail projected from the settled inbound facts. */
-    public function detail(array $adminInfo, int $locationId, string $sourceId): array
+    /** 同一事实投影服务总部及授权门店展开；selection 仅缩小读取范围，不授予写能力。 */
+    public function detail(array $adminInfo, int $locationId, string $sourceId, array $selection = []): array
     {
-        $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $locationId);
+        $resolved = (new InventoryPlatformDocumentReadScope())->resolve($adminInfo, $locationId, 'inventory_inbound', $selection);
         $access = (array)$resolved['access'];
         $location = (array)$resolved['location'];
         $sourceId = trim($sourceId);
@@ -72,7 +72,7 @@ final class InventoryPlatformHqInboundServices
             ->leftJoin('inventory_business_document_no n', 'n.tenant_id=f.tenant_id AND n.source_type=f.source_type AND n.source_id=f.source_id')
             ->where('f.tenant_id', (string)$location['tenant_id'])
             ->where('f.location_id', (int)$location['id'])
-            ->where('f.store_id', 0)
+            ->where('f.store_id', (int)($location['store_id'] ?? 0))
             ->where('f.source_type', 'manual_inbound')
             ->where('f.source_id', $sourceId)
             ->where('f.fact_status', 'SETTLED')
@@ -110,12 +110,13 @@ final class InventoryPlatformHqInboundServices
     }
 
     /** Effective outbound movements for batches originating in one HQ inbound document. */
-    public function outboundDetails(array $adminInfo, int $locationId, string $sourceId): array
+    public function outboundDetails(array $adminInfo, int $locationId, string $sourceId, array $selection = []): array
     {
-        $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $locationId);
+        // 出库追溯必须继承与入库展开相同的授权仓库，不能退回默认总部仓。
+        $resolved = (new InventoryPlatformDocumentReadScope())->resolve($adminInfo, $locationId, 'inventory_inbound', $selection);
         $access = (array)$resolved['access'];
         return (new InventoryInboundOutboundTraceReadServices())->detail(
-            (array)$resolved['location'], 0, $sourceId,
+            (array)$resolved['location'], (int)($resolved['location']['store_id'] ?? 0), $sourceId,
             in_array('inventory.cost.view', (array)($access['features'] ?? []), true)
         );
     }
