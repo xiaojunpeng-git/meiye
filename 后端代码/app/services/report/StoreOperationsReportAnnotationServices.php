@@ -72,7 +72,8 @@ final class StoreOperationsReportAnnotationServices
         'product_monetization_private_market_distribution' => ['target_amount'],
         'phase_six_garden_item_analysis' => ['expert_name'],
         'phase_six_monthly_featured_item' => ['target_amount'],
-        'phase_six_other_multi_payment' => ['unit_price', '领取日期', '领取数量', '备注'],
+        // 单价已从此报表移除；历史补充记录保留审计，但不再允许新写入。
+        'phase_six_other_multi_payment' => ['领取日期', '领取数量', '备注'],
         'phase_six_salary_detail' => ['备注'],
         'phase_six_training_employee' => ['mentor_name', 'exam_apply_time', 'exam_level', 'passed_level', 'skill_score', 'professional_score'],
         'phase_six_human_store_health' => ['beautician_establishment_count'],
@@ -101,7 +102,6 @@ final class StoreOperationsReportAnnotationServices
         'actual_staff' => 'nonnegative_integer',
         'card_sale_date' => 'date',
         'customer_acquired_at' => 'date',
-        'unit_price' => 'integer_cents',
         '领取日期' => 'date',
         '领取数量' => 'nonnegative_integer',
         '备注' => 'text',

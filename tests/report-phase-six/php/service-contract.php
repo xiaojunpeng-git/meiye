@@ -71,7 +71,7 @@ require_once $root . '/后端代码/app/services/query/metric/MetricMoneyFormatt
 $phaseSix = new \app\services\report\StoreUnifiedReportPhaseSixServices();
 $manualColumn = new ReflectionMethod($phaseSix, 'manualColumn');
 $manualDisplay = new ReflectionMethod($phaseSix, 'manualDisplayValue');
-foreach (['target_amount', 'unit_price'] as $moneyField) {
+foreach (['target_amount'] as $moneyField) {
     $column = $manualColumn->invoke($phaseSix, $moneyField, '金额', '手动补充金额');
     assertPhaseSix(($column['manual_input']['value_type'] ?? '') === 'integer_cents', "{$moneyField} submits integer cents");
     assertPhaseSix($manualDisplay->invoke($phaseSix, $column['manual_input'], '89100') === '891', "{$moneyField} reads back integer yuan");
@@ -86,20 +86,20 @@ assertPhaseSix(str_contains($service, "withManualAnnotations(\$report, \$result,
 $projectManualRows = new ReflectionMethod($phaseSix, 'projectManualRows');
 $projected = $projectManualRows->invoke($phaseSix, [
     'records' => [
-        ['store_id' => 1, 'annotation_subject_key' => 'phase_six:payment:line-a', 'unit_price' => '', '备注' => '原值'],
-        ['store_id' => 2, 'annotation_subject_key' => 'phase_six:payment:line-a', 'unit_price' => '', '备注' => '另一店'],
+        ['store_id' => 1, 'annotation_subject_key' => 'phase_six:payment:line-a', 'target_amount' => '', '备注' => '原值'],
+        ['store_id' => 2, 'annotation_subject_key' => 'phase_six:payment:line-a', 'target_amount' => '', '备注' => '另一店'],
     ],
 ], [
-    'unit_price' => ['value_type' => 'integer_cents'], '备注' => ['value_type' => 'text'],
+    'target_amount' => ['value_type' => 'integer_cents'], '备注' => ['value_type' => 'text'],
 ], [
-    ['store_id' => 1, 'subject_key' => 'phase_six:payment:line-a', 'field_key' => 'unit_price', 'field_value' => '89100', 'version' => 2],
+    ['store_id' => 1, 'subject_key' => 'phase_six:payment:line-a', 'field_key' => 'target_amount', 'field_value' => '89100', 'version' => 2],
     ['store_id' => 1, 'subject_key' => 'phase_six:payment:line-a', 'field_key' => '备注', 'field_value' => '', 'version' => 3],
 ]);
-assertPhaseSix(($projected['records'][0]['unit_price'] ?? null) === '891'
-    && ($projected['records'][0]['unit_price_version'] ?? null) === 2
+assertPhaseSix(($projected['records'][0]['target_amount'] ?? null) === '891'
+    && ($projected['records'][0]['target_amount_version'] ?? null) === 2
     && ($projected['records'][0]['备注'] ?? null) === ''
     && ($projected['records'][0]['备注_version'] ?? null) === 3
-    && ($projected['records'][1]['unit_price'] ?? null) === ''
+    && ($projected['records'][1]['target_amount'] ?? null) === ''
     && ($projected['records'][1]['备注'] ?? null) === '另一店',
     'manual values survive readback, clear explicitly and never cross store boundaries');
 $result = new ReflectionMethod($phaseSix, 'result');
