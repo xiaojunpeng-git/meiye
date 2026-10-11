@@ -154,21 +154,49 @@ try {
     if (PHP_VERSION_ID<80100) $localRankingMethod->setAccessible(true);
     $topThree=$localRankingMethod->invoke($localPeriodHarness->gateway,
         ['question'=>'前三名呢','evidence_messages'=>[['id'=>'current','text'=>'前三名呢']]],
-        ['local_conditions'=>[]]
+        ['local_conditions'=>[]],null
     );
     cdgCheck(($topThree['requirements'][0]['values']['ranking']??null)===['direction'=>'top','limit'=>3],
         'a closed top-three phrase becomes one ranking-presentation requirement');
     $topTen=$localRankingMethod->invoke($localPeriodHarness->gateway,
         ['question'=>'前十名呢','evidence_messages'=>[['id'=>'current','text'=>'前十名呢']]],
-        ['local_conditions'=>[]]
+        ['local_conditions'=>[]],null
     );
     cdgCheck(($topTen['requirements'][0]['values']['ranking']??null)===['direction'=>'top','limit'=>10],
         'verified ranking continuation supports a generic explicit row count');
     cdgCheck($localRankingMethod->invoke($localPeriodHarness->gateway,
         ['question'=>'前三名和销售额','evidence_messages'=>[['id'=>'current','text'=>'前三名和销售额']]],
-        ['local_conditions'=>[]]
+        ['local_conditions'=>[]],null
     )===null,
         'a ranking phrase with a metric remains on the natural-language binding path');
+    $lowestStores=$localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'最低的三家呢','evidence_messages'=>[['id'=>'current','text'=>'最低的三家呢']]],
+        ['local_conditions'=>[]],['business_filters'=>['object_kind'=>'store']]
+    );
+    cdgCheck(($lowestStores['requirements'][0]['values']['ranking']??null)===['direction'=>'bottom','limit'=>3],
+        'a store classifier and count close a descending presentation edit');
+    $lowestFive=$localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'最低的五家呢','evidence_messages'=>[['id'=>'current','text'=>'最低的五家呢']]],
+        ['local_conditions'=>[]],['business_filters'=>['object_kind'=>'store']]
+    );
+    cdgCheck(($lowestFive['requirements'][0]['values']['ranking']??null)===['direction'=>'bottom','limit'=>5],
+        'the same signed ranking accepts a different explicit count');
+    cdgCheck($localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'最低的三家呢','evidence_messages'=>[['id'=>'current','text'=>'最低的三家呢']]],
+        ['local_conditions'=>[]],['business_filters'=>['object_kind'=>'person']]
+    )===null,
+        'a store classifier cannot inherit a signed person ranking');
+    cdgCheck($localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'最低的三家并排除退款','evidence_messages'=>[['id'=>'current','text'=>'最低的三家并排除退款']]],
+        ['local_conditions'=>[]],['business_filters'=>['object_kind'=>'store']]
+    )===null,
+        'a new exclusion keeps the whole turn on the semantic path');
+    cdgCheck($localRankingMethod->invoke($localPeriodHarness->gateway,
+        ['question'=>'今年消耗业绩最低的三家门店',
+            'evidence_messages'=>[['id'=>'current','text'=>'今年消耗业绩最低的三家门店']]],
+        ['local_conditions'=>[]],['business_filters'=>['object_kind'=>'store']]
+    )===null,
+        'a complete new metric and period cannot inherit the old ranking');
     $overviewUnderstandingMethod=new ReflectionMethod($localPeriodHarness->gateway,'registeredOpenOverviewUnderstanding');
     if (PHP_VERSION_ID<80100) $overviewUnderstandingMethod->setAccessible(true);
     $overviewCapabilitiesMethod=new ReflectionMethod($localPeriodHarness->gateway,'capabilities');
@@ -310,6 +338,16 @@ try {
         &&$singleRankHarness->queries===$singleRankQueries+1
         &&($singleRankEvidence['query']['ranking']??null)===['direction'=>'top','limit'=>3],
         'a closed ranking continuation reuses the signed query without a provider decision');
+    $bottomFollow=$singleRankHarness->start('最低的三家呢',$singleRankFollow['answer']['context_ref']);
+    $bottomEvidence=$singleRankHarness->private->read($singleRankHarness->row($bottomFollow)['evidence_ref']);
+    cdgCheck($bottomFollow['status']==='COMPLETED'
+        &&$singleRankHarness->models===$singleRankModels
+        &&$singleRankHarness->queries===$singleRankQueries+2
+        &&($bottomEvidence['query']['ranking']??null)===['direction'=>'bottom','limit'=>3]
+        &&($bottomEvidence['query']['metric_codes']??null)===($singleRankEvidence['query']['metric_codes']??null)
+        &&($bottomEvidence['query']['start_date']??null)===($singleRankEvidence['query']['start_date']??null)
+        &&($bottomEvidence['query']['end_date']??null)===($singleRankEvidence['query']['end_date']??null),
+        'a descending count follow-up keeps the signed metric and period without a model call');
     $singleRankHarness->close();
 
     $overviewHarness=new R6GatewayHarness(3,[1,2],'platform');

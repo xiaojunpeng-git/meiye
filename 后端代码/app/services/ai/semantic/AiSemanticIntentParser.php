@@ -10,13 +10,18 @@ final class AiSemanticIntentParser
         // complete clauses first; e.g. "不含退款" remains a real constraint.
         $text=preg_replace('/(?:先)?不查(?:钱数|金额)(?:[，,、]\s*)?|不用(?:计算|算)(?:差额|增幅)[。.]?|不按当前页面(?:的)?筛选[。.]?/u',' ',$text);
         $signals=[]; $covered=$text; $constraints=[];
-        $limits=[];
-        preg_match_all('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*([0-9]+|[一二两三四五六七八九十百]+)\s*(?:名)?|([0-9]+|[一二两三四五六七八九十百]+)\s*家/u',$text,$counts,PREG_SET_ORDER);
+        $limits=[];$rankObjectHint=null;
+        // Consume a ranking classifier together with its count. Leaving “家”
+        // behind turns an otherwise complete presentation edit into an
+        // unresolved business condition. Its store meaning is only a hint:
+        // the gateway must compare it with the signed prior query before reuse.
+        preg_match_all('/(?:前|后|最高|最低|最好|最差)(?:的)?\s*([0-9]+|[一二两三四五六七八九十百]+)\s*(?:家(?:门店|店)?|名|位)?|([0-9]+|[一二两三四五六七八九十百]+)\s*家/u',$text,$counts,PREG_SET_ORDER);
         foreach($counts as $count) {
             if (!preg_match('/排行|排名|门店|家店|倒数|(?:前|后|最高|最低|最好|最差)(?:的)?\s*[一二两三四五六七八九十0-9]+\s*(?:名)?(?![天日月年号])/u',$text)) continue;
             $raw=$count[1]!==''?$count[1]:($count[2]??'');$limits[]=$this->number($raw);
             if(preg_match('/前|最高|最好/u',$count[0])) $signals[]='rank_top';
             if(preg_match('/后|最低|最差/u',$count[0])) $signals[]='rank_bottom';
+            if(mb_strpos($count[0],'家',0,'UTF-8')!==false) $rankObjectHint='store';
             $covered=str_replace($count[0],' ',$covered);
         }
         $take=static function(string $pattern,string $code) use (&$covered,&$signals): bool {
@@ -77,6 +82,7 @@ final class AiSemanticIntentParser
             // 只有客户明确表达“排行/排名”时，辅助投影才保留通用排名目标；完整对象仍由模型理解并经契约核对。
             'semantic_intent'=>['version'=>2,'goal'=>in_array('definition',$signals,true)?'metric_definition':(in_array('ranking',$signals,true)?'object_metric_ranking':'business_results'),
                 'constraints'=>$constraints,'rank_limits'=>$limits,'rank_limit'=>$limit,
+                'rank_object_hint'=>$rankObjectHint,
                 'status'=>$unparsed?'unresolved':($constraints?'understood_unavailable':'understood')]];
     }
 

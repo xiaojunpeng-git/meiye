@@ -138,7 +138,8 @@ $incompleteCard=(new AiDimensionGuidancePlanner())->start('business_date',[
     'operation'=>'ranking','metric_codes'=>[],'action_codes'=>[],
     'needs_metric_choice'=>true,'metric_choice_candidates'=>['sales_amount'],
     'ranking'=>['direction'=>'top','limit'=>1],
-],['date_terms'=>[['code'=>'EXPLICIT','start'=>'2026-09-01','end'=>'2026-09-30']]],
+],['date_terms'=>[['code'=>'EXPLICIT','start'=>'2026-09-01','end'=>'2026-09-30']],
+    'no_filler_guidance'=>false],
     $dimensionCandidates,'screen','2026-10-08');
 $incompleteOptions=$incompleteCard['fields'][0]['options']??[];
 $check(array_column(array_slice($incompleteOptions,0,3),'value')===

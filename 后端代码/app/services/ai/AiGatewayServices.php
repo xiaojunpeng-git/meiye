@@ -2084,7 +2084,7 @@ final class AiGatewayServices
         // business understanding so provider variation cannot reject a plain
         // "top three" continuation or change any executable business field.
         $localRankingUnderstanding=$sourceQuery===null && $sourceCollection===[]?null
-            :$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe);
+            :$this->localVerifiedRankingOnlyUnderstanding($safe['outbound'],$safe,$sourceQuery,$sourceCollection);
         $localOrdinalDetailUnderstanding=$sourceContext===null?null
             :$this->localVerifiedOrdinalDetailUnderstanding($safe['outbound'],$safe,$sourceContext);
         $localMetricUnderstanding=$sourceQuery===null || $sourceCollection!==[]?null
@@ -4733,7 +4733,7 @@ final class AiGatewayServices
      * This therefore generalizes natural forms such as "top three" without
      * mapping a business phrase to a metric or analytical object.
      */
-    private function localVerifiedRankingOnlyUnderstanding(array $outbound,array $safe): ?array
+    private function localVerifiedRankingOnlyUnderstanding(array $outbound,array $safe,?array $sourceQuery,array $sourceCollection=[]): ?array
     {
         if (!empty($safe['local_conditions']??[]) || !is_string($outbound['question']??null)) return null;
         $projection=(new \app\services\ai\semantic\AiSemanticIntentParser())->parse($outbound['question']);
@@ -4742,6 +4742,18 @@ final class AiGatewayServices
         $limit=$projection['semantic_intent']['rank_limit']??null;
         $top=in_array('rank_top',$signals,true)||in_array('top_5',$signals,true);
         $bottom=in_array('rank_bottom',$signals,true)||in_array('bottom_5',$signals,true);
+        // A classifier such as “家” explicitly names a store population.
+        // It may reuse a signed store ranking, but must not silently turn a
+        // person or product ranking into stores by copying the old metric.
+        $objectHint=$projection['semantic_intent']['rank_object_hint']??null;
+        if ($objectHint!==null) {
+            $queries=$sourceCollection!==[]?$sourceCollection:[['query'=>$sourceQuery]];
+            foreach ($queries as $query) {
+                $signedQuery=$query['query']??null;
+                if (!is_array($signedQuery)
+                    || (($signedQuery['business_filters']['object_kind']??'store')!==$objectHint)) return null;
+            }
+        }
         // In a verified ranking context, one closed ordinal shorthand such
         // as “前三名” already carries direction plus row count. It need not
         // contain a second literal “排行”; the strict signal allow-list below
