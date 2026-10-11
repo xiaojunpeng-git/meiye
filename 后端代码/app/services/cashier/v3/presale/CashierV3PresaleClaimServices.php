@@ -191,7 +191,7 @@ final class CashierV3PresaleClaimServices
         return $claimableId;
     }
 
-    /** Financial reversal closes remaining eligibility but never changes completed claims or inventory. */
+    /** Financial reversal closes only presale eligibility; delivered claims and inventory stay untouched. */
     public function closeForSalesOrderReversalInTx(string $tenantId, string $orderId, string $operationId, int $now): int
     {
         CashierV3TransactionGuard::assertInTransaction('presaleClaim.closeForSalesOrderReversalInTx');
@@ -201,6 +201,7 @@ final class CashierV3PresaleClaimServices
         // Imported OPEN is an unclaimed legacy spelling of AVAILABLE; reversal
         // must close it too, without touching already closed historical rows.
         $rows = Db::name(self::CLAIMABLE_TABLE)->where('tenant_id', $tenantId)->where('source_order_id', $orderId)
+            ->where('source_kind', self::SOURCE_PRESALE)
             ->whereIn('claim_status', [self::STATUS_AVAILABLE, self::STATUS_LEGACY_OPEN, self::STATUS_FULLY_CLAIMED])->lock(true)->select()->toArray();
         $closed = 0;
         foreach ($rows as $row) {

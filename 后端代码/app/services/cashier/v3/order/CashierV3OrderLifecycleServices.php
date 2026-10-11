@@ -752,7 +752,7 @@ final class CashierV3OrderLifecycleServices
         }
     }
 
-    /** Read the immutable checkout event set once; absent events mean no work. */
+    /** Read checkout events plus the settled presale entitlement, which has no dedicated event. */
     private function occurredCheckoutEvents(array $source, CashierV3DataScopeContext $scope): array
     {
         $requestId = trim((string)($source['checkoutRequestId'] ?? ''));
@@ -785,8 +785,15 @@ final class CashierV3OrderLifecycleServices
             'card' => isset($types['card.operation.settled'])
                 || isset($types['card.operation.recorded'])
                 || isset($types['card.multi_upgrade.settled']),
+            // A presale product opens a claimable line without emitting either
+            // event above. Its authoritative row must still be closed on void.
             'presale' => isset($types['gift.consumed'])
-                || isset($types['entitlement.writeoff.completed']),
+                || isset($types['entitlement.writeoff.completed'])
+                || ($orderId !== '' && Db::name(CashierV3PresaleClaimServices::CLAIMABLE_TABLE)
+                    ->where('tenant_id', $scope->tenantId())
+                    ->where('source_order_id', $orderId)
+                    ->where('source_kind', 'PRESALE')
+                    ->count() > 0),
         ];
     }
 
