@@ -1,0 +1,11 @@
+# R43 会员手机号修复与保存弹窗：瑞昊发布记录
+
+- 授权：产品经理于 2026-10-11 确认第 43 轮测试无问题，并要求本轮 commit、部署瑞昊、push。仅目标实例 `rh.cc3798.com`；其他客户未操作。
+- 功能提交：`4fb595fb78d458b6dda2ef558803d7ea00f92dde`，`R43-00001 会员手机号修复与保存提示弹窗闭环`；10 个精确文件，其他任务原有暂存区未夹带。前端源码为 `前端代码/cashier-v3/`，与本地 18091 热更新入口同源；Git 树 `6e411a6558db443b83061f61491397ee6d6e6701`。构建从该提交及同提交的库存、统一查询共享包归档产生，未读取主工作区未提交的 `CashierShell.vue` 改动。
+- 发布文件：后端仅 `app/services/cashier/v3/member/CashierV3MemberModule.php`，SHA-256 `6fabd250d68891f5af2ca840bebb7ed985f560fac2b32c7cbb6f5bf700e3a8ce`；正式 `public/view_cashier_v3/` 与瑞昊独立预览 `/www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3/` 使用相同静态构建。不改配置、数据库结构或其他后端文件。
+- 构建：Vite 1996 模块成功（仅已有大包告警）；入口 HTML `ae1364b76c4de2c15f0403fed46a2fa83255e5913d4ee32945df3ffcd55d1202`，主 JS `bab8a392c50720d88062f542999a5e6c06128fba8882f0958143e945faf64d53`，CSS `0430fda63cfa61bcbb891c49eebc0b4b214b2e623992d17ab97880361e1652ef`。本地合同测试、PHP 语法检查与 `git diff --check` 通过；手机号集成测试此前在隔离 MySQL 5.6 通过 2/2，完整 run-all 的既有非本轮失败见 R43 自测记录。
+- 发布前核对：目标服务器 `iZbp1fif4p5s7gj96nnec0Z`，后端原文件 SHA-256 `1ea1a1bdcc2b169774cf19b79da8f9611ce89c2ad98c8b833a3e6eb5e8eaa1a9`，与本地父版一致；两处原入口 HTML 均为 `d1289bc368ab0da615d8a7c5aff3ebdcee288002142714eea3949f6ec62dad16`。数据库 `ruihao` 升级日志 217 行、最大 id 219，最新为 `20261011-002-refund-attribution-adjustment`；本轮无迁移。目标机余量约 208G。
+- 独立备份：`/www/backups/rh.cc3798.com/20261011-r43-4fb595fb/`，四包均通过 gzip 校验。`backend-before.tar.gz` SHA-256 `f9dd544c560a2938bcc7fe423b0f81a92017059e8d2cc066ee597116ccb23d17`；`frontend-formal-before.tar.gz` 为 `61e7f1ab2e141b2af3c52f7da02443967b70eda56621a5b0e822d845e6fdf301`；`frontend-preview-before.tar.gz` 为 `d6c612718ecea4265c4dcec8c2eb52e1c7f9598ca5bd8ae124ddea18e78aa990`；`ruihao-before.sql.gz` 为 `444b5754a71b674b2a8a6497a24586f0f0e9cccb30c1c3d8d642443f160b62ee`。只在确认没有后续发布时恢复旧 PHP 与两处静态入口，并重启 Swoole；数据库无迁移，不可用备份覆盖发布后真实会员改动。
+- 部署：候选文件先上传至同一备份目录 `stage/`，服务器端指纹与本地一致，PHP 7.4 语法检查通过。两处先追加哈希资源；后端通过同目录临时文件原子替换，重启 `ruihao_swoole`；随后两处入口 HTML 分别原子切换。未删除旧哈希资源。
+- 线上只读验证：正式 HTTPS 入口 HTML 为 `ae1364...`，主 JS/CSS 与构建指纹一致；预览入口按既有路径前缀重写 JS/CSS，资源内容与构建一致。两处入口均返回 HTTP 200；匿名 `/cashierapi/config` 返回 `410000 请登录`。Swoole `manager_count=1`、20800 监听；升级日志仍为 217 行、最大 id 219；错误日志最近 100 行无 Fatal、Parse 或 Uncaught。未用真实会员执行生产写入，业务验收以产品经理本地测试及隔离集成测试为准。
+- 交付分组：前端源码 2 文件、后端源码 1 文件、自动化测试及夹具 4 文件、工程脚本/测试运行器 1 文件、自测证据 2 文件；本文件为发布证据。生成物仅为隔离 `dist/` 和两处目标静态包，不纳入业务源码。
