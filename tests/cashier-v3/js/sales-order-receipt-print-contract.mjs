@@ -345,7 +345,7 @@ ok('用户点击后在当前页面显示小票预览且不自动打印', () => {
   assert.match(headChildren[0].textContent, /\.items-table th:nth-child\(3\).*width: 31%/)
   assert.match(headChildren[0].textContent, /\.tear-guide .*height: 64mm/)
   assert.match(headChildren[0].textContent, /width: 63mm !important; margin: 0 !important; padding: \.5mm !important; font-size: 21px !important/)
-  assert.match(headChildren[0].textContent, /\.signature-row \{ min-height: 10mm; padding-top: 4px; \}/)
+  assert.match(headChildren[0].textContent, /\.signature-row \{ min-height: 20mm; padding-top: 4px; \}/)
   assert.match(headChildren[0].textContent, /\.meta div:first-child span:last-child \{ font-size: \.78em; \}/)
   assert.doesNotMatch(bodyChildren[1].innerHTML, /本小票仅展示已结账订单快照/)
   assert.match(bodyChildren[1].innerHTML, /客户签字:[\s\S]*前台签字:[\s\S]*店长签字:/)
@@ -487,7 +487,7 @@ ok('结账成功页直接使用成功快照打开本地小票预览', () => {
   assert.doesNotMatch(cashierWorkbench, /requestAction\(action, \{\s*salesOrderId/)
 })
 
-// Signatures are handwritten on paper, always after existing content and before the unchanged tear space.
+// Handwriting space doubles to 20mm per row; order content and tear space remain unchanged.
 ok('三种纸宽和各类小票底部均有三行空白签字栏', () => {
   for (const paperSize of ['58', '76', '80']) {
     for (const receiptMode of ['sales', 'service', 'mixed']) {
@@ -498,7 +498,7 @@ ok('三种纸宽和各类小票底部均有三行空白签字栏', () => {
       assert.deepEqual(labels, ['客户签字:', '前台签字:', '店长签字:'])
       assert.ok(html.indexOf('<div class="signatures">') > html.indexOf('<div class="note">'))
       assert.ok(html.indexOf('<div class="signatures">') < html.indexOf('<div class="tear-guide"'))
-      assert.match(html, /\.signature-row \{ min-height: 10mm; padding-top: 4px; \}/)
+      assert.match(html, /\.signature-row \{ min-height: 20mm; padding-top: 4px; \}/)
       assert.match(html, /\.signature-row, \.tear-guide \{ break-inside: avoid/)
       assert.equal(JSON.stringify(order), before)
     }
