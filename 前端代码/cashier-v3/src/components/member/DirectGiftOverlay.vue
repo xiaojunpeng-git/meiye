@@ -1,5 +1,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { InventoryProductSelector } from '@mohe/inventory-vue3'
+import { requestCashierV3Action } from '../../services/cashierV3Bridge'
+import { reconcileGiftProducts } from './directGiftProducts'
 
 const props = defineProps({
   session: { type: Object, default: () => ({}) },
@@ -24,12 +27,27 @@ const handlingStoreId = computed(() => handlingStore.value.id || handlingStore.v
 const handlingStoreName = computed(() => handlingStore.value.name || handlingStore.value.storeName || '当前门店')
 const catalogItems = computed(() => Array.isArray(props.session.catalogItems) ? props.session.catalogItems : [])
 const coupons = computed(() => Array.isArray(props.session.coupons) ? props.session.coupons : [])
+const selectedProducts = computed(() => selected.value.filter((item) => item.kind === 'product'))
+// 通过 V3 赠送权限投影分页查询，不能借库存权限接口，也不依赖只含上架品的销售目录。
+const productCatalogApi = {
+  async searchCatalog(query) {
+    const response = await requestCashierV3Action('query-gift-products', { ...query, silent: true, preserveRootState: true })
+    const envelope = response?.data?.result ? response.data : response
+    if (envelope?.result?.status !== 'success') throw new Error(envelope?.result?.message || '商品目录读取失败。')
+    return envelope.data || {}
+  }
+}
+
+function acceptProducts(rows) {
+  selected.value = reconcileGiftProducts(selected.value, rows)
+  catalogOpen.value = false
+}
 const items = computed(() => {
   const productItems = catalogItems.value
-    .filter((item) => !item.disabled && (Number(item.productType) === 6 || Number(item.productType) === 0))
+    .filter((item) => !item.disabled && Number(item.productType) === 6)
     .map((item) => ({
       key: `catalog:${item.catalogItemId || item.skuId || item.id}`,
-      kind: Number(item.productType) === 6 ? 'project' : 'product',
+      kind: 'project',
       catalogItemId: String(item.catalogItemId || item.skuId || item.id),
       name: item.name || '未命名品项',
       specification: item.specification || ''
@@ -158,7 +176,7 @@ function submit() {
           </div>
           <p v-else class="direct-gift-overlay__empty-selected">请从下方选择项目、产品或优惠券添加到清单。</p>
         </section>
-        <section v-if="catalogOpen" class="direct-gift-overlay__catalog-modal" role="dialog" aria-modal="true" :aria-label="`选择${kindLabel(activeKind)}`" @click.self="catalogOpen = false">
+        <section v-if="catalogOpen && activeKind !== 'product'" class="direct-gift-overlay__catalog-modal" role="dialog" aria-modal="true" :aria-label="`选择${kindLabel(activeKind)}`" @click.self="catalogOpen = false">
           <div class="direct-gift-overlay__catalog-dialog">
             <header><strong>选择{{ kindLabel(activeKind) }}</strong><button type="button" class="button button--secondary" @click="catalogOpen = false">关闭</button></header>
             <label class="direct-gift-overlay__search">
@@ -182,6 +200,9 @@ function submit() {
       </form>
     </section>
   </Teleport>
+  <InventoryProductSelector :visible="catalogOpen && activeKind === 'product'" :selected-rows="selectedProducts"
+    :catalog-api="productCatalogApi" :layer-index="1240" :allow-empty="true"
+    @close="catalogOpen = false" @confirm="acceptProducts" />
 </template>
 
 <style scoped>

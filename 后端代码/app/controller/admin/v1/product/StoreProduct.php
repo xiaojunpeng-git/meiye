@@ -688,6 +688,7 @@ class StoreProduct extends AuthController
             ['is_inventory', 1],//是否参与库存管理（仅产品类型，服务层按 product_type 强制）
             ['allow_negative_stock', 1],//是否允许良品负库存（仅产品类型）
             ['salon_stock_enabled', 0],//是否可作为院装耗材（仅产品类型且参与库存）
+            ['no_expiry_management', null],//旧客户端不传时保留已有设置；不能把免录资料误当成免库存校验。
             ['create_request_key', ''],//新建/复制请求幂等令牌
         ]);
 		if ($data['applicable_type'] == 1) {

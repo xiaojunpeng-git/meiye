@@ -1,0 +1,181 @@
+{
+  "at": "2026-10-11T07:47:25.780Z",
+  "local_only": true,
+  "synthetic_data_rolled_back": true,
+  "results": [
+    {
+      "label": "local-transaction-integration",
+      "exit_code": 0,
+      "stdout": "PASS product DAO persists and reloads switch off\nPASS product DAO persists and reloads switch on\nPASS blank batch/dates inbound replays once\nPASS internal cost layer has no fabricated dates\nPASS different inbound retains separate cost layers\nPASS catalog returns persisted flag and total across batches\nPASS other warehouse cannot leak stock\nPASS other tenant cannot leak stock\nPASS reject inventory_manual_inbound_dates_required got inventory_manual_inbound_dates_required\nPASS reject inventory_manual_inbound_dates_required got inventory_manual_inbound_dates_required\nPASS mixed invalid inbound rolls back whole command\nPASS blank batch/date count gain replays once\nPASS count gain records two units with internal layer and null expiry\nPASS reject inventory_stock_count_surplus_batch_required got inventory_stock_count_surplus_batch_required\nPASS count loss allocates existing cost layers without requiring batch or dates\nPASS zero difference creates no balance change\nPASS reject inventory_stock_count_surplus_batch_required got inventory_stock_count_surplus_batch_required\nPASS draft reload rehydrates current product setting\nPASS old unfinished batch draft resumes without requiring a batch number\nPASS existing draft batch identity remains intact\nPASS draft cannot freeze or forge exemption\nPASS inbound replay survives later flag change\nPASS flag change never rewrites historical dates\nPASS Excel accepts exempt blank batch and dates\nPASS catalog formats fractional stock using authoritative SKU scale\nPASS store catalog shares persisted setting and SKU stock total\nPASS active exempt stock permits total count\nPASS retired exempt stock retains real batch identity without losing exemption\nROLLBACK synthetic expiry fixtures and inventory facts\nPASS no synthetic administrator remains\n",
+      "stderr": ""
+    },
+    {
+      "label": "no-expiry-product-selector",
+      "exit_code": 0,
+      "stdout": "NO_EXPIRY_SHARED_EDITOR_OK: actual Vue2 save, dual-mode rendered columns, mixed dates, count loading, cost validation and submit payload\n",
+      "stderr": ""
+    },
+    {
+      "label": "count-submission",
+      "exit_code": 0,
+      "stdout": "COUNT_SUBMISSION_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "inbound-date-validation",
+      "exit_code": 0,
+      "stdout": "INBOUND_DATE_VALIDATION_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "count-date-ui",
+      "exit_code": 0,
+      "stdout": "COUNT_DATE_UI_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "inventory-unit-column",
+      "exit_code": 0,
+      "stdout": "INVENTORY_UNIT_COLUMN_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "count-worksheet",
+      "exit_code": 0,
+      "stdout": "COUNT_WORKSHEET_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "count-batch-entry",
+      "exit_code": 0,
+      "stdout": "COUNT_BATCH_ENTRY_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "salon-optional-project",
+      "exit_code": 0,
+      "stdout": "SALON_OPTIONAL_PROJECT_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "shared-document-layout",
+      "exit_code": 0,
+      "stdout": "SHARED_DOCUMENT_LAYOUT_CONTRACT_OK: both terminals, 5 pages, capability actions, no credential fallback, single renderer\n",
+      "stderr": ""
+    },
+    {
+      "label": "inventory-editor-action-bar",
+      "exit_code": 0,
+      "stdout": "PASS 六类商品明细编辑页共用顶部操作栏\nPASS 取消和提交组紧跟批量删除之后\nPASS 盘点保存草稿与完成盘点也在商品操作栏\nPASS 顶部标题栏仅保留返回列表入口\nPASS 底部栏仅服务详情、导入和无商品栏的仓库创建\nPASS 移动后继续复用各业务原提交函数\ninventory editor action bar contract passed: 6/6\n",
+      "stderr": ""
+    },
+    {
+      "label": "manual-inbound-request",
+      "exit_code": 0,
+      "stdout": "PASS browser JSON reaches the manual inbound whitelist with named top-level fields\nPASS manual inbound controller preserves named whitelist keys for the service\nINVENTORY_MANUAL_INBOUND_REQUEST_RESULT passed=2 failed=0\n",
+      "stderr": ""
+    },
+    {
+      "label": "count-date",
+      "exit_code": 0,
+      "stdout": "COUNT_DATE_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "catalog-scan",
+      "exit_code": 0,
+      "stdout": "PASS 门店扫码精确识别条码、SKU编码和商品编码\nPASS 门店目录搜索覆盖商品编码\nPASS 总部扫码精确识别条码、SKU编码和商品编码\nPASS 总部目录搜索覆盖商品编码\nINVENTORY_CATALOG_SCAN_CONTRACT_RESULT failed=0\n",
+      "stderr": ""
+    },
+    {
+      "label": "excel-import",
+      "exit_code": 0,
+      "stdout": "PASS V3 Excel importer calls only the V3 batch authorities\nPASS template and row validation reject defective quantity and require inbound batch evidence\nPASS file idempotency is store scoped and success is terminal\nPASS import endpoints are protected by the store inventory route group\nPASS Excel workbooks use the dedicated V3 upload boundary rather than image attachment upload\nPASS migration owns V3-only import records and errors\nPASS import record page is registered in the inventory unified-query contract\nINVENTORY_EXCEL_IMPORT_CONTRACT_RESULT failed=0\n",
+      "stderr": ""
+    },
+    {
+      "label": "stock-count-catalog-validation",
+      "exit_code": 0,
+      "stdout": "STOCK_COUNT_CATALOG_VALIDATION_CONTRACT_OK\n",
+      "stderr": ""
+    },
+    {
+      "label": "manual-document-reversal",
+      "exit_code": 0,
+      "stdout": "PASS store and headquarters commands share one reversal kernel\nPASS only manual inbound and outbound documents can enter the authority\nPASS command requires a bounded reason and an idempotency key\nPASS one original document can be voided only once without deleting history\nPASS inbound reversal refuses unavailable original batch quantity\nPASS outbound reversal restores exact original batch and cost\nPASS ledger and aggregate mismatches abort instead of being hidden\nPASS audit receipt preserves operator reason result and four inventory times\nPASS list projection exposes status and the action flag needed by both clients\nINVENTORY_MANUAL_REVERSAL_CONTRACT failed=0\n",
+      "stderr": ""
+    },
+    {
+      "label": "stock-summary-total",
+      "exit_code": 0,
+      "stdout": "PASS quantity total keeps exact four-decimal-unit arithmetic\nPASS amount total remains integer cents\nPASS cost permission hides the amount total without changing quantity\nPASS table layout explicitly fixes the result and first summary row\nPASS hidden inventory amount total is server-summary-only and permission protected\nPASS summary amount converts back to cents without floating point\nPASS unified query injects mandatory full-result quantity and permitted amount summaries\nPASS store and headquarters legacy summaries are calculated before pagination\nINVENTORY_STOCK_SUMMARY_TOTAL_RESULT failed=0\n",
+      "stderr": ""
+    },
+    {
+      "label": "whitespace",
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/controller/admin/v1/product/StoreProduct.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/controller/admin/v1/product/StoreProduct.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/controller/store/product/StoreProduct.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/controller/store/product/StoreProduct.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/product/StoreProductServices.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/product/StoreProductServices.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/inventory/InventoryManualInboundServices.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/inventory/InventoryManualInboundServices.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/inventory/InventoryStockCountServices.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/inventory/InventoryStockCountServices.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/inventory/InventoryStockCountDraftServices.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/inventory/InventoryStockCountDraftServices.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/inventory/InventoryStoreCatalogServices.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/inventory/InventoryStoreCatalogServices.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/inventory/InventoryPlatformHqCatalogServices.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/inventory/InventoryPlatformHqCatalogServices.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/inventory/InventoryCatalogStockProjection.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/inventory/InventoryCatalogStockProjection.php\n",
+      "stderr": ""
+    },
+    {
+      "label": "php-lint 后端代码/app/services/product/inventory/InventoryV3ExcelImportServices.php",
+      "exit_code": 0,
+      "stdout": "No syntax errors detected in /var/www/html/app/services/product/inventory/InventoryV3ExcelImportServices.php\n",
+      "stderr": ""
+    }
+  ]
+}

@@ -355,6 +355,8 @@ const C5_ACTIONS = {
     'open-order-gifts': FEATURE_ORDER_CENTER,
     'open-gift-records': FEATURE_ORDER_CENTER,
     'open-gift': FEATURE_GIFT,
+    // 与服务端一致：赠送选品只要求赠送权限。
+    'query-gift-products': FEATURE_GIFT,
     'open-card-batch': FEATURE_MEMBER,
     'open-card-benefits': FEATURE_MEMBER,
     'query-query-entities': 'selector:query_entities',

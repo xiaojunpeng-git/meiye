@@ -1,0 +1,59 @@
+{
+  "id": "R9-20261011-unified-selector-v2",
+  "runs": [
+    {
+      "id": "shared_selector",
+      "command": "node tests/inventory/js/shared-gift-product-selector-contract.mjs",
+      "exit_code": 0,
+      "output": "SHARED_GIFT_PRODUCT_SELECTOR_OK: seven entries, gift scope, draft reconciliation, empty confirm, pagination and stale-response isolation\n"
+    },
+    {
+      "id": "no_expiry_editor",
+      "command": "node tests/inventory/js/no-expiry-product-selector-contract.mjs",
+      "exit_code": 0,
+      "output": "NO_EXPIRY_SHARED_EDITOR_OK: actual Vue2 save, dual-mode rendered columns, mixed dates, count loading, cost validation and submit payload\n"
+    },
+    {
+      "id": "gift_search",
+      "command": "node tests/cashier-v3/js/direct-gift-search-contract.mjs",
+      "exit_code": 0,
+      "output": "cashier direct-gift three-type search contract: PASS\n"
+    },
+    {
+      "id": "gift_batch",
+      "command": "node tests/cashier-v3/js/direct-gift-batch-frontend-contract.mjs",
+      "exit_code": 0,
+      "output": "cashier direct-gift batch frontend contract: PASS\n"
+    },
+    {
+      "id": "gift_presale_frontend",
+      "command": "node tests/cashier-v3/js/gift-product-presale-claim-frontend-contract.mjs",
+      "exit_code": 0,
+      "output": "cashier gift-product presale-claim frontend contract: PASS\n"
+    },
+    {
+      "id": "gift_authority",
+      "command": "php tests/cashier-v3/php/direct-gift-authority-contract.php",
+      "exit_code": 0,
+      "output": "PASS: 前后端均登记独立赠送命令\nPASS: 独立赠送事件合同限定 gift.issued 并登记 Outbox 核验消费者\nPASS: 会员模块从入口命令路由到赠送权威服务\nPASS: 会员选择结果保留权威 uid，独立赠送可写入同一会员权益\nPASS: 独立赠送按命令会员和工作区策略校验，产品从共享目录查询且不做库存扣减\nPASS: 独立赠送锁定会员作为只读依赖，仅推进工作台版本；新权益由同一事务创建并版本化\nPASS: 弹层取得当前办理门店，并只加载总部或当前门店优惠券\nPASS: 独立赠送使用主记录、明细和统一赠送事实\nPASS: 独立赠送有事务边界与不可变幂等校验\nPASS: 服务端拒绝小数、负数和零数量，避免绕过界面被静默截断\nPASS: 提交时强制当前办理门店并重读优惠券归属门店\nPASS: 逐项赠送写事件事实并校验重放完整性\nPASS: Outbox 消费者复核主记录、明细和赠送事实链\nPASS: 会员可见权益和优惠券仅由兼容投影写入\nPASS: 库存管理商品赠送不触发库存扣减并走独立权益投影\nPASS: 独立赠送不创建销售订单、充值或收款事实\nPASS: 订单中心从赠送事实读取独立赠送并排除兼容投影重复行\nPASS: 迁移创建独立赠送表及幂等唯一约束\nPASS: 收银壳未选会员时先进入会员选择，并使用真实赠送弹层\nPASS: 赠送弹层支持项目/产品/券混合清单、重复点击累加、逐项数量和逐项有效期\nDIRECT_GIFT_AUTHORITY_CONTRACT_FAILED=0\n"
+    },
+    {
+      "id": "gift_presale_backend",
+      "command": "php tests/cashier-v3/php/gift-product-presale-claim-contract.php",
+      "exit_code": 0,
+      "output": "PASS: 产品赠送签发时注册待领用事实\nPASS: 产品赠送不创建零金额兼容销售订单\nPASS: 赠送领用复用预售事务并生成独立出库来源\nPASS: 领用列表按来源类型隔离且支持赠送\nPASS: 库存只在领用事务内加锁和扣减\nPASS: 赠送领用作废写库存反向事实\nPASS: 赠送产品出库单使用独立单号前缀\nPASS: 迁移增加来源字段和查询索引\nPASS: 前端默认预售并支持预售/赠送滑块筛选\nPASS: 赠送页面显示独立出库单和明细\nGIFT_PRODUCT_PRESALE_CLAIM_CONTRACT_FAILED=0\n"
+    },
+    {
+      "id": "local_catalog",
+      "command": "docker exec -i -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 mohe-platform-app php < tests/inventory/php/shared-gift-product-catalog-local.php",
+      "exit_code": 0,
+      "output": "PASS gift includes sale, warehouse and unmanaged physical products only\nPASS no warehouse means zero stock, not a gift denial\nPASS server pagination retains complete eligible total\nPASS submit rechecks and accepts sale\nPASS submit rechecks and accepts warehouse\nPASS submit rechecks and accepts unmanaged\nPASS submit rejects pending\nPASS submit rejects rejected\nPASS submit rejects recycled\nPASS submit rejects forced_down\nPASS submit rejects project\nPASS submit rejects foreign\nPASS inventory uses participation switch without sales or review status restrictions\nPASS store barcode shares inventory-only qualification\nPASS HQ selector uses same switch-only inventory policy\nPASS HQ barcode shares inventory-only qualification\nPASS gift query has only gift feature permission\nROLLBACK synthetic product catalog and store\nPASS no synthetic store remains\n"
+    },
+    {
+      "id": "local_no_expiry",
+      "command": "docker exec -i -e MOHE_LOCAL_DB_HOSTNAME=de34b8634512 mohe-platform-app php < tests/inventory/php/no-expiry-local-integration.php",
+      "exit_code": 0,
+      "output": "PASS product DAO persists and reloads switch off\nPASS product DAO persists and reloads switch on\nPASS blank batch/dates inbound replays once\nPASS internal cost layer has no fabricated dates\nPASS different inbound retains separate cost layers\nPASS catalog returns persisted flag and total across batches\nPASS other warehouse cannot leak stock\nPASS other tenant cannot leak stock\nPASS reject inventory_manual_inbound_dates_required got inventory_manual_inbound_dates_required\nPASS reject inventory_manual_inbound_dates_required got inventory_manual_inbound_dates_required\nPASS mixed invalid inbound rolls back whole command\nPASS blank batch/date count gain replays once\nPASS count gain records two units with internal layer and null expiry\nPASS reject inventory_stock_count_surplus_batch_required got inventory_stock_count_surplus_batch_required\nPASS count loss allocates existing cost layers without requiring batch or dates\nPASS zero difference creates no balance change\nPASS reject inventory_stock_count_surplus_batch_required got inventory_stock_count_surplus_batch_required\nPASS draft reload rehydrates current product setting\nPASS old unfinished batch draft resumes without requiring a batch number\nPASS existing draft batch identity remains intact\nPASS draft cannot freeze or forge exemption\nPASS inbound replay survives later flag change\nPASS flag change never rewrites historical dates\nPASS Excel accepts exempt blank batch and dates\nPASS catalog formats fractional stock using authoritative SKU scale\nPASS store catalog shares persisted setting and SKU stock total\nPASS active exempt stock permits total count\nPASS retired exempt stock retains real batch identity without losing exemption\nROLLBACK synthetic expiry fixtures and inventory facts\nPASS no synthetic administrator remains\n"
+    }
+  ]
+}

@@ -325,6 +325,7 @@ class StoreProduct extends AuthController
             ['is_inventory', 1],//是否参与库存管理（仅产品类型，服务层按 product_type 强制）
             ['allow_negative_stock', 1],//是否允许良品负库存（仅产品类型）
             ['salon_stock_enabled', 0],//是否可作为院装耗材（仅产品类型且参与库存）
+            ['no_expiry_management', null],//旧客户端不传时保留有效期配置，库存命令仍以数据库设置为准。
             ['create_request_key', ''],//新建/复制请求幂等令牌
         ]);
         //门店商品编辑 需要再次审核

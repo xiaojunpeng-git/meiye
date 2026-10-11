@@ -1094,6 +1094,11 @@ class StoreProductServices extends BaseServices
     public function saveData(int $id, array $data, int $type = 0, int $relation_id = 0, int $adminId = 0)
     {
         $productType = (int)($data['product_type'] ?? 0);
+        // 兼容未升级的商品编辑客户端；免录有效期是商品配置，不允许保存时无意复位。
+        $expirySetting = $data['no_expiry_management'] ?? ($id > 0
+            ? Db::name('store_product')->where('id', $id)->value('no_expiry_management') : 0);
+        if (!in_array($expirySetting, [0, 1, '0', '1'], true)) throw new AdminException('有效期管理设置不正确');
+        $data['no_expiry_management'] = $productType === 0 ? (int)$expirySetting : 0;
         if ($productType === 5) {
             $data['unit_name'] = '张';
             $data['is_inventory'] = 0;
@@ -1671,6 +1676,8 @@ class StoreProductServices extends BaseServices
                 'is_inventory' => $resolvedIsInventory,
                 'allow_negative_stock' => ((int)$data['product_type'] === 0) ? (int)($data['allow_negative_stock'] ?? 1) : 1,
                 'salon_stock_enabled' => ($resolvedIsInventory === 1) ? (int)($data['salon_stock_enabled'] ?? 0) : 0,
+                // 暂停参与库存不清除有效期偏好，重新启用时沿用；历史库存从不回填。
+                'no_expiry_management' => (int)$data['no_expiry_management'],
             ]);
             if ($is_new === 0 && $createRequestKey !== '') {
                 $createIdempotentServices->save((int)$data['type'], (int)$data['relation_id'], $createRequestKey, (int)$id);

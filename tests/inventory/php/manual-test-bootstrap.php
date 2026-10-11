@@ -91,6 +91,8 @@ $files = [
     $backend . '/database/upgrades/2026-08-03-库存V3业务单号统一/02-正式升级.sql',
     $backend . '/database/upgrades/2026-09-28-库存盘点草稿/01-正式升级.sql',
     $backend . '/database/upgrades/2026-09-29-盘点操作人身份类型/02-正式升级.sql',
+    // 独立测试库与业务目录契约同步；迁移幂等，不修改已有商品或库存事实。
+    $backend . '/database/upgrades/2026-10-11-商品免录有效期/01-up.sql',
 ];
 if (getenv('INVENTORY_SKIP_SCHEMA_BOOTSTRAP') !== '1') {
     foreach ($files as $file) executeInventorySqlFile($file);

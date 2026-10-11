@@ -15,6 +15,8 @@ function isCalendarDate(value) {
  */
 export function validateInboundDates(rows) {
   for (const [index, row] of (Array.isArray(rows) ? rows : []).entries()) {
+    // 目录返回的免录配置只决定页面负担，服务端仍重读商品设置防止伪造绕过。
+    if (Number(row?.no_expiry_management) === 1) continue
     const lineNumber = index + 1
     const manufacturedDate = String(row?.manufactured_date || '').trim()
     const expireDate = String(row?.expire_date || '').trim()

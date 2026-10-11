@@ -281,6 +281,21 @@ final class CashierV3MemberModule
                 });
             });
         }
+        // 赠送目录是只读投影，使用赠送功能权限，不依赖库存菜单或收银销售目录。
+        if (!$handlers->hasProjection('query-gift-products')) {
+            $handlers->registerProjection('query-gift-products', function (array $scope): array {
+                $operator = $scope['operator_scope'];
+                if ($operator->tenantId() !== $scope['data_scope']->tenantId() || !$scope['data_scope']->allowsStore($operator->storeId())) {
+                    throw CashierV3CommandException::invalidContext('当前门店没有办理赠送的权限。');
+                }
+                $payload = (array)($scope['payload'] ?? []);
+                $catalog = (new \app\services\product\inventory\InventoryStoreCatalogServices())->search(
+                    $operator->storeId(), (string)($payload['keyword'] ?? ''), (int)($payload['category_id'] ?? 0),
+                    (int)($payload['page'] ?? 1), (int)($payload['limit'] ?? 12), false, false, false, false, false
+                );
+                return ['data' => $catalog];
+            });
+        }
         if (!$handlers->hasProjection('open-gift')) {
             $handlers->registerProjection('open-gift', function (array $scope) use ($cashierWorkspace, $memberVersions): array {
                 $payload = is_array($scope['payload'] ?? null) ? $scope['payload'] : [];
@@ -294,22 +309,11 @@ final class CashierV3MemberModule
                     $member = self::findSelectableMember((string)$memberId, $scope['operator_scope']);
                     $memberVersion = $memberVersions->synchronizeProjectionVersion('member', (string)$memberId, $scope['operator_scope'], $scope['data_scope']);
                     $catalog = (new CashierV3SaleCatalogServices())->catalog($scope['operator_scope'], $scope['data_scope']);
-                    // Gifts do not create inventory movements. Inventory-managed
-                    // products remain selectable and are issued as benefits;
-                    // stock is intentionally unchanged by this workflow.
-                    $catalogItems = array_map(static function (array $item): array {
-                        // Sale catalog disables an inventory SKU when stock is
-                        // empty. Gift issuance has no stock movement, so only
-                        // clear that stock-only disable; ordinary off-shelf or
-                        // invalid items stay unavailable.
-                        if (trim((string)($item['stockText'] ?? '')) !== ''
-                            && (string)($item['disabledReason'] ?? '') === '库存不足') {
-                            $item['disabled'] = false;
-                            $item['disabledReason'] = '';
-                            $item['stockWarning'] = false;
-                        }
-                        return $item;
-                    }, array_values((array)($catalog['items'] ?? [])));
+                    // 这里只准备原有项目选项。实体产品唯一入口为 query-gift-products，
+                    // 不再维护一条只含上架产品、手工清除库存禁用状态的平行目录。
+                    $catalogItems = array_values(array_filter((array)($catalog['items'] ?? []), static function (array $item): bool {
+                        return (int)($item['productType'] ?? -1) === 6;
+                    }));
                     $store = (array)Db::name('system_store')->where('id', $scope['operator_scope']->storeId())
                         ->field('id,name')->find();
                     if ((int)($store['id'] ?? 0) !== $scope['operator_scope']->storeId()) {

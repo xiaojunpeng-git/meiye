@@ -3,10 +3,8 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory;
 
-use app\services\product\inventory\query\InventoryBatchStockDataScope;
-use app\services\product\inventory\query\InventoryBatchStockQueryContract;
-use app\services\product\inventory\query\InventoryBatchStockQueryProvider;
 use think\facade\Db;
+use app\services\product\product\PhysicalProductSelectionPolicy;
 
 /** Read-only catalog for the platform-owned headquarters inventory subject. */
 final class InventoryPlatformHqCatalogServices
@@ -21,7 +19,8 @@ final class InventoryPlatformHqCatalogServices
         $barcode = trim($barcode);
         if ($barcode === '' || mb_strlen($barcode) > 64) throw new \InvalidArgumentException('inventory_catalog_barcode_invalid');
         $rows = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
-            ->where('p.type', $source['type'] === 'HQ' ? 0 : 1)->where('p.relation_id', $source['type'] === 'HQ' ? 0 : $source['storeId'])->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.type', 0)
+            ->where('p.type', $source['type'] === 'HQ' ? 0 : 1)->where('p.relation_id', $source['type'] === 'HQ' ? 0 : $source['storeId'])
+            ->where(function ($query): void { PhysicalProductSelectionPolicy::apply($query); })->where('a.type', 0)
             ->where(function ($query) use ($barcode): void {
                 // Physical scanners may send the product code or SKU code when
                 // the source barcode field has not been populated.
@@ -30,7 +29,7 @@ final class InventoryPlatformHqCatalogServices
                     ->whereOr('a.code', $barcode)
                     ->whereOr('p.code', $barcode);
             })
-            ->fieldRaw("p.id AS product_id,p.pid AS parent_product_id,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,COALESCE(NULLIF(a.bar_code, ''), p.bar_code) AS barcode,a.code AS sku_code,a.stock_unit")
+            ->fieldRaw("p.id AS product_id,p.no_expiry_management,p.pid AS parent_product_id,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,COALESCE(NULLIF(a.bar_code, ''), p.bar_code) AS barcode,a.code AS sku_code,a.stock_unit")
             ->group('a.id')->order('a.id asc')->limit(2)->select()->toArray();
         if (!$rows) throw new \RuntimeException('inventory_catalog_barcode_not_found');
         if (count($rows) !== 1) throw new \RuntimeException('inventory_catalog_barcode_ambiguous');
@@ -58,8 +57,8 @@ final class InventoryPlatformHqCatalogServices
             ->join('store_product p', 'p.id=a.product_id')
             ->where('p.type', $source['type'] === 'HQ' ? 0 : 1)
             ->where('p.relation_id', $source['type'] === 'HQ' ? 0 : $source['storeId'])
-            ->where('p.is_del', 0)
-            ->where('p.is_inventory', 1)
+            // 与门店共用库存资格：仅看参与库存开关，不叠加赠送的销售/仓库状态条件。
+            ->where(function ($query): void { PhysicalProductSelectionPolicy::apply($query); })
             ->where('a.type', 0)
             ->when($keyword !== '', function ($query) use ($keyword): void {
                 $like = '%' . $keyword . '%';
@@ -82,6 +81,7 @@ final class InventoryPlatformHqCatalogServices
                 'a.bar_code' => 'barcode',
                 'a.code' => 'sku_code',
                 'a.stock_unit',
+                'p.no_expiry_management', // 展示免录状态；正式入库和盘点不能信任客户端标志。
             ])
             ->group('a.id')
             ->order('p.sort desc,p.id desc,a.id asc')
@@ -132,34 +132,10 @@ final class InventoryPlatformHqCatalogServices
         return ['type' => 'STORE', 'storeId' => $sourceStoreId, 'locationId' => (int)$storeLocation['id'], 'tenantId' => (string)$location['tenant_id'], 'features' => (array)($access['features'] ?? [])];
     }
 
-    /** Decorate catalog rows from settled inventory facts; never infer stock in the browser. */
+    /** 已获授权的来源仓 SKU 总余额，保留供货方映射，不在浏览器拼算批次数量。 */
     private function withAvailableQuantity(array $source, array $rows): array
     {
-        if (!$rows) return [];
-        $features = array_values(array_unique(array_merge(
-            (array)($source['features'] ?? []),
-            [InventoryBatchStockQueryContract::PERMISSION_VIEW]
-        )));
-        $scope = new InventoryBatchStockDataScope(
-            (string)$source['tenantId'],
-            [(int)$source['locationId']],
-            $features
-        );
-        $stockRows = (new InventoryBatchStockQueryProvider())->sourceRows([
-            'queryCutoffDate' => date('Y-m-d'),
-            'locationIds' => [(int)$source['locationId']],
-            'includeZero' => false,
-        ], $scope);
-        $available = [];
-        foreach ($stockRows as $stockRow) {
-            $available[(int)$stockRow['product_id'] . ':' . (int)$stockRow['sku_id']] = (string)$stockRow['available_quantity'];
-        }
-        foreach ($rows as &$row) {
-            $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];
-            $row['available_quantity'] = $available[$key] ?? '0';
-        }
-        unset($row);
-        return $rows;
+        return (new InventoryCatalogStockProjection())->decorate((string)$source['tenantId'], (int)$source['locationId'], $rows);
     }
 
     /**

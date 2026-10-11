@@ -88,6 +88,12 @@ final class InventoryManualInboundServices
                 continue;
             }
             $catalog = $this->lockCatalogSku($scope, $line);
+            // 只信事务内锁定的商品配置；免录资料仍逐命令/明细建立独立成本层。
+            if ((int)$catalog['no_expiry_management'] === 1) {
+                if ($line['batchNo'] === '') $line['batchNo'] = $this->automaticBatchNo($command, $index);
+            } elseif ($line['batchNo'] === '' || !$line['manufacturedDate'] || !$line['expireDate']) {
+                throw new \InvalidArgumentException('inventory_manual_inbound_dates_required');
+            }
             $stock = $this->lockOrCreateStock($location, $catalog, $line, $command['recordedAt']);
             $batch = $this->lockOrCreateBatch($stock, $catalog, $line, $command, $index);
             $this->increaseBalances($stock, $batch, $line, $command['recordedAt']);
@@ -125,15 +131,13 @@ final class InventoryManualInboundServices
             $skuId = $this->positive($line['sku_id']);
             $skuUnique = trim((string)$line['sku_unique']);
             $batchNo = trim((string)$line['batch_no']);
-            if ($skuUnique === '' || strlen($skuUnique) > 64 || $batchNo === '' || strlen($batchNo) > 64) {
+            if ($skuUnique === '' || strlen($skuUnique) > 64 || strlen($batchNo) > 64) {
                 throw new \InvalidArgumentException('inventory_manual_inbound_line_invalid');
             }
             $manufacturedDate = $line['manufactured_date'] === '' ? null : $this->date((string)$line['manufactured_date']);
             $expireDate = $line['expire_date'] === '' ? null : $this->date((string)$line['expire_date']);
-            if ($manufacturedDate === null || $expireDate === null) {
-                throw new \InvalidArgumentException('inventory_manual_inbound_dates_required');
-            }
-            if ($manufacturedDate > $expireDate) {
+            // 是否必填延后到锁定商品配置后判断；传入日期仍必须是合法且有序的日期。
+            if ($manufacturedDate !== null && $expireDate !== null && $manufacturedDate > $expireDate) {
                 throw new \InvalidArgumentException('inventory_manual_inbound_date_order_invalid');
             }
             $lines[] = [
@@ -372,7 +376,7 @@ final class InventoryManualInboundServices
         $query = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
             ->where('p.id', $line['productId'])->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
             ->where('a.unique', $line['skuUnique'])->where('a.type', 0)->lock(true)
-            ->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit');
+            ->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,p.no_expiry_management,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit');
         if (($scope['partyType'] ?? 'STORE') === 'HQ') {
             $query->where('p.type', 0)->where('p.relation_id', 0);
         } else {
@@ -494,6 +498,12 @@ final class InventoryManualInboundServices
         ]);
     }
 
+    /** 系统批次只用于成本和追溯；重放不依赖之后可能改变的商品开关。 */
+    private function automaticBatchNo(array $command, int $index): string
+    {
+        return 'AUTO-IN-' . substr(hash('sha256', $command['idempotencyKey'] . ':' . $index), 0, 48);
+    }
+
     private function assertIdempotentFact(array $fact, array $location, array $command, int $index, array $line): void
     {
         if ((string)$fact['source_type'] !== 'manual_inbound' || (string)$fact['source_id'] !== $command['idempotencyKey']
@@ -512,7 +522,7 @@ final class InventoryManualInboundServices
             || (int)$stock['sku_id'] !== (int)$line['skuId']
             || (string)$stock['product_unique'] !== (string)$line['skuUnique']
             || (int)$batch['stock_id'] !== (int)$stock['id']
-            || (string)$batch['batch_no'] !== (string)$line['batchNo']
+            || (string)$batch['batch_no'] !== ($line['batchNo'] ?: $this->automaticBatchNo($command, $index))
             || (int)$batch['unit_cost_cents'] !== (int)$line['unitCostCents']) {
             throw new \RuntimeException('inventory_manual_inbound_idempotency_conflict');
         }

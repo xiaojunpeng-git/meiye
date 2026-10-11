@@ -1,3 +1,5 @@
+import { formatBatchNumber } from './batchNumberDisplay.js'
+
 /** 平台及门店单据共用一个商品表头；各页字段仍与其权威详情契约对应。 */
 export const groupedDetailColumns = {
   inbound: ['商品', '规格', '批次号', '生产日期', '到期日', '入库数量', '库存单位', '入库单价', '入库金额', '明细备注'],
@@ -33,7 +35,7 @@ function transferQuantity(units, scale = 0) {
 /** 商品行只映射详情接口字段，不从主单金额、状态或备注反推明细事实。 */
 export function groupedLineCells(page, line, detail) {
   if (page === 'inbound' || page === 'outbound') return [
-    displayText(line.product_name), displayText(line.sku_name, '默认规格'), displayText(line.batch_no),
+    displayText(line.product_name), displayText(line.sku_name, '默认规格'), formatBatchNumber(line.batch_no),
     displayText(line.manufactured_date), displayText(line.expire_date), displayText(line.quantity),
     displayText(line.stock_unit), groupedDisplayMoney(line.unit_cost_cents),
     groupedDisplayMoney(line.cost_amount_cents), displayText(line.detail_remark)

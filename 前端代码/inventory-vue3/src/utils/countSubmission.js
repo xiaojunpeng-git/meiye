@@ -36,6 +36,7 @@ export function submittedCountRowIndex(rows, lineIndex) {
 export function missingCountSurplusMessage(rows, rowIndex) {
   const row = rows[rowIndex] || {}
   const name = String(row.product_name || `商品ID ${row.product_id || '-'}`).trim()
+  if (Number(row.no_expiry_management) === 1) return `第 ${rowIndex + 1} 行「${name}」的盘盈单价不完整，请填写单价后再完成盘点。`
   return `第 ${rowIndex + 1} 行「${name}」的盘盈批次资料不完整，请核对批号、单价、生产日期和到期日后再完成盘点。`
 }
 
@@ -84,17 +85,18 @@ export function validateCountSubmissionRows(rows) {
     const unitCost = String(row.surplus_unit_cost ?? '').trim()
     const manufacturedDate = String(row.surplus_manufactured_date || '').trim()
     const expireDate = String(row.surplus_expire_date || '').trim()
-    if (!batchNo) missing.push('批次号')
+    const withoutExpiry = Number(row.no_expiry_management) === 1
+    if (!withoutExpiry && !batchNo) missing.push('批次号')
     if (!unitCost) missing.push('单价')
-    if (!manufacturedDate) missing.push('生产日期')
-    if (!expireDate) missing.push('到期日')
+    if (!withoutExpiry && !manufacturedDate) missing.push('生产日期')
+    if (!withoutExpiry && !expireDate) missing.push('到期日')
     if (missing.length) {
       return { valid: false, rowIndex, message: `第 ${rowIndex + 1} 行「${productName}」未填写${missing.join('、')}，暂时无法完成盘点。请补充后再试。` }
     }
     if (!costPattern.test(unitCost)) {
       return { valid: false, rowIndex, message: `第 ${rowIndex + 1} 行「${productName}」的盘盈单价填写不正确，暂时无法完成盘点。请填写不小于 0、最多两位小数的金额。` }
     }
-    if (!datePattern.test(manufacturedDate) || !datePattern.test(expireDate) || manufacturedDate > expireDate) {
+    if (!withoutExpiry && (!datePattern.test(manufacturedDate) || !datePattern.test(expireDate) || manufacturedDate > expireDate)) {
       return { valid: false, rowIndex, message: `第 ${rowIndex + 1} 行「${productName}」的生产日期或到期日不正确，暂时无法完成盘点。请重新选择，且到期日不能早于生产日期。` }
     }
   }

@@ -7,7 +7,10 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   selectedRows: { type: Array, default: () => [] },
   catalogApi: { type: Object, default: () => inventoryApi },
-  catalogQuery: { type: Object, default: () => ({}) }
+  catalogQuery: { type: Object, default: () => ({}) },
+  // 嵌入赠送弹窗时只提升遮罩层级；业务范围仍由传入的服务端目录确定。
+  layerIndex: { type: Number, default: 120 },
+  allowEmpty: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['close', 'confirm'])
@@ -21,6 +24,7 @@ const total = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const selection = ref(new Map())
+let requestRevision = 0
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
 const selectedCount = computed(() => selection.value.size)
@@ -30,6 +34,8 @@ function resetSelection() {
 }
 
 async function loadCatalog() {
+  // 快速搜索、翻页或关闭后，旧响应不得覆盖新查询或下一次打开的选择。
+  const revision = ++requestRevision
   loading.value = true
   loadError.value = ''
   try {
@@ -41,17 +47,19 @@ async function loadCatalog() {
       page: page.value,
       limit
     })
+    if (revision !== requestRevision) return
     rows.value = Array.isArray(response?.list) ? response.list : []
     categories.value = Array.isArray(response?.categories) ? response.categories : []
     total.value = Number(response?.total || 0)
     const serverPage = Number(response?.page || page.value)
     page.value = Math.min(Math.max(1, serverPage), totalPages.value)
   } catch (error) {
+    if (revision !== requestRevision) return
     rows.value = []
     total.value = 0
     loadError.value = error instanceof Error ? error.message : '商品目录读取失败。'
   } finally {
-    loading.value = false
+    if (revision === requestRevision) loading.value = false
   }
 }
 
@@ -91,21 +99,23 @@ function confirm() {
 }
 
 watch(() => props.visible, (visible) => {
-  if (!visible) return
+  if (!visible) { requestRevision += 1; return }
   resetSelection()
+  keyword.value = ''
+  categoryId.value = 0
   page.value = 1
   loadCatalog()
-})
+}, { immediate: true })
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="inventory-product-selector-layer" role="presentation">
-      <button class="inventory-product-selector-mask" aria-label="关闭商品选择" @click="close" />
+    <div v-if="visible" class="inventory-product-selector-layer" :style="{ zIndex: layerIndex }" role="presentation">
+      <button type="button" class="inventory-product-selector-mask" aria-label="关闭商品选择" @click="close" />
       <section class="inventory-product-selector" role="dialog" aria-modal="true" aria-label="选择商品">
         <header>
-          <div><p>库存商品目录</p><h2>选择商品</h2></div>
-          <button class="selector-icon-button" title="关闭" @click="close"><X :size="20" /></button>
+          <div><p>商品目录</p><h2>选择商品</h2></div>
+          <button type="button" class="selector-icon-button" title="关闭" @click="close"><X :size="20" /></button>
         </header>
 
         <div class="inventory-product-selector__filters">
@@ -118,20 +128,21 @@ watch(() => props.visible, (visible) => {
           <label class="selector-search">商品搜索
             <span><Search :size="16" /><input v-model="keyword" placeholder="商品名称、SKU、编码或条码" @keyup.enter="search" /></span>
           </label>
-          <button class="selector-primary" :disabled="loading" @click="search">{{ loading ? '查询中' : '查询' }}</button>
+          <button type="button" class="selector-primary" :disabled="loading" @click="search">{{ loading ? '查询中' : '查询' }}</button>
         </div>
 
         <main>
           <p v-if="loadError" class="selector-error">{{ loadError }}</p>
           <div class="selector-table-scroll">
             <table>
-              <thead><tr><th>选择</th><th>商品名称</th><th>规格</th><th>商品编码</th><th>条码</th><th>库存单位</th></tr></thead>
+              <!-- 库存与赠送共用选品列；库存数量直接展示服务端的当前仓 SKU 总余额。 -->
+              <thead><tr><th>选择</th><th>商品名称</th><th>规格</th><th>库存单位</th><th>库存数量</th></tr></thead>
               <tbody>
-                <tr v-if="loading"><td colspan="6" class="selector-empty">正在读取商品目录...</td></tr>
-                <tr v-else-if="!rows.length"><td colspan="6" class="selector-empty">暂无符合条件的库存商品</td></tr>
+                <tr v-if="loading"><td colspan="5" class="selector-empty">正在读取商品目录...</td></tr>
+                <tr v-else-if="!rows.length"><td colspan="5" class="selector-empty">暂无符合条件的商品</td></tr>
                 <tr v-else v-for="row in rows" :key="row.sku_id" :class="{ 'selector-row--selected': isSelected(row) }" @click="toggleRow(row)">
                   <td><input type="checkbox" :checked="isSelected(row)" @click.stop="toggleRow(row)" /></td>
-                  <td><strong>{{ row.product_name }}</strong></td><td>{{ row.sku_name || '默认规格' }}</td><td>{{ row.product_code || '-' }}</td><td>{{ row.barcode || '-' }}</td><td>{{ row.stock_unit || '-' }}</td>
+                  <td><strong>{{ row.product_name }}</strong></td><td>{{ row.sku_name || '默认规格' }}</td><td>{{ row.stock_unit || '-' }}</td><td>{{ row.available_quantity ?? '-' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -141,11 +152,11 @@ watch(() => props.visible, (visible) => {
         <footer>
           <span>已选择 {{ selectedCount }} 个 SKU，共 {{ total }} 条商品规格</span>
           <div>
-            <button class="selector-pagination" :disabled="page <= 1 || loading" title="上一页" @click="changePage(page - 1)"><ChevronLeft :size="17" /></button>
+            <button type="button" class="selector-pagination" :disabled="page <= 1 || loading" title="上一页" @click="changePage(page - 1)"><ChevronLeft :size="17" /></button>
             <span class="selector-page">第 {{ page }} / {{ totalPages }} 页</span>
-            <button class="selector-pagination" :disabled="page >= totalPages || loading" title="下一页" @click="changePage(page + 1)"><ChevronRight :size="17" /></button>
-            <button class="selector-secondary" @click="close">取消</button>
-            <button class="selector-primary" :disabled="selectedCount === 0" @click="confirm">确认选择</button>
+            <button type="button" class="selector-pagination" :disabled="page >= totalPages || loading" title="下一页" @click="changePage(page + 1)"><ChevronRight :size="17" /></button>
+            <button type="button" class="selector-secondary" @click="close">取消</button>
+            <button type="button" class="selector-primary" :disabled="loading || !!loadError || (!allowEmpty && selectedCount === 0)" @click="confirm">确认选择</button>
           </div>
         </footer>
       </section>

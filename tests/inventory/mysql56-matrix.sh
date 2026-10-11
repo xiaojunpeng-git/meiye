@@ -294,7 +294,7 @@ mysql_sql "$db" "
     type tinyint unsigned NOT NULL DEFAULT 0, relation_id bigint unsigned NOT NULL DEFAULT 0,
     is_del tinyint unsigned NOT NULL DEFAULT 0, store_name varchar(120) NOT NULL DEFAULT '',
     code varchar(64) NOT NULL DEFAULT '', bar_code varchar(64) NOT NULL DEFAULT '',
-    salon_stock_enabled tinyint unsigned NOT NULL DEFAULT 0, sort int NOT NULL DEFAULT 0,
+    salon_stock_enabled tinyint unsigned NOT NULL DEFAULT 0, no_expiry_management tinyint unsigned NOT NULL DEFAULT 0, sort int NOT NULL DEFAULT 0,
     keyword varchar(255) NOT NULL DEFAULT '', is_inventory tinyint unsigned NOT NULL DEFAULT 0, PRIMARY KEY(id)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
   CREATE TABLE eb_store_product_attr_value (

@@ -15,6 +15,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\presale\CashierV3PresaleClaimServices;
 use think\facade\Db;
+use app\services\product\product\PhysicalProductSelectionPolicy;
 
 /**
  * Independent gifts are their own authority. They never become a sale,
@@ -148,11 +149,14 @@ final class CashierV3DirectGiftIssuanceServices
             $skuId = (int)($raw['catalogItemId'] ?? $raw['catalog_item_id'] ?? 0);
             $sku = (array)Db::name('store_product_attr_value')->where('id', $skuId)->where('type', 0)->lock(true)->find();
             $productId = (int)($sku['product_id'] ?? 0);
-            $product = $productId > 0 ? (array)Db::name('store_product')->where('id', $productId)
-                ->where('relation_id', $scope->storeId())->where('is_del', 0)->lock(true)->find() : [];
+            // 提交时在原事务重新锁定目录状态，不能用选品时的快照绕过审核、回收站或门店归属。
+            $productQuery = Db::name('store_product')->where('id', $productId)
+                ->where('relation_id', $scope->storeId())->where('is_del', 0);
+            if ($kind === 'product') PhysicalProductSelectionPolicy::apply($productQuery->where('type', 1), false, '');
+            $product = $productId > 0 ? (array)$productQuery->lock(true)->find() : [];
             $productType = (int)($product['product_type'] ?? -1);
             if (!$sku || !$product || ($kind === 'project' ? $productType !== 6 : $productType !== 0) || isset($seen[$kind . ':' . $skuId])) {
-                throw self::failure('direct_gift_catalog_unavailable', '所选赠送品项已下架、类型变化、不属于当前门店或重复。');
+                throw self::failure('direct_gift_catalog_unavailable', '所选赠送品项已失效、类型变化、不属于当前门店或重复。');
             }
             $items[] = ['itemNo' => count($items) + 1, 'kind' => $kind, 'productId' => $productId, 'productType' => $productType,
                 'couponIssueId' => 0, 'quantity' => $quantity, 'name' => trim((string)($product['store_name'] ?? '')) ?: '赠送内容',

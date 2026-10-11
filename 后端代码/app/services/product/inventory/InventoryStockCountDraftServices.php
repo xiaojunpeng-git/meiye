@@ -79,9 +79,20 @@ final class InventoryStockCountDraftServices
     {
         $draft = $this->scopedDraft($scope, $id);
         if ((string)$draft['document_status'] !== 'DRAFT') throw new \RuntimeException('inventory_stock_count_draft_changed');
+        // 续编时按当前商品配置展示免录状态，不能信任客户端存入草稿的配置，也不改写旧批次身份。
+        $lines = json_decode((string)$draft['lines_json'], true, 512, JSON_THROW_ON_ERROR);
+        $settings = Db::name('store_product')->whereIn('id', array_column($lines, 'product_id'))->column('no_expiry_management', 'id');
+        foreach ($lines as &$line) {
+            $line['no_expiry_management'] = (int)($settings[(int)$line['product_id']] ?? 0);
+            // 旧草稿的空批号只是未完成录入，没有真实批次身份；免录后按 SKU 实盘提交。
+            // 已有批号绝不合并或改写，多条未完成行仍由正式命令的重复身份校验阻止结算。
+            if ($line['no_expiry_management'] === 1 && ($line['count_mode'] ?? '') === 'BATCH'
+                && trim((string)($line['surplus_batch_no'] ?? '')) === '') unset($line['count_mode']);
+        }
+        unset($line);
         return ['draft_id' => (int)$draft['id'], 'version' => (int)$draft['version'],
             'business_date' => (string)$draft['business_date'], 'remark' => (string)$draft['remark'],
-            'lines' => json_decode((string)$draft['lines_json'], true, 512, JSON_THROW_ON_ERROR)];
+            'lines' => $lines];
     }
 
     /** Permanently removes only an unconfirmed creator-owned draft; settled documents and facts are never deleted. */
