@@ -28,10 +28,12 @@ use think\facade\Db;
 final class CashierV3UnifiedRefundServices
 {
     public const TABLE = 'cashier_v3_refund_adjustment';
+    private array $otherCollectionOrders = [];
 
     /** Candidate projection is advisory; executeInTx locks and recomputes it. */
     public function candidates(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
     {
+        $this->otherCollectionOrders = [];
         $this->assertAccess($operator, $scope);
         $memberId = (int)($payload['memberId'] ?? 0);
         if ($memberId <= 0 || !Db::name('user')->where('uid', $memberId)->where('is_del', 0)->find()) {
@@ -67,20 +69,25 @@ final class CashierV3UnifiedRefundServices
             // One receipt lookup per page avoids another query for every card;
             // holder and legacy-order IDs must both match before showing an XS number.
             $salesNos = [];
+            $salesOrderIds = [];
             if ($rows !== []) {
                 $receipts = Db::name(CashierV3CardPurchaseIssuanceServices::RECEIPT_TABLE)->alias('cpr')
                     ->join('cashier_v3_sales_order so', 'so.order_id=cpr.sales_order_id AND so.tenant_id=cpr.tenant_id')
                     ->where('cpr.tenant_id', $scope->tenantId())
                     ->whereIn('cpr.card_holder_id', array_column($rows, 'id'))
                     ->where('cpr.status', 'completed')
-                    ->field('cpr.card_holder_id,cpr.legacy_order_id,so.order_no')->select()->toArray();
+                    ->field('cpr.card_holder_id,cpr.legacy_order_id,cpr.sales_order_id,so.order_no')->select()->toArray();
                 foreach ($receipts as $receipt) {
                     $salesNos[(int)$receipt['card_holder_id'] . ':' . (int)$receipt['legacy_order_id']] = (string)$receipt['order_no'];
+                    $salesOrderIds[(int)$receipt['card_holder_id'] . ':' . (int)$receipt['legacy_order_id']] = (string)$receipt['sales_order_id'];
                 }
+                $this->primeOtherCollectionOrders($scope->tenantId(), array_values($salesOrderIds));
             }
             $cards = [];
             foreach ($rows as $row) {
-                $row['sales_order_no'] = $salesNos[(int)$row['id'] . ':' . (int)$row['oid']] ?? '';
+                $receiptKey = (int)$row['id'] . ':' . (int)$row['oid'];
+                $row['sales_order_no'] = $salesNos[$receiptKey] ?? '';
+                $row['sales_order_id'] = $salesOrderIds[$receiptKey] ?? '';
                 $cards[] = $this->cardSnapshot((int)$row['id'], $memberId, $scope->tenantId(), false, $row);
             }
             return ['mode' => 'card', 'cards' => $cards, 'total' => $total, 'page' => $page];
@@ -94,6 +101,7 @@ final class CashierV3UnifiedRefundServices
         if ($keyword !== '') $query->where('so.order_no', 'like', '%' . addcslashes($keyword, '%_\\') . '%');
         $lines = $query->field('l.order_line_id,l.order_id,l.item_name_snapshot,l.item_type,l.sale_amount_cents,l.coupon_payment_cents,l.store_id,l.member_id,l.tenant_id,l.line_status,l.line_direction,so.order_no,so.order_status,so.order_direction')
             ->order('l.id desc')->limit(100)->select()->toArray();
+        $this->primeOtherCollectionOrders($scope->tenantId(), array_column($lines, 'order_id'));
         $documents = [];
         foreach ($lines as $line) {
             $state = $this->lineSnapshot((string)$line['order_line_id'], $memberId, $scope->tenantId(), false, $line);
@@ -105,6 +113,8 @@ final class CashierV3UnifiedRefundServices
     /** The gateway owns the transaction, receipt and event contract. */
     public function executeInTx(array $command): array
     {
+        // Handler instances may outlive a request; never reuse a prior tender decision for a refund command.
+        $this->otherCollectionOrders = [];
         CashierV3TransactionGuard::assertInTransaction('unifiedRefund.execute');
         $operator = $command['operator_scope'] ?? null;
         $scope = $command['data_scope'] ?? null;
@@ -460,13 +470,21 @@ final class CashierV3UnifiedRefundServices
         $debtCents = self::moneyCents((string)$debt, true);
         $cardPurchaseCents = self::moneyCents((string)$candidate['pay_price'], false);
         $cardCouponCents = 0;
-        if (strncmp((string)$candidate['order_id'], 'v3c', 3) === 0) {
-            // The V3 receipt is the immutable per-card tender snapshot.
-            // Legacy coupon_price means a discount and cannot be used here.
+        $salesOrderId = trim((string)($candidate['sales_order_id'] ?? ''));
+        $receipt = [];
+        if (!array_key_exists('sales_order_id', $candidate)
+            || strncmp((string)$candidate['order_id'], 'v3c', 3) === 0) {
+            // The holder's legacy order ID alone cannot identify its V3 sale;
+            // the issuance receipt links even historical purchases to the original tender.
             $receipt = (array)Db::name(CashierV3CardPurchaseIssuanceServices::RECEIPT_TABLE)
                 ->where('tenant_id', $tenantId)->where('legacy_order_id', $originId)
                 ->where('card_holder_id', $holderId)->where('status', 'completed')
                 ->lock($lock)->find();
+            if ($receipt) $salesOrderId = trim((string)$receipt['sales_order_id']);
+        }
+        if (strncmp((string)$candidate['order_id'], 'v3c', 3) === 0) {
+            // The V3 receipt is the immutable per-card tender snapshot.
+            // Legacy coupon_price means a discount and cannot be used here.
             $receiptResult = json_decode((string)($receipt['result_snapshot_json'] ?? ''), true);
             if (!$receipt || !is_array($receiptResult)) {
                 throw self::fail('购卡回执缺失，暂不能退款。', 'refund_card_receipt_missing');
@@ -482,11 +500,14 @@ final class CashierV3UnifiedRefundServices
             ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('balance_credit_cents');
         $cashRefundRemainingCents = max(0, $cardPurchaseCents - $cardCouponCents
             - $priorRefundCents - $priorBalanceCreditCents);
+        $otherCollection = $this->usesOtherCollection($tenantId, $salesOrderId);
+        if ($otherCollection) $cashRefundRemainingCents = 0;
         $canRefund = !$voided && $sum > 0 && $components !== [] && $debtCents === 0
-            && (int)$candidate['origin_uid'] === $memberId;
-        $reason = $debtCents > 0 ? '本卡存在未结清欠款，请先补交或取消欠款后再办理退款。'
+            && (int)$candidate['origin_uid'] === $memberId && !$otherCollection;
+        $reason = $otherCollection ? '原单使用了其他收款，只能整单作废，不能办理退款。'
+            : ($debtCents > 0 ? '本卡存在未结清欠款，请先补交或取消欠款后再办理退款。'
             : ($voided ? '本卡已作废或退款终止，不能再次退款。'
-                : ($sum <= 0 ? '本卡没有可退的剩余金额。' : '本卡来源状态已变化，请联系管理员核对。'));
+                : ($sum <= 0 ? '本卡没有可退的剩余金额。' : '本卡来源状态已变化，请联系管理员核对。')));
         // V3 newly purchased cards have an internal v3c... entitlement order; only
         // the issuance receipt links that order to the customer-facing XS... sale.
         $salesOrderNo = array_key_exists('sales_order_no', $candidate)
@@ -546,16 +567,45 @@ final class CashierV3UnifiedRefundServices
         $used = array_sum(array_map(static fn(array $r): int =>
             (int)$r['refund_amount_cents'] + (int)($r['balance_credit_cents'] ?? 0), $history));
         $voided = (bool)array_filter($history, static fn(array $r): bool => (int)$r['void_target'] === 1);
-        $cashRefundRemaining = max(0, (int)$line['sale_amount_cents']
+        $remaining = max(0, (int)$line['sale_amount_cents']
             - (int)($line['coupon_payment_cents'] ?? 0) - $used);
-        $remaining = $cashRefundRemaining;
+        $otherCollection = $this->usesOtherCollection($tenantId, (string)$line['order_id']);
+        $cashRefundRemaining = $otherCollection ? 0 : $remaining;
         return ['lineId' => $lineId, 'memberId' => $memberId, 'name' => (string)$line['item_name_snapshot'],
             'itemType' => (string)$line['item_type'], 'sourceOrderId' => (string)$line['order_id'],
             'sourceOrderNo' => (string)$line['order_no'], 'purchaseAmountCents' => (int)$line['sale_amount_cents'],
             'remainingAmountCents' => $remaining, 'cashRefundRemainingCents' => $cashRefundRemaining,
             'remainingTimes' => 0, 'voided' => $voided,
-            'canRefund' => !$voided && $remaining > 0,
-            'unavailableReason' => $voided ? '这条明细已作废，不能再次退款。' : '这条明细没有可退金额。'];
+            'canRefund' => !$voided && !$otherCollection && $remaining > 0,
+            'unavailableReason' => $otherCollection ? '原单使用了其他收款，只能整单作废，不能办理退款。'
+                : ($voided ? '这条明细已作废，不能再次退款。' : '这条明细没有可退金额。')];
+    }
+
+    /** The committed tender draft, not a cash collection row, records both historical and new other-collection orders. */
+    private function primeOtherCollectionOrders(string $tenantId, array $orderIds): void
+    {
+        $missing = [];
+        foreach (array_unique(array_filter(array_map('strval', $orderIds))) as $orderId) {
+            $key = $tenantId . ':' . $orderId;
+            if (!array_key_exists($key, $this->otherCollectionOrders)) {
+                $this->otherCollectionOrders[$key] = false;
+                $missing[] = $orderId;
+            }
+        }
+        if ($missing === []) return;
+        $rows = Db::name('cashier_v3_sales_order')->alias('so')
+            ->join('cashier_v3_checkout_payment_draft d', 'd.request_id=so.checkout_request_id AND d.tenant_id=so.tenant_id')
+            ->where('so.tenant_id', $tenantId)->whereIn('so.order_id', $missing)
+            ->where('d.payment_method', 'other_collection')->where('d.draft_status', 'committed')
+            ->field('so.order_id')->select()->toArray();
+        foreach ($rows as $row) $this->otherCollectionOrders[$tenantId . ':' . (string)$row['order_id']] = true;
+    }
+
+    private function usesOtherCollection(string $tenantId, string $orderId): bool
+    {
+        if ($orderId === '') return false;
+        $this->primeOtherCollectionOrders($tenantId, [$orderId]);
+        return $this->otherCollectionOrders[$tenantId . ':' . $orderId];
     }
 
     private function adjustLine(array $line, int $refund, bool $void): array

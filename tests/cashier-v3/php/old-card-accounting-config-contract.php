@@ -24,7 +24,9 @@ assertContains("->where('code', '<>', 'old_card_entry')", $config, '旧卡录入
 assertContains("('old_card_entry','旧卡录入','旧卡录入',1,80,1", $migration, '追加迁移应写入默认旧卡录入配置');
 assertContains('ON DUPLICATE KEY UPDATE default_name=VALUES(default_name)', $migration, '迁移不得覆盖既有显示名称或状态');
 assertContains('PAYMENT_OLD_CARD_ENTRY', $kernel, '结算内核应保留旧卡录入的独立方式代码');
-assertContains("throw self::failure('old_card_entry_separate_flow_required'", $kernel, '旧卡录入不可进入正常结账收款');
+// The current card-only checkout path is allowed, but cannot be combined
+// with ordinary tender or used for other product types.
+assertContains("throw self::failure('old_card_entry_card_only_independent_required'", $kernel, '旧卡录入仅能独立用于卡项结算');
 assertContains("if (\$method === 'old_card_entry')", $facts, '旧卡录入不得生成收款事实');
 assertContains("throw self::failure('old_card_entry_payment_fact_forbidden')", $facts, '旧卡录入不得进入业绩事实链路');
 

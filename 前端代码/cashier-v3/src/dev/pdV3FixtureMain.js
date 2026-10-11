@@ -1037,7 +1037,7 @@ function createCheckoutSnapshot(state, name, options = {}) {
         { id: 'dianping_voucher', name: '大众验券' },
         { id: 'douyin_voucher', name: '抖音验券' },
         { id: 'partner_collection', name: '合作方收款' },
-        { id: 'other_collection', name: '其他收款' },
+        { id: 'other_collection', name: '其他收款', cashPerformanceEligible: false },
         { id: 'old_card_entry', name: '旧卡录入', canAdd: false, disabledReason: '旧卡录入需单独办理，不能与其他收款方式组合。', cashPerformanceEligible: false }
       ] : [],
       selectedLines: paymentLines,

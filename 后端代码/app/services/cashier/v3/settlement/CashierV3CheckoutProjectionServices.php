@@ -1037,10 +1037,16 @@ final class CashierV3CheckoutProjectionServices
             'request.balance_deduction_amount_cents'
         );
         $debt = self::nonNegativeInt($request['debt_amount_cents'] ?? null, 'request.debt_amount_cents');
-        $legacyEntry = count($paymentRows) === 1
-            && (string)$paymentRows[0]['payment_method'] === 'old_card_entry';
+        $collectedPayment = 0;
+        foreach ($paymentRows as $row) {
+            // Projection totals follow the committed settlement contract;
+            // non-cash drafts remain visible but do not create cash results.
+            if (!in_array((string)$row['payment_method'], ['old_card_entry', 'other_collection'], true)) {
+                $collectedPayment += (int)$row['amount_cents'];
+            }
+        }
         if ($selectedPayment !== $selectedPaymentExpected
-            || $cashPerformance !== ($legacyEntry ? 0 : $selectedPayment)
+            || $cashPerformance !== $collectedPayment
             || $saleDebt !== $debt) {
             throw self::failure('checkout_projection_payment_total_drift');
         }
@@ -1076,11 +1082,11 @@ final class CashierV3CheckoutProjectionServices
                 // Selecting a bookkeeping method is a draft-editing action,
                 // not proof of settlement. Keep it available after the
                 // current total reaches zero so cashiers can add and edit
-                // multiple independent collection lines before final check.
+                // multiple independent settlement lines before final check.
                 'canAdd' => count($paymentRows) < self::MAX_PAYMENT_DRAFTS,
                 'disabledReason' => count($paymentRows) < self::MAX_PAYMENT_DRAFTS
                     ? '' : '本单收款明细已达到数量上限。',
-                'cashPerformanceEligible' => true,
+                'cashPerformanceEligible' => $method !== 'other_collection',
             ];
         }
         $preparationToken = 'CKPT-' . hash('sha256', implode('|', [

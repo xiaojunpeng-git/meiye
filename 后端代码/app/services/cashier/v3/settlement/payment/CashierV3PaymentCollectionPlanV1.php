@@ -159,8 +159,14 @@ final class CashierV3PaymentCollectionPlanV1
         $finalOperatorName = self::text($order['operator_name_snapshot'], 128, 'payment_collection_final_operator_name_invalid', false);
         $payments = self::normalizePayments($lockedAggregate['payments'], $request, $finalOperatorId, $finalOperatorName);
         $paymentTotal = self::sum($payments, 'amount_cents');
-        $legacyEntry = count($payments) === 1 && $payments[0]['payment_method'] === 'old_card_entry';
-        $collectedTotal = $legacyEntry ? 0 : $paymentTotal;
+        // Non-cash settlement stays in the committed draft for reconciliation,
+        // but has no collected-payment row or cash-performance amount.
+        $collectedTotal = 0;
+        foreach ($payments as $payment) {
+            if (!in_array($payment['payment_method'], ['old_card_entry', 'other_collection'], true)) {
+                $collectedTotal += $payment['amount_cents'];
+            }
+        }
         if ($paymentTotal !== $request['selected_payment_amount_cents']
             || $collectedTotal !== $request['cash_performance_amount_cents']) {
             throw self::failure('payment_collection_checkout_total_mismatch');
@@ -178,10 +184,10 @@ final class CashierV3PaymentCollectionPlanV1
         $collectionRows = [];
         $businessConfig = new CashierV3BusinessConfigServices();
         foreach ($payments as $index => $payment) {
-            if ($payment['payment_method'] === 'old_card_entry') {
-                // Confirm the configured method is enabled, but the historical
-                // value is not a collected-payment row or cash-performance fact.
-                $businessConfig->resolveAccountingMethodSnapshot('old_card_entry', true);
+            if (in_array($payment['payment_method'], ['old_card_entry', 'other_collection'], true)) {
+                // The method must still be enabled at final confirmation even
+                // though its settlement amount is not a receipt.
+                $businessConfig->resolveAccountingMethodSnapshot($payment['payment_method'], true);
                 continue;
             }
             // The immutable collection keeps the name as of settlement. The
