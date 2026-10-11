@@ -1,0 +1,107 @@
+{
+  "checked_at": "2026-10-11T15:52:20.683Z",
+  "release": "d548c00b6e50f1da89f6f38f6e7c9f007973f401",
+  "results": [
+    {
+      "entry": "formal",
+      "url": "https://rh.cc3798.com/view_cashier_v3/index.html",
+      "status": 200,
+      "bytes": 484,
+      "sha256": "e1686d971fe948a6c2fb1fdc42b9f6d5469fd4f4e450b80da9d848367a3116c7",
+      "expected_sha256": "e1686d971fe948a6c2fb1fdc42b9f6d5469fd4f4e450b80da9d848367a3116c7",
+      "pass": true
+    },
+    {
+      "entry": "formal",
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "bytes": 939632,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "entry": "formal",
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "bytes": 661541,
+      "sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "expected_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "pass": true
+    },
+    {
+      "entry": "formal",
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/index-a4f7fed7.js",
+      "status": 200,
+      "bytes": 2071887,
+      "sha256": "0705237f96bbfed2f0da18ce56cef2429484e2849cfef5d9c369839f351b3694",
+      "expected_sha256": "0705237f96bbfed2f0da18ce56cef2429484e2849cfef5d9c369839f351b3694",
+      "pass": true
+    },
+    {
+      "entry": "formal",
+      "url": "https://rh.cc3798.com/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "bytes": 1159059,
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    },
+    {
+      "entry": "preview",
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/index.html",
+      "status": 200,
+      "bytes": 510,
+      "sha256": "f228b5168a4285a19217e5341ef325f2cf5343b5d30dd52909ea70b9d9788640",
+      "expected_sha256": "f228b5168a4285a19217e5341ef325f2cf5343b5d30dd52909ea70b9d9788640",
+      "pass": true
+    },
+    {
+      "entry": "preview",
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/exceljs.min-a0d233a6.js",
+      "status": 200,
+      "bytes": 939632,
+      "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "expected_sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "pass": true
+    },
+    {
+      "entry": "preview",
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-1d8f15eb.css",
+      "status": 200,
+      "bytes": 661541,
+      "sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "expected_sha256": "1d8f15eb4fd5f3aa20574b4613c02abdf9e653eec2e59370e30b087896fb134f",
+      "pass": true
+    },
+    {
+      "entry": "preview",
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/index-a4f7fed7.js",
+      "status": 200,
+      "bytes": 2071887,
+      "sha256": "0705237f96bbfed2f0da18ce56cef2429484e2849cfef5d9c369839f351b3694",
+      "expected_sha256": "0705237f96bbfed2f0da18ce56cef2429484e2849cfef5d9c369839f351b3694",
+      "pass": true
+    },
+    {
+      "entry": "preview",
+      "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/assets/login-beauty-quiet-826510a5.png",
+      "status": 200,
+      "bytes": 1159059,
+      "sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "expected_sha256": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "pass": true
+    }
+  ],
+  "config": {
+    "url": "https://rh.cc3798.com/cashierapi/config",
+    "http": 200,
+    "body": {
+      "status": 410000,
+      "msg": "请登录",
+      "data": []
+    }
+  },
+  "all_pass": true,
+  "note": "Initial Node HTTPS download stalled; terminated read-only checker and repeated with bounded curl downloads."
+}
