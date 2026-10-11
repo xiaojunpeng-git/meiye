@@ -30,6 +30,79 @@ function ok(label, callback) {
   process.stdout.write(`[PASS] ${label}\n`)
 }
 
+ok('长小票在原生窗口打开前解除根容器裁剪，结束、取消、异常和关闭后精确恢复', () => {
+  // Model CSSOM values and !important priorities, not just the presence of CSS
+  // text: native hosts can snapshot before @media print takes effect.
+  for (const outcome of ['afterprint', 'focus', 'throw', 'fallback', 'close']) {
+    const makeStyle = () => {
+      const values = new Map([['height', ['100%', 'important']], ['width', ['960px', '']], ['min-width', ['1120px', 'important']], ['overflow-x', ['auto', '']], ['overflow-y', ['hidden', '']]])
+      return {
+        values,
+        getPropertyValue(key) { return values.get(key)?.[0] || '' },
+        getPropertyPriority(key) { return values.get(key)?.[1] || '' },
+        setProperty(key, value, priority = '') { values.set(key, [value, priority]) },
+        removeProperty(key) { values.delete(key) }
+      }
+    }
+    const roots = [{ style: makeStyle() }, { style: makeStyle(), children: [], appendChild(child) { this.children.push(child) } }]
+    const original = roots.map((root) => [...root.style.values])
+    const listeners = new Map()
+    let timeout
+    let printCss
+    const host = {
+      document: {
+        documentElement: roots[0], body: roots[1], hasFocus() { return true },
+        head: { appendChild(style) { printCss = style } },
+        createElement(tagName) {
+          return { style: {}, children: [], handlers: {}, setAttribute() {},
+            appendChild(child) { this.children.push(child) },
+            addEventListener(event, callback) { this.handlers[event] = callback }, remove() {} }
+        }
+      },
+      DOMParser: class { parseFromString(html) { return { querySelector() { return { innerHTML: html.match(/<main class="receipt">([\s\S]*?)<\/main>/)[1] } } } } },
+      addEventListener(event, callback) { listeners.set(event, callback) },
+      removeEventListener(event) { listeners.delete(event) },
+      setTimeout(callback) { timeout = callback; return 1 }, clearTimeout() {},
+      print() {
+        for (const root of roots) {
+          assert.equal(root.style.getPropertyValue('height'), 'auto')
+          assert.equal(root.style.getPropertyValue('min-height'), '0')
+          assert.equal(root.style.getPropertyValue('max-height'), 'none')
+          // Protect physical font scaling: vertical unclipping must not alter
+          // the existing horizontal constraints, even during the native call.
+          assert.equal(root.style.getPropertyValue('width'), '960px')
+          assert.equal(root.style.getPropertyValue('min-width'), '1120px')
+          assert.equal(root.style.getPropertyPriority('min-width'), 'important')
+          assert.equal(root.style.getPropertyValue('overflow-x'), 'auto')
+          assert.equal(root.style.getPropertyValue('overflow-y'), 'visible')
+          assert.equal(root.style.getPropertyPriority('overflow-y'), 'important')
+        }
+        if (outcome === 'throw') throw new Error('native dialog failed')
+        if (outcome === 'afterprint' || outcome === 'focus') {
+          listeners.get('beforeprint')()
+          listeners.get(outcome)()
+        }
+      }
+    }
+    const preview = mountSalesOrderReceiptPreview({
+      items: [{ name: '购买商品', quantity: 1 }, { name: '权益项目', businessTag: '权益', quantity: 1 }]
+    }, host)
+    preview.printButton.handlers.click()
+    if (outcome === 'fallback') timeout()
+    if (outcome === 'close') preview.closeButton.handlers.click()
+    roots.forEach((root, index) => assert.deepEqual([...root.style.values], original[index], outcome))
+    assert.match(printCss.textContent, /html, body \{[^}]*height: auto !important;[^}]*overflow-y: visible !important;/)
+    const rootCss = printCss.textContent.match(/html, body \{([^}]+)\}/)[1]
+    assert.doesNotMatch(rootCss, /(?:^|;)\s*(?:width|min-width|overflow-x):/)
+    assert.match(printCss.textContent, /@page \{ size: 63mm 210mm;/)
+  }
+  for (const paperSize of ['58', '76', '80']) {
+    const html = buildSalesOrderReceiptHtml({}, { paperSize })
+    assert.match(html, /html, body \{[^}]*height: auto !important;[^}]*overflow-y: visible !important;/)
+    assert.doesNotMatch(html.match(/html, body \{([^}]+)\}/)[1], /(?:^|;)\s*(?:width|min-width|overflow-x):/)
+  }
+})
+
 ok('门店地址在实收金额之后，转义并换行，缺失地址不虚构', () => {
   for (const paperSize of ['58', '76', '80']) {
     const html = buildSalesOrderReceiptHtml({
