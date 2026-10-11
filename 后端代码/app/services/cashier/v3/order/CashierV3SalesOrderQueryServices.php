@@ -2876,6 +2876,12 @@ final class CashierV3SalesOrderQueryServices
     private function paymentMethodName(array $collection): string
     {
         $snapshot = trim((string)($collection['payment_method_name_snapshot'] ?? ''));
+        $code = strtolower(trim((string)($collection['payment_method'] ?? '')));
+        // 旧配置曾把 other_collection 命名为“现金”。展示权威代码的含义，
+        // 同时保留原名称以便追溯；不修改已结算收款或其不可变快照。
+        if ($code === 'other_collection' && $snapshot === '现金') {
+            return '其他收款（原记录：现金）';
+        }
         if ($snapshot !== '') {
             return $snapshot;
         }
@@ -2887,9 +2893,10 @@ final class CashierV3SalesOrderQueryServices
             'dianping_voucher' => '大众验券',
             'douyin_voucher' => '抖音验券',
             'partner' => '合作方收款',
+            'partner_collection' => '合作方收款',
             'other' => '其他收款',
+            'other_collection' => '其他收款',
         ];
-        $code = strtolower(trim((string)($collection['payment_method'] ?? '')));
         return $labels[$code] ?? ($code !== '' ? $code : '未知收款方式');
     }
 
