@@ -12,6 +12,14 @@ const DEFAULT_RECEIPT_PAPER_KEY = '76'
 // Fifteen 1/6-inch impact-printer lines, now owned by the receipt instead of the driver.
 const RECEIPT_TEAR_GUIDE_MM = 64
 const RECEIPT_TRAILING_SAFETY_MM = 4
+// Release only vertical viewport clipping. Horizontal constraints must retain
+// their established behavior: changing them can change native shrink-to-fit
+// scaling even when CSS font sizes are unchanged.
+const RECEIPT_PRINT_ROOT_STYLES = Object.freeze({
+  height: 'auto', 'min-height': '0', 'max-height': 'none', 'overflow-y': 'visible'
+})
+const RECEIPT_PRINT_ROOT_CSS = Object.entries(RECEIPT_PRINT_ROOT_STYLES)
+  .map(([property, value]) => `${property}: ${value} !important;`).join(' ')
 
 // Both native-print paths retain driver sizing, reduced by the same two pixels as preview.
 function receiptPrintFontSize(profile) {
@@ -318,6 +326,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
   @page { size: ${paperProfile.paperWidthMm}mm ${paperProfile.fixedPageHeightMm || 297}mm; margin: 0; }
   @media print {
+    html, body { ${RECEIPT_PRINT_ROOT_CSS} }
     body { padding: 0; background: #fff; }
     .receipt-toolbar { display: none; }
     /* The XP-76 driver exposes a 63mm page; use it fully while keeping text inside a 0.5mm inset. */
@@ -448,6 +457,8 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
   }
 }
 
+/** Mount a snapshot-only preview; native printing temporarily releases the app
+ * viewport and restores it on completion/cancel/failure without changing orders. */
 export function mountSalesOrderReceiptPreview(order, hostWindow = window, options = {}) {
   const documentRef = hostWindow?.document
   if (!documentRef?.createElement || !documentRef?.body) return null
@@ -492,6 +503,7 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
   let printLifecycleCompleted = false
   let printLifecycleStarted = false
   let hiddenPrintSiblings = null
+  let printRootStyles = null
 
   // Hide the live page before opening the native dialog: some embedded browsers snapshot screen layout before applying @media print.
   const isolatePrintDocument = () => {
@@ -501,6 +513,20 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       .filter((child) => child !== printHost && child.style)
       .map((child) => [child, child.style.display])
     hiddenPrintSiblings.forEach(([child]) => { child.style.display = 'none' })
+    // Native hosts may snapshot screen layout before print CSS. Release the app's
+    // vertical clipping as well as its children, so long mixed receipts can flow
+    // beyond one screen without changing width-based native print scaling.
+    // Keep exact inline values/priorities for cancel/close.
+    printRootStyles = [documentRef.documentElement, documentRef.body]
+      .filter((element) => typeof element?.style?.setProperty === 'function')
+      .map((element) => {
+        const styles = Object.entries(RECEIPT_PRINT_ROOT_STYLES).map(([property, value]) => {
+          const previous = [property, element.style.getPropertyValue(property), element.style.getPropertyPriority(property)]
+          element.style.setProperty(property, value, 'important')
+          return previous
+        })
+        return [element, styles]
+      })
     printHost.style.position = 'static'
     printHost.style.left = 'auto'
     printHost.style.width = isXp76 ? '63mm' : 'calc(100% - 2mm)'
@@ -514,6 +540,11 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
   const restorePreviewAfterPrint = () => {
     hiddenPrintSiblings?.forEach(([child, display]) => { child.style.display = display })
     hiddenPrintSiblings = null
+    printRootStyles?.forEach(([element, styles]) => styles.forEach(([property, value, priority]) => {
+      if (value) element.style.setProperty(property, value, priority)
+      else element.style.removeProperty(property)
+    }))
+    printRootStyles = null
     if (!printHost) return
     for (const property of ['position', 'left', 'width', 'fontSize', 'margin', 'padding', 'display']) printHost.style[property] = ''
   }
@@ -585,7 +616,7 @@ export function mountSalesOrderReceiptPreview(order, hostWindow = window, option
       ${root} .tear-guide { display: flex; height: ${RECEIPT_TEAR_GUIDE_MM}mm; align-items: flex-end; justify-content: center; border-bottom: 1px dashed #6b7280; color: #4b5563; font-size: 12px; }
       @page { size: ${profile.paperWidthMm}mm ${pageHeightMm}mm; margin: 0; }
       @media print {
-        html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+        html, body { ${RECEIPT_PRINT_ROOT_CSS} margin: 0 !important; padding: 0 !important; background: #fff !important; }
         body > * { display: none !important; }
         body > ${root} { position: static !important; display: block !important; width: ${profile.key === '76' ? '63mm' : 'calc(100% - 2mm)'} !important; margin: ${profile.key === '76' ? '0' : '0 1mm'} !important; padding: ${profile.key === '76' ? '.5mm' : '1mm'} !important; font-size: ${receiptPrintFontSize(profile)} !important; }
         ${root} h1 { font-size: 1.3em !important; }
