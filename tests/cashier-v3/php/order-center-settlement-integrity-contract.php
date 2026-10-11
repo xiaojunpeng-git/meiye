@@ -18,13 +18,15 @@ $snapshot = [
         'business_date' => '2026-08-08', 'business_timezone' => 'Asia/Shanghai',
         'occurred_at' => 1786169992, 'settled_at' => 1786169992,
         'original_amount_cents' => 10000, 'discount_amount_cents' => 0, 'sale_amount_cents' => 10000,
-        'operator_name_snapshot' => '收银员',
+        'operator_name_snapshot' => '收银员', 'business_source_primary_id' => 0,
+        'business_source_secondary_id' => 0,
     ],
     'batch' => [
         'receivable_amount_cents' => 5000, 'collected_amount_cents' => 5000,
         'cash_performance_amount_cents' => 5000, 'settled_at' => 1786169992,
     ],
-    'request' => ['debt_amount_cents' => 0, 'balance_deduction_amount_cents' => 0],
+    'request' => ['debt_amount_cents' => 0, 'balance_deduction_amount_cents' => 0,
+        'selected_payment_amount_cents' => 5000],
     'lines' => [[
         'order_line_id' => 'LINE-integrity-1', 'item_type' => 'project', 'item_name_snapshot' => '测试项目',
         'quantity' => 1, 'original_amount_cents' => 10000, 'sale_amount_cents' => 5000,
@@ -54,7 +56,8 @@ $upgradeSnapshot['header']['sale_amount_cents'] = 10000;
 $upgradeSnapshot['batch']['receivable_amount_cents'] = 2000;
 $upgradeSnapshot['batch']['collected_amount_cents'] = 2000;
 $upgradeSnapshot['batch']['cash_performance_amount_cents'] = 2000;
-$upgradeSnapshot['request'] = ['debt_amount_cents' => 0, 'balance_deduction_amount_cents' => 0];
+$upgradeSnapshot['request'] = ['debt_amount_cents' => 0, 'balance_deduction_amount_cents' => 0,
+    'selected_payment_amount_cents' => 2000];
 $upgradeSnapshot['lines'][0]['sale_amount_cents'] = 10000;
 $upgradeSnapshot['upgradeSettlement'] = [
     'operation_id' => 'COP-integrity-upgrade-1',
@@ -78,7 +81,8 @@ $zeroCreditDebtUpgrade['header']['original_amount_cents'] = 18000;
 $zeroCreditDebtUpgrade['batch']['receivable_amount_cents'] = 10000;
 $zeroCreditDebtUpgrade['batch']['collected_amount_cents'] = 10000;
 $zeroCreditDebtUpgrade['batch']['cash_performance_amount_cents'] = 10000;
-$zeroCreditDebtUpgrade['request'] = ['debt_amount_cents' => 8000, 'balance_deduction_amount_cents' => 0];
+$zeroCreditDebtUpgrade['request'] = ['debt_amount_cents' => 8000, 'balance_deduction_amount_cents' => 0,
+    'selected_payment_amount_cents' => 10000];
 $zeroCreditDebtUpgrade['lines'][0]['original_amount_cents'] = 18000;
 $zeroCreditDebtUpgrade['lines'][0]['sale_amount_cents'] = 18000;
 $zeroCreditDebtUpgrade['upgradeSettlement'] = [
@@ -104,7 +108,8 @@ $couponUpgradeSnapshot['header']['sale_amount_cents'] = 1270000;
 $couponUpgradeSnapshot['batch']['receivable_amount_cents'] = 1096800;
 $couponUpgradeSnapshot['batch']['collected_amount_cents'] = 1096800;
 $couponUpgradeSnapshot['batch']['cash_performance_amount_cents'] = 1096800;
-$couponUpgradeSnapshot['request'] = ['debt_amount_cents' => 10000, 'balance_deduction_amount_cents' => 0];
+$couponUpgradeSnapshot['request'] = ['debt_amount_cents' => 10000, 'balance_deduction_amount_cents' => 0,
+    'selected_payment_amount_cents' => 1096800];
 $couponUpgradeSnapshot['lines'][0]['original_amount_cents'] = 1280000;
 $couponUpgradeSnapshot['lines'][0]['discount_amount_cents'] = 10000;
 $couponUpgradeSnapshot['lines'][0]['coupon_discount_cents'] = 10000;
@@ -145,6 +150,7 @@ $balanceSnapshot = $snapshot;
 $balanceSnapshot['header']['checkout_request_id'] = 'CKR-integrity-balance';
 $balanceSnapshot['batch']['receivable_amount_cents'] = 10000;
 $balanceSnapshot['request']['balance_deduction_amount_cents'] = 6000;
+$balanceSnapshot['request']['selected_payment_amount_cents'] = 4000;
 $balanceSnapshot['batch']['collected_amount_cents'] = 4000;
 $balanceSnapshot['batch']['cash_performance_amount_cents'] = 4000;
 $balanceSnapshot['collections'] = [[
@@ -175,6 +181,7 @@ $brokenBalanceOk = ($brokenBalance['economicsDataStatus'] ?? '') === 'integrity_
 
 $balanceOnlySnapshot = $balanceSnapshot;
 $balanceOnlySnapshot['request']['balance_deduction_amount_cents'] = 10000;
+$balanceOnlySnapshot['request']['selected_payment_amount_cents'] = 0;
 $balanceOnlySnapshot['batch']['collected_amount_cents'] = 0;
 $balanceOnlySnapshot['batch']['cash_performance_amount_cents'] = 0;
 $balanceOnlySnapshot['collections'] = [];
@@ -185,7 +192,39 @@ $balanceOnlyOk = ($balanceOnly['orderStatus'] ?? '') === '正常'
     && ($balanceOnly['paymentDetails'][0]['paymentMethodCode'] ?? '') === 'member_balance'
     && ($balanceOnly['paymentDetails'][0]['amount'] ?? null) === 100.0;
 
+// A new non-cash settlement remains visible in order details without a
+// receipt. An older same-code order retains its actual collection fact.
+$otherSnapshot = $balanceSnapshot;
+$otherSnapshot['request']['balance_deduction_amount_cents'] = 0;
+$otherSnapshot['request']['selected_payment_amount_cents'] = 10000;
+$otherSnapshot['batch']['collected_amount_cents'] = 0;
+$otherSnapshot['batch']['cash_performance_amount_cents'] = 0;
+$otherSnapshot['collections'] = [];
+$otherSnapshot['nonCashEntries'] = [[
+    'payment_draft_id' => 'OTHER-integrity-1', 'payment_method' => 'other_collection',
+    'amount_cents' => 10000, 'remark' => '', 'operation_occurred_at' => 1786169992,
+]];
+$otherRecord = $method->invoke($service, $otherSnapshot, false);
+$otherOk = ($otherRecord['orderStatus'] ?? '') === '正常'
+    && ($otherRecord['actualReceivedAmount'] ?? null) === 0.0
+    && ($otherRecord['paymentMethod'] ?? '') === '其他收款'
+    && ($otherRecord['paymentDetails'][0]['paymentMethodCode'] ?? '') === 'other_collection';
+
+$historicalOther = $otherSnapshot;
+$historicalOther['batch']['collected_amount_cents'] = 10000;
+$historicalOther['batch']['cash_performance_amount_cents'] = 10000;
+$historicalOther['collections'] = [[
+    'collection_id' => 'COL-integrity-other', 'checkout_payment_draft_id' => 'OTHER-integrity-1',
+    'payment_method' => 'other_collection', 'payment_method_name_snapshot' => '其他收款',
+    'amount_cents' => 10000, 'external_transaction_no_snapshot' => '', 'remark_snapshot' => '',
+    'occurred_at' => 1786169992,
+]];
+$historicalRecord = $method->invoke($service, $historicalOther, false);
+$historicalOk = ($historicalRecord['orderStatus'] ?? '') === '正常'
+    && ($historicalRecord['actualReceivedAmount'] ?? null) === 100.0
+    && count($historicalRecord['paymentDetails'] ?? []) === 1;
+
 $passed = $ok && $upgradeOk && $zeroCreditDebtOk && $couponUpgradeOk
-    && $balanceOk && $brokenBalanceOk && $balanceOnlyOk;
+    && $balanceOk && $brokenBalanceOk && $balanceOnlyOk && $otherOk && $historicalOk;
 echo $passed ? "ORDER_CENTER_SETTLEMENT_INTEGRITY=PASS\n" : "ORDER_CENTER_SETTLEMENT_INTEGRITY=FAIL\n";
 exit($passed ? 0 : 1);

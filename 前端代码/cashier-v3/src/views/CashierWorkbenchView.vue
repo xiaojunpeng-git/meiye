@@ -5234,13 +5234,13 @@ async function setLineQuantity(line, event) {
 }
 
 function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false) {
-  // 本地预览按钮必须与服务端 canonical 收款方式一致；现金在这里是
-  // 记账收款代码，不代表绕过最终结账事务或事实校验。
+  // 本地预览按钮必须与服务端结算方式一致；其他收款只结清应收，
+  // 不代表真实到账，也不能绕过最终结账事务或事实校验。
   const methods = [
     ['cash', '现金'], ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
-  ].map(([id, name]) => ({ id, name, canAdd: true }))
+  ].map(([id, name]) => ({ id, name, canAdd: true, cashPerformanceEligible: id !== 'other_collection' }))
   // This is a card-only historical-value route, not an extra cash method.
   if (oldCardEnabled && lines.length > 0
     && lines.every((line) => cartLineRole(line) === 'sale'

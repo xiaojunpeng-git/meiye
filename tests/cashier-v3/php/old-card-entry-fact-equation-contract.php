@@ -15,7 +15,7 @@ $request = [
 $order = ['original_amount_cents' => 9000, 'discount_amount_cents' => 0, 'sale_amount_cents' => 9000];
 $lines = [[
     'item_type' => 'card', 'original_amount_cents' => 9000, 'discount_amount_cents' => 0,
-    'sale_amount_cents' => 9000, 'debt_amount_cents' => 3000,
+    'sale_amount_cents' => 9000, 'debt_amount_cents' => 3000, 'coupon_payment_cents' => 0,
 ]];
 $batch = ['collected_amount_cents' => 0, 'cash_performance_amount_cents' => 0, 'receivable_amount_cents' => 6000];
 $drafts = [['payment_method' => 'old_card_entry', 'amount_cents' => 6000]];
@@ -46,6 +46,37 @@ $check->invoke(null, $cashRequest, $order, $lines, $cashBatch, [
     ['amount_cents' => 6000, 'cash_performance_amount_cents' => 6000],
 ], [['payment_method' => 'wechat', 'amount_cents' => 6000]]);
 echo "PASS ordinary collection keeps the original settlement equation\n";
+
+$otherRequest = $request;
+$otherRequest['composition'] = 'sale_only';
+$otherLines = $lines;
+$otherLines[0]['item_type'] = 'project';
+$check->invoke(null, $otherRequest, $order, $otherLines, $batch, [], [
+    ['payment_method' => 'other_collection', 'amount_cents' => 6000],
+]);
+echo "PASS other collection settles a project without a cash fact\n";
+
+$mixedRequest = $otherRequest;
+$mixedRequest['cash_performance_amount_cents'] = 2000;
+$mixedBatch = $batch;
+$mixedBatch['collected_amount_cents'] = 2000;
+$mixedBatch['cash_performance_amount_cents'] = 2000;
+$check->invoke(null, $mixedRequest, $order, $otherLines, $mixedBatch, [
+    ['amount_cents' => 2000, 'cash_performance_amount_cents' => 2000],
+], [
+    ['payment_method' => 'other_collection', 'amount_cents' => 4000],
+    ['payment_method' => 'wechat', 'amount_cents' => 2000],
+]);
+echo "PASS mixed settlement records only received money\n";
+
+$personnelAmounts = new ReflectionMethod(CashierV3SaleOnlyFactAssembler::class, 'personnelPerformanceAmounts');
+if ($personnelAmounts->invoke(null, 0, [[
+    'allocationWeight' => 100, 'performanceAmountManual' => true, 'performanceAmountCents' => 6000,
+]]) !== [0]) {
+    fwrite(STDERR, "FAIL manual salesperson amount created performance without cash\n");
+    exit(1);
+}
+echo "PASS manual salesperson amount cannot turn non-cash settlement into performance\n";
 
 // The collection-count gate must exclude historical value while still
 // rejecting a missing formal collection for an ordinary paid method.
@@ -83,6 +114,12 @@ $countRequest['debt_amount_cents'] = 0;
 $countCheck->invoke(null, $countRequest, ['payments' => [$legacyPayment]], $plan,
     $countBatch, [], $countOrder, 'old-card-test-key');
 echo "PASS standalone historical card value needs no collection row\n";
+
+$otherPayment = $legacyPayment;
+$otherPayment['payment_method'] = 'other_collection';
+$countCheck->invoke(null, $countRequest, ['payments' => [$otherPayment]], $plan,
+    $countBatch, [], $countOrder, 'old-card-test-key');
+echo "PASS other collection needs no collection row\n";
 
 $ordinaryPayment = $legacyPayment;
 $ordinaryPayment['payment_method'] = 'wechat';

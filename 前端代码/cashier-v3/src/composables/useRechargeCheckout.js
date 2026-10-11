@@ -25,11 +25,11 @@ export function useRechargeCheckout() {
   const rechargeCheckout = ref(null)
   let rechargeCheckoutMutationTail = Promise.resolve()
   let originalLocalSubmit = null
-  // 充值确认阶段只编辑浏览器快照；这些收款代码仍会在最终提交时由服务端白名单重验。
+  // 充值确认只编辑浏览器快照；非现金结算不可充值，服务端最终重验实际收款方式。
   const localMethods = [
     ['cash', '现金'], ['unionpay', '银联'], ['wechat', '微信'], ['alipay', '支付宝'],
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
-    ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
+    ['partner_collection', '合作方收款']
   ]
 
   function acceptLocalRechargeCheckout(input = {}, session = {}) {

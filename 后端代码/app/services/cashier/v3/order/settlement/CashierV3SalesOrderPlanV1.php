@@ -170,10 +170,16 @@ final class CashierV3SalesOrderPlanV1
         }
         self::assertSourceRows($lockedAggregate['sources'], $request, $verifiedSources);
         $paymentTotal = self::assertPaymentRows($lockedAggregate['payments'], $request);
-        $legacyEntry = count($lockedAggregate['payments']) === 1
-            && (string)$lockedAggregate['payments'][0]['payment_method'] === 'old_card_entry';
+        // Selected settlement includes non-cash value; only collected methods
+        // may form the cash-performance amount bound to the sales order.
+        $cashPaymentTotal = 0;
+        foreach ($lockedAggregate['payments'] as $payment) {
+            if (!in_array((string)$payment['payment_method'], ['old_card_entry', 'other_collection'], true)) {
+                $cashPaymentTotal += (int)$payment['amount_cents'];
+            }
+        }
         if ($paymentTotal !== $request['selected_payment_amount_cents']
-            || ($legacyEntry ? 0 : $paymentTotal) !== $request['cash_performance_amount_cents']) {
+            || $cashPaymentTotal !== $request['cash_performance_amount_cents']) {
             throw self::failure('sales_order_payment_total_mismatch');
         }
 

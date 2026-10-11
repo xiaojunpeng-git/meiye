@@ -32,9 +32,11 @@ final class CashierV3RechargeModule
 {
     private const ACTION = 'submit-recharge';
     // 充值本金使用这些记账收款方式时才形成 payment_collected 和现金业绩。
+    // Recharge creates spendable principal only from real collected money;
+    // non-cash checkout settlement must never mint member balance.
     private const PAYMENT_METHODS = [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher',
-        'douyin_voucher', 'partner_collection', 'other_collection',
+        'douyin_voucher', 'partner_collection',
     ];
 
     public static function install(CashierV3ActionDispatcher $dispatcher): void

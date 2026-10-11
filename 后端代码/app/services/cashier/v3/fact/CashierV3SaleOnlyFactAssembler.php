@@ -733,7 +733,7 @@ final class CashierV3SaleOnlyFactAssembler
             || (int)($request['debt_amount_cents'] ?? 0) > 0;
         $positivePaymentCount = 0;
         $hasZeroAmountMethodSelection = false;
-        $hasLegacyEntry = false;
+        $hasNonCashSettlement = false;
         foreach ($aggregate['payments'] as $payment) {
             $amount = (int)($payment['amount_cents'] ?? -1);
             if ($amount < 0) {
@@ -742,7 +742,13 @@ final class CashierV3SaleOnlyFactAssembler
             // Historical card value settles the sale but is not a collected
             // payment fact. The later totals gate verifies its exclusive shape.
             if ((string)($payment['payment_method'] ?? '') === 'old_card_entry') {
-                $hasLegacyEntry = true;
+                $hasNonCashSettlement = true;
+                continue;
+            }
+            if ((string)($payment['payment_method'] ?? '') === 'other_collection') {
+                // The committed draft is the settlement proof, not a cash
+                // collection; a mixed checkout may still have cash rows.
+                $hasNonCashSettlement = true;
                 continue;
             }
             if ($amount === 0) {
@@ -754,7 +760,7 @@ final class CashierV3SaleOnlyFactAssembler
         $zeroReceivableMethodSelection = $hasZeroAmountMethodSelection
             && (int)($request['selected_payment_amount_cents'] ?? -1) === 0
             && (int)($request['receivable_amount_cents'] ?? -1) === 0;
-        if ((count($collections) === 0 && !$hasNonCollectionSettlement && !$zeroReceivableMethodSelection && !$hasLegacyEntry)
+        if ((count($collections) === 0 && !$hasNonCollectionSettlement && !$zeroReceivableMethodSelection && !$hasNonCashSettlement)
             || count($collections) !== $positivePaymentCount
             || count($collections) !== (int)$batch['collection_count']) {
             throw self::failure('sale_only_fact_payment_collection_count_mismatch');
@@ -872,6 +878,12 @@ final class CashierV3SaleOnlyFactAssembler
         $legacyEntry = count($paymentDrafts) === 1
             && (string)($paymentDrafts[0]['payment_method'] ?? '') === 'old_card_entry';
         $legacyAmount = $legacyEntry ? (int)$paymentDrafts[0]['amount_cents'] : 0;
+        $otherSettlementAmount = 0;
+        foreach ($paymentDrafts as $draft) {
+            if ((string)($draft['payment_method'] ?? '') === 'other_collection') {
+                $otherSettlementAmount += (int)$draft['amount_cents'];
+            }
+        }
         // The historical card value pays the card sale without becoming cash.
         // Recheck its exclusive shape where formal facts are assembled.
         if ($legacyEntry && ($legacyAmount <= 0 || $collections !== [] || $balance !== 0
@@ -895,9 +907,9 @@ final class CashierV3SaleOnlyFactAssembler
             || $original !== (int)$order['original_amount_cents']
             || $discount !== (int)$order['discount_amount_cents']
             || $sale !== (int)$order['sale_amount_cents']
-            || $collected + $legacyAmount !== (int)$request['selected_payment_amount_cents']
+            || $collected + $legacyAmount + $otherSettlementAmount !== (int)$request['selected_payment_amount_cents']
             || $collected !== (int)$request['cash_performance_amount_cents']
-            || $collected + $legacyAmount + $balance + $debt + $entitlementCredit + $couponPayment !== $sale
+            || $collected + $legacyAmount + $otherSettlementAmount + $balance + $debt + $entitlementCredit + $couponPayment !== $sale
             || $lineDebt !== $debt
             || $collected !== (int)$batch['collected_amount_cents']
             || $collected !== (int)$batch['cash_performance_amount_cents']
@@ -1049,6 +1061,11 @@ final class CashierV3SaleOnlyFactAssembler
      */
     private static function personnelPerformanceAmounts(int $amount, array $people): array
     {
+        // A manual allocation cannot turn a non-cash-only settlement (or a
+        // debt-only sale) into salesperson cash performance.
+        if ($amount === 0) {
+            return array_fill(0, count($people), 0);
+        }
         $result = [];
         foreach ($people as $index => $person) {
             $weight = max(0, min(100, (int)($person['allocationWeight'] ?? 0)));

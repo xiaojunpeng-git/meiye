@@ -969,6 +969,10 @@ async function submitImportedCardRefund() {
   if (mode === 'document' && !line) {
     importedCardRefundError.value = '请选择单据中的一条购买项目或产品明细。'; return
   }
+  if (mode === 'document' && !line.canRefund) {
+    // Candidate availability is advisory; the server recomputes the tender on submission.
+    importedCardRefundError.value = line.unavailableReason || '这条明细不能办理退款。'; return
+  }
   if (mode === 'catalog' && !catalogItem?.skuId) {
     importedCardRefundError.value = '请选择退款商品。'; return
   }
@@ -3829,9 +3833,10 @@ onBeforeUnmount(() => {
           </div>
           <div v-else-if="!unifiedRefundLines.length" class="imported-card-refund-dialog__empty">没有可退款的购买项目或产品明细。</div>
           <div v-else class="imported-card-refund-dialog__cards">
-            <label v-for="line in unifiedRefundLines" :key="line.lineId" class="imported-card-refund-dialog__card">
-              <input v-model="unifiedRefundLineId" type="radio" name="unified-document-line" :value="line.lineId" :disabled="importedCardRefundUncertain" @change="unifiedRefundCatalogItem = null" />
+            <label v-for="line in unifiedRefundLines" :key="line.lineId" class="imported-card-refund-dialog__card" :class="{ 'imported-card-refund-dialog__card--disabled': !line.canRefund }">
+              <input v-model="unifiedRefundLineId" type="radio" name="unified-document-line" :value="line.lineId" :disabled="!line.canRefund || importedCardRefundUncertain" @change="unifiedRefundCatalogItem = null" />
               <span class="imported-card-refund-dialog__card-main"><strong>{{ line.name }}</strong><small>单据号：{{ line.sourceOrderNo }}　{{ line.itemType === 'project' ? '购买项目' : '产品' }}　实际剩余金额：{{ importedCardRefundMoney(line.remainingAmountCents) }}</small></span>
+              <small v-if="line.unavailableReason && !line.canRefund" class="service-void-modal__error">{{ line.unavailableReason }}</small>
             </label>
           </div>
         </template>

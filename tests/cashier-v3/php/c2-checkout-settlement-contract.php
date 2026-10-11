@@ -353,7 +353,7 @@ function checkoutProjectionAggregate(array $result): array
 }
 
 $methods = CashierV3CheckoutSettlementKernel::paymentMethods();
-checkoutAssert('eight bookkeeping methods are exact', $methods === [
+checkoutAssert('seven receipt methods and one non-cash settlement method are exact', $methods === [
     'cash',
     'unionpay',
     'wechat',
@@ -667,7 +667,7 @@ checkoutAssert('checkout projection lines summary and composition use frozen req
         && $checkoutProjection['compositionCode'] === 'mixed'
         && $checkoutProjection['composition']['primaryAction'] === 'collect_and_complete'
         && $checkoutProjection['composition']['primaryActionLabel'] === '收款并完成服务');
-checkoutAssert('projection exposes eight cash methods without a permissionless old-card button',
+checkoutAssert('projection exposes seven receipt methods and other collection without a permissionless old-card button',
     array_column($checkoutProjection['payment']['methods'], 'id') === [
         'cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher',
         'partner_collection', 'other_collection',
@@ -1006,6 +1006,37 @@ checkoutAssert('old card entry settles card payable with debt and zero cash perf
     && $cardEntryDraft['totals']['cashPerformanceAmountCents'] === 0
     && $cardEntryDraft['totals']['balanced'] === true);
 
+// Other collection remains a checkout settlement for ordinary goods, but it
+// never represents received money. Real tender in the same order still counts.
+$otherOnly = $snapshot;
+$otherOnly['paymentDetails'][0]['method'] = 'other_collection';
+$otherOnly['paymentDetails'][0]['amountCents'] = 4000;
+$otherOnly['paymentDetails'] = [$otherOnly['paymentDetails'][0]];
+checkoutResign($otherOnly);
+$otherOnlyDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 94),
+    $otherOnly, null, $secret
+);
+checkoutAssert('other collection balances a project sale without cash performance',
+    $otherOnlyDraft['totals']['selectedPaymentAmountCents'] === 4000
+    && $otherOnlyDraft['totals']['cashPerformanceAmountCents'] === 0
+    && $otherOnlyDraft['totals']['balanced'] === true);
+$mixedOther = $otherOnly;
+$mixedOther['paymentDetails'][0]['amountCents'] = 2000;
+$mixedOther['paymentDetails'][] = [
+    'paymentAuthorityKey' => 'payment:wechat-mixed', 'method' => 'wechat',
+    'amountCents' => 2000, 'businessTime' => 1785258000,
+];
+checkoutResign($mixedOther);
+$mixedOtherDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 95),
+    $mixedOther, null, $secret
+);
+checkoutAssert('mixed settlement counts only real tender as cash performance',
+    $mixedOtherDraft['totals']['selectedPaymentAmountCents'] === 4000
+    && $mixedOtherDraft['totals']['cashPerformanceAmountCents'] === 2000
+    && $mixedOtherDraft['totals']['balanced'] === true);
+
 // The noncash card route cannot be turned into a generic payment by changing
 // the selected line, adding a second method, or consuming stored balance.
 $oldCardProduct = $cardEntry;
@@ -1327,10 +1358,10 @@ checkoutAssert('actual performance contract deducts only frozen external allocat
 $definitions = CashierV3CheckoutSettlementKernel::metricDefinitions();
 checkoutAssert('approved sales and cash performance wording is frozen verbatim',
     $definitions['销售额'] === '正式成交的商品、卡项、项目金额，包含现金业绩、余额扣款和欠款覆盖的部分。'
-        && $definitions['现金业绩'] === '现金、银联、微信、支付宝、大众验券、抖音验券、合作方收款、其他收款。');
+        && $definitions['现金业绩'] === '现金、银联、微信、支付宝、大众验券、抖音验券、合作方收款等实际收款；新结账的其他收款不计入。');
 checkoutAssert('approved payment detail and debt wording is frozen verbatim',
     $definitions['收款明细'] === '每一种记账收款分别保存的金额、方式、业务时间、操作人和来源单据。'
-        && $definitions['欠款'] === '应收金额中本次未收、允许以后补交的金额；使用八种记账方式补交产生现金业绩。');
+        && $definitions['欠款'] === '应收金额中本次未收、允许以后补交的金额；使用实际收款方式补交产生现金业绩，其他收款不可补交。');
 checkoutAssert('approved remaining business glossary is complete',
     array_keys($definitions) === [
         '销售额', '现金业绩', '收款明细', '欠款', '储值金额', '余额扣款',

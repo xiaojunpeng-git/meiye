@@ -59,9 +59,11 @@ const paymentMethods = [
   { code: 'alipay', label: '支付宝' },
   { code: 'dianping_voucher', label: '大众验券' },
   { code: 'douyin_voucher', label: '抖音验券' },
-  { code: 'partner_collection', label: '合作方收款' },
-  { code: 'other_collection', label: '其他收款' }
+  { code: 'partner_collection', label: '合作方收款' }
 ]
+// Prior receipts retain their historical label even though the non-cash
+// method is no longer selectable for a new debt repayment.
+const historicalPaymentMethods = [...paymentMethods, { code: 'other_collection', label: '其他收款' }]
 let paymentLineSequence = 0
 
 const records = computed(() => {
@@ -89,7 +91,7 @@ const selectedDebt = computed(() => records.value.find((record) => String(record
 const selectedDebtIsRecharge = computed(() => String(value(selectedDebt.value, ['sourceType', 'source_type', 'sourceLabel', 'source'], '')).includes('充值'))
 const paymentTotal = computed(() => paymentLines.value.reduce((sum, item) => sum + moneyToCents(item.amount), 0))
 const selectedPaymentMethods = computed(() => new Set(paymentLines.value.map((item) => String(item.paymentMethod || ''))))
-const paymentMethodLabel = (code) => paymentMethods.find((method) => method.code === String(code))?.label || '未命名收款方式'
+const paymentMethodLabel = (code) => historicalPaymentMethods.find((method) => method.code === String(code))?.label || '未命名收款方式'
 const salespersonSummary = computed(() => salespersonAllocations.value.length
   ? salespersonAllocations.value.map(salespersonLabel).join('、')
   : '暂未选择')

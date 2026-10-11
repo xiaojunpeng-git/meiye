@@ -184,36 +184,95 @@ final class StoreUnifiedReportPhaseSixServices
 
     private function multiPayment(array $stores, array $range): array
     {
-        $facts = array_values(array_filter($this->cashFacts($stores, $range), static fn(array $fact): bool => (int)$fact['is_experience'] === 1));
+        // 已提交的结账方式决定入表资格，包括零金额；收款方式是订单级选择，
+        // 商品行金额必须按结账时的应收减欠款基础分摊，不能在每行重复整笔金额。
+        $query = Db::name('cashier_v3_checkout_payment_draft')->alias('p')
+            ->join('cashier_v3_sales_order so', 'so.tenant_id=p.tenant_id AND so.store_id=p.store_id AND so.checkout_request_id=p.request_id AND so.checkout_request_version=p.draft_version')
+            ->join('cashier_v3_sale_fact s', "s.tenant_id=so.tenant_id AND s.order_id=so.order_id AND s.fact_direction='forward' AND s.status='effective'")
+            ->leftJoin('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
+            ->leftJoin('cashier_v3_payment_collection c', "c.tenant_id=p.tenant_id AND c.sales_order_id=so.order_id AND c.checkout_payment_draft_id=p.payment_draft_id AND c.payment_method='other_collection' AND c.collection_direction='forward' AND c.collection_status='settled'")
+            ->leftJoin('cashier_v3_payment_fact pf', "pf.tenant_id=c.tenant_id AND pf.checkout_request_id=so.checkout_request_id AND pf.source_line_id=c.collection_id AND pf.fact_type='payment_collected' AND pf.fact_direction='forward' AND pf.status='effective'")
+            ->leftJoin('cashier_v3_payment_sale_allocation_fact a', "a.tenant_id=s.tenant_id AND a.order_id=so.order_id AND a.sale_fact_id=s.fact_id AND a.payment_fact_id=pf.fact_id AND a.payment_method='other_collection' AND a.status='effective' AND a.fact_direction='forward'")
+            ->where('p.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('p.store_id', $stores)->where('p.payment_method', 'other_collection')
+            ->where('p.draft_status', 'committed')->whereBetween('p.business_date', [$range['start'], $range['end']])
+            ->where('so.order_status', 'settled')
+            ->where('so.order_direction', 'forward')->whereBetween('so.business_date', [$range['start'], $range['end']])
+            ->field("p.payment_draft_id,COALESCE(c.amount_cents,p.amount_cents) tender_amount_cents,s.fact_id sale_fact_id,s.source_line_id,s.sale_amount_cents,s.debt_amount_cents,so.store_id,so.business_date,so.member_name_snapshot customer_name,s.organization_name_snapshot company_name,s.store_name_snapshot store_name,s.quantity,d.category_path_snapshot category,s.item_name_snapshot item_name,a.allocation_fact_id allocation_id,a.amount_cents allocated_amount_cents,(SELECT GROUP_CONCAT(DISTINCT employee_name_snapshot ORDER BY id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact sales_person WHERE sales_person.tenant_id=s.tenant_id AND sales_person.source_line_id=s.source_line_id AND sales_person.performance_type='sales_performance_allocated' AND sales_person.status='effective') employee_name")
+            ->order('p.id', 'asc')->order('s.id', 'asc')->order('a.id', 'asc');
+        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'so.tenant_id', 'so.order_id');
+        $facts = $query->select()->toArray();
+        $otherAmounts = $this->otherCollectionAmountsBySaleFact($facts);
         $rows = [];
+        $receivableBySale = [];
         foreach ($facts as $fact) {
-            // 每笔收款分摊事实有独立稳定键；同一销售明细的多种收款不可共用手动值。
+            // 历史实际收款延用原分摊键，保留已录入的手动值；无分摊的新口径按结账方式和销售明细建稳定键。
+            $allocationId = trim((string)($fact['allocation_id'] ?? ''));
+            $rowKey = $allocationId !== '' ? $allocationId : (string)$fact['payment_draft_id'] . ':' . (string)$fact['sale_fact_id'];
+            $receivableBySale[(string)$fact['sale_fact_id']] = (int)$fact['sale_amount_cents'];
             $rows[] = [
                 'store_id' => (int)$fact['store_id'], 'source_line_id' => (string)$fact['source_line_id'],
                 'annotation_subject_type' => 'phase_six_row',
-                'annotation_subject_key' => 'phase_six:payment:' . (string)$fact['allocation_id'],
+                'annotation_subject_key' => 'phase_six:payment:' . $rowKey,
                 'company_name' => $fact['company_name'], 'store_name' => $fact['store_name'],
-                'business_date' => $fact['business_date'], 'customer_name' => $fact['member_name'],
-                'employee_name' => $fact['salesperson_name'], 'category' => $fact['category_path'],
+                'business_date' => $fact['business_date'], 'customer_name' => $fact['customer_name'],
+                'employee_name' => $fact['employee_name'], 'category' => $fact['category'],
                 'item_name' => $fact['item_name'], 'quantity' => (int)$fact['quantity'],
-                'cash_amount' => $this->money((int)$fact['amount_cents']), 'row_key' => $fact['allocation_id'],
+                'receivable_amount' => $this->money((int)$fact['sale_amount_cents']),
+                'other_collection_amount' => $this->money((int)($fact['allocated_amount_cents']
+                    ?? $otherAmounts[(string)$fact['payment_draft_id']][(string)$fact['sale_fact_id']] ?? 0)),
+                'row_key' => $rowKey,
             ];
         }
-        return $this->result('其他多收款业绩表', [
-            $this->column('company_name','分公司','销售事实组织快照。',false,true),
-            $this->column('store_name','门店','销售事实门店快照。',false,true),
-            $this->column('business_date','日期','成功结账业务日期。'),
-            $this->column('customer_name','顾客姓名','会员或顾客快照。'),
-            $this->column('employee_name','员工姓名','销售或操作员工快照。'),
-            $this->column('category','商品分类','销售明细历史分类快照。'),
-            $this->column('item_name','商品名称','销售明细名称。'),
-            $this->manualColumn('unit_price','单价','手动输入并独立保存。'),
-            $this->column('quantity','数量','销售明细数量。',true),
-            $this->column('cash_amount','现金业绩','体验现金业绩事实。',true),
-            $this->manualColumn('领取日期','领取日期','手动输入并独立保存。'),
-            $this->manualColumn('领取数量','领取数量','手动输入并独立保存。'),
-            $this->manualColumn('备注','备注','手动输入并独立保存。'),
+        $result = $this->result('其他多收款业绩表', [
+            $this->column('company_name','分公司','这笔销售结账时所属的分公司。',false,true),
+            $this->column('store_name','门店','这笔销售结账时所属的门店。',false,true),
+            $this->column('business_date','日期','这笔订单的结账业务日期。'),
+            $this->column('customer_name','顾客姓名','结账时记录的会员或顾客姓名。'),
+            $this->column('employee_name','员工姓名','这件商品结账时记录的销售人。'),
+            $this->column('category','商品分类','商品结账时所属的分类，之后改分类不追改旧单。'),
+            $this->column('item_name','商品名称','这笔订单中选择“其他收款”的商品名称。'),
+            $this->column('quantity','数量','这笔订单中该商品的成交数量。',true),
+            $this->column('receivable_amount','应收金额','该商品结账时的成交应收金额；同一商品有多笔“其他收款”时会在各笔明细重复显示，合计只算一次。',true),
+            $this->column('other_collection_amount','其他收款','结账时选用“其他收款”的金额，按商品应收扣除欠款后的金额分摊；多件商品合计等于该笔结算金额。历史订单按当时实际记录的分摊金额显示；不代表现金业绩。',true),
+            $this->manualColumn('领取日期','领取日期','由有权限的人员填写商品实际领取日期。'),
+            $this->manualColumn('领取数量','领取数量','由有权限的人员填写商品实际领取数量。'),
+            $this->manualColumn('备注','备注','由有权限的人员填写这条商品的补充说明。'),
         ], $rows, $range);
+        // 展示粒度是收款方式×商品，商品应收的合计粒度仍是商品，不能按收款笔数重复累计。
+        $result['summary_row']['receivable_amount'] = $this->money(array_sum($receivableBySale));
+        return $result;
+    }
+
+    /**
+     * 为没有实际收款分摊事实的新口径结算复用相同的分摊算法；
+     * 结果只用于展示原结算金额，不补写现金业绩或收款事实。
+     *
+     * @return array<string,array<string,int>> 结账方式 ID => 销售事实 ID => 分摊分数
+     */
+    private function otherCollectionAmountsBySaleFact(array $facts): array
+    {
+        $tenders = [];
+        foreach ($facts as $fact) {
+            $tenderId = (string)$fact['payment_draft_id'];
+            $saleId = (string)$fact['sale_fact_id'];
+            $tenders[$tenderId]['amount'] = (int)$fact['tender_amount_cents'];
+            $tenders[$tenderId]['has_allocation'] = ($tenders[$tenderId]['has_allocation'] ?? false)
+                || $fact['allocated_amount_cents'] !== null;
+            $tenders[$tenderId]['sales'][$saleId] = [
+                'fact_id' => $saleId,
+                'sale_amount_cents' => (int)$fact['sale_amount_cents'],
+                'debt_amount_cents' => (int)$fact['debt_amount_cents'],
+            ];
+        }
+        $allocated = [];
+        foreach ($tenders as $tenderId => $tender) {
+            if ($tender['has_allocation']) continue;
+            $allocated[$tenderId] = StoreReportPaymentSaleAllocationFactServices::allocatePaymentToSales(
+                (int)$tender['amount'], array_values($tender['sales'])
+            );
+        }
+        return $allocated;
     }
 
     private function salaryDetail(array $stores,array $range,array $input):array
@@ -1542,7 +1601,7 @@ final class StoreUnifiedReportPhaseSixServices
     /** 声明与保存接口一致的字段单位，金额由页面元转分，非金额保持原类型。 */
     private function manualColumn(string $key,string $label,string $explanation,string $group=''):array
     {
-        $types = ['target_amount' => 'integer_cents', 'unit_price' => 'integer_cents',
+        $types = ['target_amount' => 'integer_cents',
             '领取日期' => 'date', '领取数量' => 'nonnegative_integer'];
         $column = $this->column($key,$label,$explanation,false,false,120,[],$group);
         $column['manual_input'] = ['subject_type'=>'phase_six_row','field_key'=>$key,'value_type'=>$types[$key] ?? 'text'];

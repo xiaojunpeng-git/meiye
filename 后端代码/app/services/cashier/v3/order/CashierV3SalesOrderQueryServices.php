@@ -1437,24 +1437,25 @@ final class CashierV3SalesOrderQueryServices
             ->whereIn('sales_order_id', $orderIds)
             ->where('collection_status', 'settled')
             ->where('collection_direction', 'forward')
-            ->field('collection_id,sales_order_id,payment_line_no,payment_method,payment_method_name_snapshot,amount_cents,external_transaction_no_snapshot,remark_snapshot,occurred_at')
+            ->field('collection_id,sales_order_id,checkout_payment_draft_id,payment_line_no,payment_method,payment_method_name_snapshot,amount_cents,external_transaction_no_snapshot,remark_snapshot,occurred_at')
             ->order('sales_order_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray() as $collection) {
             $collectionsByOrder[(string)$collection['sales_order_id']][] = $collection;
         }
         $requestsById = [];
-        $legacyEntriesByRequest = [];
+        $nonCashEntriesByRequest = [];
         if ($requestIds !== []) {
             foreach (Db::name('cashier_v3_checkout_request')->whereIn('request_id', $requestIds)
                 ->field('request_id,debt_amount_cents,balance_deduction_amount_cents,selected_payment_amount_cents')->select()->toArray() as $request) {
                 $requestsById[(string)$request['request_id']] = $request;
             }
-            // A committed old-card draft is the non-cash settlement authority;
-            // no payment-collection row is created for historical value.
+            // A committed draft without a matching collection row is the
+            // non-cash settlement authority. Historical other-collection
+            // drafts with real collection rows remain cash under their facts.
             foreach (Db::name('cashier_v3_checkout_payment_draft')->whereIn('request_id', $requestIds)
-                ->where('payment_method', 'old_card_entry')->where('draft_status', 'committed')
-                ->field('request_id,payment_draft_id,amount_cents,remark,operation_occurred_at')
+                ->whereIn('payment_method', ['old_card_entry', 'other_collection'])->where('draft_status', 'committed')
+                ->field('request_id,payment_draft_id,payment_method,amount_cents,remark,operation_occurred_at')
                 ->select()->toArray() as $entry) {
-                $legacyEntriesByRequest[(string)$entry['request_id']][] = $entry;
+                $nonCashEntriesByRequest[(string)$entry['request_id']][] = $entry;
             }
         }
         // A card/project upgrade is a formal sale of the target item.  Its
@@ -1617,7 +1618,7 @@ final class CashierV3SalesOrderQueryServices
                 'header' => $header,
                 'batch' => $batchesByOrder[$orderId],
                 'request' => !empty($header['entitlement_only']) || $requestId === '' ? [] : $requestsById[$requestId],
-                'legacyEntries' => $legacyEntriesByRequest[$requestId] ?? [],
+                'nonCashEntries' => $nonCashEntriesByRequest[$requestId] ?? [],
                 'lines' => $linesByOrder[$orderId],
                 'serviceFacts' => $serviceFactsByOrder[$orderId] ?? [],
                 'collections' => $collectionsByOrder[$orderId] ?? [],
@@ -1647,10 +1648,23 @@ final class CashierV3SalesOrderQueryServices
         $cashPerformanceCents = (int)$batch['cash_performance_amount_cents'];
         $debtCents = (int)($request['debt_amount_cents'] ?? 0);
         $balanceCents = (int)($request['balance_deduction_amount_cents'] ?? 0);
-        $legacyEntries = (array)($snapshot['legacyEntries'] ?? []);
+        $collectedDraftIds = array_fill_keys(array_map(static function (array $collection): string {
+            return (string)($collection['checkout_payment_draft_id'] ?? '');
+        }, (array)$snapshot['collections']), true);
+        $nonCashEntries = array_values(array_filter((array)($snapshot['nonCashEntries'] ?? []),
+            static function (array $entry) use ($collectedDraftIds): bool {
+                return !isset($collectedDraftIds[(string)$entry['payment_draft_id']]);
+            }));
+        $legacyEntries = array_values(array_filter($nonCashEntries, static function (array $entry): bool {
+            return (string)$entry['payment_method'] === 'old_card_entry';
+        }));
+        $nonCashCents = array_sum(array_map(static function (array $entry): int {
+            return (int)$entry['amount_cents'];
+        }, $nonCashEntries));
         $legacyEntryCents = count($legacyEntries) === 1 ? (int)$legacyEntries[0]['amount_cents'] : 0;
         $legacyEntryValid = $legacyEntries === [] || (
             count($legacyEntries) === 1
+            && count($nonCashEntries) === 1
             && $legacyEntryCents > 0
             && (int)($request['selected_payment_amount_cents'] ?? -1) === $legacyEntryCents
             && $cashPerformanceCents === 0
@@ -1693,12 +1707,14 @@ final class CashierV3SalesOrderQueryServices
         $settlementEquationValid = $upgradeSettlementValid && $legacyEntryValid
             && $entitlementCreditCents >= 0
             && (int)$batch['collected_amount_cents'] === $cashPerformanceCents
+            && $nonCashCents >= 0
+            && $cashPerformanceCents + $nonCashCents === (int)($request['selected_payment_amount_cents'] ?? -1)
             && $debtCents >= 0
             && $balanceCents >= 0
             && $cashReceivableCents >= 0
-            && $cashPerformanceCents + $legacyEntryCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents
+            && $cashPerformanceCents + $nonCashCents + $debtCents + $balanceCents + $entitlementCreditCents === $receivableCents
             && $cashReceivableCents + $debtCents + $entitlementCreditCents === $receivableCents
-            && $cashPerformanceCents + $legacyEntryCents + $balanceCents === $cashReceivableCents;
+            && $cashPerformanceCents + $nonCashCents + $balanceCents === $cashReceivableCents;
         if (!$settlementEquationValid) {
             // A bad historical snapshot must stay visible for reconciliation,
             // but cannot make unrelated business records disappear or expose
@@ -1758,7 +1774,9 @@ final class CashierV3SalesOrderQueryServices
         if (count($itemNames) > 3) $itemSummary .= ' 等' . count($itemNames) . '项';
         $paymentNames = [];
         foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
-        if ($legacyEntryCents > 0) $paymentNames['旧卡录入'] = true;
+        foreach ($nonCashEntries as $entry) {
+            $paymentNames[(string)$entry['payment_method'] === 'old_card_entry' ? '旧卡录入' : '其他收款'] = true;
+        }
         if ($balanceCents > 0) $paymentNames['余额支付'] = true;
         if ($couponPaymentCents > 0) $paymentNames['抵用券抵付'] = true;
         $memberName = trim((string)$header['member_name_snapshot']);
@@ -1870,11 +1888,12 @@ final class CashierV3SalesOrderQueryServices
                 'occurredAt' => $this->formatTimestamp((int)$collection['occurred_at'], 'Y-m-d H:i:s'),
             ];
         }, $snapshot['collections']);
-        if ($settlementEquationValid && $legacyEntryCents > 0) {
-            $entry = $legacyEntries[0];
+        foreach ($settlementEquationValid ? $nonCashEntries : [] as $entry) {
+            $method = (string)$entry['payment_method'];
             $mapped['paymentDetails'][] = [
-                'id' => (string)$entry['payment_draft_id'], 'paymentMethodCode' => 'old_card_entry',
-                'methodName' => '旧卡录入', 'amount' => $this->moneyFromCents($legacyEntryCents),
+                'id' => (string)$entry['payment_draft_id'], 'paymentMethodCode' => $method,
+                'methodName' => $method === 'old_card_entry' ? '旧卡录入' : '其他收款',
+                'amount' => $this->moneyFromCents((int)$entry['amount_cents']),
                 'externalTransactionNo' => '', 'remark' => (string)$entry['remark'],
                 'occurredAt' => $this->formatTimestamp((int)$entry['operation_occurred_at'], 'Y-m-d H:i:s'),
             ];
@@ -2876,6 +2895,12 @@ final class CashierV3SalesOrderQueryServices
     private function paymentMethodName(array $collection): string
     {
         $snapshot = trim((string)($collection['payment_method_name_snapshot'] ?? ''));
+        $code = strtolower(trim((string)($collection['payment_method'] ?? '')));
+        // 旧配置曾把 other_collection 命名为“现金”。展示权威代码的含义，
+        // 同时保留原名称以便追溯；不修改已结算收款或其不可变快照。
+        if ($code === 'other_collection' && $snapshot === '现金') {
+            return '其他收款（原记录：现金）';
+        }
         if ($snapshot !== '') {
             return $snapshot;
         }
@@ -2887,9 +2912,10 @@ final class CashierV3SalesOrderQueryServices
             'dianping_voucher' => '大众验券',
             'douyin_voucher' => '抖音验券',
             'partner' => '合作方收款',
+            'partner_collection' => '合作方收款',
             'other' => '其他收款',
+            'other_collection' => '其他收款',
         ];
-        $code = strtolower(trim((string)($collection['payment_method'] ?? '')));
         return $labels[$code] ?? ($code !== '' ? $code : '未知收款方式');
     }
 
