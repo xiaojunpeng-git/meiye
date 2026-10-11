@@ -1,0 +1,89 @@
+{
+  "task": "R10 门店数据报表默认当天",
+  "head": "6b8ae2c4784169f4781910477cd043ecd732a643",
+  "generated_at": "2026-10-11T11:51:30.176Z",
+  "status": "selftest_passed_pending_pm_acceptance",
+  "files": [
+    {
+      "file": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+      "sha256": "737b7e4d98cbe706d5fbf25c94aacecd1c715c9eeca9ee8371262d911f829d54"
+    },
+    {
+      "file": "后端代码/app/controller/cashier/v3/Report.php",
+      "sha256": "e9946445ff35de8ba5594b4f92c649fae644de96c8dca2fd5efd3ac113dac037"
+    },
+    {
+      "file": "tests/cashier-v3/js/r10-report-today-defaults.mjs",
+      "sha256": "293d0dbcdb8e7348a13f9ac543d235e0abf1592b2e9518233736fb9276c1fa3b"
+    },
+    {
+      "file": "tests/cashier-v3/php/r10-report-today-local.php",
+      "sha256": "fa4282d73c6e54c435d4c0cbf6154a7032d061dbfba02093a1d3ec1bc51aee1c"
+    },
+    {
+      "file": "tests/cashier-v3/js/store-business-report-contract.mjs",
+      "sha256": "82e3b229f6e06803ae3d744b322751cd8a515e72d97ff607a5e192c018fd5886"
+    },
+    {
+      "file": "tests/cashier-v3/js/store-report-period-picker-contract.mjs",
+      "sha256": "5518fbffab27fad80df838f7b66de4b0e2a08dca983ee0a9d2af799a3aae76b6"
+    }
+  ],
+  "tracked_patch_sha256": "061a9bf2bead69b2ecaf974403560d9ddfc60319864bb9cd03fabca0eccb4678",
+  "closure_fingerprint_sha256": "03a59e6bc1e9e7a1cfb71a685f7751a9c2f37a911140413f8b21718486ba8e62",
+  "staged_diff_sha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+  "tests": [
+    {
+      "test": "r10-report-today-defaults.mjs",
+      "exit": 0
+    },
+    {
+      "test": "store-business-report-contract.mjs",
+      "exit": 0
+    },
+    {
+      "test": "store-report-period-picker-contract.mjs",
+      "exit": 0
+    },
+    {
+      "test": "r10-report-today-local.php (local read-only MySQL)",
+      "exit": 0
+    },
+    {
+      "test": "PHP 7.4 lint",
+      "exit": 0
+    },
+    {
+      "test": "Vue SFC script/template compilation",
+      "exit": 0
+    },
+    {
+      "test": "git diff --check",
+      "exit": 0
+    }
+  ],
+  "evidence": [
+    {
+      "file": "tests/cashier-v3/evidence/R10-report-today-selftest-2026-10-11.md",
+      "sha256": "7fbfd5a203d583aaa78d5d1fe274b280a0622a3a869689cd87942297174927c4"
+    },
+    {
+      "file": "tests/cashier-v3/evidence/R10-report-today-tests-2026-10-11.json",
+      "sha256": "f672c67ef29d63abf44309ad2a4eeb7f70661abc09cb0d0bcc99318ef1a74d40"
+    },
+    {
+      "file": "tests/cashier-v3/evidence/R10-report-today-browser-2026-10-11.json",
+      "sha256": "e6777d98ef9906fcc941b26c0c58a2c5766b64c8c610669701f3dd04f5b23c7a"
+    },
+    {
+      "file": "tests/cashier-v3/evidence/R10-report-today-desktop-2026-10-11.png",
+      "sha256": "be8891131d584423617402589934086202c41ac20840220862a01f09657c1ae2"
+    },
+    {
+      "file": "tests/cashier-v3/evidence/R10-report-today-compact-2026-10-11.png",
+      "sha256": "46aec8c5ab67791a49796ea8275ee9b09c5ec59dabaeaacbde719cf52ed00fd0"
+    }
+  ],
+  "remote_operations": false,
+  "commit": false
+}
