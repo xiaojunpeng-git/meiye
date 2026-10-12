@@ -1,0 +1,118 @@
+{
+  "plan_version": "008-morestore-mall-20261013-r3",
+  "target_instance": "008.cc3798.com",
+  "assets": [
+    {
+      "source_url": "https://meiyue.meiyuekeji.cn/uploads/system/15ed21e8b1a3eacbac52c30bf8a82bc4.png",
+      "target_path": "/static/mall/008-20261013/6c231c3034f199a65f85.png",
+      "sha256": "6c231c3034f199a65f855dfed8f0989c208e1b80e811e186cd510d8bd7938c90",
+      "bytes": 10844,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://meiyue.meiyuekeji.cn/uploads/system/1c0fb1ff89e1f6f347fb131544056910.png",
+      "target_path": "/static/mall/008-20261013/895dda86c7bbd851b321.png",
+      "sha256": "895dda86c7bbd851b32116ee4f0b5ea37356777b489e579efcdc736c43a4cc66",
+      "bytes": 9252,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://meiyue.meiyuekeji.cn/uploads/system/47c6046274318574a4840ad4f4c566f1.png",
+      "target_path": "/static/mall/008-20261013/1c8dafb53e1e2fc78db1.png",
+      "sha256": "1c8dafb53e1e2fc78db1d02484ed9868008f67cf81dcd2fab19e96aa81d45e01",
+      "bytes": 10242,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2023/12/afb7f202312152335498057.png",
+      "target_path": "/static/mall/008-20261013/440baab47b054942ecba.png",
+      "sha256": "440baab47b054942ecbab0bd4b38f479cb62b3bc4b4c54c0b865b537c9c600af",
+      "bytes": 4189,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/2b453202401221443463766.png",
+      "target_path": "/static/mall/008-20261013/9cf2326ed3654063a3e3.png",
+      "sha256": "9cf2326ed3654063a3e32b6ec7c3809d05b928072db806db443366bf2d764381",
+      "bytes": 766,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/3362e202401221443463950.png",
+      "target_path": "/static/mall/008-20261013/39964c5140b92912bb99.png",
+      "sha256": "39964c5140b92912bb990dba329c79ce4f3feecb6f7fe4269c7b8cdfa32f09ac",
+      "bytes": 3254,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/43fa8202401221443462800.png",
+      "target_path": "/static/mall/008-20261013/540875988ba87a589123.png",
+      "sha256": "540875988ba87a589123c6917bdb17a4f4409cd3b8c73406cce0b5bbaed36e45",
+      "bytes": 775,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/45cdc202401221443467979.png",
+      "target_path": "/static/mall/008-20261013/482ccab6f94b72c0db5b.png",
+      "sha256": "482ccab6f94b72c0db5b5f959473e6c638527ebf28a4119ec33cc3b0ca561f93",
+      "bytes": 2109,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/581d7202401221443466824.png",
+      "target_path": "/static/mall/008-20261013/2401c62a732c234b2c18.png",
+      "sha256": "2401c62a732c234b2c18a4f54fa120342fdbe9b83744f0ed71cb82b8184e6b24",
+      "bytes": 2048,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/6a163202401221443464791.png",
+      "target_path": "/static/mall/008-20261013/6f9b8933e87ebdbe6937.png",
+      "sha256": "6f9b8933e87ebdbe6937de6ae18bb7a22da430efc0c73638510403551713e573",
+      "bytes": 2701,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/ca672202401221443465715.png",
+      "target_path": "/static/mall/008-20261013/6b4bd43a93cb93b2a005.png",
+      "sha256": "6b4bd43a93cb93b2a00555aa4c4cc0a2185542b78d6edcc1f3a2792059ef73b8",
+      "bytes": 1438,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/01/d92ae20240122144346881.png",
+      "target_path": "/static/mall/008-20261013/c007be88f27199b65480.png",
+      "sha256": "c007be88f27199b65480e3e511a04d4de4696b097f7175028c2c243ee3b3a7e4",
+      "bytes": 1554,
+      "content_type": "image/png"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/08/2bef02024081913454578.jpg",
+      "target_path": "/static/mall/008-20261013/54dba5f66232bd684446.jpg",
+      "sha256": "54dba5f66232bd684446d769f43547a811bb0836cbb20ac045b2db1f8a32ca66",
+      "bytes": 122128,
+      "content_type": "image/jpeg"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/08/302dd202408191345455498.jpg",
+      "target_path": "/static/mall/008-20261013/78d04000452dcb00f2b8.jpg",
+      "sha256": "78d04000452dcb00f2b8ff5a7b03fce0a22aad032faba051433017faa1102702",
+      "bytes": 143585,
+      "content_type": "image/jpeg"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2024/08/81017202408191345456832.jpg",
+      "target_path": "/static/mall/008-20261013/4dfdb335178be558496f.jpg",
+      "sha256": "4dfdb335178be558496f75b16b23028ec523528e26d2d02fe4be6a4b33de9b88",
+      "bytes": 139935,
+      "content_type": "image/jpeg"
+    },
+    {
+      "source_url": "https://myqiniu.cc3798.com/attach/2023/12/20/d052e413164eb25718058c3580623340.jpg",
+      "target_path": "/static/mall/008-20261013/3ab42bab939ceddd54dc.jpg",
+      "sha256": "3ab42bab939ceddd54dcdf88182cd21745ae11e44ee3dea50e3fe31155224be4",
+      "bytes": 131586,
+      "content_type": "image/jpeg"
+    }
+  ]
+}

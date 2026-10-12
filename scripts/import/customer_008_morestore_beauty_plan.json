@@ -1,0 +1,17 @@
+{
+  "plan_version": "008-morestore-beauty-community-r1",
+  "source_database": "morestore",
+  "target_database": "mohe_008",
+  "target_instance": "008.cc3798.com",
+  "source_sha256": "63c6fbfc31ea266e10eafb1881ca848813666bc946cf46ab5f35e022c2f8a0c4",
+  "source_rows": 2540,
+  "source_public_rows": 1289,
+  "source_hidden_rows": 1251,
+  "source_authors": 155,
+  "source_images": 3079,
+  "author_mapping": "mig_morestore_20261013_member_map.source_uid -> target_uid",
+  "publication_rule": "旧 status=1 公开；status=0 仅作者与后台可见",
+  "product_relation_rule": "旧 eb_beauty 没有商品 ID，不推测商品关联",
+  "media_rule": "保留旧七牛图片 URL，008 已有七牛配置；校验图片可访问",
+  "community_visibility_rule": "仅开启 008 的 community_status，评论及发帖积分开关保持原值"
+}
