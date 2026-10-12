@@ -12,6 +12,9 @@ trait AiHttpActions
     public function aiCreate() { return $this->callAi('create'); }
     public function aiExecute(string $runId) { return $this->callAi('execute',$runId); }
     public function aiStatus(string $runId) { return $this->callAi('status',$runId); }
+    public function aiFeedbackSave(string $runId) { return $this->callAi('feedback_save',$runId); }
+    public function aiFeedbackList() { return $this->callAi('feedback_list'); }
+    public function aiFeedbackDetail(string $id) { return $this->callAi('feedback_detail',$id); }
     public function aiDelivery(string $runId) { return $this->callAi('delivery',$runId); }
     public function aiClarify(string $runId) { return $this->callAi('clarify',$runId); }
     public function aiCancel(string $runId) { return $this->callAi('cancel',$runId); }
@@ -39,6 +42,7 @@ trait AiHttpActions
                     if (array_key_exists($key,(array)$query)) { throw new \RuntimeException('AI_SENSITIVE_QUERY_FORBIDDEN'); }
                 }
                 $input=[];
+                if ($operation==='feedback_detail') $input['id']=$runId;
                 foreach (['X-Mohe-Ai-Client-Session-Id'=>'client_session_id','X-Mohe-Ai-Run-Delivery-Token'=>'run_delivery_token','X-Mohe-Ai-Generation'=>'generation','X-Mohe-Ai-Window-Token'=>'window_token'] as $header=>$key) {
                     $value=$this->request->header($header,''); if ($value!=='') { $input[$key]=$value; }
                 }
@@ -80,6 +84,9 @@ trait AiHttpActions
                 'AI_CLARIFICATION_IN_PROGRESS'=>'当前选择已接纳，正在继续查询。',
                 'AI_IDEMPOTENCY_CONFLICT'=>'本次提交与先前记录不一致，请刷新任务状态后再操作。',
                 'AI_CONTEXT_REQUIRED'=>'前文条件已失效或无法核验，请在新问题中明确条件。',
+                'AI_FEEDBACK_UNAVAILABLE'=>'这条回答已过期或暂不可评价。',
+                'AI_FEEDBACK_INVALID'=>'评价未保存，请刷新这条回答后重试。',
+                'AI_FEEDBACK_NOT_FOUND'=>'这条采集记录不存在或已不可查看。',
             ][$exception->getMessage()]??'魔核 AI 请求未完成，请重试或联系管理员。';
             $reason=$exception->getMessage();
             $safeReason=preg_match('/^AI_[A-Z0-9_]{1,62}$/D',$reason)===1?$reason:'AI_REQUEST_FAILED';

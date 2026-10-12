@@ -4,6 +4,7 @@ namespace app\services\ai;
 use app\services\ai\config\AiConfigStore;
 use app\services\ai\config\AiPrivateStorage;
 use app\services\ai\execution\AiRunStore;
+use app\services\ai\feedback\AiFeedbackStore;
 use app\services\ai\execution\AiRunBudgetPolicy;
 use app\services\ai\execution\AiExecutionEnvelope;
 use app\services\ai\execution\AiWorkflowPlanner;
@@ -34,21 +35,21 @@ final class AiGatewayServices
     // Keep the call bounded, but leave enough room for that semantic stage so a
     // valid request is not reported as failed before any Reader is executed.
     private const MODEL_STAGE_LIMIT_MS = 30000;
-    private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports;
+    private $runs; private $config; private $private; private $instance; private $views; private $model; private $queryTransaction; private $exports; private $feedback;
     private $management; private $managementDocument; private $managementRevision='source';
     /** Optional injected dependencies are for an isolated integration environment, never request parameters. */
     public function __construct(?AiRunStore $runs = null, ?AiConfigStore $config = null, ?AiPrivateStorage $private = null,
-        string $instance = '', ?MetricReadViewStore $views = null, ?callable $model = null, ?callable $queryTransaction = null, $management = null)
+        string $instance = '', ?MetricReadViewStore $views = null, ?callable $model = null, ?callable $queryTransaction = null, $management = null, ?AiFeedbackStore $feedback = null)
     {
         $this->runs=$runs; $this->config=$config; $this->private=$private; $this->instance=$instance; $this->views=$views; $this->model=$model; $this->queryTransaction=$queryTransaction;
-        $this->management=$management;
+        $this->management=$management; $this->feedback=$feedback;
     }
 
     private function initialize(): void
     {
         if ($this->runs) return;
         $runtime=\app\services\ai\execution\AiRuntimeFactory::make();
-        foreach (['instance','private','runs','config','views','management'] as $key) $this->$key=$runtime[$key];
+        foreach (['instance','private','runs','config','views','management','feedback'] as $key) $this->$key=$runtime[$key];
     }
 
     /** Trusted CLI supervision only. Counts contain no account, Run ID or conversation data. */
@@ -123,12 +124,19 @@ final class AiGatewayServices
             'management_publish'=>['expected_revision'], 'management_rollback'=>['expected_revision','target_version'],
             'management_preview'=>['expected_revision','question'], 'management_rebase'=>['expected_revision'],
             'metric_registry_get'=>[],
+            'feedback_save'=>['client_session_id','generation','run_delivery_token','rating','question','displayed_answer'],
+            'feedback_list'=>['page','rating','keyword'], 'feedback_detail'=>['id'],
         ];
         if (!isset($schemas[$operation]) || array_diff(array_keys($input),$schemas[$operation])) throw new RuntimeException('AI_INPUT_SCHEMA_INVALID');
         $this->initialize();
         if (!in_array($context['terminal']??'', ['platform','store','merchant'],true) || (int)($context['account_id']??0)<1) throw new RuntimeException('AI_AUTH_REQUIRED');
         if (strpos($operation,'management_')===0) return $this->manage($operation,$context,$input);
         if ($operation==='metric_registry_get') return $this->metricRegistry($context);
+        if ($operation==='feedback_list' || $operation==='feedback_detail') {
+            // The existing platform AI maintainer boundary protects collected customer answers.
+            if ($context['terminal']!=='platform' || empty($this->fresh($context)['can_configure'])) throw new RuntimeException('AI_PERMISSION_DENIED');
+            return $operation==='feedback_list' ? $this->feedback->listing($input) : $this->feedback->detail((int)($input['id']??0));
+        }
         if (strpos($operation,'config_')===0) {
             if ($context['terminal']!=='platform' || empty($this->fresh($context)['can_configure'])) throw new RuntimeException('AI_PERMISSION_DENIED');
             if ($operation==='config_get') {
@@ -181,7 +189,8 @@ final class AiGatewayServices
                 'guidance_schema_version'=>'mohe-clarification-v2','guidance_profile_version'=>'guidance-v2-'.$limits['max_clarification_rounds'],'max_clarification_rounds'=>(string)$limits['max_clarification_rounds'],
                 'intent_contract_version'=>AiIntentResultContract::VERSION];
             if ($this->management) $snapshot['management_revision']=$this->managementRevision;
-            $created=$this->runs->create($owner,$this->identifier($input['client_request_id']??null),$this->bodyHash($body),$snapshot,$limits['run_budget_ms'],$limits['execution_slots'],$limits['active_run_limit']);
+            $questionHash=hash_hmac('sha256',$body['question'],$this->private->signingKey());
+            $created=$this->runs->create($owner,$this->identifier($input['client_request_id']??null),$this->bodyHash($body),$snapshot,$limits['run_budget_ms'],$limits['execution_slots'],$limits['active_run_limit'],$questionHash);
             if (!$created['accepted']) return ['accepted'=>false,'reason'=>$created['reason'],'failure_guidance'=>$this->failureGuidance($created['reason'],($context['terminal']??null)==='platform'),'message'=>[
                 'RATE_LIMITED'=>'您近期提问较频繁，请稍后再问。',
                 'OTHER_CONVERSATION_ACTIVE'=>'您还有一个对话正在执行，请先完成或停止该任务。',
@@ -206,6 +215,29 @@ final class AiGatewayServices
         $generation=filter_var($input['generation']??null,FILTER_VALIDATE_INT);
         if ($generation===false || $generation<1 || ($proof['run']??'')!==$runId || ($proof['generation']??0)!==$generation) throw new RuntimeException('AI_DELIVERY_INVALID');
         $owner=['account_id'=>(int)$context['account_id'],'terminal'=>$context['terminal'],'conversation_id'=>$proof['conversation'],'window_id'=>$session];
+        if ($operation==='feedback_save') {
+            $source=$this->runs->feedbackSource($owner,$runId,$generation);
+            if ($source['question_hash']==='' || !in_array($source['status'],['COMPLETED','PARTIAL_SUCCEEDED','FAILED'],true)) throw new RuntimeException('AI_FEEDBACK_UNAVAILABLE');
+            $question=$input['question']??null;
+            if (!is_string($question) || $question==='' || strlen($question)>16000
+                || !hash_equals($source['question_hash'],hash_hmac('sha256',trim($question),$this->private->signingKey()))) throw new RuntimeException('AI_FEEDBACK_INVALID');
+            if (in_array($source['status'],['COMPLETED','PARTIAL_SUCCEEDED'],true)) {
+                // Reuse normal delivery's current evidence/permission check. The
+                // saved sample is the server-published answer, never browser JSON.
+                $this->present($context,$owner,$this->runs->get($owner,$runId,$generation));
+                $stored=$this->private->read($source['answer_ref']);$this->assertBinding($stored,$owner,$runId,$generation);
+                $answer=$stored['answer'];
+                if ($source['status']==='PARTIAL_SUCCEEDED') $answer['summary'].=' 数据已核对，但 Excel 文件生成失败。';
+            } else {
+                // Failed Runs have no published answer object. Capture only the
+                // displayed terminal text from the signed owner of that Run.
+                $shown=$input['displayed_answer']??null;
+                if (!is_string($shown) || trim($shown)==='' || strlen($shown)>16000) throw new RuntimeException('AI_FEEDBACK_INVALID');
+                $projected=$this->present($context,$owner,$this->runs->get($owner,$runId,$generation));
+                $answer=['summary'=>$shown,'terminal_status'=>'FAILED','failure_guidance'=>$projected['failure_guidance']??null];
+            }
+            return $this->feedback->save($owner,$source,(string)($input['rating']??''),trim($question),$answer);
+        }
         if ($operation==='cancel') {
             $cancelled=$this->runs->cancel($owner,$runId,$generation);
             // A queued request with no worker claim can never run after this
@@ -7847,6 +7879,7 @@ final class AiGatewayServices
     private function present(array $context,array $owner,array $run): array
     {
         $result=['run_id'=>$run['run_id'],'generation'=>$run['generation'],'version'=>$run['version'],'status'=>$run['status'],'reason'=>$run['reason'],
+            'feedback_available'=>$run['feedback_available']??false,
             'progress'=>$this->progressText($run),'message'=>$this->progressText($run),'run_delivery_token'=>$this->token(['type'=>'run','identity'=>$this->identity($context),'window'=>$owner['window_id'],
                 'conversation'=>$owner['conversation_id'],'run'=>$run['run_id'],'generation'=>$run['generation'],'expires'=>intdiv($run['expires_at'],1000)]),
             'execution_mode'=>$run['execution_mode']??'compatibility',

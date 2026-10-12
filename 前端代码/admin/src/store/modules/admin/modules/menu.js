@@ -17,6 +17,7 @@ import Setting from '@/setting';
 import { filterMoheAiManagementMenu } from '@/libs/moheAiManagementMenu';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
+import Vue from 'vue';
 
 // 客户分析九项统一挂在“会员 → 看板”下，避免旧登录态把它们平铺到
 // “客户”顶栏或生成第二套重复入口。
@@ -131,8 +132,9 @@ function getChilden(data) {
 export default {
   namespaced: true,
   state: {
-    // In-memory server probe only; replacing login user info invalidates it.
-    moheAiVerifiedUser: null,
+    // Keep the server probe bound to the current bearer token; the late user
+    // profile load may replace its object after route verification finishes.
+    moheAiVerifiedToken: null,
     // 顶部菜单
     header: [],
     // 侧栏菜单
@@ -152,7 +154,8 @@ export default {
     filterSider(state, getters, rootState) {
       const userInfo = rootState.admin.user.info;
       // @权限
-      const aiVerified = state.moheAiVerifiedUser !== null && state.moheAiVerifiedUser === userInfo;
+      const currentToken = typeof Vue.prototype.__getToken === 'function' ? Vue.prototype.__getToken() : '';
+      const aiVerified = !!currentToken && state.moheAiVerifiedToken === currentToken;
       const access = aiVerified ? [...(Array.isArray(userInfo.access) ? userInfo.access : []), 'setting-mohe-ai'] : userInfo.access;
       // 后端对 level=0 的平台超级管理员不做菜单权限裁剪；前端也必须保持同一口径，
       // 否则新增的独立报表入口会在菜单中消失并被路由守卫拦截。
@@ -217,7 +220,7 @@ export default {
     }
   },
   mutations: {
-    setMoheAiVerifiedUser(state, user) { state.moheAiVerifiedUser = user; },
+    setMoheAiVerifiedToken(state, token) { state.moheAiVerifiedToken = token; },
     /**
          * @description 设置侧边栏菜单
          * @param {Object} state vuex state

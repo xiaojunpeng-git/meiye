@@ -8,7 +8,8 @@
                 <Header class="i-layout-header" :class="headerClasses" :style="headerStyle" v-show="showHeader" v-resize="handleHeaderWidthChange">
                     <i-header-logo />
                     <!-- <i-header-logo v-if="!isMobile && isHeaderStick && headerFix" /> -->
-                    <!-- <i-header-collapse v-if="(isMobile || showSiderCollapse) && !hideSider" @on-toggle-drawer="handleToggleDrawer" /> -->
+                    <!-- 窄屏没有固定侧栏时，保留打开真实菜单树的入口。 -->
+                    <i-header-collapse v-if="isMobile && !hideSider" @on-toggle-drawer="handleToggleDrawer" />
                     <i-menu-head v-if="headerMenu && !isMobile" ref="menuHead" />
                     <i-header-breadcrumb v-if="showBreadcrumb && !headerMenu && !isMobile" ref="breadcrumb" />
                     <i-header-search v-if="showSearch && !headerMenu && !isMobile && !showBreadcrumb" />

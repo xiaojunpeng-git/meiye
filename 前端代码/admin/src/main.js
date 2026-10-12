@@ -272,7 +272,18 @@ new Vue({
     // 处理路由 得到每一级的路由设置
     this.$store.commit('admin/page/init', frameInRoutes);
     // 加载用户登录的数据
-    this.$store.dispatch('admin/account/load');
+    await this.$store.dispatch('admin/account/load');
+    // A restored session starts from local menu cache. Refresh once so the
+    // current token's server menu can reveal administrator-only AI entries on
+    // ordinary pages too, without requiring a visit to AI settings first.
+    const token = Vue.prototype.__getToken();
+    if (token && token !== 'undefined' && !Vue.prototype.__isAgentPath()) {
+      try {
+        await this.$store.dispatch('admin/menus/getMenusNavList');
+      } catch (ignored) {
+        // Keep the existing page usable if the navigation refresh fails.
+      }
+    }
     // 初始化全屏监听
     this.$store.dispatch('admin/layout/listenFullscreen');
   },

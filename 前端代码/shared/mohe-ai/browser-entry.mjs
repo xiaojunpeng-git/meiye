@@ -50,6 +50,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   `;
   // 两端确认卡共用黑白层级；视觉序号不参与业务选项与权限判断。
   style.textContent += `.card.guidance-card{padding:22px;border:1px solid #e5e5e7;border-radius:22px;background:#fff;color:#202124}.guidance-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:#777;font-size:14px}.guidance-cancel{border:0;background:transparent;color:#777;font-size:13px}.guidance-question{margin:10px 0 18px;font-size:18px;font-weight:600;line-height:1.65}.guidance-label{margin:12px 0 8px;color:#777;font-size:13px}.guidance-option{position:relative;display:flex;align-items:center;gap:12px;margin:6px 0;padding:12px;border:1px solid transparent;border-radius:16px;cursor:pointer}.guidance-option:has(input:checked){background:#f3f3f4;border-color:#d9d9dc}.guidance-option:focus-within{outline:2px solid #737377;outline-offset:2px}.guidance-option input{position:absolute;width:1px;height:1px;opacity:0}.guidance-number{display:flex;align-items:center;justify-content:center;flex:0 0 30px;height:30px;border:1px solid #dedee1;border-radius:50%;background:#f3f3f4;color:#737377;font-size:14px}.guidance-option-label{min-width:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}.guidance-supplement{box-sizing:border-box;width:100%;min-height:88px;padding:12px;border:1px solid #d9d9dc;border-radius:12px;font:inherit;resize:vertical}.guidance-confirm.primary{display:block;margin:18px 0 0 auto;padding:10px 18px;min-height:44px;border:0;border-radius:24px;background:#17191e;color:#fff}.guidance-confirm:disabled{background:#aaa}.guidance-card input[type=date],.guidance-card select{box-sizing:border-box;max-width:100%;min-height:44px}[hidden]{display:none!important}`;
+  style.textContent += `.answer-feedback{display:flex;align-items:center;gap:8px;margin:14px 0;color:#778399;font-size:13px}.answer-feedback button{border:1px solid #d8dee7;background:#fff;border-radius:16px;padding:5px 12px;color:#43536c;cursor:pointer}.answer-feedback button[aria-pressed="true"]{background:#eaf3ff;border-color:#2e86d0;color:#1565a8}.answer-feedback button:disabled{opacity:.6}.answer-feedback-note{font-size:12px}`;
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
   // Gateway codes remain machine-readable for diagnostics, but customer-facing
@@ -77,7 +78,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // and asynchronous results cannot repeatedly pull the viewport to the end.
   function message(text, cls, target = body) { const n = el('div', text, 'message ' + (cls || '')); target.appendChild(n); return n; }
   function activeConversationTurn() { return body && body.querySelector('[data-mohe-ai-active-turn]'); }
-  function appendTranscriptTurn(questionText, answer, elapsedSeconds = 0) {
+  function appendTranscriptTurn(questionText, answer, elapsedSeconds = 0, delivery = null) {
     const turn = el('section', null, 'conversation-turn');
     message(questionText, 'question', turn);
     appendCompletedElapsed(turn, elapsedSeconds);
@@ -88,6 +89,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       && Array.isArray(answer.failure_guidance && answer.failure_guidance.options);
     const displayedAnswer = oldFailureMenu ? { ...answer, summary: '这次暂时未能完成查询，请稍后重试。', failure_guidance: null } : answer;
     renderAnswer(displayedAnswer, false, turn);
+    renderFeedback(turn, questionText, displayedAnswer && displayedAnswer.summary || '', delivery);
     if (displayedAnswer && displayedAnswer.failure_guidance) renderFailureCard(questionText, displayedAnswer, turn);
     // Keep the reading runway at the physical transcript end. Reopened
     // history remains chronological instead of being appended after its gap.
@@ -333,7 +335,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       button.onclick = () => {
         if (pendingCreate || (run && !isTerminal(run.status))) return;
         recoveryDraft = null; conversation = item.id; body.textContent = ''; progress.textContent = '';
-        item.rounds.forEach(row => appendTranscriptTurn(row.question, row.presentation || { summary: row.answer }, row.elapsed_seconds));
+        item.rounds.forEach(row => appendTranscriptTurn(row.question, row.presentation || { summary: row.answer }, row.elapsed_seconds, row));
         body.scrollTop = 0;
         updateWorkspaceTitle(item); renderWorkspaceHistory();
       };
@@ -543,6 +545,35 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     if (answer.table && Array.isArray(answer.table.columns) && Array.isArray(answer.table.rows)) { const table = el('table'); const tr = el('tr'); answer.table.columns.forEach(c => tr.appendChild(el('th',c.label))); table.appendChild(tr); answer.table.rows.forEach(row => { const r = el('tr'); answer.table.columns.forEach(c => r.appendChild(el('td',row[c.key] == null ? '-' : row[c.key]))); table.appendChild(r); }); target.appendChild(table); }
     if (live && answer.export && answer.export.file_ref && run && isTerminal(run.status)) { const source = { ...run }; const download = el('button', '下载 Excel'); download.onclick = async () => { download.disabled = true; try { const blob = await request('GET', '/runs/' + encodeURIComponent(source.run_id) + '/export', { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation }, {binary:true}); const url = URL.createObjectURL(blob); const link = el('a'); link.href = url; link.download = answer.export.filename || '经营数据.xlsx'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); } catch (_) { message('文件暂不可下载，请重新查询。','error'); } finally { download.disabled = false; } }; target.appendChild(download); }
   }
+  // One button pair is attached to the completed Run, never to a mutable
+  // conversation or its individual cards. The server snapshots its answer.
+  function renderFeedback(target, questionText, displayedAnswer, delivery) {
+    if (!delivery || delivery.feedback_available !== true || !delivery.run_id || !delivery.run_delivery_token
+      || !['COMPLETED','PARTIAL_SUCCEEDED','FAILED'].includes(delivery.status || delivery.terminal_status)) return;
+    const source = { ...delivery, client_session_id: delivery.client_session_id || clientSession };
+    const conversationAtRender = conversation;
+    const wrap = el('div', null, 'answer-feedback');
+    const useful = el('button', '有用'); const notUseful = el('button', '没用');
+    useful.type = notUseful.type = 'button';
+    const note = el('span', '', 'answer-feedback-note');
+    const buttons = { useful, not_useful: notUseful };
+    let selected = delivery.feedback_rating || '';
+    const paint = () => Object.entries(buttons).forEach(([rating, button]) => button.setAttribute('aria-pressed', String(selected === rating)));
+    paint();
+    Object.entries(buttons).forEach(([rating, button]) => { button.onclick = async () => {
+      useful.disabled = notUseful.disabled = true;
+      try {
+        await request('POST', '/runs/' + encodeURIComponent(source.run_id) + '/feedback', {
+          client_session_id: source.client_session_id, run_delivery_token: source.run_delivery_token,
+          generation: source.generation, rating, question: questionText, displayed_answer: displayedAnswer
+        });
+        selected = rating; paint(); sessions.setFeedback(conversationAtRender, source.run_id, source.generation, rating);
+        note.textContent = '已记录';
+      } catch (error) { note.textContent = customerErrorMessage(error.message, '评价未保存，请稍后重试。'); }
+      finally { useful.disabled = notUseful.disabled = false; }
+    }; });
+    wrap.append(useful, notUseful, note); target.appendChild(wrap);
+  }
   function binding() { return { client_session_id: clientSession, run_delivery_token: run.run_delivery_token, generation: run.generation }; }
   // An Excel receipt belongs to one completed answer, not to the mutable
   // current Run. Polling it must never hold the composer or delay the answer.
@@ -609,6 +640,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds);
         const answerTurn = activeConversationTurn() || body;
         renderAnswer(run.answer, true, answerTurn);
+        renderFeedback(answerTurn, deliveredQuestion, run.answer.summary || '', { ...run, client_session_id: clientSession });
         // The server decides from the verified business table whether a full
         // file is required. The existing manual Excel choice shares one
         // idempotent task and never delays answer delivery.
@@ -616,7 +648,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         exportRequested = false;
         reportVisibleDeliveryAfterPaint(run);
         const text = run.answer.summary || (run.answer.cards || []).map(c => `${c.metric_name}：${c.display_value}${c.unit || ''}`).join('\n');
-        try { sessions.append(conversation, deliveredQuestion, text, run.answer, run,
+        try { sessions.append(conversation, deliveredQuestion, text, run.answer, { ...run, client_session_id: clientSession },
           { elapsedSeconds, topicBoundary: run.topic_boundary }); } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
       } else {
@@ -634,6 +666,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         finishActiveRunStatus(); appendCompletedElapsed(activeConversationTurn(), elapsedSeconds); progress.textContent = '';
         const answerTurn = activeConversationTurn() || body;
         message(terminalMessage, '', answerTurn);
+        renderFeedback(answerTurn, deliveredQuestion, terminalMessage, { ...run, client_session_id: clientSession });
         const failurePresentation = { summary: terminalMessage, terminal_status: run.status };
         if (safeGuidance) {
           failurePresentation.failure_guidance = safeGuidance;
@@ -658,7 +691,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         // non-contextual so a previous failure never becomes an instruction
         // or a claimed business fact for the next model request.
         try { sessions.append(conversation, deliveredQuestion, terminalMessage,
-          failurePresentation, run,
+          failurePresentation, { ...run, client_session_id: clientSession },
           { contextEligible: false, elapsedSeconds, topicBoundary: run.topic_boundary });
         } catch (_) { message('本机历史保存失败，本次结果仍可查看。', 'error', activeConversationTurn() || body); }
         completeActiveQuestion();
@@ -1166,7 +1199,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     cancel.onclick = stop; close.onclick = () => { stop(); panel.hidden = true; };
     input.onkeydown = event => { if (event.isComposing || event.key !== 'Enter' || event.shiftKey) return; event.preventDefault(); void submitQuestion(); };
     fresh.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) { message('请先确认当前任务状态。'); return; } recoveryDraft = null; finishActiveRunStatus(); conversation = sessions.create().id; body.textContent = ''; progress.textContent = ''; run = null; clearActive(); updateWorkspaceTitle(null); renderWorkspaceHistory(); syncWorkspaceActions(); };
-    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; recoveryDraft = null; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { recoveryDraft = null; conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => appendTranscriptTurn(r.question, r.presentation || {summary:r.answer}, r.elapsed_seconds)); body.scrollTop = 0; }; body.appendChild(b); }); };
+    history.onclick = () => { if (pendingCreate || (run && !isTerminal(run.status))) return; recoveryDraft = null; body.textContent = ''; progress.textContent = ''; sessions.load().slice().reverse().forEach(s => { const b = el('button', conversationTitle(s)); b.onclick = () => { recoveryDraft = null; conversation = s.id; body.textContent = ''; progress.textContent = ''; s.rounds.forEach(r => appendTranscriptTurn(r.question, r.presentation || {summary:r.answer}, r.elapsed_seconds, r)); body.scrollTop = 0; }; body.appendChild(b); }); };
     if (workspace) { renderWorkspaceHistory(); syncWorkspaceActions(); }
     if (record) void resumeActive(record);
   }
