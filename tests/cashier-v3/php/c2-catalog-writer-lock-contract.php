@@ -68,7 +68,8 @@ writerAssert('WRITER-GUARD-03 same-kind ordering reuses the cashier comparator',
     strpos($guard, 'CashierV3ResourceKindCatalog::compareResources') !== false
     && \app\services\cashier\v3\CashierV3ResourceKindCatalog::compareResourceIds('2', '10') < 0);
 writerAssert('WRITER-GUARD-04 resource locks are exact primary-key loops',
-    strpos($guard, "->where('id', \$id)->lock(true)") !== false
+    strpos($guard, "->where('id', \$id)->field('id')->lock(true)") !== false
+    && strpos($guard, "->field('id,product_id,unique,suk,type')->lock(true)") !== false
     && strpos($guard, "->whereIn('id', \$ids)->lock(true)") === false);
 writerAssert('WRITER-GUARD-05 low-order drift rolls back and retries',
     strpos($guard, 'StoreCatalogWritePlanChangedException') !== false
@@ -87,9 +88,9 @@ writerAssert('WRITER-GUARD-08 component reverse discovery participates in planni
     strpos($guard, "whereIn('product_id'") !== false
     && strpos($guard, "column('card_product_id')") !== false);
 writerAssert('WRITER-GUARD-09 new card creation pre-locks the existing component graph',
-    strpos($guard, 'withNewProductCreation(callable $write, array $targetRefs = [])') !== false
-    && strpos($guard, 'return $this->withCatalogMutation([], [], $targetRefs, $write);') !== false
-    && strpos($product, 'withNewProductCreation($catalogWrite, $targetRefs)') !== false);
+    strpos($guard, 'withNewProductCreation(callable $write, array $targetRefs = [], bool $expandReverseCards = true)') !== false
+    && strpos($guard, 'return $this->withCatalogMutation([], [], $targetRefs, $write, true, $expandReverseCards);') !== false
+    && strpos($product, '$catalogGuard->withNewProductCreation(') !== false);
 
 writerAssert('WRITER-REL-01 replace remap status append and delete require a lease',
     strpos($related, 'handleCardRelatedInGuard') !== false
@@ -140,7 +141,7 @@ writerAssert('WRITER-CALL-02 branch sync and delete share the outer lease',
 writerAssert('WRITER-CALL-02A branch sync re-plans stale source and target snapshots',
     strpos($branch, 'StoreBranchProductSyncPlanChangedException') !== false
     && strpos($branch, 'syncProductAttempt') !== false
-    && strpos($branch, '$currentBranchProductInfo = $this->dao->get') !== false
+    && strpos($branch, '$currentBranchProductInfo = $this->readSyncSaleProduct') !== false
     && strpos($branch, "assertSyncSnapshotUnchanged('平台商品 SKU'") !== false
     && strpos($branch, "assertSyncSnapshotUnchanged('平台卡项权益'") !== false);
 writerAssert('WRITER-CALL-03 ERP branch sync uses the canonical guarded service',

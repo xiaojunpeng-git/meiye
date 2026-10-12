@@ -790,6 +790,9 @@ class StoreBranchProductServices extends BaseServices
         }
         /** @var StoreCatalogWriteLockGuard $catalogGuard */
         $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
+        // Card sync changes only this card definition; component sync changes its seed
+        // product/SKU and therefore locks direct referencing cards, but not unrelated peers.
+        $isCardDefinitionSync = (int)$productInfo['product_type'] === 5 && $card_product_id === 0;
         [$id, $is_new] = $catalogGuard->withCatalogMutation(
             $explicitCardIds,
             $catalogProductIds,
@@ -984,7 +987,7 @@ class StoreBranchProductServices extends BaseServices
             if ($attrResult) $productAttrResultServices->setResult($attrResult, $id, 0);
             $productDescriptionServices->saveDescription($id, $description, 0);
             return [$id, $is_new];
-        });
+        }, true, !$isCardDefinitionSync, false);
 
         if ((int)$productInfo['product_type'] === 5 && $sourceCardRelated) {
             ProductSyncStoreJob::dispatchDo(

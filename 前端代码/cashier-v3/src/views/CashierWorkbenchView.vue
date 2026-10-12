@@ -6165,6 +6165,13 @@ async function enqueueCheckoutAction(event = {}) {
     } else if (action === 'submit-checkout') {
       return finalizeLocalCheckoutPreview(event)
     } else if (action === 'query-checkout-result'
+      && preview.businessType !== 'debt_repayment') {
+      // A browser-owned preview has no server checkout session. Query only
+      // the original command key; never send its cart snapshot as a new write.
+      const queried = await requestCheckoutAction({ action, payload })
+      event?.resolve?.(queried)
+      return queried
+    } else if (action === 'query-checkout-result'
       && preview.businessType === 'debt_repayment') {
       // 结果未知时只凭原确认命令查询成功事实；页面没有也不需要草稿 ID。
       const queried = await requestAction('query-debt-repayment-result', {
@@ -6277,6 +6284,51 @@ async function requestCheckoutAction({ action, payload }) {
   if (action === 'open-balance-payment') action = 'apply-balance-payment'
 
   if (action === 'open-checkout-source-selector') return openCheckoutBusinessSourceSelector('sale')
+
+  if (action === 'query-checkout-result'
+    && localCheckoutPreview.value?.localDraftPreview === true
+    && localCheckoutPreview.value?.businessType !== 'debt_repayment') {
+    const originalIdempotencyKey = String(payload?.originalIdempotencyKey || '')
+    if (!originalIdempotencyKey.startsWith('CHECKOUT-')) {
+      return { result: { status: 'result_unknown', code: 'ORIGINAL_IDEMPOTENCY_KEY_MISSING',
+        message: '原结账请求标识缺失，不能重新提交或确认成功。' } }
+    }
+    const queried = await requestAction('query-checkout-result', {
+      originalIdempotencyKey,
+      queryOnly: true
+    })
+    const projected = authoritativeCheckoutResult(queried, {
+      originalIdempotencyKey,
+      checkoutRequestId: String(payload?.checkoutRequestId || ''),
+      stateContextId: String(state.stateContextId || '')
+    })
+    // Only a response bound to this read-only request can release the
+    // uncertain checkout. A transport success alone proves no business fact.
+    const status = projected?.status || 'result_unknown'
+    const businessNo = String(projected?.salesOrder?.orderNo
+      || projected?.entitlementCompletion?.receiptId || '')
+    checkoutLocalOutcome.value = {
+      status,
+      message: projected?.message || '原结账结果暂时无法核验，请继续查询，勿重复提交。',
+      completionDescription: projected?.message || '',
+      requestNo: businessNo,
+      checkoutRequestId: String(projected?.checkoutRequest?.requestId || ''),
+      salesOrderId: String(projected?.salesOrder?.orderId || ''),
+      salesOrderNo: String(projected?.salesOrder?.orderNo || ''),
+      originalIdempotencyKey,
+      canClose: status === 'succeeded' || status === 'failed',
+      canRetry: false
+    }
+    const envelope = cashierV3ResponseEnvelope(queried)
+    return {
+      ...envelope,
+      result: {
+        ...(isRecord(envelope.result) ? envelope.result : {}),
+        status,
+        message: checkoutLocalOutcome.value.message
+      }
+    }
+  }
 
   // Local preview submissions have no checkout session or server draft by
   // design. They bypass the follow-up command context builder and send the

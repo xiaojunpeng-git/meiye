@@ -508,9 +508,14 @@ const originalCheckoutIdempotencyKey = computed(() => (
 const showSubmissionLongRunning = computed(() => isSubmitRequested.value && submissionLongRunning.value && !isResultStep.value)
 const canQueryCheckoutResult = computed(() => (
   (isUncertain.value || isPaymentSucceededServicePending.value || showSubmissionLongRunning.value)
-  && (isDebtRepayment.value || isRechargeCheckout.value || Boolean(checkoutRequestIdentity.value))
+  && (props.checkout.localDraftPreview === true || isDebtRepayment.value
+    || isRechargeCheckout.value || Boolean(checkoutRequestIdentity.value))
   && Boolean(originalCheckoutIdempotencyKey.value)
 ))
+// A checkout without sale lines is a service completion, not a recharge.
+const submissionSubject = computed(() => (isRechargeCheckout.value
+  ? '充值'
+  : (hasEntitlementLines.value && !hasSaleLines.value ? '服务' : '结账')))
 const resultTitle = computed(() => {
   if (isSucceeded.value) {
     if (isDebtRepayment.value) return '还款成功'
@@ -1503,8 +1508,8 @@ onBeforeUnmount(() => {
         </dl>
         <section v-if="showSubmissionLongRunning" class="checkout-processing-hint" role="status" aria-live="polite">
           <strong>正在提交，处理时间较长</strong>
-          <span>系统仍在处理本次充值，请勿重复提交；如长时间无响应，可查询原充值结果。</span>
-          <button type="button" class="button button--secondary" @click="queryOriginalCheckoutResult">查询原充值结果</button>
+          <span>系统仍在处理本次{{ submissionSubject }}，请勿重复提交；如长时间无响应，可查询原{{ submissionSubject }}结果。</span>
+          <button type="button" class="button button--secondary" :disabled="!canQueryCheckoutResult" @click="queryOriginalCheckoutResult">查询原{{ submissionSubject }}结果</button>
         </section>
         <section v-if="finalChanges.length || checkout.finalValidationMessage" class="checkout-final-changes">
           <div>

@@ -745,7 +745,7 @@ class WriteOffOrderServices extends BaseServices
         if ($cartIds) {//商城存在部分核销
             $ids = array_unique(array_column($cartIds, 'cart_id'));
             //订单下原商品信息
-            $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'cart_id' => $ids, 'is_writeoff' => 0] + $where, 'id,cart_id,cart_num,surplus_num,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,debt_amount,repaid_debt_amount,cart_info', 'cart_id');
+            $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'cart_id' => $ids, 'is_writeoff' => 0] + $where, 'id,oid,cart_id,cart_num,surplus_num,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,debt_amount,repaid_debt_amount,cart_info', 'cart_id');
             if (count($ids) != count($cartInfo)) {
                 throw new ValidateException('订单中有商品已核销');
             }
@@ -771,7 +771,8 @@ class WriteOffOrderServices extends BaseServices
                 if (!$info) {
                     throw new ValidateException('核销商品不存在');
                 }
-                // 收银台项目购买支付后自动核销：当场消耗服务，不受欠款次数限制
+                // 新买即用可以跳过旧的按金额折算次数限制，但不能绕过已售卡的整卡欠款禁用策略。
+                $this->assertCardDebtWriteoffAllowed($info, $orderInfo);
                 if (!$isAuto) {
                     $this->assertWriteoffWithinDebtLimit($info, (int)$cart['cart_num'], $orderInfo);
                 }
@@ -798,7 +799,7 @@ class WriteOffOrderServices extends BaseServices
             }
         } else {//整单核销
             $price = WriteoffIntegerAmount::truncate($orderInfo['pay_price'] ?? 0);
-            $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'is_writeoff' => 0] + $where, 'id,cart_id,cart_num,surplus_num,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,debt_amount,repaid_debt_amount', 'cart_id');
+            $cartInfo = $cartInfoServices->getCartColunm(['oid' => $orderInfo['id'], 'is_writeoff' => 0] + $where, 'id,oid,cart_id,cart_num,surplus_num,product_id,write_times,write_surplus_times,write_start,write_end,pay_price,debt_amount,repaid_debt_amount,cart_info', 'cart_id');
             foreach ($cartIds ?: array_map(function ($row) {
                 return ['cart_id' => $row['cart_id'], 'cart_num' => $row['write_surplus_times'] ?? 0];
             }, $cartInfo) as $cart) {
@@ -806,6 +807,9 @@ class WriteOffOrderServices extends BaseServices
                     continue;
                 }
                 $info = $cartInfo[$cart['cart_id']] ?? [];
+                if ($info) {
+                    $this->assertCardDebtWriteoffAllowed($info, $orderInfo);
+                }
                 if ($info && !$isAuto) {
                     $this->assertWriteoffWithinDebtLimit($info, (int)($cart['cart_num'] ?? 0), $orderInfo);
                 }
@@ -1330,14 +1334,16 @@ class WriteOffOrderServices extends BaseServices
     }
 
     /**
-     * 核销时解析购物车行待还欠款（含订单级欠款分摊）
+     * 核销时解析购物车行待还欠款（含订单级欠款分摊）。
+     * cancelledDebt 仅供同一次只读投影复用已核对的来源事实；提交必须留空并重查。
      */
     protected function resolveCartPendingDebtForWriteoff(
         array $cartRow,
         float $orderPendingDebt = 0,
         array $orderInfo = [],
         array $orderCartRows = [],
-        bool $allowRowLock = true
+        bool $allowRowLock = true,
+        ?string $cancelledDebt = null
     ): float
     {
         // 替换命令已按来源可用次数锁内扣减。目标行不再承接原订单欠款；
@@ -1347,7 +1353,7 @@ class WriteOffOrderServices extends BaseServices
         }
         // R50：取消是不再收取、也不再可用的金额，不得随欠款状态3解除核销限制。
         // 沿用固定来源明细权重分摊；清除旧行欠款字段，避免取消额与旧欠款重复扣除。
-        $cancelled = $this->cancelledEntitlementAmount($orderInfo, $allowRowLock);
+        $cancelled = $cancelledDebt ?? $this->cancelledEntitlementAmount($orderInfo, $allowRowLock);
         if (bccomp($cancelled, '0', 2) > 0) {
             if ((int)($cartRow['is_gift'] ?? 0) === 1) return 0.0;
             $rows = $this->debtAllocationRows($cartRow, $orderInfo, $orderCartRows);
@@ -1510,7 +1516,8 @@ class WriteOffOrderServices extends BaseServices
     }
 
     /**
-     * 扣除欠款占用后的可核销次数
+     * 返回扣除欠款占用后的可核销次数。
+     * 三个覆盖值仅供同一快照的只读投影去重查询；核销提交保持默认值，重新校验来源债务和共享次数。
      */
     public function calcEffectiveWriteSurplusTimes(
         array $cartRow,
@@ -1518,20 +1525,27 @@ class WriteOffOrderServices extends BaseServices
         array $orderInfo = [],
         ?string $remainingAmount = null,
         array $orderCartRows = [],
-        bool $allowRowLock = true
+        bool $allowRowLock = true,
+        ?string $cardPendingDebt = null,
+        ?string $cancelledDebt = null,
+        ?int $sharedLimitOverride = null
     ): int
     {
+        if ($this->cardDebtBlocksWriteoff($cartRow, $orderInfo, $allowRowLock, $cardPendingDebt)) {
+            return 0;
+        }
         $pending = $this->resolveCartPendingDebtForWriteoff(
             $cartRow,
             $orderPendingDebt,
             $orderInfo,
             $orderCartRows,
-            $allowRowLock
+            $allowRowLock,
+            $cancelledDebt
         );
         $effective = $this->calcDebtLimitedTimesByRemainingAmount($cartRow, $pending, $remainingAmount);
         // 共享池按整卡核对待还/取消额，避免零金额子项目绕开逐行分摊；
         // 恢复欠款但未补交时仍占用次数，独立项目继续保留原分摊口径。
-        $sharedLimit = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
+        $sharedLimit = $sharedLimitOverride ?? (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
             ->debtLimitForDetail($cartRow, $orderInfo, $allowRowLock);
         if ($sharedLimit !== null) $effective = min($effective, $sharedLimit);
         return $effective;
@@ -1613,6 +1627,7 @@ class WriteOffOrderServices extends BaseServices
         if ($cartNum > $surplus) {
             throw new ValidateException('核销数量超出剩余总核销次数');
         }
+        $this->assertCardDebtWriteoffAllowed($cartRow, $orderInfo);
         $orderPendingDebt = $orderInfo ? $this->resolveOrderPendingDebt($orderInfo) : 0.0;
         $effective = $this->calcEffectiveWriteSurplusTimes($cartRow, $orderPendingDebt, $orderInfo);
         if ($cartNum > $effective) {
@@ -1625,6 +1640,39 @@ class WriteOffOrderServices extends BaseServices
                 throw new ValidateException($this->getFullDebtWriteoffMessage());
             }
             throw new ValidateException($this->getDebtWriteoffLimitMessage());
+        }
+    }
+
+    /** 新售卡策略从权益行快照读取，不能回查当前商品设置而追溯改变旧卡。 */
+    private function cardDebtBlocksWriteoff(array $cartRow, array $orderInfo, bool $allowRowLock = true, ?string $cardPendingDebt = null): bool
+    {
+        $snapshot = $cartRow['cart_info'] ?? [];
+        $snapshot = is_string($snapshot) ? json_decode($snapshot, true) : $snapshot;
+        if (!is_array($snapshot) || (int)($snapshot['block_writeoff_on_debt'] ?? 0) !== 1) {
+            return false;
+        }
+        $memberId = (int)($orderInfo['uid'] ?? 0);
+        if ($memberId <= 0 || (int)($cartRow['oid'] ?? 0) !== (int)($orderInfo['id'] ?? 0)) {
+            throw new ValidateException('卡项来源不完整，暂不能核销');
+        }
+        if ($cardPendingDebt !== null) {
+            // 只读列表已按该来源订单解析过待还额；提交路径不传缓存，仍重新锁定权威债务。
+            $pending = $cardPendingDebt;
+        } else {
+            $lock = $allowRowLock && \app\services\cashier\v3\CashierV3TransactionGuard::isInTransaction();
+            $v3Debt = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
+                ->pendingV3CardDebt($orderInfo, $memberId, $lock);
+            // V3 购买每张卡有独立销售明细；旧购买仍以原订单有效待还额为准。
+            $pending = $v3Debt !== null ? $v3Debt : (string)$this->resolveOrderPendingDebt($orderInfo);
+        }
+        return bccomp($pending, '0', 2) > 0;
+    }
+
+    /** 所有提交路径（含自动核销）必须在服务端检查，不能仅依赖选择器禁用。 */
+    private function assertCardDebtWriteoffAllowed(array $cartRow, array $orderInfo): void
+    {
+        if ($this->cardDebtBlocksWriteoff($cartRow, $orderInfo)) {
+            throw new ValidateException('该卡有欠款，暂不可核销，请先结清欠款');
         }
     }
 

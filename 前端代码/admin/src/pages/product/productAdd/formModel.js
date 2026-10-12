@@ -11,6 +11,7 @@ export const defaultObj = {
   card_rule_version: 0,
   card_choice_limit: 0,
   card_shared_times: 0,
+  block_writeoff_on_debt: 0, // 仅新售卡冻结此规则，历史已售权益不追溯。
   system_form_type: 1,
   disk_info: "", //卡密简介
   presale_day: 1, //预售发货时间-结束

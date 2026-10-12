@@ -30,7 +30,9 @@ export function authoritativeCheckoutResult(rawResult, expected = {}) {
   const originalIdempotencyKey = nonEmpty(expected.originalIdempotencyKey)
   const checkoutRequestId = nonEmpty(expected.checkoutRequestId)
   const stateContextId = nonEmpty(expected.stateContextId)
-  if (!originalIdempotencyKey || !checkoutRequestId || !stateContextId) return null
+  // Browser-only checkout previews have no server request ID until a receipt
+  // exists. Bind them to the original command and response correlation first.
+  if (!originalIdempotencyKey || !stateContextId) return null
 
   const correlationId = nonEmpty(envelope.correlationId)
   if (nonEmpty(envelope.boundAction) !== CHECKOUT_RESULT_ACTION
@@ -62,23 +64,32 @@ export function authoritativeCheckoutResult(rawResult, expected = {}) {
   if (['success', 'succeeded'].includes(status)) {
     const request = isRecord(dto.checkoutRequest) ? dto.checkoutRequest : null
     const order = isRecord(dto.salesOrder) ? dto.salesOrder : null
+    const entitlement = isRecord(dto.entitlementCompletion) ? dto.entitlementCompletion : null
+    const composition = nonEmpty(dto.composition)
     if (phase !== 'succeeded'
       || !request
-      || nonEmpty(request.requestId) !== checkoutRequestId
+      || !/^CKR-[0-9a-f]{40}$/.test(nonEmpty(request.requestId))
+      || (checkoutRequestId && nonEmpty(request.requestId) !== checkoutRequestId)
       || nonEmpty(request.requestStatus) !== 'succeeded'
       || positiveVersion(request.requestVersion) === null
-      || !order
-      || !nonEmpty(order.orderId)
-      || !nonEmpty(order.orderNo)
-      || nonEmpty(order.orderStatus) !== 'settled'
-      || positiveVersion(order.orderVersion) === null) {
+      || !['sale_only', 'mixed', 'entitlement_only'].includes(composition)
+      || (composition !== 'entitlement_only' && (!order
+        || !nonEmpty(order.orderId) || !nonEmpty(order.orderNo)
+        || nonEmpty(order.orderStatus) !== 'settled'
+        || positiveVersion(order.orderVersion) === null))
+      || (composition === 'entitlement_only' && order)
+      || (composition !== 'sale_only' && (!entitlement
+        || !/^ECR-[0-9a-f]{40}$/.test(nonEmpty(entitlement.receiptId))
+        || nonEmpty(entitlement.receiptStatus) !== 'completed'))
+      || (composition === 'sale_only' && entitlement)) {
       return null
     }
     return {
       ...base,
       status: 'succeeded',
       checkoutRequest: { ...request },
-      salesOrder: { ...order }
+      salesOrder: order ? { ...order } : null,
+      entitlementCompletion: entitlement ? { ...entitlement } : null
     }
   }
 

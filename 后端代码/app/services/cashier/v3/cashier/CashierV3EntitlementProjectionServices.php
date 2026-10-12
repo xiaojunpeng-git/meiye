@@ -709,6 +709,9 @@ final class CashierV3EntitlementProjectionServices
             }
         }
         $projectsByHolder = [];
+        $pendingByOrder = [];
+        $cancelledByOrder = [];
+        $sharedLimitByHolder = [];
         $now = time();
         foreach ($snapshot['carts'] as $cart) {
             $detailId = (int)$cart['id'];
@@ -720,7 +723,16 @@ final class CashierV3EntitlementProjectionServices
             }
             $ruleAuthority = $ruleAuthoritiesByHolder[(int)$holder['id']][$detailId] ?? null;
             $sourceOrderUnavailableReason = $this->sourceOrderUnavailableReason($order);
-            $pendingDebt = $this->pendingDebt($order, $debts[(int)$order['id']] ?? null);
+            $orderId = (int)$order['id'];
+            // 同张卡的多个项目共享一笔来源待还额；列表只读一次，提交时仍重新查锁定债务。
+            if (!array_key_exists($orderId, $pendingByOrder)) {
+                $pendingByOrder[$orderId] = $this->pendingDebt($order, $debts[$orderId] ?? null);
+            }
+            $pendingDebt = $pendingByOrder[$orderId];
+            if (!array_key_exists($orderId, $cancelledByOrder)) {
+                $cancelledByOrder[$orderId] = (new CashierV3CardOriginDebtResolver())
+                    ->cancelledCardDebt($order, (int)($order['uid'] ?? 0), (string)($order['tenant_id'] ?? '0'), false);
+            }
             $decoded = is_string($cart['cart_info'] ?? null)
                 ? json_decode((string)$cart['cart_info'], true)
                 : ($cart['cart_info'] ?? []);
@@ -747,6 +759,11 @@ final class CashierV3EntitlementProjectionServices
             $sharedPurchase = is_array($ruleAuthority)
                 && (string)$ruleAuthority['ruleType'] === 'choice_count'
                 && !$centCapableOperationDetail;
+            $holderId = (int)$holder['id'];
+            if ($sharedPurchase && !array_key_exists($holderId, $sharedLimitByHolder)) {
+                // 同一任选次卡的项目共享次数限制；只读投影复用一次，提交仍逐笔重新核验。
+                $sharedLimitByHolder[$holderId] = $this->cardRules->debtLimitForDetail($cart, $order, false);
+            }
             if ($sharedPurchase) {
                 // 任选次数卡只有一份整卡购买金额。项目分摊事实不能再除以
                 // 共享总次数，否则选择桃花灸和背部 spa 会得出不同单次金额。
@@ -773,7 +790,11 @@ final class CashierV3EntitlementProjectionServices
                 (float)$pendingDebt,
                 $order,
                 $amounts['remainingAmount'],
-                $cartsByOrder[(int)$order['id']] ?? []
+                $cartsByOrder[$orderId] ?? [],
+                false,
+                $pendingDebt,
+                $cancelledByOrder[$orderId],
+                $sharedPurchase ? $sharedLimitByHolder[$holderId] : null
             );
             if (is_array($ruleAuthority)) {
                 $effective = min($rawSurplus, max(0, (int)$effective));
@@ -804,6 +825,10 @@ final class CashierV3EntitlementProjectionServices
                 $reason = '卡项当前不可用';
             } elseif (is_array($ruleAuthority) && empty($ruleAuthority['choiceAvailable'])) {
                 $reason = '已达到任选项目种数';
+            } elseif ((int)($decoded['block_writeoff_on_debt'] ?? 0) === 1
+                && bccomp((string)$pendingDebt, '0', 2) > 0) {
+                // 与核销提交读取同一已售卡快照及卡来源待还额，不能以会员总欠款误拦其他卡。
+                $reason = '该卡有欠款，请先结清';
             } elseif ($available <= 0 && $debtBlocked > 0) {
                 $reason = '欠款限制后暂无可用次数';
             } elseif ($available <= 0) {
@@ -1055,6 +1080,8 @@ final class CashierV3EntitlementProjectionServices
         $query = Db::name('store_order_cart_info')->alias('ci')
             ->join('store_order o', 'o.id = ci.oid AND o.uid = ci.uid')
             ->where('ci.uid', $memberId)
+            // 与关联条件等价；显式限定订单会员，让历史赠送查询走订单 uid 索引。
+            ->where('o.uid', $memberId)
             ->where('ci.cart_type', 2)
             ->where('ci.product_type', 6)
             ->where('ci.is_gift', 1)

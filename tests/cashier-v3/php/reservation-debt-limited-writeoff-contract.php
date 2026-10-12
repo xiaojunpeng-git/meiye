@@ -37,10 +37,10 @@ $order = ['id' => 1617982, 'uid' => 1003991, 'debt_amount' => '5480.00', 'repaid
 // 该公式测试明确提供“未取消”事实；取消审计读取及行锁由 R50 MySQL 测试覆盖。
 $writeoff = new class extends WriteOffOrderServices {
     public function __construct() {}
-    protected function cancelledEntitlementAmount(array $order): string { return '0.00'; }
+    protected function cancelledEntitlementAmount(array $order, bool $allowRowLock = true): string { return '0.00'; }
 };
-$available = $writeoff->calcEffectiveWriteSurplusTimes($detail, 5480.00, $order, null, [$detail]);
-$fullyBlocked = $writeoff->calcEffectiveWriteSurplusTimes($detail, 6980.00, $order, null, [$detail]);
+$available = $writeoff->calcEffectiveWriteSurplusTimes($detail, 5480.00, $order, null, [$detail], false, null, '0.00', 30);
+$fullyBlocked = $writeoff->calcEffectiveWriteSurplusTimes($detail, 6980.00, $order, null, [$detail], false, null, '0.00', 30);
 
 reservationDebtCheck('reported partial debt leaves six usable times', $available === 6);
 reservationDebtCheck('one reservation use is allowed by the partial-debt limit', $available >= 1);
