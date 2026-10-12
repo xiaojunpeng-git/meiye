@@ -4,7 +4,7 @@
  * The old eight-module layout uses the current H5 component schema, while all 16
  * homepage/navigation images are served from 008's own static directory.
  *
- * Usage on the named server: php customer_008_morestore_mall_apply.php check|apply|verify
+ * Usage on the named server: php customer_008_morestore_mall_apply.php check|apply|repair-check|repair|verify
  */
 declare(strict_types=1);
 
@@ -13,7 +13,9 @@ const MALL_PUBLIC = '/www/wwwroot/008.cc3798.com/public';
 const MALL_BACKUP_DIR = '/www/backups/008.cc3798.com';
 const MALL_PLAN = __DIR__ . '/customer_008_morestore_mall_homepage_plan.json';
 const MALL_ASSETS = __DIR__ . '/customer_008_morestore_mall_assets.json';
-const MALL_VERSION = '008-morestore-mall-20261013-r3';
+const MALL_VERSION = '008-morestore-mall-20261013-r4';
+const MALL_PREVIOUS_VERSION = '008-morestore-mall-20261013-r3';
+const MALL_PREVIOUS_VALUE_SHA256 = 'e01d19b530667076159c44385c5505db8766d448e800cafefc0f7be4657299dd';
 
 /** Bind every write to the 008 database and its historical MySQL 3307 port. */
 function mallDb(): PDO
@@ -103,6 +105,25 @@ function mallPreflight(PDO $db): void
     }
 }
 
+/** Limit the follow-up to the one retired coupon route in the imported 008 page. */
+function mallRepairPreflight(PDO $db, array $plan): array
+{
+    $row = $db->query('SELECT id,version,value FROM eb_diy ORDER BY id')->fetch();
+    if (!$row || (int)$db->query('SELECT COUNT(*) FROM eb_diy')->fetchColumn() !== 1
+        || (int)$row['id'] !== 1 || $row['version'] !== MALL_PREVIOUS_VERSION
+        || hash('sha256', (string)$row['value']) !== MALL_PREVIOUS_VALUE_SHA256) {
+        throw new RuntimeException('008 DIY no longer matches the imported r3 page');
+    }
+    $updated = str_replace('/pages/users/user_get_coupon/index',
+        '/pages/activity/coupon/index', (string)$row['value'], $replacements);
+    $expected = json_encode($plan['homepage']['value'],
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    if ($replacements !== 1 || $updated !== $expected) {
+        throw new RuntimeException('Coupon route is not the sole DIY change');
+    }
+    return [$row, $expected];
+}
+
 /** Keep a private rollback snapshot of the single table modified here. */
 function mallBackup(PDO $db): string
 {
@@ -164,12 +185,12 @@ function mallVerify(PDO $db, array $plan, array $manifest): array
         'local_images' => count($manifest['assets'])];
 }
 
-/** Check is read-only; apply is the only path that writes the named instance. */
+/** Check modes are read-only; apply and repair write only the named instance. */
 function mallMain(array $argv): void
 {
     $mode = $argv[1] ?? '';
-    if (!in_array($mode, ['check', 'apply', 'verify'], true)) {
-        throw new RuntimeException('Use check, apply or verify');
+    if (!in_array($mode, ['check', 'apply', 'repair-check', 'repair', 'verify'], true)) {
+        throw new RuntimeException('Use check, apply, repair-check, repair or verify');
     }
     [$plan, $manifest] = mallPlan();
     $db = mallDb();
@@ -184,10 +205,44 @@ function mallMain(array $argv): void
             'result' => mallVerify($db, $plan, $manifest)], JSON_PRETTY_PRINT), "\n";
         return;
     }
+    if ($mode === 'repair-check') {
+        [$row] = mallRepairPreflight($db, $plan);
+        mallCheckFiles($manifest);
+        echo json_encode(['mode' => 'repair-check', 'target' => 'mohe_008',
+            'diy_id' => (int)$row['id'], 'from' => MALL_PREVIOUS_VERSION,
+            'to' => MALL_VERSION], JSON_PRETTY_PRINT), "\n";
+        return;
+    }
     $lock = $db->prepare('SELECT GET_LOCK(?, 0)');
     $lock->execute(['mohe_008_mall_diy_20261013']);
     if ((int)$lock->fetchColumn() !== 1) throw new RuntimeException('008 DIY import lock is busy');
     try {
+        if ($mode === 'repair') {
+            [$previous, $encoded] = mallRepairPreflight($db, $plan);
+            mallCheckFiles($manifest);
+            $backup = mallBackup($db);
+            $db->beginTransaction();
+            try {
+                mallRepairPreflight($db, $plan);
+                $change = $db->prepare('UPDATE eb_diy SET value=?,default_value=?,version=?,update_time=?
+                    WHERE id=? AND version=? AND SHA2(value,256)=?');
+                $change->execute([$encoded, $encoded, MALL_VERSION, time(),
+                    (int)$previous['id'], MALL_PREVIOUS_VERSION, MALL_PREVIOUS_VALUE_SHA256]);
+                if ($change->rowCount() !== 1) {
+                    throw new RuntimeException('008 DIY changed during coupon route repair');
+                }
+                $db->commit();
+            } catch (Throwable $error) {
+                if ($db->inTransaction()) $db->rollBack();
+                throw $error;
+            }
+            mallInvalidateCache();
+            echo json_encode(['mode' => 'repair', 'target' => 'mohe_008',
+                'backup' => $backup, 'backup_sha256' => hash_file('sha256', $backup),
+                'verified' => mallVerify($db, $plan, $manifest)],
+                JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), "\n";
+            return;
+        }
         mallPreflight($db);
         mallCheckFiles($manifest);
         $backup = mallBackup($db);

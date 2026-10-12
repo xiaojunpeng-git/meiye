@@ -712,7 +712,7 @@
                 },
                 {
                   "title": "链接",
-                  "value": "/pages/users/user_get_coupon/index",
+                  "value": "/pages/activity/coupon/index",
                   "tips": "请输入链接",
                   "max": 100
                 }
@@ -3188,5 +3188,5 @@
     },
     "timestamp": 1739164852888010
   },
-  "version": "008-morestore-mall-20261013-r3"
+  "version": "008-morestore-mall-20261013-r4"
 }
