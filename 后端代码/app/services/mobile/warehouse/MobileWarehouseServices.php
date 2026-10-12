@@ -86,19 +86,18 @@ final class MobileWarehouseServices
         if ($rankingPage < 1 || $rankingPage > 10000) {
             throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '排行页码无效。', 'rankingPage');
         }
-        $rankingStoreIds = $rankingCode === 'store'
-            ? ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION ? $scopeStoreIds : $validStoreIds)
-            : [];
+        $selectedStoreScope = (string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE && $showStoreRanking;
+        // 六类排行以已授权门店为边界；指定门店入口不受工作台当前单店限制，组织入口只按用户主动选择的节点缩小范围。
+        $rankingScopeStoreIds = $selectedStoreScope ? $validStoreIds : $scopeStoreIds;
         if ($rankingPage > 1) {
             // 续页只读当前已授权排行，避免重复计算概览与趋势；组织排行仍是当前层级概览。
             if ((string)($input['rankingCode'] ?? '') !== $rankingCode || $rankingCode === 'organization') {
                 throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限不能读取该排行续页。');
             }
             return ['warehouse' => $rankingCode === 'store'
-                ? $this->storeRankingPage($rankingStoreIds, $stores, $period, $rankingOrder, $rankingPage)
-                : $this->factRankingPage($rankingCode, $scopeStoreIds, $period, $rankingOrder, $rankingPage)];
+                ? $this->storeRankingPage($rankingScopeStoreIds, $stores, $period, $rankingOrder, $rankingPage)
+                : $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, $rankingPage)];
         }
-        $selectedStoreScope = (string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE && $showStoreRanking;
         $metrics = $this->summaryMetrics($scopeStoreIds, $period);
         // 指定门店的组织排行跨越全部授权门店，趋势必须使用相同范围；
         // 页面顶部的工作台汇总仍保持当前门店口径。
@@ -125,7 +124,7 @@ final class MobileWarehouseServices
                 // 指定门店入口的当前节点固定为一家门店；另建仅用于排行的
                 // 权限裁剪组织投影，避免把单店误当成全部授权门店。
                 $rankingHierarchy = $this->hierarchy->project(
-                    $organizations, $stores, $bindings, $validStoreIds
+                    $organizations, $stores, $bindings, $rankingScopeStoreIds
                 );
                 $rankingHierarchyRows = $rankingHierarchy['rows'];
                 $childOrganizations = array_filter($rankingHierarchyRows, static function (array $row): bool {
@@ -145,15 +144,13 @@ final class MobileWarehouseServices
             }
             $rankingRows = $this->organizationRanking($rankingHierarchyRows, $rankingOrder);
         } elseif ($rankingCode === 'store') {
-            // 组织模式取当前组织及下级的授权门店；精确门店模式的当前节点
-            // 只是工作台门店，排行必须覆盖全部被指定的门店；时间与上方筛选一致。
-            $storePage = $this->storeRankingPage($rankingStoreIds, $stores, $period, $rankingOrder, 1);
+            $storePage = $this->storeRankingPage($rankingScopeStoreIds, $stores, $period, $rankingOrder, 1);
             $rankingRows = $storePage['rankingRows'];
             $rankingRange = $storePage['rankingRange'];
             $rankingTotal = $storePage['rankingTotal'];
             $rankingHasMore = $storePage['rankingHasMore'];
         } else {
-            $factPage = $this->factRankingPage($rankingCode, $scopeStoreIds, $period, $rankingOrder, 1);
+            $factPage = $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, 1);
             $rankingRows = $factPage['rankingRows'];
             $rankingRange = $factPage['rankingRange'];
             $rankingTotal = $factPage['rankingTotal'];
