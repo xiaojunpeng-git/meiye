@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
+import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 
 const props = defineProps({
   member: {
@@ -50,6 +51,8 @@ const repaymentSourcesLoading = ref(false)
 const repaymentSourcesError = ref('')
 const repaymentSourcePrimaryId = ref(0)
 const repaymentSourceSecondaryId = ref(0)
+const repaymentRewardAmountCents = ref(0)
+const isRepaymentRewardOpen = ref(false)
 let repaymentSourceLoadToken = 0
 // 欠款补交使用同一套记账收款代码；这里只提供可选项，落账权限和事实由最终提交重验。
 const paymentMethods = [
@@ -100,6 +103,13 @@ const selectedRepaymentPrimary = computed(() => repaymentSources.value.find(
   (source) => Number(source.id) === Number(repaymentSourcePrimaryId.value)
 ) || null)
 const repaymentSourceChildren = computed(() => selectedRepaymentPrimary.value?.children || [])
+// 只按本次选中的来源判断，不能继承原销售的奖励或收银工具栏的奖励。
+const isCrossIndustryRepayment = computed(() => /^G(?:\s|异业|$)/u.test(String(
+  selectedRepaymentPrimary.value?.name || (Number(historicalPrimaryOption.value?.primarySourceId) === Number(repaymentSourcePrimaryId.value) ? historicalPrimaryOption.value?.primarySourceNameSnapshot : '') || ''
+).trim()))
+const repaymentRewardSources = computed(() => historicalPrimaryOption.value
+  ? [...repaymentSources.value, { id: Number(historicalPrimaryOption.value.primarySourceId), name: historicalPrimaryOption.value.primarySourceNameSnapshot }]
+  : repaymentSources.value)
 const historicalPrimaryOption = computed(() => originalRepaymentSource.value
   && Number(originalRepaymentSource.value.primarySourceId) > 0
   && !repaymentSources.value.some((source) => Number(source.id) === Number(originalRepaymentSource.value.primarySourceId))
@@ -118,6 +128,8 @@ watch(records, (nextRecords) => {
   salespersonAllocations.value = []
   repaymentSourcePrimaryId.value = 0
   repaymentSourceSecondaryId.value = 0
+  repaymentRewardAmountCents.value = 0
+  isRepaymentRewardOpen.value = false
   validationMessage.value = ''
 }, { immediate: true })
 
@@ -161,6 +173,8 @@ function selectRepayment(record) {
   // 原单快照仅作默认选择。历史导入欠款可能没有来源，此时必须由操作员明确选择。
   repaymentSourcePrimaryId.value = Number(record.originalBusinessSource?.primarySourceId || 0)
   repaymentSourceSecondaryId.value = Number(record.originalBusinessSource?.secondarySourceId || 0)
+  repaymentRewardAmountCents.value = 0
+  isRepaymentRewardOpen.value = false
   loadRepaymentSources()
   validationMessage.value = ''
 }
@@ -182,13 +196,25 @@ async function loadRepaymentSources() {
   }
 }
 
+// 手动重选来源才打开奖励输入；取消不写入，已确认金额可再次打开修改。
+function changeRepaymentSource() {
+  repaymentSourceSecondaryId.value = 0
+  repaymentRewardAmountCents.value = 0
+  isRepaymentRewardOpen.value = isCrossIndustryRepayment.value
+}
+
+function confirmRepaymentReward(selection) {
+  repaymentRewardAmountCents.value = isCrossIndustryRepayment.value ? selection.rewardAmountCents : 0
+  isRepaymentRewardOpen.value = false
+}
+
 function selectedRepaymentSource() {
   const original = originalRepaymentSource.value
   const primaryId = Number(repaymentSourcePrimaryId.value)
   const secondaryId = Number(repaymentSourceSecondaryId.value)
   // 原单发生时的名称不能被目录后续改名覆盖；停用来源也可沿用历史快照。
   if (original && primaryId === Number(original.primarySourceId)
-    && secondaryId === Number(original.secondarySourceId)) return { ...original }
+    && secondaryId === Number(original.secondarySourceId)) return { ...original, rewardAmountCents: isCrossIndustryRepayment.value ? repaymentRewardAmountCents.value : 0 }
   const primary = selectedRepaymentPrimary.value
   const secondary = repaymentSourceChildren.value.find((source) => Number(source.id) === secondaryId)
   if (!primary || (Number(primary.requireSecondary) === 1 && !secondary)
@@ -198,7 +224,8 @@ function selectedRepaymentSource() {
     primarySourceNameSnapshot: String(primary.name),
     secondarySourceId: secondary ? secondaryId : 0,
     secondarySourceNameSnapshot: secondary ? String(secondary.name) : '',
-    displayNameSnapshot: secondary ? `${primary.name} / ${secondary.name}` : String(primary.name)
+    displayNameSnapshot: secondary ? `${primary.name} / ${secondary.name}` : String(primary.name),
+    rewardAmountCents: isCrossIndustryRepayment.value ? repaymentRewardAmountCents.value : 0
   }
 }
 
@@ -430,7 +457,7 @@ function confirmSalespeople(result = {}) {
           </div>
           <div class="member-debt-overlay__business-source" aria-label="本次补交客户来源">
             <label for="member-debt-repayment-source-primary">来源</label>
-            <select id="member-debt-repayment-source-primary" v-model.number="repaymentSourcePrimaryId" :disabled="isPreparing || repaymentSourcesLoading" @change="repaymentSourceSecondaryId = 0">
+            <select id="member-debt-repayment-source-primary" v-model.number="repaymentSourcePrimaryId" :disabled="isPreparing || repaymentSourcesLoading" @change="changeRepaymentSource">
               <option :value="0">请选择来源</option>
               <option v-if="historicalPrimaryOption" :value="Number(historicalPrimaryOption.primarySourceId)">{{ historicalPrimaryOption.primarySourceNameSnapshot }}（原单）</option>
               <option v-for="source in repaymentSources" :key="source.id" :value="source.id">{{ source.name }}</option>
@@ -440,6 +467,7 @@ function confirmSalespeople(result = {}) {
               <option v-if="historicalSecondaryOption" :value="Number(historicalSecondaryOption.secondarySourceId)">{{ historicalSecondaryOption.secondarySourceNameSnapshot }}（原单）</option>
               <option v-for="source in repaymentSourceChildren" :key="source.id" :value="source.id">{{ source.name }}</option>
             </select>
+            <button v-if="isCrossIndustryRepayment" type="button" class="member-debt-overlay__repay-link" :disabled="isPreparing" @click="isRepaymentRewardOpen = true">奖励金额：{{ formatMoney(Math.round(repaymentRewardAmountCents / 100)) }}</button>
             <small v-if="repaymentSourcesError">{{ repaymentSourcesError }} <button type="button" @click="loadRepaymentSources">重试</button></small>
           </div>
           <div class="member-debt-overlay__recharge-salespeople" aria-label="销售人分配">
@@ -454,6 +482,17 @@ function confirmSalespeople(result = {}) {
         <button type="button" class="button button--secondary" :disabled="isPreparing" @click="$emit('close')">关闭</button>
       </footer>
     </section>
+    <CheckoutBusinessSourceOverlay
+      v-if="isRepaymentRewardOpen"
+      reward-only
+      :sources="repaymentRewardSources"
+      :primary-source-id="repaymentSourcePrimaryId"
+      :secondary-source-id="repaymentSourceSecondaryId"
+      :reward-amount-cents="repaymentRewardAmountCents"
+      :saving="isPreparing"
+      @close="isRepaymentRewardOpen = false"
+      @confirm="confirmRepaymentReward"
+    />
     <PersonnelPerformanceOverlay
       v-if="isSalespersonSelectorOpen"
       initial-tab="salespeople"

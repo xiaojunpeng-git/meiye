@@ -670,29 +670,105 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         return $this->result('地推拓客汇总表',$columns,array_values($records),$input,[],['natural_year'=>$year,'annual_total_cents'=>$this->sumField($records,'annual_total_cents')]);
     }
 
+    /**
+     * 按收款业务日读取异业收客现金，销售、消费欠款补交和充值补交共用收款事实，
+     * 不能再拼接补交单金额，否则一笔补交会重复统计。来源沿用本次收款的冻结选择；
+     * 指定会员的后续收款下钻才放宽来源，门店、人员和作废过滤仍由 cashFacts 统一执行。
+     */
     private function crossIndustryDetail(array $stores,array $range,array $input):array
     {
-        $sourceIds=$this->sourceIds('G');$memberId=(int)($input['member_id']??0);$includeFollowupCash=(int)($input['include_followup_cash']??0)===1&&$memberId>0;$payments=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective');if(!$includeFollowupCash)$payments->whereIn('business_source_primary_id',$sourceIds?:[-1]);if($memberId>0)$payments->where('member_id',$memberId);$payments=$payments->fieldRaw('store_id,order_id,checkout_request_id,member_id,MAX(member_name_snapshot) member_name,MAX(store_name_snapshot) store_name,MAX(business_source_label_snapshot) source,SUM(amount_cents) amount_cents')->group('store_id,order_id,checkout_request_id,member_id')->select()->toArray();
+        $sourceIds=$this->sourceIds('G');$memberId=(int)($input['member_id']??0);$includeFollowupCash=(int)($input['include_followup_cash']??0)===1&&$memberId>0;
+        $payments=$this->cashFacts($stores)->whereBetween('business_date',[$range['start'],$range['end']])->where('status','effective');
+        if(!$includeFollowupCash)$payments->whereIn('business_source_primary_id',$sourceIds?:[-1]);
+        if($memberId>0)$payments->where('member_id',$memberId);
+        // 日期与金额都取本次收款事实；跨日收退款不能合并后任取一天，更不能用首次护理日替代。
+        // 使用收款日期专用投影，不触发 result 的通用组织维度增列；单号取收款快照，补交不能显示成原销售单号。
+        $payments=$payments->fieldRaw('store_id,order_id,checkout_request_id,member_id,business_date receipt_business_date,MAX(order_no_snapshot) document_no,MAX(member_name_snapshot) member_name,MAX(store_name_snapshot) store_name,MAX(business_source_label_snapshot) source,SUM(amount_cents) amount_cents')
+            ->group('store_id,order_id,checkout_request_id,member_id,business_date')->select()->toArray();
+        // 手机号沿用会员资料权威源，仅查询当前授权收款结果里的会员，不新增全库联系人入口。
+        $phones=$this->phones(array_values(array_unique(array_filter(array_column($payments,'member_id')))));
         $keys=array_values(array_unique(array_column($payments,'order_id')));$orders=[];if($keys){$fields=$this->hasColumn('cashier_v3_sales_order','reward_amount_cents')?'order_id,order_note,reward_amount_cents':'order_id,order_note';foreach(Db::name('cashier_v3_sales_order')->whereIn('order_id',$keys)->field($fields)->select()->toArray()as$r)$orders[(string)$r['order_id']]=$r;}
-        $memberIds=array_values(array_unique(array_filter(array_column($payments,'member_id'))));$careDates=[];
-        // “护理日期”作为异业顾客首次门店到店日期，体验服务不占到店；人员开关不参与。
-        if($memberIds){$careQuery=$this->completedUnvoidedServiceFacts($this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('cross_care_service'),$stores,'cross_care_service'),'cross_care_service.checkout_request_id'),'cross_care_service','cross_care_void')->whereIn('cross_care_service.member_id',$memberIds);StoreCustomerVisitEligibility::apply($careQuery,'cross_care_service');foreach($careQuery->fieldRaw('cross_care_service.store_id,cross_care_service.member_id,MIN(cross_care_service.business_date) care_date')->group('cross_care_service.store_id,cross_care_service.member_id')->select()->toArray()as$r)$careDates[(int)$r['store_id'].'|'.(int)$r['member_id']]=(string)$r['care_date'];}
-        foreach($payments as &$row){$key=(string)$row['order_id'];$row['care_date']=$careDates[(int)$row['store_id'].'|'.(int)$row['member_id']]??'';$row['full_payment']=$this->money((int)$row['amount_cents']);$row['reward']=$this->money((int)($orders[$key]['reward_amount_cents']??0));$row['remark']=(string)($orders[$key]['order_note']??'');$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sales_order';$row['source_order_id']=$key;}unset($row);
-        return $this->result('异业收客明细表',$this->columns(['source'=>'来源','care_date'=>'护理日期','store_name'=>'门店','member_name'=>'会员','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
+        // 只补充已授权收款行对应的本次补交奖励，不关联原销售单奖励；组合收款仍按补交单计一次。
+        // 未升级的历史库读作零，正式写入必须先执行奖励列迁移；不反向回填旧单。
+        if($keys)foreach(['cashier_v3_debt_repayment','cashier_v3_recharge_debt_repayment'] as $table){
+            if(!$this->hasColumn($table,'reward_amount_cents'))continue;
+            $repayments=$this->scope(Db::name($table),$stores)->where('tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('repayment_id',$keys)->where('status','succeeded')->field('repayment_id,reward_amount_cents')->select()->toArray();
+            foreach($repayments as $repayment)$orders[(string)$repayment['repayment_id']]=['reward_amount_cents'=>(int)$repayment['reward_amount_cents']];
+        }
+        // 新增业务日分行只拆收款；奖励仍按原来的门店、单据、结账、会员粒度计一次，不能因跨日退款重复累计。
+        $rewardSubjects=[];
+        foreach($payments as &$row){
+            $key=(string)$row['order_id'];
+            $rewardSubject=json_encode([$row['store_id'],$key,$row['checkout_request_id'],$row['member_id']]);
+            $row['full_payment']=$this->money((int)$row['amount_cents']);
+            $row['phone']=$phones[(int)$row['member_id']]??'';
+            $row['reward']=$this->money(isset($rewardSubjects[$rewardSubject])?0:(int)($orders[$key]['reward_amount_cents']??0));
+            $rewardSubjects[$rewardSubject]=true;
+            $row['remark']=(string)($orders[$key]['order_note']??'');$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sales_order';$row['source_order_id']=$key;
+        }unset($row);
+        return $this->result('异业收客明细表',$this->columns(['source'=>'来源','receipt_business_date'=>'业务日期','store_name'=>'门店','document_no'=>'单据号','member_name'=>'会员','phone'=>'手机号','full_payment'=>'收客全款业绩','reward'=>'奖励','remark'=>'备注']),$payments,$input);
     }
 
-    private function crossIndustrySummary(array $stores,array $range,array $input):array
+    /** 本年 G 来源销售或补交均可成为异业顾客；先确定会员名单，再计算后续收款，不能把补交当新销售重复加款。 */
+    private function crossIndustrySummaryMembers(array $stores,array $range,array $input):array
     {
         $sourceIds=$this->sourceIds('G');$year=(int)substr($range['end'],0,4);$sales=$this->participantOrder($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sale_fact')->alias('cross_sale'),$stores,'cross_sale'),'cross_sale',$input,['start'=>$year.'-01-01','end'=>$year.'-12-31']),'cross_sale.order_id')->whereBetween('cross_sale.business_date',[$year.'-01-01',$year.'-12-31'])->where('cross_sale.status','effective')->whereIn('cross_sale.business_source_primary_id',$sourceIds?:[-1]);
+        $sales->where('cross_sale.fact_direction','forward')->where('cross_sale.member_id','>',0);
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($sales,'cross_sale.tenant_id','cross_sale.order_id');
         $sales=$sales->fieldRaw('cross_sale.store_id,cross_sale.member_id,MAX(cross_sale.member_name_snapshot) member_name,MIN(cross_sale.source_line_id) source_line_id,MAX(cross_sale.item_name_snapshot) card_name,MIN(cross_sale.business_date) first_sale_date')->group('cross_sale.store_id,cross_sale.member_id')->select()->toArray();
-        $memberIds=array_values(array_unique(array_filter(array_column($sales,'member_id'))));$phones=$this->phones($memberIds);$cash=$this->cashMonthlyTotals($stores,$memberIds,$year.'-01-01',$year.'-12-31');$dailyCash=$this->cashByMemberAndMonth($stores,$memberIds,$year.'-01-01',$year.'-12-31');$services=$this->servicesByMember($stores,$memberIds);$entitlements=$this->activeCardEntitlements($stores,$memberIds);$keys=array_values(array_unique(array_column($sales,'source_line_id')));$manual=$this->annotations('cross_industry_customer_summary',$stores,$keys);$total500=0;$total2400=0;
+        $members=[];
+        foreach($sales as $row){
+            $row['annotation_subject_key']=(string)$row['source_line_id'];$row['annotation_subject_type']='sale_line';
+            $members[(int)$row['store_id'].'|'.(int)$row['member_id']]=$row;
+        }
+        $repayments=$this->cashFacts($stores)->whereBetween('business_date',[$year.'-01-01',$year.'-12-31'])
+            ->where('status','effective')->where('fact_direction','forward')->where('amount_cents','>',0)->where('member_id','>',0)
+            ->whereIn('business_source_primary_id',$sourceIds?:[-1])->whereIn('source_document_type',['debt_repayment','recharge_debt_repayment'])
+            ->field('id,fact_id,store_id,member_id,member_name_snapshot,order_id')->order('id','asc')->select()->toArray();
+        $savedRepayments=$this->annotations('cross_industry_customer_summary',$stores,array_column($repayments,'fact_id'));
+        $anchored=[];
+        foreach($repayments as $payment){
+            $memberKey=(int)$payment['store_id'].'|'.(int)$payment['member_id'];$factKey=(string)$payment['fact_id'];
+            if(!isset($members[$memberKey])){
+                // 补交没有本年销售明细时仍入表，但不能凭补交金额虚构卡项名称或首次卖卡日。
+                $members[$memberKey]=['store_id'=>(int)$payment['store_id'],'member_id'=>(int)$payment['member_id'],
+                    'member_name'=>(string)$payment['member_name_snapshot'],'source_line_id'=>'','card_name'=>'','first_sale_date'=>'',
+                    'annotation_subject_key'=>$factKey,'annotation_subject_type'=>'cross_industry_repayment','source_order_id'=>(string)$payment['order_id']];
+            }
+            // 补交行已保存过手动收客信息时保留原主题；以后发生销售或再次补交也不能让已保存值消失。
+            if(isset($savedRepayments[$factKey])&&!isset($anchored[$memberKey])){
+                $members[$memberKey]['annotation_subject_key']=$factKey;$members[$memberKey]['annotation_subject_type']='cross_industry_repayment';
+                $members[$memberKey]['source_order_id']=(string)$payment['order_id'];$anchored[$memberKey]=true;
+            }
+        }
+        return array_values($members);
+    }
+
+    /** 汇总延续自然年及后续全部来源收款口径；按门店+会员归集，月度下钻带同一门店范围。 */
+    private function crossIndustrySummary(array $stores,array $range,array $input):array
+    {
+        $year=(int)substr($range['end'],0,4);$sales=$this->crossIndustrySummaryMembers($stores,$range,$input);
+        $memberIds=array_values(array_unique(array_filter(array_column($sales,'member_id'))));$phones=$this->phones($memberIds);$dailyCash=$this->cashByStoreMemberDay($stores,$memberIds,$year.'-01-01',$year.'-12-31');$services=$this->servicesByMember($stores,$memberIds,true);$entitlements=$this->activeCardEntitlements($stores,$memberIds);$keys=array_values(array_unique(array_column($sales,'annotation_subject_key')));$manual=$this->annotations('cross_industry_customer_summary',$stores,$keys);$total500=0;$total2400=0;
         // 首次到店只读非体验的门店服务；金额和剩余权益仍保留原始事实口径。
         foreach($sales as &$row){
-            $id=(int)$row['member_id'];$key=(string)$row['source_line_id'];$row['customer_acquired_at']=$manual[$key]['customer_acquired_at']['value']??'';$row['customer_acquired_at_version']=(int)($manual[$key]['customer_acquired_at']['version']??0);$row['partner_store_name']=$manual[$key]['partner_store_name']['value']??'';$row['partner_store_name_version']=(int)($manual[$key]['partner_store_name']['version']??0);$row['phone']=$phones[$id]??'';$row['remaining_service_count']=(int)($entitlements[$id]['remaining_count']??0);$row['remaining_service_amount']=$this->money((int)($entitlements[$id]['remaining_amount_cents']??0));$visits=StoreCustomerVisitEligibility::filter($services[$id]??[]);$row['first_visit_at']=(string)($visits[0]['business_date']??'');
-            $annual=0;foreach(range(1,12)as$m){$c=(int)($cash[$id][$m]??0);$row['month_'.$m]=$this->money($c);$annual+=$c;}$row['annual_cash']=$this->money($annual);
-            $first500=0;$reached2400=0;$running=0;foreach($dailyCash[$id]??[]as$day){$amount=(int)$day['amount_cents'];if($first500===0&&$amount>=50000)$first500=$amount;$before=$running;$running+=$amount;if($reached2400===0&&$before<240000&&$running>=240000)$reached2400=$running;}
-            $row['first_500']=$this->money($first500);$row['reached_2400']=$this->money($reached2400);$total500+=$first500;$total2400+=$reached2400;$row['annotation_subject_key']=$key;$row['annotation_subject_type']='sale_line';$row['source_line_id']=$key;$row['_drilldown']=[];$annualConfig=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31','include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];foreach(range(1,12)as$m){$monthKey='month_'.$m;if((int)($cash[$id][$m]??0)===0)continue;$row['_drilldown'][$monthKey]=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m))),'include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id']];}if($annual!==0)$row['_drilldown']['annual_cash']=$annualConfig;if($first500!==0)$row['_drilldown']['first_500']=$annualConfig;if($reached2400!==0)$row['_drilldown']['reached_2400']=$annualConfig;
+            $id=(int)$row['member_id'];$memberKey=(int)$row['store_id'].'|'.$id;$key=(string)$row['annotation_subject_key'];$row['customer_acquired_at']=$manual[$key]['customer_acquired_at']['value']??'';$row['customer_acquired_at_version']=(int)($manual[$key]['customer_acquired_at']['version']??0);$row['partner_store_name']=$manual[$key]['partner_store_name']['value']??'';$row['partner_store_name_version']=(int)($manual[$key]['partner_store_name']['version']??0);$row['phone']=$phones[$id]??'';$row['remaining_service_count']=(int)($entitlements[$memberKey]['remaining_count']??0);$row['remaining_service_amount']=$this->money((int)($entitlements[$memberKey]['remaining_amount_cents']??0));$visits=StoreCustomerVisitEligibility::filter($services[$memberKey]??[]);$row['first_visit_at']=(string)($visits[0]['business_date']??'');
+            $monthly=[];foreach($dailyCash[$memberKey]??[]as$day){$m=(int)substr((string)$day['business_date'],5,2);$monthly[$m]=(int)($monthly[$m]??0)+(int)$day['amount_cents'];}
+            $annual=0;foreach(range(1,12)as$m){$c=(int)($monthly[$m]??0);$row['month_'.$m]=$this->money($c);$annual+=$c;}$row['annual_cash']=$this->money($annual);
+            $first500=0;$reached2400=0;$running=0;$first500Date='';$reached2400Date='';
+            foreach($dailyCash[$memberKey]??[]as$day){
+                $amount=(int)$day['amount_cents'];
+                if($first500===0&&$amount>=50000){$first500=$amount;$first500Date=(string)$day['business_date'];}
+                $before=$running;$running+=$amount;
+                if($reached2400===0&&$before<240000&&$running>=240000){$reached2400=$running;$reached2400Date=(string)$day['business_date'];}
+            }
+            $row['first_500']=$this->money($first500);$row['reached_2400']=$this->money($reached2400);$total500+=$first500;$total2400+=$reached2400;$row['_drilldown']=[];$annualConfig=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31','include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id','store_ids'=>'store_id']];foreach(range(1,12)as$m){$monthKey='month_'.$m;if((int)($monthly[$m]??0)===0)continue;$row['_drilldown'][$monthKey]=['report'=>'cross_industry_customer_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m))),'include_followup_cash'=>1],'param_map'=>['member_id'=>'member_id','store_ids'=>'store_id']];}if($annual!==0)$row['_drilldown']['annual_cash']=$annualConfig;
+            // 门槛单元格只下钻到组成它的单日/累计日期，不能用全年流水解释较小的门槛金额。
+            foreach(['first_500'=>$first500Date,'reached_2400'=>$reached2400Date] as $field=>$thresholdDate){
+                if($thresholdDate==='')continue;
+                $config=$annualConfig;$config['params']['end_date']=$thresholdDate;
+                if($field==='first_500')$config['params']['start_date']=$thresholdDate;
+                $row['_drilldown'][$field]=$config;
+            }
         }unset($row);
         $columns=$this->columns(['customer_acquired_at'=>'收客时间','partner_store_name'=>'异业店名','member_name'=>'会员','phone'=>'手机号码','card_name'=>'卡项名称','remaining_service_count'=>'剩余服务次数','remaining_service_amount'=>'剩余服务金额','first_500'=>'首次成交满500','reached_2400'=>'成交满2400','first_visit_at'=>'首次到店时间','annual_cash'=>'全年现金业绩']);foreach(range(1,12)as$m)$columns[]=['key'=>'month_'.$m,'label'=>$m.'月'];
         return $this->result('异业收客汇总表',$columns,$sales,$input,[],['first_500_total'=>$this->money($total500),'reached_2400_total'=>$this->money($total2400),'natural_year'=>$year]);
@@ -1678,6 +1754,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $columns=$this->fixedColumns($title,$this->withColumnExplanations($columns));
         if($title==='市场业绩表')$columns=$this->marketPerformanceColumnExplanations($columns);
         if($title==='市场明细表')$columns=$this->marketDetailColumnExplanations($columns);
+        if($title==='异业收客明细表')$columns=$this->crossIndustryDetailColumnExplanations($columns,$input);
+        if($title==='异业收客汇总表')$columns=$this->crossIndustrySummaryColumnExplanations($columns);
         if(in_array($title,['新客明细表','新客汇总表'],true))$columns=$this->newCustomerColumnExplanations($columns);
         $this->appendDimensionFiltersToColumns($columns);
         $this->appendDimensionFiltersToRows($records);
@@ -1693,6 +1771,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
             $metricVersion = 'store-customer-service-events-v2';
         }
+        // 本表展示本次收款业务日，不再展示首次护理日；其他到店报表仍沿用服务口径。
+        if ($title === '异业收客明细表') $metricVersion = 'cross-industry-cash-business-date-v3';
+        // 汇总名单新增本年 G 来源补交会员；月度/年度金额仍为这些会员在相应门店的全部有效收款。
+        if ($title === '异业收客汇总表') $metricVersion = 'cross-industry-sale-repayment-members-v3';
         $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>$metricVersion,'service_customer_rule_version'=>null,'data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
         $summary=$this->summaryRow($title,$columns,$records);if($summary)$result['summary_row']=$summary;
         if($groups)$result['column_groups']=$groups;
@@ -1711,6 +1793,56 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if(!empty($metadata['drilldown']))$metadata['drilldown']=$this->withDimensionFilterParams((array)$metadata['drilldown']);
         foreach($metadata as $key=>$value)$result[$key]=$value;
         return$result;
+    }
+    /**
+     * 只替换本表的列名说明，不改变其他报表或金额口径。普通入口与会员后续收款
+     * 下钻的来源范围不同，说明必须跟随实际查询条件，避免把后续款误说成全是 G 来源。
+     */
+    private function crossIndustryDetailColumnExplanations(array $columns,array $input):array
+    {
+        $includeFollowupCash=(int)($input['include_followup_cash']??0)===1&&(int)($input['member_id']??0)>0;
+        $explanations=[
+            'source'=>'显示收款时选择的客户来源，补交按本次补交选择的来源显示。'
+                .($includeFollowupCash?'当前正在查看指定异业顾客的后续收款，包含该顾客在查询期间的各类来源收款。':'本表只统计来源为“G异业收客”的收款。'),
+            'receipt_business_date'=>'显示本笔收款的业务日期：正常消费按订单收款业务日期，补交按本次补交业务日期，退款按退款业务日期。查询周期也按此日期筛选，与是否做过护理无关。',
+            'store_name'=>'办理本次收款或补交的门店，显示收款时记录的门店名称；只显示你有权查看的门店。',
+            'document_no'=>'显示本笔收款对应的单据号：正常消费显示销售单号，欠款补交显示本次补交单号，不显示原欠款单号。',
+            'member_name'=>'本次收款或补交对应的会员，显示收款时记录的会员姓名。',
+            'phone'=>'显示该会员在会员资料中登记的当前手机号；未登记时显示“-”。',
+            'full_payment'=>'查询期间实际收到的金额，包含购买付款、充值和欠款补交。补交按本次补交日期计入，只算本次收到的钱，不重复计算原订单总额；订单退款按退款日期扣减，已作废的订单和补交不计入。合计包含当前筛选范围内的全部记录。',
+            'reward'=>'本次销售或补交单确认的异业收客奖励；补交不继承原销售单奖励。组合收款及同单跨日分行只计一次，未登记时为0；奖励不抵扣收款或欠款。',
+            'remark'=>'销售单中填写的备注；补交记录及未填写备注的销售单显示“-”。',
+        ];
+        foreach($columns as &$column){
+            $key=(string)($column['key']??'');
+            if(isset($explanations[$key]))$column['source_explanation']=$explanations[$key];
+        }
+        unset($column);
+        return$columns;
+    }
+    /** 明确汇总的入表条件与后续款范围；补交入表不意味着把原欠款总额再算一遍。 */
+    private function crossIndustrySummaryColumnExplanations(array $columns):array
+    {
+        $explanations=[
+            'member_name'=>'显示所选年份内有“G异业收客”正常销售或有效欠款补交的会员；同一门店同一会员只显示一行，作废记录不计。',
+            'customer_acquired_at'=>'人工登记的收客时间；保存后刷新仍保留，未登记时显示“-”。',
+            'partner_store_name'=>'人工登记的异业合作店名；保存后刷新仍保留，未登记时显示“-”。',
+            'phone'=>'显示会员资料中登记的当前手机号，未登记时显示“-”。',
+            'card_name'=>'显示本年 G 来源销售记录中的商品或卡项名称；仅通过补交入表、没有本年销售记录时显示“-”。',
+            'remaining_service_count'=>'显示该会员在本门店当前有效卡项的剩余服务次数，已作废及已退款卡项不计。',
+            'remaining_service_amount'=>'显示该会员在本门店当前有效卡项的剩余服务金额，已作废及已退款卡项不计。',
+            'first_500'=>'显示该会员本年在本门店第一次单日收款净额达到500元的金额；包含正常收款和补交，不限当次来源。',
+            'reached_2400'=>'显示该会员本年在本门店累计收款净额首次达到2400元时的累计金额，不限当次来源。',
+            'first_visit_at'=>'显示该会员在本门店第一次完成非体验护理的日期；已作废服务不计，无记录显示“-”。',
+            'annual_cash'=>'按所选年份汇总该会员在本门店的有效收款净额，包含正常收款和补交及后续其他来源收款；退款按退款业务日扣减，作废记录不计，不重复计原欠款总额。',
+        ];
+        foreach($columns as &$column){
+            $key=(string)$column['key'];
+            if(isset($explanations[$key]))$column['source_explanation']=$explanations[$key];
+            elseif(preg_match('/^month_(\d+)$/D',$key,$match))$column['source_explanation']='汇总所选年份'.$match[1].'月该会员在本门店的有效收款净额，包含正常收款、补交和后续其他来源收款；按各笔业务日期归属月份，退款扣减，作废不计。';
+        }
+        unset($column);
+        return$columns;
     }
     /**
      * 市场业绩的动态来源列必须说明真实计入口径。分组名称来自当前来源配置，
@@ -1835,7 +1967,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '会员进店年度汇总表'=>['row_label'=>82,'year'=>76],
             '地推拓客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'source'=>110,'member_name_snapshot'=>90,'phone'=>116],
             '地推拓客汇总表'=>['card_sale_date'=>106,'member_name_snapshot'=>90,'phone'=>116,'source'=>110],
-            '异业收客明细表'=>['source'=>110,'care_date'=>106,'store_name'=>120,'member_name'=>90],
+            '异业收客明细表'=>['source'=>110,'receipt_business_date'=>106,'store_name'=>120,'document_no'=>160,'member_name'=>90,'phone'=>116],
             '异业收客汇总表'=>['customer_acquired_at'=>106,'partner_store_name'=>120,'member_name'=>90,'phone'=>116],
             '新客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'business_date'=>106,'customer'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'phone'=>116],
             '新客汇总表'=>['system_name'=>90,'division_name'=>120,'store_name'=>120,'member'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'source'=>110],
@@ -1892,6 +2024,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $rows=$rows->field('annual_card_sale.member_id,annual_card_sale.business_date,annual_card_sale.occurred_at,annual_card_sale.business_source_label_snapshot')->order('annual_card_sale.business_date','asc')->order('annual_card_sale.occurred_at','asc')->order('annual_card_sale.id','asc')->select()->toArray();
         $out=[];foreach($rows as $row){$id=(int)$row['member_id'];if(!isset($out[$id]))$out[$id]=(string)$row['business_source_label_snapshot'];}return$out;
     }
+    /** 异业汇总按门店+会员读取当前权益，避免同一会员跨店时重复展示全部门店余额。 */
     private function activeCardEntitlements(array $stores,array $members):array
     {
         if(!$members)return[];
@@ -1909,24 +2042,24 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                     ->where('remaining_card_sale_void.status','succeeded');
             });
         }
-        $holders=$holderQuery->field('h.uid,h.oid,h.write_surplus_times')->select()->toArray();
+        $holders=$holderQuery->field('h.store_id,h.uid,h.oid,h.write_surplus_times')->select()->toArray();
         if(!$holders)return[];
-        $oids=array_values(array_unique(array_column($holders,'oid')));$owner=[];foreach($holders as $row)$owner[(int)$row['oid']]=(int)$row['uid'];
-        $out=[];foreach($holders as $row){$id=(int)$row['uid'];$out[$id]['remaining_count']=(int)($out[$id]['remaining_count']??0)+(int)$row['write_surplus_times'];$out[$id]['remaining_amount_cents']=(int)($out[$id]['remaining_amount_cents']??0);}
+        $oids=array_values(array_unique(array_column($holders,'oid')));$owner=[];foreach($holders as $row)$owner[(int)$row['oid']]=(int)$row['store_id'].'|'.(int)$row['uid'];
+        $out=[];foreach($holders as $row){$id=(int)$row['store_id'].'|'.(int)$row['uid'];$out[$id]['remaining_count']=(int)($out[$id]['remaining_count']??0)+(int)$row['write_surplus_times'];$out[$id]['remaining_amount_cents']=(int)($out[$id]['remaining_amount_cents']??0);}
         $carts=Db::name('store_order_cart_info')->whereIn('oid',$oids)->where('write_surplus_times','>',0)->where('cart_type',2)->where('product_type',6)->field('oid,pay_price,write_times,write_surplus_times')->select()->toArray();
-        foreach($carts as $cart){$oid=(int)$cart['oid'];$id=(int)($owner[$oid]??0);$times=(int)$cart['write_times'];$remaining=(int)$cart['write_surplus_times'];if($id<=0||$times<=0)continue;$out[$id]['remaining_amount_cents']=(int)($out[$id]['remaining_amount_cents']??0)+intdiv($this->decimalCents($cart['pay_price'])*$remaining,$times);}
+        foreach($carts as $cart){$oid=(int)$cart['oid'];$id=$owner[$oid]??'';$times=(int)$cart['write_times'];$remaining=(int)$cart['write_surplus_times'];if($id===''||$times<=0)continue;$out[$id]['remaining_amount_cents']=(int)($out[$id]['remaining_amount_cents']??0)+intdiv($this->decimalCents($cart['pay_price'])*$remaining,$times);}
         return$out;
     }
     private function phones(array $ids):array{if(!$ids)return[];$out=[];foreach(Db::name('user')->whereIn('uid',$ids)->field('uid,phone')->select()->toArray()as$r)$out[(int)$r['uid']]=(string)$r['phone'];return$out;}
-    /** 保留完整完成服务供护理和手工费使用，并携带冻结体验标记供门店到店列单独筛选。 */
-    private function servicesByMember(array $stores, array $members): array
+    /** 保留完成服务与冻结体验标记；异业汇总可按门店+会员隔离，其他调用方维持原会员投影。 */
+    private function servicesByMember(array $stores, array $members, bool $byStore = false): array
     {
         if (!$members) return [];
         $rows = $this->completedUnvoidedServiceFacts(
             $this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_service'), $stores, 'member_service'), 'member_service.checkout_request_id'),
             'member_service', 'member_service_void'
         )->whereIn('member_service.member_id', $members)
-            ->field('member_service.member_id,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at,member_service.is_experience')
+            ->field('member_service.store_id,member_service.member_id,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at,member_service.is_experience')
             ->order('member_service.business_date', 'asc')->order('member_service.occurred_at', 'asc')->select()->toArray();
         $out = [];
         foreach ($rows as $row) {
@@ -1935,7 +2068,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $craftsmen[] = (string)($craftsman['employeeName'] ?? $craftsman['employee_name'] ?? $craftsman['name'] ?? '');
             }
             $row['craftsman'] = implode('、', array_unique(array_filter($craftsmen)));
-            $out[(int)$row['member_id']][] = $row;
+            $key = $byStore ? (int)$row['store_id'].'|'.(int)$row['member_id'] : (int)$row['member_id'];
+            $out[$key][] = $row;
         }
         return $out;
     }
@@ -1991,7 +2125,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if(!isset($records[$key]))$records[$key]=['system_name'=>'瑞昊','division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id'],'store_name'=>(string)$row['store_name'],'store_id'=>(int)$row['store_id'],'summary_group_key'=>$key,'guide'=>$guide,'salesperson'=>$salesperson,'sales_manager'=>$manager,'source'=>$source,'source_id'=>$sourceId,'source_label'=>$source,'annual_cash_cents'=>0];
         $month=(int)substr((string)$row['business_date'],5,2);$records[$key]['month_'.$month.'_count']=(int)($records[$key]['month_'.$month.'_count']??0)+$count;$records[$key]['month_'.$month.'_'.$suffix.'_cents']=(int)($records[$key]['month_'.$month.'_'.$suffix.'_cents']??0)+$amount;$records[$key]['annual_cash_cents']+=(int)$amount;
     }
-    private function cashByMemberAndMonth(array $stores,array $members,string $start,string $end):array{if(!$members)return[];$rows=$this->cashFacts($stores)->whereIn('member_id',$members)->whereBetween('business_date',[$start,$end])->where('status','effective')->fieldRaw('member_id,business_date,SUM(amount_cents) amount_cents')->group('member_id,business_date')->order('business_date','asc')->select()->toArray();$out=[];foreach($rows as$r)$out[(int)$r['member_id']][]=$r;return$out;}
+    /** 汇总的月度、全年与成交门槛均复用同一份门店会员日净收款，不跨店凑金额。 */
+    private function cashByStoreMemberDay(array $stores,array $members,string $start,string $end):array{if(!$members)return[];$rows=$this->cashFacts($stores)->whereIn('member_id',$members)->whereBetween('business_date',[$start,$end])->where('status','effective')->fieldRaw('store_id,member_id,business_date,SUM(amount_cents) amount_cents')->group('store_id,member_id,business_date')->order('business_date','asc')->select()->toArray();$out=[];foreach($rows as$r)$out[(int)$r['store_id'].'|'.(int)$r['member_id']][]=$r;return$out;}
     private function cashMonthlyTotals(array $stores,array $members,string $start,string $end):array{if(!$members)return[];$rows=$this->cashFacts($stores)->whereIn('member_id',$members)->whereBetween('business_date',[$start,$end])->where('status','effective')->fieldRaw('member_id,MONTH(business_date) month_no,SUM(amount_cents) amount_cents')->group('member_id,MONTH(business_date)')->select()->toArray();$out=[];foreach($rows as$r)$out[(int)$r['member_id']][(int)$r['month_no']]=(int)$r['amount_cents'];return$out;}
     private function sumField(array $rows,string $field):int{$sum=0;foreach($rows as$r)$sum+=(int)($r[$field]??0);return$sum;}
     private function money(int $cents):string{$negative=$cents<0;$cents=abs($cents);$value=intdiv($cents,100).'.'.str_pad((string)($cents%100),2,'0',STR_PAD_LEFT);$value=rtrim(rtrim($value,'0'),'.');return($negative?'-':'').$value;}

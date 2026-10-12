@@ -1,0 +1,11 @@
+{
+  "task": "R13-00001/00002 异业收客报表与补交奖励闭环",
+  "accepted_version": "R13-20261012-repayment-reward-cccf999e",
+  "fixed_manifest": "R13-repayment-reward-fixed-2026-10-12.json",
+  "fixed_manifest_sha256": "f2e23472afa86b54672016585691016e4db5acb339b1b2e67bd628c08d3659ca",
+  "acceptance": "产品经理在本轮优化汇总后明确回复：我测试没有问题,本轮commit,部署瑞昊,push",
+  "scope": "第13轮异业明细、汇总、年份控件、来源解释及补交奖励弹窗、持久化、报表联动；包含配套两张补交表奖励列迁移，无历史回填。",
+  "authorization": "本地精确提交；仅瑞昊实例发布与配套迁移；线上验证通过后推送origin/release/store-cashier-c14-main。",
+  "boundary": "排除其他任务的脏文件、暂存区及PhaseTwo新客汇总系统名称两处片段；不改其他客户实例，不进行真实资金测试。",
+  "precommit": "所有业务源码、迁移与自动化测试指纹与固定版本一致；基线f25d019857e838a59ea977c9bfa28d7ed46ae09c。"
+}

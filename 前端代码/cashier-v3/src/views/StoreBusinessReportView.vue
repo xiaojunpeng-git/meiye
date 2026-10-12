@@ -49,9 +49,9 @@ const REPORT_TABS = Object.freeze([
   { code: 'member_visit_annual_summary', name: '会员进店年度汇总表' },
   { code: 'field_acquisition_detail', name: '地推拓客明细表' },
   { code: 'field_acquisition_summary', name: '地推拓客汇总表' },
-  // 保留既有路由代码和下钻目标，只交换产品确认的展示名称。
-  { code: 'cross_industry_customer_summary', name: '异业收客明细表' },
-  { code: 'cross_industry_customer_detail', name: '异业收客汇总表' },
+  // 年度会员汇总与逐笔收款明细按真实内容命名；保留原路由、顺序和下钻目标。
+  { code: 'cross_industry_customer_summary', name: '异业收客汇总表' },
+  { code: 'cross_industry_customer_detail', name: '异业收客明细表' },
   { code: 'new_customer_analysis_summary', name: '新客汇总表' },
   { code: 'new_customer_analysis', name: '新客明细表' },
   { code: 'salesperson_large_order_statistics', name: '销售人生美大单统计表' },
@@ -63,11 +63,6 @@ const REPORT_TABS = Object.freeze([
   // through the store Data menu; the remaining 26 stay platform-only.
   { code: 'six_dimension_analysis', name: '六维数据分析表' }
 ])
-// 平台嵌入同一报表组件，但本轮名称调整仅适用于门店端。
-const PLATFORM_CROSS_INDUSTRY_NAMES = Object.freeze({
-  cross_industry_customer_detail: '异业收客明细表',
-  cross_industry_customer_summary: '异业收客汇总表'
-})
 const SIX_DIMENSION_REPORT_TABS = Object.freeze([
   { code: 'six_dimension_item_deal_analysis', name: '品项成交分析表' },
   { code: 'six_dimension_cash_consumption_analysis', name: '现金消费分析表' },
@@ -390,12 +385,9 @@ const allowedReportTabs = computed(() => {
   return authorized.length ? authorized : tabs
 })
 const reportTabs = computed(() => allowedReportTabs.value.filter((tab) => !tab.hidden).map((tab) => ({
-  // 门店端使用本地确认的名称；平台嵌入页仍保留原名称，不改其下载与字段说明标题。
+  // 两端统一使用已确认名称，避免旧目录名称覆盖正确的汇总/明细标题。
   ...(serverCatalogByCode.value.get(tab.code) || {}),
-  ...tab,
-  ...(isPlatformRuntimeRoute() && PLATFORM_CROSS_INDUSTRY_NAMES[tab.code]
-    ? { name: PLATFORM_CROSS_INDUSTRY_NAMES[tab.code] }
-    : {})
+  ...tab
 })))
 const isFirstPhaseReport = computed(() => [
   'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
@@ -420,10 +412,11 @@ const filterSchema = computed(() => {
       && !['organization_store_scope', 'date_range', 'month', 'year'].includes(type)
   })
 })
-const usesAnnualYearFilter = computed(() => PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
+const isCrossIndustryAnnualSummary = computed(() => activeReport.value === 'cross_industry_customer_summary')
+const usesAnnualYearFilter = computed(() => isCrossIndustryAnnualSummary.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
-// 门店所有报表按实际日期查询；仅平台端保留已确认的自然年/月限制，不能静默扩大门店查询范围。
-const reportPeriodMode = computed(() => !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+// 异业汇总明确按年份选择并提交完整自然年；其余门店报表继续按日期区间，平台原有年/月规则不变。
+const reportPeriodMode = computed(() => isCrossIndustryAnnualSummary.value ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
   if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
@@ -1020,6 +1013,8 @@ function syncActiveReportFromRoute() {
   const defaults = defaultReportDateRange()
   startDate.value = String(route.query?.start_date || route.query?.end_date || defaults.start)
   endDate.value = String(route.query?.end_date || route.query?.start_date || defaults.end)
+  // 无年份的新入口回到今年；不能把上一张汇总的历史年份带入默认页。
+  if (isCrossIndustryAnnualSummary.value) selectedYear.value = today().slice(0, 4)
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 
@@ -1030,6 +1025,8 @@ function syncFiltersFromRoute() {
   if (query.month && /^\d{4}-\d{2}$/.test(String(query.month))) selectedMonth.value = String(query.month)
   else if (usesNaturalMonthFilter.value && query.start_date) selectedMonth.value = String(query.start_date).slice(0, 7)
   if (query.year && /^\d{4}$/.test(String(query.year))) selectedYear.value = String(query.year)
+  // 兼容旧日期链接：原后端使用结束日所在年份，改控件不能让旧链接换成另一个年度。
+  else if (isCrossIndustryAnnualSummary.value) selectedYear.value = String(query.end_date || query.start_date || today()).slice(0, 4)
   else if (usesAnnualYearFilter.value && query.start_date) selectedYear.value = String(query.start_date).slice(0, 4)
   const storeIds = String(query.store_ids || '').split(',').map(Number).filter(Boolean)
   if (storeIds.length) {
@@ -1549,10 +1546,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <div v-if="!isPlatformReport" class="store-business-report__period-picker">
+      <label v-if="isCrossIndustryAnnualSummary || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" min="2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
+      <div v-else-if="!isPlatformReport" class="store-business-report__period-picker">
         <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
       </div>
-      <label v-else-if="usesAnnualYearFilter" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" min="2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
       <label v-else-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
       <template v-else>
         <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>

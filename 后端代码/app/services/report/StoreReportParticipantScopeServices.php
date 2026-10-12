@@ -98,6 +98,24 @@ final class StoreReportParticipantScopeServices
      */
     public function resolveSubject(string $tenantId, string $subjectType, string $subjectKey, int $employeeId = 0): ?array
     {
+        if ($subjectType === 'cross_industry_repayment') {
+            // 补交独立成为异业汇总会员时，以真实 G 来源收款事实为手动字段主题；不能伪造门店或借用其他来源。
+            $payment = Db::name('cashier_v3_payment_fact')->alias('subject_repayment')
+                ->join('cashier_v3_business_source subject_source', 'subject_source.id=subject_repayment.business_source_primary_id')
+                ->where('subject_repayment.tenant_id', $tenantId)->where('subject_repayment.fact_id', $subjectKey)
+                ->where('subject_repayment.status', 'effective')->where('subject_repayment.fact_direction', 'forward')
+                ->where('subject_repayment.member_id', '>', 0)->where('subject_repayment.amount_cents', '>', 0)
+                ->whereIn('subject_repayment.source_document_type', ['debt_repayment', 'recharge_debt_repayment'])
+                ->where('subject_source.parent_id', 0)->where('subject_source.status', 1)->where('subject_source.name', 'like', 'G%');
+            $normal = new StoreReportNormalDataScopeServices();
+            $normal->excludeVoidedSalesOrderFacts($payment, 'subject_repayment.tenant_id', 'subject_repayment.order_id');
+            $normal->excludeVoidedRechargeOrderFacts($payment, 'subject_repayment.tenant_id', 'subject_repayment.order_id');
+            $normal->excludeVoidedSupplementPaymentFacts($payment, 'subject_repayment.tenant_id', 'subject_repayment.store_id', 'subject_repayment.order_id');
+            if ($employeeId > 0) $this->applyOrder($payment, 'subject_repayment.order_id', $employeeId);
+            $row = $payment->field('subject_repayment.id,subject_repayment.store_id,subject_repayment.order_id')->find();
+            return is_array($row) ? ['store_id' => (int)$row['store_id'], 'source_fact_id' => (int)$row['id'],
+                'source_order_id' => (string)$row['order_id'], 'source_line_id' => ''] : null;
+        }
         if ($subjectType === 'market_member_day') {
             // 合并行不能信任客户端提交的门店和会员 ID；复用报表查询验证
             // 当前日期与来源下确实存在这一条门店范围内的记录。

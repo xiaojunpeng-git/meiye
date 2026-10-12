@@ -15,7 +15,8 @@ assert.ok(
   '欠款补交准备不得重读工作台并让后续命令携带过期 workspace 版本'
 )
 assert.ok(
-  preparation.includes('localRepayment: payload')
+  // 来源快照独立复制后仍是浏览器本地交接，奖励随同 businessSource 保留。
+  preparation.includes('localRepayment: { ...payload, businessSource: { ...source } }')
     && !preparation.includes("'prepare-recharge-debt-repayment'")
     && !preparation.includes("'prepare-debt-repayment'")
     && !preparation.includes('prepared?.preparationRequestId'),

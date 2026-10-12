@@ -103,7 +103,10 @@ final class CashierV3RechargeDebtRepaymentServices
         );
         $repaidAfter = $repaidBefore + $input['amountCents'];
         $debtStatus = $repaidAfter === $total ? 1 : 0;
-        $fingerprint = hash('sha256', json_encode([$input, $dataScope->tenantId(), $operator->storeId(), $rechargeId, $repaidBefore], JSON_UNESCAPED_SLASHES));
+        // 零奖励沿用升级前的命令指纹，历史重放不能仅因新增缺省字段而冲突。
+        $fingerprintInput = $input;
+        if ($input['rewardAmountCents'] === 0) unset($fingerprintInput['rewardAmountCents']);
+        $fingerprint = hash('sha256', json_encode([$fingerprintInput, $dataScope->tenantId(), $operator->storeId(), $rechargeId, $repaidBefore], JSON_UNESCAPED_SLASHES));
         $existing = Db::name('cashier_v3_recharge_debt_repayment')->where('tenant_id', $dataScope->tenantId())->where('command_idempotency_key', $commandKey)->lock(true)->find();
         if ($existing) {
             if ((string)($existing['immutable_fingerprint'] ?? '') !== $fingerprint) {
@@ -131,6 +134,8 @@ final class CashierV3RechargeDebtRepaymentServices
             );
             $input['businessSource'] = self::sourceSnapshotColumns($selected);
         }
+        // 充值补交奖励与本金分开保存；资格只依据服务端核定来源，余额仍只补入本金。
+        $rewardAmountCents = CashierV3RepaymentReward::forSource($input['rewardAmountCents'], $input['businessSource']['business_source_primary_name_snapshot']);
         $recordId = (int)Db::name('cashier_v3_recharge_debt_repayment')->insertGetId([
             'repayment_id' => $repaymentId, 'repayment_no' => $repaymentNo,
             'tenant_id' => $dataScope->tenantId(), 'store_id' => $operator->storeId(), 'member_id' => $input['memberId'], 'operator_id' => $operator->operatorId(),
@@ -142,6 +147,7 @@ final class CashierV3RechargeDebtRepaymentServices
             'business_source_secondary_name_snapshot' => $input['businessSource']['business_source_secondary_name_snapshot'],
             'business_source_label_snapshot' => $input['businessSource']['business_source_label_snapshot'],
             'salespeople_snapshot_json' => json_encode($input['salespeople'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'reward_amount_cents' => $rewardAmountCents,
             'amount_cents' => $input['amountCents'], 'debt_repaid_before_cents' => $repaidBefore, 'debt_repaid_after_cents' => $repaidAfter, 'debt_status_after' => $debtStatus,
             'balance_ledger_id' => 0, 'business_date' => $businessDate, 'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
             'status' => 'processing', 'version' => 1, 'created_at' => $now, 'updated_at' => $now,
@@ -222,7 +228,7 @@ final class CashierV3RechargeDebtRepaymentServices
         $out=[]; foreach($lines as $line){$method=trim((string)($line['paymentMethod']??''));$cents=self::inputCents(is_array($line)?($line['amount']??null):null);$reference=trim((string)($line['collectionReference']??''));$remark=trim((string)($line['remark']??''));if(!in_array($method,self::PAYMENT_METHODS,true)||$cents<=0||strlen($reference)>128||strlen($remark)>255)throw self::failure('recharge_repayment_payment_invalid');$out[]=['paymentMethod'=>$method,'amountCents'=>$cents,'collectionReference'=>$reference,'remark'=>$remark];}
         // 浏览器提交本次选中的 ID；名称仍由事务内原单快照或有效目录确定。
         $source = is_array($payload['businessSource'] ?? null) ? $payload['businessSource'] : [];
-        return ['memberId'=>$memberId,'debtId'=>$debtId,'amountCents'=>$amount,'balanceVersion'=>$version,'paymentLines'=>$out,'salespersonAllocations'=>$salespeople,'businessDate'=>trim((string)($payload['businessDate'] ?? '')),'businessSource'=>self::sourceSnapshotColumns($source)];
+        return ['memberId'=>$memberId,'debtId'=>$debtId,'amountCents'=>$amount,'balanceVersion'=>$version,'paymentLines'=>$out,'salespersonAllocations'=>$salespeople,'businessDate'=>trim((string)($payload['businessDate'] ?? '')),'businessSource'=>self::sourceSnapshotColumns($source),'rewardAmountCents'=>CashierV3RepaymentReward::cents($source['rewardAmountCents'] ?? 0)];
     }
     /** 将来源快照映射为补交记录与收款事实共用的可查询字段。 */
     private static function sourceSnapshotColumns(array $source): array
