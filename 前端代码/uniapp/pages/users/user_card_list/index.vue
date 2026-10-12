@@ -247,7 +247,9 @@
 				const projects = [];
 				let colorIdx = 0;
 				cardList.forEach((card) => {
-					if (card.product_type == 5 && card.related_list && card.related_list.length) {
+					// Imported historical purchases stay one visible item, matching
+					// the old member list; checkout keeps the full project choices.
+					if (card.product_type == 5 && !card.historical_display_single && card.related_list && card.related_list.length) {
 						card.related_list.forEach((related) => {
 							projects.push(this.formatProject({
 								key: `related-${related.id}`,

@@ -28,22 +28,27 @@ class UserIntegralJob extends BaseJobs
 
     /**
      * 执行清除到期积分
-     * @param $openids
+     * @param array $uids 待清算会员
+     * @param array $period 调度时固定的清算时间窗口
      * @return bool
      */
-    public function doJob($uids)
+    public function doJob($uids, $period = [])
     {
         if (!$uids || !is_array($uids)) {
             return true;
         }
         try {
+            if (!is_array($period) || !$period) {
+                throw new \InvalidArgumentException('积分到期任务缺少固定清算窗口');
+            }
+            // BaseJobs 仅在 doJob 返回 false 时重试；直接抛出会被其 fire() 删除任务。
             /** @var UserIntegralServices $userIntegralServices */
             $userIntegralServices = app()->make(UserIntegralServices::class);
-            $userIntegralServices->doClearExpireIntegral($uids);
+            return $userIntegralServices->doClearExpireIntegral($uids, $period);
         } catch (\Throwable $e) {
-            Log::error('清除用户到期积分失败,失败原因:' . $e->getMessage());
+            Log::error('清除用户到期积分失败，等待队列重试，原因：' . $e->getMessage());
+            return false;
         }
-        return true;
     }
 
 	/**

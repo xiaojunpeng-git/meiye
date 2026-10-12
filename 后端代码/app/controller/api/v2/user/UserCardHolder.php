@@ -13,6 +13,8 @@ namespace app\controller\api\v2\user;
 use app\Request;
 use app\services\store\SystemStoreStaffServices;
 use app\services\user\UserCardHolderServices;
+use app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy;
+use think\facade\Db;
 
 
 /**
@@ -49,6 +51,7 @@ class UserCardHolder
         $loginUid = (int)$request->uid();
         $getUid = (int)$request->get('uid', 0);
         $uid = $getUid ?: $loginUid;
+        $viewerStoreId = null;
         if ($getUid && $getUid !== $loginUid) {
             /** @var SystemStoreStaffServices $staffServices */
             $staffServices = app()->make(SystemStoreStaffServices::class);
@@ -58,8 +61,12 @@ class UserCardHolder
                 $staffInfo = [];
             }
             $staffServices->assertViewCustomerCardPermission($staffInfo);
+            // Staff may inspect a customer's imported rights only inside the
+            // organization of the authenticated operating store. The client
+            // cannot provide this store ID as a request parameter.
+            $viewerStoreId = (int)($staffInfo['store_id'] ?? 0);
         }
-        return app('json')->successful($this->services->getCardHolderList($uid));
+        return app('json')->successful($this->services->getCardHolderList($uid, [], $viewerStoreId));
     }
 
     /**
@@ -75,6 +82,27 @@ class UserCardHolder
     {
         if (!$id) {
             app('json')->fail('缺少参数');
+        }
+        $holder = Db::name('user_card_holder')->where('id', (int)$id)
+            ->field('id,uid')->find();
+        if (!$holder) {
+            return app('json')->fail('数据有误');
+        }
+        if ((int)$holder['uid'] !== (int)$request->uid()) {
+            /** @var SystemStoreStaffServices $staffServices */
+            $staffServices = app()->make(SystemStoreStaffServices::class);
+            try {
+                $staffInfo = $staffServices->getStaffInfoByUid((int)$request->uid())->toArray();
+            } catch (\Throwable $e) {
+                $staffInfo = [];
+            }
+            $staffServices->assertViewCustomerCardPermission($staffInfo);
+            if (CashierV3HistoricalEntitlementScopePolicy::isImportedHolder((int)$id, '0')
+                && CashierV3HistoricalEntitlementScopePolicy::allowedHolderIds(
+                    [(int)$id], '0', (int)($staffInfo['store_id'] ?? 0)
+                ) === []) {
+                return app('json')->fail('无操作权限');
+            }
         }
         $cardHolder = $this->services->oneCardHolder((int)$id);
         if ($cardHolder) {
@@ -93,7 +121,18 @@ class UserCardHolder
     public function delCardHolder(Request $request, $id)
     {
         if (!$id) {
-            app('json')->fail('缺少参数');
+            return app('json')->fail('缺少参数');
+        }
+        $holder = Db::name('user_card_holder')->where('id', (int)$id)
+            ->field('id,uid')->find();
+        if (!$holder || (int)$holder['uid'] !== (int)$request->uid()) {
+            return app('json')->fail('无操作权限');
+        }
+        // Source UI rights are the migration authority. A member-side delete
+        // would silently remove the imported right while leaving its source
+        // and scope audit intact; only the controlled write-off path may use it.
+        if (CashierV3HistoricalEntitlementScopePolicy::isImportedHolder((int)$id, '0')) {
+            return app('json')->fail('历史权益不可删除');
         }
         $res = $this->services->userDelCardHolder((int)$id);
         if ($res) {

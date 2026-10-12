@@ -911,7 +911,13 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         return (int)($order['id'] ?? 0) > 0
             && (int)($order['paid'] ?? 0) === 1
             && (int)($order['is_del'] ?? 0) === 0
-            && (int)($order['is_system_del'] ?? 0) === 0
+            // The historical entitlement carrier is hidden from ordinary
+            // order queries, but remains an authority only when its separate
+            // holder scope has already passed the locked checkout checks.
+            && ((int)($order['is_system_del'] ?? 0) === 0
+                || ((int)($order['is_system_del'] ?? 0) === 1
+                    && (int)($order['store_id'] ?? -1) === 0
+                    && (string)($order['mark'] ?? '') === 'migration_entitlement'))
             && (int)($order['is_user_del'] ?? 0) === 0
             && (int)($order['refund_status'] ?? 0) === 0
             && (int)($order['terminal_action'] ?? 0) === 0

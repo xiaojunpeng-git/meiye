@@ -27,6 +27,7 @@ use app\services\product\product\StoreProductRelationServices;
 use app\services\product\category\StoreProductCategoryServices;
 use app\services\store\SystemStoreServices;
 use think\exception\ValidateException;
+use app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy;
 
 /**
  *
@@ -55,14 +56,43 @@ class UserCardHolderServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function getCardHolderList(int $uid, array $where = [])
+    public function getCardHolderList(int $uid, array $where = [], ?int $viewerStoreId = null)
     {
         [$page, $limit] = $this->getPageValue();
         $where['is_del'] = 0;
         $where['uid'] = $uid;
         if(isset($where['store_id']) && $where['store_id'] <= 0) unset($where['store_id']);
-        $list = $this->dao->getList($where, $page, $limit, []);
+        // Staff scope must be evaluated before pagination, or a page can lose
+        // rows and its total will describe only the already sliced page.
+        $list = $this->dao->getList($where, $viewerStoreId === null ? $page : 0,
+            $viewerStoreId === null ? $limit : 0, []);
         $count = $this->dao->count($where);
+        // The member sees their own historical rights. A staff viewer can
+        // only see storeless rights whose owner organization contains the
+        // staff's authenticated operating store.
+        $historicalIds = array_fill_keys(
+            CashierV3HistoricalEntitlementScopePolicy::importedHolderIds(
+                array_column($list, 'id'), '0'
+            ), true
+        );
+        if ($viewerStoreId !== null && $historicalIds) {
+            $allowed = array_fill_keys(
+                CashierV3HistoricalEntitlementScopePolicy::allowedHolderIds(
+                    array_keys($historicalIds), '0', $viewerStoreId
+                ), true
+            );
+            $list = array_values(array_filter($list, static function (array $row) use ($historicalIds, $allowed): bool {
+                $id = (int)$row['id'];
+                return !isset($historicalIds[$id]) || isset($allowed[$id]);
+            }));
+            $count = count($list);
+        }
+        if ($viewerStoreId !== null) {
+            $count = count($list);
+            if ($page > 0 && $limit > 0) {
+                $list = array_slice($list, ($page - 1) * $limit, $limit);
+            }
+        }
         $time = time();
         /** @var StoreOrderServices $orderServices */
         $orderServices = app()->make(StoreOrderServices::class);
@@ -73,6 +103,8 @@ class UserCardHolderServices extends BaseServices
         /** @var StoreProductCategoryServices $categoryServices */
         $categoryServices = app()->make(StoreProductCategoryServices::class);
         foreach ($list as $key => &$item) {
+            $isHistorical = isset($historicalIds[(int)$item['id']]);
+            $item['historical_display_single'] = $isHistorical ? 1 : 0;
             // 统一返回完整 7 位卡号字段；无值时为空串（不回落订单核销码）
             $item['card_no'] = trim((string)($item['card_no'] ?? ''));
             $order = $orderServices->get($item['oid'], ['order_id', 'card_upgrade_use_oid']);
@@ -90,14 +122,17 @@ class UserCardHolderServices extends BaseServices
             $item['is_card_upgraded'] = (int) ($orderArr['card_upgrade_use_oid'] ?? 0) > 0;
             $item['store_name']=SystemStore::where("id",$item['store_id'])->value("name");
             $product_card = $productServices->get($item['product_id'], ['image', 'card_cover', 'card_cover_image', 'card_cover_color']);
-            if (!$product_card) {
+            if (!$product_card && !$isHistorical) {
                 unset($list[$key]);
                 continue;
             }
-            $item['image'] = $product_card['image'];
-            $item['card_cover'] = $product_card['card_cover'];
-            $item['card_cover_image'] = $product_card['card_cover_image'];
-            $item['card_cover_color'] = $product_card['card_cover_color'];
+            // A deleted or never-mapped historical product cannot erase a
+            // purchased right. Its immutable holder name and project snapshot
+            // remain readable while the carrier stays unavailable for sale.
+            $item['image'] = $product_card['image'] ?? '';
+            $item['card_cover'] = $product_card['card_cover'] ?? '';
+            $item['card_cover_image'] = $product_card['card_cover_image'] ?? '';
+            $item['card_cover_color'] = $product_card['card_cover_color'] ?? '';
             $rootCate = $this->resolveProductCardPackCategory((int)$item['product_id'], $productServices, $categoryServices);
             $item['cate_id'] = $rootCate['cate_id'];
             $item['cate_name'] = $rootCate['cate_name'];
@@ -296,6 +331,7 @@ class UserCardHolderServices extends BaseServices
         /** @var StoreOrderServices $orderServices */
         $orderServices = app()->make(StoreOrderServices::class);
         $cardHolder = $cardHolder->toArray();
+        $isHistorical = CashierV3HistoricalEntitlementScopePolicy::isImportedHolder((int)$cardHolder['id'], '0');
         $time = time();
         $cardHolder['store_name'] = '';
         $cardHolder['store_image'] = '';
@@ -307,15 +343,27 @@ class UserCardHolderServices extends BaseServices
         $order = $orderServices->get($cardHolder['oid'], ['order_id','pay_price']);
         $cardHolder['order_id'] = $order['order_id'];
         $cardHolder['pay_price'] = $order['pay_price'];
+        if ($isHistorical) {
+            // Member detail displays the old purchase snapshot, not the
+            // zero-priced technical carrier. This field is display-only;
+            // refund/settlement services continue to read the target order.
+            $sourcePaidPrice = CashierV3HistoricalEntitlementScopePolicy::sourcePaidPrice(
+                (int)$cardHolder['id'], '0'
+            );
+            if ($sourcePaidPrice !== null) {
+                $cardHolder['pay_price'] = $sourcePaidPrice;
+                $cardHolder['historical_original_pay_price'] = $sourcePaidPrice;
+            }
+        }
         $product_card = $productServices->get($cardHolder['product_id'], ['pid', 'image', 'card_cover', 'card_cover_image', 'card_cover_color']);
-        if (!$product_card) {
+        if (!$product_card && !$isHistorical) {
             return null;
         }
-        $cardHolder['pid'] = $product_card['pid'];
-        $cardHolder['image'] = $product_card['image'];
-        $cardHolder['card_cover'] = $product_card['card_cover'];
-        $cardHolder['card_cover_image'] = $product_card['card_cover_image'];
-        $cardHolder['card_cover_color'] = $product_card['card_cover_color'];
+        $cardHolder['pid'] = $product_card['pid'] ?? 0;
+        $cardHolder['image'] = $product_card['image'] ?? '';
+        $cardHolder['card_cover'] = $product_card['card_cover'] ?? '';
+        $cardHolder['card_cover_image'] = $product_card['card_cover_image'] ?? '';
+        $cardHolder['card_cover_color'] = $product_card['card_cover_color'] ?? '';
         if ($cardHolder['write_valid'] == 1) {
             $cardHolder['status'] = 1; // 核销中
         } else if ($time < $cardHolder['write_start']) {
@@ -330,8 +378,13 @@ class UserCardHolderServices extends BaseServices
             $cardHolder['write_end'] = date('Y-m-d H:i:s', $cardHolder['write_end']);
         }
         $cardHolder['add_time'] = date('Y-m-d H:i:s', $cardHolder['add_time']);
-        $writeoffedNum = $this->getWriteSurplusTimes($cardHolder['oid']);
-        $cardHolder['write_surplus_times'] = bcsub((string)$cardHolder['write_times'], (string)$writeoffedNum, 0);
+        // A migrated choice-count card has several selectable project rows
+        // sharing one holder pool. Summing their used counts would multiply
+        // one purchase; the locked holder remainder is authoritative here.
+        if (!$isHistorical) {
+            $writeoffedNum = $this->getWriteSurplusTimes($cardHolder['oid']);
+            $cardHolder['write_surplus_times'] = bcsub((string)$cardHolder['write_times'], (string)$writeoffedNum, 0);
+        }
         $cardHolder['remaining_price'] = 0;
         if($is_price) {
             /** @var StoreOrderCartInfoServices $cartServices */

@@ -310,8 +310,9 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             }
             $order = $this->loadActiveOrder((int)$holder['oid'], 0, $lock);
             if (!$order
-                || !$this->allowsSourceStore((int)$holder['store_id'], $operatorScope)
-                || !$this->allowsSourceStore((int)$order['store_id'], $operatorScope)) {
+                || (!$this->allowsHistoricalHolder($holder, $order, $operatorScope)
+                    && (!$this->allowsSourceStore((int)$holder['store_id'], $operatorScope)
+                        || !$this->allowsSourceStore((int)$order['store_id'], $operatorScope)))) {
                 return null;
             }
             $state = $this->cardOperationState((int)$holder['id'], $lock);
@@ -441,8 +442,9 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             return null;
         }
         $holder = $holderRows[0];
-        if (!$this->allowsSourceStore((int)$holder['store_id'], $operatorScope)
-            || !$this->allowsSourceStore((int)$order['store_id'], $operatorScope)) {
+        if (!$this->allowsHistoricalHolder($holder, $order, $operatorScope)
+            && (!$this->allowsSourceStore((int)$holder['store_id'], $operatorScope)
+                || !$this->allowsSourceStore((int)$order['store_id'], $operatorScope))) {
             return null;
         }
         // A transfer changes the current holder only. The historic order UID
@@ -536,7 +538,10 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             || ($expectedMemberId > 0 && (int)$order['uid'] !== $expectedMemberId)
             || (int)$order['paid'] !== 1
             || (int)$order['is_del'] !== 0
-            || (int)$order['is_system_del'] !== 0
+            || ((int)$order['is_system_del'] !== 0
+                && !((int)$order['store_id'] === 0
+                    && (string)$order['mark'] === 'migration_entitlement'
+                    && (int)$order['is_system_del'] === 1))
             || (int)$order['is_user_del'] !== 0
             || (int)$order['refund_status'] !== 0
             || (int)$order['terminal_action'] !== 0
@@ -658,6 +663,21 @@ final class CashierV3EntitlementResourceVersionProvider implements CashierV3Data
             return false;
         }
         return $this->crossStoreEnabled() || $sourceStoreId === $operatorScope->storeId();
+    }
+
+    /**
+     * Zero-store rights are allowed only when both carrier rows are storeless
+     * and a server-side import scope grants the operator's active store under
+     * the owning organization. This cannot be requested through client data.
+     */
+    private function allowsHistoricalHolder(array $holder, array $order, CashierV3OperatorScope $operatorScope): bool
+    {
+        if ((int)($holder['store_id'] ?? -1) !== 0 || (int)($order['store_id'] ?? -1) !== 0) {
+            return false;
+        }
+        return \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::allowedHolderIds(
+            [(int)($holder['id'] ?? 0)], $operatorScope->tenantId(), $operatorScope->storeId()
+        ) !== [];
     }
 
     private function crossStoreEnabled(): bool

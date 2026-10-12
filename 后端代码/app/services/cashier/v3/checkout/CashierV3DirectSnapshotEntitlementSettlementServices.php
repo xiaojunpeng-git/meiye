@@ -1181,8 +1181,19 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 throw self::failure('authority_entitlement_not_active', ['lineId' => $lineId]);
             }
             $this->assertCardOperationStateActive($holder, $memberId);
-            $this->assertOriginStoreAllowed((int)$order['store_id'], $operatorScope, $dataScope);
-            $this->assertOriginStoreAllowed((int)$holder['store_id'], $operatorScope, $dataScope);
+            // Storeless migration carriers have no invented sales store. The
+            // authenticated operating store must instead belong to the
+            // holder's owner organization; unrelated brands fail closed.
+            $historical = (int)$order['store_id'] === 0
+                && (int)$holder['store_id'] === 0
+                && (string)($order['mark'] ?? '') === 'migration_entitlement'
+                && \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::allowedHolderIds(
+                    [$holderId], $operatorScope->tenantId(), $operatorScope->storeId()
+                ) !== [];
+            if (!$historical) {
+                $this->assertOriginStoreAllowed((int)$order['store_id'], $operatorScope, $dataScope);
+                $this->assertOriginStoreAllowed((int)$holder['store_id'], $operatorScope, $dataScope);
+            }
             $decoded = json_decode((string)($detail['cart_info'] ?? ''), true);
             $decoded = is_array($decoded) ? $decoded : [];
             $ruleAuthority = $this->cardRules->authorityForDetail(
@@ -2036,7 +2047,10 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
         return $order
             && (int)($order['paid'] ?? 0) === 1
             && (int)($order['is_del'] ?? 1) === 0
-            && (int)($order['is_system_del'] ?? 1) === 0
+            && ((int)($order['is_system_del'] ?? 1) === 0
+                || ((int)($order['is_system_del'] ?? 1) === 1
+                    && (int)($order['store_id'] ?? -1) === 0
+                    && (string)($order['mark'] ?? '') === 'migration_entitlement'))
             && (int)($order['is_user_del'] ?? 1) === 0
             && (int)($order['refund_status'] ?? -1) === 0
             && (int)($order['terminal_action'] ?? -1) === 0

@@ -439,17 +439,13 @@ final class CashierV3EntitlementProjectionServices
         $holderQuery = Db::name('user_card_holder')
             ->field('id,uid,oid,card_name,card_no,store_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
             ->where('uid', $memberId)
-            ->where('is_del', 0)
-            ->where('store_id', '>', 0);
+            ->where('is_del', 0);
         if (!$includeUnavailableCards) {
             $holderQuery->where('write_surplus_times', '>', 0);
         }
         // 跨店核销关闭时，必须在发现阶段就裁掉其它门店卡实例。
         // 否则后续会先给不可见卡实例同步版本，再以“资源不存在”中断整个
         // 选择器，导致本店仍可用权益也无法展示。
-        if (!$this->crossStoreEnabled()) {
-            $holderQuery->where('store_id', $operatorScope->storeId());
-        }
         if ($holderFilter !== null) {
             $holderQuery->whereIn('id', $holderFilter ?: [-1]);
         }
@@ -464,6 +460,24 @@ final class CashierV3EntitlementProjectionServices
             $strictCardOperationState,
             $includeDisplayOnlyCards
         );
+        // Existing cards still follow their recorded store. Only a database
+        // migration scope may authorize a storeless historical holder, and
+        // only inside the operator's current organization branch.
+        $zeroStoreIds = [];
+        foreach ($holders as $holder) {
+            if ((int)$holder['store_id'] === 0) $zeroStoreIds[] = (int)$holder['id'];
+        }
+        $allowedHistorical = array_fill_keys(
+            \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::allowedHolderIds(
+                $zeroStoreIds, $tenantId, $operatorScope->storeId()
+            ), true
+        );
+        $holders = array_values(array_filter($holders, function (array $holder) use ($allowedHistorical, $operatorScope): bool {
+            $storeId = (int)$holder['store_id'];
+            return $storeId === 0
+                ? isset($allowedHistorical[(int)$holder['id']])
+                : ($storeId > 0 && ($this->crossStoreEnabled() || $storeId === $operatorScope->storeId()));
+        }));
         $holderCountsByOrder = [];
         foreach ($holders as $holder) {
             $orderId = (int)($holder['oid'] ?? 0);
@@ -483,25 +497,32 @@ final class CashierV3EntitlementProjectionServices
         if ($orderIds) {
             $orderQuery = Db::name('store_order')
                 ->field('id,uid,store_id,paid,is_del,is_system_del,is_user_del,refund_status,terminal_action,card_upgrade_use_oid,order_id,mark,pay_price,cash_pay_price,yue_pay_price,debt_amount,repaid_debt_amount')
-                ->whereIn('id', $orderIds)
-                ->where('store_id', '>', 0);
+                ->whereIn('id', $orderIds);
             if (!$includeDisplayOnlyCards) {
                 $orderQuery
                     ->where('paid', 1)
                     ->where('is_del', 0)
-                    ->where('is_system_del', 0)
                     ->where('is_user_del', 0)
                     ->where('refund_status', 0)
                     ->where('terminal_action', 0)
                     ->where('card_upgrade_use_oid', 0);
             }
-            if (!$this->crossStoreEnabled()) {
-                $orderQuery->where('store_id', $operatorScope->storeId());
-            }
             if ($lock) {
                 $orderQuery->lock(true);
             }
             $orders = $this->rows($orderQuery->order('id asc')->select());
+            $allowedOrderIds = [];
+            foreach ($holders as $holder) {
+                $allowedOrderIds[(int)$holder['oid']] = (int)$holder['store_id'];
+            }
+            $orders = array_values(array_filter($orders, function (array $order) use ($allowedOrderIds, $operatorScope): bool {
+                $orderId = (int)$order['id'];
+                $storeId = (int)$order['store_id'];
+                if (!array_key_exists($orderId, $allowedOrderIds)) return false;
+                return $allowedOrderIds[$orderId] === 0
+                    ? $storeId === 0
+                    : ($storeId > 0 && ($this->crossStoreEnabled() || $storeId === $operatorScope->storeId()));
+            }));
         }
         $validOrderIds = array_values(array_unique(array_map('intval', array_column($orders, 'id'))));
 
@@ -1409,9 +1430,15 @@ final class CashierV3EntitlementProjectionServices
         if ((int)($order['card_upgrade_use_oid'] ?? 0) > 0) {
             return '已升级为其他卡项，当前不可使用';
         }
+        // A migration carrier is hidden from ordinary orders with
+        // is_system_del=1. Its holder still needs a separate scope grant before
+        // it reaches this selector; no other deleted order becomes usable.
+        $hiddenHistorical = (int)($order['store_id'] ?? -1) === 0
+            && (string)($order['mark'] ?? '') === 'migration_entitlement'
+            && (int)($order['is_system_del'] ?? 0) === 1;
         if ((int)($order['terminal_action'] ?? 0) !== 0
             || (int)($order['is_del'] ?? 0) !== 0
-            || (int)($order['is_system_del'] ?? 0) !== 0
+            || ((int)($order['is_system_del'] ?? 0) !== 0 && !$hiddenHistorical)
             || (int)($order['is_user_del'] ?? 0) !== 0) {
             return '原订单已作废，当前不可使用';
         }

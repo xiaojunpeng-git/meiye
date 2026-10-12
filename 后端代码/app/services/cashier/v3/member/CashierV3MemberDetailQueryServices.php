@@ -48,8 +48,13 @@ final class CashierV3MemberDetailQueryServices
             string $date, int $time, string $store, string $operatorName, string $result) use (&$rows): void {
             $rows[] = compact('key', 'type', 'content', 'amount', 'date', 'time', 'store', 'operatorName', 'result');
         };
+        // History can show the source purchase amount, but settlement and
+        // refundable value keep using the zero-valued technical carrier.
+        $oldPaid = \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::sourcePaidPrice(
+            $holderId, $tenantId
+        );
         $append('card:' . $holderId, '购卡', (string)$holder['card_name'],
-            (string)($order['pay_price'] ?? '0.00'), date('Y-m-d', (int)$holder['add_time']),
+            $oldPaid ?? (string)($order['pay_price'] ?? '0.00'), date('Y-m-d', (int)$holder['add_time']),
             (int)$holder['add_time'], (string)Db::name('system_store')->where('id', (int)$holder['store_id'])->value('name'),
             '', '卡号：' . (string)$holder['card_no']);
         foreach (Db::name('cashier_v3_card_operation')->where('tenant_id', $tenantId)
@@ -151,7 +156,7 @@ final class CashierV3MemberDetailQueryServices
                 if ((int)$member['belong_store_id']>0) $storeIds[]=(int)$member['belong_store_id'];
             }
             $storeNames=$storeIds?Db::name('system_store')->whereIn('id',array_unique($storeIds))->column('name','id'):[];
-            $cardsByMember=$this->cardsForMembers($batch,$operatorScope->tenantId(),'','active','','');
+            $cardsByMember=$this->cardsForMembers($batch,$operatorScope->tenantId(),'','active','','',$operatorScope->storeId());
             foreach ($batch as $memberId) {
                 if ($checkpoint!==null) $checkpoint();
                 $details[$memberId]=$this->readAiRightsWithBalance($memberId,$dataScope,
@@ -285,7 +290,7 @@ final class CashierV3MemberDetailQueryServices
             $storeId = $operatorScope->storeId();
         }
         $detailQuery = $this->detailQuery($detailQuery);
-        $cards = $this->cards($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
+        $cards = $this->cards($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '', $operatorScope->storeId());
         $services = $this->services($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateTo'] : '');
         // “有效”代表会员当前仍持有的赠送/预售，不受查询区缓存的日期限制；
         // “全部”才允许按业务日期追查历史。后端也强制此口径，避免旧前端误传日期。
@@ -1119,9 +1124,9 @@ final class CashierV3MemberDetailQueryServices
     }
 
     /** Active card rights are cross-store only after the caller verifies member visibility. */
-    private function cards(int $memberId, string $tenantId, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = ''): array
+    private function cards(int $memberId, string $tenantId, string $keyword = '', string $status = 'active', string $dateFrom = '', string $dateTo = '', int $viewerStoreId = 0): array
     {
-        return $this->cardsForMembers([$memberId],$tenantId,$keyword,$status,$dateFrom,$dateTo)[$memberId]??[];
+        return $this->cardsForMembers([$memberId],$tenantId,$keyword,$status,$dateFrom,$dateTo,$viewerStoreId)[$memberId]??[];
     }
 
     /**
@@ -1132,18 +1137,16 @@ final class CashierV3MemberDetailQueryServices
      * @param array<int,int> $memberIds
      * @return array<int,array<int,array>>
      */
-    private function cardsForMembers(array $memberIds, string $tenantId, string $keyword, string $status, string $dateFrom, string $dateTo): array
+    private function cardsForMembers(array $memberIds, string $tenantId, string $keyword, string $status, string $dateFrom, string $dateTo, int $viewerStoreId = 0): array
     {
         $now = time();
         $activeOnly = $status === 'active';
         $holderQuery = Db::name('user_card_holder')->alias('h')
             ->join('store_order o', 'o.id = h.oid')
             ->whereIn('h.uid', $memberIds)
-            ->where('h.store_id', '>', 0)
             // 整卡转让只改变当前持卡人；原购卡人仍留在订单上供债务归属和审计。
             ->where('o.paid', 1)
             ->where('o.is_del', 0)
-            ->where('o.is_system_del', 0)
             ->where('o.is_user_del', 0)
             ->where('o.card_upgrade_use_oid', 0);
         if ($activeOnly) {
@@ -1160,13 +1163,37 @@ final class CashierV3MemberDetailQueryServices
         // AI 候选读取和所有写命令继续走各自权限门禁。
         $this->applyDetailKeyword($holderQuery, $keyword, ['h.card_name', 'h.card_no']);
         $holders = $holderQuery
-            ->field('h.id,h.uid,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price')
+            ->field('h.id,h.uid,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price,o.store_id as order_store_id,o.is_system_del,o.mark')
             ->order('h.id', 'asc')
             ->select()
             ->toArray();
 
+        // Storeless migrated holders need the viewer's actual operating store
+        // under their owner organization. Internal index reads have no viewer
+        // store and therefore exclude them rather than widening visibility.
+        $zeroStoreIds = [];
+        foreach ($holders as $holder) {
+            if ((int)$holder['store_id'] === 0) $zeroStoreIds[] = (int)$holder['id'];
+        }
+        $allowedZeroStore = array_fill_keys(
+            \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::allowedHolderIds(
+                $zeroStoreIds, $tenantId, $viewerStoreId
+            ), true
+        );
         $holderByOrder = [];
         foreach ($holders as $holder) {
+            $hiddenHistorical = (int)$holder['is_system_del'] === 1
+                && (int)$holder['store_id'] === 0
+                && (int)$holder['order_store_id'] === 0
+                && (string)$holder['mark'] === 'migration_entitlement'
+                && isset($allowedZeroStore[(int)$holder['id']]);
+            // Normal system-deleted orders remain excluded from the member
+            // detail, while the separate migration scope authorizes a hidden
+            // carrier only in the owner's organization.
+            if ((int)$holder['is_system_del'] !== 0 && !$hiddenHistorical) continue;
+            if ((int)$holder['store_id'] <= 0 && !isset($allowedZeroStore[(int)$holder['id']])) {
+                continue;
+            }
             $start = max(0, (int)($holder['write_start'] ?? 0));
             $end = max(0, (int)($holder['write_end'] ?? 0));
             if ($activeOnly && (($start > 0 && $start > $now) || ($end > 0 && $end < $now))) {
