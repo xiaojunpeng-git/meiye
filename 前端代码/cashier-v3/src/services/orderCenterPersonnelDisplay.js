@@ -24,6 +24,17 @@ export function salespeoplePerformanceText(people) {
   }).filter(Boolean).join('，') || '—'
 }
 
+/** 导购轮次是结账时保存的归属事实；缺失轮次不得按订单先后猜测。 */
+export function guideRoundText(people) {
+  const records = Array.isArray(people) ? people : []
+  return records.map((person) => {
+    const name = personName(person)
+    if (!name) return ''
+    const round = Number(person?.guideRoundNo ?? person?.guide_round_no ?? 0)
+    return `${name}（${Number.isInteger(round) && round >= 1 && round <= 3 ? `第${round}轮` : '无'}）`
+  }).filter(Boolean).join('、') || '—'
+}
+
 export function serviceCraftsmenPerformanceText(record) {
   const allocations = record?.craftsmenListAllocations || record?.laborPerformanceAllocations
   if (!Array.isArray(allocations) || !allocations.length) return record?.craftsmenSummary || '—'
