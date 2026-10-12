@@ -321,7 +321,8 @@ final class MemberManagementDashboardServices
     /** @return array<int,array{id:int,name:string}> */
     private function categories(): array
     {
-        try { $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('is_show', 1)->where('pid', 0)->field('id,cate_name')->order('id')->select()->toArray(); } catch (\Throwable $e) { $rows = []; }
+        // The report can still group historical members under a hidden platform category.
+        try { $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('pid', 0)->field('id,cate_name')->order('id')->select()->toArray(); } catch (\Throwable $e) { $rows = []; }
         return array_map(static fn(array $r): array => ['id' => (int)$r['id'], 'name' => (string)$r['cate_name']], $rows);
     }
 

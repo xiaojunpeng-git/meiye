@@ -589,7 +589,7 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $today = ['start' => $range['end'], 'end' => $range['end']];
         $cumulative = ['start' => self::COVERAGE_START, 'end' => $range['end']];
-        // Header categories come from all currently visible product categories,
+        // Header categories come from every existing platform category,
         // never from whichever facts happened to occur in the selected period.
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
         $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
@@ -935,49 +935,38 @@ class StoreUnifiedReportServices extends BaseServices
         ]];
         $categories = [];
         foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
-            ->field('id,pid,cate_name,is_show')->select()->toArray() as $category) {
+            ->field('id,pid,cate_name')->select()->toArray() as $category) {
             $id = (int)($category['id'] ?? 0);
             if ($id > 0) $categories[$id] = $category;
         }
         if ($categories === []) return $unclassified;
 
-        $visible = [];
-        foreach ($categories as $id => $category) {
-            if ((int)($category['is_show'] ?? 0) === 1) $visible[$id] = true;
-        }
-        if ($visible === []) return $unclassified;
+        // is_show only hides catalog choices; a category row still classifies its linked products.
+        $available = array_fill_keys(array_keys($categories), true);
 
         // Keep the same two-level projection used by partner columns, but
-        // apply it to every visible category. A visible root is replaced by
-        // its visible direct children; deeper categories roll up to that
+        // apply it to every existing category. A root is replaced by
+        // its direct children; deeper categories roll up to that
         // second level and never create a third-level header.
-        $visibleDirectChildren = [];
-        foreach (array_keys($visible) as $categoryId) {
+        $directChildren = [];
+        foreach (array_keys($available) as $categoryId) {
             $chain = $this->partnerCategoryChain((int)$categoryId, $categories);
             if ($chain === []) continue;
             $rootId = (int)$chain[0]['id'];
             if (count($chain) >= 2 && (int)$chain[1]['id'] === (int)$categoryId) {
-                $visibleDirectChildren[$rootId][(int)$categoryId] = true;
+                $directChildren[$rootId][(int)$categoryId] = true;
             }
         }
 
         $definitions = [];
-        foreach (array_keys($visible) as $categoryId) {
+        foreach (array_keys($available) as $categoryId) {
             $chain = $this->partnerCategoryChain((int)$categoryId, $categories);
             if ($chain === []) continue;
             $rootId = (int)$chain[0]['id'];
             $effective = $chain[0];
             if (count($chain) >= 2) {
-                $secondId = (int)$chain[1]['id'];
-                if (isset($visible[$secondId])) {
-                    $effective = $chain[1];
-                } elseif (isset($visibleDirectChildren[$rootId])) {
-                    // The current row is visible but its parent is hidden;
-                    // retain the visible root rather than exposing a hidden
-                    // category as a report column.
-                    $effective = $chain[0];
-                }
-            } elseif (isset($visibleDirectChildren[$rootId])) {
+                $effective = $chain[1];
+            } elseif (isset($directChildren[$rootId])) {
                 continue;
             }
             $effectiveId = (int)$effective['id'];
@@ -1602,8 +1591,10 @@ class StoreUnifiedReportServices extends BaseServices
             ->field('tenant_id,category_id')->select()->toArray();
         if ($configs === []) return [];
 
+        // Disabled partner configurations are excluded above; catalog visibility
+        // must not hide a configured category that still has persisted facts.
         $categories = [];
-        foreach (Db::name('store_product_category')->where('is_show', 1)
+        foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
             ->field('id,pid,cate_name')->select()->toArray() as $category) {
             $id = (int)($category['id'] ?? 0);
             if ($id > 0) $categories[$id] = $category;

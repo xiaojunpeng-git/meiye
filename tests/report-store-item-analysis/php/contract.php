@@ -48,11 +48,11 @@ itemAnalysisAssert(
 itemAnalysisAssert(
     str_contains($service, '$definitions = $this->itemAnalysisCategoryDefinitions($storeId);')
         && str_contains($service, "Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)")
-        && str_contains($service, "field('id,pid,cate_name,is_show')")
-        && str_contains($service, '(int)($category[\'is_show\'] ?? 0) === 1')
-        && str_contains($service, 'all currently visible product categories')
+        && str_contains($service, "field('id,pid,cate_name')")
+        && str_contains($service, 'is_show only hides catalog choices')
+        && str_contains($service, 'every existing platform category')
         && str_contains($service, 'CashierV3ScopeResolver::TENANT_SCOPE_ID'),
-    'category headers come from all visible product categories even without period facts'
+    'category headers include existing hidden platform categories even without period facts'
 );
 itemAnalysisAssert(
     str_contains($metricReader, 'cashier_v3_card_sale_category_allocation_fact')

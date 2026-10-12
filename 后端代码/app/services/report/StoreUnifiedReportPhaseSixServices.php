@@ -846,8 +846,10 @@ final class StoreUnifiedReportPhaseSixServices
      */
     private function salarySalesDebtSupplementDimensions(array $dimensions,array $debtIds):array
     {
+        // Debt items keep historical store-product IDs even after catalog deletion;
+        // the platform link is still authoritative for the repayment's category.
         $items=Db::name('store_debt_item')->alias('i')
-            ->leftJoin('store_product p','p.id=i.product_id AND p.is_del=0')
+            ->leftJoin('store_product p','p.id=i.product_id')
             ->whereIn('i.debt_id',$debtIds)
             ->field('i.id,i.debt_id,i.order_id,i.product_id,i.product_type,i.debt_amount,p.type product_scope_type,p.relation_id product_store_id')
             ->order('i.id asc')->select()->toArray();
@@ -866,7 +868,7 @@ final class StoreUnifiedReportPhaseSixServices
         $componentsByOrder=[];
         if($cardOrderIds!==[]){
             $components=Db::name('store_order_cart_info')->alias('c')
-                ->leftJoin('store_product p','p.id=c.product_id AND p.is_del=0')
+                ->leftJoin('store_product p','p.id=c.product_id')
                 ->whereIn('c.oid',array_keys($cardOrderIds))->where('c.cart_type',2)->where('c.product_type',6)
                 ->field('c.id,c.oid,c.product_id,c.total_price,c.pay_price,p.relation_id product_store_id')
                 ->order('c.id asc')->select()->toArray();
@@ -944,15 +946,15 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /**
-     * Current visible categories define zero-sales columns; hidden or unsplit current
-     * categories retain their stable legacy column keys. No historical snapshot supplies classification.
+     * Any platform category still in the database defines current columns,
+     * regardless of catalogue visibility. No historical snapshot supplies classification.
      *
      * @return array{columns:array<int,array>,targets:array<int|string,string>}
      */
     private function salaryCategoryDefinitions(array $observed): array
     {
         $configured=Db::name('store_product_category')->where('type',0)->where('relation_id',0)
-            ->field('id,pid,cate_name,is_show')->select()->toArray();
+            ->field('id,pid,cate_name')->select()->toArray();
         return $this->buildSalaryCategoryDefinitions($configured,$observed);
     }
 
@@ -963,7 +965,8 @@ final class StoreUnifiedReportPhaseSixServices
         foreach($configured as $category){
             $id=(int)($category['id']??0);if($id<=0)continue;
             $byId[$id]=$category;
-            if((int)($category['is_show']??0)===1)$visible[$id]=true;
+            // is_show affects catalog presentation, not classification of historical sales.
+            $visible[$id]=true;
         }
         foreach(array_keys($visible) as $id){
             $parent=(int)($byId[$id]['pid']??0);

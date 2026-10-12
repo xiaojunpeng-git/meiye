@@ -239,10 +239,10 @@ final class GroupManagementDashboardServices
     /** @return array{roots:array<int,array<string,mixed>>,children:array<int,array<int,int>>} */
     private function categories(): array
     {
-        // 商品分类表同时保存平台配置和按门店同步的副本。看板仅使用平台端
-        // 当前启用的分类正本；否则同一分类会按每个门店重复展示。
+        // 商品分类表同时保存平台配置和按门店同步的副本。看板只使用平台
+        // 分类正本，但不因目录隐藏状态抹掉已有商品的报表分类。
         $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
-            ->where('is_show', 1)->field('id,pid,cate_name')->order('pid', 'asc')->order('id', 'asc')->select()->toArray();
+            ->field('id,pid,cate_name')->order('pid', 'asc')->order('id', 'asc')->select()->toArray();
         $ids = [];
         $children = [];
         foreach ($rows as $row) {

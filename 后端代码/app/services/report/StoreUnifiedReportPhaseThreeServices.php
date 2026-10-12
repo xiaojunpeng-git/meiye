@@ -1212,7 +1212,8 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         $root = (int)($input['category_id'] ?? 0);
         $requestedPath = preg_replace('/\s*\/\s*/u', '/', trim((string)($input['category_path'] ?? '')));
         if ($root <= 0 && $requestedPath === '') return [];
-        $categories = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('is_show', 1)
+        // Report selection follows existing platform-category IDs even after hiding a category.
+        $categories = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
             ->field('id,pid,cate_name')->select()->toArray();
         $children = [];
         $byId = [];
@@ -1249,10 +1250,10 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
 
     private function sixDimensionCategoryIds(): array
     {
-        $roots = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('is_show', 1)->where('pid', 0)
+        $roots = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('pid', 0)
             ->where('cate_name', '六维')->order('id', 'asc')->column('id');
         if ($roots === []) throw new \RuntimeException('六维根商品分类尚未配置，无法生成六维业绩报表');
-        if (count($roots) !== 1) throw new \RuntimeException('存在多个启用的六维根商品分类，请先修正分类配置');
+        if (count($roots) !== 1) throw new \RuntimeException('存在多个六维根商品分类，请先修正分类配置');
         return $this->categoryScope(['category_id' => (int)$roots[0]]);
     }
 

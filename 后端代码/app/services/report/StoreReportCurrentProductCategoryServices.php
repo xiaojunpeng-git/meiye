@@ -7,6 +7,7 @@ use think\facade\Db;
 /**
  * Resolve report categories only through the product's current platform identity.
  * Inputs are already restricted to the caller's authorized store scope; no names or historical snapshots are used.
+ * Deletion hides a catalog item from sale, but must not erase its platform category from historical reports.
  */
 final class StoreReportCurrentProductCategoryServices
 {
@@ -35,9 +36,9 @@ final class StoreReportCurrentProductCategoryServices
         foreach ($links as $key => $link) {
             $product = $products[(int)($link['product_id'] ?? 0)] ?? [];
             $storeId = (int)($link['store_id'] ?? 0);
-            if ($product === [] || (int)$product['is_del'] !== 0 || !$this->belongsToScope($product, $storeId)) continue;
+            if ($product === [] || !$this->belongsToScope($product, $storeId)) continue;
             $platform = $this->isPlatformProduct($product) ? $product : ($parents[(int)$product['pid']] ?? []);
-            if ($platform === [] || !$this->isPlatformProduct($platform) || (int)$platform['is_del'] !== 0) continue;
+            if ($platform === [] || !$this->isPlatformProduct($platform)) continue;
             $category = $this->categoryForProduct($platform, $categories);
             if ($category !== []) $result[$key] = $category;
         }
@@ -50,7 +51,7 @@ final class StoreReportCurrentProductCategoryServices
         $products = [];
         foreach (array_chunk($ids, 300) as $chunk) {
             foreach (Db::name('store_product')->whereIn('id', $chunk)
-                ->field('id,pid,type,relation_id,cate_id,is_del')->select()->toArray() as $row) {
+                ->field('id,pid,type,relation_id,cate_id')->select()->toArray() as $row) {
                 $products[(int)$row['id']] = $row;
             }
         }

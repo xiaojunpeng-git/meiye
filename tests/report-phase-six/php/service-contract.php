@@ -144,7 +144,7 @@ assertPhaseSix(
 assertPhaseSix(
     preg_match('/后来(?:已)?作废的记录不再统计/u',$service)===1
     && str_contains($service, '页面可输入姓名中的任意文字进行筛选')
-    && str_contains($service, '卡项按卡内项目当前分类和原有金额比例拆分')
+    && str_contains($service, '卡项按卡内项目的平台商品分类和原有金额比例拆分')
     && str_contains($service, '售前销售人分得的业绩显示“售前”；其他销售和服务读取关联商品的当前分类')
     && !str_contains($service, "'business_date','日期','事实业务日期。'")
     && !str_contains($service, "'cash_amount','现金业绩','销售明细现金业绩分摊事实。'"),
@@ -168,7 +168,7 @@ assertPhaseSix(($projectSummary['summary_row']['project_count'] ?? null) === '7.
 $categoryDefinitions = new ReflectionMethod($phaseSix, 'buildSalaryCategoryDefinitions');
 $categoryProjection = $categoryDefinitions->invoke($phaseSix, [
     ['id' => 1, 'pid' => 0, 'cate_name' => '生美', 'is_show' => 1],
-    ['id' => 2, 'pid' => 1, 'cate_name' => '卡项', 'is_show' => 1],
+    ['id' => 2, 'pid' => 1, 'cate_name' => '卡项', 'is_show' => 0],
     ['id' => 3, 'pid' => 1, 'cate_name' => '项目', 'is_show' => 1],
     ['id' => 4, 'pid' => 3, 'cate_name' => '三级', 'is_show' => 1],
     ['id' => 5, 'pid' => 0, 'cate_name' => '花园', 'is_show' => 1],
@@ -184,6 +184,8 @@ assertPhaseSix(in_array('生美/卡项', $categoryLabels, true)
     'salary categories use current two-level config, retain zero-sale columns and never resurrect old categories');
 assertPhaseSix(($categoryProjection['targets'][4] ?? null) === 'salary_category_cash_3',
     'third-level sale fact rolls into its visible second-level category');
+assertPhaseSix(($categoryProjection['targets'][2] ?? null) === 'salary_category_cash_2',
+    'hidden but existing platform category keeps its current report column');
 $projectCategoryMoney = new ReflectionMethod($phaseSix, 'salaryCategoryAmountsByColumn');
 $splitSale = ['cash_cents' => 200000, 'sales_category_cents' => [2 => 150000, 4 => 50000]];
 $splitColumns = $projectCategoryMoney->invoke($phaseSix, $splitSale, $categoryProjection['targets']);
