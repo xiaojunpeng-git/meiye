@@ -21,7 +21,8 @@
 		</view>
 		<view class="status-row">
 			<view class="status-dot" :class="{ 'status-dot--error': !foundationReady }"></view>
-			<text class="status-text">{{ foundationReady ? (platformCode === 'MP_WEIXIN' ? '已连接瑞昊正式服务' : '本机调试使用真实手机端接口') : '基础校验未通过' }}</text>
+			<!-- This reports the build environment, not a live connection or a customer identity. -->
+			<text class="status-text">{{ foundationReady ? (platformCode === 'MP_WEIXIN' ? '当前为小程序正式环境' : '本机调试使用真实手机端接口') : '基础校验未通过' }}</text>
 		</view>
 	</view>
 </template>

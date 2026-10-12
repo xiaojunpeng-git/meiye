@@ -44,6 +44,15 @@ test('mini-program API origin is provisioned per build and cannot fall back to a
 	assert.doesNotMatch(runtimeConfig, /https:\/\/(?:rh|008)\.cc3798\.com/)
 })
 
+test('mini-program login status is customer-neutral and does not claim connectivity', () => {
+	const loginPage = fs.readFileSync(
+		path.join(sourceRoot, 'app', 'pages', 'bootstrap', 'index.uvue'),
+		'utf8'
+	)
+	assert.match(loginPage, /当前为小程序正式环境/)
+	assert.doesNotMatch(loginPage, /已连接瑞昊正式服务/)
+})
+
 test('source tree contains app, member, merchant, and shared boundaries', () => {
 	for (const boundary of ['app', 'member', 'merchant', 'shared']) {
 		assert.equal(fs.statSync(path.join(sourceRoot, boundary)).isDirectory(), true)
