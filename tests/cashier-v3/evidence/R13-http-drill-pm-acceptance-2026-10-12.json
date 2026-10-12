@@ -1,0 +1,14 @@
+{
+  "task": "R13-00003 异业汇总HTTP下钻参数补修",
+  "version": "R13-20261012-http-drill-886a3eda",
+  "date": "2026-10-12",
+  "timezone": "Asia/Shanghai",
+  "user_acceptance": "确认补修验收通过，继续发布",
+  "scope": "门店与平台两个报表接口保留 member_id/include_followup_cash，查询及导出同口径；无页面、金额、权限或数据库变更",
+  "authorized_next_steps": ["本地commit", "部署瑞昊", "线上复验", "push至既有Gitee发布分支"],
+  "fixed_version_evidence": "tests/cashier-v3/evidence/R13-http-drill-fixed-2026-10-12.json",
+  "patch_sha256": "886a3eda5376ef8f67a34b13346544be0b835cb92f41490638036d5c129437f7",
+  "verified_local_head_before_commit": "95322d5f10fec748f3d1b1264c9251b04baaf804",
+  "head_change_note": "原固定版本基线后的008会员端提交与本补修无交集；补修文件与补丁指纹全部一致，不纳入瑞昊发布。",
+  "verification": {"input_query_export_checks": 15, "result": "PASS", "writes": 0, "browser": "本地真实页面点击十月1200后，仅显示该会员的BJ26100200015，合计1200"}
+}
