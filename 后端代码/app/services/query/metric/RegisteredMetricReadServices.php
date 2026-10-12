@@ -1007,6 +1007,28 @@ final class RegisteredMetricReadServices
     }
 
     /**
+     * Resolve a historical employee label only from normal, effective facts in
+     * authorized stores. This lookup proves scope when a selected day has no
+     * facts; it never supplies a metric value or widens a report date range.
+     */
+    public function personnelVisibleIdentity(string $metricCode, string $tenantId, array $stores, int $employeeId): string
+    {
+        // V3 facts cannot precede this date; the wide range is used only for
+        // identity, while factQuery retains every registered normal-data guard.
+        $identityRange = ['start' => '2000-01-01', 'end' => '9999-12-31'];
+        $this->assertScope($tenantId, $stores, $identityRange);
+        if ($employeeId <= 0) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
+        $contract = MetricDefinitionRegistry::get($metricCode);
+        if (($contract['reader_strategy'] ?? null) !== 'personnel_fact_sum') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        $row = $this->factQuery($contract['source'], $tenantId, $stores, $identityRange)
+            ->where('p.employee_id', $employeeId)
+            ->where('p.employee_name_snapshot', '<>', '')
+            ->field('p.employee_name_snapshot')
+            ->order('p.business_date', 'desc')->order('p.id', 'desc')->find();
+        return trim((string)($row['employee_name_snapshot'] ?? ''));
+    }
+
+    /**
      * Registered day/person projection for report tables.  It intentionally
      * returns an already-aggregated metric value; a report may decorate it
      * with organization labels but may not reopen a performance-fact query.

@@ -266,6 +266,26 @@ final class MobileWarehouseServices
             $employeeName = $pointName;
         }
         if ($employeeName === '') {
+            // A zero-fact day is not a permission denial: a currently assigned
+            // employee remains visible within the server-authorized stores.
+            $staff = Db::name('system_store_staff')->alias('s')
+                ->join('employee e', 'e.id = s.employee_id')
+                ->where('s.employee_id', $employeeId)->whereIn('s.store_id', $storeIds)
+                ->where('s.status', 1)->where('s.is_del', 0)
+                ->where('e.status', 1)->where('e.is_del', 0)
+                ->field('e.name')->find();
+            $employeeName = trim((string)($staff['name'] ?? ''));
+        }
+        if ($employeeName === '') {
+            // Former staff may still appear in fact-backed rankings. Only a
+            // registered normal fact from an authorized store can establish
+            // their historical identity; no data from other stores is exposed.
+            foreach (['staff_sales_yeji', 'staff_labor_yeji'] as $metricCode) {
+                $employeeName = $metricReader->personnelVisibleIdentity($metricCode, '0', $storeIds, $employeeId);
+                if ($employeeName !== '') break;
+            }
+        }
+        if ($employeeName === '') {
             throw MobileApiException::business('STORE_NOT_ALLOWED', '该员工不在当前数据权限范围内。');
         }
 
