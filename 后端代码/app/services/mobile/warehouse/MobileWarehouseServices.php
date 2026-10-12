@@ -49,15 +49,7 @@ final class MobileWarehouseServices
         $organizations = Db::name('organization')->where('is_del', 0)
             ->field('id,pid,name')->select()->toArray();
 
-        $nodeType = trim((string)($input['nodeType'] ?? ''));
-        $nodeId = (int)($input['nodeId'] ?? 0);
-        if ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE) {
-            $nodeType = 'store';
-            $nodeId = (int)$entry['entryNodeId'];
-        } elseif ($nodeType === '' && $nodeId === 0) {
-            $nodeType = (string)$entry['entryNodeType'];
-            $nodeId = (int)$entry['entryNodeId'];
-        }
+        [$nodeType, $nodeId, $defaultStoreEntry] = self::requestedWarehouseNode($entry, $input);
 
         try {
             $hierarchy = $this->hierarchy->project(
@@ -86,9 +78,9 @@ final class MobileWarehouseServices
         if ($rankingPage < 1 || $rankingPage > 10000) {
             throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '排行页码无效。', 'rankingPage');
         }
-        $selectedStoreScope = (string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE && $showStoreRanking;
-        // 六类排行以已授权门店为边界；指定门店入口不受工作台当前单店限制，组织入口只按用户主动选择的节点缩小范围。
-        $rankingScopeStoreIds = $selectedStoreScope ? $validStoreIds : $scopeStoreIds;
+        // 指定门店的初始工作台仍是单店，但六类排行读取全部授权门店；
+        // 点进组织或门店后，所有排行只在该节点与授权门店的交集内读取。
+        $rankingScopeStoreIds = $defaultStoreEntry ? $validStoreIds : $scopeStoreIds;
         if ($rankingPage > 1) {
             // 续页只读当前已授权排行，避免重复计算概览与趋势；组织排行仍是当前层级概览。
             if ((string)($input['rankingCode'] ?? '') !== $rankingCode || $rankingCode === 'organization') {
@@ -101,7 +93,7 @@ final class MobileWarehouseServices
         $metrics = $this->summaryMetrics($scopeStoreIds, $period);
         // 指定门店的组织排行跨越全部授权门店，趋势必须使用相同范围；
         // 页面顶部的工作台汇总仍保持当前门店口径。
-        $trendStoreIds = $selectedStoreScope && $rankingCode === 'organization' ? $validStoreIds : $scopeStoreIds;
+        $trendStoreIds = $defaultStoreEntry && $rankingCode === 'organization' ? $validStoreIds : $scopeStoreIds;
         $trend = $this->trendProjection(
             $trendStoreIds,
             $period,
@@ -120,7 +112,7 @@ final class MobileWarehouseServices
         $rankingHasMore = false;
         if ($rankingCode === 'organization') {
             $rankingHierarchyRows = $hierarchy['rows'];
-            if ($selectedStoreScope) {
+            if ($defaultStoreEntry) {
                 // 指定门店入口的当前节点固定为一家门店；另建仅用于排行的
                 // 权限裁剪组织投影，避免把单店误当成全部授权门店。
                 $rankingHierarchy = $this->hierarchy->project(
@@ -198,6 +190,30 @@ final class MobileWarehouseServices
                     : '当前排行暂不可用。',
             ],
         ];
+    }
+
+    /**
+     * Resolve a warehouse navigation request without changing its authorization source.
+     * The selected-store entry starts on the active store but may navigate through
+     * organization nodes; the hierarchy projector intersects every node with the
+     * server-resolved authorized stores. Self-store grants stay locked to one store.
+     *
+     * @return array{0:string,1:int,2:bool} node type, node ID, default selected-store entry
+     */
+    private static function requestedWarehouseNode(array $entry, array $input): array
+    {
+        $nodeType = trim((string)($input['nodeType'] ?? ''));
+        $nodeId = (int)($input['nodeId'] ?? 0);
+        $selectedStoreRankingGrant = (string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE
+            && (bool)($entry['showOrganizationRanking'] ?? false);
+        $defaultStoreEntry = $selectedStoreRankingGrant && $nodeType === '' && $nodeId === 0;
+        if ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE && !$selectedStoreRankingGrant) {
+            return ['store', (int)$entry['entryNodeId'], false];
+        }
+        if ($nodeType === '' && $nodeId === 0) {
+            return [(string)$entry['entryNodeType'], (int)$entry['entryNodeId'], $defaultStoreEntry];
+        }
+        return [$nodeType, $nodeId, false];
     }
 
     /** Read-only V3 performance drill-down for one employee in the current server scope. */
