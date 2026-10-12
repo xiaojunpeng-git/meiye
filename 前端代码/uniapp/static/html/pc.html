@@ -37,19 +37,29 @@
 		</style>
 		<script type="text/javascript">
 			window.isPC = true;
-			
+			/* 会员 H5 与平台端可共域，预览 iframe 只接受本站 /pages/ 路由，绝不回落到平台根路径。 */
+			/* 同源跳转通常带完整 Referer，可让桌面预览回到用户原本打开的会员页。 */
+			var requested = new URLSearchParams(window.location.search).get('member_path') || document.referrer || '/pages/index/index';
+			var target = new URL(requested, window.location.origin);
+			if (target.origin !== window.location.origin || target.pathname.indexOf('/pages/') !== 0) {
+				target = new URL('/pages/index/index', window.location.origin);
+			}
+			var standalonePath = target.pathname + target.search + target.hash;
+			target.searchParams.set('type', '1');
+
 			window.onload = function(){
+				document.getElementById('member-frame').src = target.pathname + target.search + target.hash;
 				/* 监听电脑浏览器窗口尺寸改变 */
 				window.onresize = function(){
-					/* 窗口宽度 小于或等于420px 时，跳转回H5页面 */
+					/* 缩到手机宽度时回到原会员路由，不能跳到属于平台端的站点根路径。 */
 					if(window.innerWidth <= 420){
-						window.location.pathname = '/';
+						window.location.replace(standalonePath);
 					}
 				}
 			}
 		</script>
 	</head>
 	<body>
-		<iframe src="/?type=1"></iframe>
+		<iframe id="member-frame" title="会员端预览"></iframe>
 	</body>
 </html>
