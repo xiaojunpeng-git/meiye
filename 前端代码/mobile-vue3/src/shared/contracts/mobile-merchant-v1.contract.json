@@ -176,6 +176,7 @@
         "nodeId",
         "rankingCode",
         "rankingOrder",
+        "rankingPage",
         "storeRankingPage",
         "trendMetricCode"
       ],
@@ -451,6 +452,7 @@
   "warehouseHierarchy": {
     "rankingTypes": [
       "organization",
+      "store",
       "staff_cash_performance",
       "staff_labor_performance",
       "staff_designated_customer",

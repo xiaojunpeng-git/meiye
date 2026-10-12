@@ -794,12 +794,14 @@ final class RegisteredMetricReadServices
     }
 
     /** @return array<int,array{entity_id:int,entity_name:string,metric_value:int}> */
-    public function dimensionRanking(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $limit = 20, string $order = 'desc'): array
+    public function dimensionRanking(string $metricCode, string $dimension, string $tenantId, array $stores, array $range, int $limit = 20, string $order = 'desc', int $offset = 0): array
     {
         $this->assertScope($tenantId, $stores, $range);
         $contract = MetricDefinitionRegistry::get($metricCode);
         $dimensionContract = $contract['dimensions'][$dimension] ?? ($contract['source']['dimensions'][$dimension] ?? null);
-        if (!is_array($dimensionContract) || $limit < 1 || $limit > self::AI_DETAIL_LIMIT + 1 || !in_array($order, ['asc', 'desc'], true)) {
+        // 续页只开放给 SQL 分组事实排行；其他 Reader 仍维持从首条读取的原契约。
+        if (!is_array($dimensionContract) || $limit < 1 || $limit > self::AI_DETAIL_LIMIT + 1 || !in_array($order, ['asc', 'desc'], true)
+            || $offset < 0 || ($offset > 0 && !in_array($contract['reader_strategy'] ?? '', ['fact_sum', 'personnel_fact_sum'], true))) {
             $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
         $handlers = [
@@ -815,11 +817,11 @@ final class RegisteredMetricReadServices
             'derived_subtract' => function () use ($tenantId, $stores, $range, $dimensionContract, $limit, $order): array {
                 return $this->cashDimensionRanking($tenantId, $stores, $range, 'net', $dimensionContract, $limit, $order);
             },
-            'fact_sum' => function () use ($contract, $tenantId, $stores, $range, $dimensionContract, $limit, $order): array {
-                return $this->factDimensionRanking($contract['source'], $tenantId, $stores, $range, $dimensionContract, $limit, $order);
+            'fact_sum' => function () use ($contract, $tenantId, $stores, $range, $dimensionContract, $limit, $order, $offset): array {
+                return $this->factDimensionRanking($contract['source'], $tenantId, $stores, $range, $dimensionContract, $limit, $order, $offset);
             },
-            'personnel_fact_sum' => function () use ($contract, $tenantId, $stores, $range, $dimensionContract, $limit, $order): array {
-                return $this->factDimensionRanking($contract['source'], $tenantId, $stores, $range, $dimensionContract, $limit, $order);
+            'personnel_fact_sum' => function () use ($contract, $tenantId, $stores, $range, $dimensionContract, $limit, $order, $offset): array {
+                return $this->factDimensionRanking($contract['source'], $tenantId, $stores, $range, $dimensionContract, $limit, $order, $offset);
             },
             'service_customer_personnel' => function () use ($contract, $tenantId, $stores, $range, $dimension, $limit, $order): array {
                 return $this->serviceCustomerDimensionRanking($contract['metric_code'], $dimension, $tenantId, $stores, $range, $limit, $order);
@@ -2049,10 +2051,10 @@ final class RegisteredMetricReadServices
         return $this->grouped($this->factQuery($source, $tenantId, $stores, $range), $source['amount'], $stores, $range);
     }
 
-    private function factDimensionRanking(array $source, string $tenantId, array $stores, array $range, array $dimension, int $limit, string $order): array
+    private function factDimensionRanking(array $source, string $tenantId, array $stores, array $range, array $dimension, int $limit, string $order, int $offset = 0): array
     {
         if (isset($dimension['analysis_relation_source'])) {
-            return $this->relationFactDimensionRanking($source, $tenantId, $stores, $range, $dimension, $limit, $order);
+            return $this->relationFactDimensionRanking($source, $tenantId, $stores, $range, $dimension, $limit, $order, $offset);
         }
         $query=$this->factQuery($source, $tenantId, $stores, $range);
         $this->dimensionSourceFilters($query,$dimension);
@@ -2061,7 +2063,7 @@ final class RegisteredMetricReadServices
         $rows = $query->where('p.' . $idField, '>', 0)
             ->fieldRaw('p.' . $idField . ' entity_id,MAX(p.' . $nameField . ') entity_name,COALESCE(SUM(' . $source['amount'] . '),0) metric_value')
             ->group('p.' . $idField)->orderRaw('metric_value ' . strtoupper($order) . ',entity_id ASC')
-            ->limit($limit)->select()->toArray();
+            ->limit($offset, $limit)->select()->toArray();
         $out = [];
         foreach ($rows as $row) {
             $id = $this->integer($row['entity_id'] ?? null);
@@ -2098,7 +2100,7 @@ final class RegisteredMetricReadServices
      *
      * @return array<int,array{entity_id:int,entity_name:string,metric_value:int}>
      */
-    private function relationFactDimensionRanking(array $source, string $tenantId, array $stores, array $range, array $dimension, int $limit, string $order): array
+    private function relationFactDimensionRanking(array $source, string $tenantId, array $stores, array $range, array $dimension, int $limit, string $order, int $offset = 0): array
     {
         $relation=$dimension['analysis_relation_source'];
         if (!is_array($relation) || array_keys($relation)!==['table','employee_id','employee_name']) {
@@ -2113,7 +2115,7 @@ final class RegisteredMetricReadServices
         $rows=$query->where('relation.'.$relation['employee_id'], '>', 0)
             ->fieldRaw('relation.'.$relation['employee_id'].' entity_id,MAX(relation.'.$relation['employee_name'].') entity_name,COALESCE(SUM('.$source['amount'].'),0) metric_value')
             ->group('relation.'.$relation['employee_id'])->orderRaw('metric_value '.strtoupper($order).',entity_id ASC')
-            ->limit($limit)->select()->toArray();
+            ->limit($offset, $limit)->select()->toArray();
         $out=[];
         foreach ($rows as $row) {
             $id=$this->integer($row['entity_id']??null); $name=trim((string)($row['entity_name']??''));

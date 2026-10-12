@@ -64,7 +64,7 @@ check(!$personal['showOrganizationRanking'] && !$personal['showStoreRanking'], '
 
 // 23 家门店应按服务端稳定顺序分为 10、10、3 家，越界页仍返回完整命中总数。
 $ranked = array_map(static fn(int $id): array => ['entityId' => $id], range(1, 23));
-$pager = new ReflectionMethod(MobileWarehouseServices::class, 'paginateStoreRankingRows');
+$pager = new ReflectionMethod(MobileWarehouseServices::class, 'paginateRankingRows');
 $first = $pager->invoke(null, $ranked, 1);
 $second = $pager->invoke(null, $ranked, 2);
 $last = $pager->invoke(null, $ranked, 3);

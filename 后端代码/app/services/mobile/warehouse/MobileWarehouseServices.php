@@ -81,19 +81,22 @@ final class MobileWarehouseServices
         $showStoreRanking = (bool)($entry['showStoreRanking'] ?? false);
         $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? ''), $showOrganizationRanking, $showStoreRanking);
         $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
-        $storeRankingPage = (int)($input['storeRankingPage'] ?? 1);
-        if ($storeRankingPage < 1) {
-            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '门店排行页码无效。', 'storeRankingPage');
+        // 旧小程序仍以 storeRankingPage 请求门店续页；新页签共用 rankingPage。
+        $rankingPage = (int)($input['rankingPage'] ?? $input['storeRankingPage'] ?? 1);
+        if ($rankingPage < 1 || $rankingPage > 10000) {
+            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '排行页码无效。', 'rankingPage');
         }
         $rankingStoreIds = $rankingCode === 'store'
             ? ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION ? $scopeStoreIds : $validStoreIds)
             : [];
-        if ($storeRankingPage > 1) {
-            if ((string)($input['rankingCode'] ?? '') !== 'store' || !$showStoreRanking) {
-                throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限不能读取门店排行。');
+        if ($rankingPage > 1) {
+            // 续页只读当前已授权排行，避免重复计算概览与趋势；组织排行仍是当前层级概览。
+            if ((string)($input['rankingCode'] ?? '') !== $rankingCode || $rankingCode === 'organization') {
+                throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限不能读取该排行续页。');
             }
-            // 下滑续页只计算授权门店排行，避免重复读取概览和三段趋势。
-            return ['warehouse' => $this->storeRankingPage($rankingStoreIds, $stores, $period, $rankingOrder, $storeRankingPage)];
+            return ['warehouse' => $rankingCode === 'store'
+                ? $this->storeRankingPage($rankingStoreIds, $stores, $period, $rankingOrder, $rankingPage)
+                : $this->factRankingPage($rankingCode, $scopeStoreIds, $period, $rankingOrder, $rankingPage)];
         }
         $selectedStoreScope = (string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE && $showStoreRanking;
         $metrics = $this->summaryMetrics($scopeStoreIds, $period);
@@ -150,7 +153,11 @@ final class MobileWarehouseServices
             $rankingTotal = $storePage['rankingTotal'];
             $rankingHasMore = $storePage['rankingHasMore'];
         } else {
-            $rankingRows = $this->factRanking($rankingCode, $scopeStoreIds, $period, $rankingOrder);
+            $factPage = $this->factRankingPage($rankingCode, $scopeStoreIds, $period, $rankingOrder, 1);
+            $rankingRows = $factPage['rankingRows'];
+            $rankingRange = $factPage['rankingRange'];
+            $rankingTotal = $factPage['rankingTotal'];
+            $rankingHasMore = $factPage['rankingHasMore'];
         }
         $rankingCatalog = $this->rankingCatalog($showOrganizationRanking, $showStoreRanking);
         $selectedRankingAvailable = true;
@@ -885,15 +892,15 @@ final class MobileWarehouseServices
         $rows = $this->storeRanking($storeIds, $stores, $period, $rankingOrder);
         $startDate = (string)$period['startDate'];
         $endDate = (string)$period['endDate'];
-        return self::paginateStoreRankingRows($rows, $page) + [
+        return self::paginateRankingRows($rows, $page) + [
             'rankingRange' => $startDate === $endDate ? $startDate : $startDate . ' 至 ' . $endDate,
             'selectedRankingCode' => 'store',
             'data_as_of' => time(),
         ];
     }
 
-    /** 固定每批 10 家；总数来自完整授权结果，页码越界时不扩大返回范围。 */
-    private static function paginateStoreRankingRows(array $rows, int $page): array
+    /** 对已有完整授权排序结果分页；门店和点客都复用稳定的每批 10 条边界。 */
+    private static function paginateRankingRows(array $rows, int $page): array
     {
         $total = count($rows);
         $lastPage = max(1, intdiv($total + 9, 10));
@@ -946,13 +953,19 @@ final class MobileWarehouseServices
         return 0;
     }
 
-    private function factRanking(string $rankingCode, array $storeIds, array $period, string $rankingOrder): array
+    /**
+     * 员工与项目排行始终由统一指标 Reader 按原始精度排序并按页读取；
+     * 点客沿用已确认的百比分摊口径，在完整授权结果上取当前页。
+     */
+    private function factRankingPage(string $rankingCode, array $storeIds, array $period, string $rankingOrder, int $page): array
     {
-        if ($storeIds === []) {
-            return [];
-        }
+        $range = $period['startDate'] === $period['endDate']
+            ? (string)$period['startDate']
+            : $period['startDate'] . ' 至 ' . $period['endDate'];
+        $base = ['selectedRankingCode' => $rankingCode, 'rankingRange' => $range, 'data_as_of' => time()];
+        if ($storeIds === []) return self::paginateRankingRows([], $page) + $base;
         if ($rankingCode === 'staff_designated_customer') {
-            return $this->designatedCustomerRanking($storeIds, $period, $rankingOrder);
+            return self::paginateRankingRows($this->designatedCustomerRanking($storeIds, $period, $rankingOrder, 0), $page) + $base;
         }
         $bindings = [
             'project_count' => ['metric' => 'completed_service_item_count', 'dimension' => 'project', 'entity' => 'project', 'money' => false],
@@ -960,16 +973,23 @@ final class MobileWarehouseServices
             'staff_labor_performance' => ['metric' => 'staff_labor_yeji', 'dimension' => 'employee', 'entity' => 'employee', 'money' => true],
         ];
         $binding = $bindings[$rankingCode] ?? null;
-        if (!is_array($binding)) return [];
+        if (!is_array($binding)) return self::paginateRankingRows([], $page) + $base;
+        // 多取一条只用于判断还有没有下一页，不向客户端暴露；不按展示整数元重新排序。
         $registered = (new \app\services\query\metric\RegisteredMetricReadServices())->dimensionRanking(
             $binding['metric'], $binding['dimension'], '0', $storeIds,
-            ['start' => $period['startDate'], 'end' => $period['endDate']], 10, $rankingOrder
+            ['start' => $period['startDate'], 'end' => $period['endDate']], 11, $rankingOrder, ($page - 1) * 10
         );
         $rows = [];
         foreach ($registered as $row) {
             $rows[] = ['entity_id' => $row['entity_id'], 'entity_name' => $row['entity_name'], 'ranking_value' => $row['metric_value']];
         }
-        return $this->rankingRows($rows, $binding['entity'], $binding['money']);
+        return [
+            'rankingRows' => $this->rankingRows(array_slice($rows, 0, 10), $binding['entity'], $binding['money']),
+            'rankingPage' => $page,
+            // 排行只展示续页，不展示总数；不能把当前页数量冒充完整命中量。
+            'rankingTotal' => null,
+            'rankingHasMore' => count($registered) > 10,
+        ] + $base;
     }
 
     /**
