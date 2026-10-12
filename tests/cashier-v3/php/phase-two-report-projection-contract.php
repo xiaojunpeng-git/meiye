@@ -29,6 +29,26 @@ foreach ([
 if (strpos($service, 'if(!$records||!$columns)return[]') !== false) {
     throw new RuntimeException('phase-two reports must keep a summary row when the result set is empty');
 }
+// 地推现金的导购轮次必须来自本销售明细的权威归属事实，不能按查询结果的全局订单序号代替。
+foreach ([
+    'sale_line.order_line_id=s.source_line_id',
+    'guide_round.source_line_id=sale_line.checkout_line_id',
+    'MAX(guide_round.guide_round_no) guide_round_no',
+    '$cashSlot = (int)($row[\'guide_round_no\'] ?? 0)',
+    '$row[\'cash_none\'] = $this->money($cashSlot === 0',
+    '$row[\'cash_\'.$i] = $this->money($cashSlot === $i',
+    "'cash_none'=>'无轮次现金业绩','cash_1'=>'第一次现金业绩'",
+    "['labor_fee','cash_none','cash_1','cash_2','cash_3']",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('field acquisition guide round contract missing: ' . $needle);
+}
+if (strpos($service, '$saleSlots[') !== false) {
+    throw new RuntimeException('field acquisition cash must not fall back to sale order position without a guide round');
+}
+if (strpos($service, "'source_explanation']='本笔地推销售选择导购第'") === false
+    || strpos($service, "field-acquisition-guide-round-v3") === false) {
+    throw new RuntimeException('field acquisition round explanation and metric version must come from the backend');
+}
 foreach ([
     "array_merge(\$input, ['_internal_all' => true, 'page' => 1])",
     "'summary_row' => \$result['summary_row'] ?? []",

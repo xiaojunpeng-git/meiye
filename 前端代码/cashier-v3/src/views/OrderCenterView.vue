@@ -34,7 +34,7 @@ import {
 } from '@/services/salesOrderReceiptPrint'
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
-import { salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
+import { guideRoundText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
 import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
@@ -3517,8 +3517,8 @@ onBeforeUnmount(() => {
               <span v-else>{{ personnelNames(item, 'salesManagers') }}</span>
             </td>
             <td>
-              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ personnelNames(item, 'guides') }}</button>
-              <span v-else>{{ personnelNames(item, 'guides') }}</span>
+              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ guideRoundText(item.guides) }}</button>
+              <span v-else>{{ guideRoundText(item.guides) }}</span>
             </td>
             <!-- 购买明细展示用券前金额；权益价值与整单资金继续读取各自的权威投影。 -->
             <td>{{ itemMoney(item.businessTag === '权益' ? item.entitlementAmount : item.amountBeforeCoupon) }}</td>
