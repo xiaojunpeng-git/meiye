@@ -27,13 +27,15 @@ reservationListFilterOk('快捷筛选计数与预约日期范围使用同一口�
     strpos($provider, "'all' => (int)(clone \$countBase)->count()") !== false
     && strpos($provider, '$appointmentDateFilters = self::appointmentDateFilters($topFilters);') !== false
     && strpos($provider, 'private static function calendarDateFromTopFilters') !== false);
-reservationListFilterOk('首次进入日历时，状态括号也必须限定在默认预约日期',
-    strpos($provider, 'if (!$appointmentDateFilters) self::applyAppointmentDate($recordsQuery, $calendarDate);') !== false
-    && strpos($provider, 'if (!$appointmentDateFilters) self::applyAppointmentDate($countBase, $calendarDate);') !== false
+reservationListFilterOk('日历默认按当天，服务页跨日期时列表和计数一起放开',
+    strpos($provider, 'if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($recordsQuery, $calendarDate);') !== false
+    && strpos($provider, 'if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($countBase, $calendarDate);') !== false
+    && strpos($provider, "\$workflow === 'service' && !empty(\$hints['allDates'])") !== false
     && strpos($provider, "? \$value : 'all';") !== false);
 reservationListFilterOk('整页投影重建保留当前预约筛选，不能退回今日预约默认条件',
     substr_count($module, "'quickFilter' => (string)\$queryHints['quickFilter']") === 2
     && substr_count($module, "'topFilters' => (array)\$queryHints['topFilters']") === 2
+    && strpos($module, "'allDates' => (bool)\$queryHints['allDates']") !== false
     && strpos($module, '只保留 calendarDate 会使“未开始”等') !== false);
 reservationListFilterOk('预约列表只映射白名单字段，客户端不能注入列名或操作符',
     strpos($provider, "'reservation_no' => 'reservation_no'") !== false

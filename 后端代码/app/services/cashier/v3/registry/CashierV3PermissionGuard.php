@@ -49,10 +49,12 @@ class CashierV3PermissionGuard
     public function assertAllowed(array $definition, CashierV3DataScopeContext $dataScope, array $payload = []): void
     {
         $action = (string)($definition['action'] ?? $definition['canonical'] ?? '');
-        // 组织直属、无 system_store_staff 的数据权限会话只允许浏览投影。
-        // 必须在统一权限策略之前按 manifest 类型拦截，避免某个宽松的
-        // policy（例如预约操作）或新增 feature 绕过只读边界。
-        if ((string)($definition['type'] ?? '') === 'command' && $dataScope->isReadOnlySession()) {
+        // 组织直属、无 system_store_staff 的数据权限会话默认只读。
+        // 必须在宽松的预约操作策略之前核验可信手机来源和预约授权，
+        // 避免新增 feature 或其它 V3 命令越过只读边界。
+        if ((string)($definition['type'] ?? '') === 'command'
+            && $dataScope->isReadOnlySession()
+            && !$this->isTrustedMobileReservationCommand($action, $dataScope)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::PERMISSION_DENIED,
                 '当前为门店查看模式，不能执行新增、编辑、收银或结账操作。',
@@ -70,6 +72,26 @@ class CashierV3PermissionGuard
             );
         }
         $this->policies->assertAllowed($policyId, $dataScope, $payload, $action);
+    }
+
+    /**
+     * 商家端已有预约岗位授权时，只开放适配器实际承载的预约生命周期命令。
+     * 不能把只读组织会话整体改为可写：预约操作策略本身不做二次功能判权，
+     * 所以这里必须同时核验可信来源、实时预约 feature 和确切 action。
+     */
+    private function isTrustedMobileReservationCommand(string $action, CashierV3DataScopeContext $dataScope): bool
+    {
+        $profile = $dataScope->operatorProfile();
+        return !empty($profile['_cashier_v3_delegated'])
+            && !empty($profile['_trusted_mobile_merchant_session'])
+            && !empty($profile['_mobile_merchant_write'])
+            && $dataScope->allowsStore($dataScope->forcedStoreId())
+            && $dataScope->hasFeature('cashier.v3.reservation')
+            && in_array($action, [
+                'create-reservation', 'update-reservation', 'cancel-reservation',
+                'confirm-reservation', 'reject-reservation',
+                'start-reservation-service', 'end-reservation-service',
+            ], true);
     }
 
     /**

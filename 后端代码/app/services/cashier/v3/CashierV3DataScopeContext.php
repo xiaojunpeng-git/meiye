@@ -33,8 +33,8 @@ final class CashierV3DataScopeContext
     private $grantedFeatures;
     private $operatorProfile;
     /**
-     * 无门店任职的数据权限会话只能浏览，不能提交任何写命令。
-     * 该标记由服务端会话解析生成，客户端不可注入。
+     * 无门店任职的数据权限会话默认只读；统一 guard 仅对服务端签发且
+     * 已获手机预约授权的确切预约命令开窄口，其余写命令仍拒绝。
      * @var bool
      */
     private $readOnlySession;
@@ -90,10 +90,7 @@ final class CashierV3DataScopeContext
     /** @return string[] */
     public function grantedFeatures(): array { return $this->grantedFeatures; }
     public function operatorProfile(): array { return $this->operatorProfile; }
-    /**
-     * 组织直属、无 system_store_staff 的门店会话为只读会话。
-     * 只读门禁在 CashierV3PermissionGuard 中按 action 类型执行，不能只依赖前端隐藏按钮。
-     */
+    /** 组织直属门店会话由统一 guard 按命令及可信来源判权，不能只依赖前端按钮。 */
     public function isReadOnlySession(): bool { return $this->readOnlySession; }
 
     public function hasFeature(string $featureCode): bool

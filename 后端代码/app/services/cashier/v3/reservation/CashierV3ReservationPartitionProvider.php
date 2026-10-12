@@ -26,6 +26,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $storeId = $operatorScope->storeId();
         $now = time();
         $workflow = strtolower(trim((string)($hints['workflow'] ?? '')));
+        // 仅服务页可跨日期查看；桌面日历与预约确认继续按显式日期或默认当天取数。
+        $allDates = $workflow === 'service' && !empty($hints['allDates']);
         $quickFilter = self::quickFilter($hints['quickFilter'] ?? $hints['quick_filter'] ?? '', $workflow);
         $page = max(1, (int)($hints['page'] ?? 1));
         $pageSize = max(1, min(100, (int)($hints['pageSize'] ?? $hints['page_size'] ?? 20)));
@@ -67,7 +69,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         // 生效。此前预约时间仅停留在工具栏的界面状态，导致选择 9 月 19 日
         // 后无法精确找到当天的待服务预约。
         self::applyListTopFilters($recordsQuery, $topFilters);
-        if (!$appointmentDateFilters) self::applyAppointmentDate($recordsQuery, $calendarDate);
+        if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($recordsQuery, $calendarDate);
         $total = (int)(clone $recordsQuery)->count();
         $rows = $recordsQuery->order('appointment_start_at desc,id desc')->page($page, $pageSize)->select();
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
@@ -161,7 +163,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
             ->where('lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
             ->whereIn('status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE', 'COMPLETED']);
         self::applyListTopFilters($countBase, $appointmentDateFilters);
-        if (!$appointmentDateFilters) self::applyAppointmentDate($countBase, $calendarDate);
+        if (!$appointmentDateFilters && !$allDates) self::applyAppointmentDate($countBase, $calendarDate);
         $counts = [
             'all' => (int)(clone $countBase)->count(),
             'pendingConfirmation' => (int)(clone $countBase)->where('status', 'PENDING_CONFIRMATION')->count(),

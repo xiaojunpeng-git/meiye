@@ -29,6 +29,8 @@ final class MobileReservationServices
         return $this->dispatch($merchant, 'query-reservations', [
             'workflow' => $workflow,
             'quickFilter' => $quickFilter,
+            // 服务页没有日期筛选器；显式请求本门店跨日期记录，避免新建未来预约后从列表消失。
+            'allDates' => $workflow === 'service' && !empty($payload['allDates']),
             'calendarDate' => trim((string)($payload['calendarDate'] ?? $payload['calendar_date'] ?? '')),
             'page' => max(1, (int)($payload['page'] ?? 1)),
             'pageSize' => max(1, min(100, (int)($payload['pageSize'] ?? $payload['page_size'] ?? $payload['limit'] ?? 20))),

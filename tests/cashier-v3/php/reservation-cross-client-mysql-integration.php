@@ -179,7 +179,28 @@ try {
     $checks['service unstarted filter returns only waiting service'] = in_array($reservationId, array_map(static function (array $row): int { return (int)($row['reservationId'] ?? 0); }, $unstartedRecords), true)
         && !array_filter($unstartedRecords, static function (array $row): bool { return (string)($row['statusCode'] ?? '') !== 'UNSTARTED'; });
 
-    $startPayload = $command('start-reservation-service', $reservationId, 2, 'RESERVATION-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    // 未开始服务的编辑必须保存服务端草稿，且拒绝其他终端已经更新过的旧版本。
+    $serviceEditorResponse = $mobile->openEditor($merchantA, ['mode' => 'edit', 'reservationId' => $reservationId, 'preparationRequestId' => 'integration-service-editor']);
+    $serviceDraft = (array)($serviceEditorResponse['data']['editor']['draft'] ?? []);
+    $serviceDraft['remark'] = 'V3 service edit saved before start';
+    $staleDraft = $serviceDraft;
+    $staleDraft['reservationVersion'] = 1;
+    $staleUpdate = $mobile->update($merchantA, $reservationId, [
+        'reservation' => $staleDraft,
+        'command' => ['action' => 'update-reservation', 'idempotencyKey' => 'RESERVATION-ffffffff-ffff-4fff-8fff-ffffffffffff', 'contexts' => []],
+    ]);
+    $savedUpdate = $mobile->update($merchantA, $reservationId, [
+        'reservation' => $serviceDraft,
+        'command' => ['action' => 'update-reservation', 'idempotencyKey' => 'RESERVATION-99999999-9999-4999-8999-999999999999', 'contexts' => []],
+    ]);
+    $updatedHeader = (array)Db::name('cashier_v3_reservation')->where('id', $reservationId)->find();
+    $checks['service edit rejects stale draft and saves the current unstarted reservation'] = (int)($serviceDraft['reservationVersion'] ?? 0) === 2
+        && !in_array((string)($staleUpdate['result']['status'] ?? ''), ['success', 'succeeded'], true)
+        && in_array((string)($savedUpdate['result']['status'] ?? ''), ['success', 'succeeded'], true)
+        && (int)($updatedHeader['version'] ?? 0) === 3
+        && (string)($updatedHeader['remark_snapshot'] ?? '') === 'V3 service edit saved before start';
+
+    $startPayload = $command('start-reservation-service', $reservationId, 3, 'RESERVATION-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
     $started = $mobile->startService($merchantB, $reservationId, $startPayload);
     $startedReplay = $mobile->startService($merchantB, $reservationId, $startPayload);
     if (!in_array((string)($started['result']['status'] ?? ''), ['success', 'succeeded'], true)) {
@@ -190,7 +211,7 @@ try {
     $servingProjection = $reservationProjection($mobile->list($merchantA, ['workflow' => 'service', 'quickFilter' => 'serving', 'page' => 1, 'pageSize' => 100]));
     $servingRecords = (array)($servingProjection['records'] ?? []);
 
-    $endPayload = $command('end-reservation-service', $reservationId, 3, 'RESERVATION-cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+    $endPayload = $command('end-reservation-service', $reservationId, 4, 'RESERVATION-cccccccc-cccc-4ccc-8ccc-cccccccccccc');
     $ended = $mobile->endService($merchantA, $reservationId, $endPayload);
     $endedReplay = $mobile->endService($merchantA, $reservationId, $endPayload);
     if (!in_array((string)($ended['result']['status'] ?? ''), ['success', 'succeeded'], true)) {

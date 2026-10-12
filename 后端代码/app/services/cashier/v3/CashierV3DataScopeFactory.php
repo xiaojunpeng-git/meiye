@@ -45,9 +45,13 @@ class CashierV3DataScopeFactory
             : '';
 
         $readOnlySession = !empty($operatorProfile['_cashier_v3_delegated']);
-        // 只读组织会话需要加载全部页面投影，但不应获得任何写授权；
-        // CashierV3PermissionGuard 会在 command 类型统一拒绝写操作。
-        $granted = $readOnlySession
+        // 商家端预约适配器签发的可信会话仍是门店只读会话；只为预约命令
+        // 装载实时手机岗位授权，由统一 guard 按确切 action 再收窄写入口。
+        // 普通组织选店会话继续仅装载浏览入口，不能借页面可见性写入。
+        $mobileReservationSession = $readOnlySession
+            && !empty($operatorProfile['_trusted_mobile_merchant_session'])
+            && !empty($operatorProfile['_mobile_merchant_write']);
+        $granted = $readOnlySession && !$mobileReservationSession
             ? $this->featureResolver->resolveVisibleFeatures($operatorProfile)
             : $this->featureResolver->resolveGrantedFeatures($operatorProfile);
         // 数据权限选店会话没有目标店的 system_store_staff 任职，操作始终绑定

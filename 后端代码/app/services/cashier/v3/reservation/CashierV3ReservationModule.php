@@ -112,6 +112,7 @@ final class CashierV3ReservationModule
                     'calendarDate' => (string)($payload['calendarDate'] ?? ''),
                     'quickFilter' => (string)($payload['quickFilter'] ?? ''),
                     'workflow' => (string)($payload['workflow'] ?? ''),
+                    'allDates' => !empty($payload['allDates']),
                     // 查询工具栏提交的是统一 topFilters。预约列表必须在
                     // 服务端消费它们，不能只更新日期控件的显示状态。
                     'topFilters' => is_array($payload['topFilters'] ?? null) ? $payload['topFilters'] : [],
@@ -128,6 +129,7 @@ final class CashierV3ReservationModule
                     'calendarDate' => (string)($part['payload']['calendar']['date'] ?? ''),
                     'quickFilter' => (string)$queryHints['quickFilter'],
                     'workflow' => (string)$queryHints['workflow'],
+                    'allDates' => (bool)$queryHints['allDates'],
                     'topFilters' => (array)$queryHints['topFilters'],
                     'page' => (int)$queryHints['page'],
                     'pageSize' => (int)$queryHints['pageSize'],
@@ -383,6 +385,12 @@ final class CashierV3ReservationModule
         if (!self::isUnstarted((string)$header['status'])) throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '服务开始后不能编辑预约。');
         $payload = (array)($scope['payload'] ?? []);
         $reservation = (array)($payload['reservation'] ?? []);
+        // 手机编辑器传入打开时的版本；在行锁内拒绝过期草稿，避免覆盖其他终端刚保存的修改。
+        // 旧客户端未传该字段时仍沿用既有事务规则，兼容已发布的门店端。
+        if (array_key_exists('reservationVersion', $reservation)
+            && (int)$reservation['reservationVersion'] !== (int)$header['version']) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '预约已被修改，请重新打开编辑。');
+        }
         $memberId = (int)$header['member_id'];
         [$plans, $duration] = self::projectPlansForStore(self::projectInput($reservation), $operator->storeId());
         [$when, $endAt] = self::schedule($reservation, $duration);

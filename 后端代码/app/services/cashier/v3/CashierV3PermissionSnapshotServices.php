@@ -44,8 +44,9 @@ class CashierV3PermissionSnapshotServices
 
         $isVirtualStoreSession = !empty($operatorProfile['_cashier_v3_delegated'])
             || !empty($operatorProfile['_cashier_v3_organization']);
-        // 常规会话锁 system_store_staff；数据权限选店会话锁定自己的会话投影，
-        // 不把它伪造成员工任职，也不恢复历史任职行。
+        // 常规会话锁 system_store_staff；数据权限选店会话以员工档案重建，
+        // 不把它伪造成员工任职，也不恢复历史任职行。可信手机预约来源
+        // 在下方重建时保留，具体写权限仍由实时功能授权与统一 guard 判定。
         $staff = null;
         if ($isVirtualStoreSession) {
             $staff = $operatorProfile;
@@ -277,6 +278,13 @@ class CashierV3PermissionSnapshotServices
 
         if (!empty($sessionHint['_cashier_v3_delegated'])) {
             $profile['_cashier_v3_delegated'] = 1;
+            // 手机预约会话由服务端适配器签发；事务内重建后仍须保留来源，
+            // 让统一 guard 仅对实时具备预约岗位权限的命令执行窄口放行。
+            if (!empty($sessionHint['_trusted_mobile_merchant_session'])
+                && !empty($sessionHint['_mobile_merchant_write'])) {
+                $profile['_trusted_mobile_merchant_session'] = 1;
+                $profile['_mobile_merchant_write'] = 1;
+            }
         }
         if (!empty($sessionHint['_cashier_v3_organization'])) {
             $profile['_cashier_v3_organization'] = 1;

@@ -55,11 +55,31 @@ test('merchant confirmation recalculates only after schedule or project changes'
 
 test('service page uses actual-start timing, displays overtime and never auto-ends service', () => {
   for (const token of ["workflow: 'service'", 'startMobileReservationService', 'endMobileReservationService', 'actualServiceStartedAt', 'serviceCountdownEndsAt', 'totalDurationSeconds', 'serviceExpectedEndMs', '已超时 ', '不会自动结束服务']) assert.equal(servicePage.includes(token), true, token)
+  for (const token of ["let status = String(entity.statusCode || entity.status || '')", "status != 'IN_SERVICE' && status != '服务中'", 'entity.actualServiceEndedAt || entity.actualEndAt']) assert.equal(servicePage.includes(token), true, token)
   assert.equal(servicePage.includes('endMobileReservationService(detailId.value, payload, done)'), true)
   assert.equal(servicePage.includes('setTimeout(() => endMobileReservationService'), false)
   assert.equal(servicePage.includes('setInterval(() => endMobileReservationService'), false)
-  for (const forbidden of ['历史预约', '版本记录', 'cancelMobileReservation', 'createMobileReservation', 'updateMobileReservation']) assert.equal(servicePage.includes(forbidden), false, forbidden)
+  for (const forbidden of ['历史预约', '版本记录', 'cancelMobileReservation']) assert.equal(servicePage.includes(forbidden), false, forbidden)
   assert.equal(servicePage.includes('expectedVersion: version'), true)
+})
+
+test('service tab discards responses from an earlier filter or page', () => {
+  for (const token of ['let listRequestSerial = 0', 'let requestedFilter = activeFilter.value', 'let requestSerial = ++listRequestSerial', 'requestSerial != listRequestSerial || requestedFilter != activeFilter.value', 'loadingMore.value = false']) assert.equal(servicePage.includes(token), true, token)
+  // 列表投影的 statusCode 才是状态码；status 是中文标签，已结束不能回落成待服务。
+  for (const token of ["entity.statusCode || entity.status", "code == 'COMPLETED') return '已结束'", "code == 'UNSTARTED') return '待服务'"]) assert.equal(servicePage.includes(token), true, token)
+})
+
+test('service detail offers edit beside start only before service and reuses the prepared draft', () => {
+  for (const token of ["detail.value.status != 'UNSTARTED'", "action == 'edit-reservation'", 'canEditUnstarted()', 'openEditEditor', "mode: 'edit'", 'draft.reservationVersion', 'scheduleParts(draft.appointmentStartAt', 'editingReservationId.value > 0', 'updateMobileReservation(editingId, payload, done)', 'draft.reservationVersion = editingReservationVersion.value']) assert.equal(servicePage.includes(token), true, token)
+  assert.equal(servicePage.indexOf('@tap="runAction(action.action)"') < servicePage.indexOf('@tap="openEditEditor"'), true)
+  assert.equal(servicePage.includes("if (editingReservationId.value > 0) return; memberPickerOpen.value = true"), true)
+})
+
+test('service page creates through the V3 empty-context contract and requests store-scoped history', () => {
+  for (const token of ['aria-label="新增预约"', 'openMobileReservationEditor', 'createMobileReservation', 'businessSourcePrimaryId', "allDates: true", 'contexts: []']) assert.equal(servicePage.includes(token), true, token)
+  assert.equal(servicePage.includes('editorCommandContexts'), false)
+  assert.equal(servicePage.includes('reservation-page__metrics'), false)
+  assert.equal(servicePage.includes('会员端和门店端的新 V3 预约会同步到这里'), false)
 })
 
 test('service start gives a mobile-side prerequisite prompt without requiring a room', () => {
