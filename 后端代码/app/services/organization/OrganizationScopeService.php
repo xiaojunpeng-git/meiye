@@ -486,9 +486,23 @@ class OrganizationScopeService extends BaseServices
     }
 
     /**
+     * 全新独立实例的原生组织首次启用。调用方必须先完整写入并对账组织、
+     * 门店与任职；此入口拒绝任何旧区域、代理或历史切源事件，不能代替迁移。
+     * 仍复用正式发布的结构锁、Redis 补偿和 committed 审计协议。
+     */
+    public static function publishFreshNativeSourceMode(): void
+    {
+        /** @var OrganizationManageServices $manage */
+        $manage = app()->make(OrganizationManageServices::class);
+        $manage->withOrganizationStructureLock(function () {
+            self::publishSourceModeLocked(self::MODE_ORGANIZATION, true);
+        });
+    }
+
+    /**
      * 结构锁内的发布实现（含 organization 门禁全流程与失败补偿）。
      */
-    protected static function publishSourceModeLocked(string $mode): void
+    protected static function publishSourceModeLocked(string $mode, bool $freshNative = false): void
     {
         $normalized = self::normalizeSourceModeStatic($mode, true);
         if (self::$testRedisPublishBoom) {
@@ -498,7 +512,9 @@ class OrganizationScopeService extends BaseServices
         $cutoverMeta = null;
         if ($normalized === self::MODE_ORGANIZATION) {
             // 锁内重新读 DB + 强制对账 + 批次/hash（关闭对账后被并发改写的窗口）
-            $cutoverMeta = self::assertOrganizationCutoverAllowed();
+            $cutoverMeta = $freshNative
+                ? self::assertFreshNativeCutoverAllowed()
+                : self::assertOrganizationCutoverAllowed();
             self::maybeTestHold('after_cutover_gate');
         }
 
@@ -817,6 +833,66 @@ class OrganizationScopeService extends BaseServices
             'batch_id' => $batchId,
             'legacy_hash' => $legacyHash,
             'new_projection_hash' => $newHash,
+        ];
+    }
+
+    /**
+     * 原生首次启用的独立门禁。旧数据或切源历史只要存在就必须走原迁移
+     * 与回滚流程；仅旧组织数据为空的全新客户可使用本路径。
+     *
+     * @return array{batch_id:string,legacy_hash:string,new_projection_hash:string}
+     */
+    protected static function assertFreshNativeCutoverAllowed(): array
+    {
+        if ((int)Db::name('system_config')->where('menu_name', self::SOURCE_MODE_CONFIG_KEY)->count() !== 1) {
+            throw new \RuntimeException('拒绝原生首次启用：组织数据源配置必须恰有一条');
+        }
+        if (self::readDbSourceModeBypassCache() !== self::MODE_ORGANIZATION) {
+            throw new \RuntimeException('拒绝原生首次启用：DB organization_source_mode 必须明确为 organization');
+        }
+        $writeGate = app()->make(OrganizationWorkspaceWriteGate::class);
+        $legacyWrite = $writeGate->readConfigFlag(OrganizationWorkspaceWriteGate::CFG_ALLOW_LEGACY);
+        if (!$legacyWrite['ok'] || (int)$legacyWrite['value'] !== 0) {
+            throw new \RuntimeException('拒绝原生首次启用：旧组织写入通道必须关闭');
+        }
+        $legacyRegions = (int)Db::name('system_region_manage')->count();
+        $legacyAgents = (int)Db::name('system_region_agent')->count();
+        $legacyStoreLinks = (int)Db::name('system_store')->where('region_id', '>', 0)->count();
+        $legacyOrgMaps = (int)Db::name('organization')->where('legacy_manage_region_id', '>', 0)->count();
+        $legacyAdminMaps = (int)Db::name('organization_admin')->where('legacy_agent_id', '>', 0)->count();
+        $oldEvents = (int)Db::name('organization_change_log')
+            ->whereIn('action', [self::MIGRATE_BATCH_ACTION, self::SOURCE_CUTOVER_ACTION, self::SOURCE_ROLLBACK_ACTION])
+            ->count();
+        if ($legacyRegions > 0 || $legacyAgents > 0 || $legacyStoreLinks > 0
+            || $legacyOrgMaps > 0 || $legacyAdminMaps > 0 || $oldEvents > 0) {
+            throw new \RuntimeException('拒绝原生首次启用：存在旧组织数据、旧门店关联或历史切源事件');
+        }
+
+        /** @var OrganizationScopeService $scope */
+        $scope = app()->make(self::class);
+        $native = $scope->validateOrganizationNativeIntegrity(true);
+        if (empty($native['passed'])) {
+            throw new \RuntimeException('拒绝原生首次启用：' . implode('；', $native['blockers'] ?? ['原生完整性未通过']));
+        }
+        if ((int)($native['stats']['mapped_org_count'] ?? 0) <= 0
+            || (int)($native['stats']['active_store_count'] ?? 0) <= 0) {
+            throw new \RuntimeException('拒绝原生首次启用：组织或门店为空');
+        }
+
+        // 审计指纹绑定切源瞬间的原生树与门店归属，不制造虚假的旧迁移批次。
+        $snapshot = [
+            'organizations' => Db::name('organization')->where('is_del', 0)
+                ->field('id,pid,name')->order('id', 'asc')->select()->toArray(),
+            'stores' => Db::name('system_store')->where('is_del', 0)
+                ->field('id,name')->order('id', 'asc')->select()->toArray(),
+            'bindings' => Db::name('organization_store')
+                ->field('store_id,org_id')->order('store_id', 'asc')->select()->toArray(),
+        ];
+        $encoded = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        return [
+            'batch_id' => 'native-' . bin2hex(random_bytes(12)),
+            'legacy_hash' => 'fresh-instance-no-legacy',
+            'new_projection_hash' => hash('sha256', $encoded),
         ];
     }
 
