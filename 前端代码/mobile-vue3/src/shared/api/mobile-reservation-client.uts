@@ -15,7 +15,8 @@ const reservationTransportContract : any = {
 		recalculateReservation: { method: 'POST', path: '/mobile/merchant/reservations/recalculate', requestMetadataProfile: 'MERCHANT_SESSION' },
 		createReservation: { method: 'POST', path: '/mobile/merchant/reservations', requestMetadataProfile: 'MERCHANT_SESSION' },
 		updateReservation: { method: 'PUT', path: '/mobile/merchant/reservations/:reservationId', requestMetadataProfile: 'MERCHANT_SESSION' },
-		cancelReservation: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/cancel', requestMetadataProfile: 'MERCHANT_SESSION' },
+		// 删除复用 V3 可追溯的逻辑取消命令；HTTP 地址必须与商家端 DELETE 路由一致。
+		cancelReservation: { method: 'DELETE', path: '/mobile/merchant/reservations/:reservationId', requestMetadataProfile: 'MERCHANT_SESSION' },
 		confirmReservation: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/confirm', requestMetadataProfile: 'MERCHANT_SESSION' },
 		rejectReservation: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/reject', requestMetadataProfile: 'MERCHANT_SESSION' },
 		startReservationService: { method: 'POST', path: '/mobile/merchant/reservations/:reservationId/start-service', requestMetadataProfile: 'MERCHANT_SESSION' },

@@ -287,11 +287,11 @@
       "legacyReservationForbidden": true
     },
     "cancelReservation": {
-      "method": "POST",
-      "path": "/mobile/merchant/reservations/:reservationId/cancel",
+      "method": "DELETE",
+      "path": "/mobile/merchant/reservations/:reservationId",
       "requestMetadataProfile": "MERCHANT_SESSION",
       "merchantContextRequired": true,
-      "authorization": "RESERVATION_CREATE_AND_SERVER_DATA_SCOPE",
+      "authorization": "RESERVATION_MANAGE_AND_SERVER_DATA_SCOPE",
       "requestBodyRequired": ["command"],
       "response": "cashierV3ReservationAction",
       "legacyReservationForbidden": true

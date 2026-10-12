@@ -59,7 +59,7 @@ test('service page uses actual-start timing, displays overtime and never auto-en
   assert.equal(servicePage.includes('endMobileReservationService(detailId.value, payload, done)'), true)
   assert.equal(servicePage.includes('setTimeout(() => endMobileReservationService'), false)
   assert.equal(servicePage.includes('setInterval(() => endMobileReservationService'), false)
-  for (const forbidden of ['历史预约', '版本记录', 'cancelMobileReservation']) assert.equal(servicePage.includes(forbidden), false, forbidden)
+for (const forbidden of ['历史预约', '版本记录']) assert.equal(servicePage.includes(forbidden), false, forbidden)
   assert.equal(servicePage.includes('expectedVersion: version'), true)
 })
 
@@ -73,6 +73,14 @@ test('service detail offers edit beside start only before service and reuses the
   for (const token of ["detail.value.status != 'UNSTARTED'", "action == 'edit-reservation'", 'canEditUnstarted()', 'openEditEditor', "mode: 'edit'", 'draft.reservationVersion', 'scheduleParts(draft.appointmentStartAt', 'editingReservationId.value > 0', 'updateMobileReservation(editingId, payload, done)', 'draft.reservationVersion = editingReservationVersion.value']) assert.equal(servicePage.includes(token), true, token)
   assert.equal(servicePage.indexOf('@tap="runAction(action.action)"') < servicePage.indexOf('@tap="openEditEditor"'), true)
   assert.equal(servicePage.includes("if (editingReservationId.value > 0) return; memberPickerOpen.value = true"), true)
+})
+
+test('unstarted reservation deletion follows the server action, version and confirmation boundary', () => {
+  for (const token of ["detail.value.status != 'UNSTARTED'", "action == 'cancel-reservation' && detail.value.actions[i].enabled === true", 'confirmMobileAction(\'删除预约\'', "command('cancel-reservation', version)", 'cancelMobileReservation(reservationId', 'closeDetail(); loadReservations(true)']) assert.equal(servicePage.includes(token), true, token)
+  assert.equal(servicePage.indexOf('@tap="openEditEditor"') < servicePage.indexOf('@tap="deleteUnstartedReservation"'), true)
+  assert.equal(contract.endpoints.cancelReservation.method, 'DELETE')
+  assert.equal(contract.endpoints.cancelReservation.path, '/mobile/merchant/reservations/:reservationId')
+  assert.equal(contract.endpoints.cancelReservation.authorization, 'RESERVATION_MANAGE_AND_SERVER_DATA_SCOPE')
 })
 
 test('service page creates through the V3 empty-context contract and requests store-scoped history', () => {
