@@ -1,9 +1,7 @@
 @font-face {
   font-family: "iconfont"; /* Project id 3861873 */
-  /* 瑞昊自有 OSS：避免会员端依赖第三方 iconfont CDN。 */
-  src: url('https://ruihaoxitong.oss-cn-beijing.aliyuncs.com/c26-00002/iconfont.woff2') format('woff2'),
-       url('https://ruihaoxitong.oss-cn-beijing.aliyuncs.com/c26-00002/iconfont.woff') format('woff'),
-       url('https://ruihaoxitong.oss-cn-beijing.aliyuncs.com/c26-00002/iconfont.ttf') format('truetype');
+  /* 字体随统一会员端构建发布，避免正式客户页面读取其他客户的文件空间。 */
+  src: url('/static/iconfont/iconfont.woff2') format('woff2');
 }
 
 .iconfont {

@@ -2,7 +2,7 @@
 	<view class="preview-page">
 		<view class="preview-toolbar">
 			<view class="preview-title">
-				<text class="preview-kicker">RH BEAUTY</text>
+				<text class="preview-kicker">BEAUTY</text>
 				<text class="preview-heading">会员端视觉预览</text>
 			</view>
 			<view class="preview-tabs">
@@ -20,8 +20,8 @@
 		<view v-if="activeScreen === 'home'" class="mobile-screen home-screen">
 			<view class="home-top">
 				<view class="brand-lockup">
-					<text class="brand-name">瑞昊美业</text>
-					<text class="brand-en">REHO BEAUTY</text>
+					<text class="brand-name">会员端</text>
+					<text class="brand-en">BEAUTY</text>
 				</view>
 				<view class="search-pill">
 					<text class="iconfont icon-ic_search"></text>

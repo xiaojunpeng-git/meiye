@@ -40,7 +40,7 @@
 				<text>调整休息</text>
 			</view>
 			<view class="menu-item" @click="goPage('/pages/admin/staff_center/introduction/index')">
-				<image class="menu-icon" src="https://meiyue.meiyuekeji.cn/uploads/system/2c1bbd9fa1c769dde1f7dc9d12b690c2.png" mode="widthFix"></image>
+				<image class="menu-icon" src="/static/staff-center/edit-introduction.png" mode="widthFix"></image>
 				<text>修改简介</text>
 			</view>
 			<view class="menu-item" @click="goPage('/pages/admin/staff_center/order/index')">
