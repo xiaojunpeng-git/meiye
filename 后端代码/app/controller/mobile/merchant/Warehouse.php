@@ -29,4 +29,18 @@ final class Warehouse extends BaseController
             MobileApiResponse::MERCHANT_CONTRACT
         );
     }
+
+    /**
+     * Return one employee's fact-backed performance details within the server-resolved merchant scope.
+     * Client employee/date filters may narrow that scope but cannot grant additional stores.
+     */
+    public function employeePerformance()
+    {
+        $context = $this->merchantContext->resolve($this->request);
+        $payload = $this->request->post();
+        return MobileApiResponse::success(
+            $this->warehouse->employeePerformance($context, is_array($payload) ? $payload : []),
+            MobileApiResponse::MERCHANT_CONTRACT
+        );
+    }
 }

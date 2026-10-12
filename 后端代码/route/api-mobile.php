@@ -69,6 +69,8 @@ Route::group('api/mobile/merchant', function () {
             ->pattern(['action' => '[A-Za-z0-9-]+'])
             ->option(['real_name' => '手机商家端客情操作']);
         Route::post('warehouse/overview', 'Warehouse/overview')->option(['real_name' => '手机商家端组织业绩数仓']);
+		// 员工业绩下钻复用商家会话与数仓权限中间件，不能落入无权限上下文的兜底路由。
+		Route::post('warehouse/employee-performance', 'Warehouse/employeePerformance')->option(['real_name' => '手机商家端员工业绩明细']);
 		Route::get('engineering-ledger/catalog', 'EngineeringLedger/catalog')->option(['real_name' => '手机商家端工程管理台账目录']);
 		Route::get('engineering-ledger/list', 'EngineeringLedger/list')->option(['real_name' => '手机商家端工程管理台账列表']);
 		Route::post('engineering-ledger/save', 'EngineeringLedger/save')->option(['real_name' => '手机商家端工程管理台账保存']);
