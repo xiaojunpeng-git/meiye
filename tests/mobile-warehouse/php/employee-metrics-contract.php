@@ -39,4 +39,21 @@ foreach ([
     }
 }
 
-echo "mobile warehouse employee metric units: PASS\n";
+// A sale number wins; service-only labor facts must show the completed service
+// document rather than the opaque entitlement completion receipt or line ID.
+$documentNo = new ReflectionMethod(MobileWarehouseServices::class, 'detailDocumentNo');
+if (PHP_VERSION_ID < 80100) $documentNo->setAccessible(true);
+$receipt = 'ECR-8737350ec76c11de7395e089e64e5e761e926fe9';
+foreach ([
+    ['XS2610100234', 'FW26101200001', 'SO26101200001', 'XS2610100234'],
+    ['', 'FW26101200001', 'SO26101200001', 'FW26101200001'],
+    [$receipt, 'FW26101200001', 'SO26101200001', 'FW26101200001'],
+    [$receipt, '', 'SO26101200001', 'SO26101200001'],
+    [$receipt, '', $receipt, ''],
+] as [$sale, $service, $serviceDocument, $expected]) {
+    if ($documentNo->invoke(null, $sale, $service, $serviceDocument) !== $expected) {
+        throw new RuntimeException('Employee detail document number precedence changed');
+    }
+}
+
+echo "mobile warehouse employee metrics and document numbers: PASS\n";

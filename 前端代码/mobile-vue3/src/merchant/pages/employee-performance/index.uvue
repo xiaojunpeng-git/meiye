@@ -20,7 +20,11 @@
 					<view class="employee-performance__metrics"><view v-for="metric in metrics" :key="metric.code" class="employee-performance__metric"><text class="employee-performance__metric-name">{{ metric.name }}</text><text class="employee-performance__metric-value">{{ metric.value }}</text></view></view>
 					<view class="employee-performance__details-card"><view class="employee-performance__detail-tabs"><view class="employee-performance__detail-tab" :class="{ 'employee-performance__detail-tab--active': detailMode === 'cash' }" @tap="selectDetailMode('cash')"><text>现金业绩</text></view><view class="employee-performance__detail-tab" :class="{ 'employee-performance__detail-tab--active': detailMode === 'labor' }" @tap="selectDetailMode('labor')"><text>劳动业绩</text></view></view>
 						<view v-if="details.length === 0" class="employee-performance__empty"><text>当前时间范围内暂无{{ detailMode === 'cash' ? '现金' : '劳动' }}业绩明细</text></view>
-						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row"><view class="employee-performance__detail-copy"><text class="employee-performance__detail-order">{{ item.orderNo.length > 0 ? item.orderNo : item.sourceLineId }}</text><text class="employee-performance__detail-primary">{{ item.memberName.length > 0 ? item.memberName : '散客服务' }} · {{ item.storeName }}</text><text class="employee-performance__detail-meta">{{ item.businessDate }}{{ item.ruleName.length > 0 ? ' · ' + item.ruleName : '' }}</text></view><text class="employee-performance__detail-value">{{ item.displayValue }}</text></view>
+						<view v-for="item in details" :key="item.factId" class="employee-performance__detail-row">
+							<view class="employee-performance__detail-head"><text class="employee-performance__detail-order">{{ visibleDetailDocumentNo(item) }}</text><text class="employee-performance__detail-date">{{ item.businessDate }}</text></view>
+							<view class="employee-performance__detail-business"><text class="employee-performance__detail-item">商品名称：{{ item.itemName || '—' }}</text><text class="employee-performance__detail-amount">{{ detailMode === 'cash' ? '销售金额：' + (item.displaySaleAmount || '—') : '消耗金额：' + (item.displayConsumptionAmount || '—') }}</text></view>
+							<view class="employee-performance__detail-result"><text>{{ detailMode === 'cash' ? '销售业绩：' : '劳动业绩：' }}{{ item.displayValue }}</text><text v-if="detailMode === 'labor'">手工费：{{ item.displayLaborFee || '—' }}</text></view>
+						</view>
 						<view v-if="hasMore" class="employee-performance__more" @tap="loadMore"><text>加载更多</text></view>
 					</view>
 				</template>
@@ -78,6 +82,11 @@
 
 	function twoDigits(value : number) : string { return value < 10 ? '0' + value.toString() : value.toString() }
 	function employeeInitial() : string { return employeeName.value.length > 0 ? employeeName.value.slice(0, 1) : '员' }
+	// Old API responses can still contain the opaque completion receipt; never render it as a business document number.
+	function visibleDetailDocumentNo(item : any) : string {
+		let number = String(item.orderNo || '').trim()
+		return number.length > 0 && !/^ECR-[0-9a-f]{40}$/i.test(number) ? number : '暂无单号'
+	}
 	function returnToWarehouse() : void { returnFromMerchantEmployeePerformance(returnTarget.value) }
 	function selectQuickPeriod(mode : string) : void { periodMode.value = mode; reload() }
 	function openCustomRange() : void { showCustomRange.value = true }
@@ -155,12 +164,14 @@
 	.employee-performance__detail-tab text { font-size: 14px; font-weight: 600; line-height: 20px; color: #71839a; }
 	.employee-performance__detail-tab--active { border-bottom-color: #1677cc; }
 	.employee-performance__detail-tab--active text { color: #1677cc; }
-	.employee-performance__detail-row { display: flex; min-height: 72px; flex-direction: row; align-items: center; padding: 12px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf2f7; }
-	.employee-performance__detail-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+	.employee-performance__detail-row { display: flex; min-height: 90px; flex-direction: column; padding: 12px 14px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #edf2f7; }
+	.employee-performance__detail-head, .employee-performance__detail-business, .employee-performance__detail-result { display: flex; min-width: 0; width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
+	.employee-performance__detail-business, .employee-performance__detail-result { margin-top: 6px; }
 	.employee-performance__detail-order { overflow: hidden; font-size: 12px; font-weight: 700; line-height: 18px; color: #1677cc; text-overflow: ellipsis; white-space: nowrap; }
-	.employee-performance__detail-primary { overflow: hidden; margin-top: 2px; font-size: 13px; line-height: 18px; color: #314257; text-overflow: ellipsis; white-space: nowrap; }
-	.employee-performance__detail-meta { overflow: hidden; margin-top: 1px; font-size: 11px; line-height: 16px; color: #8a99aa; text-overflow: ellipsis; white-space: nowrap; }
-	.employee-performance__detail-value { flex-shrink: 0; margin-left: 10px; font-size: 17px; font-weight: 800; line-height: 22px; color: #173451; }
+	.employee-performance__detail-date { flex-shrink: 0; margin-left: 10px; font-size: 11px; color: #8a99aa; }
+	.employee-performance__detail-item { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; line-height: 18px; color: #314257; text-overflow: ellipsis; white-space: nowrap; }
+	.employee-performance__detail-amount { flex-shrink: 0; margin-left: 10px; font-size: 12px; line-height: 18px; color: #40546b; }
+	.employee-performance__detail-result text { font-size: 13px; font-weight: 700; line-height: 20px; color: #173451; }
 	.employee-performance__empty, .employee-performance__state { display: flex; min-height: 110px; flex-direction: column; align-items: center; justify-content: center; padding: 18px; font-size: 13px; line-height: 20px; color: #71839a; text-align: center; }
 	.employee-performance__state { margin-top: 12px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 8px 20px rgba(60, 88, 130, 0.08); }
 	.employee-performance__retry, .employee-performance__more { display: flex; min-height: 40px; align-items: center; justify-content: center; }

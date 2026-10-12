@@ -303,13 +303,31 @@ final class MobileWarehouseServices
         );
         $total = (int)$detailPage['total'];
         $detailRows = $detailPage['rows'];
+        $detailContext = $this->detailBusinessContext($detailRows, $storeIds, $employeeId);
         $details = [];
         foreach ($detailRows as $row) {
             $amount = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['metric_value'] ?? 0));
+            $factId = (string)($row['fact_id'] ?? '');
+            $context = $detailContext[$factId] ?? [];
+            $saleNumber = (string)($row['order_no_snapshot'] ?? '');
+            if (self::isMissingDocumentNo($saleNumber)) $saleNumber = (string)($context['sale_order_no'] ?? '');
+            $hasSale = (int)($context['sale_fact_count'] ?? 0) > 0;
+            $hasService = (int)($context['service_fact_count'] ?? 0) > 0;
             $details[] = [
-                'factId' => (string)($row['fact_id'] ?? ''),
+                'factId' => $factId,
                 'businessDate' => (string)($row['business_date'] ?? ''),
-                'orderNo' => (string)($row['order_no_snapshot'] ?? ''),
+                'orderNo' => self::detailDocumentNo(
+                    $saleNumber,
+                    (string)($context['service_record_no'] ?? ''),
+                    (string)($context['document_no_snapshot'] ?? '')
+                ),
+                'itemName' => trim((string)($detailMode === 'labor'
+                    ? ($context['project_name_snapshot'] ?? '') : ($context['sale_item_name'] ?? ''))),
+                'displaySaleAmount' => $hasSale
+                    ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$context['sale_amount_cents']) : '—',
+                'displayConsumptionAmount' => $hasService
+                    ? (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$context['consumption_amount_cents']) : '—',
+                'displayLaborFee' => (string)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)($row['labor_fee_amount_cents'] ?? 0)),
                 'storeName' => (string)($row['store_name_snapshot'] ?? ''),
                 'memberName' => (string)($row['member_name_snapshot'] ?? ''),
                 'sourceLineId' => (string)($row['source_line_id'] ?? ''),
@@ -343,6 +361,51 @@ final class MobileWarehouseServices
                 'aggregation_caught_up' => true,
             ],
         ];
+    }
+
+    /**
+     * Resolve card labels and source amounts from immutable sale and completed
+     * service facts on the same authorized checkout line. The personnel reader
+     * already decides which rows exist; this lookup cannot change those totals.
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    private function detailBusinessContext(array $detailRows, array $storeIds, int $employeeId): array
+    {
+        $factIds = [];
+        foreach ($detailRows as $row) {
+            $factId = trim((string)($row['fact_id'] ?? ''));
+            if ($factId !== '') $factIds[] = $factId;
+        }
+        if ($factIds === []) return [];
+
+        $rows = Db::name('cashier_v3_performance_fact')->alias('p')
+            ->leftJoin('cashier_v3_sale_fact sf',
+                "sf.tenant_id=p.tenant_id AND sf.store_id=p.store_id AND sf.checkout_request_id=p.checkout_request_id AND sf.source_line_id=p.source_line_id AND sf.status='effective' AND sf.fact_direction='forward'")
+            ->leftJoin('cashier_v3_entitlement_service_fact sv',
+                "sv.tenant_id=p.tenant_id AND sv.store_id=p.store_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status='completed'")
+            ->where('p.tenant_id', '0')->whereIn('p.store_id', $storeIds)
+            ->where('p.employee_id', $employeeId)->whereIn('p.fact_id', array_values(array_unique($factIds)))
+            ->fieldRaw("p.fact_id,COUNT(sf.fact_id) sale_fact_count,MAX(sf.order_no_snapshot) sale_order_no,GROUP_CONCAT(DISTINCT NULLIF(sf.item_name_snapshot,'') SEPARATOR '、') sale_item_name,COALESCE(SUM(sf.sale_amount_cents),0) sale_amount_cents,COUNT(DISTINCT sv.service_fact_id) service_fact_count,MAX(sv.service_record_no) service_record_no,MAX(sv.document_no_snapshot) document_no_snapshot,MAX(sv.project_name_snapshot) project_name_snapshot,MAX((SELECT COALESCE(SUM(pc.amount_cents),0) FROM eb_cashier_v3_performance_fact pc WHERE pc.tenant_id=p.tenant_id AND pc.store_id=p.store_id AND pc.checkout_request_id=p.checkout_request_id AND pc.source_line_id=p.source_line_id AND pc.performance_type='consumption_performance_recorded' AND pc.status='effective')) consumption_amount_cents")
+            ->group('p.fact_id')->select()->toArray();
+        $context = [];
+        foreach ($rows as $row) $context[(string)$row['fact_id']] = $row;
+        return $context;
+    }
+
+    /** A completion receipt ID is an internal reference, never a sales or service document number. */
+    private static function isMissingDocumentNo(string $number): bool
+    {
+        $number = trim($number);
+        return $number === '' || preg_match('/^ECR-[0-9a-f]{40}$/iD', $number) === 1;
+    }
+
+    /** Prefer the sale number; a service-only fact uses its customer-visible service number. */
+    private static function detailDocumentNo(string $saleNumber, string $serviceNumber, string $serviceDocumentNumber): string
+    {
+        if (!self::isMissingDocumentNo($saleNumber)) return trim($saleNumber);
+        if (!self::isMissingDocumentNo($serviceNumber)) return trim($serviceNumber);
+        return self::isMissingDocumentNo($serviceDocumentNumber) ? '' : trim($serviceDocumentNumber);
     }
 
     /** Render registered count units exactly, without float rounding away split allocations. */
