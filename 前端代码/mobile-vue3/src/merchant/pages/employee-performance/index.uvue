@@ -44,6 +44,7 @@
 	const quickPeriods = [{ code: 'today', label: '今天' }, { code: 'yesterday', label: '昨天' }, { code: 'last_month', label: '上月' }, { code: 'month', label: '本月' }]
 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 	const employeeId = ref(0)
+	const returnTarget = ref('warehouse')
 	const employeeName = ref('员工')
 	const periodMode = ref('month')
 	const month = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1))
@@ -62,6 +63,7 @@
 
 	onLoad((options : any) => {
 		employeeId.value = Number(options != null ? options.employeeId || 0 : 0)
+		returnTarget.value = String(options != null ? options.returnTarget || 'warehouse' : 'warehouse') === 'home' ? 'home' : 'warehouse'
 		periodMode.value = String(options != null ? options.periodMode || 'month' : 'month')
 		month.value = String(options != null ? options.month || month.value : month.value)
 		customStartDate.value = String(options != null ? options.startDate || customStartDate.value : customStartDate.value)
@@ -73,7 +75,7 @@
 
 	function twoDigits(value : number) : string { return value < 10 ? '0' + value.toString() : value.toString() }
 	function employeeInitial() : string { return employeeName.value.length > 0 ? employeeName.value.slice(0, 1) : '员' }
-	function returnToWarehouse() : void { returnFromMerchantEmployeePerformance() }
+	function returnToWarehouse() : void { returnFromMerchantEmployeePerformance(returnTarget.value) }
 	function selectQuickPeriod(mode : string) : void { periodMode.value = mode; reload() }
 	function openCustomRange() : void { showCustomRange.value = true }
 	function closeCustomRange() : void { showCustomRange.value = false }
