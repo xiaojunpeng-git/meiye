@@ -34,6 +34,16 @@ function productionCodeFiles() {
 	]
 }
 
+test('mini-program API origin is provisioned per build and cannot fall back to another customer', () => {
+	const runtimeConfig = fs.readFileSync(
+		path.join(sourceRoot, 'shared', 'platform', 'mobile-runtime-config.uts'),
+		'utf8'
+	)
+	assert.match(runtimeConfig, /MP_WEIXIN_PRODUCTION_ORIGIN = import\.meta\.env\.VITE_MOBILE_API_ORIGIN/)
+	assert.match(runtimeConfig, /return normalizedOrigin\(MP_WEIXIN_PRODUCTION_ORIGIN\)/)
+	assert.doesNotMatch(runtimeConfig, /https:\/\/(?:rh|008)\.cc3798\.com/)
+})
+
 test('source tree contains app, member, merchant, and shared boundaries', () => {
 	for (const boundary of ['app', 'member', 'merchant', 'shared']) {
 		assert.equal(fs.statSync(path.join(sourceRoot, boundary)).isDirectory(), true)
