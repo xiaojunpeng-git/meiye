@@ -977,23 +977,20 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function salespersonBeautyLargeOrder(array $stores,array $range,array $input):array
     {
         // 大单的唯一判断粒度是“销售人（或销售经理）+ 自然月 + 生美二级分类”。
-        // 卡项不能以外层卡分类归集；只读取结账时冻结的卡内分类分摊事实，避免把
-        // 一张混合卡的全部金额错误归入某一个生美分类。
+        // 卡项不能以外层卡分类归集。金额与权重保留结账事实，分类则按组件商品
+        // 关联的平台当前分类重排，因此历史月份的达标奖也随当前分类重算。
         $cardCategorySql=Db::name('cashier_v3_card_sale_category_allocation_fact')->alias('ccf')
             ->where('ccf.status','effective')
             ->whereIn('ccf.store_id',$stores)
             ->whereBetween('ccf.business_date',[$range['start'],$range['end']])
             ->fieldRaw('ccf.tenant_id,ccf.sale_fact_id,SUM(ccf.sale_amount_cents) allocated_sale_total_cents,SUM(ccf.cash_performance_amount_cents) allocated_cash_total_cents')
             ->group('ccf.tenant_id,ccf.sale_fact_id')->buildSql();
-        $categoryPathSql = "COALESCE(NULLIF(ccf.category_path_snapshot,''),ccf.category_name_snapshot)";
         $beautyCategorySql = Db::name('cashier_v3_card_sale_category_allocation_fact')->alias('ccf')
             ->where('ccf.status','effective')
             ->whereIn('ccf.store_id',$stores)
             ->whereBetween('ccf.business_date',[$range['start'],$range['end']])
-            ->whereRaw("TRIM(SUBSTRING_INDEX({$categoryPathSql}, '/', 1))='生美'")
-            ->whereRaw("LOCATE('/', {$categoryPathSql})>0")
-            ->fieldRaw("ccf.tenant_id,ccf.sale_fact_id,TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX({$categoryPathSql}, '/', 2), '/', -1)) beauty_category,SUM(ccf.cash_performance_amount_cents) beauty_cash_amount_cents")
-            ->group("ccf.tenant_id,ccf.sale_fact_id,TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX({$categoryPathSql}, '/', 2), '/', -1))")
+            ->fieldRaw('ccf.tenant_id,ccf.sale_fact_id,ccf.component_product_id,SUM(ccf.cash_performance_amount_cents) component_cash_amount_cents')
+            ->group('ccf.tenant_id,ccf.sale_fact_id,ccf.component_product_id')
             ->buildSql();
         $facts=$this->participantEmployeeFact($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_performance_fact')->alias('p'),$stores,'p'),'p',$input,$range),'p.employee_id')
             ->join('cashier_v3_sale_fact s','s.tenant_id=p.tenant_id AND s.store_id=p.store_id AND s.source_line_id=p.source_line_id AND s.status=\'effective\'')
@@ -1002,9 +999,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->whereBetween('p.business_date',[$range['start'],$range['end']])->where('p.status','effective')->where('p.performance_type','sales_performance_allocated');
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($facts,'p.tenant_id','p.order_id');
         $facts=$facts
-            ->whereRaw('cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.allocated_cash_total_cents>0 AND bc.beauty_cash_amount_cents>0')
-            ->fieldRaw('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,p.order_id,p.source_line_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,bc.beauty_category,SUM(ROUND(p.amount_cents*bc.beauty_cash_amount_cents/cc.allocated_cash_total_cents)) amount_cents')
-            ->group('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.order_id,p.source_line_id,p.member_id,bc.beauty_category')->order('p.business_date','desc')->select()->toArray();
+            ->whereRaw('cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.allocated_cash_total_cents>0 AND bc.component_cash_amount_cents>0')
+            ->fieldRaw('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,p.order_id,p.source_line_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,s.fact_id sale_fact_id,bc.component_product_id,MAX(bc.component_cash_amount_cents) component_cash_amount_cents,MAX(cc.allocated_cash_total_cents) allocated_cash_total_cents,SUM(p.amount_cents) base_amount_cents')
+            ->group('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.order_id,p.source_line_id,p.member_id,s.fact_id,bc.component_product_id')->order('p.business_date','desc')->select()->toArray();
         foreach ($facts as &$fact) $fact['role_snapshot'] = 'salesperson';
         unset($fact);
         // Manager facts use checkout-line IDs, while sale facts use order-line
@@ -1036,12 +1033,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->whereBetween('sm.business_date',[$range['start'],$range['end']])->where('sm.status','effective');
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($managerFacts,'sm.tenant_id','sm.order_id');
         $managerFacts = $managerFacts
-            ->whereRaw('cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.allocated_cash_total_cents>0 AND bc.beauty_cash_amount_cents>0')
-            ->fieldRaw("sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id employee_id,MAX(sm.sales_manager_name_snapshot) salesperson,sm.order_id,sol.order_line_id source_line_id,sm.member_id,sm.business_date,bc.beauty_category,MAX(s.organization_path_snapshot) organization_path_snapshot,MAX(s.organization_name_snapshot) division_name,MAX(s.store_name_snapshot) store_name,SUM(ROUND(({$managerAmountSql})*bc.beauty_cash_amount_cents/cc.allocated_cash_total_cents)) amount_cents")
-            ->group('sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id,sm.order_id,sol.order_line_id,sm.member_id,sm.business_date,bc.beauty_category')->select()->toArray();
+            ->whereRaw('cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.allocated_cash_total_cents>0 AND bc.component_cash_amount_cents>0')
+            ->fieldRaw("sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id employee_id,MAX(sm.sales_manager_name_snapshot) salesperson,sm.order_id,sol.order_line_id source_line_id,sm.member_id,sm.business_date,s.fact_id sale_fact_id,bc.component_product_id,MAX(bc.component_cash_amount_cents) component_cash_amount_cents,MAX(cc.allocated_cash_total_cents) allocated_cash_total_cents,MAX(s.organization_path_snapshot) organization_path_snapshot,MAX(s.organization_name_snapshot) division_name,MAX(s.store_name_snapshot) store_name,SUM({$managerAmountSql}) base_amount_cents")
+            ->group('sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id,sm.order_id,sol.order_line_id,sm.member_id,sm.business_date,s.fact_id,bc.component_product_id')->select()->toArray();
         foreach ($managerFacts as &$managerFact) $managerFact['role_snapshot'] = 'sales_manager';
         unset($managerFact);
-        $facts = array_merge($facts, $managerFacts);
+        $facts = $this->currentBeautyLargeOrderFacts(array_merge($facts, $managerFacts));
         usort($facts, static function (array $a, array $b): int {
             return strcmp((string)$a['business_date'], (string)$b['business_date'])
                 ?: strcmp((string)$a['source_line_id'], (string)$b['source_line_id']);
@@ -1073,7 +1070,66 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 ?: strcmp((string)$b['source_line_id'], (string)$a['source_line_id']);
         });
         $columns=$this->columns(['division_name'=>'分公司','store_name'=>'门店','business_date'=>'成交日期','salesperson'=>'销售人/销售经理','beauty_category'=>'生美二级分类','daily_cash'=>'当日现金业绩','cumulative_cash'=>'当月分类累计现金业绩','share_30000_before'=>'3万生美卡项分成前','share_30000_after'=>'3万生美卡项分成后','share_50000_before'=>'5万生美卡项分成前']);foreach(range(1,5)as$i)$columns[]=['key'=>'share_50000_after_'.$i,'label'=>'5万生美卡项分成后'];$columns[]=['key'=>'remark','label'=>'备注'];
-        return $this->result('销售人生美大单统计表',$columns,$facts,$input);
+        foreach ($columns as &$column) {
+            if ($column['key'] === 'beauty_category') $column['source_explanation'] =
+                '按卡内项目关联的平台商品当前分类显示。历史月份会随当前分类重新归组并重算达标奖，原销售业绩金额不变。';
+        }
+        unset($column);
+        $result=$this->result('销售人生美大单统计表',$columns,$facts,$input);
+        $result['metric_version']='beauty-large-order-current-category-v2';
+        return $result;
+    }
+
+    /** Rebucket frozen card-component cash weights by today's linked platform category before rounding. */
+    private function currentBeautyLargeOrderFacts(array $components): array
+    {
+        $links = [];
+        foreach ($components as $index => $component) {
+            $links[$index] = ['store_id' => (int)$component['store_id'],
+                'product_id' => (int)$component['component_product_id']];
+        }
+        $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $bySaleCategory = [];
+        foreach ($components as $index => $component) {
+            $parts = explode('/', (string)($resolved[$index]['path'] ?? ''));
+            if (count($parts) !== 2 || trim($parts[0]) !== '生美' || trim($parts[1]) === '') continue;
+            $category = trim($parts[1]);
+            $key = json_encode([(string)$component['tenant_id'], (int)$component['store_id'],
+                (string)$component['role_snapshot'], (int)$component['employee_id'],
+                (string)$component['order_id'], (string)$component['source_line_id'],
+                (string)$component['sale_fact_id'], (string)$component['business_date'], $category], JSON_UNESCAPED_UNICODE);
+            if (!isset($bySaleCategory[$key])) {
+                $bySaleCategory[$key] = $component;
+                $bySaleCategory[$key]['beauty_category'] = $category;
+                $bySaleCategory[$key]['component_cash_amount_cents'] = 0;
+            } elseif ((int)$bySaleCategory[$key]['base_amount_cents'] !== (int)$component['base_amount_cents']
+                || (int)$bySaleCategory[$key]['allocated_cash_total_cents'] !== (int)$component['allocated_cash_total_cents']) {
+                throw new \RuntimeException('生美大单的卡内分摊基数不一致，请核对原销售事实。');
+            }
+            $bySaleCategory[$key]['component_cash_amount_cents'] += (int)$component['component_cash_amount_cents'];
+        }
+        $byLineCategory = [];
+        foreach ($bySaleCategory as $fact) {
+            $denominator = (int)$fact['allocated_cash_total_cents'];
+            if ($denominator <= 0) continue;
+            $amount = (int)round((int)$fact['base_amount_cents']
+                * (int)$fact['component_cash_amount_cents'] / $denominator);
+            $key = json_encode([(string)$fact['tenant_id'], (int)$fact['store_id'],
+                (string)$fact['role_snapshot'], (int)$fact['employee_id'],
+                (string)$fact['order_id'], (string)$fact['source_line_id'],
+                (string)$fact['business_date'], (string)$fact['beauty_category']], JSON_UNESCAPED_UNICODE);
+            if (!isset($byLineCategory[$key])) {
+                $byLineCategory[$key] = $fact;
+                $byLineCategory[$key]['amount_cents'] = 0;
+            }
+            $byLineCategory[$key]['amount_cents'] += $amount;
+        }
+        foreach ($byLineCategory as &$fact) {
+            unset($fact['component_product_id'], $fact['component_cash_amount_cents'],
+                $fact['allocated_cash_total_cents'], $fact['base_amount_cents'], $fact['sale_fact_id']);
+        }
+        unset($fact);
+        return array_values($byLineCategory);
     }
 
     /**
@@ -1166,7 +1222,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 "refund_operation.source_type='card' AND legacy_card_sale.id=refund_operation.source_order_id AND legacy_card_sale.uid=refund_operation.member_id")
             ->whereBetween('ledger_refund.business_date',[$range['start'],$range['end']])
             ->whereIn('refund_operation.source_type',['card','document','imported_card'])
-            ->field('refund_operation.id refund_sequence,refund_operation.tenant_id,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,ledger_refund.store_id,ledger_refund.organization_id,ledger_refund.organization_path_snapshot,ledger_refund.organization_name_snapshot refund_market,ledger_refund.store_name_snapshot refund_store_name,ledger_refund.member_id,ledger_refund.member_name_snapshot refund_customer,adjustment.target_name_snapshot,adjustment.salespeople_snapshot_json,card_line.category_name_snapshot card_category,document_line.category_name_snapshot document_category,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time')
+            ->field('refund_operation.id refund_sequence,refund_operation.tenant_id,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,ledger_refund.store_id,ledger_refund.organization_id,ledger_refund.organization_path_snapshot,ledger_refund.organization_name_snapshot refund_market,ledger_refund.store_name_snapshot refund_store_name,ledger_refund.member_id,ledger_refund.member_name_snapshot refund_customer,adjustment.card_holder_id,adjustment.target_name_snapshot,adjustment.salespeople_snapshot_json,card_line.order_line_id card_order_line_id,document_line.order_line_id document_order_line_id,document_line.item_id document_product_id,document_line.item_type document_item_type,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time')
             ->order('refund_operation.business_date','desc')->order('refund_operation.id','desc')->select()->toArray();
         // 导入旧卡使用成功操作保存的原订单 ID，不回读会员当前持卡关系。
         $importedOrderIds=[];
@@ -1197,9 +1253,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $adjustment['store_name']=(string)(($isCard?$adjustment['card_store_name']:$adjustment['document_store_name'])?:$adjustment['refund_store_name']);
             $adjustment['customer']=(string)(($isCard?$adjustment['card_customer']:$adjustment['document_customer'])?:$adjustment['refund_customer']);
             $adjustment['refund_items']=trim((string)($adjustment['target_name_snapshot']??''))?:trim((string)($request['cardName']??''));
-            $adjustment['category']=(string)($adjustment['source_type']==='card'?$adjustment['card_category']:
-                ($adjustment['source_type']==='document'?$adjustment['document_category']:
-                    ($request['_productCategoryNameSnapshot']??'')));
+            $adjustment['category']='';
             $adjustment['refund_amount']=$this->money((int)$adjustment['refund_amount_cents']);
             $adjustment['refund_remark']=(string)$adjustment['refund_reason'];
             $rows[]=$adjustment;
@@ -1209,14 +1263,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 ?: ((int)$right['refund_settled_at']<=>(int)$left['refund_settled_at'])
                 ?: ((int)$right['refund_sequence']<=>(int)$left['refund_sequence']);
         });
-        $this->refundLedgerPersonnelAndSalesCategories($rows);
+        $this->refundLedgerPersonnel($rows);
+        $this->refundLedgerCurrentProductCategories($rows);
         // 退款事实只保存会员身份，没有历史手机快照。权限过滤完成后批量读取
         // 当前会员手机号；号码变更会反映在台账中，不伪装为退款时的历史号码。
         $memberIds=array_values(array_unique(array_filter(array_map('intval',array_column($rows,'member_id')))));
         $phones=$memberIds?Db::name('user')->whereIn('uid',$memberIds)->column('phone','uid'):[];
         foreach($rows as &$row){
             $row['phone']=(string)($phones[(int)($row['member_id']??0)]??'');
-            unset($row['refund_sequence'],$row['refund_settled_at']);
+            unset($row['refund_sequence'],$row['refund_settled_at'],$row['card_holder_id'],$row['card_order_line_id'],$row['document_order_line_id'],
+                $row['document_product_id'],$row['document_item_type']);
         }unset($row);
         // 市场归属仍供客户退款分析使用，本台账只移除其展示及导出列。
         $columns=$this->columns(['store_name'=>'门店','customer'=>'会员','phone'=>'手机','refund_date'=>'退款申请时间','salesperson'=>'销售人','guide'=>'导购','sales_manager'=>'销售经理','category'=>'分类','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']);
@@ -1228,7 +1284,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'salesperson'=>'显示本笔退款分配的销售人；改派后显示当前有效人员。原销售退款取当次负向销售业绩人员，旧记录没有可靠快照时留空。',
             'guide'=>'显示本笔退款选择的导购；改派后显示当前有效人员。未保存归属的旧退款留空，不回填原销售导购。',
             'sales_manager'=>'显示本笔退款选择的销售经理；改派后显示当前有效人员。未保存归属的旧退款留空，不回填原销售经理。',
-            'category'=>'显示退款对象在原销售或退款时保存的分类；多项退款合并显示，旧卡没有可靠分类快照时留空。',
+            'category'=>'按退款所对应商品或卡内项目的平台商品当前分类显示；多项退款合并显示。没有可核对商品关联时留空，不按名称猜填。',
             'refund_items'=>'显示本次成功退款时保存的项目或卡项名称。',
             'original_sale_date'=>'显示原销售单的业务日期；旧卡按原订单支付时间、无支付时间时按创建时间显示。',
             'refund_amount'=>'统计成功退款时登记的金额；转入余额独立记账，不重复计入，也不表示已通过支付渠道退钱。',
@@ -1239,10 +1295,135 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
 
     /**
-     * 台账仍是一笔退款一行：只批量补充该退款的有效人员与历史分类快照。
-     * 改派版本是完整人员集，空版本必须覆盖初始选择；无快照的旧单不能回读现值冒充历史。
+     * Refund categories follow the refunded project's linked platform product, not a name or sale-time label.
+     * Card refunds use the original sale components or a validated legacy cart line; missing links remain unclassified.
      */
-    private function refundLedgerPersonnelAndSalesCategories(array &$rows): void
+    private function refundLedgerCurrentProductCategories(array &$rows): void
+    {
+        if ($rows === []) return;
+        $tenants = array_values(array_unique(array_map('strval', array_column($rows, 'tenant_id'))));
+        $stores = array_values(array_unique(array_map('intval', array_column($rows, 'store_id'))));
+        $salesOwners = [];
+        $links = [];
+        $owners = [];
+        $cardLines = [];
+        $legacyCartOwners = [];
+        foreach ($rows as $index => $row) {
+            $type = (string)$row['source_type'];
+            if ($type === 'sales') {
+                $salesOwners[(string)$row['tenant_id'] . '|' . (int)$row['store_id'] . '|'
+                    . (string)$row['operation_id']] = $index;
+            } elseif ($type === 'document') {
+                $itemType = (string)($row['document_item_type'] ?? '');
+                $itemId = (string)($row['document_product_id'] ?? '');
+                if (in_array($itemType, ['project', 'product'], true) && preg_match('/^[1-9][0-9]*$/D', $itemId)) {
+                    $owners[] = $index;
+                    $links[] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)$itemId];
+                } elseif ($itemType === 'card') {
+                    $cardLines[(string)$row['document_order_line_id']][] = $index;
+                }
+            } elseif ($type === 'card') {
+                if ((string)($row['card_order_line_id'] ?? '') !== '') {
+                    $cardLines[(string)$row['card_order_line_id']][] = $index;
+                    continue;
+                }
+                // Historical imported cards have no V3 purchase receipt. Their successful refund request names
+                // the exact cart component; require the same holder, order, member and store before resolving it.
+                $request = json_decode((string)($row['request_json'] ?? ''), true);
+                $cartId = (string)($request['componentId'] ?? '');
+                $holderId = (string)($request['holderId'] ?? '');
+                if ((string)($request['mode'] ?? '') === 'card'
+                    && preg_match('/^[1-9][0-9]*$/D', $cartId)
+                    && preg_match('/^[1-9][0-9]*$/D', $holderId)
+                    && (int)$holderId === (int)($row['card_holder_id'] ?? 0)) {
+                    $legacyCartOwners[(int)$cartId][] = $index;
+                }
+            }
+        }
+        foreach (array_chunk(array_keys($legacyCartOwners), 300) as $chunk) {
+            foreach (Db::name('store_order_cart_info')->whereIn('id', $chunk)
+                ->field('id,uid,oid,relation_id,product_id')->select()->toArray() as $cart) {
+                foreach ($legacyCartOwners[(int)$cart['id']] ?? [] as $owner) {
+                    $refund = $rows[$owner];
+                    if ((int)$cart['uid'] !== (int)$refund['member_id']
+                        || (string)$cart['oid'] !== (string)$refund['order_id']
+                        || (int)$cart['relation_id'] !== (int)$refund['store_id']
+                        || (int)$cart['product_id'] <= 0) continue;
+                    $owners[] = $owner;
+                    $links[] = ['store_id' => (int)$refund['store_id'], 'product_id' => (int)$cart['product_id']];
+                }
+            }
+        }
+        $salesOperations = array_values(array_unique(array_map(static function (array $row): string {
+            return (string)$row['operation_id'];
+        }, array_filter($rows, static fn(array $row): bool => (string)$row['source_type'] === 'sales'))));
+        foreach (array_chunk($salesOperations, 300) as $chunk) {
+            foreach (Db::name('cashier_v3_order_lifecycle_refund_line')->alias('refund_line')
+                ->join('cashier_v3_sales_order_line sale_line',
+                    'sale_line.tenant_id=refund_line.tenant_id AND sale_line.store_id=refund_line.store_id AND sale_line.order_id=refund_line.source_order_id AND sale_line.order_line_id=refund_line.sales_order_line_id')
+                ->whereIn('refund_line.tenant_id', $tenants)->whereIn('refund_line.store_id', $stores)
+                ->whereIn('refund_line.operation_id', $chunk)->where('refund_line.status', 'succeeded')
+                ->field('refund_line.tenant_id,refund_line.operation_id,refund_line.store_id,sale_line.order_line_id,sale_line.item_type,sale_line.item_id')
+                ->order('refund_line.id asc')->select()->toArray() as $line) {
+                $key = (string)$line['tenant_id'] . '|' . (int)$line['store_id'] . '|'
+                    . (string)$line['operation_id'];
+                $index = $salesOwners[$key] ?? null;
+                if ($index === null) continue;
+                $itemType = (string)$line['item_type'];
+                $itemId = (string)$line['item_id'];
+                if (in_array($itemType, ['project', 'product'], true)
+                    && preg_match('/^[1-9][0-9]*$/D', $itemId)) {
+                    $owners[] = $index;
+                    $links[] = ['store_id' => (int)$line['store_id'], 'product_id' => (int)$itemId];
+                }
+            }
+        }
+        if ($cardLines !== []) {
+            $factOwners = [];
+            foreach (array_chunk(array_keys($cardLines), 300) as $chunk) {
+                foreach (Db::name('cashier_v3_sale_fact')->whereIn('tenant_id', $tenants)
+                    ->whereIn('store_id', $stores)->whereIn('source_line_id', $chunk)
+                    ->where('source_type', 'card')->where('fact_direction', 'forward')->where('status', 'effective')
+                    ->field('tenant_id,store_id,source_line_id,fact_id')->select()->toArray() as $sale) {
+                    foreach ($cardLines[(string)$sale['source_line_id']] ?? [] as $owner) {
+                        if ((string)$rows[$owner]['tenant_id'] === (string)$sale['tenant_id']
+                            && (int)$rows[$owner]['store_id'] === (int)$sale['store_id']) {
+                            $factOwners[(string)$sale['fact_id']][] = $owner;
+                        }
+                    }
+                }
+            }
+            foreach (array_chunk(array_keys($factOwners), 300) as $chunk) {
+                foreach (Db::name('cashier_v3_card_sale_category_allocation_fact')
+                    ->whereIn('tenant_id', $tenants)->whereIn('store_id', $stores)
+                    ->whereIn('sale_fact_id', $chunk)->where('status', 'effective')
+                    ->field('tenant_id,store_id,sale_fact_id,component_product_id')->select()->toArray() as $component) {
+                    if ((int)$component['component_product_id'] <= 0) continue;
+                    foreach ($factOwners[(string)$component['sale_fact_id']] ?? [] as $owner) {
+                        if ((string)$rows[$owner]['tenant_id'] !== (string)$component['tenant_id']
+                            || (int)$rows[$owner]['store_id'] !== (int)$component['store_id']) continue;
+                        $owners[] = $owner;
+                        $links[] = ['store_id' => (int)$component['store_id'],
+                            'product_id' => (int)$component['component_product_id']];
+                    }
+                }
+            }
+        }
+        $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $categories = [];
+        foreach ($owners as $key => $owner) {
+            $path = trim((string)($resolved[$key]['path'] ?? ''));
+            if ($path !== '') $categories[$owner][$path] = true;
+        }
+        foreach ($rows as $index => &$row) $row['category'] = implode('、', array_keys($categories[$index] ?? []));
+        unset($row);
+    }
+
+    /**
+     * 台账仍是一笔退款一行；本方法只补充有效人员，分类由商品 ID 的独立读取器处理。
+     * 改派版本是完整人员集，空版本必须覆盖初始选择。
+     */
+    private function refundLedgerPersonnel(array &$rows): void
     {
         foreach (array_chunk(array_keys($rows), 400) as $indexes) {
             $ids = []; $tenants = []; $events = []; $salesIds = []; $importedIds = [];
@@ -1259,17 +1440,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }
             $ids = array_values(array_unique($ids));
             $tenants = array_values(array_unique($tenants));
-            $categories = []; $salespeople = []; $attributions = []; $importedSnapshots = [];
+            $salespeople = []; $attributions = []; $importedSnapshots = [];
             if ($salesIds !== []) {
-                foreach (Db::name('cashier_v3_order_lifecycle_refund_line')->alias('refund_line')
-                    ->leftJoin('cashier_v3_sales_order_line sale_line',
-                        'sale_line.tenant_id=refund_line.tenant_id AND sale_line.order_line_id=refund_line.sales_order_line_id')
-                    ->whereIn('refund_line.tenant_id', $tenants)->whereIn('refund_line.operation_id', $salesIds)
-                    ->field('refund_line.tenant_id,refund_line.operation_id,sale_line.category_name_snapshot')
-                    ->order('refund_line.line_no asc')->order('refund_line.id asc')->select()->toArray() as $line) {
-                    $name = trim((string)($line['category_name_snapshot'] ?? ''));
-                    if ($name !== '') $categories[(string)$line['tenant_id'] . '|' . (string)$line['operation_id']][$name] = true;
-                }
                 foreach (Db::name('cashier_v3_performance_fact')
                     ->whereIn('tenant_id', $tenants)->whereIn('business_event_no', array_values(array_unique($events)))
                     ->where('performance_type', 'sales_performance_allocated')
@@ -1321,8 +1493,6 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $row = &$rows[$index];
                 $key = (string)$row['tenant_id'] . '|' . (string)$row['operation_id'];
                 $sourceType = (string)$row['source_type'];
-                $row['category'] = $sourceType === 'sales' ? implode('、', array_keys($categories[$key] ?? []))
-                    : trim((string)($row['category'] ?? ''));
                 if ($sourceType === 'sales') {
                     $row['salesperson'] = implode('、', array_values($salespeople[(string)$row['tenant_id'] . '|' . (string)$row['business_event_no']] ?? []));
                 } else {
@@ -1777,8 +1947,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 有效人员按日达标，K 人次按有效退款会员日；普通来源体验人次规则保持不变。
         $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
         if ($isMarketReport) $metricVersion = 'market-refund-member-day-v5';
-        // v5 将退款导购和销售经理拆列；金额、资格及退款日口径不变。
-        if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v5';
+        // v7 只改变商品分类读取来源；退款金额、资格、人员及业务日不回写。
+        if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v7';
         // 护理槽位与首次到店日期原先误用了人员标记；相关报表单独升级口径，其他报表不变。
         if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
             $metricVersion = 'store-customer-service-events-v2';

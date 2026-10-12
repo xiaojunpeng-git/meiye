@@ -12,12 +12,12 @@ use think\facade\Db;
  * 第四阶段运营中心与产品变现报表。
  *
  * 金额统一从 payment_sale_allocation_fact 的成功、可追溯分摊事实读取；
- * 卡项在分组前按冻结的内含项目分类再次展开。调用方只能传入认证后裁剪
+ * 卡项在分组前按原分摊事实展开，再按内含商品关联的平台当前分类归组。调用方只能传入认证后裁剪
  * 的门店范围，本服务不会读取客户端的租户或扩大组织范围。
  */
 final class StoreUnifiedReportPhaseFourServices extends BaseServices
 {
-    public const METRIC_VERSION = 'report-phase-four-store-visits-v2';
+    public const METRIC_VERSION = 'report-phase-four-current-category-v3';
 
     private const SIX_DIMENSION_ANALYSIS = 'six_dimension_analysis';
 
@@ -112,7 +112,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
 
     /**
      * 六维数据分析表：严格对应已确认的 20 个业务列。金额来自成功收款
-     * 分摊事实；卡项已在 cashRows() 按冻结的内含项目分类展开。
+     * 分摊事实；卡项已在 cashRows() 按内含项目的平台当前分类展开。
      */
     private function sixDimensionAnalysisReport(array $stores, array $range, array $input, array $definition): array
     {
@@ -287,7 +287,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $costLabel = (string)($definition['category'] ?? '') === '花园' ? '产品成本' : '单次产品成本';
         $columns = [
             $this->column('serial_no', '序号', '按本期现金业绩从高到低排序。', false, true, 70),
-            $this->column('category_name', '品类', '取成交时冻结的商品分类路径中的末级分类。', false, true, 130),
+            $this->column('category_name', '品类', '取关联平台商品当前有效分类的末级名称；无有效关联时留空。', false, true, 130),
             $this->column('item_name', $itemLabel, '取成交时保存的商品名称快照；卡项按内含项目展开。', false, true, 180),
             $this->column('cash_performance', '现金业绩', '成功收款按销售明细分摊，欠款补交和退款分别按成功日期正负计入。', true, false, 120, $this->drill($definition['category'] ?? '')),
             $this->column('performance_share', '业绩占比', '本商品现金业绩除以当前报表商品范围内现金业绩合计；分母为零显示“-”。'),
@@ -987,35 +987,31 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         else $base->where('p.business_date', '<=', (string)$range['end']);
         if ($this->participantEmployeeId > 0) (new StoreReportParticipantScopeServices())->applyOrder($base, 'p.order_id', $this->participantEmployeeId);
 
-        // Non-card sales have one frozen sale-dimension row. Cards deliberately
-        // do not use that outer category: their payment is allocated to each
-        // frozen contained-project row below.
+        // Direct sales use the linked sale item. Cards retain their frozen cash
+        // weights, but their category is read from each contained platform item.
         $direct = clone $base;
         $direct->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
             ->where('s.source_type', '<>', 'card');
-        if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
         $rows = $direct->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.sale_amount_cents,p.organization_id,s.organization_path_snapshot,s.business_source_primary_id,MAX(s.store_name_snapshot) store_name,MAX(s.member_name_snapshot) member_name,MAX(s.business_source_label_snapshot) business_source_label,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path,s.quantity')
             ->group('p.id')->select()->toArray();
 
         $card = clone $base;
         $payments = $card->where('s.source_type', 'card')->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,s.organization_path_snapshot,s.business_source_primary_id,MAX(s.store_name_snapshot) store_name,MAX(s.member_name_snapshot) member_name,MAX(s.business_source_label_snapshot) business_source_label,s.fact_id sale_fact_id')
             ->group('p.id')->select()->toArray();
-        if ($payments === []) return $rows;
+        if ($payments === []) return $this->currentCategoryRows($rows, $categoryIds);
         $saleFactIds = array_values(array_unique(array_filter(array_column($payments, 'sale_fact_id'))));
-        if ($saleFactIds === []) return $rows;
+        if ($saleFactIds === []) return $this->currentCategoryRows($rows, $categoryIds);
         $bySale = [];
         foreach (Db::name('cashier_v3_card_sale_item_allocation_fact')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
             ->field('allocation_fact_id,sale_fact_id,component_product_id,item_name_snapshot,category_id_snapshot,category_path_snapshot,component_count,sale_amount_cents,configured_amount_cents')->select()->toArray() as $item) {
             $bySale[(string)$item['sale_fact_id']][] = $item;
         }
-        $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
         foreach ($payments as $payment) {
             $items = (array)($bySale[(string)$payment['sale_fact_id']] ?? []);
             if ($items === []) continue;
             $allocated = $this->allocateSigned((int)$payment['amount_cents'], $items);
             foreach ($items as $item) {
-                if ($allowed !== [] && !isset($allowed[(int)$item['category_id_snapshot']])) continue;
                 $rows[] = [
                     'id' => (int)$payment['id'], 'store_id' => (int)$payment['store_id'], 'member_id' => (int)$payment['member_id'],
                     'order_id' => (string)$payment['order_id'], 'source_line_id' => (string)$payment['source_line_id'], 'business_date' => (string)$payment['business_date'],
@@ -1026,7 +1022,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 ];
             }
         }
-        return $rows;
+        return $this->currentCategoryRows($rows, $categoryIds);
     }
 
     private function serviceRows(array $stores, array $range, array $categoryIds): array
@@ -1035,9 +1031,9 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
         if (isset($range['start']) && (string)$range['start'] !== '') $query->whereBetween('sv.business_date', [$range['start'], $range['end']]);
         else $query->where('sv.business_date', '<=', (string)$range['end']);
-        if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         if ($this->participantEmployeeId > 0) (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
-        return $query->fieldRaw("sv.service_fact_id,sv.store_id,sv.member_id,sv.business_date,sv.organization_id,sv.organization_path_snapshot,sv.store_name_snapshot store_name,sv.project_id,sv.project_name_snapshot,sv.project_category_path_snapshot category_path,sv.is_experience,sv.source_line_id,sv.quantity,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_label,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents")->select()->toArray();
+        $rows = $query->fieldRaw("sv.service_fact_id,sv.store_id,sv.member_id,sv.business_date,sv.organization_id,sv.organization_path_snapshot,sv.store_name_snapshot store_name,sv.project_id,sv.project_id item_id,sv.project_name_snapshot,sv.project_category_path_snapshot category_path,sv.is_experience,sv.source_line_id,sv.quantity,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') business_source_label,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents")->select()->toArray();
+        return $this->currentCategoryRows($rows, $categoryIds);
     }
 
     /**
@@ -1102,7 +1098,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         if ($allocatedSales === []) return [];
 
         $saleIds = array_keys($allocatedSales);
-        $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
         $result = [];
         $directDimensions = Db::name('cashier_v3_report_sale_dimension_fact')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('sale_fact_id', $saleIds)
@@ -1110,7 +1105,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         foreach ($directDimensions as $dimension) {
             $sale = (array)($allocatedSales[(string)$dimension['sale_fact_id']] ?? []);
             if ($sale === [] || (string)($sale['sale']['source_type'] ?? '') === 'card') continue;
-            if (!isset($allowed[(int)$dimension['category_id_snapshot']])) continue;
             $row = (array)$sale['sale'];
             $row['amount_cents'] = (int)$sale['amount_cents'];
             $row['item_id'] = (string)$dimension['item_id'];
@@ -1122,7 +1116,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
 
         $cardSales = [];
         foreach ($allocatedSales as $saleId => $sale) if ((string)($sale['sale']['source_type'] ?? '') === 'card') $cardSales[(string)$sale['sale']['fact_id']] = $sale;
-        if ($cardSales === []) return $result;
+        if ($cardSales === []) return $this->currentCategoryRows($result, $categoryIds);
         $itemsBySale = [];
         foreach (Db::name('cashier_v3_card_sale_item_allocation_fact')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('sale_fact_id', array_keys($cardSales))->where('status', 'effective')
@@ -1134,7 +1128,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             if ($items === []) continue;
             $allocated = $this->allocateSigned((int)$sale['amount_cents'], $items);
             foreach ($items as $item) {
-                if (!isset($allowed[(int)$item['category_id_snapshot']])) continue;
                 $amount = (int)($allocated[(string)$item['allocation_fact_id']] ?? 0);
                 if ($amount === 0) continue;
                 $row = (array)$sale['sale'];
@@ -1145,6 +1138,27 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 $row['category_path'] = (string)$item['category_path_snapshot'];
                 $result[] = $row;
             }
+        }
+        return $this->currentCategoryRows($result, $categoryIds);
+    }
+
+    /** Apply one current-platform-category contract to authorized cash, service and debt fact rows. */
+    private function currentCategoryRows(array $rows, array $categoryIds): array
+    {
+        if ($rows === []) return [];
+        $links = [];
+        foreach ($rows as $index => $row) {
+            $links[$index] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)($row['item_id'] ?? 0)];
+        }
+        $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
+        $result = [];
+        foreach ($rows as $index => $row) {
+            $category = $categories[$index] ?? [];
+            $row['category_id'] = (int)($category['id'] ?? 0);
+            $row['category_path'] = (string)($category['path'] ?? '');
+            if ($allowed !== [] && !isset($allowed[$row['category_id']])) continue;
+            $result[] = $row;
         }
         return $result;
     }
@@ -1255,7 +1269,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         return count($members);
     }
     private function categoryFacts(array $facts, string $category): array { return array_values(array_filter($facts, static function (array $fact) use ($category): bool { return preg_match('/^' . preg_quote($category, '/') . '(?:\\s*\\/|$)/u', trim((string)($fact['category_path'] ?? ''))) === 1; })); }
-    /** 自营/合作由发生时冻结的商品分类路径判断，不能由现时商品名称或人员档案反推。 */
+    /** 自营/合作随关联平台商品当前分类变化，不由商品名称或人员档案反推。 */
     private function teamFacts(array $facts, bool $partner): array
     {
         return array_values(array_filter($facts, static function (array $fact) use ($partner): bool {
@@ -1285,9 +1299,10 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     }
     private function allocateSigned(int $amountCents, array $items): array { $sign=$amountCents<0?-1:1; $sales=[]; foreach($items as $item){$weight=abs((int)($item['sale_amount_cents']??0));if($weight===0)$weight=abs((int)($item['configured_amount_cents']??0));if($weight===0)$weight=max(1,(int)($item['component_count']??1));$sales[]=['fact_id'=>(string)$item['allocation_fact_id'],'sale_amount_cents'=>$sign*$weight,'debt_amount_cents'=>0];} return StoreReportPartnerCategorySnapshotServices::allocateAmountBySaleFact($amountCents,$sales); }
     private function categoryIds(string $rootName, array $input): array { $requested = trim((string)($input['category_path'] ?? '')); if ($requested !== '') return $this->descendantsByPath($requested); return $rootName === '' ? [] : $this->descendantsByName($rootName); }
-    private function descendantsByName(string $rootName): array { $roots = Db::name('store_product_category')->where('is_show', 1)->where('cate_name', $rootName)->column('id'); return $this->descendants($roots); }
-    private function descendantsByPath(string $path): array { $all = Db::name('store_product_category')->where('is_show', 1)->field('id,pid,cate_name')->select()->toArray(); $byId=[]; foreach ($all as $row) $byId[(int)$row['id']]=$row; $roots=[]; foreach ($byId as $id=>$row) { $parts=[]; for ($cursor=$id,$guard=0;$cursor>0&&isset($byId[$cursor])&&$guard++<32;$cursor=(int)$byId[$cursor]['pid']) array_unshift($parts,(string)$byId[$cursor]['cate_name']); if (implode(' / ',$parts)===$path) $roots[]=$id; } return $this->descendants($roots, $all); }
-    private function descendants(array $roots, ?array $all = null): array { $all=$all??Db::name('store_product_category')->where('is_show',1)->field('id,pid')->select()->toArray(); $children=[]; foreach($all as $row)$children[(int)$row['pid']][]=(int)$row['id']; $out=[];$queue=array_values(array_unique(array_map('intval',$roots)));while($queue){$id=array_shift($queue);if($id<=0||isset($out[$id]))continue;$out[$id]=true;foreach((array)($children[$id]??[])as$child)$queue[]=$child;}return array_keys($out); }
+    /** Category filters accept either slash spacing, but only platform-category IDs may select facts. */
+    private function descendantsByName(string $rootName): array { $roots = Db::name('store_product_category')->where('type',0)->where('relation_id',0)->where('is_show',1)->where('cate_name',$rootName)->column('id'); return $this->descendants($roots); }
+    private function descendantsByPath(string $path): array { $path=preg_replace('/\s*\/\s*/u','/',$path);$all=Db::name('store_product_category')->where('type',0)->where('relation_id',0)->where('is_show',1)->field('id,pid,cate_name')->select()->toArray(); $byId=[]; foreach ($all as $row) $byId[(int)$row['id']]=$row; $roots=[]; foreach ($byId as $id=>$row) { $parts=[]; for ($cursor=$id,$guard=0;$cursor>0&&isset($byId[$cursor])&&$guard++<32;$cursor=(int)$byId[$cursor]['pid']) array_unshift($parts,(string)$byId[$cursor]['cate_name']); if (implode('/',$parts)===$path) $roots[]=$id; } return $this->descendants($roots, $all); }
+    private function descendants(array $roots, ?array $all = null): array { $all=$all??Db::name('store_product_category')->where('type',0)->where('relation_id',0)->where('is_show',1)->field('id,pid')->select()->toArray(); $children=[]; foreach($all as $row)$children[(int)$row['pid']][]=(int)$row['id']; $out=[];$queue=array_values(array_unique(array_map('intval',$roots)));while($queue){$id=array_shift($queue);if($id<=0||isset($out[$id]))continue;$out[$id]=true;foreach((array)($children[$id]??[])as$child)$queue[]=$child;}return array_keys($out); }
     private function months(array $range): array { $out=[]; for($cursor=date('Y-m-01',strtotime($range['start']));$cursor<=date('Y-m-01',strtotime($range['end']));$cursor=date('Y-m-01',strtotime($cursor.' +1 month')))$out[]=substr($cursor,0,7);return $out; }
     private function range(array $range,array $input): array { $start=trim((string)($range['start']??$input['start_date']??''));$end=trim((string)($range['end']??$input['end_date']??'')); if($start===''||$end===''){ $year=max(2000,(int)($input['year']??date('Y')));$start=$year.'-01-01';$end=$year.'-12-31'; } if(!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$start)||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$end)||$start>$end)throw new \InvalidArgumentException('日期范围不正确');return ['start'=>$start,'end'=>$end]; }
     private function storeIds($ids): array { $ids=array_values(array_unique(array_filter(array_map('intval',(array)$ids))));sort($ids);return $ids; }
@@ -1314,7 +1329,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             'filter_schema' => array_merge([['key' => 'organization_store_scope', 'label' => '组织 / 门店', 'type' => 'organization_store_scope'], ['key' => 'date_range', 'label' => '日期', 'type' => !empty($filters['year']) ? 'year' : 'date_range', 'inclusive' => true, 'single_natural_month' => !empty($filters['single_month'])]], !empty($filters['category']) ? [['key' => 'category_path', 'label' => '商品分类', 'type' => 'category_tree', 'include_descendants' => true]] : [], !empty($filters['unit_price_range']) ? [['key' => 'unit_price_range', 'label' => '项目单价成交区间（元）', 'type' => 'money_range', 'min_key' => 'unit_price_min', 'max_key' => 'unit_price_max']] : []),
             'source_explanations' => array_values(array_map(static fn(array $column): array => ['key' => (string)$column['key'], 'label' => (string)$column['label'], 'source_explanation' => (string)$column['source_explanation']], $columns)),
             'drilldown_keys' => ['start_date', 'end_date', 'store_id', 'category_path', 'company_dimension_id', 'metric_code'],
-            'table_layout' => ['fixed' => true, 'sticky_query' => true, 'sticky_header' => true, 'sticky_summary' => true, 'result_scroll' => true], 'metric_version' => $title === '六维数据分析表' ? 'six-dimension-analysis-personnel-split-v2' : self::METRIC_VERSION,
+            'table_layout' => ['fixed' => true, 'sticky_query' => true, 'sticky_header' => true, 'sticky_summary' => true, 'result_scroll' => true], 'metric_version' => $title === '六维数据分析表' ? 'six-dimension-analysis-current-category-v3' : self::METRIC_VERSION,
             'service_customer_rule_version' => null,
             'data_as_of' => date('Y-m-d H:i:s'), 'aggregation_status' => 'reconciled', 'scope' => ['date_range' => $range]];
     }

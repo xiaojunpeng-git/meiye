@@ -18,7 +18,7 @@ use think\facade\Db;
 final class MemberManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'member_management_dashboard';
-    public const METRIC_VERSION = 'member-management-dashboard-facts-v2';
+    public const METRIC_VERSION = 'member-management-dashboard-facts-v3';
 
     /** @return array<string,mixed> */
     public function dashboard(array $context, array $input = []): array
@@ -159,11 +159,10 @@ final class MemberManagementDashboardServices
             ->where('p.tenant_id', $tenant)->whereIn('p.store_id', $stores)->where('p.status', 'effective')
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,s.source_type,s.business_source_primary_id,s.business_source_label_snapshot,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.is_experience');
-        if ($categoryId > 0) $query->where('d.category_id_snapshot', $categoryId);
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
         $normal->excludeVoidedSupplementAllocations($query, 'p');
-        return $query->select()->toArray();
+        return $this->currentCategoryRows($query->select()->toArray(), 'item_id', $categoryId);
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -173,9 +172,8 @@ final class MemberManagementDashboardServices
             ->where('s.tenant_id', $tenant)->whereIn('s.store_id', $stores)->where('s.service_status', 'completed')
             ->whereBetween('s.business_date', [$range['start'], $range['end']])
             ->fieldRaw('s.service_fact_id,s.store_id,s.member_id,s.business_date,s.checkout_request_id,s.source_line_id,s.project_id,s.project_name_snapshot,s.project_category_id_snapshot category_id,s.project_category_name_snapshot category_name,s.quantity,s.is_experience');
-        if ($categoryId > 0) $query->where('s.project_category_id_snapshot', $categoryId);
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 's');
-        return $query->select()->toArray();
+        return $this->currentCategoryRows($query->select()->toArray(), 'project_id', $categoryId);
     }
 
     private function performanceAmount(string $tenant, array $stores, array $range, int $categoryId = 0): int
@@ -183,12 +181,17 @@ final class MemberManagementDashboardServices
         $query = Db::name('cashier_v3_performance_fact')->alias('p')->where('p.tenant_id', $tenant)->whereIn('p.store_id', $stores)
             ->where('performance_type', 'consumption_performance_recorded')->where('status', 'effective')
             ->whereBetween('p.business_date', [$range['start'], $range['end']]);
-        if ($categoryId > 0) $query->join('cashier_v3_entitlement_service_fact s', 's.tenant_id=p.tenant_id AND s.checkout_request_id=p.checkout_request_id AND s.source_line_id=p.source_line_id')->where('s.project_category_id_snapshot', $categoryId)->where('s.service_status', 'completed');
+        if ($categoryId > 0) $query->join('cashier_v3_entitlement_service_fact s', 's.tenant_id=p.tenant_id AND s.checkout_request_id=p.checkout_request_id AND s.source_line_id=p.source_line_id')->where('s.service_status', 'completed');
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
         $normal->excludeVoidedSalesOrderServices($query, 'p');
-        $row = $query->fieldRaw('COALESCE(SUM(p.amount_cents),0) amount')->find();
-        return (int)($row['amount'] ?? 0);
+        if ($categoryId === 0) {
+            $row = $query->fieldRaw('COALESCE(SUM(p.amount_cents),0) amount')->find();
+            return (int)($row['amount'] ?? 0);
+        }
+        // Category selection is applied after resolving the linked platform item; performance cents stay on their original facts.
+        $rows = $query->fieldRaw('p.store_id,p.amount_cents,s.project_id')->select()->toArray();
+        return $this->sum($this->currentCategoryRows($rows, 'project_id', $categoryId), 'amount_cents');
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -197,10 +200,41 @@ final class MemberManagementDashboardServices
         $query = Db::name('cashier_v3_performance_fact')->alias('p')
             ->join('cashier_v3_entitlement_service_fact s', 's.tenant_id=p.tenant_id AND s.checkout_request_id=p.checkout_request_id AND s.source_line_id=p.source_line_id')
             ->where('p.tenant_id', $tenant)->whereIn('p.store_id', $stores)->where('p.performance_type', 'consumption_performance_recorded')->where('p.status', 'effective')
-            ->where('s.service_status', 'completed')->where('s.project_category_id_snapshot', $categoryId)->whereBetween('p.business_date', [$range['start'], $range['end']]);
+            ->where('s.service_status', 'completed')->whereBetween('p.business_date', [$range['start'], $range['end']]);
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 's');
-        $rows = $query->fieldRaw('s.project_id item_id,s.project_name_snapshot item_name,SUM(p.amount_cents) consumption_cents,COUNT(DISTINCT s.member_id) people')->group('s.project_id,s.project_name_snapshot')->order('consumption_cents','desc')->limit(5)->select()->toArray();
-        return array_map(function (array $row): array { $amount = (int)$row['consumption_cents']; $people = (int)$row['people']; return ['name' => (string)$row['item_name'], 'consumption_cents' => $amount, 'people' => $people, 'average_cents' => $this->ratio($amount, $people)]; }, $rows);
+        $rows = $query->fieldRaw('p.store_id,p.amount_cents,s.project_id item_id,s.project_name_snapshot item_name,s.member_id')->select()->toArray();
+        $rows = $this->currentCategoryRows($rows, 'item_id', $categoryId);
+        $groups = [];
+        foreach ($rows as $row) {
+            $key = (int)$row['item_id'] . ':' . (string)$row['item_name'];
+            if (!isset($groups[$key])) $groups[$key] = ['name' => (string)$row['item_name'], 'amount' => 0, 'members' => []];
+            $groups[$key]['amount'] += (int)$row['amount_cents'];
+            $memberId = (int)$row['member_id'];
+            if ($memberId > 0) $groups[$key]['members'][$memberId] = true;
+        }
+        $ranked = [];
+        foreach ($groups as $group) {
+            $people = count($group['members']);
+            $ranked[] = ['name' => $group['name'], 'consumption_cents' => $group['amount'], 'people' => $people, 'average_cents' => $this->ratio($group['amount'], $people)];
+        }
+        usort($ranked, static fn(array $a, array $b): int => $b['consumption_cents'] <=> $a['consumption_cents']);
+        return array_slice($ranked, 0, 5);
+    }
+
+    /** Project category grouping through platform product IDs only, then apply the dashboard's first-level category filter. */
+    private function currentCategoryRows(array $rows, string $itemKey, int $categoryId): array
+    {
+        $links = [];
+        foreach ($rows as $index => $row) $links[$index] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)($row[$itemKey] ?? 0)];
+        $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $result = [];
+        foreach ($rows as $index => $row) {
+            $category = $categories[$index] ?? [];
+            $row['category_id'] = (int)($category['root_id'] ?? 0);
+            $row['category_path'] = (string)($category['path'] ?? '');
+            if ($categoryId === 0 || $row['category_id'] === $categoryId) $result[] = $row;
+        }
+        return $result;
     }
 
     /** Product consumption is the confirmed product purchase amount per the dashboard rule. */
@@ -317,7 +351,7 @@ final class MemberManagementDashboardServices
             'service.average_amount' => '服务耗卡金额除以服务人数；分母为零显示 -。',
             'service.average_items' => '服务项目数除以服务人数；分母为零显示 -。',
             'service.unit_amount' => '服务耗卡金额除以服务项目数；分母为零显示 -。',
-            'category.people' => '该一级商品分类下非体验标签消费会员数，按会员 ID 去重。',
+            'category.people' => '按商品关联的平台商品当前一级分类归组；该分类下非体验标签消费会员数按会员 ID 去重，不按同名商品猜测分类。',
             'category.amount' => '该一级商品分类下现金业绩净额，退款、作废和调整按实际发生日期反向影响。',
             'category.average' => '分类现金业绩除以分类消费会员数；分母为零显示 -。',
             'category.share' => '分类现金业绩除以全部消费现金业绩。',

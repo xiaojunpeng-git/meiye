@@ -15,7 +15,7 @@ use think\facade\Db;
 final class ProductManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'product_management_dashboard';
-    public const METRIC_VERSION = 'product-management-dashboard-facts-v1';
+    public const METRIC_VERSION = 'product-management-current-category-v2';
 
     public function dashboard(array $context, array $input): array
     {
@@ -204,7 +204,7 @@ final class ProductManagementDashboardServices
 
     private function inventory(array $scope, array $categories, int $selected): array
     {
-        $rows = $this->inventoryRows($scope); $map = $this->productCategoryMap($categories, $scope['store_ids']);
+        $rows = $this->inventoryRows($scope); $map = $this->productCategoryMap($categories, $rows);
         $groups = [];
         foreach ($rows as $row) { $cat = $map[(string)$row['store_id'] . ':' . (int)$row['product_id']] ?? $map[(int)$row['product_id']] ?? 0; if ($selected > 0 && !in_array($cat, $this->descendants($selected, $categories['children']), true)) continue; $key = (string)$cat; if (!isset($groups[$key])) $groups[$key] = ['cost' => $this->costVisible($scope) ? 0 : null, 'rows' => []]; if ($this->costVisible($scope)) $groups[$key]['cost'] += (int)$row['inventory_cost_cents']; $itemKey = (string)$row['product_id']; if (!isset($groups[$key]['rows'][$itemKey])) $groups[$key]['rows'][$itemKey] = ['product_name' => $row['product_name'], 'available_quantity' => 0, 'inventory_cost_cents' => $this->costVisible($scope) ? 0 : null]; $groups[$key]['rows'][$itemKey]['available_quantity'] += (float)$row['quantity']; if ($this->costVisible($scope)) $groups[$key]['rows'][$itemKey]['inventory_cost_cents'] += (int)$row['inventory_cost_cents']; }
         $result = [];
@@ -215,7 +215,7 @@ final class ProductManagementDashboardServices
     private function expiry(array $scope, array $categories, int $selected): array
     {
         $rows = $this->inventoryRows($scope);
-        $map = $this->productCategoryMap($categories, $scope['store_ids']);
+        $map = $this->productCategoryMap($categories, $rows);
         $categoryNames = [];
         foreach ($categories['roots'] as $category) $categoryNames[(int)$category['id']] = (string)$category['name'];
         $cutoff = date('Y-m-d');
@@ -260,7 +260,21 @@ final class ProductManagementDashboardServices
     }
 
     private function costVisible(array $scope): bool { return (bool)($scope['cost_visible'] ?? false); }
-    private function productCategoryMap(array $categories, array $stores): array { $all = Db::name('store_product')->where('is_del', 0)->field('id,cate_id,type,relation_id')->select()->toArray(); $map = []; foreach ($all as $row) { if ((int)$row['type'] === 1 && !in_array((int)$row['relation_id'], $stores, true)) continue; foreach (explode(',', (string)$row['cate_id']) as $id) { $root = $this->rootCategory((int)$id, $categories['parents']); if ($root > 0) { $key = (int)$row['type'] === 1 ? (int)$row['relation_id'] . ':' . (int)$row['id'] : (string)(int)$row['id']; $map[$key] = $root; if (!isset($map[(string)(int)$row['id']])) $map[(string)(int)$row['id']] = $root; break; } } } return $map; }
+    /** Resolve only products present in authorized inventory rows; never use a store-copy category as authority. */
+    private function productCategoryMap(array $categories, array $rows): array
+    {
+        $links = [];
+        foreach ($rows as $index => $row) {
+            $links[$index] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)$row['product_id']];
+        }
+        $current = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $map = [];
+        foreach ($rows as $index => $row) {
+            $root = $this->rootCategory((int)($current[$index]['id'] ?? 0), $categories['parents']);
+            if ($root > 0) $map[(int)$row['store_id'] . ':' . (int)$row['product_id']] = $root;
+        }
+        return $map;
+    }
     private function rootCategory(int $id, array $parents): int { $root = $id; $guard = 0; while ($root > 0 && isset($parents[$root]) && (int)$parents[$root] > 0 && $guard++ < 32) $root = (int)$parents[$root]; return $root; }
     private function categories(): array { $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('is_show', 1)->field('id,pid,cate_name')->order('pid')->order('id')->select()->toArray(); $parents = []; $children = []; $roots = []; foreach ($rows as $row) { $id = (int)$row['id']; $pid = (int)$row['pid']; $parents[$id] = $pid; $children[$pid][] = $id; if ($pid <= 0) $roots[] = ['id' => $id, 'name' => (string)$row['cate_name']]; } return compact('roots', 'children', 'parents'); }
     private function descendants(int $root, array $children): array { $out = []; $queue = [$root]; while ($queue) { $id = (int)array_shift($queue); if ($id <= 0 || isset($out[$id])) continue; $out[$id] = $id; foreach ((array)($children[$id] ?? []) as $child) $queue[] = (int)$child; } return array_values($out); }
@@ -348,9 +362,9 @@ final class ProductManagementDashboardServices
             ->whereIn('d.product_type_snapshot', ['product', 'goods']);
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementAllocations($query, 'p');
-        if ($categoryIds !== []) $query->whereIn('d.category_id_snapshot', $categoryIds);
-        return $query->fieldRaw('p.id,p.source_line_id item_line_id,p.amount_cents,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id')
+        $rows = $query->fieldRaw('p.id,p.store_id,p.source_line_id item_line_id,p.amount_cents,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id')
             ->group('p.id')->select()->toArray();
+        return $this->currentProductCategoryRows($rows, $categoryIds);
     }
 
     /** Project revenue is recognised when a service is completed, not when a card is sold. */
@@ -362,9 +376,28 @@ final class ProductManagementDashboardServices
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('p.performance_type', 'consumption_performance_recorded');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
-        if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
-        return $query->fieldRaw("p.fact_id,p.source_line_id item_line_id,p.amount_cents,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,'project' product_type")
+        $rows = $query->fieldRaw("p.fact_id,p.store_id,p.source_line_id item_line_id,p.amount_cents,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,'project' product_type")
             ->group('p.fact_id')->select()->toArray();
+        return $this->currentProductCategoryRows($rows, $categoryIds);
+    }
+
+    /** Apply the selected category after resolving each authorized fact's platform product ID. */
+    private function currentProductCategoryRows(array $rows, array $categoryIds): array
+    {
+        if ($rows === []) return [];
+        $links = [];
+        foreach ($rows as $index => $row) {
+            $links[$index] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)$row['item_id']];
+        }
+        $current = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
+        $result = [];
+        foreach ($rows as $index => $row) {
+            $row['category_id'] = (int)($current[$index]['id'] ?? 0);
+            if ($allowed !== [] && !isset($allowed[$row['category_id']])) continue;
+            $result[] = $row;
+        }
+        return $result;
     }
 
     private function sum(array $rows, string $field): int

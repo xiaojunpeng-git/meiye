@@ -65,10 +65,12 @@ itemAnalysisAssert(
     'cash and consumption use persisted category facts rather than browser calculation'
 );
 itemAnalysisAssert(
-    str_contains($service, 'COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot')
+    str_contains($service, "projectSaleCategories(\$shareRows, 'current_product_id', 'category_id_snapshot', 'category_path_snapshot')")
+        && str_contains($service, 'RegisteredMetricReadServices::withCurrentReportProductCategory()')
+        && str_contains($metricReader, 'projectCurrentReportCategories($rows, $categoryIds, $filters)')
         && str_contains($service, 'COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents')
         && str_contains($service, '(int)($entry[\'category_id_snapshot\'] ?? 0)'),
-    'category grouping uses the product snapshot while partner amounts stay in frozen share cents'
+    'category grouping follows the linked platform product while partner share cents stay frozen'
 );
 itemAnalysisAssert(
     str_contains($service, "'rowspan' => 2")

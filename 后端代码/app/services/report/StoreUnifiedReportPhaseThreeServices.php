@@ -17,7 +17,7 @@ use think\facade\Db;
  */
 final class StoreUnifiedReportPhaseThreeServices extends BaseServices
 {
-    public const METRIC_VERSION = 'six-dimension-phase-three-v2';
+    public const METRIC_VERSION = 'six-dimension-current-category-v3';
     // The card-item projection is introduced by the Phase 3 release and has no
     // historical backfill. This date remains the first-purchase classification
     // boundary, but it must not prevent operators from querying earlier facts.
@@ -759,7 +759,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         if ($applyParticipantScope && $this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyOrder($direct, 's.order_id', $this->participantEmployeeId);
         }
-        if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
         $rows = $direct->fieldRaw("s.id,s.fact_id,s.business_event_no,s.organization_id,s.organization_path_snapshot,s.store_id,s.store_name_snapshot store_name,s.member_id,u.phone,s.order_id,s.source_line_id,s.business_date,s.occurred_at,s.quantity,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.is_experience")
             ->order('s.business_date', 'asc')->order('s.id', 'asc')->select()->toArray();
 
@@ -774,7 +773,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
         if ($applyParticipantScope && $this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyOrder($card, 'ci.order_id', $this->participantEmployeeId);
         }
-        if ($categoryIds !== []) $card->whereIn('ci.category_id_snapshot', $categoryIds);
         foreach ($card->fieldRaw("ci.id,ci.allocation_fact_id fact_id,s.business_event_no,s.organization_id,s.organization_path_snapshot,ci.store_id,s.store_name_snapshot store_name,ci.member_id,u.phone,ci.order_id,ci.source_line_id,ci.business_date,ci.occurred_at,ci.component_count quantity,ci.component_product_id item_id,ci.item_name_snapshot item_name,ci.category_id_snapshot category_id,ci.category_path_snapshot category_path,0 is_experience")
             ->order('ci.business_date', 'asc')->order('ci.id', 'asc')->select()->toArray() as $row) $rows[] = $row;
         usort($rows, static function (array $left, array $right): int {
@@ -782,7 +780,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 ?: ((int)$left['occurred_at'] <=> (int)$right['occurred_at'])
                 ?: ((int)$left['id'] <=> (int)$right['id']);
         });
-        return $rows;
+        return $this->currentCategoryRows($rows, $categoryIds);
     }
 
     private function cashItemRows(
@@ -800,7 +798,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->leftJoin('cashier_v3_checkout_request payment_request', 'payment_request.tenant_id=p.tenant_id AND payment_request.request_id=p.checkout_request_id')
             ->leftJoin('cashier_v3_sales_manager_fact sm', "sm.tenant_id=s.tenant_id AND sm.order_id=s.order_id AND sm.source_line_id=s.source_line_id")
             ->where('s.source_type', '<>', 'card');
-        if ($categoryIds !== []) $query->whereIn('d.category_id_snapshot', $categoryIds);
         $rows = $query->fieldRaw("p.id source_fact_row_id,p.allocation_fact_id,p.business_event_no,p.fact_direction,MAX(financial_reversal.reversal_type) reversal_type,p.organization_id,COALESCE(MAX(payment_event.organization_path),MAX(payment_request.organization_path),'') organization_path_snapshot,p.store_id,COALESCE(MAX(payment_event.store_name_snapshot),MAX(payment_request.store_name_snapshot),'') store_name,p.member_id,p.order_id,p.source_line_id,p.business_date,p.occurred_at,p.amount_cents,s.business_date purchase_date,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id,d.category_path_snapshot category_path,MAX(sm.sales_manager_name_snapshot) sales_manager_name")
             ->group('p.id')->order('p.business_date', 'asc')->order('p.id', 'asc')->select()->toArray();
         foreach ($rows as &$row) {
@@ -820,12 +817,11 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             if (trim((string)$payment['store_name']) === '') $payment['store_name'] = $this->storeName((int)$payment['store_id']);
         }
         unset($payment);
-        if ($cardPayments === []) return $rows;
+        if ($cardPayments === []) return $this->currentCategoryRows($rows, $categoryIds);
         $saleFactIds = array_values(array_unique(array_column($cardPayments, 'effective_sale_fact_id')));
         $itemQuery = Db::name('cashier_v3_card_sale_item_allocation_fact')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective');
-        $categoryFilter = array_fill_keys(array_map('intval', $categoryIds), true);
         $itemsBySale = [];
         foreach ($itemQuery->field('id,allocation_fact_id,sale_fact_id,component_product_id,item_name_snapshot,category_id_snapshot,category_path_snapshot,component_count,sale_amount_cents,configured_amount_cents')->order('allocation_fact_id', 'asc')->select()->toArray() as $item) {
             $itemsBySale[(string)$item['sale_fact_id']][] = $item;
@@ -835,7 +831,6 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             if ($items === []) continue;
             $allocations = $this->allocateSigned((int)$payment['amount_cents'], $items);
             foreach ($items as $item) {
-                if ($categoryFilter !== [] && !isset($categoryFilter[(int)$item['category_id_snapshot']])) continue;
                 $rows[] = [
                     'source_fact_row_id' => (int)$payment['source_fact_row_id'],
                     'allocation_fact_id' => (string)$payment['allocation_fact_id'] . ':' . (string)$item['allocation_fact_id'],
@@ -856,7 +851,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 ];
             }
         }
-        return $rows;
+        return $this->currentCategoryRows($rows, $categoryIds);
     }
 
     private function paymentAllocationQuery(
@@ -910,12 +905,12 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->whereIn('sv.store_id', $stores)->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
-        if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         if ($this->participantEmployeeId > 0) {
             (new StoreReportParticipantScopeServices())->applyCheckout($query, 'sv.checkout_request_id', $this->participantEmployeeId);
         }
-        return $query->fieldRaw("sv.id,sv.service_fact_id fact_id,sv.organization_id,sv.organization_path_snapshot,sv.store_id,sv.store_name_snapshot store_name,sv.member_id,sv.business_date,sv.occurred_at,sv.quantity,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,sv.project_category_path_snapshot category_path,sv.is_experience")
+        $rows = $query->fieldRaw("sv.id,sv.service_fact_id fact_id,sv.organization_id,sv.organization_path_snapshot,sv.store_id,sv.store_name_snapshot store_name,sv.member_id,sv.business_date,sv.occurred_at,sv.quantity,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,sv.project_category_path_snapshot category_path,sv.is_experience")
             ->order('sv.business_date', 'asc')->order('sv.id', 'asc')->select()->toArray();
+        return $this->currentCategoryRows($rows, $categoryIds);
     }
 
     private function memberCashTotals(array $stores, array $range, array $categoryIds): array
@@ -938,12 +933,35 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             ->where('sv.service_status', 'completed')
             ->where('pf.performance_type', 'consumption_performance_recorded')->where('pf.status', 'effective');
         $this->normalDataScope()->excludeVoidedSalesOrderServices($query, 'sv');
-        if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
-        $rows = $query->fieldRaw("sv.member_id, SUM(CASE WHEN pf.fact_direction='reversal' THEN -ABS(pf.amount_cents) ELSE ABS(pf.amount_cents) END) amount_cents")
-            ->where('sv.member_id', '>', 0)->group('sv.member_id')->select()->toArray();
+        $rows = $query->fieldRaw("sv.store_id,sv.project_id item_id,sv.member_id, SUM(CASE WHEN pf.fact_direction='reversal' THEN -ABS(pf.amount_cents) ELSE ABS(pf.amount_cents) END) amount_cents")
+            ->where('sv.member_id', '>', 0)->group('sv.store_id,sv.project_id,sv.member_id')->select()->toArray();
         $totals = [];
-        foreach ($rows as $row) $totals[(int)$row['member_id']] = (int)$row['amount_cents'];
+        foreach ($this->currentCategoryRows($rows, $categoryIds) as $row) {
+            $memberId = (int)$row['member_id'];
+            $totals[$memberId] = (int)($totals[$memberId] ?? 0) + (int)$row['amount_cents'];
+        }
         return $totals;
+    }
+
+    /** Project authorized fact rows by their linked platform product before category filters or aggregation. */
+    private function currentCategoryRows(array $rows, array $categoryIds): array
+    {
+        if ($rows === []) return [];
+        $links = [];
+        foreach ($rows as $index => $row) {
+            $links[$index] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)$row['item_id']];
+        }
+        $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
+        $result = [];
+        foreach ($rows as $index => $row) {
+            $category = $categories[$index] ?? [];
+            $row['category_id'] = (int)($category['id'] ?? 0);
+            $row['category_path'] = (string)($category['path'] ?? '');
+            if ($allowed !== [] && !isset($allowed[$row['category_id']])) continue;
+            $result[] = $row;
+        }
+        return $result;
     }
 
     private function activeMemberIds(array $stores, array $range): array
@@ -1192,9 +1210,9 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
     private function categoryScope(array $input): array
     {
         $root = (int)($input['category_id'] ?? 0);
-        $requestedPath = trim((string)($input['category_path'] ?? ''));
+        $requestedPath = preg_replace('/\s*\/\s*/u', '/', trim((string)($input['category_path'] ?? '')));
         if ($root <= 0 && $requestedPath === '') return [];
-        $categories = Db::name('store_product_category')->where('is_show', 1)
+        $categories = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('is_show', 1)
             ->field('id,pid,cate_name')->select()->toArray();
         $children = [];
         $byId = [];
@@ -1213,7 +1231,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                     array_unshift($parts, trim((string)$byId[$cursor]['cate_name']));
                     $cursor = (int)$byId[$cursor]['pid'];
                 }
-                if (implode(' / ', array_filter($parts, static fn(string $part): bool => $part !== '')) === $requestedPath) {
+                if (implode('/', array_filter($parts, static fn(string $part): bool => $part !== '')) === $requestedPath) {
                     $roots[] = $id;
                 }
             }
@@ -1231,7 +1249,7 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
 
     private function sixDimensionCategoryIds(): array
     {
-        $roots = Db::name('store_product_category')->where('is_show', 1)->where('pid', 0)
+        $roots = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('is_show', 1)->where('pid', 0)
             ->where('cate_name', '六维')->order('id', 'asc')->column('id');
         if ($roots === []) throw new \RuntimeException('六维根商品分类尚未配置，无法生成六维业绩报表');
         if (count($roots) !== 1) throw new \RuntimeException('存在多个启用的六维根商品分类，请先修正分类配置');

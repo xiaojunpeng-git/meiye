@@ -5,6 +5,7 @@ namespace app\services\query\metric;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\report\StoreReportNormalDataScopeServices;
 use app\services\report\StoreReportParticipantScopeServices;
+use app\services\report\StoreReportCurrentProductCategoryServices;
 use app\services\report\StoreUnifiedReportOrganizationDimensionServices;
 use think\facade\Db;
 
@@ -27,6 +28,15 @@ final class RegisteredMetricReadServices
     private $useRightsIndex;
     private $cacheServiceCustomers;
     private $serviceCustomerCache = [];
+    private bool $currentReportProductCategory = false;
+
+    /** Report-only projection: category changes follow the linked platform product; source facts stay immutable. */
+    public static function withCurrentReportProductCategory(): self
+    {
+        $reader = new self();
+        $reader->currentReportProductCategory = true;
+        return $reader;
+    }
 
     /** Cache opt-in is reserved for readers whose lifetime is one consistent read transaction. */
     public function __construct(?callable $queryFactory = null, ?callable $normalFacts = null, ?callable $normalServices = null, ?bool $useRightsIndex = null, bool $cacheServiceCustomers = false)
@@ -1174,26 +1184,66 @@ final class RegisteredMetricReadServices
         $filters = $this->normalizeCategoryFilters($filters);
         if ($participantEmployeeId > 0) $filters['participant_employee_id'] = $participantEmployeeId;
 
+        // Current-category reports must fetch the complete authorized fact population first.
+        // Filtering on sale-time category columns would permanently hide products moved today.
+        $queryCategoryIds = $categoryIds;
+        $queryFilters = $filters;
+        if ($this->currentReportProductCategory) {
+            $queryCategoryIds = [];
+            unset($queryFilters['category_path']);
+        }
+
         $contract = MetricDefinitionRegistry::get($metricCode);
         $projection = $contract['category_reader'] ?? ($contract['source']['category_reader'] ?? null);
         if (!is_array($projection) || !is_string($projection['strategy'] ?? null)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $handlers = [
-            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->cashCategoryRows($tenantId, $stores, $range, $categoryIds, (string)($projection['mode'] ?? ''), $filters);
+            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->cashCategoryRows($tenantId, $stores, $range, $queryCategoryIds, (string)($projection['mode'] ?? ''), $queryFilters);
             },
-            'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, $categoryIds, $filters);
+            'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
             },
-            'completed_service_quantity' => function () use ($tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->completedServiceQuantityCategoryRows($tenantId, $stores, $range, $categoryIds, $filters);
+            'completed_service_quantity' => function () use ($tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->completedServiceQuantityCategoryRows($tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
             },
-            'sale_completed_allocation' => function () use ($tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->completedSaleCategoryRows($tenantId, $stores, $range, $categoryIds, $filters);
+            'sale_completed_allocation' => function () use ($tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->completedSaleCategoryRows($tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
             },
         ];
         $handler = $handlers[$projection['strategy']] ?? null;
         if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        return $handler();
+        $rows = $handler();
+        return $this->currentReportProductCategory
+            ? $this->projectCurrentReportCategories($rows, $categoryIds, $filters)
+            : $rows;
+    }
+
+    /** Apply current platform category after every strategy has resolved its immutable item ID and amount. */
+    private function projectCurrentReportCategories(array $rows, array $categoryIds, array $filters): array
+    {
+        $links = [];
+        foreach ($rows as $index => $row) {
+            $links[$index] = ['store_id' => (int)($row['store_id'] ?? 0),
+                'product_id' => (int)($row['item_id'] ?? $row['project_id'] ?? 0)];
+        }
+        $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $allowed = array_fill_keys($categoryIds, true);
+        $pathFilter = (string)($filters['category_path'] ?? '');
+        $projected = [];
+        foreach ($rows as $index => $row) {
+            $category = $resolved[$index] ?? ['id' => 0, 'path' => ''];
+            $id = (int)$category['id'];
+            $path = (string)$category['path'];
+            if ($allowed !== [] && !isset($allowed[$id])) continue;
+            if ($pathFilter !== '' && strpos($path, $pathFilter) !== 0) continue;
+            $row['category_id'] = $id;
+            $row['category_path'] = $path;
+            $row['project_category_id_snapshot'] = $id;
+            $row['project_category_path_snapshot'] = $path;
+            $row['category_path_snapshot'] = $path;
+            $projected[] = $row;
+        }
+        return $projected;
     }
 
     /**
@@ -1449,6 +1499,27 @@ final class RegisteredMetricReadServices
         $filters = $this->normalizeCategoryFilters($filters);
         $contract = MetricDefinitionRegistry::get($metricCode);
         $projection = $contract['category_reader'] ?? ($contract['source']['category_reader'] ?? null);
+        if ($this->currentReportProductCategory) {
+            if ($sourceLineIds === []) return [];
+            $queryFilters = $filters;
+            unset($queryFilters['category_path']);
+            $strategy = (string)($projection['strategy'] ?? '');
+            if ($strategy === 'completed_service_performance') {
+                $rows = $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, [], $queryFilters, $sourceLineIds);
+            } elseif ($strategy === 'sale_completed_allocation') {
+                $rows = $this->completedSaleCategoryRows($tenantId, $stores, $range, [], $queryFilters, $sourceLineIds);
+            } else {
+                $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            }
+            $totals = [];
+            foreach ($this->projectCurrentReportCategories($rows, [], $filters) as $row) {
+                $line = (string)($row['source_line_id'] ?? '');
+                if (!in_array($line, $sourceLineIds, true)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $key = $line . '|' . (int)$row['category_id'];
+                $totals[$key] = $this->add((int)($totals[$key] ?? 0), $this->integer($row['amount_cents'] ?? null));
+            }
+            return $totals;
+        }
         $handlers = [
             'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $sourceLineIds, $filters): array {
                 return $this->completedServicePerformanceSourceLineCategoryTotals($contract['source'], $tenantId, $stores, $range, $sourceLineIds, $filters);
@@ -1720,7 +1791,7 @@ final class RegisteredMetricReadServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function completedServicePerformanceCategoryRows(array $source, string $tenantId, array $stores, array $range, array $categoryIds, array $filters): array
+    private function completedServicePerformanceCategoryRows(array $source, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, array $sourceLineIds = []): array
     {
         $query = call_user_func($this->queryFactory, $source['table'])->alias('p')
             ->join('cashier_v3_entitlement_service_fact sv', "sv.tenant_id=p.tenant_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status='completed'")
@@ -1729,6 +1800,7 @@ final class RegisteredMetricReadServices
         foreach ($source['filters'] as $field => $value) $query->where('p.' . $field, $value);
         call_user_func($this->normalServices, $query, 'sv');
         $this->applyParticipantScope($query, $filters, 'checkout:p');
+        if ($sourceLineIds !== []) $query->whereIn('p.source_line_id', $sourceLineIds);
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         $this->applyServiceFilters($query, $filters, 'p', 'sv');
         // 消耗业绩在服务完成时已落到项目级事实，商品目标只按服务事实的项目 ID 收敛。

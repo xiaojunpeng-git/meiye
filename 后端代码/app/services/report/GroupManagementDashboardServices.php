@@ -10,13 +10,13 @@ use think\facade\Db;
  * Platform/mobile read contract for the group management dashboard.
  *
  * The dashboard never derives metrics in a browser. Payment and performance
- * facts keep signed reversals, while category rows use frozen sale/card-item
- * allocations so cards do not use a card shell category.
+ * facts keep signed reversals, while category rows resolve linked platform
+ * products at read time; card cash weights remain frozen by component.
  */
 final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
-    public const METRIC_VERSION = 'group-management-cash-recharge-v3';
+    public const METRIC_VERSION = 'group-management-current-category-v4';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -44,7 +44,7 @@ final class GroupManagementDashboardServices
         if ($selectedCategory > 0 && $categoryIds === []) throw new \InvalidArgumentException('商品分类不存在或已停用');
         // The daily aggregate has no category grain. It is only used for an
         // unfiltered overview, trend and organization total; category paths
-        // continue to use the frozen line facts below.
+        // continue to use the original line amounts and current category projection below.
         $aggregateEligible = $categoryIds === [];
         $aggregateRange = $this->aggregateRange($range);
         $aggregateStatus = $aggregateEligible
@@ -77,7 +77,7 @@ final class GroupManagementDashboardServices
         // aggregate the two required facts in SQL so a high-volume month does
         // not materialize every payment allocation in the PHP worker.
         if (!empty($input['summary_only']) && $categoryIds === []) {
-            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+            $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
             $cash = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range);
             $refund = $reader->summary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range);
             $actual = $reader->summary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range);
@@ -107,7 +107,7 @@ final class GroupManagementDashboardServices
             $consumption = $reader->summary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range);
             $serviceCount = $reader->summary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range);
         } else {
-            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+            $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
             $cash = $reader->categorySummary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
             $refund = $reader->categorySummary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
             $actual = $reader->categorySummary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
@@ -138,7 +138,7 @@ final class GroupManagementDashboardServices
             ['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $range['end']
         );
         $monthTargets = $goalProgress['month_targets'];
-        $categoryCards = (new \app\services\query\metric\RegisteredMetricReadServices())->categoryDashboardCards(
+        $categoryCards = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()->categoryDashboardCards(
             'cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
         );
         $currentTarget = array_sum($monthTargets);
@@ -169,7 +169,7 @@ final class GroupManagementDashboardServices
             'data_as_of' => date('Y-m-d H:i:s'),
             'aggregation_caught_up' => $aggregateStatus === null ? false : (bool)$aggregateStatus['aggregation_caught_up'],
             'aggregation_status' => $aggregateStatus === null
-                ? '已选择商品分类，分类指标按冻结明细事实实时读取；日聚合只覆盖未筛选分类的集团总计、趋势和组织总计。'
+                ? '已选择商品分类，分类指标按原明细金额和关联平台商品当前分类实时读取；日聚合只覆盖未筛选分类的集团总计、趋势和组织总计。'
                 : ($aggregateReady ? (string)$aggregateStatus['status_explanation'] : '日聚合正在追平，当前结果暂由统一事实层实时读取，聚合追平后将自动切换。'),
             'aggregation_health' => $aggregationHealth,
             'coverage_start' => self::COVERAGE_START,
@@ -195,7 +195,7 @@ final class GroupManagementDashboardServices
             throw new \InvalidArgumentException('下钻指标无效');
         }
         $canonical = $metric === 'consumption_performance' ? 'consume_amount' : $metric;
-        $rows = (new \app\services\query\metric\RegisteredMetricReadServices())
+        $rows = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()
             ->categoryRows($canonical, $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
         return [
             'metric_code' => $metric,
@@ -268,23 +268,23 @@ final class GroupManagementDashboardServices
         return array_values($result);
     }
 
-    /** Registered signed net-cash rows at frozen category grain. @return array<int,array<string,mixed>> */
+    /** Signed net-cash rows with current platform category and frozen component cash weights. @return array<int,array<string,mixed>> */
     private function cashRows(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
-        return (new \app\services\query\metric\RegisteredMetricReadServices())
+        return \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()
             ->categoryRows('actual_performance', $tenantId, $stores, $range, $categoryIds);
     }
 
     /** @return array<int,array<string,mixed>> */
     private function serviceRows(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
-        return (new \app\services\query\metric\RegisteredMetricReadServices())
+        return \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()
             ->categoryRows('completed_service_item_count', $tenantId, $stores, $range, $categoryIds);
     }
 
     private function performanceTotal(string $tenantId, array $stores, array $range, array $categoryIds): int
     {
-        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
         return $categoryIds === []
             ? $reader->summary('consume_amount', $tenantId, $stores, $range)
             : $reader->categorySummary('consume_amount', $tenantId, $stores, $range, $categoryIds);
@@ -292,7 +292,7 @@ final class GroupManagementDashboardServices
 
     private function actualCashTotal(string $tenantId, array $stores, array $range, array $categoryIds): int
     {
-        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
         return $categoryIds === []
             ? $reader->summary('actual_performance', $tenantId, $stores, $range)
             : $reader->categorySummary('actual_performance', $tenantId, $stores, $range, $categoryIds);
@@ -302,7 +302,7 @@ final class GroupManagementDashboardServices
     private function dailyCashPerformance(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
         $out = [];
-        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
         $rows = $categoryIds === []
             ? $reader->dailyTotals('actual_performance', $tenantId, $stores, $range)
             : $reader->categoryDailyTotals('actual_performance', $tenantId, $stores, $range, $categoryIds);
@@ -340,7 +340,7 @@ final class GroupManagementDashboardServices
     private function dailyPerformance(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
         $out = [];
-        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
         $rows = $categoryIds === []
             ? $reader->dailyTotals('consume_amount', $tenantId, $stores, $range)
             : $reader->categoryDailyTotals('consume_amount', $tenantId, $stores, $range, $categoryIds);
@@ -460,7 +460,7 @@ final class GroupManagementDashboardServices
             }
             return $out;
         }
-        foreach ((new \app\services\query\metric\RegisteredMetricReadServices())->categoryStoreTotals('actual_performance', $tenantId, $stores, $range, $categoryIds) as $row) {
+        foreach (\app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()->categoryStoreTotals('actual_performance', $tenantId, $stores, $range, $categoryIds) as $row) {
             $storeId = (int)$row['store_id'];
             $out[$storeId] = (int)$row['amount_cents'];
         }

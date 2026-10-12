@@ -45,7 +45,7 @@ foreach ($byStoreAndDate as $group) {
         || count(array_intersect(array_column($group, 'operation_id'), $ids)) !== count($group)
         || $actualCents !== $expectedCents
         || (int)($result['totals']['refund_amount_cents'] ?? -1) !== $expectedCents
-        || (string)($result['metric_version'] ?? '') !== 'store-refund-ledger-v5'
+        || (string)($result['metric_version'] ?? '') !== 'store-refund-ledger-v7'
         || in_array('market', $columnKeys, true)
         || ($columnLabels['store_name'] ?? '') !== '门店'
         || ($columnLabels['customer'] ?? '') !== '会员'
@@ -74,6 +74,10 @@ foreach ($byStoreAndDate as $group) {
             }
         }
         $operationId = (string)$row['operation_id'];
+        if ($operationId === 'OLO-8EFCB6B8F2329B424E1C5C702BFF6FF9CEA5AC55'
+            && ((string)$row['category'] !== '生美/卡项' || (int)$row['refund_amount_cents'] !== 120000)) {
+            throw new RuntimeException('Historical card-component refund lost its linked platform category or amount');
+        }
         $tenantId = (string)$row['tenant_id'];
         $revision = Db::name('cashier_v3_refund_attribution_revision')->where('tenant_id', $tenantId)
             ->where('operation_id', $operationId)->order('id desc')->find();
@@ -130,6 +134,55 @@ foreach ($byStoreAndDate as $group) {
         }
     }
     echo "PASS store={$storeId} date={$date} count=" . count($group) . " cents={$expectedCents}\n";
+}
+
+// The legacy component ID is usable only with its recorded holder, order, member and store.
+$refundService = new \app\services\report\StoreUnifiedReportPhaseTwoServices();
+$legacyCategory = new ReflectionMethod($refundService,
+    'refundLedgerCurrentProductCategories');
+$legacyCategory->setAccessible(true);
+$legacy = [[
+    'tenant_id' => '0', 'store_id' => 23,
+    'source_type' => 'card', 'operation_id' => 'OLO-8EFCB6B8F2329B424E1C5C702BFF6FF9CEA5AC55',
+    'card_holder_id' => 2002514, 'card_order_line_id' => '', 'order_id' => '2233405',
+    'member_id' => 1093158,
+    'request_json' => json_encode(['mode' => 'card', 'holderId' => 2002514, 'componentId' => 4399971]),
+]];
+$valid = $legacy;
+$legacyCategory->invokeArgs($refundService, [&$valid]);
+if ((string)($valid[0]['category'] ?? '') !== '生美/卡项') {
+    throw new RuntimeException('Verified historical card component did not resolve its platform category');
+}
+foreach (['card_holder_id' => 2002515, 'order_id' => '2233406', 'member_id' => 1093159,
+    'store_id' => 24] as $key => $wrongValue) {
+    $invalid = $legacy;
+    $invalid[0][$key] = $wrongValue;
+    $legacyCategory->invokeArgs($refundService, [&$invalid]);
+    if ((string)($invalid[0]['category'] ?? '') !== '') {
+        throw new RuntimeException("Unverified historical card {$key} inherited a category");
+    }
+}
+$platformBefore = Db::name('store_product')->where('id', 79687)->find();
+if ($platformBefore === null) throw new RuntimeException('Historical refund platform product fixture is missing');
+Db::startTrans();
+try {
+    Db::name('store_product')->where('id', 79687)->lock(true)->find();
+    Db::name('store_product')->where('id', 79687)->update(['cate_id' => '26321']);
+    $changed = $reports->query([23], [
+        'report' => 'store_refund_ledger', 'start_date' => '2026-10-04',
+        'end_date' => '2026-10-04', '_internal_all' => true,
+    ]);
+    $matching = array_values(array_filter($changed['records'], static fn(array $row): bool =>
+        (string)$row['operation_id'] === 'OLO-8EFCB6B8F2329B424E1C5C702BFF6FF9CEA5AC55'));
+    if (count($matching) !== 1 || (string)$matching[0]['category'] !== '花园/花园产品'
+        || (int)$matching[0]['refund_amount_cents'] !== 120000) {
+        throw new RuntimeException('Historical refund did not follow the current platform category without changing money');
+    }
+} finally {
+    Db::rollback();
+}
+if (Db::name('store_product')->where('id', 79687)->find() !== $platformBefore) {
+    throw new RuntimeException('Historical refund platform category was not rolled back');
 }
 
 // A successful operation from another store must never appear through a narrower store scope.
