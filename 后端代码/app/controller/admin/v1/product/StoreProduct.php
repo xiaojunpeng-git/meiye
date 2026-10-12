@@ -601,6 +601,7 @@ class StoreProduct extends AuthController
             ['card_rule_version', 0],
             ['card_choice_limit', 0],
             ['card_shared_times', 0],
+            ['block_writeoff_on_debt', null],
 //            ['sales', 0],
             ['ficti', 0],
             ['give_integral', 0],

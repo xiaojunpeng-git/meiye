@@ -1403,6 +1403,7 @@ final class CashierV3SaleCatalogServices
             'cardRuleVersion' => (int)($row['product_card_rule_version'] ?? 0),
             'cardChoiceLimit' => (int)($row['product_card_choice_limit'] ?? 0),
             'cardSharedTimes' => (int)($row['product_card_shared_times'] ?? 0),
+            'blockWriteoffOnDebt' => (int)($row['product_block_writeoff_on_debt'] ?? 0),
         ];
         $skuVersionPayload = [
             'id' => $skuId,
@@ -1504,6 +1505,7 @@ final class CashierV3SaleCatalogServices
         $ruleVersion = (int)($row['product_card_rule_version'] ?? 0);
         $choiceLimit = (int)($row['product_card_choice_limit'] ?? 0);
         $sharedTimes = (int)($row['product_card_shared_times'] ?? 0);
+        $blockWriteoffOnDebt = (int)($row['product_block_writeoff_on_debt'] ?? 0);
         $this->assertCardRuleHeader($kindCode, $ruleType, $ruleVersion, $choiceLimit, $sharedTimes);
         $validity = self::validitySnapshot($row, $kindCode, $ruleType);
         $components = [];
@@ -1607,6 +1609,8 @@ final class CashierV3SaleCatalogServices
             'ruleVersion' => $ruleVersion,
             'choiceLimit' => $choiceLimit,
             'sharedTimes' => $sharedTimes,
+            // The sale definition freezes this setting for the issued card.
+            'blockWriteoffOnDebt' => $blockWriteoffOnDebt,
             'components' => $components,
         ];
         $definitionVersion = self::fingerprintVersion($definitionPayload);
@@ -1623,6 +1627,7 @@ final class CashierV3SaleCatalogServices
             'ruleVersion' => $ruleVersion,
             'choiceLimit' => $choiceLimit,
             'sharedTimes' => $sharedTimes,
+            'blockWriteoffOnDebt' => $blockWriteoffOnDebt,
             'validity' => $validity,
             'components' => $components,
             'definitionVersion' => $definitionVersion,

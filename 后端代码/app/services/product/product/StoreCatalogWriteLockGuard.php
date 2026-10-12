@@ -41,12 +41,20 @@ final class StoreCatalogWriteLockGuard
         return $this->withCatalogMutation($cardIds, [], $targetRefs, $write, true);
     }
 
+    /**
+     * Lock card definitions before products and SKUs for a single catalog transaction.
+     * Reverse expansion may be disabled only when the writer changes card definitions,
+     * not referenced product identities. One-hop expansion is for writers that change
+     * only explicit seed products while preserving unrelated component identities.
+     */
     public function withCatalogMutation(
         array $cardIds,
         array $productIds,
         array $targetRefs,
         callable $write,
-        bool $lockFullDefinitions = true
+        bool $lockFullDefinitions = true,
+        bool $expandReverseCards = true,
+        bool $expandTransitiveCards = true
     ) {
         $this->assertNotInTransaction();
         $seed = [
@@ -54,6 +62,8 @@ final class StoreCatalogWriteLockGuard
             'productIds' => $this->positiveIds($productIds),
             'targetRefs' => $this->normalizeRefs($targetRefs),
             'fullDefinitions' => $lockFullDefinitions,
+            'expandReverseCards' => $expandReverseCards,
+            'expandTransitiveCards' => $expandTransitiveCards,
         ];
         if (!$seed['cardIds'] && !$seed['productIds'] && !$seed['targetRefs']) {
             throw new AdminException('商品目录写锁计划不能为空');
@@ -109,7 +119,15 @@ final class StoreCatalogWriteLockGuard
                     );
                     try {
                         $result = $write($lease);
-                        $this->assertPostWriteGraphCovered($lease);
+                        $reverseProducts = $seed['productIds'];
+                        foreach ($seed['targetRefs'] as $ref) {
+                            $reverseProducts[] = $ref['productId'];
+                        }
+                        $this->assertPostWriteGraphCovered(
+                            $lease,
+                            $seed['expandReverseCards'],
+                            $seed['expandTransitiveCards'] ? $lease->productIds() : $this->positiveIds($reverseProducts)
+                        );
                         return $result;
                     } finally {
                         $lease->release();
@@ -124,14 +142,15 @@ final class StoreCatalogWriteLockGuard
         throw new AdminException('商品目录写锁计划失败');
     }
 
-    public function withNewProductCreation(callable $write, array $targetRefs = [])
+    /** A new card may lock only its direct target definitions before adopting its row. */
+    public function withNewProductCreation(callable $write, array $targetRefs = [], bool $expandReverseCards = true)
     {
         $this->assertNotInTransaction();
         $targetRefs = $this->normalizeRefs($targetRefs);
         if ($targetRefs) {
             // Existing cards that reference the chosen projects must be locked
             // before a new card relation is written in this transaction.
-            return $this->withCatalogMutation([], [], $targetRefs, $write);
+            return $this->withCatalogMutation([], [], $targetRefs, $write, true, $expandReverseCards);
         }
         return Db::transaction(function () use ($write) {
             $lease = StoreCatalogWriteLease::issue(
@@ -216,9 +235,11 @@ final class StoreCatalogWriteLockGuard
             $productIds[] = $ref['productId'];
         }
 
-        // A shared project can connect several card definitions. Expand both
-        // directions until stable so a relation remap cannot introduce a
-        // reference absent from the pre-write lock plan.
+        // A shared project can connect several card definitions. The default expands both
+        // directions until stable so a relation remap cannot introduce a reference absent
+        // from the pre-write lock plan. Sync writers only mutate their seed products: their
+        // direct reverse cards and those cards' full definitions are sufficient.
+        $firstPass = true;
         do {
             $previousCardIds = $this->sortedIds('catalog_card_definition', $cardIds);
             $previousProductIds = $this->positiveIds($productIds);
@@ -232,10 +253,12 @@ final class StoreCatalogWriteLockGuard
                         $cardIds[] = (int)$row['id'];
                     }
                 }
-                $reverseCards = Db::name('store_card_related')
-                    ->whereIn('product_id', $this->positiveIds($productIds))
-                    ->column('card_product_id');
-                $cardIds = array_merge($cardIds, $reverseCards ?: []);
+                if ($seed['expandReverseCards'] && ($seed['expandTransitiveCards'] || $firstPass)) {
+                    $reverseCards = Db::name('store_card_related')
+                        ->whereIn('product_id', $this->positiveIds($productIds))
+                        ->column('card_product_id');
+                    $cardIds = array_merge($cardIds, $reverseCards ?: []);
+                }
             }
             $cardIds = $this->sortedIds('catalog_card_definition', $cardIds);
 
@@ -249,6 +272,7 @@ final class StoreCatalogWriteLockGuard
                 }
             }
             $productIds = $this->positiveIds($productIds);
+            $firstPass = false;
         } while (
             $previousCardIds !== $cardIds
             || $previousProductIds !== $productIds
@@ -268,7 +292,7 @@ final class StoreCatalogWriteLockGuard
     {
         $rows = [];
         foreach ($this->sortedIds($kind, $ids) as $id) {
-            $row = Db::name('store_product')->where('id', $id)->lock(true)->find();
+            $row = Db::name('store_product')->where('id', $id)->field('id')->lock(true)->find();
             if ($row) {
                 $rows[] = $row;
             }
@@ -281,7 +305,8 @@ final class StoreCatalogWriteLockGuard
     {
         $rows = [];
         foreach ($this->sortedIds('catalog_sku', $ids) as $id) {
-            $row = Db::name('store_product_attr_value')->where('id', $id)->lock(true)->find();
+            $row = Db::name('store_product_attr_value')->where('id', $id)
+                ->field('id,product_id,unique,suk,type')->lock(true)->find();
             if ($row) {
                 $rows[] = $row;
             }
@@ -355,14 +380,19 @@ final class StoreCatalogWriteLockGuard
         }
     }
 
-    private function assertPostWriteGraphCovered(StoreCatalogWriteLease $lease): void
+    private function assertPostWriteGraphCovered(
+        StoreCatalogWriteLease $lease,
+        bool $checkReverseCards = true,
+        ?array $reverseProductIds = null
+    ): void
     {
         $lease->assertActive();
         $coveredCards = array_fill_keys($lease->cardIds(), true);
         $coveredProducts = array_fill_keys($lease->productIds(), true);
         $products = array_keys($coveredProducts);
-        if ($products) {
-            $reverse = Db::name('store_card_related')->whereIn('product_id', $products)->column('card_product_id');
+        $reverseProductIds = $reverseProductIds ?? $products;
+        if ($checkReverseCards && $reverseProductIds) {
+            $reverse = Db::name('store_card_related')->whereIn('product_id', $reverseProductIds)->column('card_product_id');
             foreach ($reverse ?: [] as $cardId) {
                 if (!isset($coveredCards[(int)$cardId])) {
                     throw new AdminException('商品目录引用集合在写入期间发生变化');

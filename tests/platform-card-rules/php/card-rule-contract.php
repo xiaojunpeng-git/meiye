@@ -150,9 +150,23 @@ $assert(
 );
 $lockGuardSource = file_get_contents(dirname(__DIR__, 3) . '/后端代码/app/services/product/product/StoreCatalogWriteLockGuard.php');
 $assert(
-    strpos($lockGuardSource, 'A shared project can connect several card definitions.') !== false
-    && strpos($lockGuardSource, 'reference absent from the pre-write lock plan.') !== false,
-    'catalog lock plan reaches a stable card/project reference closure'
+    strpos($lockGuardSource, 'bool $expandTransitiveCards = true') !== false
+    && strpos($lockGuardSource, "(\$seed['expandTransitiveCards'] || \$firstPass)") !== false,
+    'default catalog writes retain full closure while sync writes may stop after direct reverse cards'
+);
+$assert(
+    strpos($syncServiceSource, '$isCardDefinitionSync = (int)$productInfo[\'product_type\'] === 5') !== false
+    && strpos($syncServiceSource, '}, true, !$isCardDefinitionSync, false);') !== false
+    && strpos($relatedServiceSource, "true,\n            false\n        );") !== false,
+    'card distribution and relation remap use bounded write plans'
+);
+$assert(
+    strpos($productServiceSource, "->where('type', \$nameScope[0])") !== false
+    && strpos($productServiceSource, "->where('relation_id', \$nameScope[1])") !== false
+    && strpos($productServiceSource, "->where('is_del', 0)") !== false
+    && strpos($productServiceSource, 'SELECT GET_LOCK(?, 15) AS acquired') !== false
+    && strpos($productServiceSource, '商品名称已存在，请更换名称') !== false,
+    'product save rejects concurrent duplicate names within the same catalog only'
 );
 $assert(
     strpos($syncJobSource, 'function reconcileProductScope') !== false

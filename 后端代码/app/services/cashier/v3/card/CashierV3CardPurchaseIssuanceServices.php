@@ -208,6 +208,11 @@ final class CashierV3CardPurchaseIssuanceServices
             ? (is_array($line['authority_snapshot']['cardPurchase'] ?? null)
                 ? $line['authority_snapshot']['cardPurchase'] : [])
             : $this->salesLineCardPurchaseSnapshot($salesLine);
+        // The debt write-off rule is frozen on issuance, so a stale browser
+        // snapshot must not silently issue a card under the opposite rule.
+        // Compare only this safety policy; prices and card components remain
+        // the customer's accepted checkout snapshot.
+        $this->assertDebtWriteoffPolicyCurrent($purchase, $line, (bool)$customConfiguration);
         // The selected card definition is immutable browser intent. The locked
         // catalogue row above supplies identity only and may not replace it.
         $line['authority_snapshot']['cardPurchase'] = $purchase;
@@ -649,6 +654,8 @@ final class CashierV3CardPurchaseIssuanceServices
             'truePrice' => self::money($originalCents),
             'pay_price' => self::money($saleCents),
             'write_times' => 0,
+            // 每张已售卡独立冻结商品策略；后续改商品不追溯旧卡。
+            'block_writeoff_on_debt' => (int)($line['authority_snapshot']['cardPurchase']['blockWriteoffOnDebt'] ?? 0),
             'write_start' => $validity['writeStart'],
             'write_end' => $validity['writeEnd'],
         ];
@@ -768,6 +775,7 @@ final class CashierV3CardPurchaseIssuanceServices
                 'write_times' => $times,
                 'legacy_projection_times' => $legacyTimes,
                 'card_rule_type' => $ruleType,
+                'block_writeoff_on_debt' => (int)($purchase['blockWriteoffOnDebt'] ?? 0),
                 'writeoff_amount_cents' => (int)($component['writeoffAmountCents'] ?? 0),
                 'pay_price' => self::money($amount),
                 'productInfo' => [
@@ -914,6 +922,24 @@ final class CashierV3CardPurchaseIssuanceServices
                 (string)(int)$detailId,
                 $operatorScope,
                 $dataScope
+            );
+        }
+    }
+
+    /** Reject a stale safety rule before persisting any issued-card projection. */
+    private function assertDebtWriteoffPolicyCurrent(array $purchase, array $line, bool $isCustom): void
+    {
+        if ($isCustom) {
+            return;
+        }
+        $selected = (int)($purchase['blockWriteoffOnDebt'] ?? 0);
+        $current = (int)($line['authority_snapshot']['cardPurchase']['blockWriteoffOnDebt'] ?? 0);
+        if ($selected !== $current) {
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                '卡项欠款核销规则已更新，本次结账未生效；请返回收银台刷新商品后重新购买。',
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => 'card_purchase_debt_writeoff_policy_stale']
             );
         }
     }

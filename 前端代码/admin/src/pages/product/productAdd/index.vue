@@ -1053,6 +1053,9 @@
               <div class="tips" v-if="formData.product_type == 5 && formData.card_rule_type == 'time'">时间卡不允许永久有效</div>
               <div class="tips" v-if="formData.attr.write_valid == 3">超过有效期后，商品会自动下架放入仓库</div>
             </FormItem>
+            <FormItem v-if="formData.product_type == 5" label="欠款不允许核销：" key="block_writeoff_on_debt">
+              <Switch v-model="formData.block_writeoff_on_debt" :true-value="1" :false-value="0" />
+            </FormItem>
             <FormItem
               label=""
               prop="freight"
@@ -3915,6 +3918,8 @@ export default {
       this.$set(formData, 'card_rule_version', this.formData.card_rule_version || 0);
       this.$set(formData, 'card_choice_limit', this.formData.card_choice_limit || 0);
       this.$set(formData, 'card_shared_times', this.formData.card_shared_times || 0);
+      // 保存商品配置，售出时由后端另行冻结到该张卡，避免编辑商品追溯改变旧权益。
+      this.$set(formData, 'block_writeoff_on_debt', Number(this.formData.block_writeoff_on_debt || 0));
       return formData;
     },
     validateCardRuleSettings(formData) {

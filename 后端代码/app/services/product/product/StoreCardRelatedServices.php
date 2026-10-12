@@ -187,13 +187,17 @@ class StoreCardRelatedServices extends BaseServices
         }
         /** @var StoreCatalogWriteLockGuard $guard */
         $guard = app()->make(StoreCatalogWriteLockGuard::class);
+        // This remap changes one card's relation only; it never rewrites the shared
+        // project's SKU, so unrelated cards referencing that project need no lock.
         return $guard->withCatalogMutation(
             [$card_product_id],
             [$product_id, $id],
             $targetRefs,
             function (StoreCatalogWriteLease $lease) use ($product_id, $card_product_id, $id) {
                 return $this->updateCardProductInGuard($lease, $product_id, $card_product_id, $id);
-            }
+            },
+            true,
+            false
         );
     }
 

@@ -16,6 +16,7 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
         'keyword', 'unit_name', 'is_show', 'is_del', 'is_verify', 'is_inventory',
         'allow_negative_stock', 'card_num', 'card_num_type', 'card_rule_type',
         'card_rule_version', 'card_choice_limit', 'card_shared_times',
+        'block_writeoff_on_debt',
     ];
 
     private const SKU_FIELDS = [
