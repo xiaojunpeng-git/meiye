@@ -1,0 +1,35 @@
+{
+  "version": "R13-20261012-http-drill-886a3eda",
+  "base_head": "3e1cff74c6d8f4527dd8460bd3225a19dd5a5639",
+  "status": "development_and_selftest_passed_pending_pm_acceptance",
+  "scope": "Preserve member_id and include_followup_cash through cashier and admin report query/export input whitelists. No UI, accounting, schema or permission expansion.",
+  "discovery": "After accepted Round13 deployment, the production summary cell 1200 drilled into a member-filtered URL but the HTTP controllers discarded both filters, returning both customers and 2385. Direct service tests did not cover this boundary.",
+  "patch_sha256": "886a3eda5376ef8f67a34b13346544be0b835cb92f41490638036d5c129437f7",
+  "backend_source": [
+    {"path": "后端代码/app/controller/cashier/v3/Report.php", "sha256": "9910f29ae8f40d6650450c274f5ff400f3593b662fc1e181853916f2abeb9580"},
+    {"path": "后端代码/app/controller/admin/v1/report/UnifiedReport.php", "sha256": "05e0a354e1b84f8bf3b3b14a8bbbf55d3b291eeba402416fd4866c29867df896"}
+  ],
+  "automated_tests": [
+    {"path": "tests/cashier-v3/php/r13-cross-industry-http-input-readonly.php", "sha256": "c108a5a0c0f6ba4cd3fbd2a0c8103b6097987479fce11dbc7d31e2ecb852c245"}
+  ],
+  "frontend_source": [],
+  "database_migrations": [],
+  "engineering_scripts": [],
+  "generated_artifacts": [],
+  "evidence": [
+    {"path": "tests/cashier-v3/evidence/R13-http-drill-local-fixed-2026-10-12.jpg", "sha256": "fad4943c7b59aa8f6a1f333f4c803299f330e17340894bc1ae232ee06d65d5b1"},
+    {"path": "tests/cashier-v3/evidence/R13-http-drill-local-fullpage-2026-10-12.jpg", "sha256": "c7481f80bb16cc9ca3e803634ede2d960e50d439b6bb6a9dae1dd978265614a1"}
+  ],
+  "verification": {
+    "php_lint": "PASS: both controllers and new test",
+    "input_whitelist_query_export": {"checks": 15, "result": "PASS", "writes": 0},
+    "existing_readonly_report_regression": {"result": "PASS", "fixture": "BJ26100200015", "amount_cents": 120000, "writes": 0},
+    "actual_local_browser": "2026 summary -> Li Huizhi October 1200 -> October detail: exactly BJ26100200015, summary 1200; member and store filters retained",
+    "limits": "Production fix has not been deployed. Local browser validates cashier HTTP path; admin whitelist/query/export covered by real request parsing and service tests, not a logged-in admin browser. Export service tested, no production export job created."
+  },
+  "business_comments_updated": ["后端代码/app/controller/cashier/v3/Report.php", "后端代码/app/controller/admin/v1/report/UnifiedReport.php"],
+  "pm_reacceptance": "Only this HTTP filter correction requires impacted-scope acceptance. Prior accepted Round13 remains accepted.",
+  "commit": null,
+  "deployed": false,
+  "pushed": false
+}

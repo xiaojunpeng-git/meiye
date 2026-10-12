@@ -171,6 +171,8 @@ class Report extends AuthController
             ['category_id', 0], ['category_path', ''], ['category_path_exact', ''], ['product_type', ''], ['partner_name', ''],
             ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['day_of_month', 0],
             ['store_ids', ''],
+            // 异业汇总下钻必须保留会员和后续收款条件；只缩小已授权门店范围，不能在入口丢失后变为全店明细。
+            ['member_id', 0], ['include_followup_cash', 0],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             ['unit_price_min', ''], ['unit_price_max', ''],
             // 薪资筛选和指标下钻保留原单号与稳定人员/门店 ID；权限范围仍由服务端裁剪。
