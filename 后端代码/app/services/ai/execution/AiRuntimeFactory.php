@@ -39,6 +39,7 @@ final class AiRuntimeFactory
         $private=new AiPrivateStorage($root);
         $prefix=(string)($db['prefix']??'');
         return ['instance'=>$instance,'private'=>$private,'runs'=>new AiRunStore($pdo,$prefix,$instance),
+            'feedback'=>new \app\services\ai\feedback\AiFeedbackStore($pdo,$prefix,$instance),
             // Provider comes from this instance's server configuration. The
             // config store refuses to reuse a key/consent bound to another
             // provider, while the database and private key stay instance-local.

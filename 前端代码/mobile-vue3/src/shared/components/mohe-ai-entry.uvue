@@ -25,6 +25,7 @@
         </view>
         <scroll-view v-if="item.table != null" scroll-x="true" class="ai-result-table-scroll"><view class="ai-result-table" :style="{ width: tableWidth(item.table.columns) + 'px' }"><view class="ai-result-table__row ai-result-table__head"><text v-for="column in item.table.columns" :key="column.key" class="ai-result-table__cell">{{ column.label }}</text></view><view v-for="(row,ri) in item.table.rows" :key="ri" class="ai-result-table__row"><text v-for="column in item.table.columns" :key="column.key" class="ai-result-table__cell">{{ row[column.key] }}</text></view></view></scroll-view>
         <view v-if="item.export_status != null" class="ai-card"><text class="ai-note">{{ exportStatusLabel(item.export_status) }}</text><button v-if="item.export_status == 'succeeded' && exportSource(item) != null" size="mini" @tap="downloadExcel(item)">下载 Excel</button></view>
+        <view v-if="item.feedback_available == true && item.feedback_token != null && item.terminal_status != 'CANCELLED'" class="ai-feedback"><button size="mini" :class="{ 'ai-feedback--selected': item.feedback_rating == 'useful' }" :disabled="item.feedback_busy == true" @tap="rateAnswer(item,'useful')">有用</button><button size="mini" :class="{ 'ai-feedback--selected': item.feedback_rating == 'not_useful' }" :disabled="item.feedback_busy == true" @tap="rateAnswer(item,'not_useful')">没用</button><text v-if="item.feedback_note != null" class="ai-note">{{ item.feedback_note }}</text></view>
         <view v-if="validFailureGuidance(item.failure_guidance)" class="ai-guidance ai-failure-guidance">
           <text class="ai-guidance-label">您可以这样继续</text>
           <button v-for="(option,oi) in item.failure_guidance.options" :key="option.value" class="ai-guidance-option" :disabled="busy || pending != null" @tap="chooseFailureAction(item,option.value)"><text class="ai-guidance-number">{{ oi + 1 }}</text><text class="ai-guidance-option-label">{{ option.label }}</text></button>
@@ -143,7 +144,8 @@ function toggleExcel() : void {
 }
 function closeComposerOptions() : void { composerOptionsOpen.value = false; historyOpen.value = false }
 function toggleComposerOptions() : void { if (composerOptionsOpen.value) closeComposerOptions(); else { historyOpen.value = false; composerOptionsOpen.value = true } }
-// Delivery proofs are transient device state, never serialized into chat history.
+// Export proofs stay transient. Feedback keeps only an owner-bound 24-hour
+// proof on its original turn so a reopened answer can still be rated.
 let exportSources : Array<any> = []
 let exportLifecycle = 0
 function exportStatusLabel(status : string) : string { return status == 'succeeded' ? 'Excel 已生成' : status == 'running' ? 'Excel 正在生成…' : status == 'pending' ? 'Excel 正在排队…' : status == 'unavailable' ? 'Excel 状态暂不可用，正在重试…' : status == 'unavailable_final' ? 'Excel 状态暂不可用，请稍后查看。' : 'Excel 生成失败，问答结果不受影响。' }
@@ -155,6 +157,26 @@ function setExportStatus(source : any,status : string) : void {
   all.forEach((session : any) => { if (session.id == source.export_conversation) session.rounds = session.rounds.map((item : any) => item.run_id == source.run_id && item.generation == source.generation ? {...item,export_status:status} : item) })
   uni.setStorageSync(storageKey,all)
   if (conversation == source.export_conversation) displayed.value = displayed.value.map((item : any) => item.run_id == source.run_id && item.generation == source.generation ? {...item,export_status:status} : item)
+}
+// The gateway checks the original question fingerprint and reads successful
+// answers from its own private object; changing a button never reruns a query.
+function rateAnswer(item : any,rating : string) : void {
+  if (item == null || item.feedback_busy == true || (rating != 'useful' && rating != 'not_useful')) return
+  let targetConversation = conversation
+  let updated : any = {...item,feedback_busy:true,feedback_note:''}
+  displayed.value = displayed.value.map((row : any) => row.run_id == item.run_id && row.generation == item.generation ? updated : row)
+  mobileAiRequest('POST','/runs/' + item.run_id + '/feedback',{
+    client_session_id:item.feedback_session_id,run_delivery_token:item.feedback_token,
+    generation:item.generation,rating:rating,question:item.question,displayed_answer:item.answer
+  },(result : any) => {
+    let note = result.ok ? '已记录' : String(result.message || '评价未保存，请稍后重试。')
+    let all = load()
+    all.forEach((session : any) => { if (session.id == targetConversation) session.rounds = session.rounds.map((row : any) => row.run_id == item.run_id && row.generation == item.generation
+      ? {...row,feedback_rating:result.ok ? rating : row.feedback_rating,feedback_note:note,feedback_busy:false} : row) })
+    uni.setStorageSync(storageKey,all)
+    if (conversation == targetConversation) displayed.value = displayed.value.map((row : any) => row.run_id == item.run_id && row.generation == item.generation
+      ? {...row,feedback_rating:result.ok ? rating : row.feedback_rating,feedback_note:note,feedback_busy:false} : row)
+  })
 }
 // A file task starts only after the answer is visible and keeps polling while
 // the next customer question uses the ordinary, independent Run path.
@@ -470,7 +492,7 @@ function accept(value : any) : void {
   if (terminal()) { busy.value = false; compatibilityExecuting = false; queuedClarificationId = ''; clarification.value = null; clearGuidance(); if (timer != null) clearTimeout(timer)
     // The verified answer owns the long-table decision. Queue its file only
     // after the mobile answer is visible; a manual request shares the task.
-    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; let elapsedSeconds = completedElapsedSeconds(); let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now()}; finishActiveRunStatus(); appendTranscript(row); reportVisibleDeliveryAfterRender(run); if ((pending.want_excel === true || answer.auto_export_required === true) && run.status == 'COMPLETED') startIndependentExport({...run}) }
+    if (run.answer != null && ['COMPLETED','PARTIAL_SUCCEEDED'].indexOf(String(run.status)) >= 0 && pending != null && typeof pending.question == 'string') { let answer = run.answer; let elapsedSeconds = completedElapsedSeconds(); let row : any = {question:pending.question,answer:String(answer.summary || ''),cards:answer.cards || [],table:answer.table || null,presentation:answer,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,run_id:run.run_id,generation:run.generation,created_at:Date.now(),terminal_status:run.status,feedback_available:run.feedback_available === true,feedback_token:run.run_delivery_token,feedback_session_id:sessionId}; finishActiveRunStatus(); appendTranscript(row); reportVisibleDeliveryAfterRender(run); if ((pending.want_excel === true || answer.auto_export_required === true) && run.status == 'COMPLETED') startIndependentExport({...run}) }
     else {
       let failureGuidance = run.status == 'FAILED' ? safeFailureGuidance(run.failure_guidance,String(run.reason || '')) : null
       let terminalMessage = run.status == 'CANCELLED' ? '已取消' : failureGuidance != null ? String(failureGuidance.question || '这次没能给出可靠结果。请选择一种方式继续。') : customerErrorMessage(run.message,'本次未能完成，请重新提问。')
@@ -480,6 +502,7 @@ function accept(value : any) : void {
           presentation:{summary:terminalMessage,terminal_status:run.status},terminal_reason:run.reason,
           context_eligible:false,topic_boundary:run.topic_boundary,elapsed_seconds:elapsedSeconds,
           run_id:run.run_id,generation:run.generation,created_at:Date.now(),failure_guidance:failureGuidance,
+          terminal_status:run.status,feedback_available:run.feedback_available === true,feedback_token:run.run_delivery_token,feedback_session_id:sessionId,
           recovery_origin:failureGuidance == null || failureGuidance.kind == 'capability_help' ? null : {conversation_id:conversation,history:pending.history,context_ref:pending.context_ref || null,created_at:Date.now()}})
       }
       progress.value = terminalMessage; clientDeliveryStartedAt = 0
@@ -803,4 +826,5 @@ onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true); if (tim
 .ai-guidance-confirm{margin:0;padding:0 18px;border-radius:24px;background-color:#17191e;color:#fff;font-size:15px;line-height:44px}
 .ai-guidance-confirm[disabled]{background-color:#aaa;color:#fff}
 .ai-guidance-error{display:block;margin-top:12px;color:#b42318;font-size:14px;line-height:1.5}
+.ai-feedback{display:flex;flex-direction:row;align-items:center;gap:8px;margin-top:16px}.ai-feedback button{margin:0;border:1px solid #d8dee7;border-radius:16px;background-color:#fff;color:#43536c;font-size:13px}.ai-feedback .ai-feedback--selected{border-color:#2e86d0;background-color:#eaf3ff;color:#1565a8}.ai-feedback button::after{border:0}
 </style>

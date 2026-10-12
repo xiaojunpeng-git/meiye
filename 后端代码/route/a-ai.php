@@ -9,6 +9,7 @@ $aiActions=function () {
     Route::get('bootstrap','Ai/aiBootstrap')->completeMatch();
     Route::post('runs','Ai/aiCreate')->completeMatch();
     Route::get('runs/:runId','Ai/aiStatus')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
+    Route::post('runs/:runId/feedback','Ai/aiFeedbackSave')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::post('runs/:runId/delivery','Ai/aiDelivery')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::post('runs/:runId/execute','Ai/aiExecute')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
     Route::post('runs/:runId/clarify','Ai/aiClarify')->pattern(['runId'=>'[a-f0-9]{48}'])->completeMatch();
@@ -30,6 +31,8 @@ Route::group('adminapi/ai',function () use($aiActions) {
     Route::post('management/preview','Ai/aiManagementPreview')->completeMatch();
     Route::post('management/rebase','Ai/aiManagementRebase')->completeMatch();
     Route::get('metric-registry','Ai/aiMetricRegistryGet')->completeMatch();
+    Route::post('feedback/search','Ai/aiFeedbackList')->completeMatch();
+    Route::get('feedback/:id','Ai/aiFeedbackDetail')->pattern(['id'=>'[0-9]+'])->completeMatch();
 })->prefix('admin.v1.ai.')->middleware([
     \app\http\middleware\AiRequestGuardMiddleware::class,
 ]);

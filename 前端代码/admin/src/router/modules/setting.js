@@ -37,6 +37,12 @@ export default {
       component: () => import('@/pages/setting/moheAi/metrics.vue')
     },
     {
+      path: 'mohe-ai/feedback',
+      name: 'moheAiFeedback',
+      meta: { auth: ['setting-mohe-ai'], title: '魔核 AI 回答评价与问题采集', moheAiMaintainer: true },
+      component: () => import('@/pages/setting/moheAi/feedback.vue')
+    },
+    {
       path: 'system_config',
       name: `${pre}setSystem`,
       meta: {

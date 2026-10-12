@@ -107,8 +107,21 @@ export class DeviceSessions {
       ...(options.contextEligible === false ? { context_eligible: false } : {}),
       ...(options.topicBoundary === 'reset' ? { topic_boundary: 'reset' } : {}),
       ...(elapsedSeconds !== null ? { elapsed_seconds: elapsedSeconds } : {}),
-      ...(runId && generation !== null ? { run_id: runId, generation } : {}), created_at: this.clock() }); delete s.pending_question; this.save(sessions);
+      ...(runId && generation !== null ? { run_id: runId, generation } : {}),
+      // This owner-bound proof expires with the 24-hour transcript. It lets a
+      // reopened answer receive feedback without trusting its stored text.
+      ...(runId && delivery.feedback_available && typeof delivery.run_delivery_token === 'string'
+        ? { feedback_available: true, run_delivery_token: delivery.run_delivery_token,
+          client_session_id: delivery.client_session_id || '', status: delivery.status } : {}),
+      created_at: this.clock() }); delete s.pending_question; this.save(sessions);
     return true;
+  }
+  setFeedback(id, runId, generation, rating) {
+    const sessions = this.load();
+    const session = sessions.find(row => row.id === id);
+    const turn = session && session.rounds.find(row => row.run_id === runId && row.generation === generation);
+    if (!turn) return false;
+    turn.feedback_rating = rating; this.save(sessions); return true;
   }
   loadRuntime() {
     let value;

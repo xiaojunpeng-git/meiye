@@ -128,4 +128,15 @@ checkState($deadlineStore->claim($deadlineOwner,$deadlineRun['run_id'],$deadline
 $deadlineNow+=5000; $newDeadlineOwner=$deadlineOwner; $newDeadlineOwner['conversation_id']='new';
 checkState($deadlineStore->create($newDeadlineOwner,'new-request',$hash,$snapshot,180000,2)['accepted'],'expired foreign Run no longer blocks a new conversation');
 checkState($deadlineStore->get($deadlineOwner,$deadlineRun['run_id'],$deadlineRun['generation'])['status']==='FAILED','admission terminalizes expired Run');
+// A feedback source is bound to the same owner and original question fingerprint;
+// the runtime table still contains no raw chat text before the user votes.
+$feedbackDb=new PDO('sqlite::memory:'); installAiStateFixture($feedbackDb);
+$feedbackStore=new AiRunStore($feedbackDb,'','feedback.instance',function () { return 7000000; });
+$feedbackHash=hash_hmac('sha256','本月现金业绩多少','fixture-key');
+$feedbackRun=$feedbackStore->create($owner,'feedback-request',$hash,$snapshot,180000,2,8,$feedbackHash)['run'];
+$feedbackSource=$feedbackStore->feedbackSource($owner,$feedbackRun['run_id'],$feedbackRun['generation']);
+checkState($feedbackRun['feedback_available']===true && $feedbackSource['question_hash']===$feedbackHash,'owner feedback source retains only the keyed question fingerprint');
+checkState(strpos((string)$feedbackDb->query('SELECT counters_json FROM mohe_ai_run')->fetchColumn(),'本月现金业绩多少')===false,'raw question is absent from Run metadata');
+$wrongOwner=$owner;$wrongOwner['account_id']=2;
+rejectsState(function () use($feedbackStore,$wrongOwner,$feedbackRun) { $feedbackStore->feedbackSource($wrongOwner,$feedbackRun['run_id'],$feedbackRun['generation']); },'AI_RUN_NOT_FOUND');
 echo 'PASS '.$checks." transactional state checks (isolated SQLite; no production DB).\n";

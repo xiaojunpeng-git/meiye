@@ -17,6 +17,9 @@ import { isAgentPath } from '@/utils/pathUtils';
 import { normalizeOrganizationWorkspaceMenu } from '@/libs/organizationWorkspaceMenu';
 import { normalizeProductBusinessConfigMenu } from '@/libs/productBusinessConfigMenu';
 import { disambiguateDuplicateMenuPaths } from '@/libs/menuRouteDisambiguation';
+import { getHeaderSider, getMenuSider } from '@/libs/system';
+import { hasMoheAiManagementMenu } from '@/libs/moheAiManagementMenu';
+import Vue from 'vue';
 
 // 客户分析页面由平台源码提供路由，菜单仍由后端菜单树驱动。开发联调期间，
 // 对已有“客户”顶栏补齐九个独立入口；如果后端以后返回同一 unique_auth，
@@ -392,13 +395,30 @@ export default {
     }
   },
   actions: {
-    getMenusNavList({ commit }) {
+    getMenusNavList({ commit, state, rootState }) {
       return new Promise((resolve, reject) => {
+        const requestToken = Vue.prototype.__getToken();
         menusApi()
           .then(async(res) => {
-            resolve(res);
+            // A late response from an earlier login must not replace the new
+            // account's navigation or authorize its cached AI menu.
+            if (!requestToken || requestToken !== Vue.prototype.__getToken()) {
+              resolve(res);
+              return;
+            }
             util.makeMenu(Setting.roterPre, res.data.menus);
             commit('getmenusNav', res.data.menus);
+            commit('admin/menu/setMoheAiVerifiedToken', hasMoheAiManagementMenu(res.data.menus) ? requestToken : null, { root: true });
+            // The route watcher may have built the sidebar from the previous
+            // login snapshot before this async menu request completed. Keep
+            // the visible navigation aligned with the verified server tree.
+            const headerName = rootState.admin.menu.headerName;
+            if (Setting.layout.headerMenu && headerName) {
+              const current = getMenuSider(state.menusName, headerName)[0];
+              commit('admin/menu/setHeader', getHeaderSider(state.menusName), { root: true });
+              commit('admin/menu/setSider', current && current.children ? current.children : [], { root: true });
+            }
+            resolve(res);
           })
           .catch((res) => {
             reject(res);

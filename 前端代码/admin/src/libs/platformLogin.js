@@ -1,6 +1,7 @@
 import Setting from '@/setting';
 import util from '@/libs/util';
 import { getHeaderName, getHeaderSider, getMenuSider } from '@/libs/system';
+import { hasMoheAiManagementMenu } from '@/libs/moheAiManagementMenu';
 
 /**
  * 三种平台登录方式共用成功处理。后端已判断登录资格，菜单/权限为空不再次拒绝。
@@ -22,6 +23,9 @@ export async function finishPlatformLogin(vm, data) {
   db.set('user_info', user).write();
   util.makeMenu(Setting.roterPre, menus);
   vm.$store.commit('admin/menus/getmenusNav', menus);
+  // The login response carries the menu scoped to this freshly issued token.
+  // Clear any previous account's verification when that entry is absent.
+  vm.$store.commit('admin/menu/setMoheAiVerifiedToken', hasMoheAiManagementMenu(menus) ? data.token : null);
   vm.$store.commit('admin/menu/setHeader', getHeaderSider(menus));
   const path = menus.length ? util.resolveDefaultMenuPath(menus) : `${Setting.roterPre}/workspace`;
   const headerName = getHeaderName({ path, query: {}, params: {} }, menus);

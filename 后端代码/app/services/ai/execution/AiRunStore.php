@@ -61,7 +61,7 @@ final class AiRunStore
     }
 
     /** $snapshot contains version/reference identifiers, not model or business payloads. */
-    public function create(array $owner, string $requestId, string $requestHash, array $snapshot, int $budgetMs = 180000, int $capacity = 4, int $activeLimit = 8): array
+    public function create(array $owner, string $requestId, string $requestHash, array $snapshot, int $budgetMs = 180000, int $capacity = 4, int $activeLimit = 8, string $feedbackQuestionHash = ''): array
     {
         $this->owner($owner);
         $this->identifier($requestId);
@@ -80,7 +80,8 @@ final class AiRunStore
             if (isset($snapshot['intent_contract_version'])) $this->identifier($snapshot['intent_contract_version']);
         }
         if (!preg_match('/^[a-f0-9]{64}$/D',$snapshot['capability_snapshot_hash'])) { throw new RuntimeException('AI_SNAPSHOT_INVALID'); }
-        return $this->transaction(function () use ($owner, $requestId, $requestHash, $snapshot, $budgetMs, $capacity, $activeLimit) {
+        if ($feedbackQuestionHash !== '' && !preg_match('/^[a-f0-9]{64}$/D', $feedbackQuestionHash)) throw new RuntimeException('AI_CREATE_INVALID');
+        return $this->transaction(function () use ($owner, $requestId, $requestHash, $snapshot, $budgetMs, $capacity, $activeLimit, $feedbackQuestionHash) {
             $now = $this->now();
             // A new request is also an admission checkpoint.  The background
             // supervisor is intentionally best-effort, so it must not be the
@@ -112,7 +113,10 @@ final class AiRunStore
             $generation = (int)$generationRow['n'] + 1;
             foreach ($active as $run) { $this->execute('UPDATE '.$this->table('run').' SET status=\'CANCELLED\', reason=\'SUPERSEDED\', last_clock_at=?, slot_held=?, version=version+1 WHERE instance_id=? AND run_id=?',[$now,$run['worker_token']===''?0:(int)$run['slot_held'],$this->instance,$run['run_id']]); }
             $id = bin2hex(random_bytes(24));
-            $record = array_merge($owner,['instance_id'=>$this->instance,'run_id'=>$id,'generation'=>$generation,'status'=>'RECEIVED','reason'=>'','progress_code'=>'RECEIVED','clarification_ref'=>'','version'=>1,'created_at'=>$now,'expires_at'=>$now+86400000,'deadline_at'=>$now+$budgetMs,'last_clock_at'=>$now,'remaining_ms'=>$budgetMs,'pause_at'=>0,'clarification_count'=>0,'slot_held'=>1,'worker_token'=>'','evidence_ref'=>'','answer_ref'=>'','snapshot_json'=>json_encode($snapshot),'counters_json'=>'{}']);
+            // Keep only a keyed fingerprint until the owner explicitly rates the answer.
+            // The question itself stays in the existing short-lived private input.
+            $feedbackCounters=$feedbackQuestionHash===''?[]:['feedback_question_hash'=>$feedbackQuestionHash];
+            $record = array_merge($owner,['instance_id'=>$this->instance,'run_id'=>$id,'generation'=>$generation,'status'=>'RECEIVED','reason'=>'','progress_code'=>'RECEIVED','clarification_ref'=>'','version'=>1,'created_at'=>$now,'expires_at'=>$now+86400000,'deadline_at'=>$now+$budgetMs,'last_clock_at'=>$now,'remaining_ms'=>$budgetMs,'pause_at'=>0,'clarification_count'=>0,'slot_held'=>1,'worker_token'=>'','evidence_ref'=>'','answer_ref'=>'','snapshot_json'=>json_encode($snapshot),'counters_json'=>json_encode($feedbackCounters)]);
             $this->insert('run',$record);
             $this->insert('receipt',['instance_id'=>$this->instance,'receipt_key'=>$receiptKey,'request_hash'=>$requestHash,'window_id'=>$owner['window_id'],'run_id'=>$id,'reason'=>'','expires_at'=>$now+86400000]);
             return ['accepted'=>true,'run'=>$this->publicRun($record),'replayed'=>false];
@@ -136,6 +140,19 @@ final class AiRunStore
             }
             return $this->publicRun($r);
         });
+    }
+
+    /** Feedback can inspect only the authenticated owner's unexpired Run. */
+    public function feedbackSource(array $owner, string $runId, int $generation): array
+    {
+        $run=$this->read($owner,$runId,$generation);
+        $counters=json_decode($run['counters_json'],true)?:[];
+        $snapshot=json_decode($run['snapshot_json'],true)?:[];
+        return ['run_id'=>$runId,'generation'=>$generation,'status'=>$run['status'],
+            'reason'=>$run['reason'],'answer_ref'=>$run['answer_ref'],'evidence_ref'=>$run['evidence_ref'],
+            'question_hash'=>$counters['feedback_question_hash']??'',
+            'model_version'=>$snapshot['model_config_version']??'',
+            'created_at'=>(int)$run['created_at']];
     }
 
     public function assertRequest(array $owner, string $runId, int $generation, string $requestHash): void
@@ -1553,6 +1570,7 @@ final class AiRunStore
         foreach (['run_id','generation','status','reason','progress_code','clarification_ref','version','created_at','expires_at','deadline_at','slot_held','evidence_ref','answer_ref'] as $k) { $out[$k]=$r[$k]; }
         foreach (['generation','version','created_at','expires_at','deadline_at','slot_held'] as $k) { $out[$k]=(int)$out[$k]; }
         $snapshot=json_decode($r['snapshot_json'],true)?:[]; $counts=json_decode($r['counters_json'],true)?:[];
+        $out['feedback_available']=isset($counts['feedback_question_hash']);
         $out['guidance_schema_version']=$snapshot['guidance_schema_version']??'mohe-clarification-v1';
         $out['max_clarification_rounds']=(int)($snapshot['max_clarification_rounds']??1);
         $out['clarification_count']=(int)$r['clarification_count'];

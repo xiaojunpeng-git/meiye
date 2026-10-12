@@ -45,7 +45,7 @@ assert.match(presentationStyles, /\.answer-facts\{/);
 // to the transcript bottom and interrupt deliberate history reading.
 const browserEntrySource = fs.readFileSync(new URL('../../前端代码/shared/mohe-ai/browser-entry.mjs', import.meta.url), 'utf8');
 assert.match(browserEntrySource, /function anchorTurnAtReadingTop\(turn\)/);
-assert.match(browserEntrySource, /function appendTranscriptTurn\(questionText, answer, elapsedSeconds = 0\)/);
+assert.match(browserEntrySource, /function appendTranscriptTurn\(questionText, answer, elapsedSeconds = 0, delivery = null\)/);
 assert.match(browserEntrySource, /turn\.scrollIntoView\(\{ block: 'start'/);
 // The newest turn must have enough trailing layout space to reach the reading
 // top even before a streamed/terminal answer has produced its own height.

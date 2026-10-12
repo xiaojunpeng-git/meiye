@@ -10,7 +10,7 @@ for (const required of [
   "import { managementRouteAccess } from '../../../shared/mohe-ai/management-route-access.mjs';",
   'const decision = await managementRouteAccess(moheAiRequest);',
   "if (!decision.allowed) return next({ name: '403' });",
-  "if (decision.serverVerified) store.commit('admin/menu/setMoheAiVerifiedUser', userInfo);",
+  "if (decision.serverVerified) store.commit('admin/menu/setMoheAiVerifiedToken', token);",
   "await store.dispatch('admin/menus/getMenusNavList');",
   'A menu refresh is a presentation update.'
 ]) {

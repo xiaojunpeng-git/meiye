@@ -143,13 +143,13 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
   // Old login snapshots may not include account. Resolve this dedicated entry
   // from the current server principal, never from root-level or cached access.
   if (meta.moheAiMaintainer) {
-    store.commit('admin/menu/setMoheAiVerifiedUser', null);
+    store.commit('admin/menu/setMoheAiVerifiedToken', null);
     if (meta.isAgentRoute) return next({ name: '403' });
     // The configuration endpoint resolves the current bearer-token principal.
     // Menu cache fields are never enough to decide this special entry.
     const decision = await managementRouteAccess(moheAiRequest);
     if (!decision.allowed) return next({ name: '403' });
-    if (decision.serverVerified) store.commit('admin/menu/setMoheAiVerifiedUser', userInfo);
+    if (decision.serverVerified) store.commit('admin/menu/setMoheAiVerifiedToken', token);
     // A menu refresh is a presentation update. An operational refresh failure
     // must still allow the destination to show its precise server message.
     try {

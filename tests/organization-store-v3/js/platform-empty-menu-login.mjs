@@ -19,6 +19,7 @@ const system = read('libs/system/index.js').replace(/^import .*;$/gm, '').replac
 vm.runInContext(system, context);
 const menuHelpers = read('libs/util.js');
 vm.runInContext(menuHelpers.slice(menuHelpers.indexOf('util.makeMenu ='), menuHelpers.indexOf('/**\n * 平台端免密')), context);
+vm.runInContext(read('libs/moheAiManagementMenu.js').replace(/^export /gm, ''), context);
 vm.runInContext(read('libs/platformLogin.js').replace(/^import .*;$/gm, '').replace('export async function', 'async function'), context);
 const plain = data => JSON.parse(JSON.stringify(data));
 
@@ -54,6 +55,7 @@ for (const access of [[], ['inventory-access']]) {
   assert.equal(storage.get('unique_auth'), access.join(','));
   assert.deepEqual(result.state.get('admin/user/set').access, access);
   assert.equal(cookies.get('token'), 'synthetic-local-session');
+  assert.equal(result.state.get('admin/menu/setMoheAiVerifiedToken'), null);
 }
 assert.equal(util.resolveDefaultMenuPath([]), '/admin/workspace');
 const menu = [{ path: '/stock', header: 'product', children: [{ path: '/stock/transfer', title: '调拨管理' }] }];
@@ -64,6 +66,11 @@ assert.equal((await login([{ path: '/stock', header: 'product' }], [], '/admin/s
 // Empty arrays overwrite the previous account rather than inheriting its navigation.
 assert.equal((await login([], [])).state.get('admin/menu/setHeader').length, 0);
 assert.equal(storage.get('unique_auth'), '');
+// The freshly authenticated response may show the special entry immediately;
+// switching to an account whose response omits it must clear the marker.
+const aiMenu = [{ path: '/setting', header: 'setting', children: [{ path: '/setting/mohe-ai/feedback', unique_auth: 'setting-mohe-ai' }] }];
+assert.equal((await login(aiMenu, ['setting-mohe-ai'])).state.get('admin/menu/setMoheAiVerifiedToken'), 'synthetic-local-session');
+assert.equal((await login([], [])).state.get('admin/menu/setMoheAiVerifiedToken'), null);
 
 const loginPage = read('pages/account/login/index.vue');
 assert.equal((loginPage.match(/finishPlatformLogin\(this, res.data\)/g) || []).length, 3);
