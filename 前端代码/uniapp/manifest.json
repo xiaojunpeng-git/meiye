@@ -185,6 +185,13 @@
             "postcss" : true,
             "es6" : true
         },
+        /* 设计预览仅用于 H5，微信页面无引用；排除大图以满足正式上传的主包限制。 */
+        "packOptions" : {
+            "ignore" : [
+                { "type" : "folder", "value" : "static/design-preview" },
+                { "type" : "folder", "value" : "static/design-system" }
+            ]
+        },
         "permission" : {
             "scope.userLocation" : {
                 "desc" : "你的位置信息将用于和门店的距离长度"

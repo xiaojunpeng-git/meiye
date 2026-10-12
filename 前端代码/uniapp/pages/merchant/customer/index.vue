@@ -140,9 +140,10 @@
 					>欠款单</text>
 				</view>
 				<scroll-view scroll-y class="list" @scrolltolower="loadMore">
+					<!-- 列表位于独立分支，索引无需前缀；避免小程序编译器生成非法的事件索引表达式。 -->
 					<view
 						v-for="(item, index) in userLists"
-						:key="'f-' + index"
+						:key="index"
 						class="user-card"
 						@click="goDetail(item)"
 					>

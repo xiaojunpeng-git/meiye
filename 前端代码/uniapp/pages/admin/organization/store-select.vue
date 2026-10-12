@@ -19,9 +19,10 @@
 		<view v-if="recentList.length && !keyword" class="recent-bar">
 			<view class="recent-title">最近使用</view>
 			<scroll-view scroll-x class="recent-scroll">
+				<!-- 最近门店以门店 ID 唯一标识，直接传递标识以兼容小程序事件参数编译。 -->
 				<view
 					v-for="item in recentList"
-					:key="'r-' + item.id"
+					:key="item.id"
 					class="recent-chip"
 					:class="{ active: !!selectedStoreIds[item.id] }"
 					@tap="toggleRecent(item)"
