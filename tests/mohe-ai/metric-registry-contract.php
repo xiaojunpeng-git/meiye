@@ -281,8 +281,10 @@ $mobileEmployeeStart = strpos($mobile, 'public function employeePerformance');
 $mobileEmployeeEnd = strpos($mobile, 'public function dashboardProjection');
 $mobileEmployeeSlice = $mobileEmployeeStart === false || $mobileEmployeeEnd === false ? '' : substr($mobile, $mobileEmployeeStart, $mobileEmployeeEnd - $mobileEmployeeStart);
 metricRegistryCheck($mobileEmployeeSlice !== '' && strpos($mobileEmployeeSlice, "Db::name('cashier_v3_performance_fact')") === false
-    && strpos($mobileEmployeeSlice, 'personnelFactCounts(') !== false,
-    'mobile employee detail does not reopen the registered personnel fact source');
+    && strpos($mobileEmployeeSlice, 'personnelFactCounts(') === false
+    && strpos($mobileEmployeeSlice, 'designatedCustomerRanking(') === false
+    && strpos($mobileEmployeeSlice, "'staff_point_visit_num', 'staff_service_num', 'staff_project_num', 'staff_labor_fee'") !== false,
+    'mobile employee summary reads registered visit, project and fee metrics instead of raw fact counts or a separate ranking');
 $employee = $read($paths[3]);
 metricRegistryCheck(strpos($employee, "['sales_performance_allocated'=>'staff_sales_yeji'") === false,
     'employee dashboard no longer maintains a fact-type-to-metric switch');

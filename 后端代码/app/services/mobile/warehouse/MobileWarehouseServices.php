@@ -19,6 +19,8 @@ use think\facade\Db;
 final class MobileWarehouseServices
 {
     public const METRIC_VERSION = 'mobile-warehouse-unified-v1';
+    /** Employee cards now use six registered person metrics, including allocated count units. */
+    public const EMPLOYEE_METRIC_VERSION = 'mobile-employee-registered-v2';
 
     private $hierarchy;
     private $entryScopes;
@@ -216,7 +218,10 @@ final class MobileWarehouseServices
         return [$nodeType, $nodeId, false];
     }
 
-    /** Read-only V3 performance drill-down for one employee in the current server scope. */
+    /**
+     * Read one employee's registered V3 metrics and fact details inside the
+     * server-authorized stores. The client never aggregates or widens scope.
+     */
     public function employeePerformance(array $merchant, array $input): array
     {
         $this->assertWarehouseFeature((int)$merchant['employeeId']);
@@ -240,7 +245,10 @@ final class MobileWarehouseServices
         $pairs = [];
         foreach ($storeIds as $storeId) $pairs[] = ['store_id' => (int)$storeId, 'employee_id' => $employeeId];
         $metricAmounts = [];
-        foreach (['staff_sales_yeji', 'staff_labor_yeji'] as $metricCode) {
+        // These six codes own the page's business meaning. Service visits and
+        // point visits are tenths; allocated project counts are millionths.
+        // Raw personnel fact row counts cannot replace any of those measures.
+        foreach (['staff_sales_yeji', 'staff_labor_yeji', 'staff_point_visit_num', 'staff_service_num', 'staff_project_num', 'staff_labor_fee'] as $metricCode) {
             $metricAmounts[$metricCode] = $metricReader->personnelTotal($metricCode, '0', $storeIds, $metricRange, $pairs);
         }
 
@@ -248,22 +256,10 @@ final class MobileWarehouseServices
             $metricReader->personnelDailyTotals('staff_sales_yeji', '0', $storeIds, $metricRange, [$employeeId]),
             $metricReader->personnelDailyTotals('staff_labor_yeji', '0', $storeIds, $metricRange, [$employeeId])
         );
-        $pointCustomer = 0.0;
-        $pointName = '';
-        foreach ($this->designatedCustomerRanking($storeIds, $period, 'desc', 0) as $row) {
-            if ((int)($row['entityId'] ?? 0) === $employeeId) {
-                $pointCustomer = (float)($row['rankingValue'] ?? 0);
-                $pointName = trim((string)($row['name'] ?? ''));
-                break;
-            }
-        }
         $employeeName = '';
         foreach ($identityRows as $identity) {
             $employeeName = trim((string)($identity['employee_name'] ?? ''));
             if ($employeeName !== '') break;
-        }
-        if ($employeeName === '') {
-            $employeeName = $pointName;
         }
         if ($employeeName === '') {
             // A zero-fact day is not a permission denial: a currently assigned
@@ -275,6 +271,15 @@ final class MobileWarehouseServices
                 ->where('e.status', 1)->where('e.is_del', 0)
                 ->field('e.name')->find();
             $employeeName = trim((string)($staff['name'] ?? ''));
+        }
+        if ($employeeName === '') {
+            // Only the rare former employee with completed service but no
+            // current assignment needs the service identity read. The common
+            // path avoids a third service-customer aggregation.
+            foreach ($metricReader->personnelDailyTotals('staff_service_num', '0', $storeIds, $metricRange, [$employeeId]) as $identity) {
+                $employeeName = trim((string)($identity['employee_name'] ?? ''));
+                if ($employeeName !== '') break;
+            }
         }
         if ($employeeName === '') {
             // Former staff may still appear in fact-backed rankings. Only a
@@ -289,7 +294,6 @@ final class MobileWarehouseServices
             throw MobileApiException::business('STORE_NOT_ALLOWED', '该员工不在当前数据权限范围内。');
         }
 
-        $serviceCounts = $metricReader->personnelFactCounts('staff_labor_yeji', '0', $storeIds, $metricRange, $employeeId);
         $detailMode = trim((string)($input['detailMode'] ?? 'cash')) === 'labor' ? 'labor' : 'cash';
         $detailMetricCode = $detailMode === 'labor' ? 'staff_labor_yeji' : 'staff_sales_yeji';
         $page = max(1, (int)($input['page'] ?? 1));
@@ -323,20 +327,32 @@ final class MobileWarehouseServices
                 'employee' => ['id' => $employeeId, 'name' => $employeeName],
                 'period' => $period,
                 'metrics' => [
-                    ['code' => 'staff_sales_yeji', 'name' => \app\services\query\metric\MetricSemanticCatalog::names(['staff_sales_yeji'])['staff_sales_yeji'], 'value' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_sales_yeji']), 'unit' => 'amount'],
-                    ['code' => 'staff_labor_yeji', 'name' => \app\services\query\metric\MetricSemanticCatalog::names(['staff_labor_yeji'])['staff_labor_yeji'], 'value' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_labor_yeji']), 'unit' => 'amount'],
-                    ['code' => 'designated_customer', 'name' => '点客', 'value' => $pointCustomer, 'unit' => 'count'],
-                    ['code' => 'service_members', 'name' => '服务会员', 'value' => (int)($serviceCounts['member_count'] ?? 0), 'unit' => 'count'],
-                    ['code' => 'project_count', 'name' => '项目数', 'value' => (int)($serviceCounts['project_count'] ?? 0), 'unit' => 'count'],
+                    // 人员现金业绩是销售人分配事实，不是整店收款；页面按产品用语展示。
+                    ['code' => 'staff_sales_yeji', 'name' => '现金业绩', 'value' => \app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_sales_yeji']), 'unit' => 'amount'],
+                    ['code' => 'staff_labor_yeji', 'name' => '劳动业绩', 'value' => \app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_labor_yeji']), 'unit' => 'amount'],
+                    ['code' => 'staff_point_visit_num', 'name' => '点客数', 'value' => self::displayScaledCount($metricAmounts['staff_point_visit_num'], 1), 'unit' => 'count'],
+                    ['code' => 'staff_service_num', 'name' => '服务人次', 'value' => self::displayScaledCount($metricAmounts['staff_service_num'], 1), 'unit' => 'count'],
+                    ['code' => 'staff_project_num', 'name' => '项目数', 'value' => self::displayScaledCount($metricAmounts['staff_project_num'], 6), 'unit' => 'count'],
+                    ['code' => 'staff_labor_fee', 'name' => '手工费', 'value' => \app\services\query\metric\MetricMoneyFormatter::integerYuan($metricAmounts['staff_labor_fee']), 'unit' => 'amount'],
                 ],
                 'detailMode' => $detailMode,
                 'details' => $details,
                 'pagination' => ['page' => $page, 'pageSize' => $pageSize, 'total' => $total, 'hasMore' => $page * $pageSize < $total],
-                'metric_version' => self::METRIC_VERSION,
+                'metric_version' => self::EMPLOYEE_METRIC_VERSION,
                 'data_as_of' => time(),
                 'aggregation_caught_up' => true,
             ],
         ];
+    }
+
+    /** Render registered count units exactly, without float rounding away split allocations. */
+    private static function displayScaledCount(int $raw, int $places): string
+    {
+        $digits = str_pad(ltrim((string)$raw, '-'), $places + 1, '0', STR_PAD_LEFT);
+        $whole = ltrim(substr($digits, 0, -$places), '0');
+        $fraction = rtrim(substr($digits, -$places), '0');
+        $display = ($whole === '' ? '0' : $whole) . ($fraction === '' ? '' : '.' . $fraction);
+        return $raw < 0 && $display !== '0' ? '-' . $display : $display;
     }
 
     /**

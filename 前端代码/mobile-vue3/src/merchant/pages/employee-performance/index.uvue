@@ -1,5 +1,4 @@
 <template>
-  <MoheAiEntry />
 	<view class="employee-performance" :class="{ 'employee-performance--native-mini': platformUsesNativeCanvas }">
 		<view class="employee-performance__header">
 			<view class="employee-performance__back" @tap="returnToWarehouse"><text>‹</text></view>
@@ -28,12 +27,14 @@
 			</view>
 		</scroll-view>
 
+		<!-- Detail pages retain the permission-filtered merchant navigation; the data tab owns this drill-down. -->
+		<MerchantPrimaryTabBar active-key="warehouse" />
 		<view v-if="showCustomRange" class="employee-performance__sheet-mask" @tap="closeCustomRange"><view class="employee-performance__sheet" @tap.stop><view class="employee-performance__sheet-head"><text>选择日期区间</text><text class="employee-performance__sheet-close" @tap="closeCustomRange">×</text></view><view class="employee-performance__range-row"><text>开始日期</text><picker mode="date" :value="customStartDate" @change="changeCustomStart"><view class="employee-performance__range-value"><text>{{ customStartDate }}</text></view></picker></view><view class="employee-performance__range-row"><text>结束日期</text><picker mode="date" :value="customEndDate" @change="changeCustomEnd"><view class="employee-performance__range-value"><text>{{ customEndDate }}</text></view></picker></view><view class="employee-performance__sheet-primary" @tap="applyCustomRange"><text>查看区间数据</text></view></view></view>
 	</view>
 </template>
 
 <script setup lang="uts">
-  import MoheAiEntry from '../../../shared/components/mohe-ai-entry.uvue'
+	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
 	import { queryMobileWarehouseEmployeePerformance } from '../../../shared/api/mobile-warehouse-client.uts'
 	import { mobileHttpResultRequiresMerchantLogin } from '../../../shared/api/mobile-http.uts'
 	import { currentMobilePlatform } from '../../../shared/platform/mobile-platform.uts'
@@ -131,7 +132,8 @@
 	.employee-performance__title { font-size: 18px; font-weight: 800; line-height: 24px; color: #173451; }
 	.employee-performance__subtitle { max-width: 180px; overflow: hidden; margin-top: 1px; font-size: 11px; line-height: 16px; color: #71839a; text-overflow: ellipsis; white-space: nowrap; }
 	.employee-performance__content { min-height: 0; flex: 1; }
-	.employee-performance__inner { box-sizing: border-box; width: 100%; max-width: 1200px; margin: 0 auto; padding: 8px 18px 32px 18px; }
+	/* Reserve the fixed tab bar and safe area so the last detail row stays reachable. */
+	.employee-performance__inner { box-sizing: border-box; width: 100%; max-width: 1200px; margin: 0 auto; padding: 8px 18px calc(96px + env(safe-area-inset-bottom)) 18px; }
 	.employee-performance__scope { display: flex; min-height: 42px; flex-direction: row; align-items: center; padding: 4px; border-width: 1px; border-style: solid; border-color: rgba(215, 226, 241, 0.9); border-radius: 16px; background-color: rgba(255, 255, 255, 0.76); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(63, 93, 137, 0.08); }
 	.employee-performance__filter-pill { display: flex; min-width: 0; flex: 1; height: 34px; align-items: center; justify-content: center; border-radius: 12px; }
 	.employee-performance__filter-pill text { font-size: 13px; line-height: 20px; color: #71839a; }
