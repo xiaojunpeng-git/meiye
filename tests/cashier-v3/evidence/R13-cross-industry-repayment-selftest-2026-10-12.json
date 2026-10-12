@@ -1,0 +1,130 @@
+{
+  "task": "R13-00001 异业收客补交核对、业务日期与列名来源说明",
+  "status": "开发与自测完成，待产品经理确认验收",
+  "date": "2026-10-12",
+  "baseline_head": "b2d74bd04184d2c15bd74e8635838bc345ceca7b",
+  "business_decision": "正常消费收款和欠款补交都计入，均按本次收款选择的 G异业收客 来源统计；不因会员以前的来源扩大本表范围。用户进一步要求将护理日期改成业务日期，日期取本次收款业务日，不再取首次护理日。",
+  "findings": [
+    "现有查询已经从统一收款事实读取消费欠款补交，无须再拼接补交表金额。",
+    "截图中的李灰芝 1200 元就是补交单 BJ26100200015，业务日期 2026-10-02，来源 G异业收客。",
+    "没有发现该笔补交漏记；未增加补交取数路径、未改历史事实。本次日期变更按收款业务日分行，金额来源及过滤范围不变。",
+    "指定会员的后续收款下钻沿用原来不限来源的规则，说明会区分普通入口与该下钻入口。"
+  ],
+  "changes": [
+    "护理日期替换为业务日期，直接读取本笔收款业务日；补交不取原销售日，未护理的正常购买也有日期。",
+    "七个可见列分别提供业务语言说明；表头、固定列宽、日期取值及导出共用后端元数据。",
+    "删除已被替代的首次护理日期查询，保留本表七列与原权限；跨日拆行后原单奖励仍只计一次。",
+    "补充查询边界和说明职责注释，防止后续再次拼接补交金额造成重复。",
+    "新增本地 MySQL 只读回归测试，不造单、不改余额、不回填事实。"
+  ],
+  "files": {
+    "frontend_source": [],
+    "backend_source": [
+      {
+        "path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+        "sha256": "578eaf9389a8d28add2b8546775c9343a8d2a9aeaaaf6b3c17a899498cbdbf6b",
+        "owned_hunks": 5,
+        "owned_patch_sha256": "a9afbd3ce8a3f4a9e8230a274109200123b883a598a977f24c364de133483475",
+        "boundary": "仅 crossIndustryDetail、result 中本表说明及口径版本、crossIndustryDetailColumnExplanations、本表固定列日期键。git diff 前五个 hunk（基线起始行小于1900）属于本轮；后两个 newCustomerSummaryAddRow 系统名称改动不属本轮，不得夹带提交。"
+      }
+    ],
+    "database_migrations": [],
+    "automated_tests": [
+      {
+        "path": "tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php",
+        "sha256": "1188693c7eca4c260261c962c37f28fb64ac3d2628ffb7d58d70dba673084da1"
+      }
+    ],
+    "engineering_scripts": [],
+    "build_artifacts": [],
+    "evidence": [
+      {
+        "path": "tests/cashier-v3/evidence/R13-cross-industry-explanations-2026-10-12.jpg",
+        "sha256": "b0e5eef1c94ca3113d0408ab702d7770db928b94e13c29be8b85a9872cc03337",
+        "purpose": "日期改动前的历史说明截图，不代表当前验收版本"
+      },
+      {
+        "path": "tests/cashier-v3/evidence/R13-business-date-table-2026-10-12.jpg",
+        "sha256": "4ab5e705f96eeec7afc4f46b7a370f5bd3bfd98c63438bcec31e2c9efe4192ef"
+      },
+      {
+        "path": "tests/cashier-v3/evidence/R13-business-date-explanations-2026-10-12.jpg",
+        "sha256": "753b15037e5d71d9d71525fb11e45478a56c1db42cf8e109b73f21e6ca340e1d"
+      },
+      {
+        "path": "tests/cashier-v3/evidence/R13-cross-industry-repayment-selftest-2026-10-12.json"
+      }
+    ]
+  },
+  "verification": {
+    "php_syntax": "PASS",
+    "mysql_readonly": {
+      "command": "docker exec -i -e R13_LOCAL_TEST=1 -e R13_REPAYMENT_NO=BJ26100200015 -e BACKEND_ROOT=/var/www/html mohe-cashier-app php < tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php",
+      "database": "local mohe-mysql/ruihao, hostname de34b8634512",
+      "transaction": "READ ONLY, rolled back",
+      "passed": 48,
+      "failed": 0,
+      "repayment_no": "BJ26100200015",
+      "store_id": 175,
+      "amount_cents": 120000,
+      "month_row_count": 1,
+      "month_summary_yuan": "1200",
+      "coverage": [
+        "G 来源补交只显示一次，金额与本次收款一致",
+        "查询、合计、导出及导出说明一致",
+        "补交业务日命中，翌日不重复命中",
+        "正常消费和补交逐行日期、同日金额与原始收款事实一致，按天查询与月查询一致",
+        "表头仅替换为业务日期，不新增组织列；导出日期及说明同步",
+        "其他来源补交不混入",
+        "不限来源的会员后续款入口仍排除已作废补交",
+        "会员、门店、个人参与权限及无权限拒绝",
+        "无会员的后续款标志不得放宽来源",
+        "七列业务文案及下钻来源说明"
+      ]
+    },
+    "phase_two_projection_contract": "PASS",
+    "normal_sales_and_repayment_followup": {
+      "status": "PASS",
+      "environment": "local mohe-mysql/ruihao; READ ONLY transaction, rolled back",
+      "range": ["2026-10-01", "2026-10-31"],
+      "store_id": 118,
+      "store_name": "合肥瑶海万达店",
+      "normal_sales": {"rows": 4, "amount_cents": 680900},
+      "repayment": {"rows": 1, "amount_cents": 164000},
+      "summary_yuan": "8449",
+      "verification": "用每行原始收款的业务类型逐行核对：4笔正常消费和1笔补交均为 G异业收客；查询与导出的5行记录和合计完全一致。",
+      "query_change": "原统计已覆盖两类收款；本次改为本次收款业务日期并按日分行，未增加重复取数路径。",
+      "database_writes": 0
+    },
+    "store_business_report_js_contract": {"passed": 44, "failed": 0},
+    "git_diff_check": "PASS",
+    "browser": {
+      "url": "http://127.0.0.1:18091/view_cashier_v3/#/data/reports/cross_industry_customer_detail?start_date=2026-10-01&end_date=2026-10-31",
+      "result": "点击刷新后表头为业务日期，补交显示2026-10-02；七列说明包含新日期和奖励文案，无重叠、裁切。",
+      "download": "/Users/xiaojunpeng/Downloads/门店经营报表-异业收客明细表-20261012130801.csv",
+      "download_result": "实际页面导出表头为业务日期，含一笔 G 来源 1200 元补交，日期2026-10-02、合计1200元，并附新列名说明和cross-industry-cash-business-date-v3口径版本。"
+    },
+    "obsolete_path_scan": "全仓 rg 扫描 care_date、cross_care_service、cross_care_void；只有回归测试保留旧字段不存在的断言，业务源码旧查询零引用。",
+    "online_source_investigation": {
+      "mode": "此前用户要求溯源时，使用现有登录浏览器只读接口核对，未写数据",
+      "order_no": "XS26101100245",
+      "business_date": "2026-10-11",
+      "member_name": "朱海燕（悦丽）",
+      "store_id": 175,
+      "source": "G异业收客",
+      "amount_cents": 118500,
+      "type": "正常购买舒缓灸卡项，支付宝实收1185元；不是补交。未护理导致旧护理日期列为空。",
+      "release_status": "本地日期变更尚未部署线上"
+    }
+  },
+  "working_tree_boundary": {
+    "staged_diff_sha256_unchanged": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+    "other_changes": "其他任务的暂存区、源码和发布记录保持原状。当前 HEAD 含其他任务 OPT3 已提交成果，本轮未创建提交。"
+  },
+  "limitations": [
+    "本轮为只读现有数据回归，没有创建新补交或真实收款。",
+    "仅做过用户指定线上单据的浏览器只读溯源；没有部署或远程数据库操作。",
+    "没有新增充值补交或退款样本来模拟业务，仅保留其现有统一查询路径。",
+    "未 commit、未部署、未 push，等待本轮产品经理验收。"
+  ]
+}

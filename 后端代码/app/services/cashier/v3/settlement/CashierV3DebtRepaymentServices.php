@@ -71,6 +71,7 @@ final class CashierV3DebtRepaymentServices
         $requestId = (new CashierV3DebtRepaymentIdFactory($this->secret()))
             ->repaymentId($dataScope->tenantId(), $debtId, $commandKey);
         $businessSource = is_array($checkoutSnapshot['source'] ?? null) ? $checkoutSnapshot['source'] : [];
+        $rewardAmountCents = CashierV3RepaymentReward::cents($businessSource['rewardAmountCents'] ?? 0);
         $sourceColumns = self::sourceSnapshotColumns($businessSource);
 
         $existing = (array)Db::name('cashier_v3_debt_repayment')
@@ -81,6 +82,7 @@ final class CashierV3DebtRepaymentServices
             // 或收款方式误报为已成功，也不能再次触发欠款扣减。
             $replayedAmount = self::inputMoneyCents($checkoutSnapshot['repaymentAmount'] ?? null, 'repayment_amount');
             if ((int)($existing['debt_id'] ?? 0) !== $debtId
+                || (int)($existing['reward_amount_cents'] ?? 0) !== $rewardAmountCents
                 || (int)($existing['repayment_amount_cents'] ?? 0) !== $replayedAmount
                 || (string)($existing['business_date'] ?? '') !== (string)($checkoutSnapshot['businessDate'] ?? '')) {
                 throw self::failure('debt_repayment_idempotency_conflict');
@@ -138,6 +140,8 @@ final class CashierV3DebtRepaymentServices
         }
         $sourceColumns = self::sourceSnapshotColumns($businessSource);
         $amount = self::inputMoneyCents($checkoutSnapshot['repaymentAmount'] ?? null, 'repayment_amount');
+        // 奖励只属于本次已确认来源，随补交原子保存，不能抵扣本金或重复继承原销售奖励。
+        $rewardAmountCents = CashierV3RepaymentReward::forSource($rewardAmountCents, $businessSource['primarySourceNameSnapshot']);
         // 业务行、页面应收与收款行必须指向同一笔金额。浏览器快照
         // 只表达意图；成员、来源欠款和可还余额仍在下方事务锁内核对。
         $businessLines = array_values(array_filter((array)($checkoutSnapshot['lines'] ?? []),
@@ -181,7 +185,7 @@ final class CashierV3DebtRepaymentServices
         $repaidAfter = $repaidBefore + $amount;
         $itemTargets = self::proportionalCumulativeAllocation($repaidAfter, $items);
         $dimensions = $this->dimensions($operator, $dataScope, (int)$authority['member_id']);
-        $fingerprint = hash('sha256', json_encode([$requestId, $debtId, $amount, $repaidBefore, $payments, $selectedSalespeople, $sourceColumns], JSON_UNESCAPED_SLASHES));
+        $fingerprint = hash('sha256', json_encode([$requestId, $debtId, $amount, $repaidBefore, $payments, $selectedSalespeople, $sourceColumns, $rewardAmountCents], JSON_UNESCAPED_SLASHES));
         $recordId = (int)Db::name('cashier_v3_debt_repayment')->insertGetId([
             'repayment_id' => $repaymentId, 'repayment_no' => $repaymentNo,
             'natural_key' => 'debt_repayment:' . $requestId, 'command_idempotency_key' => $commandKey,
@@ -201,6 +205,7 @@ final class CashierV3DebtRepaymentServices
             'business_source_label_snapshot' => $sourceColumns['business_source_label_snapshot'],
             'salespeople_snapshot_json' => json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'repayment_amount_cents' => $amount, 'debt_repaid_before_cents' => $repaidBefore,
+            'reward_amount_cents' => $rewardAmountCents,
             'debt_repaid_after_cents' => $repaidAfter, 'debt_status_after' => $repaidAfter === $total ? 'settled' : 'partial',
             'business_date' => $businessDate, 'business_timezone' => 'Asia/Shanghai',
             'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
@@ -314,6 +319,8 @@ final class CashierV3DebtRepaymentServices
             throw self::failure('recharge_repayment_checkout_snapshot_amount_invalid');
         }
         $payments = $this->paymentLinesFromCheckoutSnapshot($snapshot, $amount, $debtId, $memberId);
+        // 重放校验奖励本身，不因来源后来审计更正而覆盖已记下的本次奖励。
+        $rewardAmountCents = CashierV3RepaymentReward::cents($snapshot['source']['rewardAmountCents'] ?? 0);
         $sourceColumns = self::sourceSnapshotColumns(is_array($snapshot['source'] ?? null) ? $snapshot['source'] : []);
         // A confirmed command can be queried or retried with the same key. Do
         // not re-evaluate its now-changed debt/balance as if it were a new sale.
@@ -324,6 +331,7 @@ final class CashierV3DebtRepaymentServices
             if ((string)($existing['status'] ?? '') !== 'succeeded'
                 || (int)($existing['debt_id'] ?? 0) !== $debtId
                 || (int)($existing['member_id'] ?? 0) !== $memberId
+                || (int)($existing['reward_amount_cents'] ?? 0) !== $rewardAmountCents
                 || (int)($existing['amount_cents'] ?? 0) !== $amount
                 || (string)($existing['business_date'] ?? '') !== (string)($snapshot['businessDate'] ?? '')) {
                 throw self::failure('recharge_repayment_idempotency_conflict');

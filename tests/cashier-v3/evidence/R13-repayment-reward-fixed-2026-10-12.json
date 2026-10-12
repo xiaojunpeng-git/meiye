@@ -1,0 +1,230 @@
+{
+  "task": "R13-00002 补交异业收客奖励录入与报表闭环",
+  "status": "开发与自测完成，待产品经理确认验收；未提交、未部署、未推送",
+  "fixed_version": "R13-20261012-repayment-reward-cccf999e",
+  "generated_at": "2026-10-12T05:53:54.332Z",
+  "baseline_head": "f25d019857e838a59ea977c9bfa28d7ed46ae09c",
+  "branch": "release/store-cashier-c14-main",
+  "supersedes_for_acceptance": "R13-cross-industry-year-fixed-2026-10-12.json；继承此前异业明细、汇总、年份控件和验证。本记录更新奖励闭环及全轮当前文件指纹，旧证据保留历史事实。",
+  "approved_scope": [
+    "会员欠款补交手动选择G异业收客时弹出奖励输入框，复用既有业务来源奖励组件。",
+    "奖励按本笔销售欠款或充值欠款补交保存，并进入异业收客明细奖励列；不继承原销售奖励，不抵扣还款本金。",
+    "保留此前第13轮明细、汇总、业务日期、单据号、手机号和年份控件范围。"
+  ],
+  "files": {
+    "frontend_source": [
+      {
+        "path": "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+        "sha256": "ab6b2b24e1a4254be8683b49e62181cd53be7401c6a3abe8fa9690af9a20d0c3"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/components/member/MemberDebtOverlay.vue",
+        "sha256": "6a3bfab7e14eb76f4f48e41d6408c5463d90068776760485ab8ccc47f2ef25fe"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue",
+        "sha256": "01c9e7d2a33d1cc77426e2eec900f5c7c8ba85feee3efc419404387c27726f1e"
+      }
+    ],
+    "backend_source": [
+      {
+        "path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+        "sha256": "d82cb399ee6fa48e7558a0383713e187b2578ca4e6d1c1dea101eca6d15f396d",
+        "boundary": "不含 newCustomerSummaryAddRow 的实例系统名称与对应注释改动；该两处属于其他任务。"
+      },
+      {
+        "path": "后端代码/app/services/report/StoreReportParticipantScopeServices.php",
+        "sha256": "21b8106ea97ae8731775265d75dd7180805cc00a7c74afa6991db1058f3e5678"
+      },
+      {
+        "path": "后端代码/app/services/report/StoreOperationsReportAnnotationServices.php",
+        "sha256": "aadf5efb50f92f33463e25905bb39c6cced2a0facd2290f462c7a1688c892a33"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3RepaymentReward.php",
+        "sha256": "4ea9ec39f8dec18fab838c43b6778268625f29b3c81c1409a3abfab58d193dad"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php",
+        "sha256": "e0aad68c8e2e9ee6412466b1e85980896172e950e2ae0b92e03c2b2f097e7c95"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3RechargeDebtRepaymentServices.php",
+        "sha256": "c4fbacf0050028d75f00a76e5c1fe0166567be87a481f1e68b0ca4061d137af4"
+      }
+    ],
+    "database_migrations": [
+      {
+        "path": "后端代码/database/upgrades/2026-10-12-补交异业奖励/00-升级清单.json",
+        "sha256": "bf608373ae89df8b2d7d6397b0feaa4f18f8934165f81a3ebd62af7cee6e513a"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-10-12-补交异业奖励/02-执行.php",
+        "sha256": "a7c5503e77544fec6f6ea108d048eac34ec3d2f47cdf10a20d854eac11ead00e"
+      }
+    ],
+    "automated_tests": [
+      {
+        "path": "tests/cashier-v3/php/phase-two-report-projection-contract.php",
+        "sha256": "836f27a35c244f02f5500081c5ee31a4159a758077112f460e63b6c175b140cd"
+      },
+      {
+        "path": "tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php",
+        "sha256": "9d439e243dc882ec303a7ddf89b777d8ecc672bb63499b0886291d1ece644c3a"
+      },
+      {
+        "path": "tests/cashier-v3/php/r13-cross-industry-summary-annotation-rollback.php",
+        "sha256": "53c27b72a27066c43821fa37007d92ac5423abf37d28058e150165acd4ce3d51"
+      },
+      {
+        "path": "tests/cashier-v3/js/r10-report-today-defaults.mjs",
+        "sha256": "2042fd5d7cb539e75f66fa592174bfc450e80fedcee0233ee4471c62f055a273"
+      },
+      {
+        "path": "tests/cashier-v3/js/store-business-report-contract.mjs",
+        "sha256": "6390ace407f7aa4fb75e3953a708ce09e609f1184bd9882cba78aa058369b167"
+      },
+      {
+        "path": "tests/cashier-v3/js/r13-repayment-reward.mjs",
+        "sha256": "01145fa15b8d7d5c5f60200c9383c5d349ad2fd72df64a12118f349c56f991b5"
+      },
+      {
+        "path": "tests/cashier-v3/php/r13-repayment-reward-rollback.php",
+        "sha256": "1def7afd1853925404651da250c492ed54529b892b594747d2f92b99799753ba"
+      },
+      {
+        "path": "tests/cashier-v3/js/debt-repayment-workspace-version-contract.mjs",
+        "sha256": "6d0774c6be91f53cfc8ced5a6c7c346249a96d389c121145f94f97cc322f09b4"
+      }
+    ],
+    "engineering_scripts": [],
+    "generated_artifacts": [
+      {
+        "path": "/tmp/r13-repayment-reward-build-20261012/index.html",
+        "sha256": "a65357396ce170c5b8f45197eb95cccfeacb58f52dcfdae8fe18ccb09c997de5"
+      },
+      {
+        "path": "/tmp/r13-repayment-reward-build-20261012/assets/index-59ecd876.js",
+        "sha256": "a4abe93df449b4f9c48e413cf6801f5e2ed2aa6b21b744c3f335bdd8bcf4a41a"
+      },
+      {
+        "path": "/tmp/r13-repayment-reward-build-20261012/assets/index-01240c79.css",
+        "sha256": "01240c793017a9db3193d2950f65cd07011f1cae5210080a2524c3a31a1deae0"
+      }
+    ],
+    "evidence": [
+      {
+        "path": "tests/cashier-v3/evidence/R13-repayment-reward-popup-2026-10-12.jpg",
+        "sha256": "90ded52bdc46bc903487d7bbb5d9e58cc6376ce003c484947a7397fc697d4f98"
+      }
+    ]
+  },
+  "owned_patch": {
+    "sha256": "cccf999ef3b8fae5326ed8f19b155fdf57de71b166bdd2e3286d005fcddca9a7",
+    "tracked_files": [
+      "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+      "前端代码/cashier-v3/src/components/member/MemberDebtOverlay.vue",
+      "前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue",
+      "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+      "后端代码/app/services/report/StoreReportParticipantScopeServices.php",
+      "后端代码/app/services/report/StoreOperationsReportAnnotationServices.php",
+      "后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php",
+      "后端代码/app/services/cashier/v3/settlement/CashierV3RechargeDebtRepaymentServices.php",
+      "tests/cashier-v3/php/phase-two-report-projection-contract.php",
+      "tests/cashier-v3/js/r10-report-today-defaults.mjs",
+      "tests/cashier-v3/js/store-business-report-contract.mjs",
+      "tests/cashier-v3/js/debt-repayment-workspace-version-contract.mjs"
+    ],
+    "untracked_files": [
+      "后端代码/app/services/cashier/v3/settlement/CashierV3RepaymentReward.php",
+      "后端代码/database/upgrades/2026-10-12-补交异业奖励/00-升级清单.json",
+      "后端代码/database/upgrades/2026-10-12-补交异业奖励/02-执行.php",
+      "tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php",
+      "tests/cashier-v3/php/r13-cross-industry-summary-annotation-rollback.php",
+      "tests/cashier-v3/js/r13-repayment-reward.mjs",
+      "tests/cashier-v3/php/r13-repayment-reward-rollback.php"
+    ],
+    "excluded_hunks": [
+      {
+        "header": "@@ -1978,0 +2113,4 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices",
+        "sha256": "16d1ca2c3bbf89d2d90762d2941c106fb79acea5102478cabb175ffaab334481"
+      },
+      {
+        "header": "@@ -1991 +2129,4 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices",
+        "sha256": "80a75322d140e5121c84d584ab5aee080211e39e9b7f1e6de0d186826e705c41"
+      }
+    ],
+    "staged_diff_sha256": "dc31b057aca12a17ee75ed7a86e023bfeba79933849b91605faa54e209c95b46",
+    "format": "按tracked_files顺序执行git diff --unified=0并连接，剔除excluded_hunks。未跟踪文件以各文件SHA-256固定。文件全量指纹仅标识验收环境，不意味着纳入同文件其他任务改动。",
+    "concurrent_change": "暂存区指纹与前版一致，本任务未暂存、未提交。PhaseTwo的newCustomerSummaryAddRow实例系统名及对应注释属于其他任务，已剔除两处片段。CashierShell既有改动仅作为集成依赖读取，不在本轮文件清单。"
+  },
+  "architecture": [
+    "权威奖励值属于本次补交主记录reward_amount_cents，非负整数分，与还款事务原子落库；G来源资格由服务端有效目录或原单历史快照核定，不能由前端来源名称授予。",
+    "两个补交入口共用金额校验；缺省值兼容旧客户端零奖励；同命令重放校验奖励，改变奖励须拒绝而非重复补交。",
+    "统一收款事实仍只承载实际收款本金，充值余额和欠款只变更本金；奖励不生成第二笔收款，不重算历史销售奖励。",
+    "报表只按当前授权收款结果对应的补交ID有界查询，补交奖励查询带tenant和store权限；组合收款及跨日分行按单据去重，作废按既有事实失效口径排除，保留原奖励审计值。",
+    "数据库仅新增两列默认0，无历史奖励回填。上线须先执行迁移，再部署应用；代码回退保留列和已录入奖励，不自动删列。"
+  ],
+  "local_migration": {
+    "database": "ruihao",
+    "containers": [
+      "mohe-cashier-app",
+      "mohe-mysql"
+    ],
+    "command": "docker exec mohe-cashier-app php database/upgrades/2026-10-12-补交异业奖励/02-执行.php --database=ruihao --apply",
+    "result": "本地两张补交表已新增BIGINT UNSIGNED NOT NULL DEFAULT 0奖励列。再次执行验证幂等；迁移前后消费补交114条、充值补交0条，未回填或变更业务记录。",
+    "remote_instance_migration_backup": "不适用，仅本地开发与验证；未连接或修改远程实例。正式实例迁移、备份及部署仍待单独授权与执行。"
+  },
+  "verification": {
+    "frontend_behavior": {
+      "command": "node tests/cashier-v3/js/r13-repayment-reward.mjs",
+      "result": "PASS：实际Vue脚本的G弹窗、其他来源清零、再次打开、12.34元转1234分、原单奖励不继承、切换欠款重置、Shell跨路由转交保留奖励、本金1180不变、负数/多于两位小数/非法值/超上限拒绝。"
+    },
+    "browser": [
+      "在18091真实会员欠款弹窗选择G异业收客，奖励弹窗显示在欠款弹窗上方，当前500x1043窄视口输入和按钮可达；未修改浏览器视口。",
+      "输入-1后确认被拒绝；输入12.34确认后再次打开仍为12.34。外层金额按既有规则四舍五入为整元显示，内部提交保持1234分。",
+      "已确认12.34后再次编辑99并取消，重新打开仍是12.34；切换A后奖励隐藏，再选G显示0。",
+      "保留G来源及零奖励弹窗供产品经理测试；未通过浏览器提交真实还款。"
+    ],
+    "backend_rollback": {
+      "command": "docker exec -i -e R13_LOCAL_TEST=1 -e BACKEND_ROOT=/var/www/html mohe-cashier-app php < tests/cashier-v3/php/r13-repayment-reward-rollback.php",
+      "result": "37 checks PASS。销售/充值两类补交均使用真实服务、统一收款事实和报表；每笔测试收款2元（两种支付方式各1元），奖励12.34元。校验落库、仅本金变更、幂等重放、奖励变更冲突、查询/导出同值、异店隔离、作废排除与审计保留。外层事务已回滚，测试前后欠款、会员余额及事实数量一致。"
+    },
+    "report_readonly": {
+      "command": "docker exec -i -e R13_LOCAL_TEST=1 -e R13_REPAYMENT_NO=BJ26100200015 -e BACKEND_ROOT=/var/www/html mohe-cashier-app php < tests/cashier-v3/php/r13-cross-industry-repayment-readonly.php",
+      "result": "PASS。本次只读重跑：目标BJ26100200015为120000分、门店175；当前本地月份命中3条、汇总6160。与前版证据的一行1200不同是验证时本地数据现状，不改写旧结果。writes=0。"
+    },
+    "regression": [
+      "PASS：debt-repayment-original-source-contract.mjs、debt-repayment-unique-snapshot-contract.mjs、debt-repayment-workspace-version-contract.mjs、recharge-debt-repayment-frontend-contract.mjs。",
+      "PASS：store-business-report-contract.mjs 44项；r10-report-today-defaults.mjs 23张报表场景。",
+      "PASS：repayment-source-snapshot-contract.php、sales-debt-repayment-contract.php、recharge-debt-repayment-contract.php、phase-two-report-projection-contract.php。宿主PHP存在既有弃用提示。",
+      "PASS：新增奖励校验器、两个补交服务、PhaseTwo报表、迁移脚本和回滚测试，共6个PHP文件语法检查。",
+      "既有workspace-version合同测试最初失败于旧的localRepayment: payload文本假设；依据当前已存在的复制businessSource实现修正断言，未修改CashierShell业务实现。"
+    ],
+    "frontend_build": {
+      "command": "npm run build -- --outDir /tmp/r13-repayment-reward-build-20261012",
+      "cwd": "前端代码/cashier-v3",
+      "result": "PASS，1999 modules，4.40秒；现有chunk-size提示。构建源与18091热更新正本一致，仅本地验证，不是8080集成发布包。"
+    },
+    "comment_updates": [
+      "前端代码/cashier-v3/src/components/member/MemberDebtOverlay.vue",
+      "前端代码/cashier-v3/src/components/cashier/CheckoutBusinessSourceOverlay.vue",
+      "后端代码/app/services/cashier/v3/settlement/CashierV3RepaymentReward.php",
+      "后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php",
+      "后端代码/app/services/cashier/v3/settlement/CashierV3RechargeDebtRepaymentServices.php",
+      "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+      "后端代码/database/upgrades/2026-10-12-补交异业奖励/00-升级清单.json",
+      "后端代码/database/upgrades/2026-10-12-补交异业奖励/02-执行.php",
+      "tests/cashier-v3/js/r13-repayment-reward.mjs",
+      "tests/cashier-v3/php/r13-repayment-reward-rollback.php",
+      "tests/cashier-v3/js/debt-repayment-workspace-version-contract.mjs"
+    ],
+    "git_diff_check": "PASS"
+  },
+  "limitations": [
+    "产品经理尚未验收本次奖励闭环；当前仅本地生效，未提交、部署或push。",
+    "正式写入奖励依赖两张补交主表的新增列，部署前必须迁移；未升级数据库的报表可读作0，但不能把只读兼容当作写入迁移完成。",
+    "未在页面发起真实还款；入库、报表、幂等、作废通过本地事务回滚验证，不冒充产品经理业务验收。",
+    "之前的汇总年份控件及报表覆盖期限制仍适用。"
+  ]
+}

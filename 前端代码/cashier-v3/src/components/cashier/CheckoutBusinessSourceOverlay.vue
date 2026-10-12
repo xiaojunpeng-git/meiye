@@ -6,6 +6,8 @@ const props = defineProps({
   primarySourceId: { type: Number, default: 0 },
   secondarySourceId: { type: Number, default: 0 },
   rewardAmountCents: { type: Number, default: 0 },
+  // 补交已在原弹窗选择来源，只复用奖励录入和金额校验，不提供第二套来源选择。
+  rewardOnly: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
   loadError: { type: String, default: '' }
 })
@@ -59,24 +61,24 @@ function confirm() {
 
 <template>
   <Teleport to="body">
-    <section class="checkout-source-overlay" role="presentation" @click.self="!saving && emit('close')">
-      <section class="checkout-source-panel" role="dialog" aria-modal="true" aria-label="选择业务来源">
+    <section class="checkout-source-overlay" :style="rewardOnly ? { zIndex: 1500 } : undefined" role="presentation" @click.self="!saving && emit('close')">
+      <section class="checkout-source-panel" role="dialog" aria-modal="true" :aria-label="rewardOnly ? '异业收客奖励' : '选择业务来源'">
         <header>
-          <div><span>结账信息</span><h2>选择业务来源</h2></div>
+          <div><span>{{ rewardOnly ? '本次补交' : '结账信息' }}</span><h2>{{ rewardOnly ? '异业收客奖励' : '选择业务来源' }}</h2></div>
           <button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">关闭</button>
         </header>
         <div v-if="loadError" class="checkout-source-panel__error" role="alert">
           <span>{{ loadError }}</span><button type="button" class="button button--secondary" @click="emit('retry')">重新加载</button>
         </div>
         <template v-else>
-          <section class="checkout-source-panel__section">
+          <section v-if="!rewardOnly" class="checkout-source-panel__section">
             <strong>一级来源</strong>
             <div class="checkout-source-panel__choices">
               <button v-for="item in roots" :key="item.id" type="button" :class="{ 'is-selected': Number(item.id) === Number(primaryId) }" @click="choosePrimary(item.id)">{{ item.name }}</button>
             </div>
             <p v-if="!roots.length" class="checkout-source-panel__empty">当前没有可用的业务来源，请联系平台管理员配置后重试。</p>
           </section>
-          <section v-if="selectedPrimary && children.length" class="checkout-source-panel__section">
+          <section v-if="!rewardOnly && selectedPrimary && children.length" class="checkout-source-panel__section">
             <strong>二级来源 <small v-if="requiresSecondary">必选</small></strong>
             <div class="checkout-source-panel__choices">
               <button type="button" :class="{ 'is-selected': !secondaryId }" @click="secondaryId = 0">不选择二级</button>

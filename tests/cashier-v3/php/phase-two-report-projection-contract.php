@@ -55,10 +55,10 @@ foreach ([
 ] as $needle) {
     if (strpos($service, $needle) === false) throw new RuntimeException('new-customer drilldown contract missing: ' . $needle);
 }
-// 本轮仅改门店页签；平台目录、共享服务端标题与报表代码保持原样。
+// 门店页签回归真实内容命名，与平台目录、导出及共享服务端标题一致，路由代码不互换。
 foreach ([
-    "{ code: 'cross_industry_customer_summary', name: '异业收客明细表' }",
-    "{ code: 'cross_industry_customer_detail', name: '异业收客汇总表' }",
+    "{ code: 'cross_industry_customer_summary', name: '异业收客汇总表' }",
+    "{ code: 'cross_industry_customer_detail', name: '异业收客明细表' }",
 ] as $needle) {
     if (strpos($view, $needle) === false) throw new RuntimeException('cross-industry report tab name missing: ' . $needle);
 }
@@ -68,12 +68,8 @@ foreach ([
 ] as $needle) {
     if (strpos($platformCatalog, $needle) === false) throw new RuntimeException('cross-industry platform report name missing: ' . $needle);
 }
-foreach ([
-    "cross_industry_customer_detail: '异业收客明细表'",
-    "cross_industry_customer_summary: '异业收客汇总表'",
-    'isPlatformRuntimeRoute() && PLATFORM_CROSS_INDUSTRY_NAMES[tab.code]',
-] as $needle) {
-    if (strpos($view, $needle) === false) throw new RuntimeException('platform report title must remain unchanged: ' . $needle);
+if (strpos($view, 'PLATFORM_CROSS_INDUSTRY_NAMES') !== false) {
+    throw new RuntimeException('obsolete cross-end name override must be removed after names converge');
 }
 foreach ([
     "result('异业收客明细表',",

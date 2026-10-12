@@ -186,6 +186,18 @@ final class StoreOperationsReportAnnotationServices
             $sourceFactId = (int)$resolved['source_fact_id'];
             $sourceOrderId = (string)$resolved['source_order_id'];
             $sourceLineId = (string)$resolved['source_line_id'];
+        } elseif ($subjectType === 'cross_industry_repayment') {
+            // 新增补交会员沿用两项手动字段，但所有权限模式都必须反查真实 G 来源补交及其门店。
+            if ($reportCode !== 'cross_industry_customer_summary') throw new \InvalidArgumentException('补交主题仅用于异业收客汇总');
+            $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
+                $scope['tenant_id'], $subjectType, $subjectKey,
+                $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
+            );
+            if ($resolved === null) throw new \InvalidArgumentException('异业补交记录不存在或无权编辑');
+            $storeId = (int)$resolved['store_id'];
+            $sourceFactId = (int)$resolved['source_fact_id'];
+            $sourceOrderId = (string)$resolved['source_order_id'];
+            $sourceLineId = '';
         } elseif ($subjectType === 'phase_four_month') {
             if ($storeId !== 0) throw new \InvalidArgumentException('月度手动字段只能保存到当前报表汇总行');
         } elseif ($scope['authorization_mode'] === 'self_participant') {
