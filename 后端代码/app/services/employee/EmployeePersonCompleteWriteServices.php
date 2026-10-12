@@ -121,6 +121,8 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $orgIds = $this->normalizeIntIds($input['org_ids'] ?? []);
         $storeIds = $this->normalizeIntIds($input['store_ids'] ?? []);
         $scopeMode = trim((string)($input['scope_mode'] ?? EmployeeDataScopeServices::MODE_PERSONAL));
+        // 门店编辑其他档案字段时不重写人员权限；新员工与明确修改范围时才写统一权限。
+        $scopeWrite = $source === 'hq' || $employeeIdHint <= 0 || array_key_exists('scope_mode', $input);
         $storeId = (int)($input['store_id'] ?? 0);
         // 任职结束不接受门店端调用、伪造零门店或顺带改岗位；岗位只关闭不迁移。
         $clearCurrentStore = (int)($input['clear_current_store'] ?? 0) === 1;
@@ -176,6 +178,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'status' => $statusPresent ? $input['status'] : null,
             'status_version' => $statusPresent ? $input['status_version'] : null,
         ];
+        if ($source === 'store') {
+            $payload['scope_write'] = $scopeWrite ? 1 : 0;
+            $payload['scope_version'] = array_key_exists('scope_version', $input) ? (int)$input['scope_version'] : null;
+        }
         // 只扩展新命令的指纹；普通保存保持旧指纹结构，避免已成功请求重试时误报冲突。
         if ($clearCurrentStore) {
             $payload['clear_current_store'] = 1;
@@ -225,6 +231,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 $positionIds,
                 $positionIdsPresent,
                 $scopeMode,
+                $scopeWrite,
                 $orgIds,
                 $storeIds,
                 $typeCodePresent,
@@ -252,6 +259,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                         $positionIds,
                         $positionIdsPresent,
                         $scopeMode,
+                        $scopeWrite,
                         $orgIds,
                         $storeIds,
                         $typeCodePresent,
@@ -368,32 +376,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
 
         /** @var EmployeeDataScopeServices $scopeSvc */
         $scopeSvc = app()->make(EmployeeDataScopeServices::class);
-        $forStore = $source === 'store' ? $storeId : 0;
-        $scopes = $scopeSvc->listScopes($employeeId, $forStore);
-        $scope = null;
-        foreach ($scopes as $sc) {
-            if ($source === 'store') {
-                if ((string)($sc['source_type'] ?? '') === EmployeeDataScopeServices::SOURCE_STORE
-                    && (int)($sc['source_store_id'] ?? 0) === $storeId) {
-                    $scope = $sc;
-                    break;
-                }
-            } else {
-                if ((string)($sc['source_type'] ?? '') === EmployeeDataScopeServices::SOURCE_HQ) {
-                    $scope = $sc;
-                    break;
-                }
-            }
-        }
-        if ($scope === null) {
-            $scope = [
-                'scope_mode' => EmployeeDataScopeServices::MODE_PERSONAL,
-                'org_ids' => [],
-                'store_ids' => [],
-                'source_type' => $source === 'store' ? EmployeeDataScopeServices::SOURCE_STORE : EmployeeDataScopeServices::SOURCE_HQ,
-                'source_store_id' => $source === 'store' ? $storeId : 0,
-            ];
-        }
+        $scope = $scopeSvc->readEditorScope($employeeId);
         if ((string)($scope['scope_mode'] ?? '') === EmployeeDataScopeServices::MODE_STORE) {
             $scope['store_ids'] = $scopeSvc->resolveCurrentActiveStoreIds($employeeId);
             $scope['store_ids_auto'] = true;
@@ -501,6 +484,7 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         array $positionIds,
         bool $positionIdsPresent,
         string $scopeMode,
+        bool $scopeWrite,
         array $orgIds,
         array $storeIds,
         bool $typeCodePresent,
@@ -523,10 +507,10 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             if ($storeId <= 0) {
                 throw new AdminException('请选择门店');
             }
-            if (in_array($scopeMode, [EmployeeDataScopeServices::MODE_ORG, EmployeeDataScopeServices::MODE_STORE_SELECTED], true)) {
+            if ($scopeWrite && in_array($scopeMode, [EmployeeDataScopeServices::MODE_ORG, EmployeeDataScopeServices::MODE_STORE_SELECTED], true)) {
                 throw new AdminException('门店不能设置跨店数据范围');
             }
-            if (!in_array($scopeMode, [
+            if ($scopeWrite && !in_array($scopeMode, [
                 EmployeeDataScopeServices::MODE_PERSONAL,
                 EmployeeDataScopeServices::MODE_STORE_SELF,
             ], true)) {
@@ -813,17 +797,24 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $this->maybeFail('scope', $input);
         /** @var EmployeeDataScopeServices $scopeSvc */
         $scopeSvc = app()->make(EmployeeDataScopeServices::class);
-        $scopeData = [
-            'source_type' => $source === 'store'
-                ? EmployeeDataScopeServices::SOURCE_STORE
-                : EmployeeDataScopeServices::SOURCE_HQ,
-            'source_store_id' => $source === 'store' ? $storeId : 0,
-            'scope_mode' => $scopeMode,
-            'org_ids' => $orgIds,
-            'store_ids' => $storeIds,
-            'appointment_store_id' => $storeId,
-        ];
-        $scope = $scopeSvc->saveScopeInTx($employeeId, $scopeData, $adminInfo, $auditMeta);
+        if ($scopeWrite) {
+            // 门店端“门店”与总部端“门店”写同一权限，按员工当前全部有效任职门店计算。
+            $scopeData = [
+                'source_type' => EmployeeDataScopeServices::SOURCE_HQ,
+                'source_store_id' => 0,
+                'scope_mode' => $source === 'store' && $scopeMode === EmployeeDataScopeServices::MODE_STORE_SELF
+                    ? EmployeeDataScopeServices::MODE_STORE : $scopeMode,
+                'org_ids' => $orgIds,
+                'store_ids' => $storeIds,
+                'appointment_store_id' => $storeId,
+            ];
+            if ($source === 'store' && array_key_exists('scope_version', $input)) {
+                $scopeData['expected_version'] = (int)$input['scope_version'];
+            }
+            $scope = $scopeSvc->saveScopeInTx($employeeId, $scopeData, $adminInfo, $auditMeta);
+        } else {
+            $scope = $scopeSvc->readEditorScope($employeeId);
+        }
         // 门店模式回显：把当前任职门店写入返回的 store_ids（仅展示，非人工可编辑范围）
         if (($scope['scope_mode'] ?? '') === EmployeeDataScopeServices::MODE_STORE) {
             $scope['store_ids'] = $scopeSvc->resolveCurrentActiveStoreIds($employeeId) ?: ($storeId > 0 ? [$storeId] : []);

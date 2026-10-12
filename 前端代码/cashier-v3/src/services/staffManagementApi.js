@@ -113,7 +113,13 @@ export function saveStoreStaff(staffId, values) {
       account: String(values.account || '').trim(),
       pwd: String(values.password || ''),
       position_ids: normalizedPositiveIds(values.positionIds),
-      scope_mode: values.scopeMode === 'store_self' ? 'store_self' : 'personal',
+      // 仅显式改动时提交权限；否则保留总部原有的组织/指定门店范围。
+      ...(staffId <= 0 || values.scopeTouched
+        ? {
+            scope_mode: values.scopeMode === 'store_self' ? 'store_self' : 'personal',
+            ...(staffId > 0 ? { scope_version: Number(values.scopeVersion) } : {})
+          }
+        : {}),
       work_member_id: Number(values.workMemberId) || 0,
       notify: normalizedBoolean(values.notify),
       status: normalizedBoolean(values.status),

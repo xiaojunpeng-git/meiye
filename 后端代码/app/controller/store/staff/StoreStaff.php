@@ -218,23 +218,13 @@ class StoreStaff extends AuthController
                 return (int)($j['position_id'] ?? 0);
             }, app()->make(\app\services\organization\StaffJobPositionServices::class)->listActiveJobs($id));
         }
-        $scopeMode = array_key_exists('scope_mode', $raw)
-            ? trim((string)$raw['scope_mode'])
-            : '';
-        if ($scopeMode === '' && $employeeId > 0) {
-            $scopes = app()->make(\app\services\organization\EmployeeDataScopeServices::class)
-                ->listScopes($employeeId, (int)$this->storeId);
-            $scopeMode = 'personal';
-            foreach ($scopes as $sc) {
-                if ((string)($sc['source_type'] ?? '') === 'store'
-                    && (int)($sc['source_store_id'] ?? 0) === (int)$this->storeId) {
-                    $scopeMode = (string)($sc['scope_mode'] ?? 'personal');
-                    break;
-                }
-            }
-        }
-        if ($scopeMode === '') {
-            $scopeMode = 'personal';
+        $scopeModePresent = array_key_exists('scope_mode', $raw) || $id <= 0;
+        $scopeMode = $scopeModePresent ? trim((string)($raw['scope_mode'] ?? 'personal')) : '';
+        // 旧页面不能在保存档案时把总部刚修改的权限覆盖；新页面须提交同次详情的权限版本。
+        if ($id > 0 && $scopeModePresent
+            && filter_var($raw['scope_version'] ?? null, FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => 0]]) === false) {
+            return app('json')->fail('数据范围版本缺失，请刷新员工资料后重试');
         }
         $account = trim((string)($raw['account'] ?? ''));
         if ($account === '' && $employeeId > 0) {
@@ -254,7 +244,6 @@ class StoreStaff extends AuthController
             'account' => $account,
             'pwd' => (string)($raw['pwd'] ?? ''),
             'position_ids' => is_array($positionIds) ? $positionIds : [],
-            'scope_mode' => $scopeMode,
             'org_ids' => [],
             'store_ids' => [],
             'status' => (int)($raw['status'] ?? 1),
@@ -265,6 +254,12 @@ class StoreStaff extends AuthController
             'mobile_enabled' => (int)($raw['mobile_enabled'] ?? 0),
             'request_token' => $bodyToken,
         ];
+        if ($scopeModePresent) {
+            $input['scope_mode'] = $scopeMode;
+            if ($id > 0) {
+                $input['scope_version'] = (int)$raw['scope_version'];
+            }
+        }
         // 档案字段全部由人员完整保存编排在同一事务内落库；不接受角色、规则或门店范围等扩权字段。
         foreach ([
             'work_member_id', 'notify', 'is_customer', 'customer_url', 'is_reservable',
@@ -863,12 +858,14 @@ class StoreStaff extends AuthController
             [['role_ids', 'a'], []],
             [['entries', 'a'], []],
             [['scope_mode', 's'], 'personal'],
+            [['scope_version', 'd'], -1],
             [['request_token', 's'], ''],
             [['reason', 's'], ''],
             [['save_jobs', 'd'], 1],
             [['save_roles', 'd'], 0],
             [['save_entries', 'd'], 1],
-            [['save_scope', 'd'], 1],
+            // 旧岗位接口默认不得顺带覆盖总部共用的数据范围。
+            [['save_scope', 'd'], 0],
         ]);
         try {
             $staff = $this->assertStaffInCurrentStore((int)$id);
@@ -882,6 +879,9 @@ class StoreStaff extends AuthController
             }
             if ((int)$data['save_roles'] === 1 || (is_array($data['role_ids']) && count(array_filter(array_map('intval', $data['role_ids']))) > 0)) {
                 return app('json')->fail('人员功能权限只通过岗位配置，不能再单独选择角色模板');
+            }
+            if ((int)$data['save_scope'] === 1 && (int)$data['scope_version'] < 0) {
+                return app('json')->fail('数据范围版本缺失，请刷新员工资料后重试');
             }
 
             $emp = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->find();
@@ -912,21 +912,6 @@ class StoreStaff extends AuthController
                     return (int)($j['position_id'] ?? 0);
                 }, $jobSvc->listActiveJobs((int)$id));
 
-            $scopeMode = (int)$data['save_scope'] === 1
-                ? trim((string)$data['scope_mode'])
-                : 'personal';
-            if ((int)$data['save_scope'] !== 1) {
-                $scopes = app()->make(\app\services\organization\EmployeeDataScopeServices::class)
-                    ->listScopes($employeeId, (int)$this->storeId);
-                foreach ($scopes as $sc) {
-                    if ((string)($sc['source_type'] ?? '') === 'store'
-                        && (int)($sc['source_store_id'] ?? 0) === (int)$this->storeId) {
-                        $scopeMode = (string)($sc['scope_mode'] ?? 'personal');
-                        break;
-                    }
-                }
-            }
-
             $input = [
                 'employee_id' => $employeeId,
                 'staff_id' => (int)$id,
@@ -938,11 +923,14 @@ class StoreStaff extends AuthController
                 'account' => $acct ? (string)$acct['account'] : (string)($staff['account'] ?? ''),
                 'pwd' => '',
                 'position_ids' => $positionIds,
-                'scope_mode' => $scopeMode,
                 'org_ids' => [],
                 'store_ids' => [],
                 'request_token' => $bodyToken,
             ];
+            if ((int)$data['save_scope'] === 1) {
+                $input['scope_mode'] = trim((string)$data['scope_mode']);
+                $input['scope_version'] = (int)$data['scope_version'];
+            }
             if ((int)$data['save_entries'] === 1) {
                 $entries = is_array($data['entries']) ? $data['entries'] : [];
                 foreach ($entries as $e) {
@@ -1080,20 +1068,13 @@ class StoreStaff extends AuthController
             }
 
             $scopeMode = 'personal';
+            $scopeVersion = 0;
             if ($employeeId > 0) {
                 /** @var \app\services\organization\EmployeeDataScopeServices $scopeSvc */
                 $scopeSvc = app()->make(\app\services\organization\EmployeeDataScopeServices::class);
-                $scopes = $scopeSvc->listScopes($employeeId, (int)$this->storeId);
-                foreach ($scopes as $sc) {
-                    if ((string)($sc['source_type'] ?? '') === 'store'
-                        && (int)($sc['source_store_id'] ?? 0) === (int)$this->storeId) {
-                        $mode = (string)($sc['scope_mode'] ?? 'personal');
-                        if (in_array($mode, ['personal', 'store_self'], true)) {
-                            $scopeMode = $mode;
-                        }
-                        break;
-                    }
-                }
+                $scope = $scopeSvc->readEditorScope($employeeId);
+                $scopeMode = (string)($scope['scope_mode'] ?? 'personal');
+                $scopeVersion = (int)($scope['version'] ?? 0);
             }
 
             $roleIds = array_values(array_filter(array_map('intval', explode(',', (string)($staff['roles'] ?? '')))));
@@ -1132,6 +1113,7 @@ class StoreStaff extends AuthController
                 'jobs' => $jobs,
                 'entries' => $entries,
                 'scope_mode' => $scopeMode,
+                'scope_version' => $scopeVersion,
                 'projected_roles' => $projectedRoles,
                 'function_preview' => $jobSvc->buildFunctionPreview((int)$id),
                 'help' => [
@@ -1139,7 +1121,7 @@ class StoreStaff extends AuthController
                     'jobs' => '请选择总部允许本店使用的岗位；能看哪些功能菜单，由岗位决定，不能直接勾功能。',
                     'roles' => '可选择总部已发布且允许本店使用的角色模板；不能修改模板权限正文，不能选择平台后台权限。',
                     'entries' => '只能开通本店的门店后台、收银台、手机端。开通前须已有岗位覆盖对应端，否则无法保存。',
-                    'data_scope' => '只能设「个人」或「本店」。选个人只取消本店给的扩展查看范围，不影响总部或其他门店授权。岗位变化不会扩大数据权限。',
+                    'data_scope' => '数据范围与总部共用；可设「个人」或「门店」。门店按员工当前全部有效任职门店计算。',
                     'projected_roles' => '以下为岗位自动生成的功能身份，仅供查看，不能在此勾选修改。',
                 ],
             ]);

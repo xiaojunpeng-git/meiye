@@ -79,7 +79,8 @@ const baseQueryFields = [
 function defaultEditorValues() {
   return {
     staffName: '', phone: '', avatar: '/static/images/staff/avatar_male.png', account: '', password: '',
-    positionIds: [], scopeMode: 'personal', workMemberId: 0, notify: false, status: true, statusVersion: 0,
+    positionIds: [], scopeMode: 'personal', scopeVersion: 0, scopeTouched: false,
+    workMemberId: 0, notify: false, status: true, statusVersion: 0,
     salespersonEnabled: true, craftsmanEnabled: true, craftsmanPerformanceType: 'commission', mobileEnabled: false, isCustomer: false, customerUrl: '',
     isReservable: true, employeeNumber: '', idCard: '', age: '', joinArea: '', joinDate: '',
     birthdayDate: '', birthdayType: 1, birthdayArea: '', nowArea: '', contractBegin: '',
@@ -245,11 +246,15 @@ async function loadEditorOptions() {
 }
 
 function mapDetail(detail) {
-  const scopeMode = detail?.scope?.scope_mode === 'store_self' || detail?.scope?.scope_mode === 'store' ? 'store_self' : 'personal'
+  // 总部与门店读取同一权限；门店无编辑“组织/指定门店”的控件，但必须如实回显并保留原值。
+  const rawScopeMode = String(detail?.scope?.scope_mode || 'personal')
+  const scopeMode = ['store', 'store_self'].includes(rawScopeMode) ? 'store_self'
+    : (['personal', 'org', 'store_selected'].includes(rawScopeMode) ? rawScopeMode : 'personal')
   return {
     staffName: String(detail?.staff_name || ''), phone: String(detail?.phone || ''), avatar: String(detail?.avatar || '/static/images/staff/avatar_male.png'),
     account: String(detail?.account || ''), positionIds: Array.isArray(detail?.position_ids) ? detail.position_ids.map(Number).filter(Boolean).slice(0, 1) : [],
-    scopeMode, workMemberId: Number(detail?.work_member_id || 0), notify: Number(detail?.notify || 0) === 1,
+    scopeMode, scopeVersion: Number(detail?.scope?.version ?? 0), scopeTouched: false,
+    workMemberId: Number(detail?.work_member_id || 0), notify: Number(detail?.notify || 0) === 1,
     // 在职状态和乐观锁版本必须来自同一次完整详情读取，避免两个编辑窗口
     // 相互覆盖，也保证门店端离职与平台端进入同一事务编排。
     status: Number(detail?.status ?? 1) === 1, statusVersion: Number(detail?.status_version ?? 0),
@@ -304,6 +309,8 @@ function validateEditor() {
   if (!['internal', 'partner'].includes(editorValues.employmentTypeCode)) return '请选择人员类型。'
   if (!Number.isInteger(editorValues.employmentTypeVersion) || editorValues.employmentTypeVersion < 0) return '人员类型版本无效，请刷新后重试。'
   if (!Number.isInteger(editorValues.statusVersion) || editorValues.statusVersion < 0) return '在职状态版本无效，请刷新后重试。'
+  if (!Number.isInteger(editorValues.scopeVersion) || editorValues.scopeVersion < 0) return '数据范围版本无效，请刷新后重试。'
+  if (editorValues.scopeTouched && !['personal', 'store_self'].includes(editorValues.scopeMode)) return '请选择个人或门店数据范围。'
   const account = editorValues.account.trim()
   const password = String(editorValues.password || '')
   if (!account && password) return '请先填写登录账号，或清空登录密码。'
@@ -428,7 +435,7 @@ async function onAvatarFileChange(event) {
             </div>
             <div v-show="editorTab === 'scope'" class="staff-editor__section">
               <p class="staff-editor__hint">所属组织、任职门店由当前门店关系自动确定，门店端不可编辑。</p>
-              <fieldset class="staff-editor__scope-field"><legend>数据范围：</legend><label><input v-model="editorValues.scopeMode" type="radio" value="personal"><span>个人</span></label><label><input v-model="editorValues.scopeMode" type="radio" value="store_self"><span>门店</span></label></fieldset>
+              <fieldset class="staff-editor__scope-field"><legend>数据范围：</legend><label><input v-model="editorValues.scopeMode" type="radio" value="personal" @click="editorValues.scopeTouched = true"><span>个人</span></label><label><input v-model="editorValues.scopeMode" type="radio" value="store_self" @click="editorValues.scopeTouched = true"><span>门店</span></label><span v-if="editorValues.scopeMode === 'org' || editorValues.scopeMode === 'store_selected'">当前：{{ editorValues.scopeMode === 'org' ? '组织' : '指定门店' }}</span></fieldset>
               <label class="staff-editor__toggle"><input v-model="editorValues.mobileEnabled" type="checkbox"><span>手机端：</span></label>
             </div>
             <div v-show="editorTab === 'login'" class="staff-editor__grid">
