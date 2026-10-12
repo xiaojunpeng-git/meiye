@@ -419,7 +419,10 @@ final class MobileMerchantSessionServices
         $ruleIds = array_values(array_filter(array_map('intval', explode(',', (string)($auth['rules'] ?? '')))));
         /** @var MobileMerchantCapabilityCatalog $catalog */
         $catalog = app()->make(MobileMerchantCapabilityCatalog::class);
-        return $catalog->availableActions($ruleIds, $this->isPersonalScope($employeeId) ? 'PERSONAL_SELF' : 'STORES');
+        $personal = $this->isPersonalScope($employeeId);
+        $actions = $catalog->availableActions($ruleIds, $personal ? 'PERSONAL_SELF' : 'STORES');
+        // 经营首页汇总整店事实；总部“个人”只能进入本人业绩，不能靠岗位功能看到整店概览。
+        return $personal ? array_values(array_diff($actions, ['MERCHANT_HOME_VIEW'])) : $actions;
     }
 
     /** Revalidate scope and business status for every context switch. */
@@ -460,8 +463,16 @@ final class MobileMerchantSessionServices
 
     private function isPersonalScope(int $employeeId): bool
     {
-        $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)->field('scope_mode')->select()->toArray();
+        $rows = Db::name('employee_data_scope')->where('employee_id', $employeeId)->where('status', 1)->where('is_del', 0)
+            ->field('id,scope_mode,source_type,source_store_id')->select()->toArray();
         if (!$rows) return true;
+        // 总部最新明确选择“个人”时，旧本店来源记录不再把会话扩为门店权限。
+        $hqRows = array_values(array_filter($rows, static function (array $row): bool {
+            return (string)($row['source_type'] ?? '') === EmployeeDataScopeServices::SOURCE_HQ
+                && (int)($row['source_store_id'] ?? 0) === 0;
+        }));
+        usort($hqRows, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
+        if ((string)($hqRows[0]['scope_mode'] ?? '') === EmployeeDataScopeServices::MODE_PERSONAL) return true;
         foreach ($rows as $row) if (in_array((string)($row['scope_mode'] ?? ''), ['store_self', 'store', 'store_selected', 'org'], true)) return false;
         return true;
     }

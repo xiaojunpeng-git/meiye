@@ -49,7 +49,12 @@ final class MobileMerchantAnalyticsEntryPolicy
             return (string)($row['source_type'] ?? '') === 'hq' && (int)($row['source_store_id'] ?? 0) === 0;
         }));
         usort($hqRows, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
-        if ((string)($hqRows[0]['scope_mode'] ?? '') === 'store_selected') {
+        $primaryHqMode = (string)($hqRows[0]['scope_mode'] ?? '');
+        if ($primaryHqMode === self::TYPE_PERSONAL) {
+            // 总部个人授权优先于历史本店行；入口与共享数据范围必须同口径。
+            $entryType = self::TYPE_PERSONAL;
+            $grantedOrgIds = [];
+        } elseif ($primaryHqMode === 'store_selected') {
             // 仅最新总部授权为精确门店时覆盖旧组织行，分析入口保持门店维度。
             $entryType = self::TYPE_STORE;
             $grantedOrgIds = [];
@@ -57,7 +62,7 @@ final class MobileMerchantAnalyticsEntryPolicy
         // 跨门店排行只对组织授权或总部精确指定门店授权开放；本店/个人模式
         // 不因当前员工碰巧有任职门店而获得组织及门店排行入口。
         $showStoreRanking = $entryType === self::TYPE_ORGANIZATION
-            || ($entryType === self::TYPE_STORE && (string)($hqRows[0]['scope_mode'] ?? '') === 'store_selected');
+            || ($entryType === self::TYPE_STORE && $primaryHqMode === 'store_selected');
 
         if ($entryType === self::TYPE_PERSONAL) {
             return [

@@ -86,6 +86,14 @@ check(!$self['showOrganizationRanking'] && !$self['showStoreRanking'], 'self-sto
 check(!$personal['showOrganizationRanking'] && !$personal['showStoreRanking'], 'personal permission must hide both rankings');
 check($requestedNode->invoke(null, $self, ['nodeType' => 'organization', 'nodeId' => 2]) === ['store', 101, false], 'self-store entry must reject organization navigation');
 
+// 总部个人设置高于历史本店来源；个人入口只能指向本人，不能展示组织/门店排行。
+$personalWithLegacyStore = $policy->resolve([
+    ['id' => 5, 'scope_mode' => 'personal', 'source_type' => 'hq', 'source_store_id' => 0],
+    ['id' => 6, 'scope_mode' => 'store_self', 'source_type' => 'store', 'source_store_id' => 101],
+], [101], 101, 7, $organizations, $bindings);
+check($personalWithLegacyStore['entryType'] === 'personal' && $personalWithLegacyStore['employeeId'] === 7, 'hq personal must take precedence over store-source grant');
+check(!$personalWithLegacyStore['showOrganizationRanking'] && !$personalWithLegacyStore['showStoreRanking'], 'hq personal must expose no cross-employee ranking');
+
 // 23 家门店应按服务端稳定顺序分为 10、10、3 家，越界页仍返回完整命中总数。
 $ranked = array_map(static fn(int $id): array => ['entityId' => $id], range(1, 23));
 $pager = new ReflectionMethod(MobileWarehouseServices::class, 'paginateRankingRows');

@@ -64,8 +64,8 @@ export function openMerchantEmployeePerformance(employeeId : number, periodMode 
 
 export function replaceMerchantEmployeePerformance(employeeId : number, periodMode : string, month : string, startDate : string, endDate : string, detailMode : string = 'cash') : void {
 	// Personal warehouse entry replaces its own page, so its detail must
-	// return to a primary tab instead of reopening the same redirect route.
-	uni.redirectTo({ url: merchantEmployeePerformanceUrl(employeeId, periodMode, month, startDate, endDate, detailMode) + '&returnTarget=home' })
+	// return to Profile instead of reopening Data or entering whole-store Home.
+	uni.redirectTo({ url: merchantEmployeePerformanceUrl(employeeId, periodMode, month, startDate, endDate, detailMode) + '&returnTarget=profile' })
 }
 
 function merchantEmployeePerformanceUrl(employeeId : number, periodMode : string, month : string, startDate : string, endDate : string, detailMode : string) : string {
@@ -80,8 +80,13 @@ function merchantEmployeePerformanceUrl(employeeId : number, periodMode : string
 
 export function returnFromMerchantEmployeePerformance(returnTarget : string = 'warehouse') : void {
 	// A direct H5 link or redirectTo has no previous uni-app page. In that case
-	// use a fixed merchant tab; never follow a caller-supplied URL.
-	let fallback = () : void => { switchMerchantPrimaryTab(returnTarget === 'home' ? 'home' : 'warehouse') }
+	// use a fixed merchant tab; never follow a caller-supplied URL. Personal
+	// detail explicitly returns to Profile, avoiding a data-tab redirect loop.
+	let fallback = () : void => {
+		let target = returnTarget === 'profile' ? 'profile' : (returnTarget === 'home' ? 'home' : 'warehouse')
+		if (!merchantTabIsAllowed(target, currentMerchantRoot())) target = 'profile'
+		switchMerchantPrimaryTab(target)
+	}
 	if (getCurrentPages().length <= 1) { fallback(); return }
 	uni.navigateBack({ delta: 1, fail: (_ : any) : void => { fallback() } })
 }

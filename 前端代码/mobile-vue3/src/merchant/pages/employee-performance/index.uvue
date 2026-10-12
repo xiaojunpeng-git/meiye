@@ -63,7 +63,9 @@
 
 	onLoad((options : any) => {
 		employeeId.value = Number(options != null ? options.employeeId || 0 : 0)
-		returnTarget.value = String(options != null ? options.returnTarget || 'warehouse' : 'warehouse') === 'home' ? 'home' : 'warehouse'
+		// Only these merchant tabs can be used as return targets; never accept a caller URL.
+		let requestedReturn = String(options != null ? options.returnTarget || 'warehouse' : 'warehouse')
+		returnTarget.value = requestedReturn === 'profile' || requestedReturn === 'home' ? requestedReturn : 'warehouse'
 		periodMode.value = String(options != null ? options.periodMode || 'month' : 'month')
 		month.value = String(options != null ? options.month || month.value : month.value)
 		customStartDate.value = String(options != null ? options.startDate || customStartDate.value : customStartDate.value)

@@ -202,6 +202,12 @@ class EmployeeDataScopeServices extends BaseServices
             ->order('id', 'desc')
             ->find();
 
+        // 门店编辑总部权限时必须基于打开页面时的版本，防止旧页面覆盖总部或另一门店的新设置。
+        if (array_key_exists('expected_version', $data)
+            && (int)$data['expected_version'] !== (int)($exist['version'] ?? 0)) {
+            throw new AdminException('数据范围已由他人修改，请刷新员工资料后重试');
+        }
+
         $orgJson = json_encode($orgIds, JSON_UNESCAPED_UNICODE);
         $storeJson = json_encode($storeIds, JSON_UNESCAPED_UNICODE);
         if ($exist) {
@@ -318,22 +324,60 @@ class EmployeeDataScopeServices extends BaseServices
     }
 
     /**
+     * 两端编辑器读取同一人员权限。旧门店来源尚未写入总部记录时，仅按其真实授权门店合成回显，
+     * 不改变旧数据；下一次明确修改数据范围才写入统一的总部记录。
+     */
+    public function readEditorScope(int $employeeId): array
+    {
+        $rows = $this->listScopes($employeeId);
+        $hqRows = array_values(array_filter($rows, static fn(array $row): bool =>
+            (string)($row['source_type'] ?? '') === self::SOURCE_HQ
+            && (int)($row['source_store_id'] ?? 0) === 0
+        ));
+        if ($hqRows) {
+            usort($hqRows, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
+            return $hqRows[0];
+        }
+
+        $legacyStoreIds = [];
+        foreach ($rows as $row) {
+            if ((string)($row['source_type'] ?? '') === self::SOURCE_STORE
+                && (string)($row['scope_mode'] ?? '') === self::MODE_STORE_SELF
+                && (int)($row['source_store_id'] ?? 0) > 0) {
+                $legacyStoreIds[] = (int)$row['source_store_id'];
+            }
+        }
+        $legacyStoreIds = $this->normalizeIntIds($legacyStoreIds);
+        $activeStoreIds = $this->resolveCurrentActiveStoreIds($employeeId);
+        sort($activeStoreIds);
+        $isAllAppointedStores = $legacyStoreIds && $legacyStoreIds === $activeStoreIds;
+        return [
+            'id' => 0,
+            'version' => 0,
+            'source_type' => self::SOURCE_HQ,
+            'source_store_id' => 0,
+            'scope_mode' => !$legacyStoreIds ? self::MODE_PERSONAL
+                : ($isAllAppointedStores ? self::MODE_STORE : self::MODE_STORE_SELECTED),
+            'org_ids' => [],
+            'store_ids' => $legacyStoreIds,
+        ];
+    }
+
+    /**
      * 解析有效门店 ID 集合；空数组表示「仅个人参与、无门店扩展」
      * 返回 null 表示超级管理员全量（不限制门店）
      * @return int[]|null
      */
     public function resolveEffectiveStoreIds(int $employeeId, int $contextStoreId = 0, array $adminInfo = [])
     {
-        if ($this->isSuperAdmin($adminInfo)) {
-            return null;
-        }
         $scopes = Db::name('employee_data_scope')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
             ->where('status', 1)
             ->select()->toArray();
 
-        // 总部明确指定门店时，该列表是完整授权，不与历史门店来源/自动任职范围取并集。
+        // 总部记录是两端共同的人员权限正本；旧门店来源仅在尚无总部记录时生效。
+        // 否则门店改成“个人”或总部改成其他范围后，旧来源可能继续扩大授权。
         $hqScopes = array_values(array_filter($scopes, static function (array $scope): bool {
             return (string)($scope['source_type'] ?? '') === self::SOURCE_HQ
                 && (int)($scope['source_store_id'] ?? 0) === 0;
@@ -341,7 +385,13 @@ class EmployeeDataScopeServices extends BaseServices
         if ($hqScopes) {
             usort($hqScopes, static fn(array $left, array $right): int => (int)$right['id'] <=> (int)$left['id']);
         }
-        if ((string)($hqScopes[0]['scope_mode'] ?? '') === self::MODE_STORE_SELECTED) {
+        $primaryHqMode = (string)($hqScopes[0]['scope_mode'] ?? '');
+        // 即使操作者兼有超管身份，明确的总部“个人”仍收紧本人数据；
+        // 其他模式维持既有超管全量语义，不在本闭环改变角色权限。
+        if ($this->isSuperAdmin($adminInfo) && $primaryHqMode !== self::MODE_PERSONAL) {
+            return null;
+        }
+        if ($hqScopes) {
             $scopes = [$hqScopes[0]];
         }
 
@@ -444,7 +494,7 @@ class EmployeeDataScopeServices extends BaseServices
      */
     public function applyOrderListScope(array &$where, int $employeeId, string $end, int $storeId, array $adminInfo): void
     {
-        if ($this->isSuperAdmin($adminInfo)) {
+        if ($employeeId <= 0 && $this->isSuperAdmin($adminInfo)) {
             $where['employee_data_scope'] = ['mode' => 'all'];
             return;
         }
@@ -458,6 +508,11 @@ class EmployeeDataScopeServices extends BaseServices
         $end = $end === 'store' ? 'store' : 'admin';
         $staffIds = $this->resolveStaffIdsForEmployee($employeeId);
         $effectiveStores = $this->resolveEffectiveStoreIds($employeeId, $end === 'store' ? $storeId : 0, $adminInfo);
+        if ($effectiveStores === null) {
+            // 显式总部个人已在共享解析中收紧；仅真正的超管全量继续走这里。
+            $where['employee_data_scope'] = ['mode' => 'all'];
+            return;
+        }
 
         if ($end === 'store') {
             if ($storeId <= 0) {
@@ -483,11 +538,6 @@ class EmployeeDataScopeServices extends BaseServices
         }
 
         // 平台端
-        if ($effectiveStores === null) {
-            $where['employee_data_scope'] = ['mode' => 'all'];
-            return;
-        }
-
         $hqMode = $this->resolvePrimaryHqScopeMode($employeeId);
         if ($hqMode === self::MODE_STORE) {
             $current = $this->resolveCurrentActiveStoreIds($employeeId);

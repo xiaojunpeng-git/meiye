@@ -42,6 +42,11 @@ final class MobileMerchantDashboardServices
     /** @return array<string,mixed> */
     public function home(array $merchant, array $input): array
     {
+        // 此端点按门店汇总经营、客户和商品事实；个人权限必须从服务端拒绝，
+        // 即使旧会话还保留“经营”功能，也不能退回当前任职门店读取整店数据。
+        if ((string)($merchant['dataScopeMode'] ?? '') === 'PERSONAL_SELF') {
+            throw MobileApiException::business('STORE_NOT_ALLOWED', '个人数据权限仅可查看本人业绩。');
+        }
         $storeIds = $this->positiveIds((array)($merchant['visibleStoreIds'] ?? []));
         if ($storeIds === []) {
             throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可查看的门店。');

@@ -332,7 +332,9 @@ final class MobileMerchantRequestContextResolver
         $rules = $this->positiveIds(explode(',', (string)($mobileAuth['rules'] ?? '')));
         /** @var MobileMerchantCapabilityCatalog $catalog */
         $catalog = app()->make(MobileMerchantCapabilityCatalog::class);
-        return $catalog->availableActions($rules, $scopeMode);
+        $actions = $catalog->availableActions($rules, $scopeMode);
+        // 请求上下文与登录回执采用同一数据权限：个人不能取得整店经营首页能力。
+        return $scopeMode === 'PERSONAL_SELF' ? array_values(array_diff($actions, ['MERCHANT_HOME_VIEW'])) : $actions;
     }
 
     private function staffName(array $staff): string

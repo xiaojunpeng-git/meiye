@@ -8,6 +8,9 @@ declare(strict_types=1);
 require '/var/www/html/vendor/autoload.php';
 
 use app\services\organization\EmployeeDataScopeServices;
+use app\services\mobile\merchant\MobileMerchantSessionServices;
+use app\services\mobile\merchant\MobileMerchantRequestContextResolver;
+use app\services\mobile\dashboard\MobileMerchantDashboardServices;
 use think\facade\Db;
 
 (new think\App('/var/www/html/'))->initialize();
@@ -24,6 +27,13 @@ if ($employeeId <= 0 || count($allStoreIds) !== 3) {
 }
 
 $service = app()->make(EmployeeDataScopeServices::class);
+$session = (new ReflectionClass(MobileMerchantSessionServices::class))->newInstanceWithoutConstructor();
+$isPersonalScope = new ReflectionMethod(MobileMerchantSessionServices::class, 'isPersonalScope');
+$isPersonalScope->setAccessible(true);
+$dashboard = (new ReflectionClass(MobileMerchantDashboardServices::class))->newInstanceWithoutConstructor();
+$resolver = (new ReflectionClass(MobileMerchantRequestContextResolver::class))->newInstanceWithoutConstructor();
+$requestActions = new ReflectionMethod(MobileMerchantRequestContextResolver::class, 'availableActions');
+$requestActions->setAccessible(true);
 $superAdmin = ['id' => 1, 'level' => 0, 'admin_type' => 0];
 $payload = [
     'source_type' => EmployeeDataScopeServices::SOURCE_HQ,
@@ -48,6 +58,9 @@ $rejects = static function (callable $write, string $label) use ($assert): void 
 
 Db::startTrans();
 try {
+    $defaultSuperWhere = [];
+    $service->applyOrderListScope($defaultSuperWhere, $employeeId, 'admin', 0, $superAdmin);
+    $assert((string)($defaultSuperWhere['employee_data_scope']['mode'] ?? '') === 'all', 'super-admin without explicit hq personal remains full scope');
     $saved = $service->saveScopeInTx($employeeId, $payload, $superAdmin, ['request_token' => 'local-selected-store-regression']);
     $expected = $storeIds;
     sort($expected);
@@ -61,6 +74,29 @@ try {
     ];
     $service->saveScopeInTx($employeeId, $legacyStoreSource, $superAdmin);
     $assert($service->resolveEffectiveStoreIds($employeeId, 0) === $expected, 'selected stores override other source grants');
+
+    // 总部从“指定门店”改回“个人”时，保留的门店来源行不能重新授予整店数据。
+    $personal = $payload;
+    $personal['scope_mode'] = EmployeeDataScopeServices::MODE_PERSONAL;
+    $personal['store_ids'] = [];
+    $service->saveScopeInTx($employeeId, $personal, $superAdmin);
+    $assert($service->resolveEffectiveStoreIds($employeeId, 0) === [], 'hq personal overrides legacy store grant');
+    $assert($service->resolveEffectiveStoreIds($employeeId, 0, $superAdmin) === [], 'explicit hq personal also narrows a super-admin identity');
+    $orderWhere = [];
+    $service->applyOrderListScope($orderWhere, $employeeId, 'admin', 0, $superAdmin);
+    $assert((string)($orderWhere['employee_data_scope']['mode'] ?? '') !== 'all', 'order reports do not bypass explicit hq personal');
+    $assert($service->resolveEffectiveStoreIds($employeeId, $allStoreIds[2]) === [], 'hq personal stays personal inside a store context');
+    $assert($isPersonalScope->invoke($session, $employeeId) === true, 'mobile session recognizes hq personal despite legacy store grant');
+    $personalActions = $requestActions->invoke($resolver, ['rules' => '401009,401007'], 'PERSONAL_SELF');
+    $storeActions = $requestActions->invoke($resolver, ['rules' => '401009,401007'], 'STORES');
+    $assert(!in_array('MERCHANT_HOME_VIEW', $personalActions, true) && in_array('MERCHANT_WAREHOUSE_VIEW', $personalActions, true), 'personal mobile scope retains data entry but hides whole-store home');
+    $assert(in_array('MERCHANT_HOME_VIEW', $storeActions, true), 'store scope retains granted home capability');
+    $rejects(static function () use ($dashboard, $employeeId, $allStoreIds): void {
+        $dashboard->home(['employeeId' => $employeeId, 'dataScopeMode' => 'PERSONAL_SELF', 'visibleStoreIds' => [$allStoreIds[2]]], []);
+    }, 'personal request cannot read whole-store merchant home');
+    $service->saveScopeInTx($employeeId, $payload, $superAdmin);
+    $assert($service->resolveEffectiveStoreIds($employeeId, 0) === $expected, 'switching back to selected stores restores only explicit grants');
+    $assert($isPersonalScope->invoke($session, $employeeId) === false, 'mobile session restores selected-store scope');
 
     Db::name('system_store')->where('id', $storeIds[0])->update(['is_del' => 1]);
     $assert($service->resolveEffectiveStoreIds($employeeId, 0) === [$storeIds[1]], 'deleted selected store stops resolving');
