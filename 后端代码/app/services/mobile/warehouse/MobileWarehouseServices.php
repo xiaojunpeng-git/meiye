@@ -77,9 +77,31 @@ final class MobileWarehouseServices
 
         $period = $this->period($input);
         $scopeStoreIds = array_values(array_map('intval', (array)($hierarchy['currentNode']['_storeIds'] ?? [])));
+        $showOrganizationRanking = (bool)$entry['showOrganizationRanking'];
+        $showStoreRanking = (bool)($entry['showStoreRanking'] ?? false);
+        $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? ''), $showOrganizationRanking, $showStoreRanking);
+        $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
+        $storeRankingPage = (int)($input['storeRankingPage'] ?? 1);
+        if ($storeRankingPage < 1) {
+            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '门店排行页码无效。', 'storeRankingPage');
+        }
+        $rankingStoreIds = $rankingCode === 'store'
+            ? ((string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_ORGANIZATION ? $scopeStoreIds : $validStoreIds)
+            : [];
+        if ($storeRankingPage > 1) {
+            if ((string)($input['rankingCode'] ?? '') !== 'store' || !$showStoreRanking) {
+                throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限不能读取门店排行。');
+            }
+            // 下滑续页只计算授权门店排行，避免重复读取概览和三段趋势。
+            return ['warehouse' => $this->storeRankingPage($rankingStoreIds, $stores, $period, $rankingOrder, $storeRankingPage)];
+        }
+        $selectedStoreScope = (string)$entry['entryType'] === MobileMerchantAnalyticsEntryPolicy::TYPE_STORE && $showStoreRanking;
         $metrics = $this->summaryMetrics($scopeStoreIds, $period);
+        // 指定门店的组织排行跨越全部授权门店，趋势必须使用相同范围；
+        // 页面顶部的工作台汇总仍保持当前门店口径。
+        $trendStoreIds = $selectedStoreScope && $rankingCode === 'organization' ? $validStoreIds : $scopeStoreIds;
         $trend = $this->trendProjection(
-            $scopeStoreIds,
+            $trendStoreIds,
             $period,
             $this->trendMetricCode((string)($input['trendMetricCode'] ?? 'cash_performance'))
         );
@@ -91,13 +113,46 @@ final class MobileWarehouseServices
         unset($row);
         unset($hierarchy['currentNode']['_storeIds']);
 
-        $showOrganizationRanking = (bool)$entry['showOrganizationRanking'];
-        $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? ''), $showOrganizationRanking);
-        $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
-        $rankingRows = $rankingCode === 'organization'
-            ? $this->organizationRanking($hierarchy['rows'], $rankingOrder)
-            : $this->factRanking($rankingCode, $scopeStoreIds, $period, $rankingOrder);
-        $rankingCatalog = $this->rankingCatalog($showOrganizationRanking);
+        $rankingRange = '';
+        $rankingTotal = 0;
+        $rankingHasMore = false;
+        if ($rankingCode === 'organization') {
+            $rankingHierarchyRows = $hierarchy['rows'];
+            if ($selectedStoreScope) {
+                // 指定门店入口的当前节点固定为一家门店；另建仅用于排行的
+                // 权限裁剪组织投影，避免把单店误当成全部授权门店。
+                $rankingHierarchy = $this->hierarchy->project(
+                    $organizations, $stores, $bindings, $validStoreIds
+                );
+                $rankingHierarchyRows = $rankingHierarchy['rows'];
+                $childOrganizations = array_filter($rankingHierarchyRows, static function (array $row): bool {
+                    return (string)$row['entityType'] === 'organization';
+                });
+                if ($childOrganizations === [] && (string)$rankingHierarchy['currentNode']['entityType'] === 'organization') {
+                    // 所有指定门店同属一个末级组织时，组织排行仍显示该组织，
+                    // 不把门店行重复当作组织排行。
+                    $rankingHierarchyRows = [$rankingHierarchy['currentNode']];
+                }
+                foreach ($rankingHierarchyRows as &$rankingRow) {
+                    $rowStoreIds = array_values(array_map('intval', (array)($rankingRow['_storeIds'] ?? [])));
+                    $rankingRow['metrics'] = $this->metricValues($this->summaryMetrics($rowStoreIds, $period));
+                    unset($rankingRow['_storeIds']);
+                }
+                unset($rankingRow);
+            }
+            $rankingRows = $this->organizationRanking($rankingHierarchyRows, $rankingOrder);
+        } elseif ($rankingCode === 'store') {
+            // 组织模式取当前组织及下级的授权门店；精确门店模式的当前节点
+            // 只是工作台门店，排行必须覆盖全部被指定的门店；时间与上方筛选一致。
+            $storePage = $this->storeRankingPage($rankingStoreIds, $stores, $period, $rankingOrder, 1);
+            $rankingRows = $storePage['rankingRows'];
+            $rankingRange = $storePage['rankingRange'];
+            $rankingTotal = $storePage['rankingTotal'];
+            $rankingHasMore = $storePage['rankingHasMore'];
+        } else {
+            $rankingRows = $this->factRanking($rankingCode, $scopeStoreIds, $period, $rankingOrder);
+        }
+        $rankingCatalog = $this->rankingCatalog($showOrganizationRanking, $showStoreRanking);
         $selectedRankingAvailable = true;
         foreach ($rankingCatalog as $rankingDefinition) {
             if ((string)$rankingDefinition['code'] === $rankingCode) {
@@ -126,6 +181,10 @@ final class MobileWarehouseServices
                 'selectedRankingCode' => $rankingCode,
                 'selectedRankingOrder' => $rankingOrder,
                 'selectedRankingAvailable' => $selectedRankingAvailable,
+                'rankingRange' => $rankingRange,
+                'rankingPage' => 1,
+                'rankingTotal' => $rankingTotal,
+                'rankingHasMore' => $rankingHasMore,
                 'selectedMetricCode' => 'cash_performance',
                 'metric_version' => self::METRIC_VERSION,
                 'data_as_of' => time(),
@@ -724,28 +783,33 @@ final class MobileWarehouseServices
         return $values;
     }
 
-    private function rankingCatalog(bool $showOrganizationRanking): array
+    private function rankingCatalog(bool $showOrganizationRanking, bool $showStoreRanking): array
     {
-        $sales = $this->dictionary->getTooltip('staff_sales_yeji');
-        $labor = $this->dictionary->getTooltip('staff_labor_yeji');
-        $projects = $this->dictionary->getTooltip('completed_service_item_count');
+        // 页签使用简短业务名称；metricCode 仍指向统一指标字典，改名不改变统计口径。
         $items = [
             [
                 'code' => 'organization',
                 'name' => '组织排行',
                 'available' => true,
-                'scopeRule' => 'CURRENT_ORGANIZATION_DESCENDANT_STORES',
+                'scopeRule' => 'AUTHORIZED_ORGANIZATION_OR_SELECTED_STORES',
+            ],
+            [
+                'code' => 'store',
+                'name' => '门店排行',
+                'available' => true,
+                'metricCode' => 'cash_performance',
+                'scopeRule' => 'AUTHORIZED_ORGANIZATION_OR_SELECTED_STORES',
             ],
             [
                 'code' => 'staff_cash_performance',
-                'name' => '员工'.(string)$sales['name'],
+                'name' => '员工销售',
                 'available' => true,
                 'metricCode' => 'staff_sales_yeji',
                 'groupDimension' => 'employee',
             ],
             [
                 'code' => 'staff_labor_performance',
-                'name' => '员工'.(string)$labor['name'],
+                'name' => '员工劳动',
                 'available' => true,
                 'metricCode' => 'staff_labor_yeji',
                 'groupDimension' => 'employee',
@@ -759,25 +823,24 @@ final class MobileWarehouseServices
             ],
             [
                 'code' => 'project_count',
-                'name' => (string)$projects['name'].'排行',
+                'name' => '服务项目',
                 'available' => true,
                 'metricCode' => 'service_project_count',
                 'metricDictionaryReady' => true,
                 'groupDimension' => 'project',
             ],
         ];
-        return $showOrganizationRanking ? $items : array_values(array_filter($items, static function (array $item): bool {
-            return (string)$item['code'] !== 'organization';
+        return array_values(array_filter($items, static function (array $item) use ($showOrganizationRanking, $showStoreRanking): bool {
+            return ((string)$item['code'] !== 'organization' || $showOrganizationRanking)
+                && ((string)$item['code'] !== 'store' || $showStoreRanking);
         }));
     }
 
-    private function rankingCode(string $code, bool $showOrganizationRanking): string
+    private function rankingCode(string $code, bool $showOrganizationRanking, bool $showStoreRanking): string
     {
-        $allowed = ['organization', 'staff_cash_performance', 'staff_labor_performance', 'staff_designated_customer', 'project_count'];
-        if (!$showOrganizationRanking) {
-            $allowed = array_values(array_filter($allowed, static function (string $item): bool { return $item !== 'organization'; }));
-        }
-        return in_array($code, $allowed, true) ? $code : ($showOrganizationRanking ? 'organization' : 'staff_cash_performance');
+        $allowed = array_column($this->rankingCatalog($showOrganizationRanking, $showStoreRanking), 'code');
+        $default = $showOrganizationRanking ? 'organization' : ($showStoreRanking ? 'store' : 'staff_cash_performance');
+        return in_array($code, $allowed, true) ? $code : $default;
     }
 
     /** @return array<string,mixed> */
@@ -791,6 +854,7 @@ final class MobileWarehouseServices
             'employeeId' => $personal ? (int)($entry['employeeId'] ?? 0) : 0,
             'destination' => $personal ? 'employee-performance' : 'warehouse',
             'showOrganizationRanking' => (bool)($entry['showOrganizationRanking'] ?? false),
+            'showStoreRanking' => (bool)($entry['showStoreRanking'] ?? false),
             'organizationPickerEnabled' => (bool)($entry['organizationPickerEnabled'] ?? false),
         ];
     }
@@ -813,6 +877,63 @@ final class MobileWarehouseServices
                 : $rightValue <=> $leftValue;
         });
         return array_slice($rows, 0, 10);
+    }
+
+    /** 门店排行沿用请求的统计区间，按服务端授权范围排序后每页返回 10 家。 */
+    private function storeRankingPage(array $storeIds, array $stores, array $period, string $rankingOrder, int $page): array
+    {
+        $rows = $this->storeRanking($storeIds, $stores, $period, $rankingOrder);
+        $startDate = (string)$period['startDate'];
+        $endDate = (string)$period['endDate'];
+        return self::paginateStoreRankingRows($rows, $page) + [
+            'rankingRange' => $startDate === $endDate ? $startDate : $startDate . ' 至 ' . $endDate,
+            'selectedRankingCode' => 'store',
+            'data_as_of' => time(),
+        ];
+    }
+
+    /** 固定每批 10 家；总数来自完整授权结果，页码越界时不扩大返回范围。 */
+    private static function paginateStoreRankingRows(array $rows, int $page): array
+    {
+        $total = count($rows);
+        $lastPage = max(1, intdiv($total + 9, 10));
+        return [
+            'rankingRows' => $page <= $lastPage ? array_slice($rows, ($page - 1) * 10, 10) : [],
+            'rankingPage' => $page,
+            'rankingTotal' => $total,
+            'rankingHasMore' => $page < $lastPage,
+        ];
+    }
+
+    /**
+     * 每家授权门店单独占一行，包括当日零业绩门店。统一指标 Reader 返回分值，
+     * 排序仍按分精度；只在响应展示时转整数元，避免并列元数打乱真实顺序。
+     */
+    private function storeRanking(array $storeIds, array $stores, array $period, string $rankingOrder): array
+    {
+        if ($storeIds === []) return [];
+        $names = array_column($stores, 'name', 'id');
+        $projection = $this->registeredStoreProjection($storeIds, $period);
+        $rows = [];
+        foreach ($storeIds as $storeId) {
+            if (!isset($names[$storeId])) continue;
+            $cents = (int)($projection['cash_performance'][$storeId] ?? 0);
+            $yuan = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($cents);
+            $rows[] = [
+                'entityType' => 'store', 'entityId' => (int)$storeId,
+                'name' => (string)$names[$storeId], 'metricCode' => 'cash_performance',
+                'rankingCents' => $cents, 'rankingValue' => $yuan, 'displayValue' => (string)$yuan,
+            ];
+        }
+        usort($rows, static function (array $left, array $right) use ($rankingOrder): int {
+            $comparison = (int)$left['rankingCents'] <=> (int)$right['rankingCents'];
+            return $comparison === 0
+                ? (int)$left['entityId'] <=> (int)$right['entityId']
+                : ($rankingOrder === 'asc' ? $comparison : -$comparison);
+        });
+        foreach ($rows as &$row) unset($row['rankingCents']);
+        unset($row);
+        return $rows;
     }
 
     private static function metricAmount(array $row, string $code): int

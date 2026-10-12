@@ -176,6 +176,7 @@
         "nodeId",
         "rankingCode",
         "rankingOrder",
+        "storeRankingPage",
         "trendMetricCode"
       ],
       "response": "warehouseHierarchyProjection",

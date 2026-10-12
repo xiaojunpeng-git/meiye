@@ -42,7 +42,8 @@
 	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
 
 	const periods = [{ key: 'today', label: '今天' }, { key: 'yesterday', label: '昨天' }, { key: 'last_month', label: '上月' }, { key: 'month', label: '本月' }, { key: 'custom', label: '自定义' }]
-	const selectedPeriod = ref('month')
+	// 经营首页初次进入默认看当天经营事实，与数据页的初始时间保持一致。
+	const selectedPeriod = ref('today')
 	const loading = ref(false)
 	const refreshing = ref(false)
 	const message = ref('')
@@ -71,7 +72,7 @@
 
 	const selectedPeriodLabel = computed(() => {
 		for (let index = 0; index < periods.length; index++) if (periods[index].key === selectedPeriod.value) return periods[index].label
-		return '本月'
+		return '今天'
 	})
 
 	onShow(() => {

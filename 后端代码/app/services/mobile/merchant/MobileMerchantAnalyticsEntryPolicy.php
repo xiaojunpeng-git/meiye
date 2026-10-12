@@ -54,6 +54,10 @@ final class MobileMerchantAnalyticsEntryPolicy
             $entryType = self::TYPE_STORE;
             $grantedOrgIds = [];
         }
+        // 跨门店排行只对组织授权或总部精确指定门店授权开放；本店/个人模式
+        // 不因当前员工碰巧有任职门店而获得组织及门店排行入口。
+        $showStoreRanking = $entryType === self::TYPE_ORGANIZATION
+            || ($entryType === self::TYPE_STORE && (string)($hqRows[0]['scope_mode'] ?? '') === 'store_selected');
 
         if ($entryType === self::TYPE_PERSONAL) {
             return [
@@ -62,6 +66,7 @@ final class MobileMerchantAnalyticsEntryPolicy
                 'entryNodeId' => 0,
                 'employeeId' => $employeeId,
                 'showOrganizationRanking' => false,
+                'showStoreRanking' => false,
                 'organizationPickerEnabled' => false,
                 'authorizedStoreIds' => $storeIds,
             ];
@@ -74,7 +79,8 @@ final class MobileMerchantAnalyticsEntryPolicy
                 'entryNodeType' => 'store',
                 'entryNodeId' => $storeId,
                 'employeeId' => 0,
-                'showOrganizationRanking' => false,
+                'showOrganizationRanking' => $showStoreRanking,
+                'showStoreRanking' => $showStoreRanking,
                 'organizationPickerEnabled' => false,
                 'authorizedStoreIds' => $storeIds,
             ];
@@ -92,6 +98,7 @@ final class MobileMerchantAnalyticsEntryPolicy
             'entryNodeId' => $rootOrganizationId,
             'employeeId' => 0,
             'showOrganizationRanking' => true,
+            'showStoreRanking' => $showStoreRanking,
             'organizationPickerEnabled' => true,
             'authorizedStoreIds' => $storeIds,
         ];

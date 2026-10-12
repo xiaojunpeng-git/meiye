@@ -6,7 +6,7 @@
 			<scroll-view scroll-x class="warehouse-page__breadcrumbs"><view class="warehouse-page__breadcrumb-track"><view v-for="(item, index) in breadcrumbs" :key="item.entityType + '-' + item.entityId" class="warehouse-page__breadcrumb" @tap="openBreadcrumb(item)"><text :class="{ 'warehouse-page__breadcrumb--active': index === breadcrumbs.length - 1 }">{{ item.name }}</text><text v-if="index < breadcrumbs.length - 1" class="warehouse-page__breadcrumb-divider">›</text></view></view></scroll-view>
 		</view>
 
-		<scroll-view scroll-y="true" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="warehouse-page__content">
+		<scroll-view scroll-y="true" lower-threshold="100" @scrolltolower="loadMoreStoreRanking" refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="onPullRefresh" class="warehouse-page__content">
 			<view v-if="loading" class="warehouse-page__state"><text>正在读取授权组织范围…</text></view>
 			<view v-else-if="message.length > 0" class="warehouse-page__state"><text>{{ message }}</text><view class="warehouse-page__retry" @tap="reload"><text>重新加载</text></view></view>
 			<view v-else class="warehouse-page__content-inner">
@@ -18,11 +18,14 @@
 				<view v-if="!aggregationCaughtUp" class="warehouse-page__availability"><text>{{ availabilityMessage }}</text></view>
 
 				<scroll-view scroll-x="true" :show-scrollbar="false" class="warehouse-page__ranking-tabs"><view class="warehouse-page__ranking-track"><view v-for="item in rankingCatalog" :key="item.code" class="warehouse-page__ranking-tab" :class="{ 'warehouse-page__ranking-tab--active': selectedRankingCode === item.code }" @tap="selectRanking(item)"><text>{{ item.name }}</text></view></view></scroll-view>
+				<view v-if="selectedRankingCode === 'organization' && selectedStoreRankingScope && !rankingLoading" class="warehouse-page__ranking-scope-note"><text>按全部指定门店汇总 · 统计时间随上方筛选</text></view>
 				<view v-if="selectedRankingCode === 'organization' && visibleRankingRows().length > 0 && trendPoints().length > 0" class="warehouse-page__trend-card"><view class="warehouse-page__trend-head"><text class="warehouse-page__trend-title">{{ trendMetricName() }}趋势</text><text class="warehouse-page__trend-granularity">{{ trendGranularityLabel() }}</text></view><image v-if="platformUsesNativeCanvas && nativeTrendImage.length > 0" :src="nativeTrendImage" mode="scaleToFill" class="warehouse-page__trend-canvas"></image><canvas v-else canvas-id="warehouse-trend" id="warehouse-trend" width="720" height="228" class="warehouse-page__trend-canvas"></canvas><view class="warehouse-page__trend-periods"><view class="warehouse-page__trend-period warehouse-page__trend-period--current"><text>本期</text><text>{{ trendPeriodRange('current') }}</text></view><view class="warehouse-page__trend-period warehouse-page__trend-period--yoy"><text>同比</text><text>{{ trendPeriodRange('yoy') }}</text></view><view class="warehouse-page__trend-period warehouse-page__trend-period--mom"><text>环比</text><text>{{ trendPeriodRange('mom') }}</text></view></view></view>
 				<view v-if="selectedRankingCode === 'organization' && visibleRankingRows().length > 0" class="warehouse-page__ranking-head"><view class="warehouse-page__pie-row"><view class="warehouse-page__pie-card"><text class="warehouse-page__pie-title">现金业绩占比</text><view class="warehouse-page__pie warehouse-page__pie--cash"><image v-if="platformUsesNativeCanvas && nativeCashPieImage.length > 0" :src="nativeCashPieImage" mode="scaleToFill" class="warehouse-page__pie-canvas"></image><canvas v-else canvas-id="warehouse-pie-cash" id="warehouse-pie-cash" width="356" height="356" class="warehouse-page__pie-canvas"></canvas><view v-if="!platformUsesNativeCanvas" v-for="item in visiblePieLabels('cash_performance')" :key="'cash-pie-' + item.name" class="warehouse-page__pie-label-inside" :style="pieLabelStyle(item)"><text>{{ item.name }}</text><text>{{ item.value }}</text></view><view v-if="!platformUsesNativeCanvas && rankingPieSegments('cash_performance').length === 0" class="warehouse-page__pie-center warehouse-page__pie-center--empty"><text>暂无数据</text><text>0</text></view></view></view><view class="warehouse-page__pie-card"><text class="warehouse-page__pie-title">退款金额占比</text><view class="warehouse-page__pie warehouse-page__pie--refund"><image v-if="platformUsesNativeCanvas && nativeRefundPieImage.length > 0" :src="nativeRefundPieImage" mode="scaleToFill" class="warehouse-page__pie-canvas"></image><canvas v-else canvas-id="warehouse-pie-refund" id="warehouse-pie-refund" width="356" height="356" class="warehouse-page__pie-canvas"></canvas><view v-if="!platformUsesNativeCanvas" v-for="item in visiblePieLabels('refund_performance')" :key="'refund-pie-' + item.name" class="warehouse-page__pie-label-inside warehouse-page__pie-label-inside--refund" :style="pieLabelStyle(item)"><text>{{ item.name }}</text><text>{{ item.value }}</text></view><view v-if="!platformUsesNativeCanvas && rankingPieSegments('refund_performance').length === 0" class="warehouse-page__pie-center warehouse-page__pie-center--empty"><text>暂无数据</text><text>0</text></view></view></view></view></view>
-				<view v-else-if="visibleRankingRows().length > 0" class="warehouse-page__bar-card"><view class="warehouse-page__bar-head"><text class="warehouse-page__bar-title">{{ selectedRankingName }}</text><view class="warehouse-page__sort-toggle" @tap="toggleRankingOrder"><text>{{ rankingOrderLabel() }}</text></view></view><view class="warehouse-page__column-scroll"><view class="warehouse-page__column-chart"><view v-for="(row, index) in visibleRankingRows()" :key="'bar-' + row.entityType + '-' + row.entityId" class="warehouse-page__column-item"><view class="warehouse-page__column-plot"><view class="warehouse-page__column-fill" :class="'warehouse-page__column-fill--' + (index % 5).toString()" :style="verticalBarStyle(row)"></view></view><text class="warehouse-page__column-name">{{ row.name }}</text><text class="warehouse-page__column-value">{{ rowValue(row) }}</text></view></view></view></view>
+				<view v-else-if="selectedRankingCode !== 'store' && visibleRankingRows().length > 0" class="warehouse-page__bar-card"><view class="warehouse-page__bar-head"><text class="warehouse-page__bar-title">{{ selectedRankingName }}</text><view class="warehouse-page__sort-toggle" @tap="toggleRankingOrder"><text>{{ rankingOrderLabel() }}</text></view></view><view class="warehouse-page__column-scroll"><view class="warehouse-page__column-chart"><view v-for="(row, index) in visibleRankingRows()" :key="'bar-' + row.entityType + '-' + row.entityId" class="warehouse-page__column-item"><view class="warehouse-page__column-plot"><view class="warehouse-page__column-fill" :class="'warehouse-page__column-fill--' + (index % 5).toString()" :style="verticalBarStyle(row)"></view></view><text class="warehouse-page__column-name">{{ row.name }}</text><text class="warehouse-page__column-value">{{ rowValue(row) }}</text></view></view></view></view>
+				<view v-if="selectedRankingCode === 'store' && !rankingLoading" class="warehouse-page__store-ranking-summary"><view class="warehouse-page__store-ranking-summary-copy"><text>{{ periodLabel }}现金业绩 · 已显示 {{ visibleRankingRows().length }}/{{ storeRankingTotal }} 家门店</text><text>{{ rankingRange }}</text></view><view class="warehouse-page__sort-toggle" @tap="toggleRankingOrder"><text>{{ rankingOrderLabel() }}</text></view></view>
 				<view v-if="visibleRankingRows().length > 0" class="warehouse-page__ranking-list"><view v-for="(row, index) in visibleRankingRows()" :key="row.entityType + '-' + row.entityId" class="warehouse-page__ranking-row" :class="{ 'warehouse-page__ranking-row--clickable': rowCanOpen(row) }" @tap="openRow(row)"><text class="warehouse-page__rank">{{ index + 1 }}</text><view class="warehouse-page__ranking-copy"><view class="warehouse-page__ranking-name-row"><text class="warehouse-page__ranking-name">{{ row.name }}</text><text class="warehouse-page__entity-tag">{{ rowTypeLabel(row) }}</text></view><text class="warehouse-page__ranking-meta">{{ rowMeta(row) }}</text></view><text class="warehouse-page__ranking-value">{{ rowValue(row) }}</text><text v-if="rowCanOpen(row)" class="warehouse-page__chevron">›</text></view></view>
-				<view v-else class="warehouse-page__ranking-empty"><text class="warehouse-page__ranking-empty-title">暂无排行数据</text><text class="warehouse-page__ranking-empty-copy">切换其他指标或组织范围后再试</text></view>
+				<view v-else class="warehouse-page__ranking-empty"><text class="warehouse-page__ranking-empty-title">{{ rankingLoading ? '正在读取排行…' : '暂无排行数据' }}</text><text v-if="!rankingLoading" class="warehouse-page__ranking-empty-copy">切换其他指标或组织范围后再试</text></view>
+				<view v-if="selectedRankingCode === 'store' && !rankingLoading && storeRankingTotal > 0" class="warehouse-page__store-ranking-more" @tap="loadMoreStoreRanking"><text>{{ storeRankingLoading ? '正在加载下一批…' : storeRankingLoadError ? '加载失败，点击重试' : storeRankingHasMore ? '下滑加载更多门店' : '已展示全部门店' }}</text></view>
 				<view class="warehouse-page__freshness"><text>更新于 {{ dataAsOf }}</text></view>
 			</view>
 		</scroll-view>
@@ -46,10 +49,11 @@
 	const refreshing = ref(false)
 	const message = ref('')
 	const month = ref(initialMonth)
-	const periodMode = ref('month')
+	// 商家数据页初次打开以当天为默认统计区间，用户仍可切换其他日期。
+	const periodMode = ref('today')
 	const customStartDate = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1) + '-01')
 	const customEndDate = ref(now.getFullYear().toString() + '-' + twoDigits(now.getMonth() + 1) + '-' + twoDigits(now.getDate()))
-	const periodLabel = ref('本月')
+	const periodLabel = ref('今天')
 	const currentNode = ref<any>({ entityType: 'virtual', entityId: 0, name: '授权范围', storeCount: 0 })
 	const breadcrumbs = ref<Array<any>>([])
 	const hierarchyRows = ref<Array<any>>([])
@@ -60,11 +64,19 @@
 	const summaryMetrics = ref<Array<any>>([])
 	const rankingRows = ref<Array<any>>([])
 	const rankingCatalog = ref<Array<any>>([])
+	const rankingRange = ref('')
+	const storeRankingPage = ref(1)
+	const storeRankingTotal = ref(0)
+	const storeRankingHasMore = ref(false)
+	const storeRankingLoading = ref(false)
+	const storeRankingLoadError = ref(false)
 	const trend = ref<any>({ metricName: '现金业绩', granularity: 'day', points: [], periods: {} })
 	const selectedMetricCode = ref('cash_performance')
 	const selectedRankingCode = ref('organization')
 	const selectedRankingName = ref('组织排行')
 	const selectedRankingAvailable = ref(true)
+	const rankingLoading = ref(false)
+	const selectedStoreRankingScope = ref(false)
 	const organizationPickerEnabled = ref(false)
 	// WeChat composites a type=2d canvas above scroll-view content. Only that
 	// target needs the image fallback; Android and iOS retain their native draw.
@@ -83,6 +95,7 @@
 	const availabilityMessage = ref('')
 	let activeNodeType = ''
 	let activeNodeId = 0
+	let latestWarehouseRequest = 0
 
 	onShow(() => {
 		if (merchantRequestSession(currentMerchantRoot()) == null) {
@@ -96,8 +109,14 @@
 	function onPullRefresh() : void { if (refreshing.value) return; refreshing.value = true; reload(); setTimeout(() => { refreshing.value = false }, 900) }
 	function loadNode(nodeType : string, nodeId : number, keepPage : boolean = false) : void {
 		if (!keepPage) { loading.value = true; message.value = '' }
+		storeRankingLoading.value = false
+		storeRankingLoadError.value = false
+		// 仅接收最近一次筛选或排行请求，避免快速切换时旧响应覆盖新标签。
+		let requestId = ++latestWarehouseRequest
 		queryMobileWarehouse(periodPayload(nodeType, nodeId), (response : any) => {
+			if (requestId !== latestWarehouseRequest) return
 			if (!keepPage) loading.value = false
+			rankingLoading.value = false
 			let payload = response != null && response.body != null ? response.body.warehouse : null
 			if (!response.ok || payload == null) {
 				if (mobileHttpResultRequiresMerchantLogin(response)) { clearMerchantRoot(); openMerchantBootstrap(); return }
@@ -120,9 +139,18 @@
 			summaryMetrics.value = normalizeSummaryMetrics(Array.isArray(payload.summaryMetrics) ? payload.summaryMetrics : [])
 			rankingRows.value = Array.isArray(payload.rankingRows) ? payload.rankingRows : []
 			rankingCatalog.value = Array.isArray(payload.rankingCatalog) ? payload.rankingCatalog : []
+			rankingRange.value = String(payload.rankingRange || '')
+			storeRankingPage.value = Number(payload.rankingPage || 1)
+			storeRankingTotal.value = Number(payload.rankingTotal || 0)
+			storeRankingHasMore.value = payload.rankingHasMore === true
 			trend.value = payload.trend || trend.value
 			selectedRankingCode.value = String(payload.selectedRankingCode || selectedRankingCode.value)
+			for (let index = 0; index < rankingCatalog.value.length; index++) {
+				let item = rankingCatalog.value[index]
+				if (String(item.code || '') === selectedRankingCode.value) selectedRankingName.value = String(item.name || '')
+			}
 			selectedRankingAvailable.value = payload.selectedRankingAvailable !== false
+			selectedStoreRankingScope.value = entry != null && String(entry.entryType || '') === 'store' && entry.showOrganizationRanking === true
 			organizationPickerEnabled.value = entry != null && entry.organizationPickerEnabled === true
 			metricVersion.value = String(payload.metric_version || '—')
 			dataAsOf.value = formatDataTime(Number(payload.data_as_of || 0))
@@ -135,6 +163,33 @@
 		let payload : any = { month: month.value, periodMode: periodMode.value, nodeType: nodeType, nodeId: nodeId, rankingCode: selectedRankingCode.value, rankingOrder: rankingReversed.value ? 'asc' : 'desc', trendMetricCode: selectedMetricCode.value }
 		if (periodMode.value === 'custom') { payload.startDate = customStartDate.value; payload.endDate = customEndDate.value }
 		return payload
+	}
+	// 只续载当前授权范围、日期与排序的下一页；切换条件后的旧响应不能并入新列表。
+	function loadMoreStoreRanking() : void {
+		if (selectedRankingCode.value !== 'store' || loading.value || rankingLoading.value || storeRankingLoading.value || !storeRankingHasMore.value) return
+		let nextPage = storeRankingPage.value + 1
+		let requestId = latestWarehouseRequest
+		let payload = periodPayload(activeNodeType, activeNodeId)
+		payload.storeRankingPage = nextPage
+		storeRankingLoading.value = true
+		storeRankingLoadError.value = false
+		queryMobileWarehouse(payload, (response : any) => {
+			if (requestId !== latestWarehouseRequest || selectedRankingCode.value !== 'store') return
+			storeRankingLoading.value = false
+			let page = response != null && response.body != null ? response.body.warehouse : null
+			if (!response.ok || page == null || String(page.selectedRankingCode || '') !== 'store' || Number(page.rankingPage || 0) !== nextPage) {
+				if (mobileHttpResultRequiresMerchantLogin(response)) { clearMerchantRoot(); openMerchantBootstrap(); return }
+				storeRankingLoadError.value = true
+				return
+			}
+			// 统计区间变化时重新取首批，不能拼接不同日期范围的排行。
+			if (String(page.rankingRange || '') !== rankingRange.value) { requestRanking(); return }
+			rankingRows.value = rankingRows.value.concat(Array.isArray(page.rankingRows) ? page.rankingRows : [])
+			storeRankingPage.value = nextPage
+			storeRankingTotal.value = Number(page.rankingTotal || 0)
+			storeRankingHasMore.value = page.rankingHasMore === true
+			dataAsOf.value = formatDataTime(Number(page.data_as_of || 0))
+		})
 	}
 	function changeMonth(event : any) : void { periodMode.value = 'month'; month.value = String(event.detail.value || initialMonth).slice(0, 7); loadNode(activeNodeType, activeNodeId) }
 	function selectQuickPeriod(mode : string) : void {
@@ -374,6 +429,8 @@
 	}
 	function visibleRankingRows() : Array<any> {
 		let rows = Array.isArray(rankingRows.value) ? rankingRows.value.slice() : []
+		// 门店排行每次由服务端按分精度返回 10 家，前端只拼接已授权续页。
+		if (selectedRankingCode.value === 'store') return rows
 		rows.sort((left : any, right : any) => {
 			let leftValue = rowSortNumber(left)
 			let rightValue = rowSortNumber(right)
@@ -409,8 +466,20 @@
 		return 'height: ' + percent.toString() + '%;'
 	}
 	function rankingOrderLabel() : string { return rankingReversed.value ? '正序' : '反序' }
-	function toggleRankingOrder() : void { rankingReversed.value = !rankingReversed.value; loadNode(activeNodeType, activeNodeId, true) }
-	function selectRanking(item : any) : void { selectedRankingCode.value = String(item.code || 'organization'); selectedRankingName.value = String(item.name || '组织排行'); rankingReversed.value = false; loadNode(activeNodeType, activeNodeId, true) }
+	function toggleRankingOrder() : void { rankingReversed.value = !rankingReversed.value; requestRanking() }
+	function selectRanking(item : any) : void {
+		selectedRankingCode.value = String(item.code || 'organization')
+		selectedRankingName.value = String(item.name || '组织排行')
+		rankingReversed.value = false
+		requestRanking()
+	}
+	function requestRanking() : void {
+		// 切换标签或排序时清掉旧结果，避免新条件下短暂显示上次排行。
+		rankingRows.value = []
+		rankingRange.value = ''
+		rankingLoading.value = true
+		loadNode(activeNodeType, activeNodeId, true)
+	}
 	function rowValue(row : any) : string {
 		if (selectedRankingCode.value !== 'organization') return plainMetricValue(String(row.displayValue || '—'))
 		let values = Array.isArray(row.metrics) ? row.metrics : []
@@ -420,10 +489,11 @@
 	function rowTypeLabel(row : any) : string { let type = String(row.entityType || ''); if (type === 'branch') return '分公司'; if (type === 'manager') return '经理'; if (type === 'organization') return '组织'; if (type === 'store') return '门店'; if (type === 'employee') return '员工'; return '项目' }
 	function orgOptionMeta(row : any) : string { return rowTypeLabel(row) + ' · ' + Number(row.storeCount || 0).toString() + ' 家门店' }
 	function organizationSelectorLabel() : string { let name = currentNode.value != null ? String(currentNode.value.name || '').trim() : ''; return name.length > 0 ? name : '集团' }
-	function rowMeta(row : any) : string { if (selectedRankingCode.value === 'organization') return Number(row.storeCount || 0).toString() + ' 家门店'; return selectedRankingCode.value === 'project_count' ? '本月完成服务' : String(currentNode.value.name || '') }
+	function rowMeta(row : any) : string { if (selectedRankingCode.value === 'organization') return Number(row.storeCount || 0).toString() + ' 家门店'; if (selectedRankingCode.value === 'store') return periodLabel.value + '现金业绩'; return selectedRankingCode.value === 'project_count' ? periodLabel.value + '完成服务' : String(currentNode.value.name || '') }
 	function rowCanOpen(row : any) : boolean {
 		let type = String(row.entityType || '')
-		if (selectedRankingCode.value === 'organization') return type === 'organization' || type === 'branch' || type === 'manager' || type === 'store'
+		// 指定门店权限的工作台节点固定为当前门店，组织行不能导航到未开放的组织节点。
+		if (selectedRankingCode.value === 'organization') return organizationPickerEnabled.value && (type === 'organization' || type === 'branch' || type === 'manager' || type === 'store')
 		return type === 'employee' && (selectedRankingCode.value === 'staff_cash_performance' || selectedRankingCode.value === 'staff_labor_performance' || selectedRankingCode.value === 'staff_designated_customer')
 	}
 	function trendMetricName() : string { return String((trend.value || {}).metricName || '现金业绩') }
@@ -853,7 +923,11 @@
 	.warehouse-page__metric:nth-child(4) .warehouse-page__metric-badge::after { width: 6px; height: 6px; transform: translate(-6px, -5px) rotate(25deg); }
 	.warehouse-page__metric-name { margin-top: 7px; line-height: 14px; }
 	.warehouse-page__metric-value { margin-top: 3px; font-size: 18px; line-height: 22px; }
-	.warehouse-page__ranking-track { width: 540px; min-width: 540px; flex: none; }
+	.warehouse-page__ranking-track { width: 648px; min-width: 648px; flex: none; }
+	.warehouse-page__ranking-scope-note { padding: 10px 4px 4px 4px; font-size: 12px; color: #718096; }
+	.warehouse-page__store-ranking-more { padding: 18px 4px 10px 4px; text-align: center; font-size: 12px; color: #718096; }
+	.warehouse-page__store-ranking-summary { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 4px 8px 4px; font-size: 12px; color: #718096; }
+	.warehouse-page__store-ranking-summary-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
 	.warehouse-page__ranking-tabs { margin-top: 8px; }
 	.warehouse-page__ranking-head { min-height: 0; padding-top: 4px; padding-bottom: 6px; }
 	.warehouse-page__pie-row { margin-top: 0; }

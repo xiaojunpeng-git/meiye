@@ -24,6 +24,9 @@ function readHomeCache(periodMode : string) : any {
 	let stored = uni.getStorageSync(HOME_CACHE_KEY)
 	if (stored == null || typeof stored != 'object') return null
 	if (String(stored.periodMode || '') != periodMode || Number(stored.savedAt || 0) + HOME_CACHE_TTL_MS < Date.now()) return null
+	// 相对日期筛选按上海自然日解释；跨零点后旧缓存不能冒充今天或本月数据。
+	let shanghaiOffsetMs = 8 * 60 * 60 * 1000
+	if (Math.floor((Number(stored.savedAt || 0) + shanghaiOffsetMs) / 86400000) != Math.floor((Date.now() + shanghaiOffsetMs) / 86400000)) return null
 	let body = stored.body
 	return body != null && typeof body == 'object' ? body : null
 }
