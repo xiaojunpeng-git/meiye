@@ -22,6 +22,8 @@
 				"navigationBarTextStyle": "black"
 			}
 		},
+		// #ifdef H5
+		// 视觉预览含演示品牌和数据，只供本地 H5 评审，不能进入客户小程序包。
 		{
 			"path": "pages/design_preview/index",
 			"style": {
@@ -30,6 +32,7 @@
 				"navigationBarTextStyle": "black"
 			}
 		},
+		// #endif
 		{
 			"path": "pages/order_addcart/order_addcart",
 			"style": {
