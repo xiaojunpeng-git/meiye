@@ -1691,8 +1691,10 @@ class OrganizationScopeService extends BaseServices
     /**
      * @param int[] $allowedStoreIds 空数组表示无门店权限；配合 $includeEmptyOrgs 仍可返回纯组织树
      * @param bool $includeEmptyOrgs 为 true 时保留无下级门店/组织的组织节点（人员选所属组织需要）
+     * @param bool $formalResource 仅正式组织资源选择器使用；其 org_id 必须来自 organization，
+     *                             不能在切源凭证缺失时退回旧区域 ID 并写入人员/门店资料。
      */
-    public function buildPickerTree(array $allowedStoreIds, bool $includeEmptyOrgs = false): array
+    public function buildPickerTree(array $allowedStoreIds, bool $includeEmptyOrgs = false, bool $formalResource = false): array
     {
         $allowedStoreIds = array_values(array_unique(array_filter(array_map('intval', $allowedStoreIds))));
         if (!$allowedStoreIds && !$includeEmptyOrgs) {
@@ -1730,7 +1732,7 @@ class OrganizationScopeService extends BaseServices
             ];
         }
 
-        if (!$this->isMigrated()) {
+        if (!$formalResource && !$this->isMigrated()) {
             return $this->buildLegacyPickerTree($allowedSet, $storeMap);
         }
 

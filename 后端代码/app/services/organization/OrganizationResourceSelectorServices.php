@@ -34,7 +34,7 @@ class OrganizationResourceSelectorServices extends BaseServices
             case 'employee':
                 return $this->searchEmployees($keyword, $page, $limit, $ids, $disabledIds, $allowedStoreIds, $allowedOrgIds);
             case 'org_store_tree':
-                return $this->searchOrgStoreTree($keyword, $ids, $disabledIds, $allowedStoreIds);
+                return $this->searchOrgStoreTree($keyword, $disabledIds, $allowedStoreIds);
             default:
                 throw new AdminException('不支持的资源类型');
         }
@@ -68,7 +68,7 @@ class OrganizationResourceSelectorServices extends BaseServices
             case 'employee':
                 return $this->searchEmployees($keyword, $page, $limit, $ids, $disabledIds, $allowedStoreIds, $allowedOrgIds);
             case 'org_store_tree':
-                return $this->searchOrgStoreTree($keyword, $ids, $disabledIds, $allowedStoreIds);
+                return $this->searchOrgStoreTree($keyword, $disabledIds, $allowedStoreIds);
             default:
                 throw new AdminException('不支持的资源类型');
         }
@@ -80,10 +80,11 @@ class OrganizationResourceSelectorServices extends BaseServices
      */
     protected function searchOrgStoreTree(
         string $keyword,
-        array $ids,
         array $disabledIds,
         ?array $allowedStoreIds
     ): array {
+        // 仅全量授权者可看到无门店的纯组织节点；受限范围只展示可见门店的祖先链。
+        $includeEmptyOrgs = $allowedStoreIds === null;
         if ($allowedStoreIds === null) {
             $allowedStoreIds = Db::name('system_store')
                 ->where('is_del', 0)
@@ -91,20 +92,20 @@ class OrganizationResourceSelectorServices extends BaseServices
                 ->column('id');
             $allowedStoreIds = array_values(array_unique(array_filter(array_map('intval', $allowedStoreIds))));
         }
-        if ($ids) {
-            // ids 回显：可按 org:12 / store:5 或纯数字组织 ID
-            $wantOrg = [];
-            $wantStore = [];
-            foreach ($ids as $raw) {
-                // normalizeIds 已转 int；回显走 label 接口时用 resource=organization|store
-                $wantOrg[] = (int)$raw;
-            }
-            unset($wantOrg, $wantStore);
-        }
         /** @var OrganizationScopeService $scope */
         $scope = app()->make(OrganizationScopeService::class);
-        // 人员所属组织选择需要保留无门店的组织节点（如董事会、总部中心）
-        $tree = $scope->buildPickerTree($allowedStoreIds ?: [], true);
+        // 配置已指向正式组织时，切源凭证缺失只影响全局读取；本选择器会将
+        // org_id 写入正式组织/人员资料，不能因此回退旧区域 ID。仍处于真正
+        // legacy 模式的实例沿用原树，避免扩大本次修复范围。
+        $formalResource = $scope->getSourceMode() === OrganizationScopeService::MODE_ORGANIZATION;
+        if ($formalResource) {
+            $native = $scope->validateOrganizationNativeIntegrity();
+            if (empty($native['passed'])) {
+                throw new AdminException('正式组织数据不完整，暂不能选择组织或门店');
+            }
+        }
+        // 全量人员维护场景保留无门店的组织节点（如董事会、总部中心）。
+        $tree = $scope->buildPickerTree($allowedStoreIds ?: [], $includeEmptyOrgs, $formalResource);
         $tree = $this->decoratePickerTree($tree, $disabledIds);
         if ($keyword !== '') {
             $tree = $this->filterPickerTreeByKeyword($tree, $keyword);
