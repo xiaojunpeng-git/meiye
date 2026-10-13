@@ -94,6 +94,14 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     // Keep the reading runway at the physical transcript end. Reopened
     // history remains chronological instead of being appended after its gap.
     body.insertBefore(turn, readingRunway && readingRunway.parentNode === body ? readingRunway : null);
+    // History is local display data. Recover the immutable file task only
+    // through this turn's original server-bound delivery proof, never through
+    // the mutable current Run or the stored answer text. Poll after attach so
+    // a detached history card cannot silently skip its first status request.
+    if (displayedAnswer && displayedAnswer.auto_export_required === true && delivery && delivery.status === 'COMPLETED') {
+      if (delivery.run_id && delivery.run_delivery_token) startIndependentExport(delivery, turn, false);
+      else turn.appendChild(el('div', '此历史回答的 Excel 凭证已失效，请重新提问。', 'card muted'));
+    }
     return turn;
   }
   // A failed turn is immutable history. Choosing its card starts a new Run
@@ -577,11 +585,12 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   function binding() { return { client_session_id: clientSession, run_delivery_token: run.run_delivery_token, generation: run.generation }; }
   // An Excel receipt belongs to one completed answer, not to the mutable
   // current Run. Polling it must never hold the composer or delay the answer.
-  function startIndependentExport(source, target) {
+  function startIndependentExport(source, target, createTask = true) {
     // The admin production compiler does not parse optional chaining in this
     // shared module; keep the same null guard usable by both web and mobile.
     if (!target || !source || !source.run_delivery_token) return;
-    const proof = { client_session_id: clientSession, run_delivery_token: source.run_delivery_token, generation: source.generation };
+    const proof = { client_session_id: source.client_session_id || clientSession,
+      run_delivery_token: source.run_delivery_token, generation: source.generation };
     const card = el('div', 'Excel 正在排队…', 'card muted'); target.appendChild(card);
     const path = '/runs/' + encodeURIComponent(source.run_id);
     let statusFailures = 0;
@@ -611,10 +620,20 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
         card.appendChild(download); return;
       }
       if (['failed','cancelled','expired'].includes(receipt.status)) { card.textContent = 'Excel 生成失败，问答结果不受影响。'; return; }
+      if (receipt.status === 'not_requested') {
+        card.textContent = '完整明细尚未生成 Excel。';
+        const generate = el('button', '生成 Excel');
+        generate.onclick = async () => { generate.disabled = true; card.textContent = 'Excel 正在排队…';
+          try { updateFile(await request('POST', path + '/export', proof)); }
+          catch (_) { card.textContent = 'Excel 暂无法生成，请稍后重试。'; }
+        };
+        card.appendChild(generate); return;
+      }
       card.textContent = receipt.status === 'running' ? 'Excel 正在生成…' : 'Excel 正在排队…';
       setTimeout(pollStatus, 1500);
     };
-    request('POST', path + '/export', proof).then(updateFile).catch(() => { if (card.isConnected) card.textContent = 'Excel 暂无法生成，问答结果不受影响。'; });
+    if (createTask) request('POST', path + '/export', proof).then(updateFile).catch(() => { if (card.isConnected) card.textContent = 'Excel 暂无法生成，问答结果不受影响。'; });
+    else pollStatus();
   }
   // The create response is authoritative for that specific Run. Bootstrap is
   // only a capability snapshot and can change while a request is in flight.

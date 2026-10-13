@@ -213,7 +213,8 @@ $cohortEvidence=['query'=>$cohortQuery,'results'=>[$cohortResult]];
 $cohortAnswer=(new AiAnswerRenderer())->render($cohortEvidence);
 csCheck(strpos($cohortAnswer['summary'],'会员总资产合计1,250元')!==false
     &&strpos($cohortAnswer['summary'],'会员账户余额合计800元')!==false
-    &&count($cohortAnswer['table']['rows']??[])===6,
+    &&count($cohortAnswer['table']['rows']??[])===2
+    &&count($cohortAnswer['table']['columns']??[])===4,
     'one cohort answer reports complete asset totals and per-member output columns');
 $cohortExport=MetricReadViewExportProvider::project($cohortEvidence);
 csCheck(count($cohortExport)===6 && in_array('会员总资产',array_column($cohortExport,'metric_name'),true),
@@ -256,7 +257,7 @@ for ($index=1;$index<=10;$index++) {
 }
 $tenAnswer=(new AiAnswerRenderer())->render(['query'=>$tenQuery,'results'=>[$tenResult]]);
 csCheck(($tenAnswer['auto_export_required']??false)===true
-    &&count($tenAnswer['table']['rows'])===20
+    &&count($tenAnswer['table']['rows'])===10
     &&strpos($tenAnswer['summary'],'所选前10人的完整明细另行生成 Excel')!==false,
     'a complete requested top ten remains exportable when three visible metrics exceed the screen row cap');
 csReject(static function()use($sortedQuery):void {
@@ -312,10 +313,31 @@ $memberMultiEvidence=['query'=>$memberMulti,'results'=>[[
 ]]];
 $memberMultiAnswer=(new AiAnswerRenderer())->render($memberMultiEvidence);
 csCheck(strpos($memberMultiAnswer['summary'],'全部2项条件')!==false
-    &&count($memberMultiAnswer['table']['rows']??[])===2
-    &&($memberMultiAnswer['table']['rows'][0]['unit']??null)==='次'
-    &&($memberMultiAnswer['table']['rows'][1]['unit']??null)==='元',
+    &&count($memberMultiAnswer['table']['rows']??[])===1
+    &&($memberMultiAnswer['table']['rows'][0]['metric_member_service_visit_count']??null)==='4'
+    &&($memberMultiAnswer['table']['rows'][0]['metric_sales_collected_amount']??null)==='23,500'
+    &&strpos($memberMultiAnswer['table']['columns'][1]['label']??'','次')!==false
+    &&strpos($memberMultiAnswer['table']['columns'][2]['label']??'','元')!==false,
     'member multi-condition evidence renders every registered metric and its own unit');
+// The screen limit counts authorized people, while the visible workbook and
+// exact-value audit both retain the complete verified population.
+$largeMemberEvidence=$memberMultiEvidence;
+$largeMemberEvidence['results'][0]['count']=504;
+$largeMemberEvidence['results'][0]['list_limit']=1000;
+$largeMemberEvidence['results'][0]['rows']=[];
+for ($index=1;$index<=504;$index++) {
+    $largeMemberEvidence['results'][0]['rows'][]=['member_id'=>$index,'member_name'=>'测试会员'.$index,
+        'metrics'=>['member_service_visit_count'=>4,'sales_collected_amount'=>2350000]];
+}
+$largeAnswer=(new AiAnswerRenderer())->render($largeMemberEvidence);
+$largeWorkbook=MetricReadViewExportProvider::presentationTables($largeMemberEvidence);
+csCheck(($largeAnswer['auto_export_required']??false)===true
+    &&($largeAnswer['table']['total_rows']??null)===504
+    &&count($largeAnswer['table']['rows'])===20
+    &&($largeAnswer['table']['rows'][19]['label']??null)==='测试会员20'
+    &&count($largeWorkbook[0]['rows']??[])===504
+    &&count(MetricReadViewExportProvider::project($largeMemberEvidence))===1008,
+    '504-person detail previews 20 people and retains all people in the visible and exact Excel sheets');
 // Predicate periods are typed and signed per leaf. The query date is only
 // their frozen reference day; the list must label both measured windows.
 $dated=$memberMulti;
@@ -346,9 +368,9 @@ $datedEvidence=['query'=>$dated,'results'=>[[
 ]]];
 $datedAnswer=(new AiAnswerRenderer())->render($datedEvidence);
 $datedExport=MetricReadViewExportProvider::project($datedEvidence);
-csCheck(count($datedAnswer['table']['rows'])===2
-    &&strpos($datedAnswer['table']['rows'][0]['metric'],'2026-08-01 至 2026-08-31')!==false
-    &&strpos($datedAnswer['table']['rows'][1]['metric'],'2026-09-01 至 2026-09-19')!==false
+csCheck(count($datedAnswer['table']['rows'])===1
+    &&strpos($datedAnswer['table']['columns'][1]['label'],'2026-08-01 至 2026-08-31')!==false
+    &&strpos($datedAnswer['table']['columns'][2]['label'],'2026-09-01 至 2026-09-19')!==false
     &&($datedExport[0]['period_name']??null)==='2026-08-01 至 2026-08-31'
     &&($datedExport[1]['period_name']??null)==='2026-09-01 至 2026-09-19',
     'screen and export identify the factual window of every dated predicate');
@@ -371,8 +393,9 @@ $assetAnyView=['query'=>$assetAny,'results'=>[[
 $assetAnyAnswer=(new AiAnswerRenderer())->render($assetAnyView);
 csCheck(strpos($assetAnyAnswer['summary'],'任一5项条件')!==false
     &&strpos($assetAnyAnswer['summary'],'现有有效服务记录中')===false
-    &&($assetAnyAnswer['table']['rows'][0]['value']??null)==='未记录'
-    &&count($assetAnyAnswer['table']['rows']??[])===5,
+    &&($assetAnyAnswer['table']['rows'][0]['metric_member_days_since_last_visit']??null)==='未记录'
+    &&count($assetAnyAnswer['table']['rows']??[])===1
+    &&count($assetAnyAnswer['table']['columns']??[])===6,
     'OR answer keeps every metric while an unknown last-visit age remains unmeasured');
 $memberExport=MetricReadViewExportProvider::project($memberEvidence);
 csCheck(count($memberExport)===1&&$memberExport[0]['store_name']==='测试会员；范围：当前授权范围'
@@ -432,7 +455,8 @@ csCheck($groupedCompiled['query']['condition_set']===$grouped['condition_set']
     'mixed AND/OR grouping evaluates every stated predicate on one authorized person');
 $groupAnswer=(new AiAnswerRenderer())->render($groupView);
 csCheck(strpos($groupAnswer['summary'],'组合3项条件')!==false
-    &&count($groupAnswer['table']['rows']??[])===2,
+    &&count($groupAnswer['table']['rows']??[])===1
+    &&count($groupAnswer['table']['columns']??[])===3,
     'grouped answer explains the combined condition and displays a repeated metric once');
 $droppedGroup=$grouped['aggregate_condition'];
 $droppedGroup['expression']=['relation'=>'all','children'=>[0,1]];
@@ -584,7 +608,8 @@ $productEvidence=['query'=>$productQuery,'results'=>[[
 $productAnswer=(new AiAnswerRenderer())->render($productEvidence);
 csCheck(strpos($productAnswer['summary'],'产品共有1个')!==false
     &&($productAnswer['table']['columns'][0]['label']??null)==='产品'
-    &&count($productAnswer['table']['rows']??[])===2,
+    &&count($productAnswer['table']['rows']??[])===1
+    && count($productAnswer['table']['columns']??[])===3,
     'generic dimension evidence renders the product conclusion, object label and both registered metrics');
 $saleLineEvidence=$productEvidence;
 $saleLineEvidence['query']['business_filters']=['object_kind'=>'sale_line'];
@@ -596,7 +621,7 @@ $saleLineEvidence['results'][0]['rows'][0]['entity_id']='sale-fact:line-001';
 $saleLineAnswer=(new AiAnswerRenderer())->render($saleLineEvidence);
 csCheck(strpos($saleLineAnswer['summary'],'销售明细')!==false
     &&($saleLineAnswer['table']['columns'][0]['label']??null)==='销售明细'
-    &&count($saleLineAnswer['table']['rows']??[])===2,
+    &&count($saleLineAnswer['table']['rows']??[])===1,
     'opaque immutable sale-line identity is verified without being exposed or rejected by rendering');
 $productExport=MetricReadViewExportProvider::project($productEvidence);
 csCheck(count($productExport)===2&&$productExport[0]['store_name']==='测试产品；范围：当前授权范围'
@@ -655,9 +680,9 @@ $memberStateEvidence=['query'=>$memberStateQuery,'results'=>[[
     ]]],
 ]]];
 $memberStateAnswer=(new AiAnswerRenderer())->render($memberStateEvidence);
-csCheck(($memberStateAnswer['table']['rows'][0]['unit']??null)==='次'
-    &&($memberStateAnswer['table']['rows'][1]['unit']??null)==='天'
-    &&($memberStateAnswer['table']['rows'][1]['value']??null)==='121'
+csCheck(strpos($memberStateAnswer['table']['columns'][1]['label']??'','次')!==false
+    &&strpos($memberStateAnswer['table']['columns'][2]['label']??'','天')!==false
+    &&($memberStateAnswer['table']['rows'][0]['metric_member_days_since_last_visit']??null)==='121'
     &&strpos($memberStateAnswer['summary'],'现有有效服务记录中查到')===0,
     'member state evidence keeps entitlement counts and elapsed days visibly distinct');
 $memberStateEmpty=$memberStateEvidence;

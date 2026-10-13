@@ -108,10 +108,12 @@ export class DeviceSessions {
       ...(options.topicBoundary === 'reset' ? { topic_boundary: 'reset' } : {}),
       ...(elapsedSeconds !== null ? { elapsed_seconds: elapsedSeconds } : {}),
       ...(runId && generation !== null ? { run_id: runId, generation } : {}),
-      // This owner-bound proof expires with the 24-hour transcript. It lets a
-      // reopened answer receive feedback without trusting its stored text.
-      ...(runId && delivery.feedback_available && typeof delivery.run_delivery_token === 'string'
-        ? { feedback_available: true, run_delivery_token: delivery.run_delivery_token,
+      // This owner-bound proof expires with the 24-hour transcript. A reopened
+      // answer needs it for both feedback and its separate Excel task; neither
+      // action may trust the locally stored answer text as authorization.
+      ...(runId && typeof delivery.run_delivery_token === 'string'
+        ? { feedback_available: delivery.feedback_available === true,
+          run_delivery_token: delivery.run_delivery_token,
           client_session_id: delivery.client_session_id || '', status: delivery.status } : {}),
       created_at: this.clock() }); delete s.pending_question; this.save(sessions);
     return true;

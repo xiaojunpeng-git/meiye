@@ -18,7 +18,7 @@ final class AiAnswerRenderer
         // The verified answer itself is the primary presentation.  Retain the
         // response key for old clients, but do not repeat the same evidence as
         // summary prose and metric cards.
-        $cards = []; $rows = []; $facts = []; $metricNames = []; $rankingPresentationColumns=[]; $shape = $view['query']['query_shape'];
+        $cards = []; $rows = []; $facts = []; $metricNames = []; $rankingPresentationColumns=[]; $conditionColumns=[]; $shape = $view['query']['query_shape'];
         $threshold = $shape === 'threshold_count' ? $this->thresholdCondition($view['query']) : null;
         $conditionSummary = null; $conditionListHasMore = false; $conditionListLimit = null; $conditionObjectLabel = null;
         $breakdownHasMore=false;$breakdownObjectLabel=null;$breakdownColumns=[];
@@ -93,6 +93,10 @@ final class AiAnswerRenderer
                         }
                         $displayCodes=$periodScoped?array_column($set['conditions'],'metric_code')
                             :array_values(array_unique(array_column($set['conditions'],'metric_code')));
+                        // A list row represents one authorized object. Keep
+                        // each registered condition in its own named column so
+                        // the 20-row preview means 20 people, not 20 values.
+                        $memberRow=['label'=>$object[$nameKey]];
                         foreach ($displayCodes as $index=>$code) {
                             $value=$periodScoped?$object['condition_values'][$index]:($object['metrics'][$code]??null);
                             $metricTip=$dictionary->getTooltip($code);$metric=$registered[$code]??null;
@@ -112,11 +116,12 @@ final class AiAnswerRenderer
                                     ) : null;
                                 $periodLabel=$period===null?'当前':$period['start'].' 至 '.$period['end'];
                             }
-                            $rows[]=['label'=>$object[$nameKey],
-                                'metric'=>$periodScoped?$metricTip['name'].'（'.$periodLabel.'）':$metricTip['name'],
-                                'value'=>$ageUnknown?'未记录':$this->metricValue($value,(string)$metric['storage_unit']),
-                                'unit'=>$ageUnknown?'':$metricUnit,
-                                'period'=>$periodScoped?'condition_'.$index:'current','period_label'=>$periodLabel];
+                            $key=$periodScoped?'condition_'.$index:'metric_'.$code;
+                            $columnLabel=$metricTip['name'].($periodScoped?'（'.$periodLabel.'）':'')
+                                .($metricUnit===''?'':'（'.$metricUnit.'）');
+                            if (isset($conditionColumns[$key]) && $conditionColumns[$key]!==$columnLabel) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                            $conditionColumns[$key]=$columnLabel;
+                            $memberRow[$key]=$ageUnknown?'未记录':$this->metricValue($value,(string)$metric['storage_unit']);
                         }
                         foreach ($resultCodes as $code) {
                             if (in_array($code,$displayCodes,true)) continue;
@@ -125,10 +130,11 @@ final class AiAnswerRenderer
                             if (!is_int($value)||$value<0||!is_array($metric)||empty($label['user_ready'])) {
                                 throw new RuntimeException('AI_EVIDENCE_INVALID');
                             }
-                            $rows[]=['label'=>$object[$nameKey],'metric'=>$label['name'],
-                                'value'=>$this->metricValue($value,'fen'),'unit'=>'元',
-                                'period'=>'current','period_label'=>'当前'];
+                            $key='result_'.$code;
+                            $conditionColumns[$key]=$label['name'].'（元）';
+                            $memberRow[$key]=$this->metricValue($value,'fen');
                         }
+                        $rows[]=$memberRow;
                     }
                 }
                 continue;
@@ -305,7 +311,9 @@ final class AiAnswerRenderer
         foreach ($notes as $note) $answer['summary'] .= ' ' . $note;
         if ($rows) {
             $columns = [['key' => 'label', 'label' => $shape === 'trend' ? '日期' : ($breakdownObjectLabel ?? ($conditionObjectLabel ?? ($person ? '人员' : ($member ? '会员' : ($dimensionLabel ?? '门店')))))]];
-            if ($shape==='breakdown') {
+            if ($shape==='condition_list') {
+                foreach ($conditionColumns as $key=>$label) $columns[]=['key'=>$key,'label'=>$label];
+            } elseif ($shape==='breakdown') {
                 foreach ($breakdownColumns as $code=>$column) {
                     $columns[]=['key'=>'metric_'.$code,'label'=>$column['label'].($column['unit']===''?'':'（'.$column['unit'].'）')];
                 }
@@ -317,7 +325,7 @@ final class AiAnswerRenderer
             } else {
                 $columns=array_merge($columns,[['key' => 'metric', 'label' => '指标'], ['key' => 'value', 'label' => '数值'], ['key' => 'unit', 'label' => '单位']]);
             }
-            if (count(array_unique(array_column($rows, 'period'))) > 1) array_unshift($columns, ['key' => 'period_label', 'label' => '期间']);
+            if ($shape!=='condition_list' && count(array_unique(array_column($rows, 'period'))) > 1) array_unshift($columns, ['key' => 'period_label', 'label' => '期间']);
             if ($shape === 'ranking') $columns[] = ['key' => 'rank', 'label' => '名次'];
             $answer['table'] = ['columns' => $columns, 'rows' => $rows];
         }
@@ -328,10 +336,21 @@ final class AiAnswerRenderer
         // Screen paging is a presentation concern. The signed Reader view
         // retains every row for the independent file worker and follow-ups.
         $topSelectionComplete=$shape==='condition_list' && isset($view['query']['condition_set']['sort']);
-        return $screenLimit ? self::limitTables($answer,
+        $answer=$screenLimit ? self::limitTables($answer,
             (!$conditionListHasMore||$topSelectionComplete)&&!$breakdownHasMore,
             $topSelectionComplete?'所选前'.($view['query']['condition_set']['sort']['limit']??20).'人的完整明细':'完整明细'
         ) : $answer;
+        // An explicitly selected small top-N can still carry more than 20
+        // metric cells. Preserve the agreed full-file option even though the
+        // pivoted screen now shows every selected person in one row.
+        if ($screenLimit && $topSelectionComplete && empty($answer['auto_export_required'])
+            && count($rows)*count($conditionColumns)>self::TABLE_SCREEN_LIMIT) {
+            $answer['auto_export_required']=true;
+            $note='所选前'.($view['query']['condition_set']['sort']['limit']??20).'人的完整明细另行生成 Excel。';
+            $answer['summary'].=' '.$note;
+            $answer['presentation']['notes'][]=$note;
+        }
+        return $answer;
     }
 
     /** A display label only: never replace the underlying business_date fact. */
