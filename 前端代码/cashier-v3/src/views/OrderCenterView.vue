@@ -981,10 +981,12 @@ async function submitImportedCardRefund() {
     || !/^(?:0|[1-9][0-9]{0,7})$/.test(balanceAmount)) {
     importedCardRefundError.value = '本次退款金额和转入余额只能填写整数元。'; return
   }
+  // Card candidates expose the debt-adjusted amount separately; the gross
+  // unconsumed value remains the immutable rights/refund history basis.
   const remaining = mode === 'card'
-    ? Number(card?.remainingAmountCents || 0) / 100 : Number(line?.remainingAmountCents || 0) / 100
+    ? Number(card?.usableRemainingAmountCents || 0) / 100 : Number(line?.remainingAmountCents || 0) / 100
   const targetRemaining = mode === 'card'
-    ? Number(card?.components?.find((item) => String(item.id) === unifiedRefundComponentId.value)?.remainingAmountCents || 0) / 100
+    ? Number(card?.components?.find((item) => String(item.id) === unifiedRefundComponentId.value)?.usableRemainingAmountCents || 0) / 100
     : remaining
   if (mode !== 'catalog' && (Number(amount) > targetRemaining || Number(balanceAmount) > remaining)) {
     importedCardRefundError.value = '本次退款金额或转入余额超过实际剩余金额。'; return
@@ -3798,7 +3800,7 @@ onBeforeUnmount(() => {
                     <span class="imported-card-refund-dialog__card-metrics">
                       <span>成交金额 <strong>{{ importedCardRefundMoney(card.purchaseAmountCents) }}</strong></span>
                       <span>实际可用次数 <strong>{{ card.remainingTimes }}</strong></span>
-                      <span>实际剩余金额 <strong>{{ importedCardRefundMoney(card.remainingAmountCents) }}</strong></span>
+                      <span>实际剩余金额 <strong>{{ importedCardRefundMoney(card.usableRemainingAmountCents) }}</strong></span>
                       <span>历史退款 <strong>{{ importedCardRefundMoney(card.historicalRefundCents) }}</strong></span>
                     </span>
                     <small v-if="card.unavailableReason" class="service-void-modal__error">{{ card.unavailableReason }}</small>
@@ -3810,10 +3812,10 @@ onBeforeUnmount(() => {
               <div class="unified-refund-dialog__column-head"><h3>{{ selectedUnifiedRefundCard?.ruleType === 'choice_count' ? '整卡共享次数' : '卡内项目' }}</h3><span v-if="selectedUnifiedRefundCard">共 {{ selectedUnifiedRefundCard.components.length }} 项</span></div>
               <template v-if="selectedUnifiedRefundCard">
                 <div class="unified-refund-dialog__component-list" role="radiogroup" aria-label="卡内项目">
-                  <label v-for="component in selectedUnifiedRefundCard.components" :key="component.id" class="unified-refund-dialog__component" :class="{ 'unified-refund-dialog__component--disabled': component.remainingAmountCents <= 0 }">
-                    <input v-model="unifiedRefundComponentId" type="radio" name="unified-refund-component" :value="String(component.id)" :disabled="component.remainingAmountCents <= 0 || importedCardRefundUncertain" />
+                  <label v-for="component in selectedUnifiedRefundCard.components" :key="component.id" class="unified-refund-dialog__component" :class="{ 'unified-refund-dialog__component--disabled': component.usableRemainingAmountCents <= 0 }">
+                    <input v-model="unifiedRefundComponentId" type="radio" name="unified-refund-component" :value="String(component.id)" :disabled="component.usableRemainingAmountCents <= 0 || importedCardRefundUncertain" />
                     <span class="unified-refund-dialog__component-name">{{ component.name }}</span>
-                    <span class="unified-refund-dialog__component-remaining"><strong>{{ importedCardRefundMoney(component.remainingAmountCents) }}</strong><small>剩余 {{ component.remainingTimes }} 次</small></span>
+                    <span class="unified-refund-dialog__component-remaining"><strong>{{ importedCardRefundMoney(component.usableRemainingAmountCents) }}</strong><small>剩余 {{ component.remainingTimes }} 次</small></span>
                   </label>
                 </div>
                 <div v-if="selectedUnifiedRefundCard.isTimeCard" class="unified-refund-dialog__field">

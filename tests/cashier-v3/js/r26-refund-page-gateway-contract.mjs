@@ -90,6 +90,12 @@ assert.match(refundService, /'targetName' => \(string\)\(\$saved\['target_name_s
 assert.match(refundService, /where\('cpr\.tenant_id', \$tenantId\)->where\('cpr\.card_holder_id', \$holderId\)/)
 assert.match(refundService, /where\('cpr\.legacy_order_id', \$originId\)->where\('cpr\.status', 'completed'\)/)
 assert.match(refundService, /'sourceOrderNo' => \$salesOrderNo !== '' \? \$salesOrderNo : \(string\)\$candidate\['order_id'\]/)
+// The card picker and the command cap must use debt-adjusted rights, while
+// the immutable gross remainder stays available for refund history updates.
+assert.match(orderCenter, /实际剩余金额 <strong>\{\{ importedCardRefundMoney\(card\.usableRemainingAmountCents\) \}\}<\/strong>/)
+assert.match(orderCenter, /component\.usableRemainingAmountCents <= 0/)
+assert.match(refundService, /\$refundCents > \$remaining \|\| \$balanceCents > \(int\)\$snapshot\['usableRemainingAmountCents'\]/)
+assert.match(refundService, /\$cashRefundRemainingCents = \$otherCollection \? 0 : min\(\$cashRefundRemainingCents, \$usableSum\)/)
 const refundRecords = recordQuery.match(/private function readRefund\(array \$criteria\): array\s*\{[\s\S]*?private function /)?.[0] || ''
 assert.match(refundRecords, /cpr\.tenant_id = rlo\.tenant_id AND cpr\.card_holder_id = ra\.card_holder_id AND cpr\.legacy_order_id = rlo\.source_order_id/)
 assert.match(refundRecords, /cso\.order_no AS card_sales_order_no/)

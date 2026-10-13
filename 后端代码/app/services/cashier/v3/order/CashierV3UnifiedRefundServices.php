@@ -16,6 +16,7 @@ use app\services\cashier\v3\card\CashierV3CardComponentPurchaseAmountAuthority;
 use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
+use app\services\order\store\WriteOffOrderServices;
 use app\services\user\UserBalanceAtomicServices;
 use think\facade\Db;
 
@@ -168,8 +169,8 @@ final class CashierV3UnifiedRefundServices
             ? ($snapshot['ruleType'] === 'choice_count' ? $snapshot['components'][0]
                 : $this->selectedCardComponent($snapshot, $componentId))
             : $snapshot;
-        $remaining = (int)$target['remainingAmountCents'];
-        if ($mode !== 'catalog' && ($refundCents > $remaining || $balanceCents > (int)$snapshot['remainingAmountCents'])) {
+        $remaining = (int)$target['usableRemainingAmountCents'];
+        if ($mode !== 'catalog' && ($refundCents > $remaining || $balanceCents > (int)$snapshot['usableRemainingAmountCents'])) {
             throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
         }
         // Rights keep their voucher-funded face value, but a partial refund
@@ -332,7 +333,7 @@ final class CashierV3UnifiedRefundServices
     private function selectedCardComponent(array $card, int $componentId): array
     {
         foreach ($card['components'] as $component) {
-            if ((int)$component['id'] === $componentId && (int)$component['remainingAmountCents'] > 0) return $component;
+            if ((int)$component['id'] === $componentId && (int)$component['usableRemainingAmountCents'] > 0) return $component;
         }
         throw self::fail('所选卡项目没有可退金额，请重新选择。', 'refund_component_unavailable');
     }
@@ -353,7 +354,8 @@ final class CashierV3UnifiedRefundServices
             return ['id' => 'catalog:' . $skuId, 'name' => (string)$item['name'],
                 'categoryName' => (string)($item['category'] ?? ''),
                 'kind' => (string)$item['kind'], 'sourceOrderId' => '', 'sourceOrderNo' => '',
-                'remainingAmountCents' => 0, 'remainingTimes' => 0, 'voided' => false,
+                'remainingAmountCents' => 0, 'usableRemainingAmountCents' => 0,
+                'remainingTimes' => 0, 'voided' => false,
                 'canRefund' => true, 'unavailableReason' => ''];
         }
         throw self::fail('所选商品已不在当前门店目录中，请重新选择。', 'refund_catalog_item_unavailable');
@@ -386,7 +388,7 @@ final class CashierV3UnifiedRefundServices
         if ($rule && !in_array((string)$rule['status'], ['active', 'exhausted'], true)) $voided = true;
         $isTime = (string)($rule['rule_type'] ?? '') === 'time' || (int)$candidate['write_times'] >= 1000000;
         $carts = Db::name('store_order_cart_info')->where('oid', $originId)->where('cart_type', 2)
-            ->where('product_type', 6)->field('id,oid,product_id,cart_info,pay_price,write_times,write_surplus_times,write_end')
+            ->where('product_type', 6)->field('id,oid,product_id,cart_info,pay_price,debt_amount,repaid_debt_amount,is_gift,write_times,write_surplus_times,write_end')
             ->order('id asc')->lock($lock)->select()->toArray();
         $components = [];
         $sum = 0;
@@ -468,6 +470,32 @@ final class CashierV3UnifiedRefundServices
                 : ($one ? '0.00' : bcsub((string)$candidate['debt_amount'], (string)$candidate['repaid_debt_amount'], 2));
         }
         $debtCents = self::moneyCents((string)$debt, true);
+        // The refund record retains the gross unconsumed value, while the picker and
+        // execution cap share the writeoff projection's debt/cancellation restriction.
+        // Cancelled debt never becomes cash-refundable merely because pending debt is zero.
+        $cancelledCents = self::moneyCents((new CashierV3CardOriginDebtResolver())
+            ->cancelledCardDebt($order, $memberId, $tenantId, $lock), true);
+        $usableSum = 0;
+        if ($sharedCount) {
+            $usableSum = max(0, $sum - $debtCents - $cancelledCents);
+            foreach ($components as &$component) {
+                $component['usableRemainingAmountCents'] = max(0,
+                    (int)$component['remainingAmountCents'] - $debtCents - $cancelledCents);
+            }
+            unset($component);
+        } else {
+            $writeoff = app()->make(WriteOffOrderServices::class);
+            $cartsById = array_column($carts, null, 'id');
+            foreach ($components as &$component) {
+                $cart = $cartsById[(int)$component['id']];
+                $usable = $writeoff->usableEntitlementAmount($cart, $order,
+                    self::centsToMoney((int)$component['remainingAmountCents']),
+                    (float)$debt, $carts, $lock);
+                $component['usableRemainingAmountCents'] = self::moneyCents((string)$usable, true);
+                $usableSum += $component['usableRemainingAmountCents'];
+            }
+            unset($component);
+        }
         $cardPurchaseCents = self::moneyCents((string)$candidate['pay_price'], false);
         $cardCouponCents = 0;
         $salesOrderId = trim((string)($candidate['sales_order_id'] ?? ''));
@@ -501,13 +529,13 @@ final class CashierV3UnifiedRefundServices
         $cashRefundRemainingCents = max(0, $cardPurchaseCents - $cardCouponCents
             - $priorRefundCents - $priorBalanceCreditCents);
         $otherCollection = $this->usesOtherCollection($tenantId, $salesOrderId);
-        if ($otherCollection) $cashRefundRemainingCents = 0;
-        $canRefund = !$voided && $sum > 0 && $components !== [] && $debtCents === 0
+        $cashRefundRemainingCents = $otherCollection ? 0 : min($cashRefundRemainingCents, $usableSum);
+        $canRefund = !$voided && $usableSum > 0 && $components !== [] && $debtCents === 0
             && (int)$candidate['origin_uid'] === $memberId && !$otherCollection;
         $reason = $otherCollection ? '原单使用了其他收款，只能整单作废，不能办理退款。'
             : ($debtCents > 0 ? '本卡存在未结清欠款，请先补交或取消欠款后再办理退款。'
             : ($voided ? '本卡已作废或退款终止，不能再次退款。'
-                : ($sum <= 0 ? '本卡没有可退的剩余金额。' : '本卡来源状态已变化，请联系管理员核对。')));
+                : ($usableSum <= 0 ? '本卡没有可退的剩余金额。' : '本卡来源状态已变化，请联系管理员核对。')));
         // V3 newly purchased cards have an internal v3c... entitlement order; only
         // the issuance receipt links that order to the customer-facing XS... sale.
         $salesOrderNo = array_key_exists('sales_order_no', $candidate)
@@ -522,7 +550,8 @@ final class CashierV3UnifiedRefundServices
             'sourceOrderId' => (string)$originId,
             'sourceOrderNo' => $salesOrderNo !== '' ? $salesOrderNo : (string)$candidate['order_id'],
             'purchaseAmountCents' => array_sum(array_column($components, 'purchaseAmountCents')),
-            'remainingAmountCents' => $sum, 'remainingTimes' => (int)$candidate['write_surplus_times'],
+            'remainingAmountCents' => $sum, 'usableRemainingAmountCents' => $usableSum,
+            'remainingTimes' => (int)$candidate['write_surplus_times'],
             'cashRefundRemainingCents' => $cashRefundRemainingCents,
             'historicalRefundCents' => $priorRefundCents,
             'validThrough' => (int)$candidate['write_end'], 'isTimeCard' => $isTime,
@@ -574,7 +603,8 @@ final class CashierV3UnifiedRefundServices
         return ['lineId' => $lineId, 'memberId' => $memberId, 'name' => (string)$line['item_name_snapshot'],
             'itemType' => (string)$line['item_type'], 'sourceOrderId' => (string)$line['order_id'],
             'sourceOrderNo' => (string)$line['order_no'], 'purchaseAmountCents' => (int)$line['sale_amount_cents'],
-            'remainingAmountCents' => $remaining, 'cashRefundRemainingCents' => $cashRefundRemaining,
+            'remainingAmountCents' => $remaining, 'usableRemainingAmountCents' => $remaining,
+            'cashRefundRemainingCents' => $cashRefundRemaining,
             'remainingTimes' => 0, 'voided' => $voided,
             'canRefund' => !$voided && !$otherCollection && $remaining > 0,
             'unavailableReason' => $otherCollection ? '原单使用了其他收款，只能整单作废，不能办理退款。'
