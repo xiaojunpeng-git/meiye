@@ -117,7 +117,7 @@ test('customer detail re-queries the selected member within the current merchant
 	assert.equal(detail.includes('queryMobileCustomers(false'), true)
 	assert.equal(detail.includes('当前数据权限范围内'), true)
 	assert.equal(detail.includes('客户详情'), true)
-	assert.equal(detail.includes("import { currentMerchantRoot, merchantRequestSession } from '../../platform/mobile-merchant-session.uts'"), true)
+	assert.equal(detail.includes("import { currentMerchantRoot, merchantRequestSession } from '../../../shared/platform/mobile-merchant-session.uts'"), true)
 	assert.equal(detail.includes('openMerchantBootstrapForCustomerDetail'), true)
 	assert.equal(detail.includes('if (merchantLoginIsRequired()) { openMerchantBootstrapForCustomerDetail(memberId.value, lookup.value); return }'), true)
 	for (const label of ['近况', '资料', '客情', '服务', '记录']) {
@@ -159,7 +159,7 @@ test('customer detail re-queries the selected member within the current merchant
 	for (const removedCopy of ['最近动态', '仅显示当前账号可查看的信息', '客情提醒', '资产与权益', '资产概览', '明细查询']) {
 		assert.equal(detail.includes(removedCopy), false, removedCopy)
 	}
-	assert.equal(detail.includes('旧站账户当时结余'), true)
+	assert.equal(detail.includes('旧站账户当时结余'), false)
 	assert.equal(detail.includes('record.balanceSplitKnown !== false'), true)
 	assert.equal(detail.includes('acceptLegacyBalanceHistory: true'), true)
 	assert.equal(detail.includes('CASHIER_V3_COMPLETED_SERVICE_FACT'), false)
