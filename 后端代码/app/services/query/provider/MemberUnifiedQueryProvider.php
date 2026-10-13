@@ -9,6 +9,7 @@ use app\services\query\UnifiedQueryExecutionServices;
 use app\services\query\UnifiedQueryPreferenceServices;
 use app\services\query\UnifiedQueryProvider;
 use app\services\query\metric\StoreCustomerVisitEligibility;
+use app\services\cashier\v3\card\CashierV3HistoricalEntitlementReadServices;
 use think\facade\Db;
 
 /**
@@ -576,7 +577,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         $levels = $this->levelNames($rows);
         $labels = $this->memberLabels($uids);
         $exclusive = $this->exclusiveServicePeople($uids, $visibleStoreIds, $allStores);
-        $cards = $this->cardSummaries($uids, $visibleStoreIds, $allStores);
+        $cards = $this->cardSummaries($uids, $visibleStoreIds, $allStores, $context);
         $debts = $this->debtSummaries($uids, $visibleStoreIds, $allStores);
         $purchases = $this->purchaseSummaries($uids, $visibleStoreIds, $allStores);
         $visits = $this->visitSummaries(
@@ -835,7 +836,7 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
         return array_map(static function (array $names): string { return implode('、', $names); }, $selected);
     }
 
-    protected function cardSummaries(array $uids, array $visible, bool $allStores): array
+    protected function cardSummaries(array $uids, array $visible, bool $allStores, array $context): array
     {
         $holderColumns = $this->tableColumns('user_card_holder');
         $orderColumns = $this->tableColumns('store_order');
@@ -918,6 +919,28 @@ class MemberUnifiedQueryProvider implements UnifiedQueryProvider
             unset($summary['holder_ids']);
         }
         unset($summary);
+
+        // Migrated cards have a storeless, system-hidden carrier order. They
+        // belong to the member's rights, not to a store's sales or revenue;
+        // only the authenticated operating store's organization may read them.
+        $operatorStoreId = (int)($context['store_id'] ?? 0);
+        if (!$allStores && !in_array($operatorStoreId, array_map('intval', $visible), true)) {
+            $operatorStoreId = 0;
+        }
+        $imported = (new CashierV3HistoricalEntitlementReadServices())->activeHolders(
+            $uids,
+            (string)($context['tenant_id'] ?? ''),
+            $operatorStoreId
+        );
+        foreach ($imported as $holder) {
+            $uid = (int)$holder['uid'];
+            $result[$uid]['active_card_count'] = (int)($result[$uid]['active_card_count'] ?? 0) + 1;
+            $result[$uid]['remaining_project_times'] = (int)($result[$uid]['remaining_project_times'] ?? 0)
+                + (int)$holder['write_surplus_times'];
+            // Migration carriers have zero transaction value. Historical paid
+            // price is audit-only and must not inflate member asset amount.
+            $result[$uid]['remaining_project_amount'] = (string)($result[$uid]['remaining_project_amount'] ?? '0.00');
+        }
         return $result;
     }
 

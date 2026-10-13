@@ -3,6 +3,7 @@
 namespace app\services\mobile\customer;
 
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+use app\services\cashier\v3\card\CashierV3HistoricalEntitlementReadServices;
 use think\facade\Db;
 
 /**
@@ -38,7 +39,7 @@ final class MobileCustomerAssetRecordServices
         $pageSize = min(self::MAX_PAGE_SIZE, max(1, (int)($payload['pageSize'] ?? $payload['limit'] ?? 20)));
         $storeIds = $this->scopeStoreIds($merchantContext);
         if ($type === 'entitlements') {
-            return $this->entitlements($memberId, $storeIds, $page, $pageSize);
+            return $this->entitlements($memberId, $storeIds, (int)$merchantContext['storeId'], $page, $pageSize);
         }
         if ($type === 'balance_changes') {
             return $this->balanceChanges($memberId, $storeIds, $page, $pageSize);
@@ -57,7 +58,7 @@ final class MobileCustomerAssetRecordServices
         return $ids;
     }
 
-    private function entitlements(int $memberId, array $storeIds, int $page, int $pageSize): array
+    private function entitlements(int $memberId, array $storeIds, int $operatorStoreId, int $page, int $pageSize): array
     {
         if ($storeIds === []) return $this->pagePayload('entitlements', $memberId, [], 0, $page, $pageSize, 'CURRENT_CARD_ENTITLEMENT');
         $now = time();
@@ -78,6 +79,14 @@ final class MobileCustomerAssetRecordServices
             if (($start > 0 && $start > $now) || ($end > 0 && $end < $now)) continue;
             $eligible[(int)$holder['id']] = $holder;
         }
+        // Storeless migration carriers are a member asset only when the
+        // authenticated operating store belongs to the owning organization.
+        // Keep ordinary cards under their existing visible-store filter.
+        $imported = (new CashierV3HistoricalEntitlementReadServices())->activeHolders(
+            [$memberId], self::TENANT_ID,
+            in_array($operatorStoreId, $storeIds, true) ? $operatorStoreId : 0
+        );
+        foreach ($imported as $id => $holder) $eligible[(int)$id] = $holder;
         if ($eligible === []) return $this->pagePayload('entitlements', $memberId, [], 0, $page, $pageSize, 'CURRENT_CARD_ENTITLEMENT');
         $orderIds = array_values(array_unique(array_map(static function (array $holder): int { return (int)$holder['oid']; }, $eligible)));
         $projectsByOrder = [];
@@ -118,6 +127,11 @@ final class MobileCustomerAssetRecordServices
             foreach ($projects as $project) {
                 $remainingTimes += (int)$project['remainingTimes'];
                 $remainingAmount = bcadd($remainingAmount, (string)$project['remainingAmount'], 2);
+            }
+            // Choice-count migration projects are alternatives in one pool.
+            // Their component rows must never be added as separate grants.
+            if (isset($imported[(int)$holder['id']])) {
+                $remainingTimes = (int)$holder['write_surplus_times'];
             }
             $records[] = [
                 'id' => 'holder:' . (int)$holder['id'],
