@@ -756,7 +756,14 @@ final class AiIntentUnderstandingContract
         if ($out['status']==='understood' && empty($value['groups'])) {
             $current=(string)($safeQuestion['question']??'');
             $terms=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($current);
-            preg_match_all('/[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|件|次|个|项|人|笔)/u',$current,$numericPredicates);
+            // A predicate may be a duration (90天) or a bare threshold
+            // (余额在500以上). Count numeric evidence only to detect a dropped
+            // condition; the model still owns its unit/operator and the
+            // registered condition compiler must validate both before query.
+            // Calendar years/months are excluded so time comparisons alone
+            // do not masquerade as multiple business predicates.
+            preg_match_all('/(?<![0-9])[0-9]+(?:\.[0-9]+)?(?:\s*(?:万元|元|块|天|件|次|个|项|人|笔))?(?![0-9年月日])/u',
+                $current,$numericPredicates);
             if (count($terms)>=2 && count((array)($numericPredicates[0]??[]))>=2
                 && preg_match('/并且|而且|同时|以及|或者|(?<!或)且|(?<!或)或/u',$current)===1) {
                 $conditionItems=[];
@@ -1188,6 +1195,71 @@ final class AiIntentUnderstandingContract
      * this structural contract. Transport, authority and unknown outcomes are
      * deliberately never retried as if they were a missing customer detail.
      */
+    /**
+     * Correct a generic count noun only when every stated condition term has
+     * one exact active registry owner and those owners publish one common
+     * subject. Explicit object labels in the question always win. This only
+     * reconciles the model's object carrier; it never invents a condition,
+     * operator, threshold, metric or authority scope.
+     *
+     * @param array<int,array{object_kind:string,object_label:string}> $objectVocabulary
+     */
+    public static function reconcileConditionSubjectFromRegistry(
+        array $understanding,array $safeQuestion,array $allowedCodes,array $objectVocabulary
+    ): array {
+        if (($understanding['status']??null)!=='understood'
+            || !is_string($safeQuestion['question']??null)) return $understanding;
+        $question=$safeQuestion['question'];
+        $stated=[];
+        foreach (\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            $question,$allowedCodes
+        ) as $match) $stated[$match['term']]=$match['metric_code'];
+        $withoutMetricTerms=str_replace(array_keys($stated),'',$question);
+        $contracts=\app\services\query\metric\MetricDefinitionRegistry::capabilities();
+        $requirements=(array)($understanding['requirements']??[]);
+        $conditionIndexes=[];$subjects=null;$semanticSubject=null;
+        foreach ($requirements as $index=>$requirement) {
+            $condition=$requirement['values']['aggregate_condition']??null;
+            if (!is_array($condition) || empty($condition['conditions'])) continue;
+            $subject=$condition['subject']??null;
+            if (!is_string($subject) || ($requirement['values']['object_kind']??null)!==$subject
+                || ($semanticSubject!==null && $semanticSubject!==$subject)) return $understanding;
+            $semanticSubject=$subject;$conditionIndexes[]=$index;
+            foreach ($condition['conditions'] as $item) {
+                $term=$item['metric_term']??null;
+                $code=is_string($term)?($stated[$term]??null):null;
+                if ($code===null && is_string($term)) {
+                    $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueTermInText($term,$allowedCodes);
+                    $candidate=is_array($exact)?($exact['metric_code']??null):null;
+                    if (is_string($candidate) && in_array($candidate,$stated,true)) $code=$candidate;
+                }
+                $contract=is_string($code)?($contracts[$code]??null):null;
+                if (!is_array($contract) || ($contract['ai_query_ready']??false)!==true
+                    || ($contract['condition_unit']??null)!==($item['unit']??null)) return $understanding;
+                $owners=(array)($contract['condition_subjects']??[]);
+                $subjects=$subjects===null?$owners:array_values(array_intersect($subjects,$owners));
+            }
+        }
+        if ($conditionIndexes===[] || count((array)$subjects)!==1) return $understanding;
+        $resolved=$subjects[0];
+        if ($resolved===$semanticSubject) return $understanding;
+        foreach ($objectVocabulary as $object) {
+            $label=$object['object_label']??null;
+            $kind=$object['object_kind']??null;
+            if (!is_string($label) || $label==='' || !is_string($kind) || $kind===$resolved) continue;
+            // A noun inside a complete metric title is measurement language,
+            // while a separately stated object must remain model-owned.
+            if (mb_strpos($question,$label,0,'UTF-8')!==false) {
+                if (mb_strpos($withoutMetricTerms,$label,0,'UTF-8')!==false) return $understanding;
+            }
+        }
+        foreach ($conditionIndexes as $index) {
+            $requirements[$index]['values']['object_kind']=$resolved;
+            $requirements[$index]['values']['aggregate_condition']['subject']=$resolved;
+        }
+        return self::normalize(array_replace($understanding,['requirements'=>$requirements]),$safeQuestion);
+    }
+
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''

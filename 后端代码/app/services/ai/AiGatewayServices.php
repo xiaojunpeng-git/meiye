@@ -2459,6 +2459,14 @@ final class AiGatewayServices
         $understanding=$this->reconcileStatedRegisteredMeasurements(
             $understanding,$safe['outbound'],$caps
         );
+        // A generic population noun can be misread as personnel even when
+        // every exact condition metric is registered only for members. Resolve
+        // that one carrier from the registry, while any explicit object word
+        // or non-unique subject keeps the model's interpretation unchanged.
+        $understanding=AiIntentUnderstandingContract::reconcileConditionSubjectFromRegistry(
+            $understanding,$safe['outbound'],array_keys((array)($caps['metric_readiness']??[])),
+            $this->analysisObjectVocabulary($caps,null)
+        );
         // A unique role plus a person-grain registered measurement determines
         // the rankable row only when the competing noun occurs solely inside
         // that metric title; independently named objects remain untouched.

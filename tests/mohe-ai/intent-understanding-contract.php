@@ -107,6 +107,60 @@ catch (AiContractException $error) {
 }
 $check($lostPredicate && AiIntentUnderstandingContract::repairable('condition_completeness'),
     'two registered numeric predicates cannot be reduced to one measurement');
+$mixedUnitQuestion=$doubleConditionQuestion;
+$mixedUnitQuestion['question']='90天没有到店且余额在500以上有多少人';
+$mixedUnitQuestion['evidence_messages']=[['id'=>'current','text'=>$mixedUnitQuestion['question']]];
+$mixedLostCondition=$lostCondition;
+$mixedLostCondition['requirements'][0]['values']['metric_terms']=['余额'];
+$mixedLostCondition['requirements'][0]['evidence'][0]['quote']=$mixedUnitQuestion['question'];
+$mixedRejected=false;
+try { AiIntentUnderstandingContract::normalize($mixedLostCondition,$mixedUnitQuestion); }
+catch (AiContractException $error) {
+    $mixedRejected=($error->diagnostic()['predicate']??null)==='condition_completeness';
+}
+$check($mixedRejected,
+    'duration and unitless money thresholds both require typed conditions before binding');
+$mixedTyped=['goal'=>'统计符合条件的人数','status'=>'understood','requirements'=>[[
+    'id'=>'r1','meaning'=>'统计同时满足两个条件的人数',
+    'fields'=>['metric_codes','object_kind','operation','aggregate_condition'],
+    'values'=>['metric_terms'=>['没有到店','余额'],'object_kind'=>'person','operation'=>'condition_count',
+        'aggregate_condition'=>['subject'=>'person','relation'=>'all','result_form'=>'count','conditions'=>[
+            ['metric_term'=>'没有到店','operator'=>'gte','quantity'=>'90','unit'=>'day'],
+            ['metric_term'=>'余额','operator'=>'gte','quantity'=>'500','unit'=>'yuan'],
+        ]]],
+    'evidence'=>[['message_id'=>'current','quote'=>$mixedUnitQuestion['question']]],
+]]];
+$objectVocabulary=[['object_kind'=>'person','object_label'=>'员工'],
+    ['object_kind'=>'member','object_label'=>'会员']];
+$activeConditionCodes=['member_days_since_last_visit','member_account_balance'];
+$corrected=AiIntentUnderstandingContract::reconcileConditionSubjectFromRegistry(
+    AiIntentUnderstandingContract::normalize($mixedTyped,$mixedUnitQuestion),
+    $mixedUnitQuestion,$activeConditionCodes,$objectVocabulary
+);
+$check(($corrected['requirements'][0]['values']['object_kind']??null)==='member'
+    &&($corrected['requirements'][0]['values']['aggregate_condition']['subject']??null)==='member'
+    &&count($corrected['requirements'][0]['values']['aggregate_condition']['conditions']??[])===2,
+    'exact member-only conditions correct a generic person carrier without dropping predicates');
+$qualifiedTerm=$mixedTyped;
+$qualifiedTerm['requirements'][0]['values']['metric_terms'][0]='90天没有到店';
+$qualifiedTerm['requirements'][0]['values']['aggregate_condition']['conditions'][0]['metric_term']='90天没有到店';
+$qualifiedCorrected=AiIntentUnderstandingContract::reconcileConditionSubjectFromRegistry(
+    AiIntentUnderstandingContract::normalize($qualifiedTerm,$mixedUnitQuestion),
+    $mixedUnitQuestion,$activeConditionCodes,$objectVocabulary
+);
+$check(($qualifiedCorrected['requirements'][0]['values']['object_kind']??null)==='member',
+    'a condition excerpt containing one exact registered term keeps its unique member owner');
+$explicitStaffQuestion=$mixedUnitQuestion;
+$explicitStaffQuestion['question']='90天没有到店且余额在500以上的员工有多少人';
+$explicitStaffQuestion['evidence_messages']=[['id'=>'current','text'=>$explicitStaffQuestion['question']]];
+$explicitStaff=$mixedTyped;
+$explicitStaff['requirements'][0]['evidence'][0]['quote']=$explicitStaffQuestion['question'];
+$preserved=AiIntentUnderstandingContract::reconcileConditionSubjectFromRegistry(
+    AiIntentUnderstandingContract::normalize($explicitStaff,$explicitStaffQuestion),
+    $explicitStaffQuestion,$activeConditionCodes,$objectVocabulary
+);
+$check(($preserved['requirements'][0]['values']['object_kind']??null)==='person',
+    'an explicitly named employee population is never relabeled as members');
 $nullCondition=$lostCondition;
 $nullCondition['requirements'][0]['fields'][]='aggregate_condition';
 $nullCondition['requirements'][0]['values']['aggregate_condition']=null;
