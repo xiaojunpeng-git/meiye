@@ -13,6 +13,9 @@ interface CashierV3SaleCatalogAuthority
     /** @return array<int,array> */
     public function listStoreItems(int $storeId): array;
 
+    /** 预约项目候选只含本店在售项目及 SKU，不读取卡项组成或仓库中项目。 */
+    public function listReservationProjects(int $storeId): array;
+
     /** 定制卡专用候选：同门店、已审核、未删除的销售中/仓库中项目，不扩充普通销售目录。 */
     public function listCustomCardProjects(int $storeId): array;
 

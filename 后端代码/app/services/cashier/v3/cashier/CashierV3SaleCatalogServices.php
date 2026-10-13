@@ -111,6 +111,31 @@ final class CashierV3SaleCatalogServices
         ];
     }
 
+    /**
+     * 预约“全部项目”只投影本店在售项目。已购历史权益仍由预约权益投影提供；
+     * 不读取卡项组成，避免无关卡项的资料错误阻断预约，但项目自身身份与门店仍逐行校验。
+     */
+    public function reservationProjects(
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): array {
+        $this->assertStoreScope($operatorScope, $dataScope);
+        $storeId = $operatorScope->storeId();
+        $rows = $this->authority->listReservationProjects($storeId);
+        if (count($rows) > self::MAX_CATALOG_ITEMS) {
+            throw self::failure(CashierV3ResultCode::ACTION_DEPENDENCY_NOT_READY,
+                '当前门店可预约项目过多，请联系管理员优化分类。', 'reservation_project_limit_exceeded');
+        }
+        $items = [];
+        foreach ($rows as $row) {
+            if ((int)($row['product_is_show'] ?? 0) !== 1) continue;
+            $item = $this->customCardComponent($row, $storeId, (int)($row['sku_id'] ?? 0));
+            if (!$item['active']) continue;
+            $items[] = $this->publicCatalogItem($item, null);
+        }
+        return $items;
+    }
+
     /** 有界加载定制卡候选，并复用提交端的资格检查与价格/分类规范化。 */
     private function customCardProjects(int $storeId): array
     {

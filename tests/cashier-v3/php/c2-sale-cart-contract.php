@@ -110,6 +110,16 @@ final class SaleFakeAuthority implements CashierV3SaleCatalogAuthority
         return $storeId === 7 ? $this->rows : [];
     }
 
+    /** 预约目录只取本店在售项目，不让卡项或隐藏项目进入夹具结果。 */
+    public function listReservationProjects(int $storeId): array
+    {
+        return array_values(array_filter($this->listStoreItems($storeId), static function (array $row): bool {
+            return (int)$row['product_product_type'] === 6
+                && (int)$row['product_is_show'] === 1
+                && (int)$row['product_pid'] !== 8154;
+        }));
+    }
+
     /** 夹具候选保持与真实适配器一致：仅正常项目，排除定制卡隐藏壳。 */
     public function listCustomCardProjects(int $storeId): array
     {

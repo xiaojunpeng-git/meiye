@@ -663,7 +663,7 @@ final class CashierV3ReservationModule
     ): array
     {
         $options = [];
-        foreach ((array)($catalog->catalog($operator, $dataScope)['items'] ?? []) as $item) {
+        foreach ($catalog->reservationProjects($operator, $dataScope) as $item) {
             if ((int)($item['productType'] ?? -1) !== 6 || !empty($item['disabled'])) continue;
             $categoryNames = array_values(array_filter(array_map('strval', (array)($item['categoryNames'] ?? [])), static function (string $name): bool {
                 return trim($name) !== '';
