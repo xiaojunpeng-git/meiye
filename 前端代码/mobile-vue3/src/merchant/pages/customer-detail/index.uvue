@@ -223,7 +223,9 @@
 		if (customer.value == null || assetDetailType.value.length == 0 || assetLoading.value) return
 		assetLoading.value = true; assetMessage.value = ''
 		let page = append ? assetPage.value + 1 : 1
-		queryMobileCustomerAssetRecords({ memberId: Number(memberId.value), detailType: assetDetailType.value, page: page, pageSize: 10 }, (result : any) => {
+		// This client can render old rows without inventing principal/gift splits;
+		// earlier mini programs omit the capability and keep their V3-only response.
+		queryMobileCustomerAssetRecords({ memberId: Number(memberId.value), detailType: assetDetailType.value, page: page, pageSize: 10, acceptLegacyBalanceHistory: true }, (result : any) => {
 			assetLoading.value = false
 			if (!result.ok || result.body == null) { assetMessage.value = String(result.message || '资产明细加载失败。'); return }
 			let records = Array.isArray(result.body.records) ? result.body.records : []

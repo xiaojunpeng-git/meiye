@@ -62,17 +62,19 @@ try {
     BalanceTestDb::$pdo = $target;
     $service = (new ReflectionClass(\app\services\mobile\customer\MobileCustomerAssetRecordServices::class))->newInstanceWithoutConstructor();
     $merged = new ReflectionMethod($service,'mergedBalancePage');
-    $first = $merged->invoke($service,421,[108],1,20);
-    $last = $merged->invoke($service,421,[108],3,20);
-    $oldOnly = $merged->invoke($service,421,[999],1,20);
+    $first = $merged->invoke($service,421,[108],1,20,true);
+    $last = $merged->invoke($service,421,[108],3,20,true);
+    $oldOnly = $merged->invoke($service,421,[999],1,20,true);
+    $oldClient = $merged->invoke($service,421,[108],1,20,false);
     if (count($first)!==20 || count($last)!==8 || (int)$first[0]['origin']!==0
-        || (int)$first[1]['origin']!==1 || (int)$oldOnly[0]['origin']!==1) {
+        || (int)$first[1]['origin']!==1 || (int)$oldOnly[0]['origin']!==1
+        || count($oldClient)!==1 || (int)$oldClient[0]['origin']!==0) {
         throw new RuntimeException('Merged chronology, pagination or store scope differs');
     }
     $source->exec('UPDATE eb_user SET now_money=13693 WHERE uid=421');
     try { balanceAccountGuard($source,$target); throw new RuntimeException('Expected stale account guard'); }
     catch (RuntimeException $error) { if ($error->getMessage()==='Expected stale account guard') throw $error; }
-    echo "PASS 008 legacy balance import, orphan audit, digest, current-balance guard, merged pagination and store scope\n";
+    echo "PASS 008 legacy balance import, orphan audit, digest, current-balance guard, merged pagination, store scope and old-client compatibility\n";
 } finally {
     $root->exec('DROP DATABASE `' . $sourceName . '`');
     $root->exec('DROP DATABASE `' . $targetName . '`');

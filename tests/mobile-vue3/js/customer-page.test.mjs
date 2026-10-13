@@ -161,6 +161,7 @@ test('customer detail re-queries the selected member within the current merchant
 	}
 	assert.equal(detail.includes('旧站账户当时结余'), true)
 	assert.equal(detail.includes('record.balanceSplitKnown !== false'), true)
+	assert.equal(detail.includes('acceptLegacyBalanceHistory: true'), true)
 	assert.equal(detail.includes('CASHIER_V3_COMPLETED_SERVICE_FACT'), false)
 })
 
@@ -275,6 +276,8 @@ test('mobile customer contract keeps customer scope server enforced', () => {
 	})
 	assert.equal(contract.endpoints.queryCustomerAssetRecords.legacyBalanceStoreScope, 'ALL_OLD_STORES_AFTER_MEMBER_VISIBILITY_CHECK')
 	assert.equal(contract.endpoints.queryCustomerAssetRecords.legacyBalanceSplitKnown, false)
+	assert.equal(contract.endpoints.queryCustomerAssetRecords.legacyBalanceHistoryCapability, 'acceptLegacyBalanceHistory')
+	assert.equal(contract.endpoints.queryCustomerAssetRecords.legacyBalanceHistoryDefaultAuthority, 'CASHIER_V3_BALANCE_FACT')
 	assert.equal(contract.endpoints.customerProfileDraft.authorization, 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE')
 	assert.equal(contract.endpoints.customerProfileDetail.authorization, 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE')
 	assert.deepEqual(contract.endpoints.createCustomerProfile.requestBodyRequired, ['name', 'phone', 'idempotencyKey'])

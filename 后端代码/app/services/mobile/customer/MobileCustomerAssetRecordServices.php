@@ -42,7 +42,11 @@ final class MobileCustomerAssetRecordServices
             return $this->entitlements($memberId, $storeIds, (int)$merchantContext['storeId'], $page, $pageSize);
         }
         if ($type === 'balance_changes') {
-            return $this->balanceChanges($memberId, $storeIds, $page, $pageSize);
+            // Older mini programs do not understand missing principal/gift
+            // splits. Require an explicit new-client capability before old
+            // display rows can enter their balance response.
+            return $this->balanceChanges($memberId, $storeIds, $page, $pageSize,
+                ($payload['acceptLegacyBalanceHistory'] ?? false) === true);
         }
         return $this->debts($memberId, $storeIds, $page, $pageSize);
     }
@@ -149,9 +153,9 @@ final class MobileCustomerAssetRecordServices
         return $this->slice('entitlements', $memberId, $records, $page, $pageSize, 'CURRENT_CARD_ENTITLEMENT');
     }
 
-    private function balanceChanges(int $memberId, array $storeIds, int $page, int $pageSize): array
+    private function balanceChanges(int $memberId, array $storeIds, int $page, int $pageSize, bool $includeLegacy): array
     {
-        $authority = 'CASHIER_V3_BALANCE_FACT_AND_IMPORTED_LEGACY_MONEY';
+        $authority = $includeLegacy ? 'CASHIER_V3_BALANCE_FACT_AND_IMPORTED_LEGACY_MONEY' : 'CASHIER_V3_BALANCE_FACT';
         $current = Db::name('cashier_v3_balance_fact')->alias('bf')
             ->where('bf.tenant_id', self::TENANT_ID)->where('bf.member_id', $memberId)
             ->where('bf.fact_type', 'balance_changed')->where('bf.status', 'effective');
@@ -160,10 +164,10 @@ final class MobileCustomerAssetRecordServices
         // historical rows; it never grants another member or a spendable asset.
         if ($storeIds === []) $current->whereRaw('1 = 0');
         else $current->whereIn('bf.store_id', $storeIds);
-        $legacy = Db::name('mobile_customer_legacy_balance_record')
-            ->where('source_system', 'morestore')->where('member_id', $memberId);
-        $total = (int)(clone $current)->count('bf.id') + (int)(clone $legacy)->count();
-        $rows = $total > 0 ? $this->mergedBalancePage($memberId, $storeIds, $page, $pageSize) : [];
+        $legacyTotal = $includeLegacy ? (int)Db::name('mobile_customer_legacy_balance_record')
+            ->where('source_system', 'morestore')->where('member_id', $memberId)->count() : 0;
+        $total = (int)(clone $current)->count('bf.id') + $legacyTotal;
+        $rows = $total > 0 ? $this->mergedBalancePage($memberId, $storeIds, $page, $pageSize, $includeLegacy) : [];
         $records = array_map(function (array $row): array {
             if ((int)$row['origin'] === 1) {
                 // Old money rows do not reliably split principal and gifts.
@@ -212,7 +216,7 @@ final class MobileCustomerAssetRecordServices
     }
 
     /** Sort the union before pagination so old and new events cannot disappear at a page boundary. */
-    private function mergedBalancePage(int $memberId, array $storeIds, int $page, int $pageSize): array
+    private function mergedBalancePage(int $memberId, array $storeIds, int $page, int $pageSize, bool $includeLegacy): array
     {
         $prefix = (string)Db::connect()->getConfig('prefix');
         if (!preg_match('/^[A-Za-z0-9_]*$/', $prefix)) throw new \RuntimeException('Invalid database table prefix');
@@ -229,8 +233,8 @@ final class MobileCustomerAssetRecordServices
             . '0 amount_yuan,0 balance_after_yuan '
             . 'FROM ' . $prefix . 'cashier_v3_balance_fact bf '
             . "WHERE bf.tenant_id='0' AND bf.member_id={$memberId} "
-            . "AND bf.fact_type='balance_changed' AND bf.status='effective' AND {$storeCondition} "
-            . 'UNION ALL '
+            . "AND bf.fact_type='balance_changed' AND bf.status='effective' AND {$storeCondition} ";
+        if ($includeLegacy) $sql .= 'UNION ALL '
             . 'SELECT 1 origin,l.id row_id,l.occurred_at event_at,'
             . "'' fact_id,'' business_date,'' balance_change_type,0 principal_delta_cents,"
             . '0 bonus_delta_cents,0 principal_after_cents,0 bonus_after_cents,'
@@ -238,8 +242,8 @@ final class MobileCustomerAssetRecordServices
             . "'' operator_name_snapshot,l.source_money_id,l.source_type,l.title_snapshot,"
             . 'l.mark_snapshot,l.pm,l.amount_yuan,l.balance_after_yuan '
             . 'FROM ' . $prefix . 'mobile_customer_legacy_balance_record l '
-            . "WHERE l.source_system='morestore' AND l.member_id={$memberId}"
-            . ") merged ORDER BY event_at DESC,origin ASC,row_id DESC LIMIT {$offset},{$pageSize}";
+            . "WHERE l.source_system='morestore' AND l.member_id={$memberId}";
+        $sql .= ") merged ORDER BY event_at DESC,origin ASC,row_id DESC LIMIT {$offset},{$pageSize}";
         return Db::query($sql);
     }
 
