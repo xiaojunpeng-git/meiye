@@ -15,6 +15,18 @@ use think\facade\Db;
  */
 final class InventoryCrossSubjectTransferServices
 {
+    /** Compare ASCII document numbers and Chinese remarks under one text collation without changing stored values. */
+    private function applyListKeyword($query, string $keyword): void
+    {
+        $keyword = trim($keyword);
+        if ($keyword === '') return;
+        $like = '%' . $keyword . '%';
+        $query->whereRaw('(CONVERT(d.transfer_no USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :transfer_search_no OR CONVERT(d.remark USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :transfer_search_remark)', [
+            'transfer_search_no' => $like,
+            'transfer_search_remark' => $like,
+        ]);
+    }
+
     public function listForStore(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 20, bool $canViewCost = false, string $dateFrom = '', string $dateTo = ''): array
     {
         $scope = $this->scope($storeId, $operatorId, false);
@@ -26,15 +38,9 @@ final class InventoryCrossSubjectTransferServices
                     ->whereOr(function ($inner) use ($scope): void { $inner->where('d.to_party_type', 'STORE')->where('d.to_party_id', $scope['storeId']); });
             });
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
-        $keyword = trim($keyword);
-        if ($keyword !== '') {
-            $like = '%' . $keyword . '%';
-            $query->where(function ($inner) use ($like): void {
-                $inner->whereLike('d.transfer_no', $like)->whereOr('d.remark', 'like', $like);
-            });
-        }
+        $this->applyListKeyword($query, $keyword);
         $count = (int)(clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.initiator_store_id,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.quantity_scale*0)+0) quantity_placeholder')
+        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.quantity_scale*0)+0) quantity_placeholder')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         foreach ($list as &$row) {
             $amount = (int)Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', (int)$row['id'])
@@ -87,15 +93,9 @@ final class InventoryCrossSubjectTransferServices
             $path = $binding ? $this->organizationPath((int)$binding) : '';
             if ($path !== '' && (explode('/', trim($path, '/'))[0] ?? '') === $root) $allowed[] = ['id' => (int)$row['id'], 'name' => (string)$row['name'], 'party_type' => 'STORE'];
         }
-        $headquarters = $this->headquartersForScope($scope);
-        if ($headquarters !== null) {
-            $allowed[] = [
-                'id' => 0,
-                'name' => (string)$headquarters['partyName'],
-                'party_type' => 'HQ',
-                'location_id' => (int)$headquarters['location']['id'],
-            ];
-        }
+        foreach ($this->headquartersDirectory($scope) as $location) $allowed[] = [
+            'id' => 0, 'name' => (string)$location['location_name'], 'party_type' => 'HQ', 'location_id' => (int)$location['id'],
+        ];
         return ['list' => $allowed];
     }
 
@@ -104,7 +104,7 @@ final class InventoryCrossSubjectTransferServices
         $scope = $this->scope($storeId, $operatorId, false);
         $documents = Db::name('inventory_stock_request_document')->alias('d')->leftJoin('system_store s', 's.id=d.store_id')
             ->where('d.tenant_id', $scope['tenantId'])->where('d.supply_party_type', 'STORE')->where('d.supply_party_id', $scope['storeId'])
-            ->whereIn('d.document_status', ['APPLIED', 'PARTIAL'])->field('d.id,d.request_no,d.store_id,d.request_party_type,d.request_party_id,d.request_party_name_snapshot,s.name request_store_name,d.business_date,d.document_status')->order('d.id desc')->select()->toArray();
+            ->whereIn('d.document_status', ['APPLIED', 'PARTIAL'])->field('d.id,d.request_no,d.store_id,d.location_id,d.supply_location_id,d.request_party_type,d.request_party_id,d.request_party_name_snapshot,s.name request_store_name,d.business_date,d.document_status')->order('d.id desc')->select()->toArray();
         foreach ($documents as &$document) {
             if ((int)($document['request_party_id'] ?? 0) === 0 && (int)($document['store_id'] ?? 0) > 0) {
                 $document['request_party_type'] = 'STORE';
@@ -113,7 +113,7 @@ final class InventoryCrossSubjectTransferServices
             }
             try {
                 $target = strtoupper((string)($document['request_party_type'] ?? 'STORE')) === 'HQ'
-                    ? $this->headquartersForScope($scope)
+                    ? $this->headquartersForScope($scope, (int)$document['location_id'])
                     : $this->scope((int)($document['request_party_id'] ?? $document['store_id'] ?? 0), 0, false);
             } catch (\RuntimeException $exception) {
                 $document['lines'] = [];
@@ -171,11 +171,13 @@ final class InventoryCrossSubjectTransferServices
             if (Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->lock(true)->find()) throw new \RuntimeException('inventory_cross_transfer_edit_state_invalid');
 
             $this->assertSameTenant($source, $target);
-            if ($source['partyType'] === $target['partyType'] && (int)$source['partyId'] === (int)$target['partyId']) throw new \RuntimeException('inventory_cross_transfer_target_scope_denied');
+            $source['location'] = $this->subjectLocation($source, $command['now']);
+            $target['location'] = $this->subjectLocation($target, $command['now']);
+            if ((int)$source['location']['id'] === (int)$target['location']['id']) throw new \RuntimeException('inventory_cross_transfer_target_scope_denied');
             // A request-backed transfer must still belong to the same request and receiving subject.
             if ((int)$document['request_document_id'] !== (int)$command['requestDocumentId']
                 || ((int)$document['request_document_id'] > 0 && ((string)$document['to_party_type'] !== $target['partyType']
-                    || (int)$document['to_party_id'] !== (int)$target['partyId']))) throw new \RuntimeException('inventory_cross_transfer_request_target_locked');
+                    || (int)$document['to_party_id'] !== (int)$target['partyId'] || (int)$document['to_location_id'] !== (int)$target['location']['id']))) throw new \RuntimeException('inventory_cross_transfer_request_target_locked');
             $request = $this->requestDocument($target, $command['requestDocumentId'], $source);
             $targetLocation = $this->subjectLocation($target, $command['now']);
             Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->delete();
@@ -245,7 +247,7 @@ final class InventoryCrossSubjectTransferServices
             if ($hqRoot === '' || $sourceRoot === '' || $hqRoot !== $sourceRoot) throw new \RuntimeException('inventory_cross_transfer_source_scope_denied');
         }
         return Db::transaction(function () use ($sourceScope, $hqScope, $command): array {
-            $target = $command['targetPartyType'] === 'HQ' ? $this->headquartersForScope($sourceScope) : $this->scope($command['targetStoreId'], 0, false);
+            $target = $command['targetPartyType'] === 'HQ' ? $this->headquartersForScope($sourceScope, $command['targetLocationId']) : $this->scope($command['targetStoreId'], 0, false);
             if ($target === null) throw new \RuntimeException('inventory_cross_transfer_hq_location_missing');
             // 产品确认：调入方不按人员门店/组织权限裁剪；有效实体和租户隔离仍须服务端验证。
             $this->assertSameTenant($sourceScope, $target);
@@ -290,7 +292,7 @@ final class InventoryCrossSubjectTransferServices
     }
 
     /** 返回当前平台组织范围内可记名的在职员工；平台账号关联员工默认选中。 */
-    public function transferStaffCandidatesForHeadquarters(array $adminInfo, int $hqLocationId, string $sourcePartyType, int $sourceStoreId, int $targetStoreId): array
+    public function transferStaffCandidatesForHeadquarters(array $adminInfo, int $hqLocationId, string $sourcePartyType, int $sourceStoreId, int $targetStoreId, int $targetLocationId = 0): array
     {
         // 人员候选仍按原授权范围返回；选中的调入方本身不要求在操作者的门店范围内。
         $hqScope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
@@ -302,7 +304,7 @@ final class InventoryCrossSubjectTransferServices
             $sourceScope = $this->scope($sourceStoreId, 0, false);
             if (!$this->sameOrganizationRoot($hqScope, $sourceScope)) throw new \RuntimeException('inventory_cross_transfer_source_scope_denied');
         }
-        $targetScope = $targetStoreId > 0 ? $this->scope($targetStoreId, 0, false) : $this->headquartersForScope($sourceScope);
+        $targetScope = $targetStoreId > 0 ? $this->scope($targetStoreId, 0, false) : $this->headquartersForScope($sourceScope, $targetLocationId);
         if ($targetScope === null) throw new \RuntimeException('inventory_cross_transfer_hq_location_missing');
         $this->assertSameTenant($sourceScope, $targetScope);
         $staff = $this->platformTransferStaffRows($hqScope);
@@ -335,9 +337,9 @@ final class InventoryCrossSubjectTransferServices
             ->join('organization o', 'o.id=os.org_id')->where('s.is_del', 0)->where('s.is_show', 1)
             ->where('o.is_del', 0)->field('s.id,s.name')->distinct(true)->order('s.id asc')->select()->toArray();
         $list = [];
-        if ($sourcePartyType === 'STORE') {
-            $headquarters = $this->headquartersForScope($scope);
-            if ($headquarters !== null) $list[] = ['id' => 0, 'name' => '总部仓', 'party_type' => 'HQ', 'location_id' => (int)$headquarters['location']['id']];
+        foreach ($this->headquartersDirectory($scope) as $location) {
+            if ($sourcePartyType === 'HQ' && (int)$location['id'] === (int)$scope['location']['id']) continue;
+            $list[] = ['id' => 0, 'name' => (string)$location['location_name'], 'party_type' => 'HQ', 'location_id' => (int)$location['id']];
         }
         foreach ($rows as $row) {
             if ($sourcePartyType === 'STORE' && (int)$row['id'] === $sourceStoreId) continue;
@@ -361,9 +363,13 @@ final class InventoryCrossSubjectTransferServices
         $root = explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? '';
         if ($root === '') throw new \RuntimeException('inventory_cross_transfer_organization_invalid');
         $query = Db::name('inventory_stock_request_document')->alias('d')->leftJoin('system_store s', 's.id=d.store_id')
-            ->where('d.tenant_id', $scope['tenantId'])->where('d.supply_party_type', $sourcePartyType)->where('d.supply_party_id', $sourceStoreId)
+            ->where('d.tenant_id', $scope['tenantId'])->where('d.supply_party_type', $sourcePartyType)->where('d.supply_party_id', $sourceStoreId)->where(function ($query) use ($source, $sourcePartyType): void {
+                // 历史门店供货单只有唯一默认仓，允许未保存仓ID的旧单；总部多仓绝不推断。
+                $query->where('d.supply_location_id', (int)$source['location']['id']);
+                if ($sourcePartyType === 'STORE') $query->whereOr('d.supply_location_id', 0);
+            })
             ->whereLike('d.organization_path', '/' . $root . '/%')
-            ->whereIn('d.document_status', ['APPLIED', 'PARTIAL'])->field('d.id,d.request_no,d.store_id,d.request_party_type,d.request_party_id,d.request_party_name_snapshot,s.name request_store_name,d.business_date,d.document_status')->order('d.id desc');
+            ->whereIn('d.document_status', ['APPLIED', 'PARTIAL'])->field('d.id,d.request_no,d.store_id,d.location_id,d.supply_location_id,d.request_party_type,d.request_party_id,d.request_party_name_snapshot,s.name request_store_name,d.business_date,d.document_status')->order('d.id desc');
         if (!$scope['isSuperAdmin']) $query->where(function ($inner) use ($scope): void {
             $inner->whereIn('d.store_id', $scope['allowedStoreIds'])->whereOr(function ($hq) { $hq->where('d.request_party_type', 'HQ')->where('d.request_party_id', 0); });
         });
@@ -371,7 +377,7 @@ final class InventoryCrossSubjectTransferServices
         foreach ($documents as &$document) {
             try {
                 $target = strtoupper((string)($document['request_party_type'] ?? 'STORE')) === 'HQ'
-                    ? $this->headquartersForScope($scope)
+                    ? $this->headquartersForScope($scope, (int)$document['location_id'])
                     : $this->scope((int)($document['request_party_id'] ?? $document['store_id'] ?? 0), 0, false);
             } catch (\RuntimeException $exception) {
                 // A malformed/obsolete request row must not hide valid manual
@@ -388,41 +394,38 @@ final class InventoryCrossSubjectTransferServices
         return ['list' => array_values(array_filter($documents, static fn (array $document): bool => (bool)$document['lines']))];
     }
 
-    public function listForHeadquarters(array $adminInfo, int $hqLocationId, string $keyword, int $page = 1, int $limit = 20, string $fromPartyType = '', int $fromPartyId = 0, string $toPartyType = '', int $toPartyId = 0, string $status = '', string $dateFrom = '', string $dateTo = ''): array
+    public function listForHeadquarters(array $adminInfo, int $hqLocationId, string $keyword, int $page = 1, int $limit = 20, string $fromPartyType = '', int $fromPartyId = 0, string $toPartyType = '', int $toPartyId = 0, string $status = '', string $dateFrom = '', string $dateTo = '', int $fromLocationId = 0, int $toLocationId = 0): array
     {
         // 查询只解析可读范围；按钮能力仍取后端写授权，不能由单据状态独自决定。
         $scope = $this->headquartersScope($adminInfo, $hqLocationId, false);
         $query = Db::name('inventory_cross_transfer_document')->alias('d')->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id')
             ->where('d.tenant_id', $scope['tenantId'])->where(function ($inner) use ($scope): void {
-                $inner->where('d.from_location_id', (int)$scope['location']['id'])->whereOr('d.to_location_id', (int)$scope['location']['id']);
+                $inner->whereIn('d.from_location_id', $scope['hqLocationIds'])->whereOr(function ($target) use ($scope): void { $target->whereIn('d.to_location_id', $scope['hqLocationIds']); });
                 if ($scope['allowedStoreIds']) {
                     $inner->whereOr(function ($source) use ($scope): void { $source->where('d.from_party_type', 'STORE')->whereIn('d.from_party_id', $scope['allowedStoreIds']); });
                 }
             });
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
-        $keyword = trim($keyword);
-        if ($keyword !== '') {
-            $like = '%' . $keyword . '%';
-            $query->where(function ($inner) use ($like): void {
-                $inner->whereLike('d.transfer_no', $like)->whereOr('d.remark', 'like', $like);
-            });
-        }
+        $this->applyListKeyword($query, $keyword);
         if (in_array(strtoupper(trim($fromPartyType)), ['HQ', 'STORE'], true)) $query->where('d.from_party_type', strtoupper(trim($fromPartyType)))->where('d.from_party_id', $fromPartyId);
         if (in_array(strtoupper(trim($toPartyType)), ['HQ', 'STORE'], true)) $query->where('d.to_party_type', strtoupper(trim($toPartyType)))->where('d.to_party_id', $toPartyId);
+        // Platform filters distinguish physical HQ warehouses even though their party ID is always zero.
+        if ($fromLocationId > 0) $query->where('d.from_location_id', $fromLocationId);
+        if ($toLocationId > 0) $query->where('d.to_location_id', $toLocationId);
         if ($status !== '') $query->where('d.document_status', $status);
         $count = (int)(clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_location_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_location_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.initiator_store_id,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count')
+        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_location_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_location_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         foreach ($list as &$row) {
             $row['status_name'] = $this->statusName((string)$row['status_name']);
-            $sourceAllowed = (int)$row['from_location_id'] === (int)$scope['location']['id']
+            $sourceAllowed = in_array((int)$row['from_location_id'], $scope['hqLocationIds'], true)
                 ? true
                 : ((string)$row['from_party_type'] === 'STORE' && ($scope['isSuperAdmin'] || in_array((int)$row['from_party_id'], $scope['allowedStoreIds'], true)));
             // 已有调拨编辑功能覆盖源方草稿流程；收货仍必须是本总部仓的在途单。
             $row['can_dispatch'] = $scope['canCreate'] && (string)$row['document_status'] === 'DRAFT' && $sourceAllowed;
             $row['can_edit'] = $row['can_dispatch'];
             $row['can_delete'] = $row['can_edit'];
-            $row['can_receive'] = $scope['canCreate'] && (string)$row['document_status'] === 'DISPATCHED' && (int)$row['to_location_id'] === (int)$scope['location']['id'];
+            $row['can_receive'] = $scope['canCreate'] && (string)$row['document_status'] === 'DISPATCHED' && in_array((int)$row['to_location_id'], $scope['hqLocationIds'], true);
             $row['can_cancel'] = false;
             $row['can_reverse'] = false;
         }
@@ -434,7 +437,7 @@ final class InventoryCrossSubjectTransferServices
     {
         // 查看详情与写命令共用单据归属检查，但不要求仓库管理写授权。
         $scope = $this->headquartersScope($adminInfo, $hqLocationId, false);
-        $documentScope = $this->platformDocumentAccessScope($scope, $documentId, false);
+        $documentScope = $this->platformDocumentAccessScope($scope, $adminInfo, $documentId, false);
         $document = $this->lockedSubjectDocument($documentScope, $documentId, false);
         $canViewCost = in_array('inventory.cost.view', (array)((new InventoryPlatformAccessPolicy())->resolve($adminInfo)['features'] ?? []), true);
         $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->select()->toArray();
@@ -450,7 +453,7 @@ final class InventoryCrossSubjectTransferServices
         $document['lines'] = $lines;
         // 能力由当前授权和源方归属共同决定，收件方查看不能获得编辑权。
         $sourceAllowed = (string)$document['from_party_type'] === 'HQ'
-            ? (int)$document['from_location_id'] === (int)$scope['location']['id']
+            ? in_array((int)$document['from_location_id'], $scope['hqLocationIds'], true)
             : (($scope['isSuperAdmin'] || in_array((int)$document['from_party_id'], $scope['allowedStoreIds'], true)) && $this->sameOrganizationRoot($scope, $documentScope));
         $document['can_edit'] = $scope['canCreate'] && $sourceAllowed && (string)$document['document_status'] === 'DRAFT';
         $document['can_delete'] = $document['can_edit'];
@@ -512,7 +515,9 @@ final class InventoryCrossSubjectTransferServices
     private function createDraft(array $source, array $target, array $command): array
     {
         $this->assertSameTenant($source, $target);
-        if ($source['partyType'] === $target['partyType'] && (int)$source['partyId'] === (int)$target['partyId']) {
+        $source['location'] = $this->subjectLocation($source, $command['now']);
+        $target['location'] = $this->subjectLocation($target, $command['now']);
+        if ((int)$source['location']['id'] === (int)$target['location']['id']) {
             throw new \RuntimeException('inventory_cross_transfer_target_invalid');
         }
         $sourceLocation = $this->subjectLocation($source, $command['now']);
@@ -628,6 +633,10 @@ final class InventoryCrossSubjectTransferServices
         // JSON objects have no business-significant key order. Keep an exact
         // field whitelist (including legacy/store contracts), but accept object
         // spread/serializer reordering without weakening required/type checks.
+        // 新契约明确调入总部仓；旧契约只保留原默认仓兼容，不把仓库ID塞进门店ID。
+        $targetLocationId = (int)($input['target_location_id'] ?? 0);
+        if (isset($input['target_location_id']) && (!is_int($input['target_location_id']) || $targetLocationId < 0)) throw new \InvalidArgumentException('inventory_cross_transfer_target_invalid');
+        unset($input['target_location_id']);
         $inputKeys = array_keys($input);
         sort($inputKeys);
         $allowedKeySets = [$legacyKeys, $storeKeys, $keys, $keysWithTransferStaff];
@@ -665,7 +674,7 @@ final class InventoryCrossSubjectTransferServices
         }
         $date = $this->date((string)$input['business_date']); $remark = mb_substr(trim((string)$input['remark']), 0, 500);
         $legacyFingerprint = hash('sha256', json_encode([$date, $remark, $input['target_store_id'], $input['request_document_id'], $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        return ['key' => $key, 'date' => $date, 'remark' => $remark, 'sourcePartyType' => $sourcePartyType, 'sourceStoreId' => $sourceStoreId, 'targetPartyType' => $targetPartyType, 'targetStoreId' => $input['target_store_id'], 'requestDocumentId' => $input['request_document_id'], 'transferStaffId' => (int)($input['transfer_staff_id'] ?? 0), 'lines' => $lines, 'fingerprint' => hash('sha256', json_encode([$date, $remark, $sourcePartyType, $sourceStoreId, $targetPartyType, $input['target_store_id'], $input['request_document_id'], $input['transfer_staff_id'] ?? 0, $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)), 'legacyFingerprint' => $legacyFingerprint, 'now' => time()];
+        return ['key' => $key, 'date' => $date, 'remark' => $remark, 'sourcePartyType' => $sourcePartyType, 'sourceStoreId' => $sourceStoreId, 'targetPartyType' => $targetPartyType, 'targetStoreId' => $input['target_store_id'], 'targetLocationId' => $targetLocationId, 'requestDocumentId' => $input['request_document_id'], 'transferStaffId' => (int)($input['transfer_staff_id'] ?? 0), 'lines' => $lines, 'fingerprint' => hash('sha256', json_encode([$date, $remark, $sourcePartyType, $sourceStoreId, $targetPartyType, $input['target_store_id'], $input['request_document_id'], $input['transfer_staff_id'] ?? 0, $lines, $targetLocationId], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)), 'legacyFingerprint' => $legacyFingerprint, 'now' => time()];
     }
 
     private function platformTransferStaff(array $hqScope, array $sourceScope, array $targetScope, int $staffId): array
@@ -748,8 +757,9 @@ final class InventoryCrossSubjectTransferServices
         $scope = (new InventoryHqLocationServices())->scope($resolved['location'], (int)$resolved['access']['admin_id']);
         $scope['partyType'] = 'HQ';
         $scope['partyId'] = 0;
-        $scope['partyName'] = '总部仓';
+        $scope['partyName'] = (string)$resolved['location']['location_name'];
         $scope['location'] = $resolved['location'];
+        $scope['hqLocationIds'] = array_map('intval', array_column((new InventoryHqLocationServices())->locationsForAccess($resolved['access'], !$writable), 'id'));
         $scope['allowedStoreIds'] = array_values(array_map('intval', (array)($resolved['access']['store_ids'] ?? [])));
         $scope['isSuperAdmin'] = !empty($resolved['access']['is_super_admin']);
         $scope['canCreate'] = (new InventoryPlatformAccessPolicy())->canCreate($resolved['access'], 'transfer');
@@ -759,20 +769,29 @@ final class InventoryCrossSubjectTransferServices
         return $scope;
     }
 
-    private function headquartersForScope(array $scope): ?array
+    /** 接收目录只提供名称和身份；实际收货仍由对应仓库操作权限控制。 */
+    private function headquartersDirectory(array $scope): array
+    {
+        $root = (int)(explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? 0);
+        return Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])->where('location_type', 'HQ')
+            ->where('owner_id', $root)->where('location_status', 'ACTIVE')->order('is_default desc,id asc')->select()->toArray();
+    }
+
+    private function headquartersForScope(array $scope, int $locationId = 0): ?array
     {
         $root = (int)(explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? 0);
         if ($root <= 0) throw new \RuntimeException('inventory_cross_transfer_organization_invalid');
-        $location = Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])->where('location_type', 'HQ')->where('owner_id', $root)->where('store_id', 0)->where('is_default', 1)->where('location_status', 'ACTIVE')->limit(2)->lock(true)->select()->toArray();
+        $location = Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])->where('location_type', 'HQ')->where('owner_id', $root)->where('store_id', 0)->where('location_status', 'ACTIVE')
+            ->where($locationId > 0 ? 'id' : 'is_default', $locationId > 0 ? $locationId : 1)->limit(2)->lock(true)->select()->toArray();
         if (!$location) return null;
         if (count($location) !== 1) throw new \RuntimeException('inventory_cross_transfer_hq_location_ambiguous');
-        return ['tenantId' => $scope['tenantId'], 'organizationId' => (string)$location[0]['organization_id'], 'organizationPath' => (string)$location[0]['organization_path'], 'storeId' => 0, 'storeName' => '', 'operatorId' => 0, 'partyType' => 'HQ', 'partyId' => 0, 'partyName' => '总部仓', 'location' => (array)$location[0]];
+        return ['tenantId' => $scope['tenantId'], 'organizationId' => (string)$location[0]['organization_id'], 'organizationPath' => (string)$location[0]['organization_path'], 'storeId' => 0, 'storeName' => '', 'operatorId' => 0, 'partyType' => 'HQ', 'partyId' => 0, 'partyName' => (string)$location[0]['location_name'], 'location' => (array)$location[0]];
     }
 
     private function targetForStore(array $source, array $command): array
     {
         if ($command['targetPartyType'] === 'STORE') return $this->scope((int)$command['targetStoreId'], 0, false);
-        $headquarters = $this->headquartersForScope($source);
+        $headquarters = $this->headquartersForScope($source, (int)($command['targetLocationId'] ?? 0));
         if ($headquarters === null) throw new \RuntimeException('inventory_cross_transfer_hq_location_missing');
         return $headquarters;
     }
@@ -783,7 +802,7 @@ final class InventoryCrossSubjectTransferServices
         $id = (int)($scope['location']['id'] ?? 0);
         $location = Db::name('inventory_location')->where('id', $id)->lock(true)->find();
         if (!$location || (string)$location['tenant_id'] !== (string)$scope['tenantId'] || (string)$location['location_type'] !== 'HQ'
-            || (int)$location['store_id'] !== 0 || (int)$location['is_default'] !== 1 || (string)$location['location_status'] !== 'ACTIVE') throw new \RuntimeException('inventory_cross_transfer_hq_location_invalid');
+            || (int)$location['store_id'] !== 0 || (string)$location['location_status'] !== 'ACTIVE') throw new \RuntimeException('inventory_cross_transfer_hq_location_invalid');
         return (array)$location;
     }
 
@@ -859,7 +878,10 @@ final class InventoryCrossSubjectTransferServices
         if (!$request || !in_array((string)$request['document_status'], ['APPLIED', 'PARTIAL'], true)
             || $requestPartyType !== $target['partyType'] || $requestPartyId !== (int)$target['partyId']
             || strtoupper((string)$request['supply_party_type']) !== $source['partyType']
-            || (int)$request['supply_party_id'] !== (int)$source['partyId']) throw new \RuntimeException('inventory_cross_transfer_request_unavailable');
+            || (int)$request['supply_party_id'] !== (int)$source['partyId']
+            || (int)$request['location_id'] !== (int)$target['location']['id']
+            || ((int)($request['supply_location_id'] ?? 0) !== (int)$source['location']['id']
+                && !($source['partyType'] === 'STORE' && (int)($request['supply_location_id'] ?? 0) === 0))) throw new \RuntimeException('inventory_cross_transfer_request_unavailable');
         return (array)$request;
     }
 
@@ -902,16 +924,21 @@ final class InventoryCrossSubjectTransferServices
     }
 
     /** Resolve either the source or HQ target side for a platform detail view. */
-    private function platformDocumentAccessScope(array $hqScope, int $documentId, bool $lock): array
+    private function platformDocumentAccessScope(array $hqScope, array $adminInfo, int $documentId, bool $lock): array
     {
         $document = $this->platformTransferDocument($hqScope, $documentId, $lock);
-        if ((string)$document['from_party_type'] === 'HQ' && (int)$document['from_location_id'] === (int)$hqScope['location']['id']) return $hqScope;
+        // List access spans all authorized HQ warehouses; detail must resolve the document's actual location.
+        if ((string)$document['from_party_type'] === 'HQ' && in_array((int)$document['from_location_id'], $hqScope['hqLocationIds'], true)) {
+            return $this->headquartersScope($adminInfo, (int)$document['from_location_id'], false);
+        }
         if ((string)$document['from_party_type'] === 'STORE' && (int)$document['from_party_id'] > 0
             && ($hqScope['isSuperAdmin'] || in_array((int)$document['from_party_id'], $hqScope['allowedStoreIds'], true))) {
             $source = $this->scope((int)$document['from_party_id'], (int)$hqScope['operatorId'], false);
             if ($this->sameOrganizationRoot($hqScope, $source)) return $source;
         }
-        if ((string)$document['to_party_type'] === 'HQ' && (int)$document['to_location_id'] === (int)$hqScope['location']['id']) return $hqScope;
+        if ((string)$document['to_party_type'] === 'HQ' && in_array((int)$document['to_location_id'], $hqScope['hqLocationIds'], true)) {
+            return $this->headquartersScope($adminInfo, (int)$document['to_location_id'], false);
+        }
         throw new \RuntimeException('inventory_cross_transfer_scope_denied');
     }
 
@@ -937,7 +964,19 @@ final class InventoryCrossSubjectTransferServices
     private function fulfilledUnits(int $requestLineId):int{$fulfilled=(int)Db::name('inventory_stock_request_fulfillment')->where('request_line_id',$requestLineId)->sum('fulfilled_quantity_units');$reversed=(int)Db::name('inventory_stock_request_fulfillment_reversal')->where('request_line_id',$requestLineId)->sum('reversed_quantity_units');return max(0,$fulfilled-$reversed);}
     private function assertRequestRemaining(int $requestLineId,int $units):void{if($requestLineId<=0)return;$line=Db::name('inventory_stock_request_line')->where('id',$requestLineId)->lock(true)->find();$document=$line?Db::name('inventory_stock_request_document')->where('id',(int)$line['document_id'])->lock(true)->find():null;if(!$line||!$document||!in_array((string)$document['document_status'],['APPLIED','PARTIAL'],true))throw new \RuntimeException('inventory_cross_transfer_request_unavailable');$requested=(int)$line['requested_quantity_units'];$fulfilled=$this->fulfilledUnits($requestLineId);if($requested<$fulfilled+$units)throw new \RuntimeException('inventory_cross_transfer_request_quantity_exceeded');}
     private function refreshRequestStatus(int $requestId):void{if($requestId<=0)return;$document=Db::name('inventory_stock_request_document')->where('id',$requestId)->lock(true)->find();if(!$document||in_array((string)$document['document_status'],['CANCELLED','TERMINATED'],true))return;$lines=Db::name('inventory_stock_request_line')->where('document_id',$requestId)->lock(true)->select()->toArray();if(!$lines)return;$requested=0;$fulfilled=0;foreach($lines as $line){$requested+=(int)$line['requested_quantity_units'];$fulfilled+=$this->fulfilledUnits((int)$line['id']);}$status=$fulfilled>= $requested?'DONE':($fulfilled>0?'PARTIAL':'APPLIED');Db::name('inventory_stock_request_document')->where('id',$requestId)->whereIn('document_status',['APPLIED','PARTIAL','DONE'])->update(['document_status'=>$status]);}
-    private function replayDraft(array $document,array $from,array $to,array $command):array{$legacyStoreReplay=$from['partyType']==='STORE'&&$to['partyType']==='STORE'&&(string)$document['request_fingerprint']===(string)($command['legacyFingerprint']??'');if(((string)$document['request_fingerprint']!==$command['fingerprint']&&!$legacyStoreReplay)||(string)$document['from_party_type']!==$from['partyType']||(int)$document['from_party_id']!==(int)$from['partyId']||(string)$document['to_party_type']!==$to['partyType']||(int)$document['to_party_id']!==(int)$to['partyId']||(string)$document['document_status']!=='DRAFT')throw new \RuntimeException('inventory_cross_transfer_idempotency_conflict');return['transfer_id'=>(int)$document['id'],'transfer_no'=>(string)$document['transfer_no'],'document_status'=>'DRAFT','idempotent'=>true];}
+    /** 幂等重放必须绑定两端实际仓库，避免同一总部内切仓重试读回另一仓草稿。 */
+    private function replayDraft(array $document, array $from, array $to, array $command): array
+    {
+        $legacyStoreReplay = $from['partyType'] === 'STORE' && $to['partyType'] === 'STORE'
+            && (string)$document['request_fingerprint'] === (string)($command['legacyFingerprint'] ?? '');
+        if (((string)$document['request_fingerprint'] !== $command['fingerprint'] && !$legacyStoreReplay)
+            || (string)$document['from_party_type'] !== $from['partyType'] || (int)$document['from_party_id'] !== (int)$from['partyId']
+            || (string)$document['to_party_type'] !== $to['partyType'] || (int)$document['to_party_id'] !== (int)$to['partyId']
+            || (int)$document['from_location_id'] !== (int)$from['location']['id']
+            || (int)$document['to_location_id'] !== (int)$to['location']['id']
+            || (string)$document['document_status'] !== 'DRAFT') throw new \RuntimeException('inventory_cross_transfer_idempotency_conflict');
+        return ['transfer_id' => (int)$document['id'], 'transfer_no' => (string)$document['transfer_no'], 'document_status' => 'DRAFT', 'idempotent' => true];
+    }
     private function statusName(string $status):string{return['DRAFT'=>'草稿','DISPATCHED'=>'在途','RECEIVED'=>'已收货','CANCELLED'=>'已取消','REVERSED'=>'已作废'][$status]??$status;}
     private function date(string $value):string{$date=\DateTimeImmutable::createFromFormat('!Y-m-d',trim($value));$errors=\DateTimeImmutable::getLastErrors();if(!$date||($errors!==false&&($errors['warning_count']||$errors['error_count']))||$date->format('Y-m-d')!==trim($value))throw new \InvalidArgumentException('inventory_cross_transfer_date_invalid');return$date->format('Y-m-d');}
 }

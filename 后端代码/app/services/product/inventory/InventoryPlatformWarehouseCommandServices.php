@@ -3,185 +3,104 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory;
 
-use app\services\cashier\v3\CashierV3ScopeResolver;
 use think\facade\Db;
 
-/**
- * Creates a non-default store warehouse through the platform authority.
- *
- * A location is inventory master data, not an inventory movement fact: this
- * command never changes stock, batches, costs, sales, or service facts.
- */
+/** 总部仓主数据命令：沿用组织所有权，不创建门店副仓，不直接改库存或历史快照。 */
 final class InventoryPlatformWarehouseCommandServices
 {
+    /** 从已授权总部仓取得组织归属；幂等键生成稳定编码，重试不会重复建仓。 */
     public function create(array $adminInfo, array $input): array
     {
-        InventoryV3RolloutPolicy::assertMultiWarehouseEnabled();
-        $command = $this->normalize($input);
+        $key = trim((string)($input['idempotency_key'] ?? ''));
+        if (!preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key)) throw new \InvalidArgumentException('inventory_platform_warehouse_idempotency_invalid');
+        $name = $this->name($input['location_name'] ?? '');
+        $policy = new InventoryPlatformAccessPolicy();
+        $policy->assertFeature($policy->resolve($adminInfo), 'inventory.location.settings', '当前岗位未配置“仓库设置”权限。');
+        $base = (new InventoryHqLocationServices())->readableLocation($adminInfo, (int)($input['base_location_id'] ?? 0));
+        return Db::transaction(function () use ($base, $key, $name): array {
+            $location = (array)$base['location'];
+            $this->lockOwner($location);
+            $code = 'HQ-' . $location['owner_id'] . '-' . strtoupper(substr(hash('sha256', $key), 0, 24));
+            $existing = Db::name('inventory_location')->where('tenant_id', $location['tenant_id'])->where('location_code', $code)->lock(true)->find();
+            if ($existing) {
+                if ((int)$existing['owner_id'] !== (int)$location['owner_id'] || (string)$existing['location_name'] !== $name) throw new \RuntimeException('inventory_platform_warehouse_idempotency_conflict');
+                return ['location' => $existing, 'idempotent' => true];
+            }
+            $this->assertNameAvailable($location, $name);
+            $now = time();
+            $id = (int)Db::name('inventory_location')->insertGetId([
+                'tenant_id' => $location['tenant_id'], 'organization_id' => $location['organization_id'],
+                'organization_path' => $location['organization_path'], 'organization_name_snapshot' => $location['organization_name_snapshot'],
+                'location_type' => 'HQ', 'owner_id' => $location['owner_id'], 'location_code' => $code,
+                'location_name' => $name, 'store_id' => 0, 'store_name_snapshot' => '', 'is_default' => 0,
+                'location_status' => 'ACTIVE', 'version' => 1, 'created_by_admin_id' => (int)$base['access']['admin_id'],
+                'created_at' => $now, 'updated_at' => $now,
+            ]);
+            return ['location' => Db::name('inventory_location')->where('id', $id)->find(), 'idempotent' => false];
+        });
+    }
+
+    /** 版本保护阻止旧页面覆盖他人设置；改名与停用不覆盖历史单据快照。 */
+    public function update(array $adminInfo, int $id, array $input): array
+    {
         $policy = new InventoryPlatformAccessPolicy();
         $access = $policy->resolve($adminInfo);
-        $policy->assertFeature($access, 'inventory.location.manage', '当前岗位未配置“平台仓库管理”权限。');
-        $nameLock = 'inventory-location:' . substr(
-            hash('sha256', CashierV3ScopeResolver::TENANT_SCOPE_ID . ':' . $command['storeId'] . ':' . $command['locationName']),
-            0,
-            40
-        );
-        $lock = Db::query("SELECT GET_LOCK('{$nameLock}', 5) AS acquired");
-        if ((int)($lock[0]['acquired'] ?? 0) !== 1) {
-            throw new \RuntimeException('inventory_platform_warehouse_name_lock_timeout');
-        }
-        try {
-            return Db::transaction(function () use ($access, $command): array {
-            if (empty($access['is_super_admin']) && !in_array($command['storeId'], (array)$access['store_ids'], true)) {
-                throw new \RuntimeException('inventory_platform_warehouse_store_scope_denied');
-            }
-            $scope = $this->lockStoreScope($command['storeId']);
-            $code = $this->locationCode($command['storeId'], $command['idempotencyKey']);
-            $existing = Db::name('inventory_location')
-                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                ->where('location_code', $code)
-                ->lock(true)
-                ->find();
-            if ($existing) {
-                return $this->replay((array)$existing, $scope, $command, $code);
-            }
-
-            $sameName = Db::name('inventory_location')
-                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                ->where('store_id', $command['storeId'])
-                ->where('location_name', $command['locationName'])
-                ->lock(true)
-                ->find();
-            if ($sameName) {
-                throw new \RuntimeException('inventory_platform_warehouse_name_taken');
-            }
-
-            try {
-                $id = (int)Db::name('inventory_location')->insertGetId([
-                    'tenant_id' => CashierV3ScopeResolver::TENANT_SCOPE_ID,
-                    'organization_id' => $scope['organizationId'],
-                    'organization_path' => $scope['organizationPath'],
-                    'organization_name_snapshot' => $scope['organizationName'],
-                    'location_type' => 'STORE',
-                    'owner_id' => $command['storeId'],
-                    'location_code' => $code,
-                    'location_name' => $command['locationName'],
-                    'store_id' => $command['storeId'],
-                    'store_name_snapshot' => $scope['storeName'],
-                    'is_default' => 0,
-                    'location_status' => 'ACTIVE',
-                    'version' => 1,
-                    'created_by_admin_id' => (int)$access['admin_id'],
-                    'created_at' => $command['recordedAt'],
-                    'updated_at' => $command['recordedAt'],
-                ]);
-            } catch (\Throwable $exception) {
-                $colliding = Db::name('inventory_location')
-                    ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                    ->where('location_code', $code)
-                    ->lock(true)
-                    ->find();
-                if ($colliding) {
-                    return $this->replay((array)$colliding, $scope, $command, $code);
-                }
-                throw $exception;
-            }
-
+        $policy->assertFeature($access, 'inventory.location.settings', '当前岗位未配置“仓库设置”权限。');
+        $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $id);
+        $name = $this->name($input['location_name'] ?? '');
+        $status = (string)($input['location_status'] ?? '');
+        if (!in_array($status, ['ACTIVE', 'INACTIVE'], true) || (int)($input['expected_version'] ?? 0) <= 0) throw new \InvalidArgumentException('inventory_platform_warehouse_input_invalid');
+        return Db::transaction(function () use ($resolved, $id, $input, $name, $status): array {
+            $this->lockOwner((array)$resolved['location']);
             $location = Db::name('inventory_location')->where('id', $id)->lock(true)->find();
-            if (!$location) {
-                throw new \RuntimeException('inventory_platform_warehouse_create_failed');
-            }
-            return ['location' => $this->present((array)$location), 'idempotent' => false];
-            });
-        } finally {
-            Db::query("SELECT RELEASE_LOCK('{$nameLock}')");
-        }
+            if (!$location || (int)$location['version'] !== (int)$input['expected_version']) throw new \RuntimeException('仓库设置已变化，请刷新后重试。');
+            $this->assertNameAvailable($location, $name, $id);
+            if ($status === 'INACTIVE' && (string)$location['location_status'] !== 'INACTIVE') $this->assertCanDisable($location);
+            $changed = Db::name('inventory_location')->where('id', $id)->where('version', (int)$input['expected_version'])->update([
+                'location_name' => $name, 'location_status' => $status, 'version' => (int)$location['version'] + 1, 'updated_at' => time(),
+            ]);
+            if ($changed !== 1) throw new \RuntimeException('仓库设置已变化，请刷新后重试。');
+            return ['location' => Db::name('inventory_location')->where('id', $id)->find()];
+        });
     }
 
-    private function normalize(array $input): array
+    private function name($value): string
     {
-        if (array_keys($input) !== ['idempotency_key', 'store_id', 'location_name']) {
-            throw new \InvalidArgumentException('inventory_platform_warehouse_input_invalid');
-        }
-        $key = trim((string)$input['idempotency_key']);
-        if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) {
-            throw new \InvalidArgumentException('inventory_platform_warehouse_idempotency_invalid');
-        }
-        if (!is_int($input['store_id']) || $input['store_id'] <= 0) {
-            throw new \InvalidArgumentException('inventory_platform_warehouse_store_invalid');
-        }
-        $name = trim((string)$input['location_name']);
-        if ($name === '' || mb_strlen($name) > 100 || preg_match('/[\x00-\x1F\x7F]/', $name) === 1) {
-            throw new \InvalidArgumentException('inventory_platform_warehouse_name_invalid');
-        }
-        return ['idempotencyKey' => $key, 'storeId' => (int)$input['store_id'], 'locationName' => $name, 'recordedAt' => time()];
+        if (!is_string($value)) throw new \InvalidArgumentException('inventory_platform_warehouse_input_invalid');
+        $name = trim($value);
+        if ($name === '' || mb_strlen($name) > 100 || preg_match('/[\x00-\x1F\x7F]/', $name)) throw new \InvalidArgumentException('inventory_platform_warehouse_input_invalid');
+        return $name;
     }
 
-    private function lockStoreScope(int $storeId): array
+    /** 同一总部共用组织行锁，保证并发建仓与改名的名称唯一。 */
+    private function lockOwner(array $location): void
     {
-        $store = Db::name('system_store')->where('id', $storeId)->where('is_del', 0)->where('is_show', 1)
-            ->field('id,name')->lock(true)->find();
-        $binding = Db::name('organization_store')->where('store_id', $storeId)->field('org_id')->lock(true)->find();
-        $organizationId = (int)($binding['org_id'] ?? 0);
-        if (!$store || trim((string)($store['name'] ?? '')) === '' || $organizationId <= 0) {
-            throw new \RuntimeException('inventory_platform_warehouse_store_scope_invalid');
-        }
-        $ids = [];
-        $seen = [];
-        $name = '';
-        $current = $organizationId;
-        for ($depth = 0; $depth < 64; $depth++) {
-            if (isset($seen[$current])) throw new \RuntimeException('inventory_platform_warehouse_organization_invalid');
-            $seen[$current] = true;
-            $node = Db::name('organization')->where('id', $current)->where('is_del', 0)->field('id,pid,name')->lock(true)->find();
-            if (!$node || trim((string)($node['name'] ?? '')) === '') throw new \RuntimeException('inventory_platform_warehouse_organization_invalid');
-            if ($name === '') $name = trim((string)$node['name']);
-            $ids[] = (int)$node['id'];
-            $parentId = (int)($node['pid'] ?? 0);
-            if ($parentId === 0) break;
-            if ($parentId < 0) throw new \RuntimeException('inventory_platform_warehouse_organization_invalid');
-            $current = $parentId;
-        }
-        if (!$ids || (int)end($ids) !== $current) throw new \RuntimeException('inventory_platform_warehouse_organization_invalid');
-        return [
-            'organizationId' => (string)$organizationId,
-            'organizationPath' => '/' . implode('/', array_reverse($ids)) . '/',
-            'organizationName' => mb_substr($name, 0, 100),
-            'storeName' => mb_substr(trim((string)$store['name']), 0, 100),
-        ];
+        if (!Db::name('organization')->where('id', (int)$location['owner_id'])->where('is_del', 0)->lock(true)->find()) throw new \RuntimeException('仓库所属组织已失效。');
     }
 
-    private function locationCode(int $storeId, string $idempotencyKey): string
+    private function assertNameAvailable(array $location, string $name, int $exceptId = 0): void
     {
-        return 'STORE-' . $storeId . '-' . strtoupper(substr(hash('sha256', 'warehouse:' . $idempotencyKey), 0, 24));
+        if (Db::name('inventory_location')->where('tenant_id', $location['tenant_id'])->where('location_type', 'HQ')
+            ->where('owner_id', (int)$location['owner_id'])->where('location_name', $name)->where('id', '<>', $exceptId)->value('id')) throw new \RuntimeException('该总部已存在同名仓库。');
     }
 
-    private function replay(array $location, array $scope, array $command, string $code): array
+    /** 停用前锁仓核对余额及未完成单据；不删除历史或转移库存。 */
+    private function assertCanDisable(array $location): void
     {
-        if ((string)($location['organization_id'] ?? '') !== $scope['organizationId']
-            || (string)($location['organization_path'] ?? '') !== $scope['organizationPath']
-            || (int)($location['store_id'] ?? 0) !== $command['storeId']
-            || (string)($location['location_code'] ?? '') !== $code
-            || (string)($location['location_name'] ?? '') !== $command['locationName']
-            || (int)($location['is_default'] ?? -1) !== 0) {
-            throw new \RuntimeException('inventory_platform_warehouse_idempotency_conflict');
+        $id = (int)$location['id'];
+        if (Db::name('inventory_stock')->where('location_id', $id)->where('available_quantity_units', '<>', 0)->value('id')) throw new \RuntimeException('仓库仍有库存，不能停用。');
+        if (Db::name('inventory_stock_count_draft')->where('location_id', $id)->where('document_status', 'DRAFT')->value('id')) throw new \RuntimeException('仓库仍有未完成盘点草稿，不能停用。');
+        if (Db::name('inventory_cross_transfer_document')->whereIn('document_status', ['DRAFT', 'DISPATCHED'])
+            ->where(function ($q) use ($id): void { $q->where('from_location_id', $id)->whereOr('to_location_id', $id); })->value('id')) throw new \RuntimeException('仓库仍有未完成调拨，不能停用。');
+        // 未绑定总部供货仓的旧请货不能因默认仓停用被遗落；先核实绑定，再允许停用。
+        if ((int)$location['is_default'] === 1 && Db::name('inventory_stock_request_document')->alias('d')
+            ->join('inventory_location l', 'l.id=d.location_id')
+            ->where('d.tenant_id', $location['tenant_id'])->where('d.supply_party_type', 'HQ')->where('d.supply_location_id', 0)
+            ->whereIn('d.document_status', ['APPLIED', 'PARTIAL'])
+            ->where('l.organization_path', 'like', '/' . (int)$location['owner_id'] . '/%')->value('d.id')) {
+            throw new \RuntimeException('存在尚未确认供货仓的历史请货，请先绑定仓库。');
         }
-        return ['location' => $this->present($location), 'idempotent' => true];
-    }
-
-    private function present(array $location): array
-    {
-        return [
-            'id' => (int)$location['id'],
-            'location_code' => (string)$location['location_code'],
-            'location_name' => (string)$location['location_name'],
-            'store_id' => (int)$location['store_id'],
-            'store_name_snapshot' => (string)$location['store_name_snapshot'],
-            'is_default' => (int)$location['is_default'],
-            'location_status' => (string)$location['location_status'],
-            'version' => (int)$location['version'],
-            'created_by_admin_id' => (int)($location['created_by_admin_id'] ?? 0),
-            'created_at' => (int)$location['created_at'],
-        ];
+        if (Db::name('inventory_stock_request_document')->whereIn('document_status', ['APPLIED', 'PARTIAL'])
+            ->where(function ($q) use ($id): void { $q->where('location_id', $id)->whereOr('supply_location_id', $id); })->value('id')) throw new \RuntimeException('仓库仍有未完成请货，不能停用。');
     }
 }

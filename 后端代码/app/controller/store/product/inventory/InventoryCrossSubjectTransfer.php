@@ -36,7 +36,7 @@ final class InventoryCrossSubjectTransfer extends AuthController
     public function create()
     {
         $input = $this->request->postMore([
-            ['idempotency_key', ''], ['business_date', ''], ['remark', ''], ['target_party_type', 'STORE'], ['target_store_id', 0], ['request_document_id', 0], ['lines', []],
+            ['idempotency_key', ''], ['business_date', ''], ['remark', ''], ['target_party_type', 'STORE'], ['target_store_id', 0], ['target_location_id', 0], ['request_document_id', 0], ['lines', []],
         ]);
         return $this->run(fn (): array => $this->services->createDraftForStore((int)$this->storeId, (int)$this->storeStaffId, $input), '跨店调拨草稿已保存。');
     }
@@ -46,7 +46,7 @@ final class InventoryCrossSubjectTransfer extends AuthController
     {
         $input = $this->request->postMore([
             ['expected_edit_token', ''], ['idempotency_key', ''], ['business_date', ''], ['remark', ''],
-            ['target_party_type', 'STORE'], ['target_store_id', 0], ['request_document_id', 0], ['lines', []],
+            ['target_party_type', 'STORE'], ['target_store_id', 0], ['target_location_id', 0], ['request_document_id', 0], ['lines', []],
         ]);
         return $this->run(fn (): array => $this->services->updateDraftForStore((int)$this->storeId, (int)$this->storeStaffId, $id, $input), '调拨草稿已更新。');
     }

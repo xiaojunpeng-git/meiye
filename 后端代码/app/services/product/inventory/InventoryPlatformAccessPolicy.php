@@ -25,6 +25,7 @@ final class InventoryPlatformAccessPolicy
     public const AUTH_COST = 'inventory-v3-platform-batch-cost';
     public const AUTH_EXPORT = 'inventory-v3-platform-batch-export';
     public const AUTH_QUERY_MANAGE = 'inventory-v3-platform-query-manage';
+    public const AUTH_WAREHOUSE_SETTINGS = 'inventory-v3-platform-warehouse-settings';
     public const AUTH_WAREHOUSE_MANAGE = 'inventory-v3-platform-warehouse-manage';
 
     /** 菜单与页面对应平台路由的既有 auth；首页权限仅兼容原路由明确接受它的页面。 */
@@ -74,6 +75,7 @@ final class InventoryPlatformAccessPolicy
             'post product/inventory/v3/hq/count/draft' => 'count',
             'get product/inventory/v3/hq/count/draft/:id' => 'count',
             'post product/inventory/v3/hq/request/apply' => 'request',
+            'post product/inventory/v3/hq/request/:id/bind-supply-warehouse' => 'transfer',
             'get product/inventory/v3/hq/request/requester' => 'request',
             'get product/inventory/v3/hq/request/suppliers' => 'request',
             'post product/inventory/v3/hq/cross-transfer' => 'transfer',
@@ -86,6 +88,11 @@ final class InventoryPlatformAccessPolicy
             'get product/inventory/v3/hq/catalog' => 'catalog',
             'get product/inventory/v3/hq/catalog/barcode' => 'catalog',
         ];
+        // 主数据命令可由独立仓库设置权限授权，不传播到任何库存业务写命令。
+        if (strtolower(trim($method)) === 'post' && in_array($rule, ['product/inventory/v3/locations', 'product/inventory/v3/locations/:id'], true)) {
+            try { return in_array('inventory.location.settings', $this->resolveByAdminId($adminId)['features'], true); }
+            catch (UnifiedQueryException $exception) { return false; }
+        }
         $page = $routes[strtolower(trim($method)) . ' ' . $rule] ?? '';
         if ($page === '') return false;
         try { return $this->canCreate($this->resolveByAdminId($adminId), $page); }
@@ -102,7 +109,7 @@ final class InventoryPlatformAccessPolicy
         // 只归一框架定义的参数占位符，不把任意实际 URL/路径前缀当授权路由。
         $rule = str_replace(['<id>', '<productid>'], [':id', ':productid'], strtolower(trim($rule)));
         $routes = [
-            'locations' => '*', 'dashboard' => 'overview',
+            'locations' => '*', 'warehouse-settings' => '*', 'import' => '*', 'import/:id/detail' => '*', 'dashboard' => 'overview',
             'hq/inbound' => 'inbound', 'hq/inbound/:id/detail' => 'inbound', 'hq/inbound/:id/outbound-details' => 'inbound',
             'hq/outbound' => 'outbound', 'hq/outbound/:id/detail' => 'outbound',
             'hq/request' => 'request', 'hq/request/:id/detail' => 'request',
@@ -187,6 +194,7 @@ final class InventoryPlatformAccessPolicy
             self::AUTH_EXPORT,
             self::AUTH_QUERY_MANAGE,
             self::AUTH_WAREHOUSE_MANAGE,
+            self::AUTH_WAREHOUSE_SETTINGS,
         ] : $this->roleUniqueAuth($admin);
         $hasNativeView = in_array(self::AUTH_VIEW, $uniqueAuth, true);
         // 有效旧库存菜单可建立只读数据范围，但不补发 AUTH_VIEW/仓库写权限；
@@ -218,6 +226,8 @@ final class InventoryPlatformAccessPolicy
             $features[] = 'inventory.location.manage';
         }
 
+        // 仓库设置只维护主数据，不提升入库、出库、盘点或调拨的写能力。
+        if ($hasNativeView && (in_array(self::AUTH_WAREHOUSE_SETTINGS, $uniqueAuth, true) || in_array(self::AUTH_WAREHOUSE_MANAGE, $uniqueAuth, true))) $features[] = 'inventory.location.settings';
         sort($storeIds, SORT_NUMERIC);
         sort($uniqueAuth, SORT_STRING);
         sort($features, SORT_STRING);

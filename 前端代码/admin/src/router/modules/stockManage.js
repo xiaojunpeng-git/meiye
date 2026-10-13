@@ -19,6 +19,12 @@ export default {
   redirect: `${Setting.roterPre}/stock/manage/home`,
   component: BasicLayout,
   children: [
+    // 仓库主数据设置复用库存桥接，独立设置权限不开放其他库存写命令。
+    {
+      path: `${Setting.roterPre}/stock/warehouse`, name: 'inventoryWarehouseSettings',
+      meta: { auth: ['inventory-v3-platform-warehouse-settings', 'inventory-v3-platform-warehouse-manage'], title: '仓库设置' },
+      component: () => import('@/pages/stockManage/InventoryV3Bridge')
+    },
     {
       path: `${Setting.roterPre}/stock/manage/home`, name: 'stockManageV3Home',
       meta: { auth: ['admin-stock-manage'], title: '库存首页' },

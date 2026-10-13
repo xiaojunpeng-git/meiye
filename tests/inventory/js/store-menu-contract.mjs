@@ -113,7 +113,7 @@ check('store inventory scope derives its displayed store name from the trusted w
 check('inventory rows no longer forge a store operator and transfer is explicitly cross-store',
   !inventoryApp.includes('王晓雯')
     && !inventoryApp.includes("text(row.operator_name || row.admin_name || row.staff_name, '—')")
-    && inventoryApp.includes("case 'count': return [text(row.order_sn), text(row.store_name),")
+    && inventoryApp.includes("text(mode.value === 'platform' ? row.location_name || row.store_name : row.store_name)")
     && inventoryModal.includes('调入方')
     && inventoryModal.includes('收货时入账')
     && inventoryModal.includes('crossTransferIncomingRequests'))
@@ -123,7 +123,7 @@ check('unimplemented exports are not exposed as clickable actions',
     && inventoryApp.includes('导出将在对应权威导出任务接入后开放'))
 // 门店库存查询取消设置入口，不更改平台按钮或其他页面的共享工具栏默认行为。
 check('inventory stock hides store settings while preserving platform settings and the same query region',
-  inventoryApp.includes('<div class="heading-actions"><button v-if="currentPage.action"')
+  inventoryApp.includes('<button v-if="currentPage.action"')
     && !inventoryApp.includes('active === \'stock\' || (mode === \'store\' && operationalQueryPage)')
     && !inventoryApp.includes('stockQueryToolbar')
     && inventoryApp.includes(':show-keyword-search="false"')
@@ -165,14 +165,16 @@ check('embedded platform pages hide the duplicate inventory navigation and narro
     && inventoryApp.includes('const platformStoreId = ref(0)')
     && inventoryApp.includes("? { storeId: Number(platformStoreId.value) }")
     && !inventoryApp.includes('platformLocationId'))
+// R14: commands follow the selected physical warehouse, not the original default HQ prop.
 check('platform HQ operations bind catalog, inbound, and transfer to one selected headquarters location',
   inventoryApp.includes('const platformHqLocationId = ref(0)')
     && inventoryApp.includes('const platformHqLocations = computed')
     && inventoryApp.includes('listHqInbound(listWarehouseQuery)')
     && inventoryApp.includes('listHqCrossTransfers({ hq_location_id: Number(platformHqLocationId.value), ...query })')
     && inventoryModal.includes('const catalogQuery = computed(() =>')
-    && inventoryModal.includes('createHqInbound({ ...payload, hq_location_id: Number(props.hqLocationId) })')
-    && inventoryModal.includes('createHqCrossTransfer({ ...payload, hq_location_id: Number(props.hqLocationId) })'))
+    && inventoryModal.includes('createHqInbound({ ...payload, hq_location_id: Number(commandHqLocationId.value) })')
+    && inventoryModal.includes('createHqCrossTransfer(payload)')
+    && inventoryModal.includes('hq_location_id: Number(commandHqLocationId.value)'))
 check('request detail and edit are wired to the V3 authority and import accepts a dropped xlsx file',
   inventoryApp.includes('async function openRequestDetail')
     && inventoryApp.includes('async function openRequestEditor')

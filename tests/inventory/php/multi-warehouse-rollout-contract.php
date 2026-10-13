@@ -32,17 +32,19 @@ rolloutAssert('transfer reads and writes are closed at the service boundary',
 rolloutAssert('store transfer endpoints return an explicit Chinese rollout response',
     substr_count($source['transferController'], '多仓库调拨本期暂不开放。') === 2
     && strpos($source['transferController'], 'InventoryV3RolloutPolicy::MULTI_WAREHOUSE_DEFERRED_CODE') !== false);
-rolloutAssert('non-default warehouse creation is closed at controller and service boundaries',
-    strpos($source['warehouseService'], 'InventoryV3RolloutPolicy::assertMultiWarehouseEnabled();') !== false
-    && strpos($source['warehouseController'], '多仓库建仓本期暂不开放。') !== false);
-rolloutAssert('store and platform warehouse selectors return the default warehouse only',
-    substr_count($source['storeLocations'], "->where('is_default', 1)") >= 1
-    && substr_count($source['platformLocations'], "->where('is_default', 1)") >= 1);
-rolloutAssert('the V3 inventory navigation restores cross-store transfer while keeping non-default warehouses deferred',
-    strpos($source['app'], "const deferredPageKeys = new Set(['warehouse'])") !== false
-    && strpos($source['app'], 'if (deferredPageKeys.has(item.key)) return false') !== false
-    && strpos($source['app'], "{ key: 'transfer', label: '调拨管理'") !== false
-    && strpos($source['app'], "{ key: 'warehouse', label: '仓库设置'") === false);
+rolloutAssert('HQ warehouse creation has its own settings permission and never creates store warehouses',
+    strpos($source['warehouseService'], "'inventory.location.settings'") !== false
+    && strpos($source['warehouseService'], "'location_type' => 'HQ'") !== false
+    && strpos($source['warehouseService'], "'location_type' => 'STORE'") === false);
+rolloutAssert('store selector still returns defaults while the platform opens all HQ locations',
+    strpos($source['storeLocations'], "->where('is_default', 1)") !== false
+    && strpos($source['platformLocations'], "\$types->where('location_type', 'HQ')") !== false
+    && strpos($source['platformLocations'], "\$store->where('location_type', 'STORE')->where('is_default', 1)") !== false);
+// The navigation entry was removed in R14; keep the existing settings page for authorized direct access.
+rolloutAssert('warehouse settings are absent from navigation while the settings page remains',
+    strpos($source['app'], "{ key: 'warehouse', label: '仓库设置'") === false
+    && strpos($source['app'], "warehouse: {") !== false
+    && strpos($source['app'], "const deferredPageKeys = new Set(['warehouse'])") === false);
 rolloutAssert('cross-store transfer writes a draft, a source fact at dispatch, and a target fact only at receipt',
     strpos($source['crossTransferService'], "'document_status' => 'DRAFT'") !== false
     && strpos($source['crossTransferService'], "'cross_transfer_out'") !== false

@@ -102,7 +102,7 @@ uqInventoryAssert('platform UQ derives HQ or store locations server-side and acc
     && strpos($platformContextSource, "'scope_dimensions' => ['location_id' => array_keys(\$locationIds)]") !== false
     && $platformControllerSource !== false
     && strpos($platformControllerSource, 'selectedStoreId') !== false
-    && strpos($platformControllerSource, "unset(\$payload['storeId'], \$payload['subject'])") !== false
+    && strpos($platformControllerSource, "unset(\$payload['storeId'], \$payload['subject'], \$payload['hq_location_id'])") !== false
     && strpos($platformControllerSource, "['HQ', 'STORE']") !== false
     && strpos($platformControllerSource, 'warehouseId') === false
     && strpos($platformControllerSource, 'unifiedExportTask') !== false

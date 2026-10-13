@@ -21,7 +21,8 @@ final class InventoryProductStockSummaryServices
             if ($batchId <= 0 || $productId <= 0 || $skuId <= 0 || $scale < 0 || $scale > 4) {
                 throw new \RuntimeException('inventory_product_summary_row_invalid');
             }
-            $key = $productId . ':' . $skuId;
+            // 同一总部商品可存在多个物理仓，数量筛选和汇总不得跨仓合并。
+            $key = (int)$row['location_id'] . ':' . $productId . ':' . $skuId;
             if (!isset($groups[$key])) {
                 $groups[$key] = $row + [
                     'quantity_units' => 0,

@@ -217,6 +217,11 @@
   flex-flow: row wrap;
 }
 
+/* When a host adds a warehouse selector, share the same quick-query row without hiding its scope. */
+.unified-query-toolbar--actions-after-fields .unified-query-toolbar__secondary:has(> .unified-query-toolbar__context-actions) .unified-query-toolbar__top-fields {
+  flex: 1 1 600px;
+}
+
 .unified-query-toolbar--quick-controls-inline {
   grid-template-rows: auto;
 }

@@ -31,7 +31,7 @@ final class InventoryStockRequestQueryServices
         $query->whereRaw('(' . implode(' OR ', $conditions) . ')', $bindings);
     }
 
-    public function listForHeadquarters(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $requestPartyType = '', int $requestPartyId = 0, string $supplyPartyType = '', int $supplyPartyId = 0, int $acceptancePartyId = 0, string $status = '', string $dateFrom = '', string $dateTo = ''): array
+    public function listForHeadquarters(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $requestPartyType = '', int $requestPartyId = 0, string $supplyPartyType = '', int $supplyPartyId = 0, int $acceptancePartyId = 0, string $status = '', string $dateFrom = '', string $dateTo = '', int $supplyLocationId = 0, int $requestLocationId = 0): array
     {
         $resolved = (new InventoryHqLocationServices())->readableLocation($adminInfo, $locationId);
         $location = (array)$resolved['location']; $access = (array)$resolved['access'];
@@ -51,16 +51,19 @@ final class InventoryStockRequestQueryServices
         }
         // 受理部门只在总部供货范围内有意义，拒绝脱离总部供货条件的隐式筛选。
         if (strtoupper(trim($supplyPartyType)) === 'HQ' && $acceptancePartyId > 0) $query->where('d.acceptance_party_id', $acceptancePartyId);
+        if ($supplyLocationId > 0) $query->where('d.supply_location_id', $supplyLocationId);
+        if ($requestLocationId > 0) $query->where('d.location_id', $requestLocationId);
         if ($status !== '') $query->where('d.document_status', $status);
         $count = (int)(clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.request_party_name_snapshot request_party_name,d.requester_name_snapshot,d.operator_name_snapshot operator_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
+        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.request_party_name_snapshot request_party_name,d.requester_name_snapshot,d.operator_name_snapshot operator_name,d.supply_party_type,d.supply_party_id,d.supply_location_id,d.location_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         $canViewCost = in_array('inventory.cost.view', (array)($access['features'] ?? []), true);
         foreach ($list as &$row) {
             $status=(string)$row['status_name'];
             // The shortcut is only an entry to an existing transfer command: it never confirms
             // or consumes stock. Source authority and current remaining lines are rechecked there.
-            $row['can_transfer'] = in_array($status, ['APPLIED', 'PARTIAL'], true)
+            $row['can_bind_supply'] = (int)$row['supply_location_id'] === 0 && (string)$row['supply_party_type'] === 'HQ' && in_array($status, ['APPLIED', 'PARTIAL'], true) && (new InventoryPlatformAccessPolicy())->canCreate($access, 'transfer');
+            $row['can_transfer'] = (int)$row['supply_location_id'] > 0 && in_array($status, ['APPLIED', 'PARTIAL'], true)
                 && in_array('inventory.location.manage', (array)($access['features'] ?? []), true)
                 && ((string)$row['supply_party_type'] === 'HQ'
                     || !empty($access['is_super_admin'])
@@ -122,7 +125,7 @@ final class InventoryStockRequestQueryServices
         $this->applyKeyword($query, $keyword);
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
         $count = (clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot operator_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
+        $list = $query->field('d.id,d.request_no order_sn,d.document_status status_name,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot operator_name,d.supply_party_type,d.supply_party_id,d.supply_location_id,d.location_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.business_date request_date,d.recorded_at add_time,d.recorded_at operation_at,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         foreach ($list as &$row) {
             $documentStatus = (string)$row['status_name'];
@@ -161,7 +164,7 @@ final class InventoryStockRequestQueryServices
                 });
             })
             ->where('d.id', $requestId)
-            ->field('d.id,d.request_no,d.document_status,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot,d.acceptance_party_id,d.acceptance_party_name_snapshot,d.business_date,d.applied_at,d.recorded_at,d.remark')
+            ->field('d.id,d.request_no,d.document_status,d.store_id,s.name request_store_name,d.requester_name_snapshot,d.operator_name_snapshot,d.supply_party_type,d.supply_party_id,d.supply_location_id,d.location_id,d.supply_party_name_snapshot,d.acceptance_party_id,d.acceptance_party_name_snapshot,d.business_date,d.applied_at,d.recorded_at,d.remark')
             ->find();
         if (!$document) throw new \RuntimeException('inventory_stock_request_not_found');
         $document['status_name'] = $this->statusName((string)$document['document_status']);

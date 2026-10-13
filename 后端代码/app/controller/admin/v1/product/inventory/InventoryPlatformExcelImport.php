@@ -35,6 +35,20 @@ final class InventoryPlatformExcelImport extends AuthController
         return $this->services->downloadPlatformTemplate($direction, $allowed, is_array($selected) ? $selected : []);
     }
 
+    /** 平台导入记录与详情复用服务端仓库权限，不能按store_id=0混看所有总部仓。 */
+    public function index()
+    {
+        return $this->success($this->services->platformRecords((array)$this->adminInfo, $this->request->getMore([
+            ['hq_location_id',0],['store_id',0],['keyword',''],['page',1],['limit',20],
+        ])));
+    }
+
+    /** 记录ID只用于定位，实际仓库及历史创建人权限由服务端重新核验。 */
+    public function detail(int $id)
+    {
+        return $this->success($this->services->platformRecordDetail((array)$this->adminInfo,$id));
+    }
+
     public function upload()
     {
         return $this->success($this->services->storeUploadedFile($this->request->file('file')));

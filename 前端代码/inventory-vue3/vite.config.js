@@ -13,6 +13,8 @@ export default defineConfig({
   // 盘点导出在用户点击时才动态引入 ExcelJS；开发服务必须在启动期间预构建，避免平台 iframe 首次访问时整个库存工作台空白。
   optimizeDeps: { include: ['exceljs'] },
   server: {
+    // Docker bind mounts on macOS may miss file events; polling keeps the platform iframe on current source without restarting Vite.
+    watch: { usePolling: true, interval: 1000 },
     proxy: {
       '/storeapi': {
         target: process.env.VITE_LOCAL_BACKEND_ORIGIN || 'http://127.0.0.1:8080',

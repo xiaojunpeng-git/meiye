@@ -10,12 +10,12 @@ use app\services\product\product\PhysicalProductSelectionPolicy;
 final class InventoryPlatformHqCatalogServices
 {
     /** Resolve one HQ SKU by barcode; scanning must never depend on a catalog page. */
-    public function barcode(array $adminInfo, int $locationId, string $barcode, string $sourcePartyType = 'HQ', int $sourceStoreId = 0, string $availabilityPartyType = '', int $availabilityStoreId = 0): array
+    public function barcode(array $adminInfo, int $locationId, string $barcode, string $sourcePartyType = 'HQ', int $sourceStoreId = 0, string $availabilityPartyType = '', int $availabilityStoreId = 0, int $availabilityLocationId = 0): array
     {
         $source = $this->source($adminInfo, $locationId, $sourcePartyType, $sourceStoreId);
         $availabilitySource = $availabilityPartyType === ''
             ? $source
-            : $this->source($adminInfo, $locationId, $availabilityPartyType, $availabilityStoreId);
+            : $this->source($adminInfo, $availabilityPartyType === 'HQ' && $availabilityLocationId > 0 ? $availabilityLocationId : $locationId, $availabilityPartyType, $availabilityStoreId);
         $barcode = trim($barcode);
         if ($barcode === '' || mb_strlen($barcode) > 64) throw new \InvalidArgumentException('inventory_catalog_barcode_invalid');
         $rows = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
@@ -36,14 +36,14 @@ final class InventoryPlatformHqCatalogServices
         return $this->withSupplierAvailableQuantity($source, $availabilitySource, $rows)[0];
     }
 
-    public function search(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $sourcePartyType = 'HQ', int $sourceStoreId = 0, string $availabilityPartyType = '', int $availabilityStoreId = 0, bool $includeCountBatches = false): array
+    public function search(array $adminInfo, int $locationId, string $keyword, int $page = 1, int $limit = 20, string $sourcePartyType = 'HQ', int $sourceStoreId = 0, string $availabilityPartyType = '', int $availabilityStoreId = 0, bool $includeCountBatches = false, int $availabilityLocationId = 0): array
     {
         // Resolve the selected source subject first. The catalog is never a
         // tenant-wide anonymous product search, even though it contains no stock figures.
         $source = $this->source($adminInfo, $locationId, $sourcePartyType, $sourceStoreId);
         $availabilitySource = $availabilityPartyType === ''
             ? $source
-            : $this->source($adminInfo, $locationId, $availabilityPartyType, $availabilityStoreId);
+            : $this->source($adminInfo, $availabilityPartyType === 'HQ' && $availabilityLocationId > 0 ? $availabilityLocationId : $locationId, $availabilityPartyType, $availabilityStoreId);
 
         $keyword = trim($keyword);
         if (mb_strlen($keyword) > 64) {

@@ -35,9 +35,14 @@ assert.ok(toolbar.props.some(prop => prop.type === 7 && prop.name === 'on' && pr
 assert.equal(binding('on-save-settings'), 'saveStockQuerySettings')
 assert.equal(binding('fields'), 'visibleStockQueryFields')
 assert.ok(!source.includes('stockQueryToolbar'))
-// 位置调整仅门店库存查询启用，平台及未明确指定模式不受影响。
-assert.equal(binding('query-actions-after-quick-fields'), "mode === 'store'")
+// Both hosts share one query layout; the platform keeps its warehouse and settings controls.
+assert.equal(binding('query-actions-after-quick-fields'), 'true')
 const relocate = new Function('mode', `return ${binding('query-actions-after-quick-fields')}`)
 assert.equal(relocate('store'), true)
-assert.equal(relocate('platform'), false)
-console.log('STOCK_SETTINGS_ENTRY_CONTRACT_OK checks=13')
+assert.equal(relocate('platform'), true)
+assert.equal(binding('single-row-quick-query'), 'true')
+assert.ok(source.includes("platformStockSubject === 'HQ' ? platformHqLocationId || 'all' : platformStoreId || 'all'"))
+const toolbarSource = fs.readFileSync(path.join(root, '前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue'), 'utf8')
+assert.ok(toolbarSource.includes('singleRowQueryActive && $slots[\'context-actions\']'))
+assert.ok(toolbarSource.includes('singleRowQueryActive && showSettingsButton'))
+console.log('STOCK_SETTINGS_ENTRY_CONTRACT_OK checks=17')

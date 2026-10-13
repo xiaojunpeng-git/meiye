@@ -30,8 +30,7 @@ final class InventoryStockRequestServices
     }
 
     /**
-     * 受理部门只负责把总部请货路由给不同责任组，不代表仓库，也不能参与库存归属或扣减。
-     * 目录按租户从独立表读取，后续增减责任组不需要修改请货代码。
+     * 受理部门目录仅供旧单据/旧客户端只读追溯；新请货只绑定供货仓库，不再写受理部门。
      */
     public function acceptancePartiesForStore(int $storeId, int $operatorId): array
     {
@@ -55,13 +54,16 @@ final class InventoryStockRequestServices
         $root = explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? '';
         $query = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->field('id,name')->order('id asc');
         if (empty($resolved['access']['is_super_admin'])) $query->whereIn('id', array_map('intval', (array)($resolved['access']['store_ids'] ?? [])));
-        $list = [['key' => 'HQ:0', 'type' => 'HQ', 'id' => 0, 'name' => '总部仓']];
+        $list = [];
+        foreach ($hq->locationsForAccess($resolved['access']) as $location) {
+            $list[] = ['key' => 'HQ:' . $location['id'], 'type' => 'HQ', 'id' => 0, 'location_id' => (int)$location['id'], 'name' => (string)$location['location_name']];
+        }
         foreach ($query->select()->toArray() as $store) {
             $binding = Db::name('organization_store')->where('store_id', (int)$store['id'])->value('org_id');
             $path = $binding ? $this->organizationPath((int)$binding) : '';
             if ($path !== '' && (explode('/', trim($path, '/'))[0] ?? '') === $root) $list[] = ['key' => 'STORE:' . (int)$store['id'], 'type' => 'STORE', 'id' => (int)$store['id'], 'name' => mb_substr((string)$store['name'], 0, 120)];
         }
-        return ['list' => $list, 'default' => 'HQ:0'];
+        return ['list' => $list, 'default' => 'HQ:' . (int)$resolved['location']['id']];
     }
 
     /** The editable requester defaults to the authenticated operator, never a client claim. */
@@ -127,7 +129,9 @@ final class InventoryStockRequestServices
     {
             $this->assertRequesterSelection($scope, $command['requesterName']);
             $supplier = $this->supplier($scope, $command);
-            $acceptanceParty = $this->acceptanceParty($scope, $command, $supplier);
+            // 新单直接绑定实际供货仓；受理部门仅保留在历史数据中。
+            $acceptanceParty = ['id' => 0, 'name' => ''];
+            if ((int)$supplier['location_id'] === (int)$location['id']) throw new \RuntimeException('inventory_stock_request_supplier_invalid');
             $existing = Db::name('inventory_stock_request_document')->where('tenant_id', $scope['tenantId'])->where('idempotency_key', $command['idempotencyKey'])->lock(true)->find();
             if ($existing) return $this->replay($existing, $scope, $location, $command);
             $now = $command['recordedAt'];
@@ -136,7 +140,7 @@ final class InventoryStockRequestServices
                 'request_no' => $requestNo,
                 'idempotency_key' => $command['idempotencyKey'], 'request_fingerprint' => $command['fingerprint'],
                 'tenant_id' => $scope['tenantId'], 'organization_id' => $scope['organizationId'], 'organization_path' => $scope['organizationPath'],
-                'location_id' => (int)$location['id'], 'store_id' => $scope['storeId'], 'request_party_type' => $scope['requestPartyType'], 'request_party_id' => $scope['requestPartyId'], 'request_party_name_snapshot' => $scope['requestPartyName'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'], 'supply_party_name_snapshot' => $supplier['name'], 'acceptance_party_id' => $acceptanceParty['id'], 'acceptance_party_name_snapshot' => $acceptanceParty['name'], 'requester_name_snapshot' => $command['requesterName'], 'operator_id' => $scope['operatorId'], 'operator_name_snapshot' => $scope['operatorName'],
+                'location_id' => (int)$location['id'], 'store_id' => $scope['storeId'], 'request_party_type' => $scope['requestPartyType'], 'request_party_id' => $scope['requestPartyId'], 'request_party_name_snapshot' => $scope['requestPartyName'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'], 'supply_location_id' => $supplier['location_id'], 'supply_party_name_snapshot' => $supplier['name'], 'acceptance_party_id' => $acceptanceParty['id'], 'acceptance_party_name_snapshot' => $acceptanceParty['name'], 'requester_name_snapshot' => $command['requesterName'], 'operator_id' => $scope['operatorId'], 'operator_name_snapshot' => $scope['operatorName'],
                 'document_status' => 'APPLIED', 'remark' => $command['remark'], 'business_date' => $command['businessDate'],
                 'applied_at' => $now, 'recorded_at' => $now,
             ]);
@@ -159,6 +163,40 @@ final class InventoryStockRequestServices
         }
         $allowed = array_map(static fn (array $item): string => (string)$item['name'], $this->requesterCandidates($scope, []));
         if (!in_array($name, $allowed, true)) throw new \InvalidArgumentException('inventory_stock_request_requester_invalid');
+    }
+
+    /** 旧请货没有实际供货仓时由操作人明确绑定；有调拨则只能绑定原调出仓，审计保留旧快照。 */
+    public function bindSupplyWarehouse(array $adminInfo, int $locationId, int $requestId): array
+    {
+        $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId, 'transfer');
+        $location = (array)$resolved['location'];
+        (new InventoryStockRequestQueryServices())->detailForHeadquarters($adminInfo, $locationId, $requestId);
+        return Db::transaction(function () use ($location, $resolved, $requestId): array {
+            $locked = Db::name('inventory_location')->where('id', (int)$location['id'])->lock(true)->find();
+            if (!$locked || $locked['location_status'] !== 'ACTIVE') throw new \RuntimeException('inventory_hq_location_invalid');
+            $document = Db::name('inventory_stock_request_document')->where('id', $requestId)->where('tenant_id', $location['tenant_id'])->lock(true)->find();
+            if (!$document || !in_array($document['document_status'], ['APPLIED','PARTIAL'], true) || $document['supply_party_type'] !== 'HQ'
+                || !$this->sameRoot((string)$document['organization_path'], (string)$location['organization_path'])
+                || (int)$document['location_id'] === (int)$location['id']) throw new \RuntimeException('inventory_stock_request_supplier_invalid');
+            if ((int)$document['supply_location_id'] > 0) {
+                if ((int)$document['supply_location_id'] !== (int)$location['id']) throw new \RuntimeException('请货单已绑定其他供货仓，请刷新后查看。');
+                return ['request_id'=>$requestId,'supply_location_id'=>(int)$location['id'],'idempotent'=>true];
+            }
+            $sources = array_unique(array_map('intval', Db::name('inventory_cross_transfer_document')->where('request_document_id', $requestId)->column('from_location_id')));
+            if ($sources && (count($sources) !== 1 || $sources[0] !== (int)$location['id'])) throw new \RuntimeException('请货已关联调拨，只能确认原调出仓。');
+            $nextFingerprint = hash('sha256', $document['request_fingerprint'] . ':bind-supply:' . $location['id']);
+            $lines = Db::name('inventory_stock_request_line')->where('document_id',$requestId)->order('line_no asc')->select()->toArray();
+            Db::name('inventory_stock_request_revision')->insert([
+                'document_id'=>$requestId,'revision_no'=>(int)Db::name('inventory_stock_request_revision')->where('document_id',$requestId)->max('revision_no')+1,
+                'idempotency_key'=>'bind-supply-warehouse-'.$requestId,'previous_fingerprint'=>$document['request_fingerprint'],'next_fingerprint'=>$nextFingerprint,
+                'previous_snapshot_json'=>json_encode(['document'=>$document,'lines'=>$lines],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),
+                'changed_by_operator_id'=>(int)$resolved['access']['admin_id'],'changed_at'=>time(),
+            ]);
+            Db::name('inventory_stock_request_document')->where('id',$requestId)->where('supply_location_id',0)->update([
+                'supply_location_id'=>(int)$location['id'],'supply_party_name_snapshot'=>(string)$location['location_name'],'request_fingerprint'=>$nextFingerprint,
+            ]);
+            return ['request_id'=>$requestId,'supply_location_id'=>(int)$location['id'],'idempotent'=>false];
+        });
     }
 
     public function cancel(int $storeId, int $operatorId, int $requestId): array
@@ -386,7 +424,7 @@ final class InventoryStockRequestServices
             if ($transferId || array_filter($previousLines, static fn(array $line): bool => (int)$line['fulfilled_transfer_id'] > 0)) throw new \RuntimeException('inventory_stock_request_edit_fulfillment_started');
 
             $supplier = $this->supplier($scope, $command);
-            $acceptanceParty = $this->acceptanceParty($scope, $command, $supplier);
+            $acceptanceParty = ['id' => 0, 'name' => ''];
             $revisionNo = (int)Db::name('inventory_stock_request_revision')->where('document_id', $requestId)->max('revision_no') + 1;
             Db::name('inventory_stock_request_revision')->insert([
                 'document_id' => $requestId, 'revision_no' => $revisionNo, 'idempotency_key' => $command['idempotencyKey'],
@@ -396,7 +434,7 @@ final class InventoryStockRequestServices
             ]);
             Db::name('inventory_stock_request_document')->where('id', $requestId)->update([
                 'request_fingerprint' => $command['fingerprint'], 'supply_party_type' => $supplier['type'], 'supply_party_id' => $supplier['id'],
-                'supply_party_name_snapshot' => $supplier['name'], 'acceptance_party_id' => $acceptanceParty['id'], 'acceptance_party_name_snapshot' => $acceptanceParty['name'], 'requester_name_snapshot' => $command['requesterName'], 'remark' => $command['remark'], 'business_date' => $command['businessDate'],
+                'supply_location_id' => $supplier['location_id'], 'supply_party_name_snapshot' => $supplier['name'], 'acceptance_party_id' => $acceptanceParty['id'], 'acceptance_party_name_snapshot' => $acceptanceParty['name'], 'requester_name_snapshot' => $command['requesterName'], 'remark' => $command['remark'], 'business_date' => $command['businessDate'],
             ]);
             Db::name('inventory_stock_request_line')->where('document_id', $requestId)->delete();
             $this->insertLines($requestId, $scope, $location, $command['lines'], $command['recordedAt']);
@@ -406,7 +444,7 @@ final class InventoryStockRequestServices
 
     private function normalize(array $input): array
     {
-        $required = ['idempotency_key', 'business_date', 'remark', 'requester_name', 'supply_party_type', 'supply_party_id', 'acceptance_party_id', 'lines'];
+        $required = ['idempotency_key', 'business_date', 'remark', 'requester_name', 'supply_party_type', 'supply_party_id', 'supply_location_id', 'lines'];
         if (array_diff($required, array_keys($input)) || !is_array($input['lines']) || !$input['lines'] || count($input['lines']) > 100) throw new \InvalidArgumentException('inventory_stock_request_input_invalid');
         $key = trim((string)$input['idempotency_key']);
         if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) throw new \InvalidArgumentException('inventory_stock_request_idempotency_invalid');
@@ -431,15 +469,15 @@ final class InventoryStockRequestServices
         $supplierType = strtoupper(trim((string)$input['supply_party_type']));
         $supplierId = $input['supply_party_id'];
         if (!in_array($supplierType, ['HQ', 'STORE'], true) || !is_int($supplierId) || ($supplierType === 'HQ' && $supplierId !== 0) || ($supplierType === 'STORE' && $supplierId <= 0)) throw new \InvalidArgumentException('inventory_stock_request_supplier_invalid');
-        $acceptancePartyId = $input['acceptance_party_id'];
-        // 总部供货的新单必须明确责任组；门店供货必须为 0，避免受理部门被误用成第二套仓库维度。
-        if (!is_int($acceptancePartyId) || ($supplierType === 'HQ' ? $acceptancePartyId <= 0 : $acceptancePartyId !== 0)) throw new \InvalidArgumentException('inventory_stock_request_acceptance_party_invalid');
+        $supplyLocationId = $input['supply_location_id'];
+        if (!is_int($supplyLocationId) || $supplyLocationId <= 0) throw new \InvalidArgumentException('inventory_stock_request_supplier_invalid');
+        $acceptancePartyId = 0;
         $requesterName = mb_substr(trim((string)$input['requester_name']), 0, 64);
         if ($requesterName === '') throw new \InvalidArgumentException('inventory_stock_request_requester_invalid');
         $requestPartyType = strtoupper(trim((string)($input['request_party_type'] ?? 'STORE'))); $requestPartyId = (int)($input['request_party_id'] ?? 0);
         if (!in_array($requestPartyType, ['HQ', 'STORE'], true) || ($requestPartyType === 'STORE' && $requestPartyId <= 0) || ($requestPartyType === 'HQ' && $requestPartyId !== 0)) throw new \InvalidArgumentException('inventory_stock_request_party_invalid');
-        $fingerprint = hash('sha256', json_encode([$date->format('Y-m-d'), trim((string)$input['remark']), $requesterName, $requestPartyType, $requestPartyId, $supplierType, $supplierId, $acceptancePartyId, $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        return ['idempotencyKey' => $key, 'businessDate' => $date->format('Y-m-d'), 'remark' => mb_substr(trim((string)$input['remark']), 0, 500), 'requesterName' => $requesterName, 'requestPartyType' => $requestPartyType, 'requestPartyId' => $requestPartyId, 'supplierType' => $supplierType, 'supplierId' => $supplierId, 'acceptancePartyId' => $acceptancePartyId, 'lines' => $lines, 'fingerprint' => $fingerprint, 'recordedAt' => time()];
+        $fingerprint = hash('sha256', json_encode([$date->format('Y-m-d'), trim((string)$input['remark']), $requesterName, $requestPartyType, $requestPartyId, $supplierType, $supplierId, $supplyLocationId, $lines], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return ['idempotencyKey' => $key, 'businessDate' => $date->format('Y-m-d'), 'remark' => mb_substr(trim((string)$input['remark']), 0, 500), 'requesterName' => $requesterName, 'requestPartyType' => $requestPartyType, 'requestPartyId' => $requestPartyId, 'supplierType' => $supplierType, 'supplierId' => $supplierId, 'supplyLocationId' => $supplyLocationId, 'acceptancePartyId' => $acceptancePartyId, 'lines' => $lines, 'fingerprint' => $fingerprint, 'recordedAt' => time()];
     }
 
     private function lockScope(int $storeId, int $operatorId): array
@@ -467,7 +505,7 @@ final class InventoryStockRequestServices
         $scope['operatorName'] = $name;
         $scope['requestPartyType'] = 'HQ';
         $scope['requestPartyId'] = 0;
-        $scope['requestPartyName'] = '总部仓';
+        $scope['requestPartyName'] = (string)($scope['locationName'] ?? '总部仓');
         return $scope;
     }
 
@@ -528,11 +566,15 @@ final class InventoryStockRequestServices
 
     private function supplier(array $scope, array $command): array
     {
-        if ($command['supplierType'] === 'HQ') return ['type' => 'HQ', 'id' => 0, 'name' => '总部仓'];
-        if ($command['supplierId'] === $scope['storeId']) throw new \RuntimeException('inventory_stock_request_supplier_invalid');
-        $store = Db::name('system_store')->where('id', $command['supplierId'])->where('is_del', 0)->where('is_show', 1)->field('id,name')->lock(true)->find();
-        if (!$store) throw new \RuntimeException('inventory_stock_request_supplier_invalid');
-        return ['type' => 'STORE', 'id' => (int)$store['id'], 'name' => mb_substr((string)$store['name'], 0, 120)];
+        // 目录仅允许选择供货对象，不授予其库存权限；正式提交重新锁定并核对类型、组织及状态。
+        $location = Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])->where('id', (int)$command['supplyLocationId'])->lock(true)->find();
+        if (!$location || $location['location_status'] !== 'ACTIVE' || $location['location_type'] !== $command['supplierType']
+            || !$this->sameRoot((string)$scope['organizationPath'], (string)$location['organization_path'])
+            || ($command['supplierType'] === 'STORE' && ((int)$location['store_id'] !== (int)$command['supplierId'] || (int)$location['is_default'] !== 1))) throw new \RuntimeException('inventory_stock_request_supplier_invalid');
+        foreach ($this->suppliers($scope)['list'] as $candidate) {
+            if ((int)$candidate['location_id'] === (int)$location['id']) return ['type' => $candidate['party_type'], 'id' => $candidate['party_id'], 'location_id' => (int)$location['id'], 'name' => $candidate['name']];
+        }
+        throw new \RuntimeException('inventory_stock_request_supplier_invalid');
     }
 
     private function suppliers(array $scope): array
@@ -542,11 +584,17 @@ final class InventoryStockRequestServices
         if (($scope['requestPartyType'] ?? 'STORE') === 'STORE') $query->where('id', '<>', (int)$scope['storeId']);
         // 总部仓既是平台端默认请货方的合法供货方，也是门店请货时的合法供货方。
         // 供货目录必须始终显式返回 HQ，不能只在门店请货场景返回。
-        $list = [['party_type' => 'HQ', 'party_id' => 0, 'name' => '总部仓']];
+        $root = (int)(explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? 0);
+        $list = [];
+        foreach (Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])->where('location_type', 'HQ')->where('owner_id', $root)->where('location_status', 'ACTIVE')->order('is_default desc,id asc')->select()->toArray() as $location) {
+            if (($scope['requestPartyType'] ?? '') === 'HQ' && (int)($scope['locationId'] ?? 0) === (int)$location['id']) continue;
+            $list[] = ['party_type' => 'HQ', 'party_id' => 0, 'location_id' => (int)$location['id'], 'name' => (string)$location['location_name']];
+        }
         foreach ($query->select()->toArray() as $store) {
             $binding = Db::name('organization_store')->where('store_id', (int)$store['id'])->value('org_id');
             if (!$binding || !$this->sameRoot((string)$scope['organizationPath'], $this->organizationPath((int)$binding))) continue;
-            $list[] = ['party_type' => 'STORE', 'party_id' => (int)$store['id'], 'name' => mb_substr((string)$store['name'], 0, 120)];
+            $location = Db::name('inventory_location')->where('tenant_id', $scope['tenantId'])->where('location_type', 'STORE')->where('store_id', (int)$store['id'])->where('is_default', 1)->where('location_status', 'ACTIVE')->find();
+            if ($location) $list[] = ['party_type' => 'STORE', 'party_id' => (int)$store['id'], 'location_id' => (int)$location['id'], 'name' => mb_substr((string)$store['name'], 0, 100) . ' · ' . (string)$location['location_name']];
         }
         return ['list' => $list];
     }
@@ -561,15 +609,6 @@ final class InventoryStockRequestServices
         ], $rows)];
     }
 
-    private function acceptanceParty(array $scope, array $command, array $supplier): array
-    {
-        if ((string)$supplier['type'] !== 'HQ') return ['id' => 0, 'name' => ''];
-        $row = Db::name('inventory_stock_request_acceptance_party')
-            ->where('tenant_id', (string)$scope['tenantId'])->where('id', (int)$command['acceptancePartyId'])
-            ->where('status', 1)->field('id,party_name')->lock(true)->find();
-        if (!$row || trim((string)$row['party_name']) === '') throw new \RuntimeException('inventory_stock_request_acceptance_party_invalid');
-        return ['id' => (int)$row['id'], 'name' => mb_substr((string)$row['party_name'], 0, 64)];
-    }
 
     private function organizationPath(int $organizationId): string
     {

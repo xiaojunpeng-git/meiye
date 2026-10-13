@@ -47,7 +47,7 @@ final class InventoryPlatformHqStockRequest extends AuthController
         try {
             // 顶部周期筛选用户选择的请货日期；操作日期由 recorded_at 单独只读展示。
             [$locationId, $keyword, $page, $limit, $requestPartyType, $requestPartyId, $supplyPartyType, $supplyPartyId, $acceptancePartyId, $status, $dateFrom, $dateTo] = $this->request->getMore([['hq_location_id', 0], ['keyword', ''], ['page', 1], ['limit', 20], ['request_party_type', ''], ['request_party_id', 0], ['supply_party_type', ''], ['supply_party_id', 0], ['acceptance_party_id', 0], ['status', ''], ['business_date_from', ''], ['business_date_to', '']], true);
-            return $this->success($queries->listForHeadquarters((array)$this->adminInfo, (int)$locationId, (string)$keyword, (int)$page, (int)$limit, (string)$requestPartyType, (int)$requestPartyId, (string)$supplyPartyType, (int)$supplyPartyId, (int)$acceptancePartyId, (string)$status, (string)$dateFrom, (string)$dateTo));
+            return $this->success($queries->listForHeadquarters((array)$this->adminInfo, (int)$locationId, (string)$keyword, (int)$page, (int)$limit, (string)$requestPartyType, (int)$requestPartyId, (string)$supplyPartyType, (int)$supplyPartyId, (int)$acceptancePartyId, (string)$status, (string)$dateFrom, (string)$dateTo, (int)$this->request->get('supply_location_id', 0), (int)$this->request->get('request_location_id', 0)));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
     }
@@ -69,6 +69,14 @@ final class InventoryPlatformHqStockRequest extends AuthController
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\InvalidArgumentException $exception) { return $this->fail('总部请货参数不合法，请检查供货方和商品。', ['code' => $exception->getMessage()]); }
         catch (\RuntimeException $exception) { return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]); }
+    }
+
+    /** 旧单显式确认供货仓，不接受修改已绑定单据的仓库。 */
+    public function bindSupplyWarehouse(int $id)
+    {
+        try { return $this->success($this->services->bindSupplyWarehouse((array)$this->adminInfo, (int)$this->request->post('hq_location_id',0), $id)); }
+        catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code'=>$exception->getErrorCode()]); }
+        catch (\RuntimeException $exception) { return $this->fail($exception->getMessage()); }
     }
 
     public function cancel(int $id)
@@ -114,7 +122,7 @@ final class InventoryPlatformHqStockRequest extends AuthController
             'inventory_hq_location_scope_denied' => '当前岗位无权操作该总部仓。',
             'inventory_hq_location_selection_required' => '请选择要操作的总部仓。',
             'inventory_hq_location_invalid' => '总部仓状态无效，无法请货。',
-            'inventory_stock_request_supplier_invalid' => '供货门店不存在或已停用。',
+            'inventory_stock_request_supplier_invalid' => '请选择有效且不同于请货仓的供货仓库。',
             'inventory_stock_request_acceptance_party_invalid' => '请选择有效的受理部门。',
             'inventory_stock_request_sku_not_found' => '所选总部商品或规格已失效，请重新选择。',
             'inventory_stock_request_not_found' => '总部请货单不存在或不属于当前总部仓。',

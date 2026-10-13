@@ -943,6 +943,10 @@ async function startDirectQueryExport() {
     </div>
 
     <div v-if="(customFiltersExpanded || singleRowQueryActive) && (secondaryQuickFields.length || (!inlineQuickControls && quickFilters.length))" class="unified-query-toolbar__secondary">
+      <!-- A single-row query must keep the host's permission-scoped context controls visible. -->
+      <div v-if="singleRowQueryActive && $slots['context-actions']" class="unified-query-toolbar__context-actions">
+        <slot name="context-actions" />
+      </div>
       <div v-if="!inlineQuickControls && quickFilters.length" class="unified-query-toolbar__quick">
         <button
           v-for="filter in quickFilters"
@@ -1012,6 +1016,7 @@ async function startDirectQueryExport() {
         <div v-if="queryActionsInSecondary" class="unified-query-toolbar__field-actions">
           <button type="button" class="button button--primary" @click="submitQuery">查询</button>
           <button type="button" class="button button--secondary" @click="resetQuery">重置</button>
+          <button v-if="singleRowQueryActive && showSettingsButton" type="button" class="button button--secondary" @click="openSettings">{{ settingsButtonLabel }}</button>
           <!-- 单行布局只移动入口，权限、导出抽屉与直接导出的执行契约均保持原样。 -->
           <button v-if="singleRowQueryActive && canExport" type="button" class="button button--secondary unified-query-export-button" :disabled="exportButtonAfterSettings && isDirectExporting" @click="exportButtonAfterSettings && directQueryExport ? startDirectQueryExport() : (isExportOpen = true)"><Download :size="16" />{{ exportButtonAfterSettings && isDirectExporting ? '正在创建…' : '导出' }}</button>
         </div>

@@ -14,7 +14,7 @@ final class InventoryStockRequest extends AuthController
     public function apply()
     {
         try {
-            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['acceptance_party_id',0], ['lines',[]]]);
+            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['supply_location_id',0], ['lines',[]]]);
             return $this->success($this->services->apply((int)$this->storeId, (int)$this->storeStaffId, $data));
         } catch (\InvalidArgumentException|\RuntimeException $exception) {
             // 保存失败必须返回可执行的业务原因；技术错误码仅作为结构化上下文供前端与日志定位。
@@ -35,7 +35,7 @@ final class InventoryStockRequest extends AuthController
     public function updateApplied(int $id)
     {
         try {
-            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['acceptance_party_id',0], ['lines',[]]]);
+            $data = $this->request->postMore([['idempotency_key',''], ['business_date',''], ['remark',''], ['requester_name',''], ['supply_party_type',''], ['supply_party_id',0], ['supply_location_id',0], ['lines',[]]]);
             return $this->success($this->services->updateApplied((int)$this->storeId, (int)$this->storeStaffId, $id, $data));
         } catch (\InvalidArgumentException|\RuntimeException $exception) {
             $messages = [

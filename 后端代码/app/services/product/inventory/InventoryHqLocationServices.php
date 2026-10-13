@@ -23,7 +23,7 @@ final class InventoryHqLocationServices
     public function readableLocation(array $adminInfo, int $locationId = 0): array
     {
         $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
-        return $this->locationForAccess($access, $locationId);
+        return $this->locationForAccess($access, $locationId, true);
     }
 
     /** 具体新建入口可用对应功能授权；未指定操作的管理/冲销路径仍强制原生仓库管理。 */
@@ -41,9 +41,9 @@ final class InventoryHqLocationServices
     }
 
     /** @return array{access:array,location:array} */
-    private function locationForAccess(array $access, int $locationId): array
+    private function locationForAccess(array $access, int $locationId, bool $includeInactive = false): array
     {
-        $locations = $this->locationsForAccess($access);
+        $locations = $this->locationsForAccess($access, $includeInactive);
         if (!$locations) {
             throw new \RuntimeException('inventory_hq_location_scope_empty');
         }
@@ -60,13 +60,13 @@ final class InventoryHqLocationServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    public function locationsForAccess(array $access): array
+    public function locationsForAccess(array $access, bool $includeInactive = false): array
     {
         $query = Db::name('inventory_location')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('location_type', 'HQ')
-            ->where('is_default', 1)
-            ->where('location_status', 'ACTIVE');
+            ->where('location_type', 'HQ');
+        // 历史读取保留停用仓；写命令仍只能选择启用仓，默认标记不再决定总部仓可见性。
+        if (!$includeInactive) $query->where('location_status', 'ACTIVE');
         if (empty($access['is_super_admin']) && empty($access['headquarters_only'])) {
             $roots = $this->rootsForStores((array)($access['store_ids'] ?? []));
             if (!$roots) return [];
@@ -82,8 +82,7 @@ final class InventoryHqLocationServices
         if ((string)($location['location_type'] ?? '') !== 'HQ'
             || (int)($location['store_id'] ?? -1) !== 0
             || (int)($location['owner_id'] ?? 0) <= 0
-            || (string)($location['tenant_id'] ?? '') !== CashierV3ScopeResolver::TENANT_SCOPE_ID
-            || (string)($location['location_status'] ?? '') !== 'ACTIVE') {
+            || (string)($location['tenant_id'] ?? '') !== CashierV3ScopeResolver::TENANT_SCOPE_ID) {
             throw new \RuntimeException('inventory_hq_location_invalid');
         }
         return [
@@ -95,6 +94,7 @@ final class InventoryHqLocationServices
             'storeName' => '',
             'operatorId' => $operatorId,
             'partyType' => 'HQ',
+            'locationId' => (int)$location['id'], 'locationName' => (string)$location['location_name'],
         ];
     }
 

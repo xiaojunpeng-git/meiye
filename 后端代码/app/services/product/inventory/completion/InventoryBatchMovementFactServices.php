@@ -181,13 +181,13 @@ final class InventoryBatchMovementFactServices
         if ((string)($location['location_type'] ?? '') === 'STORE') {
             return $storeId > 0 && (int)($location['store_id'] ?? 0) === $storeId && (int)($location['owner_id'] ?? 0) === $storeId;
         }
+        // 总部多仓均属于组织根；默认标记只用于旧入口，不能阻止非默认实物仓记账。
         return (string)($location['location_type'] ?? '') === 'HQ'
             && $storeId === 0
             && (int)($location['store_id'] ?? -1) === 0
             && (int)($location['owner_id'] ?? 0) > 0
             && (int)($location['owner_id'] ?? 0) === (int)($location['organization_id'] ?? 0)
-            && (string)($location['organization_path'] ?? '') === '/' . (int)($location['owner_id'] ?? 0) . '/'
-            && (int)($location['is_default'] ?? 0) === 1;
+            && (string)($location['organization_path'] ?? '') === '/' . (int)($location['owner_id'] ?? 0) . '/';
     }
 
     private function assertTransaction(): void

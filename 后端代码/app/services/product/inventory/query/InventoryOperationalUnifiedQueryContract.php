@@ -67,7 +67,6 @@ final class InventoryOperationalUnifiedQueryContract
             'inventory_request' => [
                 ['request_no', '请货单号', 'text', ''],
                 ['request_party_name', '请货方', 'text', ''], ['supply_party_name', '供货方', 'text', ''],
-                ['acceptance_party_name', '受理部门', 'text', ''],
                 ['detail_count', '商品项数', 'integer', ''], ['estimated_amount_cents', '预计金额（分）', 'integer', InventoryBatchStockQueryContract::PERMISSION_COST],
                 ['operation_at', '操作日期', 'datetime', ''],
                 ['operator_name', '操作人', 'text', ''],

@@ -315,9 +315,11 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
 
     private function usageRows(string $tenantId, int $storeId, array $locationIds): array
     {
+        // 列表显示单据原仓，不从当前页面筛选器反推；查询范围仍以服务端授权 location_id 集合为准。
         $rows = Db::name('inventory_salon_usage_document')->alias('d')->leftJoin('inventory_salon_usage_line l', 'l.document_id=d.id')
+            ->leftJoin('inventory_location loc', 'loc.id=d.location_id')
             ->where('d.tenant_id', $tenantId)->where('d.store_id', $storeId)->whereIn('d.location_id', $locationIds)
-            ->field('d.id,d.usage_no,d.operation_type,d.project_name_snapshot,d.location_id,d.document_status,d.business_date,d.recorded_at operation_at,d.operator_name_snapshot operator_name,d.remark,COUNT(l.id) detail_count')
+            ->field('d.id,d.usage_no,d.operation_type,d.project_name_snapshot,d.store_id,d.location_id,loc.location_name,d.document_status,d.business_date,d.recorded_at operation_at,d.operator_name_snapshot operator_name,d.remark,COUNT(l.id) detail_count')
             ->group('d.id')->order('d.business_date desc,d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         $issueIds = array_values(array_map('intval', array_column(array_filter($rows,
             static fn (array $row): bool => (string)$row['operation_type'] === 'ISSUE'

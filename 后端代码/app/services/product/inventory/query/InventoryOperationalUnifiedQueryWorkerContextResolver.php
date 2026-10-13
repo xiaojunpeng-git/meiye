@@ -51,7 +51,7 @@ final class InventoryOperationalUnifiedQueryWorkerContextResolver implements Uni
             $factory = new InventoryPlatformUnifiedQueryContextFactory(
                 UnifiedQueryRuntime::service('contextFactory')
             );
-            $context = $factory->make($operatorId, [], date('Y-m-d'), 0, $pageCode);
+            $context = $factory->make($operatorId, [], date('Y-m-d'), 0, 'HQ', $pageCode);
         } elseif ($storeId > 0) {
             $factory = new InventoryStoreUnifiedQueryContextFactory(
                 UnifiedQueryRuntime::service('contextFactory')

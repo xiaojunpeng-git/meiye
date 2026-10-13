@@ -43,9 +43,11 @@ final class InventoryPlatformUnifiedQueryContextFactory
             throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前平台账号未被授予任何门店库存范围。', []);
         }
         $locationsQuery = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('location_status', 'ACTIVE')->where('location_type', $subject);
+            ->where('location_type', $subject);
+        // 停用总部仓仍可查历史；门店继续维持单默认仓范围。
+        if ($subject === 'STORE') $locationsQuery->where('location_status', 'ACTIVE')->where('is_default', 1);
         if ($subject === 'HQ') {
-            $hqIds = array_map('intval', array_column((new \app\services\product\inventory\InventoryHqLocationServices())->locationsForAccess($access), 'id'));
+            $hqIds = array_map('intval', array_column((new \app\services\product\inventory\InventoryHqLocationServices())->locationsForAccess($access, true), 'id'));
             if (!$hqIds) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前平台没有可用总部仓，查询已停止。', []);
             if ($selectedHqLocationId > 0 && !in_array($selectedHqLocationId, $hqIds, true)) {
                 throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '所选总部仓不在当前平台库存范围内。', []);

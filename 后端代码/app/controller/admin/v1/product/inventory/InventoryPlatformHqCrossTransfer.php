@@ -21,7 +21,7 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
     {
         try {
             $input = $this->request->getMore([['hq_location_id', 0], ['keyword', ''], ['page', 1], ['limit', 20], ['from_party_type', ''], ['from_party_id', 0], ['to_party_type', ''], ['to_party_id', 0], ['status', ''], ['business_date_from', ''], ['business_date_to', '']]);
-            return $this->success($this->services->listForHeadquarters((array)$this->adminInfo, (int)$input['hq_location_id'], (string)$input['keyword'], (int)$input['page'], (int)$input['limit'], (string)$input['from_party_type'], (int)$input['from_party_id'], (string)$input['to_party_type'], (int)$input['to_party_id'], (string)$input['status'], (string)$input['business_date_from'], (string)$input['business_date_to']));
+            return $this->success($this->services->listForHeadquarters((array)$this->adminInfo, (int)$input['hq_location_id'], (string)$input['keyword'], (int)$input['page'], (int)$input['limit'], (string)$input['from_party_type'], (int)$input['from_party_id'], (string)$input['to_party_type'], (int)$input['to_party_id'], (string)$input['status'], (string)$input['business_date_from'], (string)$input['business_date_to'], (int)$this->request->get('from_location_id', 0), (int)$this->request->get('to_location_id', 0)));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\RuntimeException $exception) {
@@ -74,7 +74,8 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
                 (int)$this->request->get('hq_location_id', 0),
                 (string)$this->request->get('source_party_type', 'HQ'),
                 (int)$this->request->get('source_store_id', 0),
-                (int)$this->request->get('target_store_id', 0)
+                (int)$this->request->get('target_store_id', 0),
+                (int)$this->request->get('target_location_id', 0)
             ));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);

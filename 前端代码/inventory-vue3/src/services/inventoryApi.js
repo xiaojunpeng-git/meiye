@@ -67,7 +67,8 @@ function messageOf(body, fallback) {
     inventory_stock_count_draft_missing: '盘点草稿不存在，或当前账号无权查看。',
     inventory_stock_count_draft_lines_invalid: '盘点草稿明细不完整，请核对商品和数量。',
     inventory_salon_usage_date_invalid: '院装业务日期格式不正确，请重新选择日期。',
-    inventory_salon_usage_project_not_found: '所选项目不存在、已停用或不属于当前门店。',
+    inventory_salon_usage_project_not_found: '所选项目不存在、已停用或不属于当前领用仓库。',
+    inventory_salon_usage_warehouse_selection_invalid: '请选择一个领用仓库后重试。',
     inventory_batch_transfer_input_invalid: '调拨信息不完整，请检查调入仓和明细。',
     inventory_stock_request_line_invalid: '请货明细不合法，请检查商品和数量。',
     inventory_platform_warehouse_idempotency_conflict: '本次建仓内容与已提交记录不一致，请刷新后重新操作。'
@@ -203,7 +204,7 @@ export function createInventoryApi(options = {}) {
     usageStatistics(query = {}) { return request('/salon/usage/statistics', { query }) },
     movementStatistics(query = {}) { return request('/v3/movement-statistics', { query }) },
     batchAnalysis(query = {}) { return request('/v3/batch-analysis', { query }) },
-    dashboard() { return request('/v3/dashboard') },
+    dashboard(query = {}) { return request('/v3/dashboard', { query }) },
     productDetail(productId) { return request(`/v3/product-summary/${Number(productId)}/detail`) },
     unifiedBatchStock(query = {}) { return request('/v3/unified-query/batch-stock', { query }) },
     unifiedOperationalQuery(query = {}) { return request('/v3/unified-query/operational', { query }) },
@@ -216,6 +217,7 @@ export function createInventoryApi(options = {}) {
     // Authenticated binary transport rejects JSON error envelopes instead of saving fake spreadsheets.
     downloadOutboundExport(taskNo) { return download(`/v3/unified-query/export-task/${encodeURIComponent(String(taskNo || ''))}/download`) },
     createWarehouse(body) { return request('/v3/locations', { method: 'POST', body }) },
+    updateWarehouse(id, body) { return request(`/v3/locations/${Number(id)}`, { method: 'POST', body }) },
     listHqInbound(query = {}) { return request('/v3/hq/inbound', { query }) },
     hqInboundDetail(id, query = {}) { return request(`/v3/hq/inbound/${encodeURIComponent(String(id || ''))}/detail`, { query }) },
     hqInboundOutboundDetails(id, query = {}) { return request(`/v3/hq/inbound/${encodeURIComponent(String(id || ''))}/outbound-details`, { query }) },
@@ -236,6 +238,7 @@ export function createInventoryApi(options = {}) {
     hqRequestRequester(query = {}) { return request('/v3/hq/request/requester', { query }) },
     hqRequestAcceptanceParties(query = {}) { return request('/v3/hq/request/acceptance-parties', { query }) },
     applyHqRequest(body) { return request('/v3/hq/request/apply', { method: 'POST', body }) },
+    bindRequestSupplyWarehouse(id, body) { return request(`/v3/hq/request/${Number(id)}/bind-supply-warehouse`, { method: 'POST', body }) },
     hqRequestDetail(id, query = {}) { return request(`/v3/hq/request/${Number(id)}/detail`, { query }) },
     cancelHqRequest(id, body) { return request(`/v3/hq/request/${Number(id)}/cancel`, { method: 'POST', body }) },
     terminateHqRequest(id, body) { return request(`/v3/hq/request/${Number(id)}/terminate`, { method: 'POST', body }) },
@@ -337,7 +340,7 @@ export function createPlatformInventoryApi(options = {}) {
       usage: '/v3/salon-usage',
       stock: '/v3/batch-stock',
       platformLocations: '/v3/locations',
-      warehouseSettings: '/v3/locations',
+      warehouseSettings: '/v3/warehouse-settings',
       recipe: '/recipe/list',
       ...(options.listPaths || {})
     }

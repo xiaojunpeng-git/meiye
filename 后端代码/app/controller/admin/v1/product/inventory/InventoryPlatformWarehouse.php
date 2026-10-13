@@ -25,15 +25,17 @@ final class InventoryPlatformWarehouse extends AuthController
         $this->services = $services;
     }
 
+    /** 历史查询可请求停用仓；返回目录不等于授予写权限。 */
     public function locations()
     {
         try {
             $access = $this->access();
             return $this->success([
-                'list' => $this->services->locations((array)$this->adminInfo),
+                'list' => $this->services->resolvedLocations((array)$this->adminInfo, (int)$this->request->get('include_inactive', 0) === 1)['locations'],
                 'permission_anchor' => InventoryBatchStockQueryContract::PERMISSION_VIEW,
                 'cost_visible' => in_array(InventoryBatchStockQueryContract::PERMISSION_COST, $access['features'], true),
                 // 页面只消费可信写能力；读取库位不会自动开放新建、导入或作废。
+                'can_manage_warehouses' => in_array('inventory.location.settings', $access['features'], true),
                 'can_manage' => in_array('inventory.location.manage', $access['features'], true),
                 // 按功能分别返回新建能力，不能由任一添加节点推导全部库存操作。
                 'can_create' => array_combine(['inbound', 'outbound', 'count', 'request', 'transfer'], array_map(
@@ -48,14 +50,12 @@ final class InventoryPlatformWarehouse extends AuthController
         }
     }
 
+    /** 只接收已授权组织锚点建仓，不接受浏览器指定租户或组织所有权。 */
     public function createLocation(InventoryPlatformWarehouseCommandServices $services)
     {
-        if (!InventoryV3RolloutPolicy::MULTI_WAREHOUSE_ENABLED) {
-            return $this->fail('多仓库建仓本期暂不开放。', ['code' => InventoryV3RolloutPolicy::MULTI_WAREHOUSE_DEFERRED_CODE]);
-        }
         try {
             $input = $this->request->postMore([
-                ['idempotency_key', ''], ['store_id', 0], ['location_name', ''],
+                ['idempotency_key', ''], ['base_location_id', 0], ['location_name', ''],
             ]);
             return $this->success($services->create((array)$this->adminInfo, $input));
         } catch (UnifiedQueryException $exception) {
@@ -65,6 +65,25 @@ final class InventoryPlatformWarehouse extends AuthController
         } catch (\RuntimeException $exception) {
             return $this->fail($exception->getMessage());
         }
+    }
+
+    /** 分页、总数和筛选统一交由服务端按授权总部仓范围执行。 */
+    public function settings()
+    {
+        try { return $this->success($this->services->settings((array)$this->adminInfo, (string)$this->request->get('keyword',''), (string)$this->request->get('status',''), (int)$this->request->get('page',1), (int)$this->request->get('limit',20))); }
+        catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code'=>$exception->getErrorCode()]); }
+    }
+
+    /** 仓库设置独立检查管理权限及版本；业务添加节点不能获得启停/改名能力。 */
+    public function updateLocation(int $id, InventoryPlatformWarehouseCommandServices $services)
+    {
+        try {
+            return $this->success($services->update((array)$this->adminInfo, $id, $this->request->postMore([
+                ['location_name', ''], ['location_status', ''], ['expected_version', 0],
+            ])));
+        } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
+        catch (\InvalidArgumentException $exception) { return $this->fail('请检查仓库名称和状态。'); }
+        catch (\RuntimeException $exception) { return $this->fail($exception->getMessage()); }
     }
 
     public function batchStock()
@@ -82,7 +101,7 @@ final class InventoryPlatformWarehouse extends AuthController
     public function dashboard()
     {
         try {
-            return $this->success($this->services->dashboard((array)$this->adminInfo));
+            return $this->success($this->services->dashboard((array)$this->adminInfo, (int)$this->request->get('hq_location_id', 0)));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\InvalidArgumentException $exception) {
@@ -99,8 +118,9 @@ final class InventoryPlatformWarehouse extends AuthController
             $runtime = UnifiedQueryRuntime::runtime();
             $selectedStoreId = $this->selectedStoreId($payload);
             $subject = $this->selectedSubject($payload);
-            unset($payload['storeId'], $payload['subject']);
-            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, (string)($payload['queryCutoffDate'] ?? date('Y-m-d')), $selectedStoreId, $subject);
+            $hqLocationId = $this->selectedHqLocationId($payload);
+            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id']);
+            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, (string)($payload['queryCutoffDate'] ?? date('Y-m-d')), $selectedStoreId, $subject, InventoryBatchStockQueryContract::PAGE_CODE, $hqLocationId);
             $payload['pageCode'] = InventoryBatchStockQueryContract::PAGE_CODE;
             return $this->success($runtime['providers']->resolve(InventoryBatchStockQueryContract::PAGE_CODE)->query($context, $payload));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
@@ -149,7 +169,7 @@ final class InventoryPlatformWarehouse extends AuthController
     {
         try {
             $raw = $this->request->get(); $raw = is_array($raw) ? $raw : [];
-            $runtime = UnifiedQueryRuntime::runtime(); $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedStoreId($raw), $this->selectedSubject($raw));
+            $runtime = UnifiedQueryRuntime::runtime(); $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedStoreId($raw), $this->selectedSubject($raw), InventoryBatchStockQueryContract::PAGE_CODE, $this->selectedHqLocationId($raw));
             $settings = $runtime['preferences']->load($context, InventoryBatchStockQueryContract::PAGE_CODE);
             $capability = $runtime['capabilities']->build($context, InventoryBatchStockQueryContract::PAGE_CODE, (int)$settings['settingsVersion'], (int)$context['data_as_of']);
             $capability['commandContext'] = ['kind' => 'query_preference', 'id' => InventoryBatchStockQueryContract::PAGE_CODE];
@@ -171,8 +191,8 @@ final class InventoryPlatformWarehouse extends AuthController
                     ? '当前岗位未配置“平台库存导出”权限。'
                     : '当前岗位未配置“平台库存查询管理”权限。');
             $runtime = UnifiedQueryRuntime::runtime();
-            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedStoreId($input), $this->selectedSubject($input));
-            unset($input['storeId'], $input['subject']);
+            $context = (new InventoryPlatformUnifiedQueryContextFactory($runtime['contextFactory']))->make((int)$this->adminId, (array)$this->adminInfo, date('Y-m-d'), $this->selectedStoreId($input), $this->selectedSubject($input), (string)($input['pageCode'] ?? $input['payload']['pageCode'] ?? InventoryBatchStockQueryContract::PAGE_CODE), $this->selectedHqLocationId($input));
+            unset($input['storeId'], $input['subject'], $input['hq_location_id']);
             return $this->success($services->dispatchWithContext($context, $input));
         } catch (UnifiedQueryException $exception) { return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]); }
         catch (\InvalidArgumentException $exception) { return $this->fail('平台库存统一查询操作参数不合法。'); }

@@ -2200,11 +2200,17 @@ Route::group('adminapi', function () {
 			//库存明细
 			Route::get('detail/list', 'v1.product.inventory.StoreProductStockDetail/index')->option(['real_name' => '库存明细列表']);
 			// Vue3 平台库存：仓库范围与批次库存均由服务端限定
-			Route::get('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/locations')->option(['real_name' => '平台库存仓库列表']);
+			// 旧请货供货仓确认沿用调拨功能权限，不产生库存事实。
+            Route::post('v3/hq/request/:id/bind-supply-warehouse', 'v1.product.inventory.InventoryPlatformHqStockRequest/bindSupplyWarehouse')->pattern(['id' => '\\d+'])->option(['real_name' => '确认旧请货供货仓']);
+            Route::get('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/locations')->option(['real_name' => '平台库存仓库列表']);
+			Route::get('v3/warehouse-settings', 'v1.product.inventory.InventoryPlatformWarehouse/settings')->option(['real_name' => '平台总部仓设置列表']);
 			Route::get('v3/import/template', 'v1.product.inventory.InventoryPlatformExcelImport/template')->option(['real_name' => '平台库存导入模板']);
+			Route::get('v3/import', 'v1.product.inventory.InventoryPlatformExcelImport/index')->option(['real_name' => '平台库存导入记录']);
+			Route::get('v3/import/:id/detail', 'v1.product.inventory.InventoryPlatformExcelImport/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台库存导入详情']);
 			Route::post('v3/import/upload', 'v1.product.inventory.InventoryPlatformExcelImport/upload')->option(['real_name' => '平台库存导入文件上传']);
 			Route::post('v3/import', 'v1.product.inventory.InventoryPlatformExcelImport/import')->option(['real_name' => '平台多门店库存导入']);
 			Route::post('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/createLocation')->option(['real_name' => '平台库存创建仓库']);
+			Route::post('v3/locations/:id', 'v1.product.inventory.InventoryPlatformWarehouse/updateLocation')->pattern(['id' => '\\d+'])->option(['real_name' => '平台总部仓设置']);
 			Route::get('v3/salon-usage', 'v1.product.inventory.InventoryPlatformSalonUsage/index')->option(['real_name' => '平台院装单据查询']);
 			Route::get('v3/salon-usage/projects', 'v1.product.inventory.InventoryPlatformSalonUsage/projects')->option(['real_name' => '平台院装项目选择']);
 			Route::get('v3/salon-usage/:id/detail', 'v1.product.inventory.InventoryPlatformSalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台院装单据详情']);

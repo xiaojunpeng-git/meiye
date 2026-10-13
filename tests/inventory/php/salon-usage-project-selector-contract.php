@@ -45,7 +45,7 @@ selectorAssert('browser submits a selected project instead of accepting free pro
 
 selectorAssert('write authorization remains the final project authority',
     selectorContains($service, '$command = $this->authorizeProject($scope, $command)')
-    && selectorContains($service, 'private function authorizeProject(array $scope,array $command):array'));
+    && preg_match('/private function authorizeProject\(array\s+\$scope,\s*array\s+\$command\):\s*array/', $service) === 1);
 
 echo "INVENTORY_SALON_USAGE_PROJECT_SELECTOR_CONTRACT_RESULT failed={$failed}\n";
 exit($failed === 0 ? 0 : 1);

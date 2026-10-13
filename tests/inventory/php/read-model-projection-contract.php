@@ -68,7 +68,8 @@ readModelAssert('inventory page displays the authority fields with correct units
     $app !== false
     && strpos($app, "'商品摘要'") === false
     && strpos($app, 'text(row.product_summary)') === false
-    && strpos($app, 'inbound: 6, outbound: 6') !== false
+    // 门店出库多一列出库对象；平台总部仓仍沿用原状态列位置。
+    && strpos($app, "outbound: mode.value === 'store' ? 7 : 6") !== false
     && strpos($app, "'操作日期'") !== false
     && strpos($app, "'耗材项数'") !== false
     && strpos($app, 'centsMoney(row.change_amount_cents)') !== false
@@ -89,7 +90,7 @@ readModelAssert('dashboard and product summary are read from settled batch facts
     && strpos($storeReadModel, "'product_id' => \$productId") !== false
     && strpos($storeReadModel, "'inventory_amount_cents'") !== false
     && strpos($app, "const client = mode.value === 'platform' ? platformInventoryApi : inventoryApi") !== false
-    && strpos($app, 'dashboard.value = await client.dashboard()') !== false
+    && strpos($app, "dashboard.value = await client.dashboard(mode.value === 'platform' ? { hq_location_id:") !== false
     && strpos($app, "client.list('productSummary'") !== false);
 
 readModelAssert('inventory home keeps quantity metrics while cost follows the overview feature grant',

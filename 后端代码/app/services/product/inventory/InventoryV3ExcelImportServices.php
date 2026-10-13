@@ -124,7 +124,7 @@ final class InventoryV3ExcelImportServices
             throw new ValidateException('无法读取导入文件，请重新上传');
         }
 
-        $record = $this->claimRecord($direction, $storeId, $operatorId, $fileHash, $originName);
+        $record = $this->claimRecord($direction, $storeId, $operatorId, '', $fileHash, $originName);
         try {
             $rows = $this->readExcelRows($filePath, $direction);
             if (!$rows) throw new ValidateException('数据不能为空');
@@ -190,6 +190,43 @@ final class InventoryV3ExcelImportServices
         $count = (int)(clone $query)->count();
         $list = $query->order('id desc')->page($page, $limit)->select()->toArray();
         return ['count' => $count, 'list' => $list];
+    }
+
+    /** 平台导入记录按实际仓库限定；旧总部记录无法定位仓库时仅创建人可读，不猜测归属。 */
+    public function platformRecords(array $adminInfo, array $input): array
+    {
+        $query = $this->platformRecordQuery($adminInfo);
+        $locationId = (int)($input['hq_location_id'] ?? 0);
+        if ($locationId > 0) {
+            (new InventoryHqLocationServices())->readableLocation($adminInfo, $locationId);
+            $query->where('r.location_id', $locationId);
+        }
+        if ((int)($input['store_id'] ?? 0) > 0) $query->where('r.store_id', (int)$input['store_id']);
+        if (trim((string)($input['keyword'] ?? '')) !== '') $query->whereLike('r.document_no', '%' . trim((string)$input['keyword']) . '%');
+        $page = max(1, (int)($input['page'] ?? 1)); $limit = max(1,min(100,(int)($input['limit'] ?? 20)));
+        $count = (int)(clone $query)->count();
+        return ['list'=>$query->field('r.*,l.location_name')->order('r.id desc')->page($page,$limit)->select()->toArray(),'count'=>$count];
+    }
+
+    public function platformRecordDetail(array $adminInfo, int $recordId): array
+    {
+        $record = $this->platformRecordQuery($adminInfo)->where('r.id',$recordId)->field('r.*,l.location_name')->find();
+        if (!$record) throw new ValidateException('导入记录不存在或无权查看');
+        return ['record'=>$record,'errors'=>Db::name('inventory_v3_import_error')->where('record_id',$recordId)->order('excel_row asc,id asc')->select()->toArray()];
+    }
+
+    private function platformRecordQuery(array $adminInfo)
+    {
+        $resolved = (new InventoryPlatformWarehouseServices())->resolvedLocations($adminInfo,true);
+        $ids = array_map('intval',array_column($resolved['locations'],'id'));
+        $stores = array_values(array_filter(array_map('intval',array_column($resolved['locations'],'store_id'))));
+        $adminId = (int)$resolved['access']['admin_id'];
+        return Db::name('inventory_v3_import_record')->alias('r')->leftJoin('inventory_location l','l.id=r.location_id')
+            ->where('r.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->where(function ($q) use ($ids,$stores,$adminId): void {
+                $q->whereIn('r.location_id',$ids);
+                if ($stores) $q->whereOr(function ($legacy) use ($stores): void { $legacy->where('r.location_id',0)->whereIn('r.store_id',$stores); });
+                $q->whereOr(function ($legacy) use ($adminId): void { $legacy->where('r.location_id',0)->where('r.store_id',0)->where('r.operator_id',$adminId); });
+            });
     }
 
     public function detail(int $storeId, int $recordId): array
@@ -270,9 +307,14 @@ final class InventoryV3ExcelImportServices
         $fileHash = md5_file($filePath) ?: '';
         $results = [];
         foreach ($prepared as [$partyType, $locationId, $command, $businessType]) {
-            $results[] = ['party_type' => $partyType, 'location_id' => $locationId] + $this->persistPreparedImport($direction, $partyType, $locationId, $adminInfo, $fileHash, $originName, $command, $businessType);
+            try {
+                $results[] = ['party_type' => $partyType, 'location_id' => $locationId, 'status' => 'SUCCEEDED'] + $this->persistPreparedImport($direction, $partyType, $locationId, $adminInfo, $fileHash, $originName, $command, $businessType);
+            } catch (\Throwable $exception) {
+                $results[] = ['party_type' => $partyType, 'location_id' => $locationId, 'status' => 'FAILED', 'message' => $exception->getMessage()];
+            }
         }
-        return ['targets' => $results, 'target_count' => count($results), 'success_count' => count($results)];
+        $success = count(array_filter($results, static fn(array $result): bool => $result['status'] === 'SUCCEEDED'));
+        return ['targets' => $results, 'target_count' => count($results), 'success_count' => $success, 'failure_count' => count($results) - $success];
     }
 
     private function persistPreparedImport(string $direction, string $partyType, int $locationId, array $adminInfo, string $fileHash, string $originName, array $command, string $businessType): array
@@ -283,9 +325,20 @@ final class InventoryV3ExcelImportServices
         // A single workbook can target more than one warehouse. Scope the
         // idempotency/record hash by target so one HQ/store group cannot mask
         // another group in the same upload.
-        $targetFileHash = hash('sha256', $fileHash . '|' . $partyType . '|' . $locationId);
+        // 导入记录的既有file_hash为char(32)，保留SHA-256的128位前缀避免数据库截断和幂等查询失配。
+        $targetFileHash = substr(hash('sha256', $fileHash . '|' . $partyType . '|' . $locationId), 0, 32);
+        // 同文件逐仓恢复：已成功仓返回原结果，失败仓重新执行，禁止重复记库存。
+        $prior = Db::name('inventory_v3_import_record')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('store_id', $storeId)->where('direction', $direction)->where('file_hash', $targetFileHash)->find();
+        if ($prior && (string)$prior['status'] === 'SUCCEEDED') return ['record_id' => (int)$prior['id'], 'document_no' => (string)$prior['document_no'], 'success_count' => (int)$prior['success_count'], 'idempotent' => true];
         $record = $this->claimRecord($direction, $storeId, $operatorId, $operatorName, $targetFileHash, $originName);
-        $input = ['idempotency_key' => 'inventory-platform-import-' . $direction . '-' . $partyType . '-' . $locationId . '-' . $targetFileHash, 'business_date' => (string)$command['business_date'], 'remark' => $this->buildRemark($businessType, (array)$command['remark_parts']), 'lines' => (array)$command['lines']];
+        // 先保存目标仓与行数，再执行库存事务；失败记录也能按原仓追溯和授权查询。
+        Db::name('inventory_v3_import_record')->where('id', (int)$record['id'])->where('status', 'PROCESSING')->update([
+            'location_id' => $partyType === 'HQ' ? $locationId : (int)(Db::name('inventory_location')->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)->value('id') ?? 0),
+            'business_type' => $businessType, 'total_count' => count($command['lines']), 'updated_at' => time(),
+        ]);
+        try {
+        $input = ['idempotency_key' => 'inventory-pi-' . $direction . '-' . $targetFileHash, 'business_date' => (string)$command['business_date'], 'remark' => $this->buildRemark($businessType, (array)$command['remark_parts']), 'lines' => (array)$command['lines']];
         $authority = Db::transaction(function () use ($direction, $partyType, $locationId, $adminInfo, $storeId, $operatorId, $record, $input, $businessType): array {
             if ($partyType === 'HQ') {
                 $resolved = (new InventoryHqLocationServices())->writableLocation($adminInfo, $locationId);
@@ -296,10 +349,14 @@ final class InventoryV3ExcelImportServices
             } else {
                 $authority = $direction === self::DIRECTION_INBOUND ? (new InventoryManualInboundServices())->createForImport($storeId, $operatorId, $input) : (new InventoryManualOutboundServices())->createForImport($storeId, $operatorId, $input);
             }
-            Db::name('inventory_v3_import_record')->where('id', (int)$record['id'])->update(['business_type' => $businessType, 'total_count' => count($input['lines']), 'success_count' => count($input['lines']), 'failure_count' => 0, 'document_no' => (string)($authority['document_no'] ?? ''), 'status' => 'SUCCEEDED', 'updated_at' => time()]);
+            Db::name('inventory_v3_import_record')->where('id', (int)$record['id'])->update(['location_id' => $partyType === 'HQ' ? $locationId : (int)(Db::name('inventory_location')->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)->value('id') ?? 0), 'business_type' => $businessType, 'total_count' => count($input['lines']), 'success_count' => count($input['lines']), 'failure_count' => 0, 'document_no' => (string)($authority['document_no'] ?? ''), 'status' => 'SUCCEEDED', 'updated_at' => time()]);
             return $authority;
         });
         return ['record_id' => (int)$record['id'], 'document_no' => (string)($authority['document_no'] ?? ''), 'success_count' => count($input['lines'])];
+        } catch (\Throwable $exception) {
+            $this->markRuntimeFailure((int)$record['id'], $exception);
+            throw $exception;
+        }
     }
 
     private function claimRecord(string $direction, int $storeId, int $operatorId, string $operatorName, string $fileHash, string $originName): array

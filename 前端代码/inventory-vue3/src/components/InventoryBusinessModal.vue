@@ -16,6 +16,7 @@ const props = defineProps({
   scopeName: { type: String, default: '' },
   defaultLocationName: { type: String, default: '' },
   warehouseOptions: { type: Array, default: () => [] },
+  warehouseSelection: { type: String, default: '' },
   hqLocationId: { type: Number, default: 0 },
   usageStoreId: { type: Number, default: 0 },
   defaultBusinessDate: { type: String, default: '' },
@@ -66,6 +67,7 @@ const outboundDate = ref(initialBusinessDate())
 const outboundRemark = ref('')
 // Optional recipient is a document snapshot, not a member/staff identifier.
 const outboundRecipient = ref('')
+const inboundAttempt = ref(null)
 const outboundAttempt = ref(null)
 const countRemark = ref('')
 const countDraftId = ref(0)
@@ -81,13 +83,10 @@ const requesterSelection = ref('')
 const supplyParties = ref([])
 const supplyPartySelection = ref('')
 const supplyPartiesLoading = ref(false)
-const acceptanceParties = ref([])
-const acceptancePartyId = ref(0)
-const acceptancePartiesLoading = ref(false)
 const transferDate = ref(initialBusinessDate())
 const transferRemark = ref('')
 // The request shortcut selects the supplier as transfer source; no stock data is copied from the list.
-const transferSourceSelection = ref(props.detail?.transfer_request_id ? `${props.detail.transfer_source_type}:${Number(props.detail.transfer_source_id || 0)}` : 'HQ:0')
+const transferSourceSelection = ref(props.detail?.transfer_request_id ? `${props.detail.transfer_source_type}:${Number(props.detail.transfer_source_type === 'HQ' ? props.detail.transfer_source_location_id : props.detail.transfer_source_id)}` : ('HQ:' + Number(props.hqLocationId)))
 const transferCounterparties = ref([])
 const transferTargetSelection = ref('')
 const incomingRequests = ref([])
@@ -104,8 +103,12 @@ const usageProjectsLoading = ref(false)
 const usageProjectsError = ref('')
 let usageProjectRequestSerial = 0
 const usageRemark = ref('')
-const warehouseStoreId = ref(0)
-const warehouseName = ref('')
+const documentWarehouseSelection = ref(`HQ:${Number(props.hqLocationId) || 0}`)
+const usageWarehouseSelection = ref(props.mode === 'platform' ? props.warehouseSelection : `STORE:${Number(props.usageStoreId) || 0}`)
+const warehouseStoreId = ref(Number(props.detail?.id || props.hqLocationId || 0))
+const warehouseStatus = ref(String(props.detail?.location_status || 'ACTIVE'))
+const warehouseCreateAttempt = ref({ content: '', key: '' })
+const warehouseName = ref(String(props.detail?.location_name || ''))
 const submitting = ref(false)
 const submitError = ref('')
 const importFile = ref(null)
@@ -124,10 +127,27 @@ const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
 const isImport = computed(() => props.modalKind === 'import')
 const isPlatformHeadquarters = computed(() => props.mode === 'platform')
+ // HQ描述符携带实际仓库ID；门店描述符保留门店ID，两种身份不能混用。
+ const commandHqLocationId = computed(() => {
+   const selection = props.pageKey === 'request' ? requestPartySelection.value
+     : props.pageKey === 'transfer' ? transferSourceSelection.value
+       : ['inbound', 'outbound'].includes(props.pageKey) ? documentWarehouseSelection.value
+         : props.pageKey === 'usage' && usageWarehouseSelection.value.startsWith('HQ:') ? usageWarehouseSelection.value : ''
+   const [type, id] = String(selection).split(':')
+   return type === 'HQ' && Number(id) > 0 ? Number(id) : Number(props.hqLocationId)
+ })
+ const warehouseSelection = (type, partyId, locationId) => type + ':' + (type === 'HQ' ? Number(locationId) : Number(partyId))
+
 const platformImportStores = computed(() => {
-  const hq = props.warehouseOptions.filter((location) => String(location?.location_type || '') === 'HQ' && Number(location?.id || 0) > 0).map((location) => ({ ...location, import_key: `HQ:${Number(location.id)}`, import_name: location.location_name || '总部仓', import_type: '总部仓' }))
+  const hq = props.warehouseOptions.filter((location) => location.location_status !== 'INACTIVE' && String(location?.location_type || '') === 'HQ' && Number(location?.id || 0) > 0).map((location) => ({ ...location, import_key: `HQ:${Number(location.id)}`, import_name: location.location_name || '总部仓', import_type: '总部仓' }))
   const stores = props.warehouseOptions.filter((location) => String(location?.location_type || '') === 'STORE' && Number(location?.store_id || 0) > 0).map((location) => ({ ...location, import_key: `STORE:${Number(location.store_id)}`, import_name: location.store_name || location.store_name_snapshot || `门店${location.store_id}`, import_type: '门店' }))
   return [...hq, ...stores].filter((item, index, list) => list.findIndex((candidate) => candidate.import_key === item.import_key) === index)
+})
+const documentWarehouseOptions = computed(() => platformImportStores.value.filter((item) => item.import_type === '总部仓').map((item) => ({ key: item.import_key, name: item.import_name, type: 'HQ' })))
+const usageWarehouseOptions = computed(() => platformImportStores.value.filter((item) => item.location_status === 'ACTIVE').map((item) => ({ key: item.import_key, name: item.import_name, type: item.import_key.startsWith('HQ:') ? 'HQ' : 'STORE' })))
+const usageWarehouseScope = computed(() => {
+  const [type, rawId] = String(usageWarehouseSelection.value || '').split(':', 2)
+  return type === 'HQ' ? { hq_location_id: Number(rawId) || 0 } : { store_id: Number(rawId) || 0 }
 })
 const catalogApi = computed(() => isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi)
 const catalogQuery = computed(() => {
@@ -137,31 +157,33 @@ const catalogQuery = computed(() => {
   // “当前库存”则必须来自供货方库存主体，不能误展示请货方库存。
   const selection = props.pageKey === 'request'
     ? requestPartySelection.value
-    : props.pageKey === 'usage' ? `STORE:${Number(props.usageStoreId) || 0}` : (transferSourceSelection.value || 'HQ:0')
+    : props.pageKey === 'usage' ? usageWarehouseSelection.value
+      : ['inbound', 'outbound'].includes(props.pageKey) ? documentWarehouseSelection.value : (transferSourceSelection.value || 'HQ:0')
   const [sourcePartyType, rawSourceId] = String(selection).split(':', 2)
   const availabilitySelection = props.pageKey === 'request'
     ? (supplyPartySelection.value || selection)
     : selection
   const [availabilityPartyType, rawAvailabilityId] = String(availabilitySelection).split(':', 2)
   return {
-    hq_location_id: Number(props.hqLocationId),
+    hq_location_id: Number(commandHqLocationId.value),
     source_party_type: sourcePartyType,
-    source_store_id: Number(rawSourceId || 0),
+    source_store_id: sourcePartyType === 'HQ' ? 0 : Number(rawSourceId || 0),
     availability_party_type: availabilityPartyType,
-    availability_store_id: Number(rawAvailabilityId || 0),
+    availability_store_id: availabilityPartyType === 'HQ' ? 0 : Number(rawAvailabilityId || 0), availability_location_id: selectedSupplyParty().locationId || Number(commandHqLocationId.value),
     ...(props.pageKey === 'count' ? { include_count_batches: 1 } : {})
   }
 })
 const warehouseStoreOptions = computed(() => {
   const seen = new Set()
   return props.warehouseOptions.filter((location) => {
-    const storeId = Number(location?.store_id || 0)
-    if (storeId <= 0 || seen.has(storeId)) return false
+    const storeId = Number(location?.owner_id || 0)
+    if (location.location_type !== 'HQ' || storeId <= 0 || seen.has(storeId)) return false
     seen.add(storeId)
     return true
   })
 })
 const title = computed(() => {
+  if (props.modalKind === 'warehouse-edit') return '仓库设置'
   if (isImport.value) return '库存导入'
   if (isInboundOutboundDetail.value) return '入库批次出库明细'
   if (isDetail.value) return `${pageLabel.value}详情`
@@ -180,8 +202,10 @@ const primarySubmitDisabled = computed(() => {
   // 统一移动提交入口时保留各业务原有门禁，按钮位置不得放宽数据完整性校验。
   if (submitting.value) return true
   if (lineEditorKeys.includes(props.pageKey) && !selectedRows.value.length) return true
+  if (isPlatformHeadquarters.value && props.pageKey === 'usage' && !usageWarehouseOptions.value.some((item) => item.key === usageWarehouseSelection.value)) return true
+  if (isPlatformHeadquarters.value && ['inbound', 'outbound'].includes(props.pageKey) && !documentWarehouseOptions.value.some((item) => item.key === documentWarehouseSelection.value)) return true
   // 院装领用可以不关联核销项目；作废走独立命令，不复用领用表单。
-  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || (selectedSupplyParty().type === 'HQ' && Number(acceptancePartyId.value) <= 0))) return true
+  if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || selectedSupplyParty().locationId <= 0)) return true
   if (props.pageKey === 'transfer' && (!transferTargetSelection.value || (isPlatformHeadquarters.value && !transferStaffOptions.value.length))) return true
   return props.pageKey === 'warehouse' && (Number(warehouseStoreId.value) <= 0 || !warehouseName.value.trim())
 })
@@ -190,12 +214,14 @@ const primarySubmitLabel = computed(() => {
   if (props.pageKey === 'request') return isRequestEdit.value ? '保存修改' : '确认申请'
   if (props.pageKey === 'transfer') return isTransferEdit.value ? '保存修改' : '保存调拨草稿'
   if (props.pageKey === 'usage') return '确认领用'
-  if (props.pageKey === 'warehouse') return '创建仓库'
+  if (props.pageKey === 'warehouse') return props.modalKind === 'warehouse-edit' ? '保存设置' : '创建仓库'
   return '保存'
 })
 const requestDetailLines = computed(() => Array.isArray(props.detail?.lines) ? props.detail.lines : [])
 const transferDetailLines = computed(() => Array.isArray(props.detail?.lines) ? props.detail.lines : [])
 const modalScopeName = computed(() => {
+  if (props.pageKey === 'warehouse') return props.warehouseOptions.find(item => Number(item.id) === Number(warehouseStoreId.value))?.organization_name_snapshot || '总部仓'
+  if (props.pageKey === 'request' && isPlatformHeadquarters.value) return requestPartyOptions.value.find(item => item.key === requestPartySelection.value)?.name || props.scopeName
   if (props.pageKey !== 'transfer' || !isPlatformHeadquarters.value) return props.scopeName
   return transferSourceOptions.value.find((option) => String(option.key) === String(transferSourceSelection.value))?.name || props.scopeName
 })
@@ -204,10 +230,10 @@ const transferSourceOptions = computed(() => {
   const stores = props.warehouseOptions
     .filter((location) => Number(location?.store_id || 0) > 0)
     .map((location) => ({ key: `STORE:${Number(location.store_id)}`, type: 'STORE', id: Number(location.store_id), name: String(location.store_name_snapshot || location.store_name || `门店${location.store_id}`) }))
-  return [{ key: 'HQ:0', type: 'HQ', id: 0, name: '总部仓' }, ...stores.filter((item, index, list) => list.findIndex((candidate) => candidate.key === item.key) === index)]
+  return [...props.warehouseOptions.filter((item) => item.location_type === 'HQ' && item.location_status !== 'INACTIVE').map((item) => ({ key: 'HQ:' + Number(item.id), type: 'HQ', id: 0, name: item.location_name })), ...stores.filter((item, index, list) => list.findIndex((candidate) => candidate.key === item.key) === index)]
 })
 const transferTargetOptions = computed(() => transferCounterparties.value
-  .map((item) => ({ key: `${String(item?.party_type || 'STORE').toUpperCase()}:${Number(item.id || item.store_id || 0)}`, type: String(item?.party_type || 'STORE').toUpperCase(), id: Number(item.id || item.store_id || 0), name: String(item.name || item.store_name || '') })))
+  .map((item) => ({ key: warehouseSelection(String(item?.party_type || 'STORE').toUpperCase(), item.id || item.store_id, item.location_id), type: String(item?.party_type || 'STORE').toUpperCase(), id: Number(item.id || item.store_id || 0), name: String(item.name || item.store_name || '') })))
 
 function formatQuantity(units, scale = 0) {
   const divisor = 10 ** Number(scale || 0)
@@ -374,8 +400,7 @@ async function hydrateRequestEditor(detail) {
   requestRemark.value = String(document.remark || '')
   requesterName.value = String(document.requester_name_snapshot || '')
   requestPartySelection.value = `${String(document.request_party_type || 'STORE')}:${Number(document.request_party_id || document.store_id || 0)}`
-  supplyPartySelection.value = `${String(document.supply_party_type || 'HQ')}:${Number(document.supply_party_id || 0)}`
-  acceptancePartyId.value = Number(document.acceptance_party_id || 0)
+  supplyPartySelection.value = warehouseSelection(String(document.supply_party_type || 'HQ'), document.supply_party_id, document.supply_location_id)
   selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({
     product_id: Number(line.product_id), sku_id: Number(line.sku_id), sku_unique: String(line.sku_unique || ''),
     product_name: String(line.product_name_snapshot || ''), sku_name: String(line.sku_name_snapshot || ''),
@@ -383,7 +408,6 @@ async function hydrateRequestEditor(detail) {
   }))
   requestEditIdempotencyKey.value = newRequestIdempotencyKey()
   await loadSupplyParties()
-  await loadAcceptanceParties()
 }
 
 watch(() => props.detail, (detail) => { hydrateRequestEditor(detail) }, { immediate: true })
@@ -393,9 +417,9 @@ function hydrateTransferEditor(detail) {
   if (!isTransferEdit.value || !detail?.can_edit) return
   transferDate.value = String(detail.business_date || transferDate.value)
   transferRemark.value = String(detail.remark || '')
-  transferSourceSelection.value = `${String(detail.from_party_type || 'HQ')}:${Number(detail.from_party_id || 0)}`
+  transferSourceSelection.value = warehouseSelection(String(detail.from_party_type || 'HQ'), detail.from_party_id, detail.from_location_id)
   transferStaffId.value = Number(detail.transfer_staff_id || 0)
-  transferTargetSelection.value = `${String(detail.to_party_type || 'STORE')}:${Number(detail.to_party_id || 0)}`
+  transferTargetSelection.value = warehouseSelection(String(detail.to_party_type || 'STORE'), detail.to_party_id, detail.to_location_id)
   requestDocumentId.value = Number(detail.request_document_id || 0)
   selectedRows.value = (Array.isArray(detail.lines) ? detail.lines : []).map((line) => ({
     product_id: Number(line.from_product_id), sku_id: Number(line.from_sku_id),
@@ -427,7 +451,7 @@ async function loadUsageProjects() {
   usageProjectsError.value = ''
   try {
     const api = isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi
-    const response = await api.salonUsageProjects({ keyword: usageProjectKeyword.value.trim(), page: 1, limit: 50, ...(isPlatformHeadquarters.value ? { store_id: Number(props.usageStoreId) } : {}) })
+    const response = await api.salonUsageProjects({ keyword: usageProjectKeyword.value.trim(), page: 1, limit: 50, ...(isPlatformHeadquarters.value ? usageWarehouseScope.value : {}) })
     if (requestSerial !== usageProjectRequestSerial) return
     usageProjects.value = Array.isArray(response?.list) ? response.list : []
   } catch (error) {
@@ -442,6 +466,23 @@ async function loadUsageProjects() {
 function selectUsageProject() {
   const selected = usageProjects.value.find((project) => Number(project?.id) === Number(usageProjectId.value))
   usageProjectName.value = selected ? String(selected.name || '') : ''
+}
+
+/** 仓库变动会改变可用库存与项目资格；旧仓的已选行不能进入新仓命令。 */
+function onDocumentWarehouseChanged() {
+  selectedRows.value = []
+  selectedLineIndexes.value = []
+  productSelectorVisible.value = false
+  scannerVisible.value = false
+  catalogError.value = ''
+}
+
+function onUsageWarehouseChanged() {
+  onDocumentWarehouseChanged()
+  usageProjectId.value = ''
+  usageProjectName.value = ''
+  usageProjects.value = []
+  loadUsageProjects()
 }
 
 watch(() => props.pageKey, (pageKey) => {
@@ -464,7 +505,8 @@ async function submitImport() {
     if (isPlatformHeadquarters.value) {
       if (!platformImportStoreIds.value.length) throw new Error('请选择至少一个门店。')
       result = await platformInventoryApi.submitImport({ direction: importDirection.value, file: upload.src, real_name: importFileName.value, store_ids: platformImportStoreIds.value })
-      importMessage.value = `导入完成：${result.target_count || 0} 家门店，共生成 ${result.success_count || 0} 张单据。`
+      importMessage.value = `共 ${result.target_count || 0} 个仓库，成功 ${result.success_count || 0} 个，失败 ${result.failure_count || 0} 个。`
+      if (result.failure_count > 0) { submitError.value = (result.targets || []).filter(item => item.status === 'FAILED').map(item => `仓库 ${item.location_id}：${item.message}`).join('；'); return }
     } else {
       result = await inventoryApi.submitImport({ direction: importDirection.value, file: upload.src, real_name: importFileName.value })
       importMessage.value = `导入完成：${result.success_count || 0} 行，业务单号 ${result.document_no || '已生成'}。`
@@ -480,7 +522,7 @@ async function submitImport() {
 
 function openCatalogPicker() {
   if (!['inbound', 'outbound', 'count', 'request', 'transfer', 'usage'].includes(props.pageKey)) return
-  if (isPlatformHeadquarters.value && Number(props.hqLocationId) <= 0) {
+  if (isPlatformHeadquarters.value && Number(commandHqLocationId.value) <= 0) {
     catalogError.value = '请选择可操作的总部仓后再选择商品。'
     return
   }
@@ -490,7 +532,7 @@ function openCatalogPicker() {
 
 function openScanner() {
   if (!['inbound', 'outbound'].includes(props.pageKey)) return
-  if (isPlatformHeadquarters.value && Number(props.hqLocationId) <= 0) {
+  if (isPlatformHeadquarters.value && Number(commandHqLocationId.value) <= 0) {
     catalogError.value = '请选择可操作的总部仓后再扫码添加商品。'
     return
   }
@@ -749,44 +791,30 @@ async function importCountRows(event) {
 
 async function loadSupplyParties() {
   if (props.pageKey !== 'request') return
-  if (isPlatformHeadquarters.value && Number(props.hqLocationId) <= 0) {
+  if (isPlatformHeadquarters.value && Number(commandHqLocationId.value) <= 0) {
     supplyParties.value = []
     return
   }
   supplyPartiesLoading.value = true
   try {
     const response = isPlatformHeadquarters.value
-      ? await platformInventoryApi.hqRequestCounterparties({ hq_location_id: Number(props.hqLocationId), request_party_type: String(requestPartySelection.value).split(':')[0], request_party_id: Number(String(requestPartySelection.value).split(':')[1] || 0) })
+      ? await platformInventoryApi.hqRequestCounterparties({ hq_location_id: Number(commandHqLocationId.value), request_party_type: String(requestPartySelection.value).split(':')[0], request_party_id: requestPartySelection.value.startsWith('HQ:') ? 0 : Number(String(requestPartySelection.value).split(':')[1] || 0) })
       : await inventoryApi.requestCounterparties()
     const stores = (Array.isArray(response?.list) ? response.list : []).map((item) => {
       const type = String(item.party_type || item.type || 'STORE').toUpperCase()
       const id = Number(item.party_id ?? item.id ?? 0)
-      return { key: `${type}:${id}`, type, id, name: String(item.name || '') }
+      return { key: warehouseSelection(type, id, item.location_id), type, id, locationId: Number(item.location_id), name: String(item.name || '') }
     }).filter((item) => item.name && (item.type === 'HQ' || item.id > 0))
     supplyParties.value = stores
     if (!supplyPartySelection.value || !supplyParties.value.some((item) => item.key === supplyPartySelection.value)) supplyPartySelection.value = supplyParties.value[0]?.key || ''
   } catch (error) { catalogError.value = error instanceof Error ? error.message : '供货方目录读取失败。' } finally { supplyPartiesLoading.value = false }
 }
 
-async function loadAcceptanceParties() {
-  if (props.pageKey !== 'request') return
-  if (isPlatformHeadquarters.value && Number(props.hqLocationId) <= 0) { acceptanceParties.value = []; return }
-  acceptancePartiesLoading.value = true
-  try {
-    const response = isPlatformHeadquarters.value
-      ? await platformInventoryApi.hqRequestAcceptanceParties({ hq_location_id: Number(props.hqLocationId) })
-      : await inventoryApi.requestAcceptanceParties()
-    acceptanceParties.value = Array.isArray(response?.list) ? response.list : []
-    if (acceptancePartyId.value > 0 && !acceptanceParties.value.some((item) => Number(item.id) === Number(acceptancePartyId.value))) acceptancePartyId.value = 0
-  } catch (error) { catalogError.value = error instanceof Error ? error.message : '受理部门目录读取失败。' }
-  finally { acceptancePartiesLoading.value = false }
-}
-
 async function loadRequester() {
   if (props.pageKey !== 'request' || isRequestEdit.value) return
   try {
     const response = isPlatformHeadquarters.value
-      ? await platformInventoryApi.hqRequestRequester({ hq_location_id: Number(props.hqLocationId), request_party_type: String(requestPartySelection.value).split(':')[0], request_party_id: Number(String(requestPartySelection.value).split(':')[1] || 0) })
+      ? await platformInventoryApi.hqRequestRequester({ hq_location_id: Number(commandHqLocationId.value), request_party_type: String(requestPartySelection.value).split(':')[0], request_party_id: requestPartySelection.value.startsWith('HQ:') ? 0 : Number(String(requestPartySelection.value).split(':')[1] || 0) })
       : await inventoryApi.requestRequester()
     requesterOptions.value = Array.isArray(response?.list) ? response.list : []
     requesterSelection.value = String(response?.default_key || requesterOptions.value[0]?.key || '')
@@ -796,12 +824,12 @@ async function loadRequester() {
   }
 }
 
-watch(() => [props.pageKey, props.mode, props.hqLocationId], () => { if (isPlatformHeadquarters.value) loadRequestParties(); else { loadSupplyParties(); loadRequester() }; loadAcceptanceParties() }, { immediate: true })
+watch(() => [props.pageKey, props.mode, props.hqLocationId], () => { if (isPlatformHeadquarters.value) loadRequestParties(); else { loadSupplyParties(); loadRequester() } }, { immediate: true })
 
 async function loadRequestParties() {
-  if (props.pageKey !== 'request' || !isPlatformHeadquarters.value || Number(props.hqLocationId) <= 0) return
+  if (props.pageKey !== 'request' || !isPlatformHeadquarters.value || Number(commandHqLocationId.value) <= 0) return
   try {
-    const response = await platformInventoryApi.hqRequestParties({ hq_location_id: Number(props.hqLocationId) })
+    const response = await platformInventoryApi.hqRequestParties({ hq_location_id: Number(commandHqLocationId.value) })
     requestPartyOptions.value = Array.isArray(response?.list) ? response.list : []
     requestPartySelection.value = String(response?.default || requestPartyOptions.value[0]?.key || 'HQ:0')
     await onRequestPartyChanged(requestPartySelection.value)
@@ -820,8 +848,6 @@ async function onRequestPartyChanged(value) {
 
 function onSupplyPartyChanged(value) {
   supplyPartySelection.value = String(value || '')
-  // 受理部门是总部供货的责任路由，不得残留到门店供货单，更不能改变库存主体。
-  if (selectedSupplyParty().type !== 'HQ') acceptancePartyId.value = 0
   // 已选商品的库存属于原供货方；切换后要求从新供货方库存重新选择。
   selectedRows.value = []
 }
@@ -833,7 +859,7 @@ async function loadTransferContext() {
   if (initialRequestId > 0) requestDocumentId.value = initialRequestId
   try {
     const [sourceType, rawSourceId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
-    const sourceQuery = { hq_location_id: Number(props.hqLocationId), source_party_type: sourceType, source_store_id: Number(rawSourceId || 0) }
+    const sourceQuery = { hq_location_id: Number(commandHqLocationId.value), source_party_type: sourceType, source_store_id: sourceType === 'HQ' ? 0 : Number(rawSourceId || 0) }
     const parties = isPlatformHeadquarters.value
       ? await platformInventoryApi.hqCrossTransferCounterparties(sourceQuery)
       : await inventoryApi.crossTransferCounterparties()
@@ -870,7 +896,7 @@ async function loadTransferStaffs() {
   try {
     const [sourcePartyType, rawSourceId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
     const response = await platformInventoryApi.hqCrossTransferStaffs({
-      hq_location_id: Number(props.hqLocationId), source_party_type: sourcePartyType, source_store_id: Number(rawSourceId || 0), target_store_id: target.type === 'HQ' ? 0 : target.id
+      hq_location_id: Number(commandHqLocationId.value), source_party_type: sourcePartyType, source_store_id: sourcePartyType === 'HQ' ? 0 : Number(rawSourceId || 0), target_store_id: target.type === 'HQ' ? 0 : target.id, target_location_id: target.type === 'HQ' ? target.locationId : 0
     })
     transferStaffOptions.value = Array.isArray(response?.list) ? response.list : []
     // 编辑优先保留仍有效的记名人员；失效人员必须重新选择。
@@ -896,13 +922,13 @@ function onTransferTargetChanged(value) {
 
 function selectedSupplyParty() {
   const [type, rawId] = String(supplyPartySelection.value || '').split(':', 2)
-  return { type, id: Number(rawId || 0) }
+  return { type, id: type === 'HQ' ? 0 : Number(rawId || 0), locationId: type === 'HQ' ? Number(rawId || 0) : Number(supplyParties.value.find((item) => item.key === supplyPartySelection.value)?.locationId || 0) }
 }
 
 function applyIncomingRequest() {
   const request = incomingRequests.value.find((item) => Number(item.id) === Number(requestDocumentId.value))
   if (!request) return
-  transferTargetSelection.value = `${String(request.request_party_type || 'STORE').toUpperCase()}:${Number(request.request_party_id || request.store_id || 0)}`
+  transferTargetSelection.value = warehouseSelection(String(request.request_party_type || 'STORE').toUpperCase(), request.request_party_id || request.store_id, request.location_id)
   const lines = Array.isArray(request.lines) ? request.lines : []
   selectedRows.value = lines.map((line) => {
     const scale = Number(line.quantity_scale || 0)
@@ -920,7 +946,7 @@ function applyIncomingRequest() {
 
 function selectedTransferTarget() {
   const [type, rawId] = String(transferTargetSelection.value || '').split(':', 2)
-  return { type, id: Number(rawId || 0) }
+  return { type, id: type === 'HQ' ? 0 : Number(rawId || 0), locationId: type === 'HQ' ? Number(rawId || 0) : Number(supplyParties.value.find((item) => item.key === supplyPartySelection.value)?.locationId || 0) }
 }
 
 function countIdempotencyKey() { return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `count-${crypto.randomUUID()}` : `count-${Date.now()}-${Math.random().toString(36).slice(2)}` }
@@ -945,7 +971,7 @@ async function persistCountDraft() {
   // 平台总部不能调用门店写接口；保存仍只产生可续编快照，不产生库存变更。
   const payload = { draft_id: countDraftId.value, expected_version: countDraftVersion.value, ...content }
   const result = isPlatformHeadquarters.value
-    ? await platformInventoryApi.saveHqCountDraft({ ...payload, hq_location_id: Number(props.hqLocationId) })
+    ? await platformInventoryApi.saveHqCountDraft({ ...payload, hq_location_id: Number(commandHqLocationId.value) })
     : await inventoryApi.saveCountDraft(payload)
   countDraftId.value = Number(result.draft_id)
   countDraftVersion.value = Number(result.version)
@@ -1007,7 +1033,7 @@ async function submitCount() {
         ...(row.count_mode === 'BATCH' ? { count_mode: 'BATCH' } : {})
       }))
     }
-    if (isPlatformHeadquarters.value) await platformInventoryApi.confirmHqCount({ ...payload, hq_location_id: Number(props.hqLocationId) })
+    if (isPlatformHeadquarters.value) await platformInventoryApi.confirmHqCount({ ...payload, hq_location_id: Number(commandHqLocationId.value) })
     else await inventoryApi.confirmCount(payload)
     emit('saved')
     close()
@@ -1088,7 +1114,7 @@ async function submitInbound() {
   submitError.value = ''
   try {
     const payload = {
-      idempotency_key: inboundIdempotencyKey(), business_date: inboundDate.value, remark: inboundRemark.value,
+      idempotency_key: '', business_date: inboundDate.value, remark: inboundRemark.value,
       lines: selectedRows.value.map((row) => ({
         product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique,
         batch_no: Number(row.no_expiry_management) === 1 ? '' : row.batch_no, quantity: row.quantity, unit_cost: row.unit_cost,
@@ -1096,11 +1122,15 @@ async function submitInbound() {
         expire_date: Number(row.no_expiry_management) === 1 ? '' : row.expire_date, detail_remark: String(row.detail_remark || '')
       }))
     }
+    // 传输结果不明时同仓同内容复用键；换仓或改明细必须产生新命令。
+    const fingerprint = JSON.stringify([Number(commandHqLocationId.value), payload])
+    if (inboundAttempt.value?.fingerprint !== fingerprint) inboundAttempt.value = { fingerprint, key: inboundIdempotencyKey() }
+    payload.idempotency_key = inboundAttempt.value.key
     if (isPlatformHeadquarters.value) {
-      if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
-      await platformInventoryApi.createHqInbound({ ...payload, hq_location_id: Number(props.hqLocationId) })
+      if (Number(commandHqLocationId.value) <= 0) throw new Error('请选择可操作的总部仓。')
+      await platformInventoryApi.createHqInbound({ ...payload, hq_location_id: Number(commandHqLocationId.value) })
     } else await inventoryApi.createInbound(payload)
-    emit('saved')
+    emit('saved', { businessDate: inboundDate.value, warehouseSelection: isPlatformHeadquarters.value ? documentWarehouseSelection.value : '' })
     close()
   } catch (error) {
     submitError.value = inventoryErrorMessage(error, '入库提交失败。')
@@ -1122,14 +1152,14 @@ async function submitOutbound() {
       }))
     }
     // A retry of unchanged content reuses the original key; edits start a new command.
-    const fingerprint = JSON.stringify(payload)
+    const fingerprint = JSON.stringify([Number(commandHqLocationId.value), payload])
     if (outboundAttempt.value?.fingerprint !== fingerprint) outboundAttempt.value = { fingerprint, key: outboundIdempotencyKey() }
     payload.idempotency_key = outboundAttempt.value.key
     if (isPlatformHeadquarters.value) {
-      if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
-      await platformInventoryApi.createHqOutbound({ ...payload, hq_location_id: Number(props.hqLocationId) })
+      if (Number(commandHqLocationId.value) <= 0) throw new Error('请选择可操作的总部仓。')
+      await platformInventoryApi.createHqOutbound({ ...payload, hq_location_id: Number(commandHqLocationId.value) })
     } else await inventoryApi.createOutbound(payload)
-    emit('saved')
+    emit('saved', { businessDate: outboundDate.value, warehouseSelection: isPlatformHeadquarters.value ? documentWarehouseSelection.value : '' })
     close()
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : '出库提交失败。'
@@ -1149,15 +1179,15 @@ async function submitRequest() {
   submitting.value = true
   submitError.value = ''
   try {
-    const requestParty = (() => { const [type, rawId] = String(requestPartySelection.value || 'HQ:0').split(':', 2); return { type, id: Number(rawId || 0) } })()
+    const requestParty = (() => { const [type, rawId] = String(requestPartySelection.value || 'HQ:0').split(':', 2); return { type, id: type === 'HQ' ? 0 : Number(rawId || 0), locationId: type === 'HQ' ? Number(rawId || 0) : Number(supplyParties.value.find((item) => item.key === supplyPartySelection.value)?.locationId || 0) } })()
     const selectedRequester = requesterOptions.value.find((item) => String(item.key) === String(requesterSelection.value))
     const payload = {
-      idempotency_key: isRequestEdit.value ? requestEditIdempotencyKey.value : requestIdempotencyKey(), business_date: requestDate.value, remark: requestRemark.value, requester_name: String(selectedRequester?.name || requesterName.value).trim(), ...(isPlatformHeadquarters.value ? { request_party_type: requestParty.type, request_party_id: requestParty.id } : {}), supply_party_type: supplier.type, supply_party_id: supplier.id, acceptance_party_id: supplier.type === 'HQ' ? Number(acceptancePartyId.value) : 0,
+      idempotency_key: isRequestEdit.value ? requestEditIdempotencyKey.value : requestIdempotencyKey(), business_date: requestDate.value, remark: requestRemark.value, requester_name: String(selectedRequester?.name || requesterName.value).trim(), ...(isPlatformHeadquarters.value ? { request_party_type: requestParty.type, request_party_id: requestParty.id } : {}), supply_party_type: supplier.type, supply_party_id: supplier.id, supply_location_id: supplier.locationId,
       lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, detail_remark: String(row.detail_remark || '') }))
     }
     if (isPlatformHeadquarters.value) {
-      if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
-      await platformInventoryApi.applyHqRequest({ ...payload, hq_location_id: Number(props.hqLocationId) })
+      if (Number(commandHqLocationId.value) <= 0) throw new Error('请选择可操作的总部仓。')
+      await platformInventoryApi.applyHqRequest({ ...payload, hq_location_id: Number(commandHqLocationId.value) })
     } else if (isRequestEdit.value) await inventoryApi.updateRequest(props.detail?.document?.id, payload)
     else await inventoryApi.applyRequest(payload)
     // 把实际保存的业务日期回传给列表，保证保存后用户立即看到该单据。
@@ -1181,11 +1211,11 @@ async function submitTransfer() {
     if (!isTransferEdit.value && Number(requestDocumentId.value) > 0 && !incomingRequests.value.some((item) => Number(item.id) === Number(requestDocumentId.value))) {
       throw new Error('关联请货单已无可调拨商品或不在当前供货权限内，请返回列表刷新。')
     }
-    const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, request_document_id: Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: Number(row.request_line_id || 0), detail_remark: String(row.detail_remark || '') })) }
+    const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, target_location_id: target.type === 'HQ' ? target.locationId : 0, request_document_id: Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: Number(row.request_line_id || 0), detail_remark: String(row.detail_remark || '') })) }
     if (isPlatformHeadquarters.value) {
-      if (Number(props.hqLocationId) <= 0) throw new Error('请选择可操作的总部仓。')
+      if (Number(commandHqLocationId.value) <= 0) throw new Error('请选择可操作的总部仓。')
       const [type, rawId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
-      const payload = { ...commonPayload, source_party_type: type, source_store_id: Number(rawId || 0), transfer_staff_id: Number(transferStaffId.value), hq_location_id: Number(props.hqLocationId) }
+      const payload = { ...commonPayload, source_party_type: type, source_store_id: type === 'HQ' ? 0 : Number(rawId || 0), transfer_staff_id: Number(transferStaffId.value), hq_location_id: Number(commandHqLocationId.value) }
       if (isTransferEdit.value) await platformInventoryApi.updateHqCrossTransfer(Number(props.detail?.id), { ...payload, expected_edit_token: String(props.detail?.edit_token || '') })
       else await platformInventoryApi.createHqCrossTransfer(payload)
     } else if (isTransferEdit.value) {
@@ -1201,16 +1231,21 @@ async function submitUsage() {
   submitting.value = true; submitError.value = ''
   try {
     const api = isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi
-    const scope = isPlatformHeadquarters.value ? { store_id: Number(props.usageStoreId) } : {}
+    const scope = isPlatformHeadquarters.value ? usageWarehouseScope.value : {}
     await api.issueSalonUsage({ idempotency_key: usageIdempotencyKey(), business_date: usageDate.value, project_id: Number(usageProjectId.value), project_name: usageProjectName.value.trim(), remark: usageRemark.value, ...scope, lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, detail_remark: String(row.detail_remark || '') })) })
-    emit('saved'); close()
+    emit('saved', { businessDate: usageDate.value, warehouseSelection: isPlatformHeadquarters.value ? usageWarehouseSelection.value : '' }); close()
   } catch (error) { submitError.value = error instanceof Error ? error.message : '院装领用提交失败。' } finally { submitting.value = false }
 }
 
+/** 同一建仓内容在网络失败后复用幂等键；改名或切换组织才开始新命令。 */
 function warehouseIdempotencyKey() {
-  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+  const content = JSON.stringify([Number(warehouseStoreId.value), warehouseName.value.trim()])
+  if (warehouseCreateAttempt.value.content === content) return warehouseCreateAttempt.value.key
+  const key = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? `warehouse-${crypto.randomUUID()}`
     : `warehouse-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  warehouseCreateAttempt.value = { content, key }
+  return key
 }
 
 async function submitWarehouse() {
@@ -1218,9 +1253,10 @@ async function submitWarehouse() {
   submitting.value = true
   submitError.value = ''
   try {
-    await platformInventoryApi.createWarehouse({
+    if (props.modalKind === 'warehouse-edit') await platformInventoryApi.updateWarehouse(Number(props.detail.id), { location_name: warehouseName.value.trim(), location_status: warehouseStatus.value, expected_version: Number(props.detail.version) })
+    else await platformInventoryApi.createWarehouse({
       idempotency_key: warehouseIdempotencyKey(),
-      store_id: Number(warehouseStoreId.value),
+      base_location_id: Number(warehouseStoreId.value),
       location_name: warehouseName.value.trim()
     })
     emit('saved')
@@ -1289,7 +1325,7 @@ function submitPrimaryEditor() {
               <section class="line-section"><header><div><h3>草稿明细</h3><p>保存的数据仅供查看；点击编辑后才能继续填写或完成盘点。</p></div><button class="modal-primary" @click="emit('edit-count-draft')">编辑草稿</button></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>单位</th><th>条码</th><th>账面库存</th><th>实盘库存</th><th>库存盈亏</th><th>盘盈批次号</th><th>盘盈单价</th><th>生产日期</th><th>到期日</th></tr></thead><tbody><tr v-for="(line, index) in detail.lines || []" :key="`${line.sku_id}-${index}`"><td>{{ line.product_name || '-' }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.barcode || '-' }}</td><td>{{ line.book_quantity }}</td><td>{{ line.counted_quantity === '' ? '未填写' : line.counted_quantity }}</td><td>{{ line.counted_quantity === '' ? '-' : Number(line.counted_quantity) - Number(line.book_quantity) }}</td><td>{{ formatBatchNumber(line.surplus_batch_no) }}</td><td>{{ line.surplus_unit_cost || '-' }}</td><td>{{ line.surplus_manufactured_date || '-' }}</td><td>{{ line.surplus_expire_date || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'usage' && detail?.document">
-              <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>关联项目：{{ detail.document.project_name_snapshot || '未关联项目' }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>
+              <div class="detail-meta"><span>院装单号：<b>{{ detail.document.usage_no }}</b></span><span>领用仓库：{{ detail.document.location_name || '-' }}</span><span>关联项目：{{ detail.document.project_name_snapshot || '未关联项目' }}</span><span>业务日期：{{ detail.document.business_date }}</span><span>类型：{{ detail.document.operation_type === 'RETURN' ? '退回' : '领用' }}</span></div>
               <section class="line-section"><header><div><h3>耗材明细</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>领用/退回数量</th><th>已退回</th><th>可退回</th><th>库存单位</th><th>明细备注</th></tr></thead><tbody><tr v-if="!detail.lines?.length"><td colspan="7" class="modal-empty">该院装单没有耗材明细</td></tr><tr v-for="line in detail.lines" :key="line.line_id"><td>{{ line.product_name }}</td><td>{{ line.sku_name || '默认规格' }}</td><td>{{ line.quantity }}</td><td>{{ line.returned_quantity }}</td><td>{{ line.returnable_quantity }}</td><td>{{ line.stock_unit || '-' }}</td><td>{{ line.detail_remark || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'import' && detail?.record">
@@ -1303,7 +1339,7 @@ function submitPrimaryEditor() {
               <section class="line-section"><header><div><h3>出入库流水</h3><p>仅展示当前商品最近 200 条已结算批次事实；冲销流水保留原流水编号。</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>业务日期</th><th>单据号</th><th>批号</th><th>生产日期</th><th>到期日</th><th>业务类型</th><th>方向</th><th>数量</th><th>单位</th><th>来源明细</th><th>冲销关系</th><th>单位成本</th><th>发生仓库</th><th>成本金额</th></tr></thead><tbody><tr v-if="!detail.movements?.length"><td colspan="14" class="modal-empty">暂无出入库流水</td></tr><tr v-for="movement in detail.movements" :key="movement.id"><td>{{ movement.business_date }}</td><td>{{ movement.order_sn }}</td><td>{{ formatBatchNumber(movement.batch_no) }}</td><td>{{ movement.manufactured_date || '-' }}</td><td>{{ movement.expire_date || '-' }}</td><td>{{ movement.source_type_name || '其他库存业务' }}</td><td>{{ Number(movement.direction) > 0 ? '入库' : '出库' }}</td><td>{{ formatQuantity(movement.quantity_units, movement.quantity_scale) }}</td><td>{{ movement.stock_unit || detail.product.stock_unit }}</td><td>{{ movement.source_detail_name || '历史业务明细' }}</td><td>{{ Number(movement.reversal_of || 0) > 0 ? `冲销流水 #${movement.reversal_of}` : '-' }}</td><td>{{ movement.unit_cost_cents === null ? '-' : `¥${(Number(movement.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>{{ movement.location_name }}</td><td>{{ movement.cost_amount_cents === null ? '-' : `¥${(Number(movement.cost_amount_cents) / 100).toFixed(2)}` }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'request' && detail?.document">
-              <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span v-if="String(detail.document.supply_party_type) === 'HQ'">受理部门：{{ detail.document.acceptance_party_name_snapshot || '历史单据未设置' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
+              <div class="detail-meta"><span>请货单号：<b>{{ detail.document.request_no }}</b></span><span>请货方：{{ detail.document.request_store_name || scopeName }}</span><span>供货方：{{ detail.document.supply_party_name_snapshot || '-' }}</span><span>状态：{{ detailStatus(detail.document) }}</span><span>申请日期：{{ detail.document.business_date }}</span></div>
               <section class="line-section"><header><div><h3>请货商品</h3><p>{{ detail.document.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>申请数量</th><th>库存单位</th><th>明细备注</th></tr></thead><tbody><tr v-if="!requestDetailLines.length"><td colspan="5" class="modal-empty">该请货单没有商品明细</td></tr><tr v-for="line in requestDetailLines" :key="line.id"><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ line.quantity }}</td><td>{{ line.stock_unit_snapshot }}</td><td>{{ line.detail_remark || '-' }}</td></tr></tbody></table></div></section>
             </template>
             <template v-else-if="pageKey === 'transfer' && detail?.transfer_no">
@@ -1317,6 +1353,7 @@ function submitPrimaryEditor() {
             <section v-if="pageKey === 'inbound' || pageKey === 'outbound'" class="form-grid">
               <div class="form-grid__inline form-grid__full"><span class="field-label">{{ pageKey === 'inbound' ? '入库类型' : '出库类型' }}<i>*</i></span><div><div class="type-radio-group"><button v-for="item in pageKey === 'inbound' ? inboundTypes : outboundTypes" :key="item" :class="{ active: selectedType === item }" @click="pageKey === 'inbound' ? inboundType = item : outboundType = item">{{ item }}</button></div><p class="type-tip">{{ pageKey === 'inbound' ? '调拨入库由调拨确认自动生成，不在此处手工创建。' : '调拨出库由调拨确认自动生成；出库按所选仓库的实际批次扣减。' }}</p></div></div>
               <label class="form-grid__inline"><span class="field-label">{{ pageKey === 'inbound' ? '入库日期' : '出库日期' }}<i>*</i></span><input v-if="pageKey === 'inbound'" v-model="inboundDate" type="date" /><input v-else v-model="outboundDate" type="date" /></label>
+              <label v-if="isPlatformHeadquarters" class="form-grid__inline"><span class="field-label">{{ pageKey === 'inbound' ? '入库仓' : '出库仓' }}<i>*</i></span><InventoryStoreSelector v-model="documentWarehouseSelection" :options="documentWarehouseOptions" placeholder="请选择总部仓" @update:modelValue="onDocumentWarehouseChanged" /></label>
               <label v-if="pageKey === 'inbound' && inboundType === '退货入库'" class="form-grid__inline"><span class="field-label">售后单号</span><span class="input-like input-like--action">+ 选择售后单据</span></label>
               <label v-if="pageKey === 'outbound'" class="form-grid__inline"><span class="field-label">出库对象</span><input v-model="outboundRecipient" maxlength="100" placeholder="请输入出库对象" /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-if="pageKey === 'inbound'" v-model="inboundRemark" placeholder="请输入备注" /><input v-else v-model="outboundRemark" placeholder="请输入备注" /></label>
@@ -1326,8 +1363,7 @@ function submitPrimaryEditor() {
 
             <section v-else-if="pageKey === 'request'" class="form-grid">
               <label class="form-grid__inline"><span class="field-label">请货方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="requestPartySelection" :options="requestPartyOptions" placeholder="总部仓（可切换门店）" @update:modelValue="onRequestPartyChanged" /><input v-else :value="scopeName" disabled /></label>
-              <label class="form-grid__inline"><span class="field-label">供货方<i>*</i></span><InventoryStoreSelector v-model="supplyPartySelection" :options="supplyParties" :loading="supplyPartiesLoading" :placeholder="isPlatformHeadquarters ? '搜索供货门店' : '搜索总部仓或供货门店'" @update:modelValue="onSupplyPartyChanged" /></label>
-              <label v-if="selectedSupplyParty().type === 'HQ'" class="form-grid__inline"><span class="field-label">受理部门<i>*</i></span><select v-model.number="acceptancePartyId" :disabled="acceptancePartiesLoading"><option :value="0" disabled>{{ acceptancePartiesLoading ? '正在读取受理部门…' : '请选择受理部门' }}</option><option v-for="party in acceptanceParties" :key="party.id" :value="Number(party.id)">{{ party.name }}</option></select></label>
+              <label class="form-grid__inline"><span class="field-label">供货方<i>*</i></span><InventoryStoreSelector v-model="supplyPartySelection" :options="supplyParties" :loading="supplyPartiesLoading" placeholder="请选择供货仓库" @update:modelValue="onSupplyPartyChanged" /></label>
               <label class="form-grid__inline"><span class="field-label">请货日期<i>*</i></span><input v-model="requestDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">请货人<i>*</i></span><select v-model="requesterSelection" @change="requesterName = requesterOptions.find((item) => String(item.key) === String(requesterSelection))?.name || ''"><option value="" disabled>请选择请货人</option><option v-for="person in requesterOptions" :key="person.key" :value="person.key">{{ person.name }}{{ person.type === 'ORG_EMPLOYEE' ? '（组织直属）' : '（门店任职）' }}</option></select></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="requestRemark" placeholder="请输入备注" /></label>
             </section>
@@ -1340,14 +1376,15 @@ function submitPrimaryEditor() {
             </section>
 
             <section v-else-if="pageKey === 'warehouse'" class="form-grid">
-              <label>所属门店<i>*</i><select v-model.number="warehouseStoreId"><option :value="0" disabled>请选择已有默认仓的门店</option><option v-for="location in warehouseStoreOptions" :key="location.store_id" :value="Number(location.store_id)">{{ location.store_name_snapshot || location.location_name }}</option></select></label>
-              <label>仓库名称<i>*</i><input v-model="warehouseName" maxlength="100" placeholder="例如：调拨测试仓" /></label>
-              <p class="form-grid__full type-tip">创建的是非默认仓库，不改变现有库存、批次或成本；调拨时只能在同门店仓库之间进行。</p>
+              <label>所属总部<i>*</i><input v-if="modalKind === 'warehouse-edit'" :value="detail.organization_name_snapshot" disabled /><select v-else v-model.number="warehouseStoreId"><option :value="0" disabled>请选择所属总部</option><option v-for="location in warehouseStoreOptions" :key="location.owner_id" :value="Number(location.id)">{{ location.organization_name_snapshot || location.location_name }}</option></select></label>
+              <label>仓库名称<i>*</i><input v-model="warehouseName" maxlength="100" placeholder="请输入仓库名称" /></label><label v-if="modalKind === 'warehouse-edit'">状态<select v-model="warehouseStatus"><option value="ACTIVE">启用</option><option value="INACTIVE">停用</option></select></label>
             </section>
 
             <section v-else-if="pageKey === 'usage'" class="form-grid">
-              <label class="form-grid__inline form-grid__full"><span class="field-label">核销项目</span><span class="usage-project-picker"><input v-model="usageProjectKeyword" placeholder="搜索项目名称或编码" @input="loadUsageProjects" /><select v-model="usageProjectId" :disabled="usageProjectsLoading" @change="selectUsageProject"><option value="">{{ usageProjectsLoading ? '正在读取项目…' : '不关联核销项目' }}</option><option v-for="project in usageProjects" :key="project.id" :value="String(project.id)">{{ project.name }}{{ project.code ? `（${project.code}）` : '' }}</option></select><small v-if="usageProjectName">已选择：{{ usageProjectName }}</small><small v-else-if="usageProjectsError" class="catalog-error">{{ usageProjectsError }}</small><small v-else-if="!usageProjectsLoading && !usageProjects.length">当前门店没有可用核销项目，可不关联项目直接领用</small></span></label>
-              <label class="form-grid__inline"><span class="field-label">领用日期<i>*</i></span><input v-model="usageDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">操作人</span><input value="当前登录人员" disabled /></label>
+              <label class="form-grid__inline form-grid__full"><span class="field-label">核销项目</span><span class="usage-project-picker"><input v-model="usageProjectKeyword" placeholder="搜索项目名称或编码" @input="loadUsageProjects" /><select v-model="usageProjectId" :disabled="usageProjectsLoading" @change="selectUsageProject"><option value="">{{ usageProjectsLoading ? '正在读取项目…' : '不关联核销项目' }}</option><option v-for="project in usageProjects" :key="project.id" :value="String(project.id)">{{ project.name }}{{ project.code ? `（${project.code}）` : '' }}</option></select><small v-if="usageProjectName">已选择：{{ usageProjectName }}</small><small v-else-if="usageProjectsError" class="catalog-error">{{ usageProjectsError }}</small><small v-else-if="!usageProjectsLoading && !usageProjects.length">当前仓库没有可用核销项目，可不关联项目直接领用</small></span></label>
+              <label class="form-grid__inline"><span class="field-label">领用日期<i>*</i></span><input v-model="usageDate" type="date" /></label>
+              <label v-if="isPlatformHeadquarters" class="form-grid__inline"><span class="field-label">领用仓库<i>*</i></span><InventoryStoreSelector v-model="usageWarehouseSelection" :options="usageWarehouseOptions" placeholder="请选择领用仓库" @update:modelValue="onUsageWarehouseChanged" /></label>
+              <label class="form-grid__inline"><span class="field-label">操作人</span><input value="当前登录人员" disabled /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="usageRemark" placeholder="请输入备注" /></label>
             </section>
 

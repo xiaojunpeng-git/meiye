@@ -20,11 +20,11 @@ final class InventorySalonUsageServices
         });
     }
 
-    /** 平台端也只能作废已授权门店默认仓的领用单，不能跨门店退库。 */
-    public function voidForPlatform(array $adminInfo, int $storeId, int $documentId, array $input): array
+    /** 平台作废按单一选定仓库退回原批次；总部与门店均不得跨仓操作。 */
+    public function voidForPlatform(array $adminInfo, int $storeId, int $documentId, array $input, int $hqLocationId = 0): array
     {
-        return Db::transaction(function () use ($adminInfo, $storeId, $documentId, $input): array {
-            [$scope, $location] = $this->platformScope($adminInfo, $storeId);
+        return Db::transaction(function () use ($adminInfo, $storeId, $documentId, $input, $hqLocationId): array {
+            [$scope, $location] = $this->platformWarehouseScope($adminInfo, $storeId, $hqLocationId);
             return $this->voidAtScope($scope, $location, $documentId, $input);
         });
     }
@@ -52,11 +52,15 @@ final class InventorySalonUsageServices
             ->where('d.operation_type', 'RETURN')->find()) {
             throw new \RuntimeException('inventory_salon_usage_void_has_return');
         }
-        $reversal = (new InventoryManualDocumentReversalServices())->reverseSalonAtLocation($scope, $location, [
+        $reversalInput = [
             'source_id' => (string)$document['usage_no'],
             'idempotency_key' => (string)$input['idempotency_key'],
             'reason' => (string)$input['reason'],
-        ]);
+        ];
+        $reversalService = new InventoryManualDocumentReversalServices();
+        $reversal = (string)$location['location_type'] === 'HQ'
+            ? $reversalService->reverseForHeadquarters($scope, $location, InventoryManualDocumentReversalServices::SALON_ISSUE, $reversalInput)
+            : $reversalService->reverseSalonAtLocation($scope, $location, $reversalInput);
         if ((string)$document['document_status'] === 'SETTLED') {
             if (Db::name('inventory_salon_usage_document')->where('id', $documentId)
                 ->where('document_status', 'SETTLED')->update(['document_status' => 'VOIDED']) !== 1) {
@@ -78,12 +82,12 @@ final class InventorySalonUsageServices
         });
     }
 
-    /** Platform commands remain server-scoped to one authorized store warehouse. */
-    public function issueForPlatform(array $adminInfo, int $storeId, array $input): array
+    /** 平台命令以服务端授权仓库为库存主体，单据及流水使用同一 location_id。 */
+    public function issueForPlatform(array $adminInfo, int $storeId, array $input, int $hqLocationId = 0): array
     {
         $command = $this->command($input, 'ISSUE');
-        return Db::transaction(function () use ($adminInfo, $storeId, $command): array {
-            [$scope, $location, $operatorId] = $this->platformScope($adminInfo, $storeId);
+        return Db::transaction(function () use ($adminInfo, $storeId, $hqLocationId, $command): array {
+            [$scope, $location, $operatorId] = $this->platformWarehouseScope($adminInfo, $storeId, $hqLocationId);
             return $this->writeIssue($scope, $location, $operatorId, $this->authorizeProject($scope, $command));
         });
     }
@@ -95,10 +99,10 @@ final class InventorySalonUsageServices
         return $this->listForScope($scope, $projectId, '', $from, $to);
     }
 
-    public function listForPlatform(array $adminInfo, int $storeId, string $keyword, string $from, string $to): array
+    public function listForPlatform(array $adminInfo, int $storeId, string $keyword, string $from, string $to, int $hqLocationId = 0): array
     {
         // 只读院装菜单不要求领用写权限，门店范围仍由同一个后端策略决定。
-        [$scope] = $this->platformScope($adminInfo, $storeId, false);
+        [$scope] = $this->platformWarehouseScope($adminInfo, $storeId, $hqLocationId, false);
         $result = $this->listForScope($scope, 0, $keyword, $from, $to);
         $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
         foreach ($result['items'] as &$item) $item['can_void'] = !empty($item['can_void']) && in_array('inventory.location.manage', $access['features'], true);
@@ -111,7 +115,10 @@ final class InventorySalonUsageServices
         $from = $this->date($from); $to = $this->date($to); if ($from > $to) throw new \InvalidArgumentException('inventory_salon_usage_date_range_invalid');
         $query = Db::name('inventory_salon_usage_document')->alias('d')
             ->leftJoin('inventory_salon_usage_line l', 'l.document_id=d.id')
+            ->leftJoin('inventory_location loc', 'loc.id=d.location_id')
             ->where('d.tenant_id', $scope['tenantId'])->where('d.store_id', $scope['storeId'])->whereBetween('d.business_date', [$from, $to]);
+        // HQ 单据的 store_id 恒为 0，必须再按实际仓库 ID 隔离每一个总部仓。
+        if (!empty($scope['locationId'])) $query->where('d.location_id', (int)$scope['locationId']);
         if ($projectId > 0) $query->where('project_id', $projectId);
         $keyword = trim($keyword);
         if ($keyword !== '') {
@@ -119,7 +126,7 @@ final class InventorySalonUsageServices
             $query->where(function ($inner) use ($like): void { $inner->whereLike('d.usage_no|d.project_name_snapshot|d.remark', $like); });
         }
         $items = $query->order('d.business_date desc')->order('d.id desc')
-            ->field('d.id,d.usage_no,d.operation_type,d.project_id,d.project_name_snapshot,d.location_id,d.document_status,d.business_date,d.remark,d.settled_at,d.recorded_at operation_at,COUNT(l.id) detail_count')
+            ->field('d.id,d.usage_no,d.operation_type,d.project_id,d.project_name_snapshot,d.store_id,d.location_id,loc.location_name,d.operator_name_snapshot operator_name,d.document_status,d.business_date,d.remark,d.settled_at,d.recorded_at operation_at,COUNT(l.id) detail_count')
             ->group('d.id')->select()->toArray();
         $issueIds = array_values(array_map('intval', array_column(array_filter($items,
             static fn (array $item): bool => (string)$item['operation_type'] === 'ISSUE'
@@ -152,9 +159,9 @@ final class InventorySalonUsageServices
         return $this->projectsForScope($scope, $keyword, $page, $limit);
     }
 
-    public function projectsForPlatform(array $adminInfo, int $storeId, string $keyword, int $page = 1, int $limit = 50): array
+    public function projectsForPlatform(array $adminInfo, int $storeId, string $keyword, int $page = 1, int $limit = 50, int $hqLocationId = 0): array
     {
-        [$scope] = $this->platformScope($adminInfo, $storeId);
+        [$scope] = $this->platformWarehouseScope($adminInfo, $storeId, $hqLocationId, false);
         return $this->projectsForScope($scope, $keyword, $page, $limit);
     }
 
@@ -169,7 +176,7 @@ final class InventorySalonUsageServices
             ->where('p.is_del', 0)
             ->where('p.is_show', 1)
             ->where('p.product_type', 6)
-            ->whereIn('p.type', [0, 1])
+            ->whereIn('p.type', $scope['storeId'] > 0 ? [0, 1] : [0])
             ->where(function ($scopeQuery) use ($scope) {
                 $scopeQuery->where('p.type', 0)->whereOr('p.relation_id', $scope['storeId']);
             })
@@ -194,10 +201,10 @@ final class InventorySalonUsageServices
         return $this->detailForScope($this->scope($storeId, $operatorId), $documentId);
     }
 
-    public function detailForPlatform(array $adminInfo, int $storeId, int $documentId): array
+    public function detailForPlatform(array $adminInfo, int $storeId, int $documentId, int $hqLocationId = 0): array
     {
         // 查看明细与领退命令分离；不开放越权门店或写入。
-        [$scope] = $this->platformScope($adminInfo, $storeId, false);
+        [$scope] = $this->platformWarehouseScope($adminInfo, $storeId, $hqLocationId, false);
         return $this->detailForScope($scope, $documentId);
     }
 
@@ -206,7 +213,10 @@ final class InventorySalonUsageServices
         if ($documentId <= 0) throw new \InvalidArgumentException('inventory_salon_usage_detail_invalid');
         $document = Db::name('inventory_salon_usage_document')
             ->where('tenant_id', $scope['tenantId'])->where('store_id', $scope['storeId'])->where('id', $documentId)->find();
-        if (!$document) throw new \InvalidArgumentException('inventory_salon_usage_detail_missing');
+        if (!$document || (!empty($scope['locationId']) && (int)$document['location_id'] !== (int)$scope['locationId'])) {
+            throw new \InvalidArgumentException('inventory_salon_usage_detail_missing');
+        }
+        $locationName = (string)Db::name('inventory_location')->where('id', (int)$document['location_id'])->value('location_name');
         $lines = Db::name('inventory_salon_usage_line')->alias('l')->leftJoin('inventory_batch b', 'b.id=l.batch_id')
             ->leftJoin('inventory_stock s', 's.id=l.stock_id')->where('l.document_id', $documentId)
             ->field('l.id line_id,l.source_usage_line_id,l.product_id,l.sku_id,l.sku_unique,l.quantity_scale,l.quantity_units,l.unit_cost_cents,l.detail_remark,b.product_name_snapshot product_name,b.sku_name_snapshot sku_name,b.barcode_snapshot barcode,s.stock_unit')
@@ -231,7 +241,7 @@ final class InventorySalonUsageServices
         return ['document' => [
             'id' => (int)$document['id'], 'usage_no' => (string)$document['usage_no'], 'operation_type' => (string)$document['operation_type'],
             'project_id' => (int)$document['project_id'], 'project_name_snapshot' => (string)$document['project_name_snapshot'],
-            'location_id' => (int)$document['location_id'], 'business_date' => (string)$document['business_date'],
+            'store_id' => (int)$document['store_id'], 'location_id' => (int)$document['location_id'], 'location_name' => $locationName, 'business_date' => (string)$document['business_date'],
             'recorded_at' => (int)$document['recorded_at'], 'remark' => (string)$document['remark'], 'document_status' => (string)$document['document_status'],
             'can_void' => (string)$document['operation_type'] === 'ISSUE' && (string)$document['document_status'] === 'SETTLED' && !$hasReturn,
             'void_reason' => $voidReceipt ? (string)$voidReceipt['reason'] : '',
@@ -282,6 +292,25 @@ final class InventorySalonUsageServices
         return [$scope, $location, (int)$access['admin_id']];
     }
 
+    /** 请求必须恰好选择一种仓库身份；总部仓由平台权限目录重新解析，绝不信任前端 store_id。 */
+    private function platformWarehouseScope(array $adminInfo, int $storeId, int $hqLocationId, bool $writable = true): array
+    {
+        if ($storeId < 0 || $hqLocationId < 0 || (($storeId > 0) === ($hqLocationId > 0))) {
+            throw new \InvalidArgumentException('inventory_salon_usage_warehouse_selection_invalid');
+        }
+        if ($storeId > 0) return $this->platformScope($adminInfo, $storeId, $writable);
+        $resolver = new InventoryHqLocationServices();
+        $resolved = $writable
+            ? $resolver->writableLocation($adminInfo, $hqLocationId)
+            : $resolver->readableLocation($adminInfo, $hqLocationId);
+        $location = $resolved['location'];
+        $access = $resolved['access'];
+        $scope = $resolver->scope($location, (int)$access['admin_id']);
+        $scope['operatorType'] = 'PLATFORM_ADMIN';
+        $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 128);
+        return [$scope, $location, (int)$access['admin_id']];
+    }
+
     private function quantity(int $units, int $scale): string
     {
         $scale = max(0, min(4, $scale));
@@ -328,7 +357,7 @@ final class InventorySalonUsageServices
                 ->where('is_del', 0)->where('is_show', 1)->where('product_type', 6)
                 ->lock(true)->field('id,type,relation_id,store_name')->find();
             if (!$project || !in_array((int)$project['type'], [0, 1], true)
-                || ((int)$project['type'] === 1 && (int)$project['relation_id'] !== $scope['storeId'])
+                || ((int)$project['type'] === 1 && ($scope['storeId'] <= 0 || (int)$project['relation_id'] !== $scope['storeId']))
                 || trim((string)$project['store_name']) === '') {
                 throw new \RuntimeException('inventory_salon_usage_project_not_found');
             }

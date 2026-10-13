@@ -7,11 +7,12 @@
 <script>
 import util from '@/libs/util'
 
+// 路由仅选择共享库存页面；会话、权限和仓库范围仍由宿主及后端校验。
 const pageByRoute = Object.freeze({
   inboundManage: 'inbound', outboundManage: 'outbound', inventoryDetails: 'stock',
   inventoryInfo: 'movement', inventoryCount: 'count', inventoryStatistics: 'movement',
   stockRequestManage: 'request', stockTransferManage: 'transfer', salonRecipeManage: 'recipe',
-  salonUsageReport: 'usage', stockManageV3Home: 'overview'
+  salonUsageReport: 'usage', stockManageV3Home: 'overview', inventoryWarehouseSettings: 'warehouse'
 })
 
 export default {
