@@ -393,7 +393,7 @@ final class RegisteredMetricReadServices
         // candidate IDs. This avoids reading every current balance/card in a
         // large directory for a narrow historical cohort. The final member
         // relation and every other predicate are still checked below.
-        $seed=null;
+        $seed=null;$seedKey=null;$seedExpression=null;
         // A direct child of the root AND is mandatory. A fact inside an OR
         // branch is optional and must never seed away other qualifying rows.
         $seedIndexes=isset($set['expression'])
@@ -412,20 +412,31 @@ final class RegisteredMetricReadServices
             );
             $seed=$seedQuery->having($seedExpression.' '
                 .$this->conditionSqlOperator($condition['operator']).' '.$condition['value']);
+            $seedKey=$conditionKeys[$index];
             break;
         }
+        // MySQL 5.7 materializes the aggregate behind this seed before an
+        // outer cursor filter. Re-running it for every 100-member batch made
+        // a broad observed-service cohort scan the same authorised facts
+        // dozens of times. Materialize the scoped candidate IDs and their
+        // registered metric values once, then retain bounded member/asset
+        // reads and the normal per-member predicate check below.
+        $seedRows=$seed===null?null:$seed->fieldRaw('s.member_id member_id,'.$seedExpression.' metric_value')
+            ->order('s.member_id','asc')->select()->toArray();
+        $seedOffset=0;
         $count=0;$rows=[];$cursor=0;
         do {
             $candidateIds=null;
+            $seedValues=[];
             if ($seed!==null) {
-                $seedRows=(clone $seed)->where('s.member_id','>',$cursor)
-                    ->fieldRaw('s.member_id member_id')->order('s.member_id','asc')
-                    ->limit(100)->select()->toArray();
+                $seedBatch=array_slice($seedRows,$seedOffset,100);
+                $seedOffset+=count($seedBatch);
                 $candidateIds=[];
-                foreach ($seedRows as $seedRow) {
+                foreach ($seedBatch as $seedRow) {
                     $id=$this->integer($seedRow['member_id']??null);
                     if ($id<1||$id<=$cursor) $this->fail('METRIC_SOURCE_RESULT_INVALID');
                     $candidateIds[]=$id;$cursor=$id;
+                    $seedValues[$id]=$this->integer($seedRow['metric_value']??null);
                 }
                 if ($candidateIds===[]) break;
             }
@@ -453,6 +464,10 @@ final class RegisteredMetricReadServices
             }
             $values=[];
             foreach ($factCodes as $key=>$factSpec) {
+                if ($key===$seedKey) {
+                    foreach ($ids as $id) if (array_key_exists($id,$seedValues)) $values[$id][$key]=$seedValues[$id];
+                    continue;
+                }
                 [$query,$expression]=$this->memberMetricAggregateQuery($factSpec['code'],$tenantId,$stores,$factSpec['range']);
                 foreach ($query->whereIn('s.member_id',$ids)
                     ->fieldRaw('s.member_id member_id,'.$expression.' metric_value')->select()->toArray() as $fact) {
@@ -1487,26 +1502,66 @@ final class RegisteredMetricReadServices
         $filters = $this->normalizeCategoryFilters($filters);
         if ($participantEmployeeId > 0) $filters['participant_employee_id'] = $participantEmployeeId;
 
+        // Current-category reports must fetch the complete authorized fact population first.
+        // Filtering on sale-time category columns would permanently hide products moved today.
+        $queryCategoryIds = $categoryIds;
+        $queryFilters = $filters;
+        if ($this->currentReportProductCategory) {
+            $queryCategoryIds = [];
+            unset($queryFilters['category_path']);
+        }
+
         $contract = MetricDefinitionRegistry::get($metricCode);
         $projection = $contract['category_reader'] ?? ($contract['source']['category_reader'] ?? null);
         if (!is_array($projection) || !is_string($projection['strategy'] ?? null)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $handlers = [
-            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->cashCategoryRows($tenantId, $stores, $range, $categoryIds, (string)($projection['mode'] ?? ''), $filters);
+            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->cashCategoryRows($tenantId, $stores, $range, $queryCategoryIds, (string)($projection['mode'] ?? ''), $queryFilters);
             },
-            'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, $categoryIds, $filters);
+            'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
             },
-            'completed_service_quantity' => function () use ($tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->completedServiceQuantityCategoryRows($tenantId, $stores, $range, $categoryIds, $filters);
+            'completed_service_quantity' => function () use ($tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->completedServiceQuantityCategoryRows($tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
             },
-            'sale_completed_allocation' => function () use ($tenantId, $stores, $range, $categoryIds, $filters): array {
-                return $this->completedSaleCategoryRows($tenantId, $stores, $range, $categoryIds, $filters);
+            'sale_completed_allocation' => function () use ($tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
+                return $this->completedSaleCategoryRows($tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
             },
         ];
         $handler = $handlers[$projection['strategy']] ?? null;
         if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-        return $handler();
+        $rows = $handler();
+        return $this->currentReportProductCategory
+            ? $this->projectCurrentReportCategories($rows, $categoryIds, $filters)
+            : $rows;
+    }
+
+    /** Apply current platform category after every strategy has resolved its immutable item ID and amount. */
+    private function projectCurrentReportCategories(array $rows, array $categoryIds, array $filters): array
+    {
+        $links = [];
+        foreach ($rows as $index => $row) {
+            $links[$index] = ['store_id' => (int)($row['store_id'] ?? 0),
+                'product_id' => (int)($row['item_id'] ?? $row['project_id'] ?? 0)];
+        }
+        $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $allowed = array_fill_keys($categoryIds, true);
+        $pathFilter = (string)($filters['category_path'] ?? '');
+        $projected = [];
+        foreach ($rows as $index => $row) {
+            $category = $resolved[$index] ?? ['id' => 0, 'path' => ''];
+            $id = (int)$category['id'];
+            $path = (string)$category['path'];
+            if ($allowed !== [] && !isset($allowed[$id])) continue;
+            if ($pathFilter !== '' && strpos($path, $pathFilter) !== 0) continue;
+            $row['category_id'] = $id;
+            $row['category_path'] = $path;
+            $row['project_category_id_snapshot'] = $id;
+            $row['project_category_path_snapshot'] = $path;
+            $row['category_path_snapshot'] = $path;
+            $projected[] = $row;
+        }
+        return $projected;
     }
 
     /**
@@ -1762,6 +1817,27 @@ final class RegisteredMetricReadServices
         $filters = $this->normalizeCategoryFilters($filters);
         $contract = MetricDefinitionRegistry::get($metricCode);
         $projection = $contract['category_reader'] ?? ($contract['source']['category_reader'] ?? null);
+        if ($this->currentReportProductCategory) {
+            if ($sourceLineIds === []) return [];
+            $queryFilters = $filters;
+            unset($queryFilters['category_path']);
+            $strategy = (string)($projection['strategy'] ?? '');
+            if ($strategy === 'completed_service_performance') {
+                $rows = $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, [], $queryFilters, $sourceLineIds);
+            } elseif ($strategy === 'sale_completed_allocation') {
+                $rows = $this->completedSaleCategoryRows($tenantId, $stores, $range, [], $queryFilters, $sourceLineIds);
+            } else {
+                $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            }
+            $totals = [];
+            foreach ($this->projectCurrentReportCategories($rows, [], $filters) as $row) {
+                $line = (string)($row['source_line_id'] ?? '');
+                if (!in_array($line, $sourceLineIds, true)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $key = $line . '|' . (int)$row['category_id'];
+                $totals[$key] = $this->add((int)($totals[$key] ?? 0), $this->integer($row['amount_cents'] ?? null));
+            }
+            return $totals;
+        }
         $handlers = [
             'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $sourceLineIds, $filters): array {
                 return $this->completedServicePerformanceSourceLineCategoryTotals($contract['source'], $tenantId, $stores, $range, $sourceLineIds, $filters);
@@ -1961,7 +2037,7 @@ final class RegisteredMetricReadServices
             // A migrated-card refund likewise has no defensible sale category; keep it in
             // unfiltered cash/refund totals without fabricating an item allocation.
             $rows = array_merge($rows, $importedCardRefund->fieldRaw(
-                "CONCAT('imported-card-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'旧卡退款' item_name,'imported_card_refund' product_type_snapshot,0 category_id,'' category_path"
+                "CONCAT('manual-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='manual_refund' THEN '卡项或单据退款' ELSE '旧卡退款' END item_name,p.source_document_type product_type_snapshot,0 category_id,'' category_path"
             )->select()->toArray());
         }
         if ($cards === []) return $rows;
@@ -2033,7 +2109,7 @@ final class RegisteredMetricReadServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function completedServicePerformanceCategoryRows(array $source, string $tenantId, array $stores, array $range, array $categoryIds, array $filters): array
+    private function completedServicePerformanceCategoryRows(array $source, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, array $sourceLineIds = []): array
     {
         $query = call_user_func($this->queryFactory, $source['table'])->alias('p')
             ->join('cashier_v3_entitlement_service_fact sv', "sv.tenant_id=p.tenant_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status='completed'")
@@ -2042,6 +2118,7 @@ final class RegisteredMetricReadServices
         foreach ($source['filters'] as $field => $value) $query->where('p.' . $field, $value);
         call_user_func($this->normalServices, $query, 'sv');
         $this->applyParticipantScope($query, $filters, 'checkout:p');
+        if ($sourceLineIds !== []) $query->whereIn('p.source_line_id', $sourceLineIds);
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         $this->applyServiceFilters($query, $filters, 'p', 'sv');
         // 消耗业绩在服务完成时已落到项目级事实，商品目标只按服务事实的项目 ID 收敛。
@@ -2835,16 +2912,21 @@ final class RegisteredMetricReadServices
         return $query;
     }
 
-    /**
-     * Migrated cards carry rights but no trustworthy historic positive payment. Their manually
-     * confirmed refund is therefore a standalone negative cash fact, not a fabricated reversal.
-     */
+    /** Old-card and R26 manual refund adjustments reduce actual performance once. */
     private function importedCardRefundCashQuery(string $tenantId, array $stores, array $range)
     {
         return call_user_func($this->queryFactory, 'cashier_v3_payment_fact')->alias('p')
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)
-            ->where('p.status', 'effective')->where('p.fact_type', 'payment_refunded')
-            ->where('p.source_document_type', 'imported_card_refund')
+            ->where('p.status', 'effective')
+            ->where(function ($kind): void {
+                $kind->where(function ($old): void {
+                    $old->where('p.fact_type', 'payment_refunded')
+                        ->where('p.source_document_type', 'imported_card_refund');
+                })->whereOr(function ($manual): void {
+                    $manual->where('p.fact_type', 'manual_refund_adjustment')
+                        ->where('p.source_document_type', 'manual_refund');
+                });
+            })
             ->where('p.amount_cents', '<', 0)
             // 误录退款的原现金事实保留审计，但正常指标不得再计入作废单。
             ->whereRaw("(p.source_document_type <> 'manual_refund' OR NOT EXISTS (SELECT 1 FROM eb_cashier_v3_refund_adjustment voided_refund WHERE voided_refund.tenant_id=p.tenant_id AND voided_refund.operation_id=p.order_id AND voided_refund.status='voided'))")

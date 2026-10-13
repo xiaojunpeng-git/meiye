@@ -24,6 +24,36 @@ csCheck(AiConditionResponseFormResolver::resolve('2026年消费4980的有多少�
     'population count is an answer form rather than a second spend metric');
 csCheck(AiConditionResponseFormResolver::resolve('今天收了多少钱')===null,
     'money amount question is not misclassified as a population count');
+$twoMemberTerms=[['term'=>'没有到店','unit'=>'day'],['term'=>'余额','unit'=>'yuan']];
+$closedFiveDay=AiConditionResponseFormResolver::parseClosedMemberConditionCount(
+    '5天没有到店且余额在500以上有多少人',$twoMemberTerms);
+csCheck(($closedFiveDay['relation']??null)==='all'
+    &&($closedFiveDay['conditions']??null)===[
+        ['metric_term'=>'没有到店','operator'=>'gte','quantity'=>'5','unit'=>'day'],
+        ['metric_term'=>'余额','operator'=>'gte','quantity'=>'500','unit'=>'yuan'],
+    ],'a complete two-metric member count preserves both inclusive boundaries');
+$closedOr=AiConditionResponseFormResolver::parseClosedMemberConditionCount(
+    '超过5天没有到店或者余额超过500元有多少人',$twoMemberTerms);
+csCheck(($closedOr['relation']??null)==='any' &&($closedOr['conditions']??null)===[
+        ['metric_term'=>'没有到店','operator'=>'gt','quantity'=>'5','unit'=>'day'],
+        ['metric_term'=>'余额','operator'=>'gt','quantity'=>'500','unit'=>'yuan'],
+    ],'strict comparisons remain strict across a registered OR count');
+$closedThree=AiConditionResponseFormResolver::parseClosedMemberConditionCount(
+    '5天没有到店且余额在500以上且权益金额超过100元有多少人',[
+        ['term'=>'没有到店','unit'=>'day'],['term'=>'余额','unit'=>'yuan'],['term'=>'权益金额','unit'=>'yuan'],
+    ]);
+csCheck(($closedThree['relation']??null)==='all'&&count($closedThree['conditions']??[])===3,
+    'the closed grammar admits three distinct registered predicates without a two-metric ceiling');
+csCheck((AiConditionResponseFormResolver::parseClosedMemberConditionCount(
+    '5天没有到店且余额在500以上、积分也不少于20有多少人',$twoMemberTerms))===null,
+    'unconsumed third conditions cannot be silently dropped');
+csCheck((AiConditionResponseFormResolver::parseClosedMemberConditionCount(
+    '5天没有到店且余额超过500以上有多少人',$twoMemberTerms))===null,
+    'contradictory comparator wording stays with model clarification');
+csCheck((AiConditionResponseFormResolver::parseClosedMemberConditionCount(
+    '5天没有到店且余额在500以上或者权益金额超过100有多少人',[
+        ['term'=>'没有到店','unit'=>'day'],['term'=>'余额','unit'=>'yuan'],['term'=>'权益金额','unit'=>'yuan'],
+    ]))===null,'mixed AND and OR groups are not flattened into one relation');
 
 $understandingInstruction=AiIntentUnderstandingContract::modelInstruction();
 csCheck(strpos($understandingInstruction,'relation all means every condition must hold')!==false

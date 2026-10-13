@@ -98,6 +98,66 @@ final class AiConditionResponseFormResolver
         return ['operator'=>$normalizedOperator,'quantity'=>$amountMatches[0]['quantity'],'unit'=>'yuan'];
     }
 
+    /**
+     * Parse a fully consumed member-count sentence with several distinct
+     * registered predicates. The caller supplies each metric's authorized
+     * registry term and unit; this grammar never chooses a metric or fills in
+     * missing wording. Mixed Boolean relations and any unconsumed text return
+     * null so the normal language and clarification path owns them.
+     *
+     * @param array<int,array{term:string,unit:string}> $registeredTerms
+     * @return array{relation:string,conditions:array<int,array{metric_term:string,operator:string,quantity:string,unit:string}>}|null
+     */
+    public static function parseClosedMemberConditionCount(string $question,array $registeredTerms): ?array
+    {
+        if (count($registeredTerms)<2 || count($registeredTerms)>8 || self::resolve($question)!=='count') return null;
+        $text=preg_replace('/[\s，,。？?！!]/u','',$question);
+        if (!is_string($text) || !preg_match('/(?:有)?多少(?:个|位|名)?(?:人|会员|客户|顾客)$/u',$text,$count)) return null;
+        $text=mb_substr($text,0,mb_strlen($text,'UTF-8')-mb_strlen($count[0],'UTF-8'),'UTF-8');
+        $parts=preg_split('/(并且|而且|同时|以及|或者|且|或)/u',$text,-1,PREG_SPLIT_DELIM_CAPTURE);
+        if (!is_array($parts) || count($parts)!==count($registeredTerms)*2-1) return null;
+        $relation=null;$conditions=[];$used=[];
+        foreach ($parts as $index=>$part) {
+            if ($index%2===1) {
+                $next=in_array($part,['或者','或'],true)?'any':'all';
+                if ($relation!==null && $relation!==$next) return null;
+                $relation=$next;
+                continue;
+            }
+            $owner=null;
+            foreach ($registeredTerms as $candidate) {
+                $term=$candidate['term']??null;
+                if (!is_string($term) || $term==='' || mb_strpos($part,$term,0,'UTF-8')===false) continue;
+                if ($owner!==null) return null;
+                $owner=$candidate;
+            }
+            if ($owner===null || isset($used[$owner['term']])) return null;
+            $unit=$owner['unit']??null;
+            if (!in_array($unit,['day','yuan'],true)) return null;
+            $term=preg_quote($owner['term'],'/');
+            $number='(?<quantity>(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?)';
+            $comparison='(?<comparison>超过|大于|多于|高于|不少于|不低于|至少|大于等于|不超过|不高于|至多|小于|低于|少于|小于等于)?';
+            if ($unit==='day') {
+                $pattern='/^'.$comparison.$number.'天'.$term.'(?<suffix>以上|以下)?$/u';
+            } else {
+                $pattern='/^'.$term.'(?:在)?'.$comparison.$number.'(?:元|块)?(?<suffix>以上|以下)?$/u';
+            }
+            if (preg_match($pattern,$part,$match)!==1) return null;
+            $word=$match['comparison']??'';$suffix=$match['suffix']??'';
+            if ($word!=='' && $suffix!=='') return null;
+            $operators=['超过'=>'gt','大于'=>'gt','多于'=>'gt','高于'=>'gt',
+                '不少于'=>'gte','不低于'=>'gte','至少'=>'gte','大于等于'=>'gte',
+                '不超过'=>'lte','不高于'=>'lte','至多'=>'lte','小于'=>'lt',
+                '低于'=>'lt','少于'=>'lt','小于等于'=>'lte'];
+            $operator=$word!==''?($operators[$word]??null):($suffix==='以上'?'gte':($suffix==='以下'?'lte':($unit==='day'?'gte':null)));
+            if ($operator===null) return null;
+            $conditions[]=['metric_term'=>$owner['term'],'operator'=>$operator,
+                'quantity'=>$match['quantity'],'unit'=>$unit];
+            $used[$owner['term']]=true;
+        }
+        return ['relation'=>$relation,'conditions'=>$conditions];
+    }
+
     /** @return array<int,string> Explicit count-form excerpts, never metric evidence. */
     private static function countPhrases(string $text): array
     {

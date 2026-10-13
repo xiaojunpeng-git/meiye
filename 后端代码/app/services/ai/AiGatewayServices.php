@@ -2144,8 +2144,14 @@ final class AiGatewayServices
         // no implicit store/cohort filter, so it cannot force this independent
         // question through another model call. Restricted scopes and paused
         // clarification replies still require the normal relation decision.
-        $localCountUnderstanding=($sourceContext===null || ($independent && $sourceQuery!==null))
-            ?$this->localClosedMemberMoneyCountUnderstanding($safe['outbound'],$safe,$today,$caps):null;
+        // A fully consumed multi-condition sentence is self-contained even
+        // after a prior cohort. Its explicit new-topic marker prevents the
+        // old conditions from being inherited; the older one-money shortcut
+        // keeps its narrower context gate.
+        $localCountUnderstanding=$this->localClosedMemberConditionCountUnderstanding($safe['outbound'],$safe,$caps);
+        if ($localCountUnderstanding===null && ($sourceContext===null || ($independent && $sourceQuery!==null))) {
+            $localCountUnderstanding=$this->localClosedMemberMoneyCountUnderstanding($safe['outbound'],$safe,$today,$caps);
+        }
         // A reply belongs to a paused semantic request, not merely the last
         // verified result. Narrow fast paths cannot ignore its preserved fields.
         if (isset($body['_clarification_context'])) {
@@ -4920,6 +4926,48 @@ final class AiGatewayServices
             ]],
             'status'=>'understood',
         ],$outbound);
+    }
+
+    /**
+     * A complete, explicit multi-condition count can be grounded in current
+     * registered member metrics without a variable model response. This path
+     * requires every phrase, comparison and Boolean join to be consumed; the
+     * ordinary compiler and Reader still decide validity, scope and answer.
+     */
+    private function localClosedMemberConditionCountUnderstanding(array $outbound,array $safe,array $caps): ?array
+    {
+        $question=$outbound['question']??null;
+        if (!is_string($question) || $question==='' || !empty($safe['local_conditions']??[])) return null;
+        $matches=\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+            $question,array_keys((array)($caps['metric_readiness']??[]))
+        );
+        if (count($matches)<2 || count($matches)>8) return null;
+        $discover=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,'member','condition_count');
+        $terms=[];
+        foreach ($matches as $match) {
+            $code=$match['metric_code']??null;$term=$match['term']??null;
+            $readiness=is_string($code)?($caps['metric_readiness'][$code]??null):null;
+            if (!is_string($term) || !is_array($readiness) || !isset($discover[$code])
+                || !in_array('member',(array)($readiness['condition_subjects']??[]),true)) return null;
+            $terms[]=['term'=>$term,'unit'=>$readiness['condition_unit']??null];
+        }
+        $parsed=\app\services\ai\semantic\AiConditionResponseFormResolver::parseClosedMemberConditionCount($question,$terms);
+        if ($parsed===null) return null;
+        return \app\services\ai\contract\AiIntentUnderstandingContract::normalize(
+            (($outbound['prior_query']??null)!==null?['topic_relation'=>'new_topic']:[])+[
+                'goal'=>'count members matching all explicitly stated registered conditions',
+                'requirements'=>[[
+                    'id'=>'r1','meaning'=>'registered member conditions and population count',
+                    'fields'=>['metric_codes','object_kind','operation','aggregate_condition'],
+                    'values'=>['metric_terms'=>array_column($matches,'term'),'object_kind'=>'member',
+                        'operation'=>'condition_count','aggregate_condition'=>[
+                            'subject'=>'member','relation'=>$parsed['relation'],'result_form'=>'count',
+                            'conditions'=>$parsed['conditions'],
+                        ]],
+                    'evidence'=>[['message_id'=>'current','quote'=>$question]],
+                ]],
+                'status'=>'understood',
+            ],$outbound);
     }
 
     /**
