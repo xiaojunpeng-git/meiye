@@ -183,7 +183,7 @@ try {
         && (int)($detailRow($guestOrderId)['visits'] ?? -1) === 0,
         'Experience guest was counted or its zero-visit row disappeared');
     $allDetail = $query('market_detail', ['_internal_all' => true]);
-    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-refund-member-day-v5'
+    checkMarketExperience((string)($allDetail['metric_version'] ?? '') === 'market-imported-debt-effective-v6'
         && (string)($query('market_performance')['metric_version'] ?? '') === (string)$allDetail['metric_version']
         && array_key_exists('service_customer_rule_version', $allDetail)
         && $allDetail['service_customer_rule_version'] === null

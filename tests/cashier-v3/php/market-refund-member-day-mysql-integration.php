@@ -142,7 +142,7 @@ try {
     $marketExport = $reports->export($stores, $input + ['report' => 'market_performance']);
     checkRefundDay(count($page['records']) === 10 && $page['total'] === 18 && (int)$page['summary_row']['visits'] === 18, 'Refund summary covers every page');
     checkRefundDay(count($export['records']) === 18 && $export['summary_row'] === $page['summary_row'] && (int)$marketExport['summary_row'][$visitsKey] === 18, 'Summary, drilldown and exports reconcile');
-    checkRefundDay($export['metric_version'] === 'market-refund-member-day-v5' && $export['metric_version'] === $marketExport['metric_version'], 'Market reports expose identical updated metric version');
+    checkRefundDay($export['metric_version'] === 'market-imported-debt-effective-v6' && $export['metric_version'] === $marketExport['metric_version'], 'Market reports expose identical updated metric version');
     checkRefundDay($query('market_detail', $drill)['summary_row'] === $page['summary_row'], 'Repeated refund query is stable');
 } finally {
     Db::rollback();

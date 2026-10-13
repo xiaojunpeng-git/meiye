@@ -35,6 +35,14 @@ $stores = [(int)$seed['store_id']];
 $otherStore = (int)Db::name('cashier_v3_payment_fact')->where('store_id', '<>', $stores[0])->value('store_id');
 if ($otherStore <= 0) throw new RuntimeException('Second local store required');
 $stores[] = $otherStore;
+$repaymentSeeds = Db::query("SELECT r.repayment_id,r.store_id,o.channel_type FROM eb_cashier_v3_debt_repayment r JOIN eb_store_debt d ON d.id=r.debt_id LEFT JOIN eb_store_order o ON o.id=d.order_id WHERE r.status='succeeded' AND r.tenant_id=? AND NOT EXISTS (SELECT 1 FROM eb_cashier_v3_order_center_void_operation v WHERE v.tenant_id=r.tenant_id AND v.store_id=r.store_id AND v.source_id=r.repayment_id AND v.source_kind='sales_supplement' AND v.status='succeeded') ORDER BY r.id DESC LIMIT 500", [(string)$seed['tenant_id']]);
+$importedRepayment = null; $ordinaryRepayment = null;
+foreach ($repaymentSeeds as $repaymentSeed) {
+    if ((string)$repaymentSeed['channel_type'] === 'migration' && $importedRepayment === null) $importedRepayment = $repaymentSeed;
+    if ((string)$repaymentSeed['channel_type'] !== 'migration' && $ordinaryRepayment === null) $ordinaryRepayment = $repaymentSeed;
+}
+if (!$importedRepayment || !$ordinaryRepayment) throw new RuntimeException('Local imported and ordinary debt repayment seeds required');
+$stores = array_values(array_unique(array_merge($stores, [(int)$importedRepayment['store_id'], (int)$ordinaryRepayment['store_id']])));
 $start = '2035-01-01';
 $end = '2035-01-02';
 if (Db::name('cashier_v3_payment_fact')->whereIn('store_id', $stores)->whereBetween('business_date', [$start, $end])->count()) {
@@ -155,8 +163,30 @@ try {
     checkMarketDay(count($export['records']) === 18 && $export['summary_row'] === $page['summary_row'], 'Detail export uses complete identical daily results');
     $marketExport = $reports->export($stores, $input + ['report' => 'market_performance']);
     checkMarketDay((int)$marketExport['summary_row'][$aKey] === 18 && $marketExport['metric_version'] === $export['metric_version']
-        && $export['metric_version'] === 'market-refund-member-day-v5', 'Summary export and detail share daily metric version');
+        && $export['metric_version'] === 'market-imported-debt-effective-v6', 'Summary export and detail share daily metric version');
     checkMarketDay($query('market_detail', $drill)['summary_row'] === $page['summary_row'], 'Repeated query is stable and read-only');
+
+    // 历史导入欠款的真实补交保留在金额列；仅达标集合剔除，普通补交仍可达标。
+    $pay($base + 40, $a, $start, 120000, ['source_document_type' => 'debt_repayment', 'order_id' => $importedRepayment['repayment_id'], 'store_id' => (int)$importedRepayment['store_id']]);
+    $pay($base + 41, $a, $start, 120000, ['source_document_type' => 'debt_repayment', 'order_id' => $ordinaryRepayment['repayment_id'], 'store_id' => (int)$ordinaryRepayment['store_id']]);
+    $pay($base + 42, $a, $end, 40000, ['store_id' => (int)$importedRepayment['store_id']]);
+    $pay($base + 42, $a, $end, 80000, ['source_document_type' => 'debt_repayment', 'order_id' => $importedRepayment['repayment_id'], 'store_id' => (int)$importedRepayment['store_id']]);
+    $pay($base + 43, $a, $start, 120000, ['source_document_type' => 'debt_repayment', 'natural_key' => 'historical_debt_repayment:payment:' . $token, 'store_id' => (int)$importedRepayment['store_id']]);
+    $importedDetail = $reports->export($stores, array_merge($input, ['report' => 'market_detail']));
+    $byMember = [];
+    foreach ($importedDetail['records'] as $row) $byMember[(int)$row['member_id']] = $row;
+    checkMarketDay((int)($byMember[$base + 40]['effective_people'] ?? -1) === 0
+        && (float)($byMember[$base + 40]['amount'] ?? 0) === 1200.0, 'Imported debt repayment remains in amount but never qualifies member');
+    checkMarketDay((int)($byMember[$base + 41]['effective_people'] ?? -1) === 1, 'Ordinary debt repayment still qualifies member');
+    checkMarketDay((int)($byMember[$base + 42]['effective_people'] ?? -1) === 0
+        && (float)($byMember[$base + 42]['amount'] ?? 0) === 1200.0, 'Imported repayment cannot top up ordinary receipt to threshold');
+    checkMarketDay((int)($byMember[$base + 43]['effective_people'] ?? -1) === 0
+        && (float)($byMember[$base + 43]['amount'] ?? 0) === 1200.0, 'Historical imported repayment backfill also remains amount-only');
+    $updated = $query('market_performance');
+    $updatedDrill = $query('market_detail', $drill);
+    checkMarketDay((int)$updated['summary_row'][$aKey] === 19
+        && (int)$updatedDrill['summary_row']['effective_people'] === 19
+        && $updatedDrill['total'] === 19, 'Summary and drilldown agree after imported debt exclusion');
 } finally {
     Db::rollback();
 }

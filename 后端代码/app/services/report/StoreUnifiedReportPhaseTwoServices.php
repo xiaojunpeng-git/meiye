@@ -1767,7 +1767,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     /**
      * 有效人员只按业务日净记账收款达标：门店、日期、来源、会员为唯一粒度。
      * 查询/下钻/导出共用权限裁剪后的事实；退款沿原来源在其业务日抵减，
-     * 作废沿 cashFacts 排除，不改金额列的 K 来源展示，也不改任何原始事实。
+     * 作废沿 cashFacts 排除；历史导入欠款的补交只从达标金额剔除，
+     * 不改金额列、K 来源展示或任何原始事实。
      * SQL 先聚合并排除低于最低门槛的会员日，避免加载逐笔事实或逐来源重复扫描。
      */
     private function marketEffectiveMemberKeys(array $stores, array $range, string $method = ''):array
@@ -1775,11 +1776,15 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $sources = [];
         foreach ($this->primarySources() as $source) $sources[(int)$source['id']] = $source;
         $query = $this->cashFacts($stores)
-            ->whereBetween('business_date', [$range['start'], $range['end']])
-            ->where('status', 'effective')->where('member_id', '>', 0);
-        if ($method !== '') $query->where('payment_method', $method);
-        $rows = $query->fieldRaw('store_id,business_date,business_source_primary_id,member_id,SUM(amount_cents) amount_cents')
-            ->group('store_id,business_date,business_source_primary_id,member_id')
+            ->whereBetween('report_payment.business_date', [$range['start'], $range['end']])
+            ->where('report_payment.status', 'effective')->where('report_payment.member_id', '>', 0)
+            // 导入欠款的补交仍是真实收款；只是不用于认定当日新增的有效人员。
+            // 以原欠款/充值单的迁移标记识别，不能凭补交单号或会员姓名猜测。
+            ->whereRaw("NOT (report_payment.source_document_type='debt_repayment' AND (LEFT(report_payment.natural_key,CHAR_LENGTH('historical_debt_repayment:payment:'))='historical_debt_repayment:payment:' OR EXISTS (SELECT 1 FROM eb_cashier_v3_debt_repayment market_repay JOIN eb_store_debt market_debt ON market_debt.id=market_repay.debt_id JOIN eb_store_order market_origin ON market_origin.id=market_debt.order_id WHERE market_repay.tenant_id=report_payment.tenant_id AND market_repay.repayment_id=report_payment.order_id AND market_origin.channel_type='migration'))) ")
+            ->whereRaw("NOT (report_payment.source_document_type='recharge_debt_repayment' AND EXISTS (SELECT 1 FROM eb_cashier_v3_recharge_debt_repayment market_recharge_repay JOIN eb_user_recharge market_recharge_origin ON market_recharge_origin.id=market_recharge_repay.recharge_id WHERE market_recharge_repay.tenant_id=report_payment.tenant_id AND market_recharge_repay.repayment_id=report_payment.order_id AND (market_recharge_origin.channel_type='migration' OR market_recharge_origin.recharge_type='migration'))) ");
+        if ($method !== '') $query->where('report_payment.payment_method', $method);
+        $rows = $query->fieldRaw('report_payment.store_id,report_payment.business_date,report_payment.business_source_primary_id,report_payment.member_id,SUM(report_payment.amount_cents) amount_cents')
+            ->group('report_payment.store_id,report_payment.business_date,report_payment.business_source_primary_id,report_payment.member_id')
             ->having('SUM(amount_cents)>=50000')->select()->toArray();
         $keys = [];
         foreach ($rows as $row) {
@@ -1946,7 +1951,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v6':($title==='新客明细表'?'new-customer-first-sale-v5':'store-operations-phase-two-v1');
         // 有效人员按日达标，K 人次按有效退款会员日；普通来源体验人次规则保持不变。
         $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
-        if ($isMarketReport) $metricVersion = 'market-refund-member-day-v5';
+        if ($isMarketReport) $metricVersion = 'market-imported-debt-effective-v6';
         // v7 只改变商品分类读取来源；退款金额、资格、人员及业务日不回写。
         if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v7';
         // 护理槽位与首次到店日期原先误用了人员标记；相关报表单独升级口径，其他报表不变。
@@ -2053,7 +2058,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $descriptions=[
                     'walk_in'=>'汇总有权限人员在市场明细表保存的进店数：会员按“门店＋业务日期＋会员＋来源”汇总，游客按原始订单独立记录；新行尚未保存时读取原单据已保存值，新旧值不会重复相加。仅 B 来源显示该列。',
                     'visits'=>'统计所选日期内归属“'.$source.'”、已完成且未作废的非体验服务人次。打了“体验”标签的服务不计门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除门店人次，不排除金额和按收款门槛计算的有效人员，也不表示整行明细隐藏。',
-                    'effective'=>'统计所选日期内归属“'.$source.'”的每日达标会员数之和：同一门店、同一业务日期、同一来源、同一会员的净记账收款独立达到标准才计 1，A 来源每天至少 1,000 元，其他来源每天至少 500 元。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计，游客不计。退款会抵减，已作废销售不计；成功现金退款在退款业务日抵减原来源的达标收款，不回改其他日期。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
+                    'effective'=>'统计所选日期内归属“'.$source.'”的每日达标会员数之和：同一门店、同一业务日期、同一来源、同一会员的净记账收款独立达到标准才计 1，A 来源每天至少 1,000 元，其他来源每天至少 500 元。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计，游客不计。导入历史欠款的补交不参与达标金额，但仍显示在收款金额中。退款会抵减，已作废销售不计；成功现金退款在退款业务日抵减原来源的达标收款，不回改其他日期。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
                     'amount'=>'合计所选日期内归属“'.$source.'”的有效记账收款净额。成功现金退款及登记退款在退款发生日计入 K退款顾客并冲减金额；作废销售冲减原来源；余额支付和旧卡录入不计。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
                 ];
                 $column['source_explanation']=$descriptions[$parts[1]];
@@ -2085,7 +2090,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'dimension'=>'显示业务发生时保存的客户来源；纯权益服务优先读取本次结账保存的来源，历史服务没有该快照时读取关联购卡或销售记录，不按会员当前资料改写历史来源。',
             'walk_in'=>'显示有权限人员为本行保存的进店数：会员按“门店＋业务日期＋会员＋来源”合并，游客按原始订单独立显示和编辑；新行尚未保存时显示原单据已保存值。仅 B 来源汇总到市场业绩表的进店列。',
             'visits'=>$this->marketRefundVisitExplanation().' 其他来源有已完成且未作废的非体验服务才计门店人次。打了“体验”标签的服务不计普通来源门店人次；“不算人数人次”只影响人员统计，不影响本列。同一门店、同一天、同一来源还有其他符合条件的服务时，会员仍记 1 人次。游客每张可关联销售单记 1；同单多项目不重复，不要求当次有收款。体验标签只排除普通来源门店人次，不排除金额和按收款门槛计算的有效人员；明细行仍可能显示，人次为 0 不代表整行隐藏。',
-            'effective_people'=>'同一门店、同一业务日期、同一来源、同一会员的净记账收款独立达标时显示 1，否则为 0：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计，合计为每日达标会员数之和。成功现金退款在退款业务日抵减原来源的达标收款，不回改其他日期；退款金额仍展示在 K 来源，已作废销售不计。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
+            'effective_people'=>'同一门店、同一业务日期、同一来源、同一会员的净记账收款独立达标时显示 1，否则为 0：A 来源至少 1,000 元，其他来源至少 500 元；游客不计。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计，合计为每日达标会员数之和。导入历史欠款的补交不参与达标金额，但仍显示在收款金额中。成功现金退款在退款业务日抵减原来源的达标收款，不回改其他日期；退款金额仍展示在 K 来源，已作废销售不计。“体验”和“不算人数人次”不影响本列，达到收款门槛仍计入。',
             'amount'=>'合计本行会员当天在该门店和来源下的有效记账收款净额；退款按退款发生日抵减，已作废销售不计。只有正常服务、没有当次收款时显示 0。“体验”和“不算人数人次”不排除已经产生的有效记账收款。',
             'registered_date'=>'显示本行收款或服务归属的业务日期；补录业务的系统录入时间可能晚于该日期。',
             'reviewer'=>'本表目前没有读取审核人，显示“—”；不能据此判断单据是否审核。',
