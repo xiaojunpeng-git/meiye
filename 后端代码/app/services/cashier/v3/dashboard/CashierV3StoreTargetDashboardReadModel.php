@@ -8,23 +8,23 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
-use app\services\query\metric\ServiceCustomerMetricReadServices;
 use app\services\query\metric\RegisteredMetricReadServices;
 use app\services\report\StoreReportNormalDataScopeServices;
+use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\target\TargetSchemeServices;
 use think\facade\Db;
 
 /**
  * 门店端目标看板只读模型。
  *
- * 目标进度读取关联“门店目标”的生效方案；员工排行直接读取 V3
- * immutable performance/service facts。门店范围始终由当前 operator 强制
+ * 目标进度读取关联“门店目标”的生效方案；员工排行复用员工薪资汇总的
+ * 事实与人员分摊口径。门店范围始终由当前 operator 强制
  * 收窄，客户端传入的 store_id/store_ids 不参与扩大权限。
  */
 final class CashierV3StoreTargetDashboardReadModel
 {
     public const CONTRACT_VERSION = 'cashier-v3-store-target-dashboard-v1';
-    public const METRIC_VERSION = 'cashier-v3-facts-v2';
+    public const METRIC_VERSION = 'cashier-v3-target-salary-parity-v1';
 
     /** @return array<string,mixed> */
     public function dashboard(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
@@ -51,6 +51,7 @@ final class CashierV3StoreTargetDashboardReadModel
         $metrics = new RegisteredMetricReadServices();
         $monthActual = $metrics->summary('actual_performance', $tenantId, [$storeId], ['start' => $monthStart, 'end' => $range['end']]);
         $yearActual = $metrics->summary('actual_performance', $tenantId, [$storeId], ['start' => $yearStart, 'end' => $range['end']]);
+        $salaryRows = (new StoreUnifiedReportPhaseSixServices())->salaryRankingRows([$storeId], $range);
 
         return [
             'availability' => ['contractVersion' => self::CONTRACT_VERSION, 'status' => 'active', 'dataLoaded' => true],
@@ -61,12 +62,12 @@ final class CashierV3StoreTargetDashboardReadModel
                 'month' => $this->goal('本月目标进度', $monthTarget, $monthActual),
                 'year' => $this->goal('本年目标进度', $yearTarget, $yearActual),
             ],
-            'cash_ranking' => $this->cashRanking($tenantId, $storeId, $range),
-            'consumption_ranking' => $this->consumptionRanking($tenantId, $storeId, $range),
+            'cash_ranking' => $this->cashRanking($tenantId, $storeId, $range, $salaryRows),
+            'consumption_ranking' => $this->consumptionRanking($salaryRows),
             'source_explanation' => [
                 'goals' => '门店目标读取关联门店目标的生效方案；完成值使用统一事实层“实际业绩”指标，未设置目标不回退旧表；本页只读。',
-                'cash_ranking' => '现金业绩读取有效 sales_performance_allocated 事实；销售数量关联有效销售明细数量，成交人数按顾客去重。',
-                'consumption_ranking' => '消耗业绩、手工和项目数保留实际完成服务的有效业绩；服务人次对会员本人按同日去重，服务人数对会员本人按周期去重，朋友算和游客逐条计数；普通岗位共同服务时均分，独立核算岗位按发生时职位另组计算；本人或朋友选择“不算人数人次”不计入这两列。',
+                'cash_ranking' => '现金业绩与员工薪资汇总一致：结账和补交分配计入，成功退款按退款日扣减；销售数量取有效销售明细，成交人数按顾客去重。',
+                'consumption_ranking' => '消耗业绩、手工、项目数和服务客数与员工薪资汇总一致；已作废服务不计入，服务人次按同日去重、服务人数按所选期间去重，并沿用员工分摊和不计客数设置。',
             ],
             'metricVersion' => self::METRIC_VERSION,
             'dataAsOf' => date('Y-m-d H:i:s'),
@@ -74,7 +75,7 @@ final class CashierV3StoreTargetDashboardReadModel
     }
 
     /** @return array<string,mixed> */
-    private function cashRanking(string $tenantId, int $storeId, array $range): array
+    private function cashRanking(string $tenantId, int $storeId, array $range, array $salaryRows): array
     {
         $query = Db::name('cashier_v3_performance_fact')->alias('p')
             ->leftJoin('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.source_line_id=p.source_line_id AND s.fact_direction=\'forward\' AND s.status=\'effective\'')
@@ -82,18 +83,27 @@ final class CashierV3StoreTargetDashboardReadModel
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective')
             ->where('p.performance_type', 'sales_performance_allocated')->where('p.employee_id', '>', 0);
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        $rows = $query
-            ->fieldRaw("p.employee_id,MAX(p.employee_name_snapshot) AS employee_name,SUM(p.amount_cents) AS cash_performance_cents,SUM((CASE WHEN p.fact_direction='reversal' THEN -1 ELSE 1 END) * COALESCE(s.quantity,0) * COALESCE(p.allocation_weight_numerator,1) / NULLIF(COALESCE(p.allocation_weight_denominator,1),0)) AS sales_quantity,COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count")
-            ->group('p.employee_id')->orderRaw('cash_performance_cents DESC, p.employee_id ASC')->limit(100)->select()->toArray();
+        // Counts describe effective sales activity only. Money comes from the
+        // salary projection so refunds and reversals cannot diverge here.
+        $activity = $query
+            ->fieldRaw("p.employee_id,SUM((CASE WHEN p.fact_direction='reversal' THEN -1 ELSE 1 END) * COALESCE(s.quantity,0) * COALESCE(p.allocation_weight_numerator,1) / NULLIF(COALESCE(p.allocation_weight_denominator,1),0)) AS sales_quantity,COUNT(DISTINCT NULLIF(p.member_id,0)) AS customer_count")
+            ->group('p.employee_id')->select()->toArray();
+        $byEmployee = [];
+        foreach ($activity as $row) $byEmployee[(int)$row['employee_id']] = $row;
         $records = [];
-        foreach ($rows as $row) {
-            $cents = (int)$row['cash_performance_cents'];
+        foreach ($salaryRows as $row) {
+            $employeeId = (int)$row['employee_id'];
+            $cents = (int)$row['cash_cents'];
+            if ($employeeId <= 0 || $cents === 0) continue;
+            $counts = $byEmployee[$employeeId] ?? [];
             $records[] = [
-                'employee_id' => (int)$row['employee_id'], 'employee' => (string)$row['employee_name'],
+                'employee_id' => $employeeId, 'employee' => (string)$row['employee_name'],
                 'cash_performance_cents' => $cents, 'cash_performance' => $this->money($cents),
-                'sales_quantity' => (int)$row['sales_quantity'], 'customer_count' => (int)$row['customer_count'],
+                'sales_quantity' => (int)($counts['sales_quantity'] ?? 0), 'customer_count' => (int)($counts['customer_count'] ?? 0),
             ];
         }
+        usort($records, static fn(array $a, array $b): int => $b['cash_performance_cents'] <=> $a['cash_performance_cents'] ?: $a['employee_id'] <=> $b['employee_id']);
+        $records = array_slice($records, 0, 100);
         return ['title' => '员工现金业绩排行', 'sortBy' => 'cash_performance', 'sortOrder' => 'desc', 'columns' => [
             ['key' => 'employee', 'label' => '员工'], ['key' => 'cash_performance', 'label' => '现金业绩', 'type' => 'money'],
             ['key' => 'sales_quantity', 'label' => '销售数量', 'type' => 'count'], ['key' => 'customer_count', 'label' => '成交人数', 'type' => 'count'],
@@ -101,38 +111,28 @@ final class CashierV3StoreTargetDashboardReadModel
     }
 
     /** @return array<string,mixed> */
-    private function consumptionRanking(string $tenantId, int $storeId, array $range): array
+    private function consumptionRanking(array $salaryRows): array
     {
-        // 客数只复用统一服务客数读层；劳动金额与项目数保留完整有效事实。
-        // 不能在此处给整条事实加“不算人数人次”过滤，否则会误删真实消耗和手工。
-        $customerMetrics = (new ServiceCustomerMetricReadServices())->employeeMetrics($tenantId, [$storeId], $range)['summary_by_store_employee'];
-        $query = Db::name('cashier_v3_performance_fact')->alias('p')
-            ->leftJoin('cashier_v3_entitlement_service_fact sv', 'sv.tenant_id=p.tenant_id AND sv.checkout_request_id=p.checkout_request_id AND sv.source_line_id=p.source_line_id AND sv.service_status=\'completed\'')
-            ->leftJoin('cashier_v3_entitlement_reversal_fact er', 'er.tenant_id=sv.tenant_id AND er.reversal_of=sv.service_fact_id')
-            ->where('p.tenant_id', $tenantId)->where('p.store_id', $storeId)->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->where('p.status', 'effective')->whereNull('er.id')
-            ->where('p.performance_type', 'labor_performance_allocated')->where('p.employee_id', '>', 0);
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
-        $rows = $query
-            // This is the employee-level allocation snapshot.  New records
-            // carry an exact decimal count; the half-unit field is retained
-            // only for historical rows.
-            ->fieldRaw("p.employee_id,MAX(p.employee_name_snapshot) AS employee_name,SUM(p.amount_cents) AS consumption_performance_cents,SUM(COALESCE(p.labor_fee_amount_cents,0)) AS labor_cents,SUM(CASE WHEN p.project_count_decimal IS NULL THEN COALESCE(p.project_count_half_units,0) / 2 ELSE p.project_count_decimal END) AS project_count")
-            ->group('p.employee_id')->orderRaw('consumption_performance_cents DESC, p.employee_id ASC')->limit(100)->select()->toArray();
         $records = [];
-        foreach ($rows as $row) {
-            $consumption = (int)$row['consumption_performance_cents'];
-            $customer = $customerMetrics[$storeId . '|' . (int)$row['employee_id']] ?? [];
+        foreach ($salaryRows as $row) {
+            $employeeId = (int)$row['employee_id'];
+            $consumption = (int)$row['consumption_cents'];
+            $labor = (int)$row['labor_fee_cents'];
+            $projects = (int)$row['project_count_micros'];
+            $visits = (int)$row['service_visit_tenths'];
+            $people = (int)$row['service_people_tenths'];
+            if ($employeeId <= 0 || ($consumption === 0 && $labor === 0 && $projects === 0 && $visits === 0 && $people === 0)) continue;
             $records[] = [
-                'employee_id' => (int)$row['employee_id'], 'employee' => (string)$row['employee_name'],
+                'employee_id' => $employeeId, 'employee' => (string)$row['employee_name'],
                 'consumption_performance_cents' => $consumption, 'consumption_performance' => $this->money($consumption),
-                'labor_cents' => (int)$row['labor_cents'], 'labor' => $this->money((int)$row['labor_cents']),
-                'project_count' => (float)$row['project_count'],
-                // 读层以十分之一客为整数分配，转成展示数值时不能截断多人服务的 0.1 精度。
-                'service_count' => (int)($customer['visit_tenths'] ?? 0) / 10,
-                'customer_count' => (int)($customer['people_tenths'] ?? 0) / 10,
+                'labor_cents' => $labor, 'labor' => $this->money($labor),
+                'project_count' => $projects / 1000000,
+                'service_count' => $visits / 10,
+                'customer_count' => $people / 10,
             ];
         }
+        usort($records, static fn(array $a, array $b): int => $b['consumption_performance_cents'] <=> $a['consumption_performance_cents'] ?: $a['employee_id'] <=> $b['employee_id']);
+        $records = array_slice($records, 0, 100);
         return ['title' => '员工消耗业绩排行', 'sortBy' => 'consumption_performance', 'sortOrder' => 'desc', 'columns' => [
             ['key' => 'employee', 'label' => '员工'], ['key' => 'consumption_performance', 'label' => '消耗业绩', 'type' => 'money'],
             ['key' => 'labor', 'label' => '手工', 'type' => 'money'], ['key' => 'project_count', 'label' => '项目数', 'type' => 'count'],

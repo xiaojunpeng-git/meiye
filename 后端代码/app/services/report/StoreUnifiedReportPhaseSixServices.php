@@ -466,7 +466,17 @@ final class StoreUnifiedReportPhaseSixServices
         return $references;
     }
 
-    private function salarySummary(array $stores,array $range,array $input):array
+    /**
+     * Give the target ranking the salary report's employee-level totals before
+     * display rounding or category-column projection. The caller supplies its
+     * already-authorized store scope; this read never changes salary facts.
+     */
+    public function salaryRankingRows(array $stores,array $range):array
+    {
+        return $this->salarySummary($stores,$range,[],true);
+    }
+
+    private function salarySummary(array $stores,array $range,array $input,bool $forRanking=false):array
     {
         $employeeName=$this->salaryEmployeeName($input);
         $rows=[];$observedCategories=[];
@@ -493,12 +503,27 @@ final class StoreUnifiedReportPhaseSixServices
             }
             $rows[$key]['labor_fee_cents']+=(int)$f['labor_fee_cents'];
         }
-        $categories=$this->salaryCategoryDefinitions($observedCategories);
         // Service people is a range-level deduplicated metric.  It must come
         // from the common reader once per store/employee, rather than by
         // adding detail rows (which would turn a multi-day member into many
         // people).
         $summaryMetrics = $this->serviceCustomerMetrics($stores, $range)['summary_by_store_employee'];
+        if($forRanking){
+            $ranking=[];
+            foreach($rows as $key=>$r){
+                $ranking[]=[
+                    'store_id'=>(int)$r['store_id'],'employee_id'=>(int)$r['employee_id'],
+                    'employee_name'=>(string)$r['employee_name'],
+                    'cash_cents'=>(int)$r['cash_cents'],'consumption_cents'=>(int)$r['consumption_cents'],
+                    'labor_fee_cents'=>(int)$r['labor_fee_cents'],
+                    'project_count_micros'=>(int)$r['project_count_micros'],
+                    'service_visit_tenths'=>(int)$r['service_visit_tenths'],
+                    'service_people_tenths'=>(int)($summaryMetrics[$key]['people_tenths']??0),
+                ];
+            }
+            return $ranking;
+        }
+        $categories=$this->salaryCategoryDefinitions($observedCategories);
         foreach($rows as $key=>&$r){
             $r['service_people_tenths']=(int)($summaryMetrics[$key]['people_tenths'] ?? 0);
             $r['project_count']=$this->projectCountText((int)$r['project_count_micros']);

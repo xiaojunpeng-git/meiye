@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * 只读本地回归：目标页两项客数必须等于统一员工服务客数出口。
- * 固定样本 FW100200008 是“朋友不算”；实际消耗和项目数仍留在排行。
+ * 固定样本 FW101000627 是“朋友不算”；实际消耗和项目数仍留在排行。
  */
 if (getenv('STORE_TARGET_CUSTOMER_READONLY') !== '1') {
     throw new RuntimeException('explicit read-only local flag required');
@@ -25,7 +25,7 @@ function targetCustomerCheck(bool $ok, string $message): void
 }
 
 $service = Db::name('cashier_v3_entitlement_service_fact')
-    ->where('service_record_no', 'FW100200008')
+    ->where('service_record_no', 'FW101000627')
     ->field('tenant_id,store_id,business_date,service_object,friend_counts_as_customer,checkout_request_id,source_line_id')
     ->find();
 targetCustomerCheck(is_array($service)
@@ -46,8 +46,8 @@ targetCustomerCheck(is_array($labor) && (int)$labor['employee_id'] > 0
 
 $method = new ReflectionMethod(CashierV3StoreTargetDashboardReadModel::class, 'consumptionRanking');
 $method->setAccessible(true);
-$ranking = $method->invoke(new CashierV3StoreTargetDashboardReadModel(),
-    (string)$service['tenant_id'], $storeId, $range);
+$salaryRows = (new \app\services\report\StoreUnifiedReportPhaseSixServices())->salaryRankingRows([$storeId], $range);
+$ranking = $method->invoke(new CashierV3StoreTargetDashboardReadModel(), $salaryRows);
 $employeeId = (int)$labor['employee_id'];
 $row = null;
 foreach ($ranking['records'] as $record) {
@@ -58,13 +58,13 @@ $metrics = (new ServiceCustomerMetricReadServices())->employeeMetrics(
     (string)$service['tenant_id'], [$storeId], $range
 );
 $summary = $metrics['summary_by_store_employee'][$storeId . '|' . $employeeId] ?? [];
-targetCustomerCheck((float)$row['service_count'] === (int)($summary['visit_tenths'] ?? 0) / 10
-    && (float)$row['customer_count'] === (int)($summary['people_tenths'] ?? 0) / 10,
+targetCustomerCheck(abs((float)$row['service_count'] - (int)($summary['visit_tenths'] ?? 0) / 10) < 0.000001
+    && abs((float)$row['customer_count'] - (int)($summary['people_tenths'] ?? 0) / 10) < 0.000001,
     'target customer columns equal unified reader');
 targetCustomerCheck((int)$row['consumption_performance_cents'] >= (int)$labor['amount_cents']
     && (float)$row['project_count'] > 0, 'friend consumption and project count remain');
 echo "TARGET_CROSSCHECK " . json_encode([
-    'record' => 'FW100200008', 'employee_id' => $employeeId,
+    'record' => 'FW101000627', 'employee_id' => $employeeId,
     'service_count' => $row['service_count'], 'customer_count' => $row['customer_count'],
     'consumption_performance_cents' => $row['consumption_performance_cents'],
     'project_count' => $row['project_count'],
