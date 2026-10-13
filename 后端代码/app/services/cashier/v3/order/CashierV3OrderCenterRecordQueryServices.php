@@ -730,7 +730,7 @@ final class CashierV3OrderCenterRecordQueryServices
         $rows = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)
             ->where('source_document_type', $sourceDocumentType)->whereIn('order_id', $ids)
             ->where('performance_type', 'sales_performance_allocated')->where('fact_direction', 'forward')->where('status', 'effective')
-            ->field('fact_id,order_id,employee_id,employee_name_snapshot,allocation_weight_numerator')->order('id asc')->select()->toArray();
+            ->field('fact_id,order_id,employee_id,employee_name_snapshot,role_snapshot,amount_cents,allocation_weight_numerator')->order('id asc')->select()->toArray();
         $factIds = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['fact_id'] ?? ''), $rows)));
         $reversed = $factIds === [] ? [] : Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenantId)->where('fact_direction', 'reversal')->whereIn('reversal_of', $factIds)->column('reversal_of');
         $reversed = array_fill_keys(array_map('strval', $reversed), true);
@@ -739,12 +739,22 @@ final class CashierV3OrderCenterRecordQueryServices
             if (isset($reversed[(string)($row['fact_id'] ?? '')])) continue;
             $id = trim((string)($row['order_id'] ?? '')); $name = trim((string)($row['employee_name_snapshot'] ?? ''));
             if ($id === '' || $name === '') continue;
-            $weight = (int)($row['allocation_weight_numerator'] ?? 0);
-            $names[$id][] = $weight > 0 && $weight < 100 ? $name . ' (' . $weight . '%)' : $name;
+            $names[$id][] = self::supplementSalespersonLabel($row);
         }
         $out = [];
         foreach ($names as $id => $values) $out[$id] = implode('、', array_values(array_unique($values)));
         return $out;
+    }
+
+    /** 人员金额取当前未冲销的业绩事实；历史无角色后缀只省略“售前”，不能省略金额。 */
+    private static function supplementSalespersonLabel(array $fact): string
+    {
+        $name = trim((string)($fact['employee_name_snapshot'] ?? ''));
+        $amount = '¥' . number_format((int)round((int)($fact['amount_cents'] ?? 0) / 100));
+        if (str_ends_with((string)($fact['role_snapshot'] ?? ''), ':presale')) {
+            return $name . '(售前,' . $amount . ')';
+        }
+        return $name . '(' . $amount . ')';
     }
 
     /**

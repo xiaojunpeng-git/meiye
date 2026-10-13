@@ -228,8 +228,8 @@ final class CashierV3MemberDebtProjectionServices
 
     /**
      * Read each debt item's current platform product category for order-center display.
-     * Categories are deliberately not frozen on a repayment: platform category changes
-     * must be reflected on the next query, while missing/deleted categories stay explicit.
+     * A store SKU (type 1) inherits its platform parent, never its own store category.
+     * Category changes are reflected on the next query; absent ID links stay unclassified.
      *
      * @param array<int,int> $debtIds IDs already constrained by the caller's data scope
      * @return array<int,string>
@@ -240,10 +240,10 @@ final class CashierV3MemberDebtProjectionServices
         if ($debtIds === []) return [];
 
         $items = $this->rows(Db::name('store_debt_item')->alias('i')
-            ->leftJoin('store_product p', 'p.id=i.product_id AND p.is_del=0')
-            ->leftJoin('store_product parent', 'parent.id=p.pid AND parent.type=0 AND parent.is_del=0')
+            ->leftJoin('store_product p', 'p.id=i.product_id')
+            ->leftJoin('store_product parent', 'parent.id=p.pid AND parent.type=0')
             ->whereIn('i.debt_id', $debtIds)
-            ->field('i.debt_id,i.id debt_item_id,p.id product_id,p.cate_id,parent.cate_id parent_cate_id')
+            ->field('i.debt_id,i.id debt_item_id,p.id product_id,p.type product_type,p.cate_id,parent.cate_id parent_cate_id')
             ->order('i.id asc')->select());
         $categories = [];
         foreach ($this->rows(Db::name('store_product_category')
@@ -256,8 +256,9 @@ final class CashierV3MemberDebtProjectionServices
         foreach ($items as $item) {
             $debtId = (int)($item['debt_id'] ?? 0);
             if ($debtId <= 0) continue;
-            $rawIds = trim((string)($item['cate_id'] ?? ''));
-            if ($rawIds === '') $rawIds = trim((string)($item['parent_cate_id'] ?? ''));
+            $rawIds = (int)($item['product_type'] ?? -1) === 1
+                ? trim((string)($item['parent_cate_id'] ?? ''))
+                : trim((string)($item['cate_id'] ?? ''));
             $itemPaths = [];
             foreach (explode(',', $rawIds) as $rawId) {
                 $rawId = trim($rawId);
