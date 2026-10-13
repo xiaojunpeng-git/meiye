@@ -64,7 +64,8 @@ final class AiIntentResultContract
         // registry's full display name while another uses a registered alias.
         if (in_array($intent['operation']??null,['condition_count','condition_list'],true)
             && is_array($intent['aggregate_condition']['conditions']??null)
-            && count($intent['aggregate_condition']['conditions'])===count($intent['metric_codes']??[])
+            && count(array_unique(array_column($intent['aggregate_condition']['conditions'],'metric_code')))
+                ===count($intent['metric_codes']??[])
             && count($intent['metric_codes'])>0) return $intent;
         $coordinated=false;
         $intent=self::canonicalizeExactCoordinatedMetricBindings(
@@ -491,8 +492,9 @@ final class AiIntentResultContract
      * quoted an exact, uniquely-owned term from the active metric registry.
      * The language model still owns the object, time, relation, operators and
      * quantities; this method merely replaces an incomplete model code list
-     * with the registry's total one-to-one projection. Ambiguous, repeated or
-     * unavailable terms remain on the normal model/clarification path.
+     * with the registry's total condition projection. A repeated exact term
+     * may own several bounds, while ambiguous or unavailable terms remain on
+     * the normal model/clarification path.
      */
     private static function canonicalizeExactConditionMetricBindings(array $intent,array $understanding,array $metricCodes,array $safeQuestion,?string &$failure=null): array
     {
@@ -514,7 +516,6 @@ final class AiIntentResultContract
         foreach ($semantic['conditions'] as $index=>$condition) {
             $code=$resolve($condition['metric_term']??null);
             if ($code===null) {$codes[$index]=null;$unresolved[]=$index;continue;}
-            if (isset($used[$code])) {$failure='duplicate_direct_code';return $intent;}
             $codes[$index]=$code;$used[$code]=true;
         }
         // The understanding carrier may preserve a predicate fragment such
@@ -543,11 +544,12 @@ final class AiIntentResultContract
             }
         }
         ksort($codes,SORT_NUMERIC);$codes=array_values($codes);
-        if (count(array_unique($codes))!==count($codes)) {$failure='duplicate_code';return $intent;}
         $fallbackByTerm=[];
         foreach ($semantic['conditions'] as $index=>$condition) {
             $term=$condition['metric_term']??null;
-            if (!is_string($term)||$term===''||isset($fallbackByTerm[$term])) {$failure='condition_term';return $intent;}
+            if (!is_string($term)||$term===''||(isset($fallbackByTerm[$term]) && $fallbackByTerm[$term]!==$codes[$index])) {
+                $failure='condition_term';return $intent;
+            }
             $fallbackByTerm[$term]=$codes[$index];
         }
         $requirements=[];$accounted=[];
@@ -593,6 +595,7 @@ final class AiIntentResultContract
         if ($requirements===[] || array_diff($codes,array_keys($accounted))) {$failure='requirement_accounting';return $intent;}
         $projected=['subject'=>$semantic['subject'],'relation'=>$semantic['relation'],
             'result_form'=>$semantic['result_form'],'conditions'=>[]];
+        if (isset($semantic['expression'])) $projected['expression']=$semantic['expression'];
         foreach ($semantic['conditions'] as $index=>$condition) {
             $projected['conditions'][]=['metric_code'=>$codes[$index],'operator'=>$condition['operator'],
                 'quantity'=>$condition['quantity'],'unit'=>$condition['unit']];
@@ -601,7 +604,9 @@ final class AiIntentResultContract
         $intent['object_relation']='analysis';
         $intent['object_term']='';
         $intent['operation']=$operation;
-        $intent['metric_codes']=$codes;
+        // The model-facing metric list is a unique catalogue selection;
+        // the bound carrier retains all predicate occurrences and their order.
+        $intent['metric_codes']=array_values(array_unique($codes));
         $intent['action_codes']=[];
         $intent['needs_metric_choice']=false;
         $intent['initial_observation']=false;
@@ -1131,7 +1136,7 @@ final class AiIntentResultContract
         // must select one, and the server still verifies its registry and
         // authority before querying. Do not spend another model round on it.
         $context.=' Only when needs_metric_choice is true, you may add optional metric_choice_candidates: an ordered array of up to three supplied compatible metric codes that plausibly match the accepted meaning. Omit it if you cannot justify a candidate. These codes are alternatives, never a combined query or permission to guess a result.';
-        return ($nested?'Each item.intent must be one JSON object following ':'Return one JSON object following ').self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: object_relation, ranking, periods, scope, aggregate_condition, result_reference, initial_observation, recommended_initial_answer'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. object_relation is analysis when object_kind is the thing being compared, grouped or listed, and selection only when object_term identifies a particular target that must narrow the data. Do not turn an analytical object into a selection; when object_relation is analysis, object_term must be empty. A threshold member count uses object_kind=member, object_relation=analysis, operation=threshold_count and the accepted legacy aggregate_condition. A generic accepted condition set uses operation=condition_count or condition_list. Return metric_codes in the exact order of the accepted conditions, with one compatible registered code per condition; the server projects those codes onto the independently accepted condition carrier. If you also emit aggregate_condition, use {"subject":"person|member|store|order|sale_line|card|project|product","relation":"all|any","result_form":"count|list","conditions":[{"metric_code":"one supplied compatible registered code","operator":"gte|gt|lte|lt|eq","quantity":"the exact normalized decimal from understanding","unit":"yuan|count"}]} and preserve condition order, operator, quantity, unit, relation, subject and result form exactly, changing only metric_term into its accountable registered metric_code. For an aggregate operating goal with no named analytical object, use object_kind store and an empty object_term; words such as “overall” describe the goal, not a separate object_kind. The accepted understanding is the primary record of customer meaning. Do not reinterpret, replace or contradict any typed value it already carries; bind its business goal to registered capability only. If that understanding has no typed carrier for a response form, period, ranking, scope, object or object relation that you can still clearly understand from the same question, return the faithful candidate rather than treating the customer as unclear. The server sends such a new carrier to a separate semantic reviewer before it can execute. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous and no professionally useful first reading can be selected; then metric_codes must be empty. A customer may instead ask for an open overview of an understood object without naming one measurement. When the accepted understanding is such an open goal, no explicit customer condition conflicts with it, and operation is summary, set initial_observation=true and select two to four independent supplied metrics compatible with that object as provisional observation angles. The server replaces those provisional codes only through the published registry overview profile; they are professional observations, not a claim that the customer selected one metric. Do not use this exception for a named measurement, exclusion, comparison, ranking or breakdown. When the customer has made the analytical object and response form clear but the business measurement has several registered readings, select the most useful compatible professional first reading from the supplied capabilities. A ranking must set metric_codes to exactly one registered code because one ranked result needs one comparable measurement; a breakdown may retain multiple explicitly coordinated compatible measurements. Set recommended_initial_answer=true, needs_metric_choice=false and label the resulting metric perspective in the answer, so the customer can naturally pursue another perspective afterwards. Never set recommended_initial_answer for an unresolved meaning, an unavailable capability, a changed exclusion, or a result that needs customer confirmation. Set both initial_observation and recommended_initial_answer false or omit them for every other request. Lack of an available metric is not ambiguity. requirement_bindings is a required accountability array. It has exactly one row for every accepted understanding requirement whose fields include metric_codes, and no other rows. Each row is exactly {"requirement_id":"rN","status":"satisfied|unavailable|pending","metric_codes":[registered codes]}. A satisfied row names the registered metric codes that fulfill that one requirement; together all satisfied rows must account for the selected metric_codes. An unavailable or pending row has an empty metric_codes array and therefore cannot accompany an executable metric selection. When there is no accepted metric_codes requirement and you select a professional recommended_initial_answer, requirement_bindings must be an empty array: the recommendation is not customer-selected meaning and must not be attached to object, ranking, period, scope or other requirements. This is an accountability record for the accepted meaning, not a phrase matcher: do not decide it from word overlap, and do not omit an exclusion or another customer requirement. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"calendar_period","unit":"week|month|quarter|year","offset":signed-integer,"count":positive-integer,"end_mode":"full|to_reference"}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. Calendar periods use calendar_period: week begins Monday, quarter begins January/April/July/October, full covers prior periods and to_reference covers the current period through question.reference_date. Copy an accepted typed period unchanged. Never bind a calendar week/quarter as a rolling day span or a month. relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are binding candidates inside their required arrays and only contain supplied codes. Do not output provenance: the server records whether a carrier came from accepted meaning, verified context, a system default, or a candidate that still needs semantic admission. result_reference, if used, is only {"group":"top|bottom","ordinal":positive-integer}; emit it only when the accepted understanding has an equal result_reference requirement with current-question evidence. group means the rank section explicitly named by the customer and never contains an ID, name or result value. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
+        return ($nested?'Each item.intent must be one JSON object following ':'Return one JSON object following ').self::VERSION.'. Required keys: '.implode(', ',self::REQUIRED_FIELDS).'. Optional keys: object_relation, ranking, periods, scope, aggregate_condition, result_reference, initial_observation, recommended_initial_answer'.($hasPriorQuery?', context_delta':'').'. '.$context.' object_term is an exact customer term or an empty string where no named object is needed. object_relation is analysis when object_kind is the thing being compared, grouped or listed, and selection only when object_term identifies a particular target that must narrow the data. Do not turn an analytical object into a selection; when object_relation is analysis, object_term must be empty. A threshold member count uses object_kind=member, object_relation=analysis, operation=threshold_count and the accepted legacy aggregate_condition. A generic accepted condition set uses operation=condition_count or condition_list. Return metric_codes once per distinct registered measurement in first-appearance order; repeated bounds on one measurement keep separate condition items with that same metric_code; the server projects those codes onto the independently accepted condition carrier. If you also emit aggregate_condition, use {"subject":"person|member|store|order|sale_line|card|project|product","relation":"all|any","result_form":"count|list","conditions":[{"metric_code":"one supplied compatible registered code","operator":"gte|gt|lte|lt|eq","quantity":"the exact normalized decimal from understanding","unit":"yuan|count|day"}]} and preserve condition order, operator, quantity, unit, relation, subject, result form and any accepted expression tree exactly, changing only metric_term into its accountable registered metric_code. An expression tree uses {"relation":"all|any","children":[zero-based condition index or nested group]}, names every condition once, and is omitted for a flat set. For an aggregate operating goal with no named analytical object, use object_kind store and an empty object_term; words such as “overall” describe the goal, not a separate object_kind. The accepted understanding is the primary record of customer meaning. Do not reinterpret, replace or contradict any typed value it already carries; bind its business goal to registered capability only. If that understanding has no typed carrier for a response form, period, ranking, scope, object or object relation that you can still clearly understand from the same question, return the faithful candidate rather than treating the customer as unclear. The server sends such a new carrier to a separate semantic reviewer before it can execute. needs_metric_choice is true only when the intended business measurement is genuinely ambiguous and no professionally useful first reading can be selected; then metric_codes must be empty. A customer may instead ask for an open overview of an understood object without naming one measurement. When the accepted understanding is such an open goal, no explicit customer condition conflicts with it, and operation is summary, set initial_observation=true and select two to four independent supplied metrics compatible with that object as provisional observation angles. The server replaces those provisional codes only through the published registry overview profile; they are professional observations, not a claim that the customer selected one metric. Do not use this exception for a named measurement, exclusion, comparison, ranking or breakdown. When the customer has made the analytical object and response form clear but the business measurement has several registered readings, select the most useful compatible professional first reading from the supplied capabilities. A ranking must set metric_codes to exactly one registered code because one ranked result needs one comparable measurement; a breakdown may retain multiple explicitly coordinated compatible measurements. Set recommended_initial_answer=true, needs_metric_choice=false and label the resulting metric perspective in the answer, so the customer can naturally pursue another perspective afterwards. Never set recommended_initial_answer for an unresolved meaning, an unavailable capability, a changed exclusion, or a result that needs customer confirmation. Set both initial_observation and recommended_initial_answer false or omit them for every other request. Lack of an available metric is not ambiguity. requirement_bindings is a required accountability array. It has exactly one row for every accepted understanding requirement whose fields include metric_codes, and no other rows. Each row is exactly {"requirement_id":"rN","status":"satisfied|unavailable|pending","metric_codes":[registered codes]}. A satisfied row names the registered metric codes that fulfill that one requirement; together all satisfied rows must account for the selected metric_codes. An unavailable or pending row has an empty metric_codes array and therefore cannot accompany an executable metric selection. When there is no accepted metric_codes requirement and you select a professional recommended_initial_answer, requirement_bindings must be an empty array: the recommendation is not customer-selected meaning and must not be attached to object, ranking, period, scope or other requirements. This is an accountability record for the accepted meaning, not a phrase matcher: do not decide it from word overlap, and do not omit an exclusion or another customer requirement. periods, when present, is an ordered array of up to two period objects. A period is exactly one of {"kind":"date_range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}, {"kind":"relative_days","days":positive-integer,"end_offset_days":signed-integer}, or {"kind":"calendar_period","unit":"week|month|quarter|year","offset":signed-integer,"count":positive-integer,"end_mode":"full|to_reference"}. Preserve early, future and long periods exactly; execution coverage and length limits are checked by the server later, never reinterpret them as an invalid intent. Calendar periods use calendar_period: week begins Monday, quarter begins January/April/July/October, full covers prior periods and to_reference covers the current period through question.reference_date. Copy an accepted typed period unchanged. Never bind a calendar week/quarter as a rolling day span or a month. relative_days is only for a stated rolling number of days. ranking is {"direction":"top|bottom|top_and_bottom|unspecified","limit":integer-or-null}. Scope and accessible stores are server-owned: omit scope unless current wording explicitly changes current-store versus authorized scope. metric_codes and action_codes are binding candidates inside their required arrays and only contain supplied codes. Do not output provenance: the server records whether a carrier came from accepted meaning, verified context, a system default, or a candidate that still needs semantic admission. result_reference, if used, is only {"group":"top|bottom","ordinal":positive-integer}; emit it only when the accepted understanding has an equal result_reference requirement with current-question evidence. group means the rank section explicitly named by the customer and never contains an ID, name or result value. unresolved_fragments only contains exact current-question text whose meaning cannot be understood, not understood requests that lack a registered binding. Never calculate, query, invent a condition, discard a condition, or copy a previous result value.';
     }
 
     public static function normalize($value,array $metricCodes,array $actionCodes,array $safeQuestion,array $understanding=[]): array
@@ -1321,16 +1326,21 @@ final class AiIntentResultContract
         // The first model pass already owns the complete, evidence-backed
         // condition semantics. The binding pass owns only the registered
         // metric candidates. Project those candidates onto the signed
-        // condition order when the mapping is total and one-to-one, instead
+        // condition order when the mapping is total and positionally unique, instead
         // of asking a second model to copy thresholds and occasionally drop
         // a predicate. This is protocol composition, not phrase matching:
         // PHP neither chooses a metric nor derives a condition from text.
         $semanticCondition=self::combinedSemanticAggregateCondition($understanding);
         if (is_array($semanticCondition) && isset($semanticCondition['conditions'])
             && !$value['needs_metric_choice']
+            // A duplicate semantic measurement cannot be paired with two
+            // unrelated selected codes merely because the array lengths fit.
+            && count(array_unique(array_column($semanticCondition['conditions'],'metric_term')))
+                ===count($semanticCondition['conditions'])
             && count($value['metric_codes'])===count($semanticCondition['conditions'])) {
             $projected=['subject'=>$semanticCondition['subject'],'relation'=>$semanticCondition['relation'],
                 'result_form'=>$semanticCondition['result_form'],'conditions'=>[]];
+            if (isset($semanticCondition['expression'])) $projected['expression']=$semanticCondition['expression'];
             foreach ($semanticCondition['conditions'] as $index=>$condition) {
                 $projected['conditions'][]=['metric_code'=>$value['metric_codes'][$index],
                     'operator'=>$condition['operator'],'quantity'=>$condition['quantity'],'unit'=>$condition['unit']];
@@ -1387,8 +1397,10 @@ final class AiIntentResultContract
         if ($conditionMetricCodes===[] && $hasPrior && (($value['context_delta']['metric_codes']??null)==='inherit')) {
             $conditionMetricCodes=array_values((array)($safeQuestion['prior_query']['metric_codes']??[]));
         }
+        // The selected metric list is a catalogue set; separate lower and
+        // upper bounds may refer to the same registered metric more than once.
         if (is_array($aggregateCondition) && isset($aggregateCondition['conditions'])
-            && array_column($aggregateCondition['conditions'],'metric_code')!==$conditionMetricCodes) self::fail('bad_value:aggregate_condition');
+            && array_values(array_unique(array_column($aggregateCondition['conditions'],'metric_code')))!==$conditionMetricCodes) self::fail('bad_value:aggregate_condition');
         // Like an all-null ranking, null scope is an optional transport form,
         // not a customer request.  Do not turn it into a failed query or an
         // implied data-range change.
@@ -1486,7 +1498,7 @@ final class AiIntentResultContract
             && self::semanticAggregateCondition($semanticCondition)
             && self::boundAggregateCondition($aggregateCondition)
             && !$value['needs_metric_choice']
-            && count($value['metric_codes'])===count($semanticCondition['conditions'])) {
+            && count((array)($aggregateCondition['conditions']??[]))===count($semanticCondition['conditions'])) {
             $delta['aggregate_condition']='replace';
             $value['context_delta']['aggregate_condition']='replace';
         }
@@ -2784,11 +2796,17 @@ final class AiIntentResultContract
             && in_array($value['operator']??null,['gte','gt','lte','lt','eq'],true)
             && is_int($value['amount_cents']??null) && $value['amount_cents']>0
             && $value['amount_cents']<=100000000000;
-        if ($keys!==['conditions','relation','result_form','subject']
+        $hasExpression=$keys===['conditions','expression','relation','result_form','subject'];
+        if ((!$hasExpression && $keys!==['conditions','relation','result_form','subject'])
             ||!in_array($value['subject']??null,['person','member','store','order','sale_line','card','project','product'],true)
             ||!in_array($value['relation']??null,['all','any'],true)||!in_array($value['result_form']??null,['count','list'],true)
             ||!is_array($value['conditions']??null)||count($value['conditions'])<1||count($value['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS
             ||array_keys($value['conditions'])!==range(0,count($value['conditions'])-1)) return false;
+        if ($hasExpression && (!in_array($value['subject'],['member','person','store'],true)
+            ||$value['relation']!==($value['expression']['relation']??null)
+            ||!\app\services\query\metric\MetricConditionExpression::valid(
+                $value['expression'],count($value['conditions'])
+            ))) return false;
         $codes=[];
         foreach ($value['conditions'] as $condition) {
             $conditionKeys=is_array($condition)?array_keys($condition):[];sort($conditionKeys,SORT_STRING);
@@ -2798,7 +2816,7 @@ final class AiIntentResultContract
                 ||!in_array($condition['unit']??null,['yuan','count','day'],true)) return false;
             $codes[]=$condition['metric_code'];
         }
-        return count(array_unique($codes))===count($codes);
+        return true;
     }
     private static function aggregateConditionOperation($value): ?string
     {
@@ -2823,6 +2841,11 @@ final class AiIntentResultContract
             $candidates[]=$candidate;
         }
         if ($candidates===[]) return null;
+        // A grouped expression owns its own leaf positions. Merging separate
+        // requirement arrays would silently renumber those positions.
+        foreach ($candidates as $candidate) if (isset($candidate['expression'])) {
+            return count($candidates)===1?$candidate:null;
+        }
         $combined=['subject'=>$candidates[0]['subject'],'relation'=>$candidates[0]['relation'],
             'result_form'=>$candidates[0]['result_form'],'conditions'=>[]];
         $seen=[];
@@ -2849,6 +2872,7 @@ final class AiIntentResultContract
     {
         if (!self::semanticAggregateCondition($semantic)||!self::boundAggregateCondition($bound)) return false;
         foreach (['subject','relation','result_form'] as $field) if (($semantic[$field]??null)!==($bound[$field]??null)) return false;
+        if (($semantic['expression']??null)!==($bound['expression']??null)) return false;
         if (count($semantic['conditions'])!==count($bound['conditions'])) return false;
         foreach ($semantic['conditions'] as $index=>$condition) foreach (['operator','quantity','unit'] as $field) {
             if (($condition[$field]??null)!==($bound['conditions'][$index][$field]??null)) return false;
@@ -2861,6 +2885,7 @@ final class AiIntentResultContract
         if (!self::semanticAggregateCondition($semantic)) return 'semantic_shape';
         if (!self::boundAggregateCondition($bound)) return 'bound_shape';
         foreach (['subject','relation','result_form'] as $field) if (($semantic[$field]??null)!==($bound[$field]??null)) return $field;
+        if (($semantic['expression']??null)!==($bound['expression']??null)) return 'semantic_shape';
         if (count($semantic['conditions'])!==count($bound['conditions'])) return 'condition_count';
         foreach ($semantic['conditions'] as $index=>$condition) foreach (['operator','quantity','unit'] as $field) {
             if (($condition[$field]??null)!==($bound['conditions'][$index][$field]??null)) return 'condition_'.$field;

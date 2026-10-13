@@ -211,6 +211,48 @@ csCheck(count($memberExport)===1&&$memberExport[0]['store_name']==='测试会员
     'member condition list export reuses verified rows and registered units instead of exporting only the count');
 $view=$views->create([],$query);
 csCheck($view['results'][0]['count']===1&&$view['results'][0]['rows'][0]['employee_name']==='甲员工','AND set evaluates against one authorised current-personnel population');
+// Two stated bounds are predicates on one registered value, so the signed
+// metric list remains unique while the condition carrier keeps both bounds.
+$rangeQuery=$query;
+$rangeQuery['metric_codes']=['staff_sales_yeji'];
+$rangeQuery['aggregate_condition']['conditions']=[
+    ['metric_code'=>'staff_sales_yeji','operator'=>'gte','quantity'=>'50000','unit'=>'yuan'],
+    ['metric_code'=>'staff_sales_yeji','operator'=>'lte','quantity'=>'60000','unit'=>'yuan'],
+];
+$rangeQuery['condition_set']=(new AiConditionSetCompiler())->compile(
+    $rangeQuery['aggregate_condition'],$capabilities,'condition_list'
+);
+$rangeCaps=$capabilities;$rangeCaps['metric_codes']=['staff_sales_yeji'];
+$rangeCompiled=(new AiRegisteredPlanCompiler())->compile(['query'=>$rangeQuery,'output_format'=>'screen'],$rangeCaps);
+csCheck($rangeCompiled['query']['condition_set']===$rangeQuery['condition_set']
+    &&$views->create([],$rangeQuery)['results'][0]['count']===1,
+    'same-metric lower and upper bounds keep one selected metric and one qualifying person');
+$grouped=$query;
+$grouped['aggregate_condition']['conditions']=[
+    ['metric_code'=>'staff_sales_yeji','operator'=>'gte','quantity'=>'50000','unit'=>'yuan'],
+    ['metric_code'=>'staff_labor_yeji','operator'=>'gte','quantity'=>'3000000','unit'=>'yuan'],
+    ['metric_code'=>'staff_sales_yeji','operator'=>'lte','quantity'=>'60000','unit'=>'yuan'],
+];
+$grouped['aggregate_condition']['expression']=['relation'=>'all','children'=>[
+    0,['relation'=>'any','children'=>[1,2]],
+]];
+$grouped['condition_set']=(new AiConditionSetCompiler())->compile(
+    $grouped['aggregate_condition'],$capabilities,'condition_list'
+);
+$groupedCompiled=(new AiRegisteredPlanCompiler())->compile(['query'=>$grouped,'output_format'=>'screen'],$capabilities);
+$groupView=$views->create([],$grouped);
+csCheck($groupedCompiled['query']['condition_set']===$grouped['condition_set']
+    &&$groupView['results'][0]['count']===1,
+    'mixed AND/OR grouping evaluates every stated predicate on one authorized person');
+$groupAnswer=(new AiAnswerRenderer())->render($groupView);
+csCheck(strpos($groupAnswer['summary'],'组合3项条件')!==false
+    &&count($groupAnswer['table']['rows']??[])===2,
+    'grouped answer explains the combined condition and displays a repeated metric once');
+$droppedGroup=$grouped['aggregate_condition'];
+$droppedGroup['expression']=['relation'=>'all','children'=>[0,1]];
+csReject(static function()use($droppedGroup,$capabilities):void {
+    (new AiConditionSetCompiler())->compile($droppedGroup,$capabilities,'condition_list');
+},'AI_UNSUPPORTED_CONDITION');
 csCheck(($view['results'][0]['list_limit']??null)===1000&&($view['results'][0]['has_more']??null)===false,
     'personnel condition lists retain the bounded full-result ceiling for export');
 $truncatedEvidence=$view;
@@ -853,6 +895,57 @@ csCheck($canonicalExactBound['metric_codes']===['staff_sales_yeji','staff_servic
     &&$canonicalExactBound['periods']===[['kind'=>'relative_days','days'=>30,'end_offset_days'=>0]]
     &&$canonicalExactBound['unresolved_fragments']===[],
     'multiple exact registered condition terms recover a complete one-to-one binding without dropping a predicate');
+$rangeSafe=$safe;
+$rangeSafe['question']='最近30天销售业绩在5万元到6万元之间的员工有哪些？';
+$rangeSafe['evidence_messages'][0]['text']=$rangeSafe['question'];
+$rangeSemantic=$semantic;
+$rangeSemantic['goal']='列出销售业绩在5万元到6万元之间的员工';
+$rangeSemantic['requirements'][0]['evidence'][0]['quote']=$rangeSafe['question'];
+$rangeSemantic['requirements'][0]['values']['metric_terms']=['销售业绩'];
+$rangeSemantic['requirements'][0]['values']['aggregate_condition']['conditions']=[
+    ['metric_term'=>'销售业绩','operator'=>'gte','quantity'=>'50000','unit'=>'yuan'],
+    ['metric_term'=>'销售业绩','operator'=>'lte','quantity'=>'60000','unit'=>'yuan'],
+];
+$rangeSemantic=AiIntentUnderstandingContract::normalize($rangeSemantic,$rangeSafe);
+$rangeCandidate=$binding;
+$rangeCandidate['metric_codes']=['staff_sales_yeji'];
+$rangeCandidate['aggregate_condition']=null;
+$rangeCandidate['requirement_bindings'][0]['metric_codes']=['staff_sales_yeji'];
+$rangeCandidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+    $rangeCandidate,$rangeSemantic,$rangeSafe,['staff_sales_yeji']
+);
+$rangeBound=AiIntentResultContract::normalize($rangeCandidate,['staff_sales_yeji'],[],$rangeSafe,$rangeSemantic);
+csCheck($rangeBound['metric_codes']===['staff_sales_yeji']
+    &&array_column($rangeBound['aggregate_condition']['conditions'],'operator')===['gte','lte']
+    &&array_column($rangeBound['aggregate_condition']['conditions'],'metric_code')===['staff_sales_yeji','staff_sales_yeji'],
+    'exact registered metric keeps both bounds through semantic binding and unique catalogue selection');
+$groupSafe=$safe;
+$groupSafe['question']='最近30天销售业绩达到5万元且（劳动业绩达到300万元或销售业绩不超过6万元）的员工有哪些？';
+$groupSafe['evidence_messages'][0]['text']=$groupSafe['question'];
+$groupSemantic=$semantic;
+$groupSemantic['requirements'][0]['evidence'][0]['quote']=$groupSafe['question'];
+$groupSemantic['requirements'][0]['values']['aggregate_condition']['conditions']=[
+    ['metric_term'=>'销售业绩','operator'=>'gte','quantity'=>'50000','unit'=>'yuan'],
+    ['metric_term'=>'劳动业绩','operator'=>'gte','quantity'=>'3000000','unit'=>'yuan'],
+    ['metric_term'=>'销售业绩','operator'=>'lte','quantity'=>'60000','unit'=>'yuan'],
+];
+$groupSemantic['requirements'][0]['values']['aggregate_condition']['expression']=[
+    'relation'=>'all','children'=>[0,['relation'=>'any','children'=>[1,2]]],
+];
+$groupSemantic=AiIntentUnderstandingContract::normalize($groupSemantic,$groupSafe);
+$groupCandidate=$binding;
+$groupCandidate['aggregate_condition']=null;
+$groupCandidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+    $groupCandidate,$groupSemantic,$groupSafe,['staff_sales_yeji','staff_labor_yeji']
+);
+$groupBound=AiIntentResultContract::normalize(
+    $groupCandidate,['staff_sales_yeji','staff_labor_yeji'],[],$groupSafe,$groupSemantic
+);
+csCheck($groupBound['metric_codes']===['staff_sales_yeji','staff_labor_yeji']
+    &&$groupBound['aggregate_condition']['expression']===$groupSemantic['requirements'][0]['values']['aggregate_condition']['expression']
+    &&array_column($groupBound['aggregate_condition']['conditions'],'metric_code')===
+        ['staff_sales_yeji','staff_labor_yeji','staff_sales_yeji'],
+    'mixed grouping and repeated metric remain identical across understood and bound contracts');
 $bound=AiIntentResultContract::normalize($binding,['staff_sales_yeji','staff_service_num'],[],$safe,$semantic);
 csCheck($bound['aggregate_condition']===$boundCondition&&$bound['metric_codes']===['staff_sales_yeji','staff_service_num'],
     'understood condition meanings bind to registered codes without changing thresholds, relation or order');

@@ -64,6 +64,24 @@ foreach ($list['rows'] as $item) {
     }
 }
 echo "PASS local mixed asset conditions: exact count and list agree\n";
+// Compare repeated lower/upper predicates to the same authority values from
+// the already enumerated member population; no SQL fact multiplication or
+// first-page-only count may change the answer.
+$zeroBalances=count(array_filter($list['rows'],static function(array $member):bool {
+    return ($member['metrics']['member_account_balance']??null)===0;
+}));
+$sameMetricRange=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_account_balance','operator'=>'lte','value'=>0],
+]];
+$sameMetricCount=$reader->conditionMembers('0',$storeIds,$range,$sameMetricRange,0);
+$sameMetricList=$reader->conditionMembers('0',$storeIds,$range,$sameMetricRange,100);
+if ($sameMetricCount['count']!==$zeroBalances
+    ||$sameMetricList['count']!==$zeroBalances
+    ||count($sameMetricList['rows'])!==$zeroBalances) {
+    throw new RuntimeException('REPEATED_ASSET_BOUND_COUNT_DRIFT');
+}
+echo "PASS local repeated balance bounds: one member value satisfies both comparisons\n";
 $ageCondition=['metric_code'=>'member_days_since_last_visit','operator'=>'gt','value'=>90];
 $ageAndAssets=['subject'=>'member','relation'=>'all','conditions'=>[
     $ageCondition,['metric_code'=>'member_total_assets','operator'=>'gte','value'=>50000],
@@ -100,3 +118,52 @@ foreach ($fiveResult['rows'] as $item) {
     }
 }
 echo "PASS local five-condition member result: every registered value retained\n";
+$zeroVisits=count(array_filter($fiveResult['rows'],static function(array $member):bool {
+    return ($member['metrics']['member_service_visit_count']??null)===0;
+}));
+$sameFactRange=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_service_visit_count','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_service_visit_count','operator'=>'lte','value'=>0],
+]];
+$sameFactResult=$reader->conditionMembers('0',$storeIds,$range,$sameFactRange,100);
+$singleZeroFact=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0],
+]];
+$singleZeroResult=$reader->conditionMembers('0',$storeIds,$range,$singleZeroFact,100);
+if ($sameFactResult['count']!==$zeroVisits || count($sameFactResult['rows'])!==$zeroVisits
+    ||$singleZeroResult['count']!==$zeroVisits) {
+    throw new RuntimeException('REPEATED_FACT_BOUND_COUNT_DRIFT');
+}
+echo "PASS local repeated fact bounds: no current-asset lookup is required\n";
+$groupedAssets=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_days_since_last_visit','operator'=>'gt','value'=>90],
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>50000],
+    ['metric_code'=>'member_remaining_project_amount','operator'=>'gte','value'=>50000],
+], 'expression'=>['relation'=>'all','children'=>[
+    0,['relation'=>'any','children'=>[1,2]],
+]]];
+$expectedGroup=count(array_filter($fiveResult['rows'],static function(array $member):bool {
+    $m=$member['metrics'];
+    return is_int($m['member_days_since_last_visit'])
+        &&$m['member_days_since_last_visit']>90
+        &&($m['member_account_balance']>=50000 || $m['member_remaining_project_amount']>=50000);
+}));
+$groupCount=$reader->conditionMembers('0',$storeIds,$range,$groupedAssets,0);
+$groupList=$reader->conditionMembers('0',$storeIds,$range,$groupedAssets,100);
+if ($groupCount['count']!==$expectedGroup || $groupList['count']!==$expectedGroup
+    ||count($groupList['rows'])!==$expectedGroup) {
+    throw new RuntimeException('GROUPED_MEMBER_POPULATION_DRIFT');
+}
+echo "PASS local grouped member conditions: exact count and list match source values\n";
+$groupAlways=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+    ['metric_code'=>'member_remaining_project_amount','operator'=>'gt','value'=>100000000000],
+    ['metric_code'=>'member_total_assets','operator'=>'gte','value'=>0],
+], 'expression'=>['relation'=>'all','children'=>[
+    0,['relation'=>'any','children'=>[1,2]],
+]]];
+$groupAlwaysResult=$reader->conditionMembers('0',$storeIds,$range,$groupAlways,100);
+if ($groupAlwaysResult['count']!==$list['count'] || count($groupAlwaysResult['rows'])!==$list['count']) {
+    throw new RuntimeException('GROUPED_MEMBER_OR_BRANCH_LOST');
+}
+echo "PASS local grouped OR branch: a failed alternative does not erase authorized members\n";

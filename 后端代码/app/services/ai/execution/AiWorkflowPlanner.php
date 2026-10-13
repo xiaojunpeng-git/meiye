@@ -48,7 +48,8 @@ final class AiWorkflowPlanner
         // projection is suitable for summaries, but it must never reorder
         // that positional condition contract. Preserve the already validated
         // binding order; the registered compiler below still requires an
-        // exact one-to-one match with the canonical condition set.
+        // exact distinct-code match with the canonical condition set; one
+        // metric may still own separate upper and lower bound predicates.
         if (in_array($shape,['condition_count','condition_list'],true)) {
             $metrics=array_values($selection['metric_codes']);
         }

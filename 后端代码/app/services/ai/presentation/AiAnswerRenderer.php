@@ -62,8 +62,8 @@ final class AiAnswerRenderer
                         $identity=$object[$idKey]??null;
                         $validIdentity=$idKey==='entity_id'?$this->conditionEntityIdentity($identity):is_int($identity);
                         if (!$validIdentity||!is_string($object[$nameKey]??null)||!is_array($object['metrics']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
-                        foreach ($set['conditions'] as $condition) {
-                            $code=$condition['metric_code'];$value=$object['metrics'][$code]??null;
+                        foreach (array_unique(array_column($set['conditions'],'metric_code')) as $code) {
+                            $value=$object['metrics'][$code]??null;
                             $metricTip=$dictionary->getTooltip($code);$metric=$registered[$code]??null;
                             // A member with no observed completed service has
                             // no known last-visit age. In an OR result another
@@ -405,9 +405,14 @@ final class AiAnswerRenderer
     private function conditionSet(array $query): array
     {
         $set=$query['condition_set']??null;$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
-        if ($keys!==['conditions','relation','subject']||!is_string($set['subject']??null)
+        $hasExpression=$keys===['conditions','expression','relation','subject'];
+        if ((!$hasExpression && $keys!==['conditions','relation','subject'])||!is_string($set['subject']??null)
             ||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$set['subject'])||!in_array($set['relation']??null,['all','any'],true)
             ||!is_array($set['conditions']??null)||!$set['conditions']) throw new RuntimeException('AI_EVIDENCE_INVALID');
+        if ($hasExpression && ($set['relation']!==($set['expression']['relation']??null)
+            ||!\app\services\query\metric\MetricConditionExpression::valid(
+                $set['expression'],count($set['conditions'])
+            ))) throw new RuntimeException('AI_EVIDENCE_INVALID');
         $capabilities=MetricReadViewServices::metricCapabilities();
         foreach ($set['conditions'] as $condition) if (!is_array($condition)||!is_string($condition['metric_code']??null)
             ||!in_array($set['subject'],(array)($capabilities[$condition['metric_code']]['condition_subjects']??[]),true)
@@ -417,7 +422,7 @@ final class AiAnswerRenderer
 
     private function conditionSummary(int $count,array $set,array $registered): string
     {
-        $relation=$set['relation']==='all'?'全部':'任一';
+        $relation=isset($set['expression'])?'组合':($set['relation']==='all'?'全部':'任一');
         $labels=['member'=>['客户','人'],'person'=>['人员','人'],'store'=>['门店','家'],
             'order'=>['销售订单','笔'],'sale_line'=>['销售明细','条'],'card'=>['卡项','个'],
             'project'=>['项目','个'],'product'=>['产品','个']];
@@ -435,7 +440,15 @@ final class AiAnswerRenderer
         // In an OR query a balance predicate can admit a member with no
         // observed service. Scope the history qualifier to the age predicate,
         // rather than presenting the whole population as service-observed.
-        if ($prefixes!==[] && $set['relation']==='all') {
+        $historyRequired=$set['relation']==='all' && !isset($set['expression']);
+        if (isset($set['expression']) && $set['expression']['relation']==='all') {
+            foreach ($set['expression']['children'] as $child) {
+                if (!is_int($child)) continue;
+                $code=$set['conditions'][$child]['metric_code'];
+                if (isset($registered[$code]['observed_answer_prefix'])) $historyRequired=true;
+            }
+        }
+        if ($prefixes!==[] && $historyRequired) {
             $prefix=count($prefixes)===1?array_key_first($prefixes):'现有记录中';
             $base='符合'.$relation.count($set['conditions']).'项条件的'.$label;
             // 会员未命中时用业务方确认的简短说法；条件明细仍在结果表中，

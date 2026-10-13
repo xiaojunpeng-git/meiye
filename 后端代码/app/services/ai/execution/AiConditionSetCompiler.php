@@ -16,13 +16,19 @@ final class AiConditionSetCompiler
     {
         if (!in_array($operation,['condition_count','condition_list'],true)) $this->fail();
         $keys=array_keys($binding);sort($keys,SORT_STRING);
-        if ($keys!==['conditions','relation','result_form','subject']
+        $hasExpression=$keys===['conditions','expression','relation','result_form','subject'];
+        if ((!$hasExpression && $keys!==['conditions','relation','result_form','subject'])
             ||!in_array($binding['relation']??null,['all','any'],true)
             ||($binding['result_form']??null)!==($operation==='condition_count'?'count':'list')
             ||!is_string($binding['subject']??null)||!is_array($binding['conditions']??null)
             ||count($binding['conditions'])<1||count($binding['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS
             ||array_keys($binding['conditions'])!==range(0,count($binding['conditions'])-1)) $this->fail();
-        $conditions=[];$codes=[];
+        if ($hasExpression && (!in_array($binding['subject'],['member','person','store'],true)
+            ||$binding['relation']!==($binding['expression']['relation']??null)
+            ||!\app\services\query\metric\MetricConditionExpression::valid(
+                $binding['expression'],count($binding['conditions'])
+            ))) $this->fail();
+        $conditions=[];
         foreach ($binding['conditions'] as $condition) {
             $conditionKeys=is_array($condition)?array_keys($condition):[];sort($conditionKeys,SORT_STRING);
             if ($conditionKeys!==['metric_code','operator','quantity','unit']
@@ -30,7 +36,8 @@ final class AiConditionSetCompiler
                 ||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
                 ||!is_string($condition['quantity']??null)||!in_array($condition['unit']??null,['yuan','count','day'],true)) $this->fail();
             $code=$condition['metric_code'];
-            if (isset($codes[$code])) $this->fail();
+            // Two bounds on one registered metric are separate predicates.
+            // The Reader evaluates both against the same subject value.
             $contract=$capabilities['metric_readiness'][$code]??null;
             if (!is_array($contract)||empty($contract['ai_query_ready'])
                 ||!in_array($operation,(array)($contract['query_shapes']??[]),true)
@@ -48,10 +55,11 @@ final class AiConditionSetCompiler
                 $value=$this->scaled($condition['quantity'],1);
             } else $this->fail('AI_METRIC_NOT_READY');
             if ($value<0||$value>self::MAX_VALUE) $this->fail();
-            $codes[$code]=true;
             $conditions[]=['metric_code'=>$code,'operator'=>$condition['operator'],'value'=>$value];
         }
-        return ['subject'=>$binding['subject'],'relation'=>$binding['relation'],'conditions'=>$conditions];
+        $set=['subject'=>$binding['subject'],'relation'=>$binding['relation'],'conditions'=>$conditions];
+        if ($hasExpression) $set['expression']=$binding['expression'];
+        return $set;
     }
 
     /**

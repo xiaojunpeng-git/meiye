@@ -231,15 +231,21 @@ final class AiRegisteredPlanCompiler
         } elseif (!$conditionPopulation && $query['aggregate_condition']!==null) AiRegistryValue::fail('AI_QUERY_SHAPE_INVALID');
         if ($conditionPopulation) {
             $set=$query['condition_set'];$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
+            $hasExpression=$keys===['conditions','expression','relation','subject'];
             $conditionSubject=$set['subject']??null;
             $expectedFilters=$conditionSubject==='person'
                 ? ['object_kind'=>'person','selection_ref'=>'cohort:active_personnel']
                 : ['object_kind'=>$conditionSubject];
             if (!in_array($conditionSubject,['person','member','store','order','sale_line','card','project','product'],true)
                 ||(!$sourceFilter && $query['business_filters']!==$expectedFilters)
-                ||$keys!==['conditions','relation','subject']||$conditionSubject!==$objectKind
+                ||(!$hasExpression && $keys!==['conditions','relation','subject'])||$conditionSubject!==$objectKind
                 ||!in_array($set['relation']??null,['all','any'],true)||!is_array($set['conditions']??null)
                 ||count($set['conditions'])<1||count($set['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+            if ($hasExpression && (!in_array($conditionSubject,['member','person','store'],true)
+                ||$set['relation']!==($set['expression']['relation']??null)
+                ||!\app\services\query\metric\MetricConditionExpression::valid(
+                    $set['expression'],count($set['conditions'])
+                ))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             $metrics=[];
             foreach ($set['conditions'] as $condition) {
                 $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
@@ -247,7 +253,9 @@ final class AiRegisteredPlanCompiler
                     ||!is_int($condition['value']??null)||abs($condition['value'])>100000000000) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
                 $metrics[]=$condition['metric_code'];
             }
-            if (count(array_unique($metrics))!==count($metrics)||$metrics!==$query['metric_codes']) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+            // Repeated bounds share one selected metric while retaining both
+            // predicates in the signed condition set.
+            if (array_values(array_unique($metrics))!==$query['metric_codes']) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if (!is_array($query['aggregate_condition'])) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             try {
                 $canonical=(new AiConditionSetCompiler())->compile($query['aggregate_condition'],$capabilities,$query['query_shape']);

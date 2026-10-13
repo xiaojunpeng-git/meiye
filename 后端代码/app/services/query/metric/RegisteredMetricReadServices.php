@@ -145,13 +145,40 @@ final class RegisteredMetricReadServices
         if ($rightsConditions!==[]) {
             if (count($conditionSet['conditions'])===1) {
                 return $this->currentRightsAmountMembers($tenantId,$stores,$rightsConditions[0],$limit);
+        if (isset($conditionSet['expression']) && (!MetricConditionExpression::valid(
+            $conditionSet['expression'],count($conditionSet['conditions'])
+        ) || $conditionSet['relation']!==$conditionSet['expression']['relation'])) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        if (isset($conditionSet['expression'])) {
+            return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+        }
+
+        // The SQL union fast path assumes one predicate per metric. A range
+        // on one metric must test both bounds against the same member value.
+        $codes=array_column($conditionSet['conditions'],'metric_code');
+        if (count(array_unique($codes))!==count($codes)) {
+            return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+        }
+        foreach ($conditionSet['conditions'] as $condition) {
+            $code=$condition['metric_code']??null;
+            if (!is_string($code)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            $missing=$this->missingMemberConditionValue($code);
+            if ($missing===0 && $this->matchesAssetCondition(0,$condition)) {
+                // SQL fact unions contain only observed members. A valid
+                // period-total predicate that includes zero needs the full
+                // authorized member directory, including no-fact members.
+                return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
             }
-            return $this->currentAssetConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+        }
+
+            }
+            return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
         }
         foreach ($conditionSet['conditions'] as $condition) {
             $code=is_array($condition)?($condition['metric_code']??null):null;
             if (is_string($code) && (MetricDefinitionRegistry::get($code)['reader_strategy']??null)==='member_current_assets') {
-                return $this->currentAssetConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+                return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
             }
         }
 
@@ -280,12 +307,12 @@ final class RegisteredMetricReadServices
     }
 
     /**
-     * Combine current account/card assets with registered member predicates.
-     * The authorized member directory is traversed in bounded batches; each
-     * fact remains at member grain and current assets use their cashier
-     * authorities. Count-only queries never truncate to the screen page.
+     * Evaluate repeated or grouped member predicates on the same authorized
+     * member population. Traverse in bounded batches; aggregate period facts
+     * at member grain and read current assets from cashier authorities.
+     * Count-only queries never truncate to the screen page.
      */
-    private function currentAssetConditionMembers(string $tenantId,array $stores,array $range,array $set,int $limit): array
+    private function batchedMemberConditionMembers(string $tenantId,array $stores,array $range,array $set,int $limit): array
     {
         $conditions=$set['conditions'];$assetCodes=[];$factCodes=[];
         foreach ($conditions as $condition) {
@@ -311,7 +338,13 @@ final class RegisteredMetricReadServices
         // large directory for a narrow historical cohort. The final member
         // relation and every other predicate are still checked below.
         $seed=null;
-        if ($set['relation']==='all') foreach ($conditions as $condition) {
+        // A direct child of the root AND is mandatory. A fact inside an OR
+        // branch is optional and must never seed away other qualifying rows.
+        $seedIndexes=isset($set['expression'])
+            ? array_values(array_filter($set['expression']['children'], 'is_int'))
+            : array_keys($conditions);
+        if ($set['relation']==='all') foreach ($seedIndexes as $index) {
+            $condition=$conditions[$index];
             if (!isset($factCodes[$condition['metric_code']])) continue;
             [$seedQuery,$seedExpression]=$this->memberMetricAggregateQuery(
                 $condition['metric_code'],$tenantId,$stores,$range
@@ -323,6 +356,11 @@ final class RegisteredMetricReadServices
         $count=0;$rows=[];$cursor=0;
         do {
             $candidateIds=null;
+            // A period total with no fact is zero. A predicate satisfied by
+            // zero cannot seed from observed fact rows without losing valid
+            // members; an unknown last-visit age never satisfies a bound.
+            $missing=$this->missingMemberConditionValue($condition['metric_code']);
+            if ($missing!==null && $this->matchesAssetCondition($missing,$condition)) continue;
             if ($seed!==null) {
                 $seedRows=(clone $seed)->where('s.member_id','>',$cursor)
                     ->fieldRaw('s.member_id member_id')->order('s.member_id','asc')
@@ -368,7 +406,7 @@ final class RegisteredMetricReadServices
             }
             $candidates=[];
             foreach ($ids as $id) {
-                if ($set['relation']==='any' || $factCodes===[]) {
+                if (isset($set['expression']) || $set['relation']==='any' || $factCodes===[]) {
                     $candidates[]=$id;continue;
                 }
                 $matches=[];
@@ -379,7 +417,7 @@ final class RegisteredMetricReadServices
                 }
                 if (!in_array(false,$matches,true)) $candidates[]=$id;
             }
-            if ($candidates!==[]) {
+            if ($candidates!==[] && $assetCodes!==[]) {
                 foreach ($assetReader->values($tenantId,$stores,$candidates,array_keys($assetCodes)) as $id=>$assets) {
                     foreach ($assets as $code=>$value) $values[$id][$code]=$value;
                 }
@@ -393,7 +431,9 @@ final class RegisteredMetricReadServices
                     $display[$code]=$value;
                     $matches[]=is_int($value) && $this->matchesAssetCondition($value,$condition);
                 }
-                $qualified=$set['relation']==='all'?!in_array(false,$matches,true):in_array(true,$matches,true);
+                $qualified=isset($set['expression'])
+                    ? MetricConditionExpression::evaluate($set['expression'],$matches)
+                    : ($set['relation']==='all'?!in_array(false,$matches,true):in_array(true,$matches,true));
                 if (!$qualified) continue;
                 ++$count;
                 if ($limit>0 && count($rows)<$limit) {

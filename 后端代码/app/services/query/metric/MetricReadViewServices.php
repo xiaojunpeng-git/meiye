@@ -517,8 +517,7 @@ final class MetricReadViewServices
                 if (!isset($names[$storeId])) $this->fail('METRIC_STORE_LABEL_UNAVAILABLE');
                 $values[$storeId]=['store_id'=>$storeId,'store_name'=>$names[$storeId],'metrics'=>[]];
             }
-            foreach ($conditionSet['conditions'] as $condition) {
-                $metric=$condition['metric_code'];
+            foreach (array_unique(array_column($conditionSet['conditions'],'metric_code')) as $metric) {
                 foreach ($values as &$row) $row['metrics'][$metric]=0;
                 unset($row);
                 foreach ($reader->dailyStoreTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric) as $point) {
@@ -535,7 +534,9 @@ final class MetricReadViewServices
                 foreach ($conditionSet['conditions'] as $condition) {
                     $matches[]=$this->matchesCondition($row['metrics'][$condition['metric_code']],$condition['operator'],$condition['value']);
                 }
-                $qualified=$conditionSet['relation']==='all'?!in_array(false,$matches,true):in_array(true,$matches,true);
+                $qualified=isset($conditionSet['expression'])
+                    ? MetricConditionExpression::evaluate($conditionSet['expression'],$matches)
+                    : ($conditionSet['relation']==='all'?!in_array(false,$matches,true):in_array(true,$matches,true));
                 if ($qualified) $rows[]=$row;
             }
             usort($rows,static function(array $left,array $right):int { return [$left['store_name'],$left['store_id']] <=> [$right['store_name'],$right['store_id']]; });
@@ -571,8 +572,7 @@ final class MetricReadViewServices
             if (!isset($personnel['names'][$employee])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
             $values[$employee]=['employee_id'=>$employee,'employee_name'=>$personnel['names'][$employee],'metrics'=>[]];
         }
-        foreach ($conditionSet['conditions'] as $condition) {
-            $metric=$condition['metric_code'];
+        foreach (array_unique(array_column($conditionSet['conditions'],'metric_code')) as $metric) {
             foreach ($values as &$row) $row['metrics'][$metric]=0;
             unset($row);
             $points=$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric,$personnel['pairs']);
@@ -586,7 +586,9 @@ final class MetricReadViewServices
         foreach ($values as $row) {
             $matches=[];
             foreach ($conditionSet['conditions'] as $condition) $matches[]=$this->matchesCondition($row['metrics'][$condition['metric_code']],$condition['operator'],$condition['value']);
-            $qualified=$conditionSet['relation']==='all' ? !in_array(false,$matches,true) : in_array(true,$matches,true);
+            $qualified=isset($conditionSet['expression'])
+                ? MetricConditionExpression::evaluate($conditionSet['expression'],$matches)
+                : ($conditionSet['relation']==='all' ? !in_array(false,$matches,true) : in_array(true,$matches,true));
             if ($qualified) $rows[]=$row;
         }
         usort($rows,static function(array $left,array $right):int { return [$left['employee_name'],$left['employee_id']] <=> [$right['employee_name'],$right['employee_id']]; });
@@ -737,15 +739,21 @@ final class MetricReadViewServices
         } elseif (!$conditionPopulation && $query['aggregate_condition'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         if ($conditionPopulation) {
             $set=$query['condition_set'];$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
+            $hasExpression=$keys===['conditions','expression','relation','subject'];
             $conditionSubject=$set['subject']??null;
             $expectedFilters=$conditionSubject==='person'
                 ? ['object_kind'=>'person','selection_ref'=>'cohort:active_personnel']
                 : ['object_kind'=>$conditionSubject];
             if (!is_string($conditionSubject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$conditionSubject)
                 ||(!$sourceFilter && $query['business_filters']!==$expectedFilters)
-                ||$keys!==['conditions','relation','subject']||$conditionSubject!==$objectKind
+                ||(!$hasExpression && $keys!==['conditions','relation','subject'])||$conditionSubject!==$objectKind
                 ||!in_array($set['relation']??null,['all','any'],true)||!is_array($set['conditions']??null)
                 ||count($set['conditions'])<1||count($set['conditions'])>MetricDefinitionRegistry::MAX_CONDITIONS||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+            if ($hasExpression && (!in_array($conditionSubject,['member','person','store'],true)
+                ||$set['relation']!==($set['expression']['relation']??null)
+                ||!MetricConditionExpression::valid($set['expression'],count($set['conditions'])))) {
+                $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+            }
             $conditionMetrics=[];
             foreach ($set['conditions'] as $condition) {
                 $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
@@ -753,9 +761,13 @@ final class MetricReadViewServices
                     ||!is_int($condition['value']??null)||abs($condition['value'])>100000000000) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
                 $conditionMetrics[]=$condition['metric_code'];
             }
-            if (count(array_unique($conditionMetrics))!==count($conditionMetrics)||$query['metric_codes']!==$conditionMetrics) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+            // The query signs each selected metric once; the condition list
+            // may carry multiple nonidentical thresholds for that metric.
+            if ($query['metric_codes']!==array_values(array_unique($conditionMetrics))) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             $binding=$query['aggregate_condition'];$bindingKeys=is_array($binding)?array_keys($binding):[];sort($bindingKeys,SORT_STRING);
-            if ($bindingKeys!==['conditions','relation','result_form','subject']||($binding['subject']??null)!==$conditionSubject
+            if ($bindingKeys!==($hasExpression?['conditions','expression','relation','result_form','subject']:['conditions','relation','result_form','subject'])
+                ||($binding['expression']??null)!==($set['expression']??null)
+                ||($binding['subject']??null)!==$conditionSubject
                 ||($binding['relation']??null)!==$set['relation']
                 ||($binding['result_form']??null)!==($query['query_shape']==='condition_count'?'count':'list')
                 ||!is_array($binding['conditions']??null)||count($binding['conditions'])!==count($set['conditions'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
