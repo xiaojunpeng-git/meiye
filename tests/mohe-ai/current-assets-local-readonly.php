@@ -64,6 +64,52 @@ foreach ($list['rows'] as $item) {
     }
 }
 echo "PASS local mixed asset conditions: exact count and list agree\n";
+// The output metrics are not predicates. Read and total them only for the
+// same fully qualified authorized members, including count-only answers.
+$cohort=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+], 'result_metric_codes'=>['member_remaining_project_amount','member_total_assets']];
+$cohortCount=$reader->conditionMembers('0',$storeIds,$range,$cohort,0);
+$cohortList=$reader->conditionMembers('0',$storeIds,$range,$cohort,100);
+$expectedTotals=['member_remaining_project_amount'=>0,'member_total_assets'=>0];
+foreach ($list['rows'] as $item) foreach ($expectedTotals as $code=>$_) {
+    $expectedTotals[$code]+=$item['metrics'][$code];
+}
+if ($cohortCount['count']!==$list['count']||$cohortList['count']!==$list['count']
+    ||$cohortCount['result_totals']!==$expectedTotals
+    ||$cohortList['result_totals']!==$expectedTotals
+    ||count($cohortList['rows'])!==$list['count']) throw new RuntimeException('COHORT_ASSET_TOTAL_DRIFT');
+echo "PASS local filtered cohort: full count and current-asset totals share authorized member IDs\n";
+// A >100-member store crosses the Reader's batch cursor. Compare its
+// count-only total with independently enumerated authorized member IDs;
+// a first-page sum would fail even though the preview remains bounded.
+$larger=Db::name('store_user')->alias('su')->join('user u','u.uid=su.uid')
+    ->where('su.status',1)->where('u.status',1)->where('u.is_del',0)
+    ->where('su.store_id','>',0)->group('su.store_id')
+    ->fieldRaw('su.store_id,COUNT(DISTINCT su.uid) member_count')
+    ->having('COUNT(DISTINCT su.uid) BETWEEN 101 AND 200')
+    ->order('member_count','asc')->find();
+if (!is_array($larger)) throw new RuntimeException('NO_CROSS_BATCH_LOCAL_STORE');
+$largerStore=(int)$larger['store_id'];
+$memberRows=Db::name('store_user')->alias('su')->join('user u','u.uid=su.uid')
+    ->where('su.status',1)->where('u.status',1)->where('u.is_del',0)
+    ->where('su.store_id',$largerStore)->distinct(true)->field('su.uid')->order('su.uid','asc')
+    ->select()->toArray();
+$memberIds=array_map('intval',array_column($memberRows,'uid'));
+$expectedCents=0;
+foreach (array_chunk($memberIds,100) as $batch) {
+    foreach ((new MemberCurrentAssetMetricReadServices())->values('0',[$largerStore],$batch,
+        ['member_total_assets']) as $assets) $expectedCents+=$assets['member_total_assets'];
+}
+$largerCohort=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
+], 'result_metric_codes'=>['member_total_assets']];
+$largerCount=$reader->conditionMembers('0',[$largerStore],$range,$largerCohort,0);
+if ($largerCount['count']!==count($memberIds)
+    ||$largerCount['result_totals']!==['member_total_assets'=>$expectedCents]) {
+    throw new RuntimeException('CROSS_BATCH_COHORT_TOTAL_DRIFT');
+}
+echo "PASS local cross-batch cohort: exact count and assets total include all authorized members\n";
 // Compare repeated lower/upper predicates to the same authority values from
 // the already enumerated member population; no SQL fact multiplication or
 // first-page-only count may change the answer.

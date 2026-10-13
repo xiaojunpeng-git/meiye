@@ -16,8 +16,13 @@ final class AiConditionSetCompiler
     {
         if (!in_array($operation,['condition_count','condition_list'],true)) $this->fail();
         $keys=array_keys($binding);sort($keys,SORT_STRING);
-        $hasExpression=$keys===['conditions','expression','relation','result_form','subject'];
-        if ((!$hasExpression && $keys!==['conditions','relation','result_form','subject'])
+        $hasExpression=in_array('expression',$keys,true);
+        $hasResults=in_array('result_metric_codes',$keys,true);
+        $expected=['conditions','relation','result_form','subject'];
+        if ($hasExpression) $expected[]='expression';
+        if ($hasResults) $expected[]='result_metric_codes';
+        sort($expected,SORT_STRING);
+        if ($keys!==$expected
             ||!in_array($binding['relation']??null,['all','any'],true)
             ||($binding['result_form']??null)!==($operation==='condition_count'?'count':'list')
             ||!is_string($binding['subject']??null)||!is_array($binding['conditions']??null)
@@ -75,6 +80,24 @@ final class AiConditionSetCompiler
         }
         $set=['subject'=>$binding['subject'],'relation'=>$binding['relation'],'conditions'=>$conditions];
         if ($hasExpression) $set['expression']=$binding['expression'];
+        if ($hasResults) {
+            $results=$binding['result_metric_codes'];
+            if ($binding['subject']!=='member'||!is_array($results)||$results===[]
+                ||count($results)>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS
+                ||count(array_unique($results))!==count($results)
+                ||array_keys($results)!==range(0,count($results)-1)) $this->fail();
+            foreach ($results as $code) {
+                $contract=is_string($code)?($capabilities['metric_readiness'][$code]??null):null;
+                // Only registered current assets are additive at the same
+                // member grain. Period flows need a separately stated window.
+                if (!is_array($contract)||empty($contract['ai_query_ready'])
+                    ||!in_array($operation,(array)($contract['query_shapes']??[]),true)
+                    ||!in_array('member',(array)($contract['condition_subjects']??[]),true)
+                    ||($contract['threshold_count']['aggregation']??null)!=='current_state'
+                    ||($contract['storage_unit']??null)!=='fen') $this->fail('AI_QUERY_SHAPE_NOT_READY');
+            }
+            $set['result_metric_codes']=$results;
+        }
         return $set;
     }
 

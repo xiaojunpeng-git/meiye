@@ -3720,12 +3720,14 @@ final class AiGatewayServices
             $subject=$intent['object_kind'];
             $conditionMetrics=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($caps,$subject,$intent['operation']);
             if ($localTerm!==null||!$conditionMetrics
-                ||$intent['needs_metric_choice']||count($intent['metric_codes'])<1||count($intent['metric_codes'])>4
+                ||$intent['needs_metric_choice']||count($intent['metric_codes'])<1
+                ||count($intent['metric_codes'])>\app\services\ai\execution\AiOverviewMetricResolver::MAX_METRICS
                 ||!is_array($intent['aggregate_condition']??null)||($intent['aggregate_condition']['subject']??null)!==$subject) {
                 $shapeField=$localTerm!==null?'object_selection'
                     :(!$conditionMetrics?'registry_contract'
                     :($intent['needs_metric_choice']?'metric_choice'
-                    :((count($intent['metric_codes'])<1||count($intent['metric_codes'])>4)?'metric_count'
+                    :((count($intent['metric_codes'])<1
+                        ||count($intent['metric_codes'])>\app\services\ai\execution\AiOverviewMetricResolver::MAX_METRICS)?'metric_count'
                     :(!is_array($intent['aggregate_condition']??null)?'aggregate_condition':'condition_subject'))));
                 $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'analysis_object_condition_shape_unavailable',[
                     'field'=>$shapeField,

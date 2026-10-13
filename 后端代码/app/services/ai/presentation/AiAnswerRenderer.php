@@ -50,6 +50,23 @@ final class AiAnswerRenderer
                     // customer language instead of "符合 1 项条件".
                     $conditionSummary='首次疗程来源为'.$sourceLabel.'的会员共有'.$row['count'].'人。';
                 } else $conditionSummary=$this->conditionSummary($row['count'],$set,$registered);
+                $resultCodes=$set['result_metric_codes']??[];
+                if ($resultCodes!==[]) {
+                    $totals=$row['result_totals']??null;
+                    if (!is_array($totals)||array_keys($totals)!==$resultCodes) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                    foreach ($resultCodes as $code) {
+                        $total=$totals[$code]??null;$contract=$registered[$code]??null;
+                        $label=$dictionary->getTooltip($code);
+                        if (!is_int($total)||$total<0||!is_array($contract)
+                            ||($contract['storage_unit']??null)!=='fen'||empty($label['user_ready'])) {
+                            throw new RuntimeException('AI_EVIDENCE_INVALID');
+                        }
+                        // This total is over every qualified authorized
+                        // member, independent of the bounded list preview.
+                        $conditionSummary.=' '.$label['name'].'合计'.$this->metricValue($total,'fen').'元。';
+                    }
+                    $conditionSummary.=' 资产金额为查询时的当前值。';
+                }
                 $conditionObjectLabel=$this->conditionObjectLabel($subject,$row);
                 if ($shape==='condition_list') {
                     if (!is_array($row['rows']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
@@ -94,6 +111,17 @@ final class AiAnswerRenderer
                                 'value'=>$ageUnknown?'未记录':$this->metricValue($value,(string)$metric['storage_unit']),
                                 'unit'=>$ageUnknown?'':$metricUnit,
                                 'period'=>$periodScoped?'condition_'.$index:'current','period_label'=>$periodLabel];
+                        }
+                        foreach ($resultCodes as $code) {
+                            if (in_array($code,$displayCodes,true)) continue;
+                            $value=$object['metrics'][$code]??null;
+                            $metric=$registered[$code]??null;$label=$dictionary->getTooltip($code);
+                            if (!is_int($value)||$value<0||!is_array($metric)||empty($label['user_ready'])) {
+                                throw new RuntimeException('AI_EVIDENCE_INVALID');
+                            }
+                            $rows[]=['label'=>$object[$nameKey],'metric'=>$label['name'],
+                                'value'=>$this->metricValue($value,'fen'),'unit'=>'元',
+                                'period'=>'current','period_label'=>'当前'];
                         }
                     }
                 }
@@ -423,8 +451,13 @@ final class AiAnswerRenderer
     private function conditionSet(array $query): array
     {
         $set=$query['condition_set']??null;$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
-        $hasExpression=$keys===['conditions','expression','relation','subject'];
-        if ((!$hasExpression && $keys!==['conditions','relation','subject'])||!is_string($set['subject']??null)
+        $hasExpression=in_array('expression',$keys,true);
+        $hasResults=in_array('result_metric_codes',$keys,true);
+        $expected=['conditions','relation','subject'];
+        if ($hasExpression) $expected[]='expression';
+        if ($hasResults) $expected[]='result_metric_codes';
+        sort($expected,SORT_STRING);
+        if ($keys!==$expected||!is_string($set['subject']??null)
             ||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$set['subject'])||!in_array($set['relation']??null,['all','any'],true)
             ||!is_array($set['conditions']??null)||!$set['conditions']) throw new RuntimeException('AI_EVIDENCE_INVALID');
         if ($hasExpression && ($set['relation']!==($set['expression']['relation']??null)
@@ -438,6 +471,17 @@ final class AiAnswerRenderer
             ||(isset($condition['period']) && !\app\services\ai\execution\AiTemporalPeriodResolver::valid(
                 $condition['period']
             ))) throw new RuntimeException('AI_EVIDENCE_INVALID');
+        if ($hasResults) {
+            if ($set['subject']!=='member'||!is_array($set['result_metric_codes'])
+                ||$set['result_metric_codes']===[]) throw new RuntimeException('AI_EVIDENCE_INVALID');
+            foreach ($set['result_metric_codes'] as $code) {
+                $contract=is_string($code)?($capabilities[$code]??null):null;
+                if (!is_array($contract)||($contract['storage_unit']??null)!=='fen'
+                    ||($contract['threshold_count']['aggregation']??null)!=='current_state') {
+                    throw new RuntimeException('AI_EVIDENCE_INVALID');
+                }
+            }
+        }
         return $set;
     }
 

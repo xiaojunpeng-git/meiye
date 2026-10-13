@@ -137,7 +137,8 @@ final class RegisteredMetricReadServices
         // A count answer must not pay for a hidden 100-row member page and a
         // second value lookup. limit=0 is the server-owned count-only mode;
         // callers still cannot request an unbounded page.
-        $rightsOnly=count((array)($conditionSet['conditions']??[]))===1
+        $rightsOnly=!isset($conditionSet['result_metric_codes'])
+            &&count((array)($conditionSet['conditions']??[]))===1
             && ($conditionSet['conditions'][0]['metric_code']??null)==='member_remaining_project_amount';
         $maxLimit=$rightsOnly?self::rightsDetailLimit():self::AI_DETAIL_LIMIT;
         if ($limit < 0 || $limit > $maxLimit || ($conditionSet['subject'] ?? null) !== 'member'
@@ -151,6 +152,11 @@ final class RegisteredMetricReadServices
             $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
         if (isset($conditionSet['expression'])) {
+            return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+        }
+        if (isset($conditionSet['result_metric_codes'])) {
+            // A cohort total must read every qualifying member, not just the
+            // bounded screen page chosen by the SQL condition fast path.
             return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
         }
         foreach ($conditionSet['conditions'] as $condition) if (isset($condition['period'])) {
@@ -328,6 +334,18 @@ final class RegisteredMetricReadServices
     private function batchedMemberConditionMembers(string $tenantId,array $stores,array $range,array $set,int $limit): array
     {
         $conditions=$set['conditions'];$assetCodes=[];$factCodes=[];$conditionKeys=[];
+        $resultCodes=$set['result_metric_codes']??[];
+        if (!is_array($resultCodes)
+            ||(array_key_exists('result_metric_codes',$set) && $resultCodes===[])
+            ||count($resultCodes)>MetricDefinitionRegistry::MAX_CONDITIONS
+            ||count(array_unique($resultCodes))!==count($resultCodes)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        foreach ($resultCodes as $code) {
+            $definition=is_string($code)?MetricDefinitionRegistry::get($code):null;
+            if (!is_array($definition)
+                ||!in_array($definition['reader_strategy'],['member_current_assets','member_current_rights_amount'],true)
+                ||($definition['storage_unit']??null)!=='fen') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
+        $resultTotals=array_fill_keys($resultCodes,0);
         $periodScoped=false;
         foreach ($conditions as $condition) {
             $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
@@ -411,6 +429,7 @@ final class RegisteredMetricReadServices
                 :$memberQuery->whereIn('u.uid',$candidateIds)->select()->toArray();
             if (!$members && $candidateIds===null) break;
             $ids=[];
+            $qualifiedRows=[];
             foreach ($members as $member) {
                 $id=$this->integer($member['uid']??null);
                 if ($id<1||($candidateIds===null && $id<=$cursor)
@@ -464,17 +483,37 @@ final class RegisteredMetricReadServices
                     : ($set['relation']==='all'?!in_array(false,$matches,true):in_array(true,$matches,true));
                 if (!$qualified) continue;
                 ++$count;
-                if ($limit>0 && count($rows)<$limit) {
-                    $name=trim((string)($member['member_name']??''));
-                    if ($name==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
-                    $row=['member_id'=>$id,'member_name'=>$name,'metrics'=>$display];
-                    if ($periodScoped) $row['condition_values']=$conditionValues;
-                    $rows[]=$row;
+                // Count-only asset sums need IDs for the complete cohort,
+                // while ordinary counts and completed list previews do not
+                // need member labels or per-member presentation rows.
+                if ($limit===0) {
+                    if ($resultCodes!==[]) $qualifiedRows[$id]=[];
+                    continue;
                 }
+                if ($resultCodes===[] && count($rows)+count($qualifiedRows)>=$limit) continue;
+                $name=trim((string)($member['member_name']??''));
+                if ($name==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $row=['member_id'=>$id,'member_name'=>$name,'metrics'=>$display];
+                if ($periodScoped) $row['condition_values']=$conditionValues;
+                $qualifiedRows[$id]=$row;
             }
+            if ($resultCodes!==[] && $qualifiedRows!==[]) {
+                $extraCodes=array_values(array_diff($resultCodes,array_keys($assetCodes)));
+                $extra=$extraCodes===[]?[]:$assetReader->values($tenantId,$stores,array_keys($qualifiedRows),$extraCodes);
+                foreach ($qualifiedRows as $id=>&$row) foreach ($resultCodes as $code) {
+                    $value=$values[$id][$code]??$extra[$id][$code]??null;
+                    if (!is_int($value)||$value<0) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                    $resultTotals[$code]=$this->add($resultTotals[$code],$value);
+                    if ($limit>0) $row['metrics'][$code]=$value;
+                }
+                unset($row);
+            }
+            foreach ($qualifiedRows as $row) if ($limit>0 && count($rows)<$limit) $rows[]=$row;
         } while (($candidateIds===null?count($members):count($candidateIds))===100);
         if ($limit>=self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
-        return ['count'=>$count,'rows'=>$rows,'limit'=>$limit,'has_more'=>$count>count($rows)];
+        $result=['count'=>$count,'rows'=>$rows,'limit'=>$limit,'has_more'=>$count>count($rows)];
+        if ($resultCodes!==[]) $result['result_totals']=$resultTotals;
+        return $result;
     }
 
     /** The operator is admitted by the registered metric before evaluation. */

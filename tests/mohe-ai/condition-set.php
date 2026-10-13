@@ -152,6 +152,52 @@ csCheck(MetricSemanticCatalog::registeredNonOverlappingTermsInText(
     ['metric_code'=>'member_days_since_last_visit','term'=>'没有到店','ai_query_ready'=>true],
     ['metric_code'=>'member_total_assets','term'=>'总余额','ai_query_ready'=>true],
 ], 'nested balance wording and no-visit wording each retain one registered meaning');
+$cohortQuery=$memberQuery;
+$cohortQuery['metric_codes']=['sales_collected_amount','member_total_assets','member_account_balance'];
+$cohortQuery['aggregate_condition']['result_metric_codes']=['member_total_assets','member_account_balance'];
+$cohortQuery['condition_set']=(new AiConditionSetCompiler())->compile(
+    $cohortQuery['aggregate_condition'],['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_list'
+);
+$cohortCaps=$memberCapabilities;$cohortCaps['metric_codes']=$cohortQuery['metric_codes'];
+csCheck((new AiRegisteredPlanCompiler())->compile(['query'=>$cohortQuery,'output_format'=>'screen'],$cohortCaps)
+    ['query']['condition_set']['result_metric_codes']===['member_total_assets','member_account_balance']
+    &&$normalizeMetricQuery($views,$cohortQuery)['metric_codes']===$cohortQuery['metric_codes'],
+    'filtered member result metrics remain distinct registered outputs in signed plan and Reader');
+csReject(static function()use($cohortQuery):void {
+    $wrong=$cohortQuery['aggregate_condition'];
+    $wrong['result_metric_codes']=['sales_collected_amount'];
+    (new AiConditionSetCompiler())->compile($wrong,
+        ['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_list');
+},'AI_QUERY_SHAPE_NOT_READY');
+$cohortResult=['period'=>'current','metric_code'=>'sales_collected_amount','storage_unit'=>'count',
+    'object_kind'=>'member','condition_set'=>$cohortQuery['condition_set'],'count'=>2,
+    'result_totals'=>['member_total_assets'=>125000,'member_account_balance'=>80000],
+    'list_limit'=>100,'has_more'=>false,'rows'=>[
+        ['member_id'=>101,'member_name'=>'甲会员','metrics'=>[
+            'sales_collected_amount'=>2350000,'member_total_assets'=>75000,'member_account_balance'=>50000]],
+        ['member_id'=>102,'member_name'=>'乙会员','metrics'=>[
+            'sales_collected_amount'=>3000000,'member_total_assets'=>50000,'member_account_balance'=>30000]],
+    ]];
+$cohortEvidence=['query'=>$cohortQuery,'results'=>[$cohortResult]];
+$cohortAnswer=(new AiAnswerRenderer())->render($cohortEvidence);
+csCheck(strpos($cohortAnswer['summary'],'会员总资产合计1,250元')!==false
+    &&strpos($cohortAnswer['summary'],'会员账户余额合计800元')!==false
+    &&count($cohortAnswer['table']['rows']??[])===6,
+    'one cohort answer reports complete asset totals and per-member output columns');
+$cohortExport=MetricReadViewExportProvider::project($cohortEvidence);
+csCheck(count($cohortExport)===6 && in_array('会员总资产',array_column($cohortExport,'metric_name'),true),
+    'cohort list export retains extra registered asset values for each matching member');
+$cohortCount=$cohortQuery;$cohortCount['query_shape']='condition_count';
+$cohortCount['aggregate_condition']['result_form']='count';
+$cohortCountResult=$cohortResult;unset($cohortCountResult['rows'],$cohortCountResult['list_limit'],$cohortCountResult['has_more']);
+$cohortCountEvidence=['query'=>$cohortCount,'results'=>[$cohortCountResult]];
+csCheck(strpos((new AiAnswerRenderer())->render($cohortCountEvidence)['summary'],'会员总资产合计1,250元')!==false
+    &&count(MetricReadViewExportProvider::project($cohortCountEvidence))===3,
+    'count answer and export include exact full-cohort totals, not list-page sums');
+csReject(static function()use($cohortCountEvidence):void {
+    $missing=$cohortCountEvidence;unset($missing['results'][0]['result_totals']);
+    (new AiAnswerRenderer())->render($missing);
+},'AI_EVIDENCE_INVALID');
 $boundedCodes=[];$boundedConditions=[];
 for ($index=1;$index<=\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS;$index++) {
     $code='fixture_metric_'.$index;
@@ -953,6 +999,46 @@ csCheck($canonicalExactBound['metric_codes']===['staff_sales_yeji','staff_servic
     &&$canonicalExactBound['periods']===[['kind'=>'relative_days','days'=>30,'end_offset_days'=>0]]
     &&$canonicalExactBound['unresolved_fragments']===[],
     'multiple exact registered condition terms recover a complete one-to-one binding without dropping a predicate');
+$cohortSafe=$safe;
+$cohortSafe['question']='余额超过500元的会员有多少人，总资产合计多少元？';
+$cohortSafe['evidence_messages'][0]['text']=$cohortSafe['question'];
+$cohortSemantic=AiIntentUnderstandingContract::normalize([
+    'goal'=>'查询余额条件会员数量和总资产合计','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'余额超过500元的会员人数和总资产合计',
+        'fields'=>['metric_codes','object_kind','operation','aggregate_condition'],
+        'values'=>['object_kind'=>'member','operation'=>'condition_count',
+            'aggregate_condition'=>['subject'=>'member','relation'=>'all','result_form'=>'count',
+                'conditions'=>[['metric_term'=>'余额','operator'=>'gt','quantity'=>'500','unit'=>'yuan']],
+                'result_metric_terms'=>['总资产']]],
+        'evidence'=>[['message_id'=>'current','quote'=>$cohortSafe['question']]],
+    ]],
+],$cohortSafe);
+csCheck($cohortSemantic['requirements'][0]['values']['metric_terms']===['余额','总资产'],
+    'understanding keeps the cohort filter and requested return metric separate');
+$cohortCandidate=$binding;
+$cohortCandidate['metric_codes']=[];$cohortCandidate['aggregate_condition']=null;
+$cohortCandidate['periods']=[];$cohortCandidate['requirement_bindings'][0]['metric_codes']=[];
+$cohortCandidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+    $cohortCandidate,$cohortSemantic,$cohortSafe,['member_account_balance','member_total_assets']
+);
+$cohortBound=AiIntentResultContract::normalize($cohortCandidate,
+    ['member_account_balance','member_total_assets'],[],$cohortSafe,$cohortSemantic);
+csCheck($cohortBound['metric_codes']===['member_account_balance','member_total_assets']
+    &&($cohortBound['aggregate_condition']['result_metric_codes']??null)===['member_total_assets'],
+    'binding maps both explicit metric terms without turning the returned asset into a predicate');
+csReject(static function()use($cohortCandidate,$cohortSafe,$cohortSemantic):void {
+    $wrong=$cohortCandidate;
+    $wrong['aggregate_condition']['result_metric_codes']=['member_account_balance'];
+    $wrong['metric_codes']=['member_account_balance'];
+    AiIntentResultContract::normalize($wrong,
+        ['member_account_balance','member_total_assets'],[],$cohortSafe,$cohortSemantic);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
+csReject(static function()use($cohortCandidate,$cohortSafe,$cohortSemantic):void {
+    $duplicate=$cohortCandidate;
+    $duplicate['aggregate_condition']['result_metric_codes']=['member_total_assets','member_total_assets'];
+    AiIntentResultContract::normalize($duplicate,
+        ['member_account_balance','member_total_assets'],[],$cohortSafe,$cohortSemantic);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
 $rangeSafe=$safe;
 $rangeSafe['question']='最近30天销售业绩在5万元到6万元之间的员工有哪些？';
 $rangeSafe['evidence_messages'][0]['text']=$rangeSafe['question'];

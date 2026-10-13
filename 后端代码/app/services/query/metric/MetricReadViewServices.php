@@ -495,6 +495,11 @@ final class MetricReadViewServices
             }
             $result=['period'=>'current','metric_code'=>$conditionSet['conditions'][0]['metric_code'],'storage_unit'=>'count','object_kind'=>'member',
                 'condition_set'=>$conditionSet,'count'=>$population['count']];
+            if (isset($conditionSet['result_metric_codes'])) {
+                // Totals come from the same complete authorized population
+                // that supplied count, never from its bounded display rows.
+                $result['result_totals']=$population['result_totals']??null;
+            }
             if ($sourceFilter) $result['source_label']=(new FirstCourseSourceCatalog())->label(
                 $filters['source_primary_id'],$filters['source_secondary_id']??0);
             if ($shape==='condition_list') {
@@ -800,14 +805,19 @@ final class MetricReadViewServices
         } elseif (!$conditionPopulation && $query['aggregate_condition'] !== null) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         if ($conditionPopulation) {
             $set=$query['condition_set'];$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
-            $hasExpression=$keys===['conditions','expression','relation','subject'];
+            $hasExpression=in_array('expression',$keys,true);
+            $hasResults=in_array('result_metric_codes',$keys,true);
+            $expectedKeys=['conditions','relation','subject'];
+            if ($hasExpression) $expectedKeys[]='expression';
+            if ($hasResults) $expectedKeys[]='result_metric_codes';
+            sort($expectedKeys,SORT_STRING);
             $conditionSubject=$set['subject']??null;
             $expectedFilters=$conditionSubject==='person'
                 ? ['object_kind'=>'person','selection_ref'=>'cohort:active_personnel']
                 : ['object_kind'=>$conditionSubject];
             if (!is_string($conditionSubject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$conditionSubject)
                 ||(!$sourceFilter && $query['business_filters']!==$expectedFilters)
-                ||(!$hasExpression && $keys!==['conditions','relation','subject'])||$conditionSubject!==$objectKind
+                ||$keys!==$expectedKeys||$conditionSubject!==$objectKind
                 ||!in_array($set['relation']??null,['all','any'],true)||!is_array($set['conditions']??null)
                 ||count($set['conditions'])<1||count($set['conditions'])>MetricDefinitionRegistry::MAX_CONDITIONS||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             if ($hasExpression && (!in_array($conditionSubject,['member','person','store'],true)
@@ -827,9 +837,29 @@ final class MetricReadViewServices
             }
             // The query signs each selected metric once; the condition list
             // may carry multiple nonidentical thresholds for that metric.
+            if ($hasResults) {
+                if ($conditionSubject!=='member'||!is_array($set['result_metric_codes'])
+                    ||$set['result_metric_codes']===[]
+                    ||count($set['result_metric_codes'])>MetricDefinitionRegistry::MAX_CONDITIONS) {
+                    $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+                }
+                foreach ($set['result_metric_codes'] as $code) {
+                    $capability=is_string($code)?(self::metricCapabilities()[$code]??null):null;
+                    if (!is_array($capability)||($capability['threshold_count']['aggregation']??null)!=='current_state'
+                        ||($capability['storage_unit']??null)!=='fen') {
+                        $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+                    }
+                }
+                $conditionMetrics=array_merge($conditionMetrics,$set['result_metric_codes']);
+            }
             if ($query['metric_codes']!==array_values(array_unique($conditionMetrics))) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             $binding=$query['aggregate_condition'];$bindingKeys=is_array($binding)?array_keys($binding):[];sort($bindingKeys,SORT_STRING);
-            if ($bindingKeys!==($hasExpression?['conditions','expression','relation','result_form','subject']:['conditions','relation','result_form','subject'])
+            $expectedBinding=['conditions','relation','result_form','subject'];
+            if ($hasExpression) $expectedBinding[]='expression';
+            if ($hasResults) $expectedBinding[]='result_metric_codes';
+            sort($expectedBinding,SORT_STRING);
+            if ($bindingKeys!==$expectedBinding
+                ||($binding['result_metric_codes']??null)!==($set['result_metric_codes']??null)
                 ||($binding['expression']??null)!==($set['expression']??null)
                 ||($binding['subject']??null)!==$conditionSubject
                 ||($binding['relation']??null)!==$set['relation']
