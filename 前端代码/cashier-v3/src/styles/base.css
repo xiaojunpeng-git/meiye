@@ -1337,6 +1337,13 @@ button:disabled {
   }
 }
 
+/* 集团看板嵌在平台 iframe 中，不能继承收银工作台的最小画布宽度，否则底部会出现仅数像素行程的假滚动条。 */
+html.group-dashboard-document,
+html.group-dashboard-document body,
+html.group-dashboard-document #app {
+  min-width: 0;
+}
+
 .button {
   display: inline-flex;
   align-items: center;

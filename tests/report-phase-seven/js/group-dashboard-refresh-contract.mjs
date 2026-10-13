@@ -22,5 +22,7 @@ assert(source.includes('v-model="scopePicker.selectedStoreIds"'), 'permission sc
 assert(source.includes('store_ids: scopePicker.value.selectedStoreIds.join'), 'selected stores are passed back to the dashboard query')
 assert(source.includes('function changeScope({ storeIds, label })'), 'permission picker changes reload the dashboard within scope')
 assert(source.includes('--metric-consumption:#b7791f'), 'consumption trend uses the consumption card color')
+assert(!source.includes('>目标管理</button>') && !source.includes('>管理目标</button>'), 'dashboard does not expose target management actions')
+assert(source.includes('dashboard-drilldown__conditions') && source.includes('dashboard-drilldown__table'), 'drilldown separates filters from a labeled detail table')
 
 console.log('group dashboard refresh contract: PASS')

@@ -23,10 +23,20 @@ stabilityAssert(
     'aggregate status exposes a stable code, lag and check timestamp'
 );
 stabilityAssert(
-    str_contains($dashboard, "'status_code' => 'not_applicable'")
-    && str_contains($dashboard, "'scope' => 'category_filtered'")
-    && str_contains($dashboard, "'aggregation_health' => " . '$aggregationHealth'),
-    'dashboard distinguishes category-filtered reads from stale unfiltered aggregates'
+    str_contains($aggregate, "METRIC_VERSION = 'registered-actual-consume-v1'")
+    && str_contains($aggregate, "'actual_performance' => 'actual_performance_cents'")
+    && str_contains($aggregate, "'consume_amount' => 'consumption_performance_cents'")
+    && str_contains($aggregate, "'metric_version' => self::METRIC_VERSION")
+    && !str_contains($aggregate, 'actual_performance_recorded')
+    && !str_contains($aggregate, 'consumption_performance_recorded'),
+    'daily aggregate rebuild follows registered metrics and marks its formula version'
+);
+stabilityAssert(
+    str_contains($dashboard, "'status_code' => " . '$categoryIds === []' . " ? 'realtime' : 'not_applicable'")
+    && str_contains($dashboard, "'aggregation_health' => " . '$aggregationHealth')
+    && !str_contains($dashboard, 'aggregateMatchesFacts(')
+    && !str_contains($dashboard, 'dailyAggregate->status('),
+    'dashboard reads current registered facts without per-request legacy aggregate checks'
 );
 stabilityAssert(
     str_contains($command, "fopen(" . '$path' . ", 'c')")

@@ -10,6 +10,7 @@ import Hourglass from '@lucide/vue/dist/esm/icons/hourglass.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import TrendingDown from '@lucide/vue/dist/esm/icons/trending-down.mjs'
 import TrendingUp from '@lucide/vue/dist/esm/icons/trending-up.mjs'
+import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import {
   queryGroupManagementDashboard,
@@ -217,7 +218,8 @@ async function showDrilldown(drill, label = '') {
   if (!drill?.metric_code) return
   const scope = dashboard.value?.scope || {}
   drilldown.value = {
-    label: label || cards.value.find((item) => item.metric_code === drill.metric_code)?.name || '经营明细',
+    title: `${label || cards.value.find((item) => item.metric_code === drill.metric_code)?.name || '经营'}明细`,
+    // 筛选条件只展示已传给后端的范围，避免弹窗说明与实际下钻口径不一致。
     conditions: {
       开始日期: scope.range?.start || currentQuery().start_date,
       截止日期: scope.range?.end || currentQuery().end_date,
@@ -242,7 +244,8 @@ async function showDrilldown(drill, label = '') {
 function showConditions(label, conditions = {}, explanation = '') {
   const scope = dashboard.value?.scope || {}
   drilldown.value = {
-    label,
+    title: label,
+    conditionOnly: true,
     conditions: {
       开始日期: scope.range?.start || currentQuery().start_date,
       截止日期: scope.range?.end || currentQuery().end_date,
@@ -376,7 +379,7 @@ onBeforeUnmount(() => {
       <label v-if="period === 'custom'" class="dashboard-date">从 <input v-model="customStart" type="date" /></label>
       <label v-if="period === 'custom'" class="dashboard-date">至 <input v-model="customEnd" type="date" /></label>
       <label class="dashboard-category-label">商品分类<select v-model.number="selectedCategoryId"><option v-for="item in categoryOptions" :key="item.value" :value="Number(item.value)">{{ item.label }}</option></select></label>
-      <div class="group-dashboard__actions"><button type="button" class="button button--primary" :disabled="loading" @click="loadDashboard">查询</button><button type="button" class="button button--secondary" :disabled="loading" @click="loadDashboard"><RefreshCw :size="16" aria-hidden="true" />刷新</button><button type="button" class="button button--secondary" @click="openTargetDrawer"><Goal :size="16" aria-hidden="true" />目标管理</button><button type="button" class="button button--secondary" @click="toggleFullscreen"><Expand :size="16" aria-hidden="true" />{{ presentationMode ? '退出全屏' : '全屏' }}</button></div>
+      <div class="group-dashboard__actions"><button type="button" class="button button--primary" :disabled="loading" @click="loadDashboard">查询</button><button type="button" class="button button--secondary" :disabled="loading" @click="loadDashboard"><RefreshCw :size="16" aria-hidden="true" />刷新</button><button type="button" class="button button--secondary" @click="toggleFullscreen"><Expand :size="16" aria-hidden="true" />{{ presentationMode ? '退出全屏' : '全屏' }}</button></div>
     </section>
 
     <p v-if="errorMessage" class="dashboard-state dashboard-state--error">{{ errorMessage }}</p><p v-else-if="loading" class="dashboard-state">正在加载集团管理看板...</p>
@@ -389,19 +392,40 @@ onBeforeUnmount(() => {
 
       <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>今日客情</h2><span>按实际启用来源动态展示，只有来源 A 显示活客数</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('sources')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="dashboard-source-grid"><button v-for="source in sources" :key="source.source_id || source.name" type="button" class="dashboard-source-card" @click="showConditions('今日客情统计条件', { 来源: source.name }, dashboard?.sources?.source_explanation)"><strong>{{ source.name }}</strong><span class="source-metric source-metric--visits">进店数 <b>{{ source.visit_count ?? '-' }}</b></span><span v-if="String(source.source_code).toUpperCase() === 'A'" class="source-metric source-metric--active">活客数 <b>{{ source.active_customer_count ?? '-' }}</b></span><span class="source-metric source-metric--deals">成交数 <b>{{ source.deal_count ?? '-' }}</b></span><span class="source-metric source-metric--amount">成交金额 <b>{{ formatMoney(source.deal_amount_cents) }}</b></span></button></div><p v-if="!sources.length" class="dashboard-empty">当前没有启用的业务来源。</p></section>
 
-      <section class="group-dashboard__target-progress-grid" aria-label="本月与本年目标进度"><article v-for="card in targetProgressCards" :key="card.key" class="dashboard-target-progress-panel"><header><div><h2>{{ card.title }}</h2><span>{{ card.subtitle }}</span></div><button type="button" class="dashboard-link" @click="openTargetDrawer">管理目标</button></header><div class="dashboard-target-progress-panel__body"><div class="dashboard-target-progress-panel__metrics"><article v-for="metric in card.metrics" :key="metric.key" :class="`goal-summary-card goal-summary-card--${metric.tone}`"><component :is="metric.icon" :size="17" aria-hidden="true" /><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></article></div><div class="dashboard-target-donut" :style="{ '--target-rate': Math.max(0, Math.min(Number(card.rate) || 0, 100)) }"><div><strong>{{ formatRate(card.rate) }}</strong><span>达成率</span></div></div></div></article></section>
+      <section class="group-dashboard__target-progress-grid" aria-label="本月与本年目标进度"><article v-for="card in targetProgressCards" :key="card.key" class="dashboard-target-progress-panel"><header><div><h2>{{ card.title }}</h2><span>{{ card.subtitle }}</span></div><button type="button" class="dashboard-link" @click="openTargetDrawer">查看明细</button></header><div class="dashboard-target-progress-panel__body"><div class="dashboard-target-progress-panel__metrics"><article v-for="metric in card.metrics" :key="metric.key" :class="`goal-summary-card goal-summary-card--${metric.tone}`"><component :is="metric.icon" :size="17" aria-hidden="true" /><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></article></div><div class="dashboard-target-donut" :style="{ '--target-rate': Math.max(0, Math.min(Number(card.rate) || 0, 100)) }"><div><strong>{{ formatRate(card.rate) }}</strong><span>达成率</span></div></div></div></article></section>
 
       <section class="group-dashboard__target-rank-grid"><article v-for="rank in targetRankings" :key="rank.key" class="dashboard-panel"><header><div><h2>{{ rank.title || '-' }}</h2><span>目标 / 实际业绩 / 完成率</span></div><button type="button" class="dashboard-link" @click="showConditions(rank.title || '组织目标排行统计条件', {}, dashboard?.rankings?.source_explanation)">查看条件</button></header><div class="dashboard-target-rank-list"><button v-for="(row, index) in rank.records" :key="row.name" type="button" @click="showConditions(rank.title || '组织目标排行统计条件', { 组织: row.name }, dashboard?.rankings?.source_explanation)"><em>{{ index + 1 }}</em><span>{{ row.name }}</span><small>{{ formatMoney(row.target_amount_cents) }} / {{ formatMoney(row.actual_performance_cents) }}</small><strong :class="{ 'is-low': Number(row.achievement_rate) < 80 }">{{ formatRate(row.achievement_rate) }}</strong><i class="dashboard-target-rank__progress" :class="{ 'is-low': Number(row.achievement_rate) < 80 }"><b :style="{ width: `${Math.min(Math.max(Number(row.achievement_rate) || 0, 0), 100)}%` }"></b></i></button><p v-if="!rank.records.length" class="dashboard-empty">暂无排行数据。</p></div></article></section>
 
     </template>
 
-    <div v-if="drilldown" class="dashboard-modal" role="dialog" aria-modal="true" aria-label="经营明细"><section class="dashboard-modal__card"><header><div><strong>{{ drilldown.label }}明细</strong><p v-for="(value, key) in drilldown.conditions" :key="key">{{ key }}：{{ value }}</p></div><button type="button" aria-label="关闭明细" @click="drilldown = null">×</button></header><p v-if="drilldownLoading" class="dashboard-empty">正在读取明细...</p><p v-else-if="drilldownError" class="dashboard-empty">{{ drilldownError }}</p><div v-else class="dashboard-drilldown-list"><p>{{ drilldown.explanation }}</p><article v-for="(row, index) in drilldown.records" :key="row.fact_id || row.id || index"><strong>{{ row.store_name || row.store_name_snapshot || row.item_name || row.project_name_snapshot || '业务明细' }}</strong><span>{{ row.business_date || '-' }}</span><b>{{ formatMoney(row.amount_cents) }}</b></article><p v-if="!drilldown.records.length" class="dashboard-empty">当前条件没有可解释的明细。</p></div></section></div>
+    <div v-if="drilldown" class="dashboard-modal" role="dialog" aria-modal="true" :aria-label="drilldown.title">
+      <section class="dashboard-modal__card dashboard-modal__card--drilldown">
+        <header class="dashboard-drilldown__header">
+          <strong>{{ drilldown.title }}</strong>
+          <button type="button" aria-label="关闭明细" @click="drilldown = null"><X :size="18" aria-hidden="true" /></button>
+        </header>
+        <div class="dashboard-drilldown__body">
+          <dl class="dashboard-drilldown__conditions">
+            <div v-for="(value, key) in drilldown.conditions" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
+          </dl>
+          <p v-if="drilldown.explanation" class="dashboard-drilldown__explanation">{{ drilldown.explanation }}</p>
+          <p v-if="drilldownLoading" class="dashboard-drilldown__state">正在读取明细...</p>
+          <p v-else-if="drilldownError" class="dashboard-drilldown__state dashboard-drilldown__state--error">{{ drilldownError }}</p>
+          <div v-else-if="!drilldown.conditionOnly && drilldown.records.length" class="dashboard-drilldown__table-scroll">
+            <table class="dashboard-drilldown__table"><thead><tr><th>业务日期</th><th>门店</th><th>商品或项目</th><th>金额</th></tr></thead>
+              <tbody><tr v-for="(row, index) in drilldown.records" :key="row.fact_id || row.id || index"><td>{{ row.business_date || '-' }}</td><td>{{ row.store_name || row.store_name_snapshot || '-' }}</td><td>{{ row.item_name || row.project_name_snapshot || '-' }}</td><td>{{ formatMoney(row.amount_cents) }}</td></tr></tbody>
+            </table>
+          </div>
+          <p v-else-if="!drilldown.conditionOnly" class="dashboard-drilldown__state">当前条件暂无明细数据。</p>
+        </div>
+      </section>
+    </div>
     <div v-if="fieldGuideOpen" class="dashboard-modal" role="dialog" aria-modal="true" aria-label="列名取值来源"><section class="dashboard-modal__card"><header><div><strong>{{ fieldGuideFocus ? '列名取值来源' : '集团管理看板列名取值来源' }}</strong><p>以下业务解释由服务端口径元数据返回。</p></div><button type="button" aria-label="关闭" @click="fieldGuideOpen = false">×</button></header><div class="dashboard-field-guide"><article v-for="([key, value]) in Object.entries(fieldExplanations).filter(([key]) => !fieldGuideFocus || key === fieldGuideFocus)" :key="key"><strong>{{ key }}</strong><p>{{ value }}</p></article><p v-if="!Object.keys(fieldExplanations).length" class="dashboard-empty">暂无列名取值来源。</p></div></section></div>
 
-    <aside v-if="targetDrawerOpen" class="target-drawer" aria-label="目标管理">
+    <aside v-if="targetDrawerOpen" class="target-drawer" aria-label="门店月度目标明细">
       <div class="target-drawer__backdrop" @click="targetDrawerOpen = false"></div>
       <section class="target-drawer__panel">
-        <header><div><h2>目标管理</h2><p>目标取自已生效且关联集团看板的目标方案，此处只读。</p></div><button type="button" aria-label="关闭目标管理" @click="targetDrawerOpen = false">×</button></header>
+        <header><div><h2>门店月度目标明细</h2><p>目标取自已生效且关联集团看板的目标方案，此处只读。</p></div><button type="button" aria-label="关闭目标明细" @click="targetDrawerOpen = false">×</button></header>
         <div class="target-drawer__month"><label>目标年度<select v-model="selectedTargetYear"><option v-for="year in [new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1]" :key="year" :value="String(year)">{{ year }}</option></select></label><span>{{ targets?.source_explanation || '正在读取生效方案。' }}</span></div>
         <div class="target-drawer__content"><section><h3>门店月度目标</h3>
           <p>仅展示方案中设置的全店实际业绩目标；未设置的月份显示“-”，不按零处理。</p>
@@ -413,7 +437,7 @@ onBeforeUnmount(() => {
             <p v-if="!targetRows.length" class="dashboard-empty">当前权限范围没有目标门店。</p>
           </div>
         </section></div>
-        <footer><span>设置目标请到平台端“数据 → 目标管理 → 目标方案”。</span></footer>
+        <footer><span>数据取自当前已生效的目标方案，此处仅供查看。</span></footer>
       </section>
     </aside>
   </main>
@@ -504,4 +528,29 @@ onBeforeUnmount(() => {
 
 /* The Vue 3 shell disables body scrolling; the embedded dashboard owns its vertical scroll. */
 .group-dashboard{height:100vh;min-height:100vh;overflow-x:hidden;overflow-y:auto}
+
+.dashboard-modal__card--drilldown{display:flex;width:min(880px,100%);max-height:min(720px,calc(100vh - 40px));flex-direction:column;overflow:hidden}
+.dashboard-drilldown__header{align-items:center;flex:0 0 auto;padding:16px 20px}
+.dashboard-drilldown__header strong{color:#263b50;font-size:16px}
+.dashboard-drilldown__header button{display:grid;width:28px;height:28px;place-items:center;border-radius:4px}
+.dashboard-drilldown__header button:hover{background:#eef3f8}
+.dashboard-drilldown__body{min-height:0;overflow-y:auto;padding:18px 20px 20px}
+.dashboard-drilldown__conditions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px}
+.dashboard-drilldown__conditions>div{min-width:0;border:1px solid #e4eaf0;border-radius:6px;padding:9px 11px;background:#f7f9fc}
+.dashboard-drilldown__conditions dt{color:#78899a;font-size:11px}
+.dashboard-drilldown__conditions dd{overflow-wrap:anywhere;margin:4px 0 0;color:#30475d;font-size:13px;font-weight:600}
+.dashboard-drilldown__explanation{margin:0 0 16px!important;border-left:3px solid #82a7c7;padding:8px 12px;background:#f5f8fb;color:#526a80;font-size:12px;line-height:1.6}
+.dashboard-drilldown__table-scroll{max-height:360px;overflow:auto;border:1px solid #e4eaf0;border-radius:6px}
+.dashboard-drilldown__table{width:100%;border-collapse:collapse;font-size:12px;text-align:left}
+.dashboard-drilldown__table th{position:sticky;top:0;z-index:1;background:#f3f6fa;color:#61758a;font-weight:600}
+.dashboard-drilldown__table th,.dashboard-drilldown__table td{border-bottom:1px solid #edf1f5;padding:10px 12px}
+.dashboard-drilldown__table th:first-child,.dashboard-drilldown__table td:first-child{min-width:110px;white-space:nowrap}
+.dashboard-drilldown__table th:nth-child(2),.dashboard-drilldown__table td:nth-child(2){min-width:150px}
+.dashboard-drilldown__table th:nth-child(3),.dashboard-drilldown__table td:nth-child(3){min-width:190px}
+.dashboard-drilldown__table th:last-child,.dashboard-drilldown__table td:last-child{text-align:right;white-space:nowrap}
+.dashboard-drilldown__table td:last-child{color:#1f5f8b;font-weight:700}
+.dashboard-drilldown__table tbody tr:last-child td{border-bottom:0}
+.dashboard-drilldown__state{padding:28px 12px;color:#72859a;text-align:center;font-size:13px}
+.dashboard-drilldown__state--error{color:#b44b4b}
+@media(max-width:700px){.dashboard-drilldown__conditions{grid-template-columns:1fr}.dashboard-drilldown__body{padding:14px}}
 </style>

@@ -10,21 +10,14 @@ use think\facade\Db;
  * Rebuildable daily read model for the group management dashboard.
  *
  * This is deliberately not a business source of truth. It only summarizes
- * effective immutable performance facts and can be deleted and regenerated
- * for an arbitrary tenant/store/date range without changing orders, facts or
- * dashboard targets.
+ * registered actual-performance and consumption metrics. It can be deleted
+ * and regenerated without changing orders, facts or dashboard targets.
  */
 final class GroupManagementDashboardDailyAggregateServices
 {
     public const TABLE = 'cashier_v3_group_dashboard_daily_aggregate';
-    public const FACT_TABLE = 'cashier_v3_performance_fact';
-    public const AGGREGATE_SCOPE = '仅无商品分类筛选的集团总计、趋势和组织总计；分类筛选不得使用本读模型。';
-
-    /** @var array<int,string> */
-    private const PERFORMANCE_TYPES = [
-        'actual_performance_recorded',
-        'consumption_performance_recorded',
-    ];
+    public const METRIC_VERSION = 'registered-actual-consume-v1';
+    public const AGGREGATE_SCOPE = '仅供无分类筛选的离线对账；完成可靠失效机制前不得用于看板展示。';
 
     /**
      * Replaces only this read-model's rows in the requested range.
@@ -41,9 +34,9 @@ final class GroupManagementDashboardDailyAggregateServices
 
         Db::startTrans();
         try {
-            // Keep the source snapshot and replacement in one transaction. A
-            // fact committed afterwards is intentionally reported as stale by
-            // status() and picked up by the next bounded rebuild.
+            // Read registered metrics and replace their disposable projection
+            // in one transaction. Backdated changes are checked by value in
+            // status(); this is not an online invalidation guarantee.
             $sourceRows = $this->sourceGroups($tenantId, $stores, $range);
             $delete = Db::name(self::TABLE)
                 ->where('tenant_id', $tenantId)
@@ -61,6 +54,9 @@ final class GroupManagementDashboardDailyAggregateServices
                     'business_date' => (string)$source['business_date'],
                     'actual_performance_cents' => (int)$source['actual_performance_cents'],
                     'consumption_performance_cents' => (int)$source['consumption_performance_cents'],
+                    'metric_version' => self::METRIC_VERSION,
+                    // Legacy columns remain for table compatibility; neither
+                    // is a valid watermark for derived registered metrics.
                     'source_fact_count' => (int)$source['source_fact_count'],
                     'source_max_recorded_at' => (int)$source['source_max_recorded_at'],
                     'created_at' => $now,
@@ -125,14 +121,14 @@ final class GroupManagementDashboardDailyAggregateServices
         if ($stores !== []) {
             $query->whereIn('store_id', $stores);
         }
-        return $query->field('store_id,business_date,actual_performance_cents,consumption_performance_cents,source_fact_count,source_max_recorded_at,updated_at')
+        return $query->where('metric_version', self::METRIC_VERSION)
+            ->field('store_id,business_date,actual_performance_cents,consumption_performance_cents,metric_version,source_fact_count,source_max_recorded_at,updated_at')
             ->order('business_date', 'asc')->order('store_id', 'asc')->select()->toArray();
     }
 
     /**
-     * Compare every source fact group to its corresponding read-model row.
-     * A max timestamp alone is not enough because a late fact can share a
-     * second with an existing row, so the fact count is compared too.
+     * Compare registered amounts and metric version for every store/day.
+     * This explicit diagnostic is expensive and is never run on page load.
      *
      * @param array<int,int|string> $storeIds
      * @return array<string,int|bool|string>
@@ -161,8 +157,7 @@ final class GroupManagementDashboardDailyAggregateServices
             $key = $this->groupKey((int)$source['store_id'], (string)$source['business_date']);
             $aggregate = $aggregateByKey[$key] ?? null;
             if ($aggregate === null
-                || (int)$aggregate['source_fact_count'] !== (int)$source['source_fact_count']
-                || (int)$aggregate['source_max_recorded_at'] < (int)$source['source_max_recorded_at']
+                || (string)$aggregate['metric_version'] !== self::METRIC_VERSION
                 || (int)$aggregate['actual_performance_cents'] !== (int)$source['actual_performance_cents']
                 || (int)$aggregate['consumption_performance_cents'] !== (int)$source['consumption_performance_cents']) {
                 $stale++;
@@ -192,40 +187,38 @@ final class GroupManagementDashboardDailyAggregateServices
             'lag_seconds' => $lagSeconds,
             'checked_at' => $checkedAt,
             'aggregate_scope' => self::AGGREGATE_SCOPE,
-            'status_explanation' => '按门店和业务日期比对有效实际业绩、消耗业绩事实的条数、最大系统写入时间和净额；完全一致才视为日聚合已追平。',
+            'status_explanation' => '按门店和业务日期比对统一指标的实际业绩、消耗业绩净额及口径版本；仅代表本次离线检查一致，不保证随后没有回溯变更。',
         ];
     }
 
     /** @return array<int,array<string,mixed>> */
     private function sourceGroups(string $tenantId, array $stores, array $range): array
     {
-        $query = Db::name(self::FACT_TABLE)->alias('p')
-            ->where('p.tenant_id', $tenantId)
-            ->where('p.status', 'effective')
-            ->whereIn('p.performance_type', self::PERFORMANCE_TYPES)
-            ->whereBetween('p.business_date', [$range['start'], $range['end']]);
-        if ($stores !== []) {
-            $query->whereIn('p.store_id', $stores);
+        if ($stores === []) {
+            $stores = array_map('intval', Db::name('system_store')->column('id'));
         }
-        $normal = new StoreReportNormalDataScopeServices();
-        $normal->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        $normal->excludeVoidedRechargeOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        $normal->excludeVoidedSupplementPaymentFacts($query, 'p.tenant_id', 'p.store_id', 'p.order_id');
-        // Service voids affect consumption only; they must not hide an otherwise
-        // valid sales performance fact from the same checkout.
-        $query->where(function ($population) use ($normal): void {
-            $population->where('p.performance_type', 'actual_performance_recorded')
-                ->whereOr(function ($services) use ($normal): void {
-                    $services->where('p.performance_type', 'consumption_performance_recorded');
-                    $normal->excludeVoidedSalesOrderServices($services, 'p');
-                });
-        });
-        return $query->fieldRaw(
-            "store_id,business_date,"
-            . "COALESCE(SUM(CASE WHEN performance_type='actual_performance_recorded' THEN amount_cents ELSE 0 END),0) actual_performance_cents,"
-            . "COALESCE(SUM(CASE WHEN performance_type='consumption_performance_recorded' THEN amount_cents ELSE 0 END),0) consumption_performance_cents,"
-            . 'COUNT(*) source_fact_count,MAX(recorded_at) source_max_recorded_at'
-        )->group('store_id,business_date')->order('business_date', 'asc')->order('store_id', 'asc')->select()->toArray();
+        if ($stores === []) return [];
+        $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+        $groups = [];
+        // Actual performance is registered cash minus refund; consumption is
+        // the completed-service amount. Never infer either from retired fact types.
+        foreach (['actual_performance' => 'actual_performance_cents', 'consume_amount' => 'consumption_performance_cents'] as $metric => $column) {
+            foreach ($reader->dailyStoreTotals($metric, $tenantId, $stores, $range) as $point) {
+                $storeId = (int)$point['store_id'];
+                $day = (string)$point['business_date'];
+                $key = $this->groupKey($storeId, $day);
+                if (!isset($groups[$key])) {
+                    $groups[$key] = ['store_id' => $storeId, 'business_date' => $day,
+                        'actual_performance_cents' => 0, 'consumption_performance_cents' => 0,
+                        'source_fact_count' => 0, 'source_max_recorded_at' => 0];
+                }
+                $groups[$key][$column] = (int)$point['amount_cents'];
+            }
+        }
+        $rows = array_values($groups);
+        usort($rows, static fn(array $a, array $b): int => strcmp($a['business_date'], $b['business_date'])
+            ?: $a['store_id'] <=> $b['store_id']);
+        return $rows;
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -237,7 +230,7 @@ final class GroupManagementDashboardDailyAggregateServices
         if ($stores !== []) {
             $query->whereIn('store_id', $stores);
         }
-        return $query->field('store_id,business_date,actual_performance_cents,consumption_performance_cents,source_fact_count,source_max_recorded_at,updated_at')
+        return $query->field('store_id,business_date,actual_performance_cents,consumption_performance_cents,metric_version,source_fact_count,source_max_recorded_at,updated_at')
             ->select()->toArray();
     }
 

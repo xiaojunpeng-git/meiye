@@ -165,19 +165,33 @@ final class TargetSchemeReportServices
             $yearTargets[$storeId] = ($yearTargets[$storeId] ?? 0) + (int)$line['target_value'];
             if ($month === $current) $monthTargets[$storeId] = (int)$line['target_value'];
         }
-        $tenant = (string)($context['tenant_id'] ?? '0');
-        $monthActual = 0; $yearActual = 0;
-        foreach ($byMonth as $month => $stores) {
-            if ($month > $current) continue;
-            $start = $month . '-01';
-            $end = $month === $current ? $asOfDate : date('Y-m-t', strtotime($start));
-            if ($end < $start) continue;
-            $value = $this->metrics->summary('actual_performance', $tenant, array_values(array_unique($stores)), ['start' => $start, 'end' => $end]);
-            $yearActual += $value;
-            if ($month === $current) $monthActual = $value;
+        $monthActual = 0; $yearActual = 0; $monthStoreActuals = [];
+        $eligible = array_filter($byMonth, static fn($stores, $month) => $month <= $current, ARRAY_FILTER_USE_BOTH);
+        if ($eligible) {
+            $storeSets = []; $allStores = [];
+            foreach ($eligible as $month => $stores) {
+                $storeSets[$month] = array_fill_keys(array_unique(array_map('intval', $stores)), true);
+                foreach (array_keys($storeSets[$month]) as $storeId) $allStores[$storeId] = true;
+            }
+            // The registered Reader owns the cash-minus-refund formula. One
+            // store/day population feeds both goal totals and current-month
+            // rankings, while excluding stores without a target in that month.
+            $range = ['start' => min(array_keys($eligible)) . '-01', 'end' => $asOfDate];
+            foreach ($this->metrics->dailyStoreTotals('actual_performance', (string)($context['tenant_id'] ?? '0'), array_keys($allStores), $range) as $row) {
+                $month = substr((string)$row['business_date'], 0, 7);
+                $storeId = (int)$row['store_id'];
+                if (!isset($storeSets[$month][$storeId])) continue;
+                $value = (int)$row['amount_cents'];
+                $yearActual += $value;
+                if ($month === $current) {
+                    $monthActual += $value;
+                    $monthStoreActuals[$storeId] = ($monthStoreActuals[$storeId] ?? 0) + $value;
+                }
+            }
         }
         return ['scheme_id' => (int)$bound['scheme_id'], 'scheme_ids' => $bound['scheme_ids'], 'month_targets' => $monthTargets,
-            'year_targets' => $yearTargets, 'month_actual' => $monthActual, 'year_actual' => $yearActual];
+            'year_targets' => $yearTargets, 'month_actual' => $monthActual, 'year_actual' => $yearActual,
+            'month_store_actuals' => $monthStoreActuals];
     }
 
     private function actual(string $tenant, array $line, string $month): int
