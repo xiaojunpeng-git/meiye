@@ -2472,6 +2472,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         return hash('sha256',json_encode([(int)($row['store_id']??0),(string)($row['company_dimension_id']??''),(string)($row['division_name']??$row['organization_name_snapshot']??''),(string)($row['store_name']??$row['store_name_snapshot']??''),$guide,$salesperson,$manager,$sourceId,$source],JSON_UNESCAPED_UNICODE));
     }
+    /**
+     * 将同一门店和人员维度的首次销售事实合入新客汇总；系统名称只取当前实例配置，
+     * 不参与事实分组，也不能把某个客户的品牌写进其他客户的报表。
+     */
     private function newCustomerSummaryAddRow(array &$records,array $row,array $guides,array $salespeople,array $managers,int $amount,string $suffix,int $count,string $source,int $sourceId,array $input):void
     {
         // 缺少人员归属不影响首次疗程卡顾客身份；人员仅用于主动筛选。
@@ -2484,7 +2488,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if(!$this->selectedDimensionMatches($row,$input))return;
         $guide=$this->newCustomerNames($guides,'guide_employee_id','guide_employee_name_snapshot');$salesperson=$this->newCustomerNames($salespeople,'employee_id','employee_name_snapshot');$manager=$this->newCustomerNames($managers,'sales_manager_employee_id','sales_manager_name_snapshot');
         $key=$this->newCustomerSummaryGroupKey($row,$guide,$salesperson,$manager,$sourceId,$source);
-        if(!isset($records[$key]))$records[$key]=['system_name'=>'瑞昊','division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id'],'store_name'=>(string)$row['store_name'],'store_id'=>(int)$row['store_id'],'summary_group_key'=>$key,'guide'=>$guide,'salesperson'=>$salesperson,'sales_manager'=>$manager,'source'=>$source,'source_id'=>$sourceId,'source_label'=>$source,'annual_cash_cents'=>0];
+        if(!isset($records[$key])){
+            $systemName=trim((string)sys_config('site_name',''));
+            $records[$key]=['system_name'=>$systemName!==''?$systemName:'当前系统','division_name'=>(string)$row['division_name'],'company_dimension_id'=>(string)$row['company_dimension_id'],'city_manager_dimension_id'=>(string)$row['city_manager_dimension_id'],'store_name'=>(string)$row['store_name'],'store_id'=>(int)$row['store_id'],'summary_group_key'=>$key,'guide'=>$guide,'salesperson'=>$salesperson,'sales_manager'=>$manager,'source'=>$source,'source_id'=>$sourceId,'source_label'=>$source,'annual_cash_cents'=>0];
+        }
         $month=(int)substr((string)$row['business_date'],5,2);$records[$key]['month_'.$month.'_count']=(int)($records[$key]['month_'.$month.'_count']??0)+$count;$records[$key]['month_'.$month.'_'.$suffix.'_cents']=(int)($records[$key]['month_'.$month.'_'.$suffix.'_cents']??0)+$amount;$records[$key]['annual_cash_cents']+=(int)$amount;
     }
     /** 汇总的月度、全年与成交门槛均复用同一份门店会员日净收款，不跨店凑金额。 */
