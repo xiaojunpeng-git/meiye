@@ -2787,7 +2787,7 @@ final class AiIntentResultContract
         if ($keys!==['conditions','relation','result_form','subject']
             ||!in_array($value['subject']??null,['person','member','store','order','sale_line','card','project','product'],true)
             ||!in_array($value['relation']??null,['all','any'],true)||!in_array($value['result_form']??null,['count','list'],true)
-            ||!is_array($value['conditions']??null)||count($value['conditions'])<1||count($value['conditions'])>4
+            ||!is_array($value['conditions']??null)||count($value['conditions'])<1||count($value['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS
             ||array_keys($value['conditions'])!==range(0,count($value['conditions'])-1)) return false;
         $codes=[];
         foreach ($value['conditions'] as $condition) {
@@ -2834,7 +2834,7 @@ final class AiIntentResultContract
                 $key=json_encode($condition,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
                 if (isset($seen[$key])) continue;
                 $seen[$key]=true;$combined['conditions'][]=$condition;
-                if (count($combined['conditions'])>4) return null;
+                if (count($combined['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS) return null;
             }
         }
         return $combined;

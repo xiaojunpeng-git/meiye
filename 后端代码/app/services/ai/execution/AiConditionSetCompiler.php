@@ -20,7 +20,7 @@ final class AiConditionSetCompiler
             ||!in_array($binding['relation']??null,['all','any'],true)
             ||($binding['result_form']??null)!==($operation==='condition_count'?'count':'list')
             ||!is_string($binding['subject']??null)||!is_array($binding['conditions']??null)
-            ||count($binding['conditions'])<1||count($binding['conditions'])>4
+            ||count($binding['conditions'])<1||count($binding['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS
             ||array_keys($binding['conditions'])!==range(0,count($binding['conditions'])-1)) $this->fail();
         $conditions=[];$codes=[];
         foreach ($binding['conditions'] as $condition) {

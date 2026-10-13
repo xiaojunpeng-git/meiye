@@ -237,6 +237,54 @@ final class CashierV3MemberBalanceProvider implements CashierV3DataScopedVersion
         return $snapshots;
     }
 
+    /**
+     * Return current account balances for a bounded AI member cohort. The AI
+     * caller supplies store IDs already bound to the authenticated report
+     * scope; this method independently verifies each member/store relation
+     * and the same principal + gift = total invariant used by checkout.
+     * It never accepts an unbounded member-directory request.
+     *
+     * @param array<int,int> $memberIds
+     * @param array<int,int> $visibleStoreIds
+     * @return array<int,int> member ID => exact cents
+     */
+    public function readAiBalanceCents(array $memberIds, array $visibleStoreIds): array
+    {
+        $memberIds = array_values(array_unique($memberIds));
+        $visibleStoreIds = array_values(array_unique($visibleStoreIds));
+        if (!$memberIds || count($memberIds) > 100 || !$visibleStoreIds) {
+            throw self::failure('member_balance_identity_invalid');
+        }
+        foreach ($memberIds as $id) {
+            if (!is_int($id) || $id <= 0) throw self::failure('member_balance_identity_invalid');
+        }
+        foreach ($visibleStoreIds as $id) {
+            if (!is_int($id) || $id <= 0) throw self::failure('member_balance_data_scope_invalid');
+        }
+        if (empty($this->readinessStatus()['ready'])) throw self::failure('member_balance_provider_not_ready');
+        $rows = Db::name(self::TABLE)->alias('u')->whereIn('u.uid', $memberIds)
+            ->whereIn('u.uid', static function ($query) use ($visibleStoreIds): void {
+                $query->name('store_user')->where('status', 1)
+                    ->whereIn('store_id', $visibleStoreIds)->field('uid');
+            })
+            ->field('u.uid,u.now_money,u.ben_money,u.give_money,u.balance_version,u.status,u.is_del,u.delete_time')
+            ->select()->toArray();
+        if (count($rows) !== count($memberIds)) throw self::failure('member_balance_member_not_found');
+        $balances = [];
+        foreach ($rows as $row) {
+            if (!$this->activeMember($row) || (int)($row['balance_version'] ?? 0) <= 0) {
+                throw self::failure('member_balance_member_not_found');
+            }
+            $principal = $this->moneyToCents($row['ben_money'] ?? null);
+            $gift = $this->moneyToCents($row['give_money'] ?? null);
+            $total = $this->moneyToCents($row['now_money'] ?? null);
+            if ($principal + $gift !== $total) throw self::failure('member_balance_invariant_invalid');
+            $balances[(int)$row['uid']] = $total;
+        }
+        if (count($balances) !== count($memberIds)) throw self::failure('member_balance_member_not_found');
+        return $balances;
+    }
+
     private function snapshot(array $member, CashierV3DataScopeContext $dataScope): array
     {
         $principal = $this->moneyToCents($member['ben_money'] ?? null);

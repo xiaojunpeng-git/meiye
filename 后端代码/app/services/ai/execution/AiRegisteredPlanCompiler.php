@@ -239,7 +239,7 @@ final class AiRegisteredPlanCompiler
                 ||(!$sourceFilter && $query['business_filters']!==$expectedFilters)
                 ||$keys!==['conditions','relation','subject']||$conditionSubject!==$objectKind
                 ||!in_array($set['relation']??null,['all','any'],true)||!is_array($set['conditions']??null)
-                ||count($set['conditions'])<1||count($set['conditions'])>4||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+                ||count($set['conditions'])<1||count($set['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             $metrics=[];
             foreach ($set['conditions'] as $condition) {
                 $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);

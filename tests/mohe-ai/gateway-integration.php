@@ -372,7 +372,7 @@ verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id
  $unknownBindingFailure=true;[$unknownBinding,$unknownBindingInput]=$make('binding-result-unknown','今天消耗业绩多少？请解释一下');$modelsBeforeUnknownBinding=$models;$queriesBeforeUnknownBinding=$queries;
  $unknownBindingResult=$gateway->handle('execute',$context,$binding($unknownBinding)+$unknownBindingInput,$unknownBinding['run_id']);
  verifyGateway($unknownBindingResult['status']==='FAILED' && $unknownBindingResult['reason']==='AI_MODEL_RESULT_UNKNOWN'
-     && $unknownBindingResult['progress']==='这次没能给出可靠结果。请选择一种方式继续。'
+     && $unknownBindingResult['progress']==='AI 服务未及时返回可靠结果，请稍后按原问题重试。'
      && count($unknownBindingResult['failure_guidance']['options']??[])===3,'an unknown binding result stops after one full model attempt with a four-option customer recovery');
  verifyGateway($models===$modelsBeforeUnknownBinding+2 && $queries===$queriesBeforeUnknownBinding,'an unknown binding result is never automatically replayed or sent to the Reader');
  verifyGateway((int)$db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE run_id=".$db->quote($unknownBinding['run_id'])." AND attempt_code='bind_intent' AND state='UNKNOWN'")->fetchColumn()===1,'unknown binding remains auditable');

@@ -129,7 +129,7 @@ try {
 
 // No-response timeout is a specific admission rule. Other transport shapes,
 // account failures, cancellation and authority changes do not qualify.
-foreach ([timeoutFailure(200),new AiContractException('AI_MODEL_ACCOUNT_UNAVAILABLE'),
+foreach ([timeoutFailure(100),timeoutFailure(200),new AiContractException('AI_MODEL_ACCOUNT_UNAVAILABLE'),
     new AiContractException('AI_CANCELLED'),new AiContractException('AI_AUTHORIZATION_CHANGED'),
     new AiContractException('AI_MODEL_RESULT_UNKNOWN',['stage'=>'transport','predicate'=>'connection','transport_errno'=>7,'http_status'=>0,'elapsed_ms'=>100])]
     as $failure) {

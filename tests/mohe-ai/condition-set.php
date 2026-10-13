@@ -121,6 +121,51 @@ $normalizeMetricQuery=Closure::bind(static function(MetricReadViewServices $serv
 },null,MetricReadViewServices::class);
 csCheck($normalizeMetricQuery($views,$memberMulti)['metric_codes']===$memberMulti['metric_codes'],
     'read-view admission keeps validated member multi-condition populations while single-metric ranking rules stay closed');
+// Current assets share the member-grain condition contract with historical
+// visits and collected cash; no question-specific pair is installed.
+$assetCodes=['member_days_since_last_visit','member_account_balance',
+    'member_remaining_project_amount','member_total_assets','member_service_visit_count'];
+$assetConditions=[
+    ['metric_code'=>$assetCodes[0],'operator'=>'gt','quantity'=>'90','unit'=>'day'],
+    ['metric_code'=>$assetCodes[1],'operator'=>'gte','quantity'=>'500','unit'=>'yuan'],
+    ['metric_code'=>$assetCodes[2],'operator'=>'gt','quantity'=>'0','unit'=>'yuan'],
+    ['metric_code'=>$assetCodes[3],'operator'=>'gte','quantity'=>'1000','unit'=>'yuan'],
+    ['metric_code'=>$assetCodes[4],'operator'=>'gte','quantity'=>'2','unit'=>'count'],
+];
+$assetQuery=$memberQuery;
+$assetQuery['metric_codes']=$assetCodes;
+$assetQuery['aggregate_condition']['conditions']=$assetConditions;
+$assetQuery['condition_set']=(new AiConditionSetCompiler())->compile(
+    $assetQuery['aggregate_condition'],['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_list'
+);
+$assetCaps=$memberCapabilities;$assetCaps['metric_codes']=$assetCodes;
+$assetCompiled=(new AiRegisteredPlanCompiler())->compile(['query'=>$assetQuery,'output_format'=>'screen'],$assetCaps);
+csCheck(count($assetCompiled['query']['condition_set']['conditions'])===5
+    &&($assetCompiled['query']['condition_set']['conditions'][1]['value']??null)===50000
+    &&($assetCompiled['query']['condition_set']['conditions'][3]['value']??null)===100000,
+    'five registered member conditions compile with distinct units and intact order');
+csCheck($normalizeMetricQuery($views,$assetQuery)['metric_codes']===$assetCodes,
+    'Reader admission accepts five registered conditions without dropping any metric');
+csCheck(MetricSemanticCatalog::registeredNonOverlappingTermsInText(
+    '90天没有到店且总余额在500元以上', $assetCodes
+)===[
+    ['metric_code'=>'member_days_since_last_visit','term'=>'没有到店','ai_query_ready'=>true],
+    ['metric_code'=>'member_total_assets','term'=>'总余额','ai_query_ready'=>true],
+], 'nested balance wording and no-visit wording each retain one registered meaning');
+$boundedCodes=[];$boundedConditions=[];
+for ($index=1;$index<=\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS;$index++) {
+    $code='fixture_metric_'.$index;
+    $boundedCodes[$code]=['ai_query_ready'=>true,'query_shapes'=>['condition_count'],
+        'condition_subjects'=>['member'],'storage_unit'=>'count'];
+    $boundedConditions[]=['metric_code'=>$code,'operator'=>'gte','quantity'=>'1','unit'=>'count'];
+}
+$bounded=['subject'=>'member','relation'=>'all','result_form'=>'count','conditions'=>$boundedConditions];
+csCheck(count((new AiConditionSetCompiler())->compile($bounded,['metric_readiness'=>$boundedCodes],'condition_count')['conditions'])
+    ===\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS,'bounded compound query retains every admitted predicate');
+csReject(static function()use($bounded,$boundedCodes):void {
+    $extra=$bounded;$extra['conditions'][]=$bounded['conditions'][0];
+    (new AiConditionSetCompiler())->compile($extra,['metric_readiness'=>$boundedCodes],'condition_count');
+},'AI_UNSUPPORTED_CONDITION');
 $memberEvidence=['query'=>$memberQuery,'results'=>[[]+
     ['period'=>'current','metric_code'=>'sales_collected_amount','storage_unit'=>'count','object_kind'=>'member',
         'condition_set'=>$memberQuery['condition_set'],'count'=>1,'list_limit'=>100,'has_more'=>false,
@@ -143,6 +188,23 @@ csCheck(strpos($memberMultiAnswer['summary'],'全部2项条件')!==false
     &&($memberMultiAnswer['table']['rows'][0]['unit']??null)==='次'
     &&($memberMultiAnswer['table']['rows'][1]['unit']??null)==='元',
     'member multi-condition evidence renders every registered metric and its own unit');
+$assetAny=$assetQuery;$assetAny['condition_set']['relation']='any';
+$assetAny['aggregate_condition']['relation']='any';
+$assetAnyView=['query'=>$assetAny,'results'=>[[
+    'period'=>'current','metric_code'=>$assetCodes[0],'storage_unit'=>'count','object_kind'=>'member',
+    'condition_set'=>$assetAny['condition_set'],'count'=>1,'list_limit'=>100,'has_more'=>false,
+    'rows'=>[['member_id'=>101,'member_name'=>'测试会员','metrics'=>[
+        'member_days_since_last_visit'=>null,'member_account_balance'=>50000,
+        'member_remaining_project_amount'=>0,'member_total_assets'=>50000,
+        'member_service_visit_count'=>0,
+    ]]],
+]]];
+$assetAnyAnswer=(new AiAnswerRenderer())->render($assetAnyView);
+csCheck(strpos($assetAnyAnswer['summary'],'任一5项条件')!==false
+    &&strpos($assetAnyAnswer['summary'],'现有有效服务记录中')===false
+    &&($assetAnyAnswer['table']['rows'][0]['value']??null)==='未记录'
+    &&count($assetAnyAnswer['table']['rows']??[])===5,
+    'OR answer keeps every metric while an unknown last-visit age remains unmeasured');
 $memberExport=MetricReadViewExportProvider::project($memberEvidence);
 csCheck(count($memberExport)===1&&$memberExport[0]['store_name']==='测试会员；范围：当前授权范围'
     &&$memberExport[0]['metric_value']==='8900.01'&&$memberExport[0]['unit']==='元',

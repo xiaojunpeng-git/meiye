@@ -65,10 +65,17 @@ final class AiAnswerRenderer
                         foreach ($set['conditions'] as $condition) {
                             $code=$condition['metric_code'];$value=$object['metrics'][$code]??null;
                             $metricTip=$dictionary->getTooltip($code);$metric=$registered[$code]??null;
-                            if (!is_int($value)||!is_array($metric)||empty($metricTip['user_ready'])) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                            // A member with no observed completed service has
+                            // no known last-visit age. In an OR result another
+                            // predicate may admit that member; never render
+                            // the missing age as a measured zero.
+                            $ageUnknown=$value===null
+                                && ($metric['threshold_count']['aggregation']??null)==='as_of_age_days';
+                            if ((!is_int($value)&&!$ageUnknown)||!is_array($metric)||empty($metricTip['user_ready'])) throw new RuntimeException('AI_EVIDENCE_INVALID');
                             $metricUnit=$this->displayUnit($metricTip,(string)$metric['storage_unit']);
                             $rows[]=['label'=>$object[$nameKey],'metric'=>$metricTip['name'],
-                                'value'=>$this->metricValue($value,(string)$metric['storage_unit']),'unit'=>$metricUnit,'period'=>'current','period_label'=>'本期'];
+                                'value'=>$ageUnknown?'未记录':$this->metricValue($value,(string)$metric['storage_unit']),
+                                'unit'=>$ageUnknown?'':$metricUnit,'period'=>'current','period_label'=>'本期'];
                         }
                     }
                 }
@@ -425,7 +432,10 @@ final class AiAnswerRenderer
             $prefix=$registered[$condition['metric_code']]['observed_answer_prefix']??null;
             if (is_string($prefix) && $prefix!=='') $prefixes[$prefix]=true;
         }
-        if ($prefixes!==[]) {
+        // In an OR query a balance predicate can admit a member with no
+        // observed service. Scope the history qualifier to the age predicate,
+        // rather than presenting the whole population as service-observed.
+        if ($prefixes!==[] && $set['relation']==='all') {
             $prefix=count($prefixes)===1?array_key_first($prefixes):'现有记录中';
             $base='符合'.$relation.count($set['conditions']).'项条件的'.$label;
             // 会员未命中时用业务方确认的简短说法；条件明细仍在结果表中，

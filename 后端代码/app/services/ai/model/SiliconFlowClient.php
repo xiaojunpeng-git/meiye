@@ -843,7 +843,7 @@ final class SiliconFlowClient
             || !in_array($condition['subject']??null,['person','member','store','order','sale_line','card','project','product'],true)
             || !in_array($condition['relation']??null,['all','any'],true)
             || ($condition['result_form']??null)!==($operation==='condition_count'?'count':'list')
-            || !is_array($condition['conditions']??null) || count($condition['conditions'])<1 || count($condition['conditions'])>4
+            || !is_array($condition['conditions']??null) || count($condition['conditions'])<1 || count($condition['conditions'])>\app\services\query\metric\MetricDefinitionRegistry::MAX_CONDITIONS
             || array_keys($condition['conditions'])!==range(0,count($condition['conditions'])-1)) return false;
         $codes=[];
         foreach ($condition['conditions'] as $item) {

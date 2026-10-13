@@ -133,19 +133,26 @@ final class RegisteredMetricReadServices
         if ($limit < 0 || $limit > $maxLimit || ($conditionSet['subject'] ?? null) !== 'member'
             || !in_array($conditionSet['relation'] ?? null, ['all', 'any'], true)
             || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
-            || count($conditionSet['conditions']) > 4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            || count($conditionSet['conditions']) > MetricDefinitionRegistry::MAX_CONDITIONS) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
 
-        // Current rights are not period facts. Their displayed amount is an
-        // exact card projection, so run its registered reader before the
-        // fact-only SQL union. A mixed condition needs a separate verified
-        // intersection contract; never silently drop its other predicates.
+        // Current rights are not period facts. Keep their existing full
+        // population reader for a single predicate; mixed current assets use
+        // the bounded authorized-member evaluator below.
         $rightsConditions=array_values(array_filter($conditionSet['conditions'],static function($condition):bool {
             if (!is_array($condition) || !is_string($condition['metric_code']??null)) return false;
             return (MetricDefinitionRegistry::get($condition['metric_code'])['reader_strategy']??null)==='member_current_rights_amount';
         }));
         if ($rightsConditions!==[]) {
-            if (count($conditionSet['conditions'])!==1) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
-            return $this->currentRightsAmountMembers($tenantId,$stores,$rightsConditions[0],$limit);
+            if (count($conditionSet['conditions'])===1) {
+                return $this->currentRightsAmountMembers($tenantId,$stores,$rightsConditions[0],$limit);
+            }
+            return $this->currentAssetConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+        }
+        foreach ($conditionSet['conditions'] as $condition) {
+            $code=is_array($condition)?($condition['metric_code']??null):null;
+            if (is_string($code) && (MetricDefinitionRegistry::get($code)['reader_strategy']??null)==='member_current_assets') {
+                return $this->currentAssetConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+            }
         }
 
         $queries = []; $metricCodes = []; $observedAgeProbe = null;
@@ -247,10 +254,17 @@ final class RegisteredMetricReadServices
             $names[$memberId] = $name;
         }
         $values = [];
+        $missingValues=[];
+        foreach (array_keys($metricCodes) as $code) {
+            $aggregation=MetricDefinitionRegistry::get($code)['source']['threshold_count']['aggregation']??null;
+            // A missing last visit is unknown, whereas a period total with no
+            // matching fact is an exact zero over the selected fact period.
+            $missingValues[$code]=$aggregation==='as_of_age_days'?null:0;
+        }
         foreach ($memberIds as $memberId) {
             if (!isset($names[$memberId])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
             $values[$memberId] = ['member_id'=>$memberId,'member_name'=>$names[$memberId],
-                'metrics'=>$inlineValues[$memberId]??array_fill_keys(array_keys($metricCodes),0)];
+                'metrics'=>$inlineValues[$memberId]??$missingValues];
         }
         foreach ($inlineValues===[]?array_keys($metricCodes):[] as $metricCode) {
             [$query, $expression] = $this->memberMetricAggregateQuery($metricCode, $tenantId, $stores, $range);
@@ -263,6 +277,149 @@ final class RegisteredMetricReadServices
             }
         }
         return ['count'=>$count,'rows'=>array_values($values),'limit'=>$limit,'has_more'=>$count>count($values)];
+    }
+
+    /**
+     * Combine current account/card assets with registered member predicates.
+     * The authorized member directory is traversed in bounded batches; each
+     * fact remains at member grain and current assets use their cashier
+     * authorities. Count-only queries never truncate to the screen page.
+     */
+    private function currentAssetConditionMembers(string $tenantId,array $stores,array $range,array $set,int $limit): array
+    {
+        $conditions=$set['conditions'];$assetCodes=[];$factCodes=[];
+        foreach ($conditions as $condition) {
+            $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
+            $code=is_array($condition)?($condition['metric_code']??null):null;
+            if ($keys!==['metric_code','operator','value']||!is_string($code)
+                ||!is_int($condition['value']??null)||$condition['value']<0||$condition['value']>100000000000) {
+                $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            }
+            $definition=MetricDefinitionRegistry::get($code);
+            if (!in_array($condition['operator'],(array)($definition['source']['threshold_count']['operators']??[]),true)) {
+                $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            }
+            if (in_array($definition['reader_strategy'],['member_current_assets','member_current_rights_amount'],true)) {
+                $assetCodes[$code]=true;
+            } else {
+                $factCodes[$code]=true;
+            }
+        }
+        $assetReader=new MemberCurrentAssetMetricReadServices();
+        // For an intersection, a registered fact predicate can seed the
+        // candidate IDs. This avoids reading every current balance/card in a
+        // large directory for a narrow historical cohort. The final member
+        // relation and every other predicate are still checked below.
+        $seed=null;
+        if ($set['relation']==='all') foreach ($conditions as $condition) {
+            if (!isset($factCodes[$condition['metric_code']])) continue;
+            [$seedQuery,$seedExpression]=$this->memberMetricAggregateQuery(
+                $condition['metric_code'],$tenantId,$stores,$range
+            );
+            $seed=$seedQuery->having($seedExpression.' '
+                .$this->conditionSqlOperator($condition['operator']).' '.$condition['value']);
+            break;
+        }
+        $count=0;$rows=[];$cursor=0;
+        do {
+            $candidateIds=null;
+            if ($seed!==null) {
+                $seedRows=(clone $seed)->where('s.member_id','>',$cursor)
+                    ->fieldRaw('s.member_id member_id')->order('s.member_id','asc')
+                    ->limit(100)->select()->toArray();
+                $candidateIds=[];
+                foreach ($seedRows as $seedRow) {
+                    $id=$this->integer($seedRow['member_id']??null);
+                    if ($id<1||$id<=$cursor) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                    $candidateIds[]=$id;$cursor=$id;
+                }
+                if ($candidateIds===[]) break;
+            }
+            $memberQuery=call_user_func($this->queryFactory,'user')->alias('u')
+                ->where('u.status',1)->where('u.is_del',0)
+                ->whereIn('u.uid',static function($query)use($stores):void {
+                    $query->name('store_user')->where('status',1)->whereIn('store_id',$stores)->field('uid');
+                })
+                ->fieldRaw("u.uid,COALESCE(NULLIF(u.real_name,''),NULLIF(u.nickname,''),NULLIF(u.phone,''),CONCAT('会员#',u.uid)) member_name")
+                ->order('u.uid','asc')->limit(100);
+            $members=$candidateIds===null
+                ?$memberQuery->where('u.uid','>',$cursor)->select()->toArray()
+                :$memberQuery->whereIn('u.uid',$candidateIds)->select()->toArray();
+            if (!$members && $candidateIds===null) break;
+            $ids=[];
+            foreach ($members as $member) {
+                $id=$this->integer($member['uid']??null);
+                if ($id<1||($candidateIds===null && $id<=$cursor)
+                    ||($candidateIds!==null && !in_array($id,$candidateIds,true))) {
+                    $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                }
+                $ids[]=$id;
+                if ($candidateIds===null) $cursor=$id;
+            }
+            $values=[];
+            foreach (array_keys($factCodes) as $code) {
+                [$query,$expression]=$this->memberMetricAggregateQuery($code,$tenantId,$stores,$range);
+                foreach ($query->whereIn('s.member_id',$ids)
+                    ->fieldRaw('s.member_id member_id,'.$expression.' metric_value')->select()->toArray() as $fact) {
+                    $id=$this->integer($fact['member_id']??null);
+                    if (!in_array($id,$ids,true)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                    $values[$id][$code]=$this->integer($fact['metric_value']??null);
+                }
+            }
+            $candidates=[];
+            foreach ($ids as $id) {
+                if ($set['relation']==='any' || $factCodes===[]) {
+                    $candidates[]=$id;continue;
+                }
+                $matches=[];
+                foreach ($conditions as $condition) if (isset($factCodes[$condition['metric_code']])) {
+                    $value=$values[$id][$condition['metric_code']]??null;
+                    if ($value===null) $value=$this->missingMemberConditionValue($condition['metric_code']);
+                    $matches[]=is_int($value) && $this->matchesAssetCondition($value,$condition);
+                }
+                if (!in_array(false,$matches,true)) $candidates[]=$id;
+            }
+            if ($candidates!==[]) {
+                foreach ($assetReader->values($tenantId,$stores,$candidates,array_keys($assetCodes)) as $id=>$assets) {
+                    foreach ($assets as $code=>$value) $values[$id][$code]=$value;
+                }
+            }
+            foreach ($members as $member) {
+                $id=$this->integer($member['uid']);
+                $matches=[];$display=[];
+                foreach ($conditions as $condition) {
+                    $code=$condition['metric_code'];$value=$values[$id][$code]??null;
+                    if ($value===null && isset($factCodes[$code])) $value=$this->missingMemberConditionValue($code);
+                    $display[$code]=$value;
+                    $matches[]=is_int($value) && $this->matchesAssetCondition($value,$condition);
+                }
+                $qualified=$set['relation']==='all'?!in_array(false,$matches,true):in_array(true,$matches,true);
+                if (!$qualified) continue;
+                ++$count;
+                if ($limit>0 && count($rows)<$limit) {
+                    $name=trim((string)($member['member_name']??''));
+                    if ($name==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                    $rows[]=['member_id'=>$id,'member_name'=>$name,'metrics'=>$display];
+                }
+            }
+        } while (($candidateIds===null?count($members):count($candidateIds))===100);
+        if ($limit>=self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+        return ['count'=>$count,'rows'=>$rows,'limit'=>$limit,'has_more'=>$count>count($rows)];
+    }
+
+    /** The operator is admitted by the registered metric before evaluation. */
+    private function matchesAssetCondition(int $actual,array $condition): bool
+    {
+        $target=$condition['value'];
+        return ['gte'=>$actual>=$target,'gt'=>$actual>$target,'lte'=>$actual<=$target,
+            'lt'=>$actual<$target,'eq'=>$actual===$target][$condition['operator']]??false;
+    }
+
+    /** A period total may be zero; no observed service has no known age. */
+    private function missingMemberConditionValue(string $code): ?int
+    {
+        $aggregation=MetricDefinitionRegistry::get($code)['source']['threshold_count']['aggregation']??null;
+        return $aggregation==='period_total'?0:null;
     }
 
     /**
@@ -416,7 +573,7 @@ final class RegisteredMetricReadServices
         if ($limit<1||$limit>self::AI_DETAIL_LIMIT||!is_string($subject)||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$subject)
             ||!in_array($conditionSet['relation']??null,['all','any'],true)
             ||!is_array($conditionSet['conditions']??null)||count($conditionSet['conditions'])<1
-            ||count($conditionSet['conditions'])>4) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+            ||count($conditionSet['conditions'])>MetricDefinitionRegistry::MAX_CONDITIONS) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
 
         $queries=[];$metricCodes=[];$objectLabel=null;$sourceTable=null;$dimensionName=null;
         foreach ($conditionSet['conditions'] as $condition) {

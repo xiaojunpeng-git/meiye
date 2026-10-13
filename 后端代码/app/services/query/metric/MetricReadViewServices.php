@@ -745,7 +745,7 @@ final class MetricReadViewServices
                 ||(!$sourceFilter && $query['business_filters']!==$expectedFilters)
                 ||$keys!==['conditions','relation','subject']||$conditionSubject!==$objectKind
                 ||!in_array($set['relation']??null,['all','any'],true)||!is_array($set['conditions']??null)
-                ||count($set['conditions'])<1||count($set['conditions'])>4||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+                ||count($set['conditions'])<1||count($set['conditions'])>MetricDefinitionRegistry::MAX_CONDITIONS||array_keys($set['conditions'])!==range(0,count($set['conditions'])-1)) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             $conditionMetrics=[];
             foreach ($set['conditions'] as $condition) {
                 $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);

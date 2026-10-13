@@ -23,6 +23,11 @@ foreach (['AI_INTENT_UNRESOLVED','AI_CAPABILITY_CHANGED'] as $reason) {
         throw new RuntimeException('R63 capability help must not render a retry card: '.$reason);
     }
 }
+$unknown=$guidance->invoke($gateway,'AI_MODEL_RESULT_UNKNOWN');
+if (strpos($unknown['question'],'未及时返回可靠结果')===false
+    ||strpos($unknown['question'],'按原问题重试')===false) {
+    throw new RuntimeException('An unknown model response must not be described as a missing business condition.');
+}
 // Private-member discovery can legitimately find a nickname inside ordinary
 // prose. Calendar spans must survive masking intact, while an exact private
 // label colliding with a calendar word is still kept away from the model.

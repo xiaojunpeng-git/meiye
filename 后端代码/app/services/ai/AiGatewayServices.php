@@ -5443,7 +5443,9 @@ final class AiGatewayServices
             }
         }
         $addedRequirement=false;
-        foreach (\app\services\query\metric\MetricSemanticCatalog::registeredTermsInText($question,$allowed) as $match) {
+        // A complete registered phrase owns its shorter embedded aliases.
+        // In “总余额” the embedded “余额” is not an independent condition.
+        foreach (\app\services\query\metric\MetricSemanticCatalog::registeredNonOverlappingTermsInText($question,$allowed) as $match) {
             if (isset($accounted[$match['term']])||isset($accountedCodes[$match['metric_code']])) continue;
             if (count($requirements)>=12) return $understanding;
             $next=1;while(isset($used['r'.$next])&&$next<1000)$next++;
@@ -7994,9 +7996,14 @@ final class AiGatewayServices
             'question'=>'我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接用平常的话提问。'];
         if ($reason==='AI_CAPABILITY_CHANGED') return ['kind'=>'capability_help',
             'question'=>'这次暂时没能完成查询。我主要帮您查询门店经营数据，比如今天的现金业绩、消耗业绩。您可以直接再问一次。'];
-        $question=in_array($reason,['AI_AUTHORIZATION_CHANGED','AI_PERSONNEL_PERMISSION_REQUIRED','AI_WORKFLOW_DISABLED','AI_MODEL_ACCOUNT_UNAVAILABLE'],true)
+        // UNKNOWN is a transport outcome, not a missing customer condition.
+        // Keep the merchant's familiar three actions while naming the real
+        // failure so the customer can retry the original question unchanged.
+        $question=$reason==='AI_MODEL_RESULT_UNKNOWN'
+            ?'AI 服务未及时返回可靠结果，请稍后按原问题重试。'
+            :(in_array($reason,['AI_AUTHORIZATION_CHANGED','AI_PERSONNEL_PERMISSION_REQUIRED','AI_WORKFLOW_DISABLED','AI_MODEL_ACCOUNT_UNAVAILABLE'],true)
             ?'当前账号暂时无法完成这次查询。请选择一种方式继续。'
-            :'这次没能给出可靠结果。请选择一种方式继续。';
+            :'这次没能给出可靠结果。请选择一种方式继续。');
         return ['kind'=>'recovery','question'=>$question,'options'=>[
             ['value'=>'retry_original','label'=>'按原问题再查一次'],
             ['value'=>'edit_original','label'=>'修改原问题后查询'],

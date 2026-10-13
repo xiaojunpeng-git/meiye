@@ -11,12 +11,14 @@ namespace app\services\query\metric;
  */
 final class MetricDefinitionRegistry
 {
+    /** Shared bounded predicate envelope for model, compiler and Reader. */
+    public const MAX_CONDITIONS = 8;
     /** Server-owned cohort used when the customer did not request a role or position filter. */
     public const PERSONNEL_FACT_PARTICIPANT_REF='cohort:metric_fact_participants';
-    // v3 introduces source-owned analysis-dimension contracts.  Bumping the
-    // mapping identity prevents a plan frozen against the older registry from
-    // being mistaken for one that carries those object contracts.
-    public const VERSION = 'unified-metric-registry-v22';
+    // The mapping identity changes when registered formulas or executable
+    // metric contracts change; a frozen AI plan must not replay under a
+    // different current-asset or analysis-dimension definition.
+    public const VERSION = 'unified-metric-registry-v23';
     public const COVERAGE_START = '2026-08-10';
 
     /**
@@ -443,6 +445,41 @@ final class MetricDefinitionRegistry
                     'operators' => ['gte', 'gt'],
                 ],
             ]) + ['condition_subjects' => ['member']],
+            // Current member assets are account state, not historical payment
+            // flows. The registered components tell the Reader which existing
+            // authorities to combine; the model never supplies a formula.
+            'member_account_balance' => self::amount('member_current_assets', 'member-current-account-balance-v1', ['condition_count', 'condition_list'], [
+                'table' => 'user',
+                'asset_components' => ['balance'],
+                'dimensions' => ['member' => [
+                    'id' => 'member_id', 'name' => 'member_name',
+                    'analysis_object_kind' => 'member', 'analysis_object_label' => '会员',
+                    'analysis_relation_role' => 'member_current_account_balance',
+                    'analysis_action_codes' => ['member'],
+                ]],
+                'threshold_count' => [
+                    'subject_dimension' => 'member', 'aggregation' => 'current_state',
+                    'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
+                ],
+            ]) + ['condition_subjects' => ['member']],
+            'member_total_assets' => self::amount('member_current_assets', 'member-current-total-assets-v1', ['condition_count', 'condition_list'], [
+                'table' => 'user + user_card_holder',
+                'asset_components' => ['balance', 'rights'],
+                'dimensions' => ['member' => [
+                    'id' => 'member_id', 'name' => 'member_name',
+                    'analysis_object_kind' => 'member', 'analysis_object_label' => '会员',
+                    'analysis_relation_role' => 'member_current_total_assets',
+                    'analysis_action_codes' => ['member'],
+                ]],
+                'threshold_count' => [
+                    'subject_dimension' => 'member', 'aggregation' => 'current_state',
+                    'operators' => ['gte', 'gt', 'lte', 'lt', 'eq'],
+                ],
+            ]) + [
+                'condition_subjects' => ['member'],
+                'derivation' => ['operator' => 'add', 'left_metric' => 'member_account_balance',
+                    'right_metric' => 'member_remaining_project_amount'],
+            ],
             // Age is computed as-of the signed query end date from the latest
             // valid completed-service fact in the authorized store range.
             // Missing history is excluded rather than treated as infinitely
