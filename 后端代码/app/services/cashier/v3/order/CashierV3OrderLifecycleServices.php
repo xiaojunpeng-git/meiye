@@ -523,7 +523,7 @@ final class CashierV3OrderLifecycleServices
         if ($lock) $q->lock(true);
         $row = (array)$q->find();
         if (!$row || (string)($row['order_status'] ?? '') !== 'settled' || (string)($row['order_direction'] ?? '') !== 'forward') throw self::failure('sales_order_not_mutable');
-        return ['sourceType' => 'sales', 'sourceId' => $id, 'sourceRecordId' => (int)$row['id'], 'resourceId' => $id, 'sourceNo' => (string)$row['order_no'], 'memberId' => (int)$row['member_id'], 'storeId' => (int)$row['store_id'], 'storeName' => (string)$row['store_name_snapshot'], 'checkoutRequestId' => (string)$row['checkout_request_id'], 'amountCents' => (int)$row['sale_amount_cents'], 'orderNote' => (string)($row['order_note'] ?? ''), 'tenantId' => $scope->tenantId()];
+        return ['sourceType' => 'sales', 'sourceId' => $id, 'sourceRecordId' => (int)$row['id'], 'resourceId' => $id, 'sourceNo' => (string)$row['order_no'], 'memberId' => (int)$row['member_id'], 'storeId' => (int)$row['store_id'], 'storeName' => (string)$row['store_name_snapshot'], 'checkoutRequestId' => (string)$row['checkout_request_id'], 'businessDate' => (string)$row['business_date'], 'amountCents' => (int)$row['sale_amount_cents'], 'orderNote' => (string)($row['order_note'] ?? ''), 'tenantId' => $scope->tenantId()];
     }
 
     private function input(string $action, array $payload, array $source): array
@@ -1065,6 +1065,9 @@ final class CashierV3OrderLifecycleServices
     private function adjustPersonnelFacts(array $source, array $input, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
     {
         if (!$input['personnel']) throw self::failure('personnel_adjustment_empty');
+        // 人员调整改变的是原销售归属，不是当天新发生一笔销售。事实业务日期
+        // 必须留在原订单日期；occurred_at 和操作单日期继续记录真实调整时间。
+        $businessDate = $this->personnelAdjustmentBusinessDate($source);
         $targetLineId = (string)$input['targetOrderLineId'];
         $targetRole = (string)$input['targetRole'];
         // 订单中心调整只作用于已结算销售订单的一个明细和一个归属角色，
@@ -1125,7 +1128,7 @@ final class CashierV3OrderLifecycleServices
             $input['personnel'] = $authoritativePersonnel;
         }
         if ($targetRole === 'craftsman') {
-            $this->adjustCraftsmanFacts($source, $input, $operationId, $commandKey, $event, $operator, $scope, $now);
+            $this->adjustCraftsmanFacts($source, $input, $operationId, $commandKey, $event, $operator, $scope, $now, $businessDate);
             return;
         }
         $reversedAttributions = [];
@@ -1136,7 +1139,7 @@ final class CashierV3OrderLifecycleServices
             $staffId = (int)($item['staffId'] ?? 0);
             if ($lineId === '' || !in_array($role, ['salesperson', 'craftsman', 'guide', 'sales_manager'], true) || $staffId <= 0) throw self::failure('personnel_adjustment_item_invalid');
             if (in_array($role, ['guide', 'sales_manager'], true)) {
-                $this->adjustAttributionFact($source, $item, $operationId, $commandKey, $event, $operator, $scope, $now, $reversedAttributions);
+                $this->adjustAttributionFact($source, $item, $operationId, $commandKey, $event, $operator, $scope, $now, $businessDate, $reversedAttributions);
                 continue;
             }
             $factType = $role === 'salesperson' ? 'sales_performance_allocated' : 'labor_performance_allocated';
@@ -1157,7 +1160,7 @@ final class CashierV3OrderLifecycleServices
             $total = $role === 'salesperson'
                 ? $this->cashPerformanceForLine($scope->tenantId(), $source['sourceId'], $lineId)
                 : array_sum(array_map(static function (array $fact): int { return abs((int)$fact['amount_cents']); }, $facts));
-            foreach ($facts as $fact) $this->insertReversal('cashier_v3_performance_fact', $fact, $operationId, $commandKey, $event, $operator, $now);
+            foreach ($facts as $fact) $this->insertReversal('cashier_v3_performance_fact', $fact, $operationId, $commandKey, $event, $operator, $now, [], $businessDate);
             $template = $facts[0] ?? $this->personnelAdjustmentTemplate($scope->tenantId(), $source['sourceId']);
             $marked = $role === 'salesperson' ? !empty($item['isPreSale']) : !empty($item['isPointCustomer']);
             if ($role === 'salesperson') {
@@ -1167,7 +1170,7 @@ final class CashierV3OrderLifecycleServices
                 $salespersonState = ['template' => $template, 'total' => $total];
                 continue;
             }
-            $this->insertAdjustedPerformance($template, $operationId, $commandKey, $event, $operator, $now, $staff, $role, $factType, $total, $lineId, $marked, $staffId);
+            $this->insertAdjustedPerformance($template, $operationId, $commandKey, $event, $operator, $now, $businessDate, $staff, $role, $factType, $total, $lineId, $marked, $staffId);
         }
         if ($targetRole === 'salesperson') {
             if (!is_array($salespersonState)) throw self::failure('personnel_adjustment_line_ineligible');
@@ -1176,9 +1179,26 @@ final class CashierV3OrderLifecycleServices
                 $staffId = (int)($item['staffId'] ?? 0);
                 $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.id', $staffId)->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->lock(true)->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code,e.employment_type_version')->find();
                 if (!$staff || (int)$staff['cashier_salesperson_enabled'] !== 1) throw self::failure('personnel_adjustment_staff_ineligible');
-                $this->insertAdjustedPerformance($salespersonState['template'], $operationId, $commandKey, $event, $operator, $now, $staff, 'salesperson', 'sales_performance_allocated', (int)$amounts[$index], $targetLineId, !empty($item['isPreSale']), $staffId, !empty($item['performanceAmountManual']));
+                $this->insertAdjustedPerformance($salespersonState['template'], $operationId, $commandKey, $event, $operator, $now, $businessDate, $staff, 'salesperson', 'sales_performance_allocated', (int)$amounts[$index], $targetLineId, !empty($item['isPreSale']), $staffId, !empty($item['performanceAmountManual']));
             }
         }
+    }
+
+    /**
+     * Personnel corrections replace the original sale attribution. Keep their
+     * reporting date on that sale while the lifecycle operation records when
+     * the correction was actually performed.
+     */
+    private function personnelAdjustmentBusinessDate(array $source): string
+    {
+        $date = trim((string)($source['businessDate'] ?? ''));
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        $errors = \DateTimeImmutable::getLastErrors();
+        if (!$parsed || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+            || $parsed->format('Y-m-d') !== $date) {
+            throw self::failure('personnel_adjustment_business_date_invalid');
+        }
+        return $date;
     }
 
     /**
@@ -1186,7 +1206,7 @@ final class CashierV3OrderLifecycleServices
      * The submitted performance, labor fee and project count are operational
      * facts only; the settled order line and payment facts remain immutable.
      */
-    private function adjustCraftsmanFacts(array $source, array $input, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    private function adjustCraftsmanFacts(array $source, array $input, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, string $businessDate): void
     {
         $lineId = (string)$input['targetOrderLineId'];
         $line = (array)Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
@@ -1196,7 +1216,7 @@ final class CashierV3OrderLifecycleServices
         $facts = $this->effectivePersonnelFactsForLineKeys(
             $scope->tenantId(), $source['sourceId'], $this->attributionFactLineIds($line), 'labor_performance_allocated'
         );
-        foreach ($facts as $fact) $this->insertReversal('cashier_v3_performance_fact', $fact, $operationId, $commandKey, $event, $operator, $now);
+        foreach ($facts as $fact) $this->insertReversal('cashier_v3_performance_fact', $fact, $operationId, $commandKey, $event, $operator, $now, [], $businessDate);
         $template = $facts[0] ?? $this->personnelAdjustmentTemplate($scope->tenantId(), $source['sourceId']);
         foreach ($input['personnel'] as $item) {
             $staffId = (int)($item['staffId'] ?? 0);
@@ -1214,7 +1234,7 @@ final class CashierV3OrderLifecycleServices
                 throw self::failure('personnel_adjustment_craftsman_type_amount_invalid');
             }
             $this->insertAdjustedPerformance(
-                $template, $operationId, $commandKey, $event, $operator, $now, $staff,
+                $template, $operationId, $commandKey, $event, $operator, $now, $businessDate, $staff,
                 'craftsman', 'labor_performance_allocated', $amount, $lineId,
                 !empty($item['isPointCustomer']), $staffId, true, $fee, (string)$item['projectCount'], $type
             );
@@ -1289,7 +1309,7 @@ final class CashierV3OrderLifecycleServices
      * 导购和销售经理都只保留订单参与归属。旧有效事实保留为审计行并
      * 转为 reversed，再插入本次操作的新快照；不在此推导独立业绩。
      */
-    private function adjustAttributionFact(array $source, array $item, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, array &$reversedAttributions): void
+    private function adjustAttributionFact(array $source, array $item, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now, string $businessDate, array &$reversedAttributions): void
     {
         $lineId = trim((string)($item['orderLineId'] ?? ''));
         $role = trim((string)($item['role'] ?? ''));
@@ -1323,7 +1343,7 @@ final class CashierV3OrderLifecycleServices
         $common = [
             'tenant_id' => $scope->tenantId(), 'organization_id' => $scope->organizationId(), 'store_id' => $operator->storeId(),
             'member_id' => (int)$source['memberId'], 'order_id' => $source['sourceId'], 'source_line_id' => $sourceLineId,
-            'business_date' => date('Y-m-d', $now), 'operator_id' => $operator->operatorId(), 'business_event_no' => (string)$event['event_no'],
+            'business_date' => $businessDate, 'operator_id' => $operator->operatorId(), 'business_event_no' => (string)$event['event_no'],
             'command_idempotency_key' => $commandKey, 'occurred_at' => $now, 'recorded_at' => $now, 'status' => 'effective',
         ];
         if ($role === 'guide') {
@@ -1472,11 +1492,11 @@ final class CashierV3OrderLifecycleServices
     }
 
     /** @return array<string,mixed> */
-    private function insertReversal(string $table, array $source, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $amountOverrides = []): array
+    private function insertReversal(string $table, array $source, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $amountOverrides = [], string $businessDate = ''): array
     {
         $factId = 'OLR-' . strtoupper(substr(hash_hmac('sha256', $table . '|' . $source['fact_id'] . '|' . $operationId, $this->secret()), 0, 40));
         $row = $source; unset($row['id']);
-        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_direction'] = 'reversal'; $row['natural_key'] = 'order_lifecycle:reversal:' . hash('sha256', $table . '|' . $source['fact_id'] . '|' . $operationId); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = (string)$source['fact_id']; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now;
+        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_direction'] = 'reversal'; $row['natural_key'] = 'order_lifecycle:reversal:' . hash('sha256', $table . '|' . $source['fact_id'] . '|' . $operationId); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = (string)$source['fact_id']; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = $businessDate !== '' ? $businessDate : date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now;
         if (!$amountOverrides) {
             $columns = $table === 'cashier_v3_sale_fact'
                 ? ['original_amount_cents', 'discount_amount_cents', 'coupon_discount_cents', 'coupon_payment_cents', 'sale_amount_cents', 'debt_amount_cents']
@@ -1513,14 +1533,14 @@ final class CashierV3OrderLifecycleServices
         return $value[0] === '-' ? substr($value, 1) : '-' . $value;
     }
 
-    private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId, bool $manualAmount = false, int $laborFeeCents = 0, ?string $projectCount = null, string $craftsmanType = ''): void
+    private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, string $businessDate, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId, bool $manualAmount = false, int $laborFeeCents = 0, ?string $projectCount = null, string $craftsmanType = ''): void
     {
         // 事实 ID 必须区分同一条明细/角色下的不同员工；旧算法只拼
         // operation/line/role，多人分配时会生成相同主键并触发 1062。
         $allocationIdentity = $operationId . '|' . $lineId . '|' . $role . '|' . $staffId;
         $factId = 'OLA-' . strtoupper(substr(hash_hmac('sha256', $allocationIdentity, $this->secret()), 0, 40));
         $row = $template; unset($row['id']);
-        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_type'] = $factType; $row['performance_type'] = $factType; $row['fact_direction'] = 'forward'; $row['natural_key'] = 'order_lifecycle:adjust:' . hash('sha256', $allocationIdentity); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = ''; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = date('Y-m-d', $now); $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now; $row['source_line_id'] = $lineId; $row['employee_id'] = (int)$staff['employee_id']; $row['employee_name_snapshot'] = trim((string)$staff['name']) ?: (string)$staff['staff_name']; $row['employee_type_snapshot'] = (string)$staff['employment_type_code']; $row['employee_type_authority_version'] = max(1, (int)$staff['employment_type_version']); $row['role_snapshot'] = $role . ($role === 'salesperson' ? ($marked ? ':presale' : ':postsale') : ($marked ? ':point' : ':round')) . ($role === 'craftsman' ? ':' . $craftsmanType : ''); $row['allocation_weight_numerator'] = $amount > 0 ? $amount : 0; $row['allocation_weight_denominator'] = max(1, $amount); $row['allocation_base_amount_cents'] = $amount; $row['amount_cents'] = $amount;
+        $row['fact_id'] = $factId; $row['business_event_no'] = (string)$event['event_no']; $row['fact_type'] = $factType; $row['performance_type'] = $factType; $row['fact_direction'] = 'forward'; $row['natural_key'] = 'order_lifecycle:adjust:' . hash('sha256', $allocationIdentity); $row['command_idempotency_key'] = $commandKey; $row['fact_version'] = 1; $row['reversal_of'] = ''; $row['operator_id'] = $operator->operatorId(); $row['business_date'] = $businessDate; $row['occurred_at'] = $now; $row['settled_at'] = $now; $row['recorded_at'] = $now; $row['source_line_id'] = $lineId; $row['employee_id'] = (int)$staff['employee_id']; $row['employee_name_snapshot'] = trim((string)$staff['name']) ?: (string)$staff['staff_name']; $row['employee_type_snapshot'] = (string)$staff['employment_type_code']; $row['employee_type_authority_version'] = max(1, (int)$staff['employment_type_version']); $row['role_snapshot'] = $role . ($role === 'salesperson' ? ($marked ? ':presale' : ':postsale') : ($marked ? ':point' : ':round')) . ($role === 'craftsman' ? ':' . $craftsmanType : ''); $row['allocation_weight_numerator'] = $amount > 0 ? $amount : 0; $row['allocation_weight_denominator'] = max(1, $amount); $row['allocation_base_amount_cents'] = $amount; $row['amount_cents'] = $amount;
         if ($role === 'craftsman') {
             // 手艺人调整保存的是三个独立业务量，不得从售价或比例反推。
             $row['labor_fee_amount_cents'] = $laborFeeCents;
