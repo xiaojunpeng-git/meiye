@@ -2467,6 +2467,12 @@ final class AiGatewayServices
             $understanding,$safe['outbound'],array_keys((array)($caps['metric_readiness']??[])),
             $this->analysisObjectVocabulary($caps,null)
         );
+        // A provider may read the customer's inclusive “以上” as a strict
+        // greater-than. Ground that boundary in the exact numeric phrase
+        // before compiling registered conditions; authorization stays intact.
+        $understanding=AiIntentUnderstandingContract::reconcileExplicitInclusiveConditionBounds(
+            $understanding,$safe['outbound']
+        );
         // A unique role plus a person-grain registered measurement determines
         // the rankable row only when the competing noun occurs solely inside
         // that metric title; independently named objects remain untouched.

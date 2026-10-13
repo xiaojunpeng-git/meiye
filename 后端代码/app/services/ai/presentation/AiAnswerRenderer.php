@@ -540,9 +540,13 @@ final class AiAnswerRenderer
         if ($prefixes!==[] && $historyRequired) {
             $prefix=count($prefixes)===1?array_key_first($prefixes):'现有记录中';
             $base='符合'.$relation.count($set['conditions']).'项条件的'.$label;
-            // 会员未命中时用业务方确认的简短说法；条件明细仍在结果表中，
-            // 不把现有记录之外的历史解释成“0 人”。
-            if ($count===0 && $set['subject']==='member') return $prefix.'未查到符合条件的会员。';
+            // An observed-only service history cannot establish a complete
+            // historical zero. Tell the customer why the actual population
+            // remains unknown instead of making an empty local fact set look
+            // like a verified count of all members.
+            if ($count===0 && $set['subject']==='member') {
+                return $prefix.'未查到符合条件的会员；历史服务记录可能不完整，无法确定实际人数。';
+            }
             return $count===0?$prefix.'未查到'.$base.'。':$prefix.'查到'.$base.$count.$unit.'。';
         }
         return '符合'.$relation.count($set['conditions']).'项条件的'.$label.'共有'.$count.$unit.'。';

@@ -634,7 +634,7 @@ $memberStateEmpty=$memberStateEvidence;
 $memberStateEmpty['results'][0]['count']=0;
 $memberStateEmpty['results'][0]['rows']=[];
 $memberStateNoData=(new AiAnswerRenderer())->render($memberStateEmpty);
-csCheck(strpos($memberStateNoData['summary'],'现有有效服务记录中未查到符合条件的会员。')===0
+csCheck(strpos($memberStateNoData['summary'],'现有有效服务记录中未查到符合条件的会员；历史服务记录可能不完整，无法确定实际人数。')===0
     &&strpos($memberStateNoData['summary'],'共有0人')===false,
     'empty observed-service results are reported as no matching records, never a complete historical zero');
 csCheck(strpos(AiIntentUnderstandingContract::modelInstruction(),'unit":"yuan|count|day"')!==false

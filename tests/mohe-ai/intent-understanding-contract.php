@@ -125,8 +125,8 @@ $mixedTyped=['goal'=>'统计符合条件的人数','status'=>'understood','requi
     'fields'=>['metric_codes','object_kind','operation','aggregate_condition'],
     'values'=>['metric_terms'=>['没有到店','余额'],'object_kind'=>'person','operation'=>'condition_count',
         'aggregate_condition'=>['subject'=>'person','relation'=>'all','result_form'=>'count','conditions'=>[
-            ['metric_term'=>'没有到店','operator'=>'gte','quantity'=>'90','unit'=>'day'],
-            ['metric_term'=>'余额','operator'=>'gte','quantity'=>'500','unit'=>'yuan'],
+            ['metric_term'=>'没有到店','operator'=>'gt','quantity'=>'90','unit'=>'day'],
+            ['metric_term'=>'余额','operator'=>'gt','quantity'=>'500','unit'=>'yuan'],
         ]]],
     'evidence'=>[['message_id'=>'current','quote'=>$mixedUnitQuestion['question']]],
 ]]];
@@ -141,6 +141,48 @@ $check(($corrected['requirements'][0]['values']['object_kind']??null)==='member'
     &&($corrected['requirements'][0]['values']['aggregate_condition']['subject']??null)==='member'
     &&count($corrected['requirements'][0]['values']['aggregate_condition']['conditions']??[])===2,
     'exact member-only conditions correct a generic person carrier without dropping predicates');
+$inclusive=AiIntentUnderstandingContract::reconcileExplicitInclusiveConditionBounds(
+    $corrected,$mixedUnitQuestion
+);
+$check(($inclusive['requirements'][0]['values']['aggregate_condition']['conditions'][1]['operator']??null)==='gte'
+    &&($inclusive['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']??null)==='gte',
+    '500-above and a stated 90-day absence both include their exact boundaries');
+$strictAgeQuestion=$mixedUnitQuestion;
+$strictAgeQuestion['question']='超过90天没有到店且余额在500以上有多少人';
+$strictAgeQuestion['evidence_messages']=[['id'=>'current','text'=>$strictAgeQuestion['question']]];
+$strictAgeUnderstood=$corrected;
+$strictAgeUnderstood['requirements'][0]['evidence'][0]['quote']=$strictAgeQuestion['question'];
+$check((AiIntentUnderstandingContract::reconcileExplicitInclusiveConditionBounds(
+    $strictAgeUnderstood,$strictAgeQuestion
+)['requirements'][0]['values']['aggregate_condition']['conditions'][0]['operator']??null)==='gt',
+    'an explicit more-than duration remains strictly greater than');
+$strictQuestion=$mixedUnitQuestion;
+$strictQuestion['question']='90天没有到店且余额超过500有多少人';
+$strictQuestion['evidence_messages']=[['id'=>'current','text'=>$strictQuestion['question']]];
+$strictUnderstood=$corrected;
+$strictUnderstood['requirements'][0]['evidence'][0]['quote']=$strictQuestion['question'];
+$check((AiIntentUnderstandingContract::reconcileExplicitInclusiveConditionBounds(
+    $strictUnderstood,$strictQuestion
+)['requirements'][0]['values']['aggregate_condition']['conditions'][1]['operator']??null)==='gt',
+    'strict greater-than evidence remains strict');
+$contradictoryQuestion=$mixedUnitQuestion;
+$contradictoryQuestion['question']='90天没有到店且余额超过500以上有多少人';
+$contradictoryQuestion['evidence_messages']=[['id'=>'current','text'=>$contradictoryQuestion['question']]];
+$contradictoryUnderstood=$corrected;
+$contradictoryUnderstood['requirements'][0]['evidence'][0]['quote']=$contradictoryQuestion['question'];
+$check((AiIntentUnderstandingContract::reconcileExplicitInclusiveConditionBounds(
+    $contradictoryUnderstood,$contradictoryQuestion
+)['requirements'][0]['values']['aggregate_condition']['conditions'][1]['operator']??null)==='gt',
+    'a conflicting strict comparator is not silently widened by the inclusive suffix');
+$ambiguousQuestion=$mixedUnitQuestion;
+$ambiguousQuestion['question']='90天没有到店且余额在500以上、另一个金额500以上有多少人';
+$ambiguousQuestion['evidence_messages']=[['id'=>'current','text'=>$ambiguousQuestion['question']]];
+$ambiguousUnderstood=$corrected;
+$ambiguousUnderstood['requirements'][0]['evidence'][0]['quote']=$ambiguousQuestion['question'];
+$check((AiIntentUnderstandingContract::reconcileExplicitInclusiveConditionBounds(
+    $ambiguousUnderstood,$ambiguousQuestion
+)['requirements'][0]['values']['aggregate_condition']['conditions'][1]['operator']??null)==='gt',
+    'repeated threshold text is not silently attached to one condition');
 $qualifiedTerm=$mixedTyped;
 $qualifiedTerm['requirements'][0]['values']['metric_terms'][0]='90天没有到店';
 $qualifiedTerm['requirements'][0]['values']['aggregate_condition']['conditions'][0]['metric_term']='90天没有到店';

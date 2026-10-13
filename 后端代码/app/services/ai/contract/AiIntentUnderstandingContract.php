@@ -1191,11 +1191,6 @@ final class AiIntentUnderstandingContract
     }
 
     /**
-     * A completed provider response may be corrected once only when it failed
-     * this structural contract. Transport, authority and unknown outcomes are
-     * deliberately never retried as if they were a missing customer detail.
-     */
-    /**
      * Correct a generic count noun only when every stated condition term has
      * one exact active registry owner and those owners publish one common
      * subject. Explicit object labels in the question always win. This only
@@ -1260,6 +1255,61 @@ final class AiIntentUnderstandingContract
         return self::normalize(array_replace($understanding,['requirements'=>$requirements]),$safeQuestion);
     }
 
+    /**
+     * Ground an inclusive boundary in one uniquely located literal number:
+     * “以上” includes that value, and N days of stated absence includes day N.
+     * An explicit strict comparator wins. Other thresholds remain model-owned
+     * so the server never invents a predicate or resolves ambiguous numbers.
+     */
+    public static function reconcileExplicitInclusiveConditionBounds(array $understanding,array $safeQuestion): array
+    {
+        if (($understanding['status']??null)!=='understood'
+            || !is_string($safeQuestion['question']??null)) return $understanding;
+        $question=$safeQuestion['question'];
+        $requirements=(array)($understanding['requirements']??[]);
+        $changed=false;
+        foreach ($requirements as $index=>$requirement) {
+            $items=$requirement['values']['aggregate_condition']['conditions']??null;
+            if (!is_array($items)) continue;
+            foreach ($items as $itemIndex=>$item) {
+                $quantity=$item['quantity']??null;
+                if (($item['operator']??null)!=='gt' || !is_string($quantity)
+                    || preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D',$quantity)!==1) continue;
+                $literal=preg_quote($quantity,'/');
+                $number='(?<![0-9.])'.$literal.'(?![0-9.])';
+                if (preg_match_all('/'.$number.'/u',$question)!==1) continue;
+                // The deployed PHP 7.4 runtime does not support match;
+                // keep the unit vocabulary explicit and bounded here.
+                $unitPatterns=['yuan'=>'(?:元|块)?','day'=>'天?',
+                    'count'=>'(?:次|个|项|人|笔)?'];
+                $unit=$unitPatterns[$item['unit']??'']??null;
+                $inclusive=false;
+                if ($unit!==null && preg_match('/'.$number.'\s*'.$unit.'\s*(?:及)?以上/u',
+                    $question,$above,PREG_OFFSET_CAPTURE)===1) {
+                    $prefix=substr($question,0,$above[0][1]);
+                    $inclusive=preg_match('/(?:超过|大于|多于|高于)\s*$/u',$prefix)!==1;
+                }
+                if (!$inclusive && ($item['unit']??null)==='day') {
+                    $term=$item['metric_term']??null;
+                    if (is_string($term) && preg_match('/^(?:没有|未|没)/u',$term)===1
+                        && preg_match('/'.$number.'\s*天\s*'.preg_quote($term,'/').'/u',$question,$duration,PREG_OFFSET_CAPTURE)===1) {
+                        $prefix=substr($question,0,$duration[0][1]);
+                        $inclusive=preg_match('/(?:超过|大于|多于|高于)\s*$/u',$prefix)!==1;
+                    }
+                }
+                if (!$inclusive) continue;
+                $requirements[$index]['values']['aggregate_condition']['conditions'][$itemIndex]['operator']='gte';
+                $changed=true;
+            }
+        }
+        return $changed?self::normalize(array_replace($understanding,['requirements'=>$requirements]),$safeQuestion):$understanding;
+    }
+
+    /**
+     * A completed provider response may be corrected once only when it failed
+     * this structural contract. Transport, authority and unknown outcomes are
+     * deliberately never retried as if they were a missing customer detail.
+     */
     public static function repairable(?string $predicate): bool
     {
         return is_string($predicate) && $predicate !== ''
