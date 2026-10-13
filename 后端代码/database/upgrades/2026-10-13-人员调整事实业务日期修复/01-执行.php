@@ -207,9 +207,9 @@ function r47VerifyWritten(PDO $pdo, array $written): void
 {
     $groups = [R47_TABLE_PERFORMANCE => [], R47_TABLE_GUIDE => [], R47_TABLE_MANAGER => []];
     foreach ($written as $factId) {
-        if (str_starts_with($factId, 'R47R-') || str_starts_with($factId, 'R47F-')) $groups[R47_TABLE_PERFORMANCE][] = $factId;
-        elseif (str_starts_with($factId, 'R47G-')) $groups[R47_TABLE_GUIDE][] = $factId;
-        elseif (str_starts_with($factId, 'R47M-')) $groups[R47_TABLE_MANAGER][] = $factId;
+        if (strpos($factId, 'R47R-') === 0 || strpos($factId, 'R47F-') === 0) $groups[R47_TABLE_PERFORMANCE][] = $factId;
+        elseif (strpos($factId, 'R47G-') === 0) $groups[R47_TABLE_GUIDE][] = $factId;
+        elseif (strpos($factId, 'R47M-') === 0) $groups[R47_TABLE_MANAGER][] = $factId;
         else throw new RuntimeException('Unexpected correction identifier');
     }
     $actual = 0;

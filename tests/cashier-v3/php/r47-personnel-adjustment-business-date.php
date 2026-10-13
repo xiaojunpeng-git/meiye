@@ -58,6 +58,7 @@ $checks = [
     ) !== false && strpos($migration, "\$forward['business_date'] = (string)\$source['source_business_date'];") !== false,
     'migration_covers_guide_and_sales_manager' => strpos($migration, 'R47_TABLE_GUIDE') !== false
         && strpos($migration, 'R47_TABLE_MANAGER') !== false,
+    'migration_remains_php74_compatible' => strpos($migration, 'str_starts_with(') === false,
     'migration_verifies_database_identity' => substr_count(
         $migration,
         'database identity mismatch'
