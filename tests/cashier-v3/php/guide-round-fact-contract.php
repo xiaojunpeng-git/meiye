@@ -65,8 +65,11 @@ $checks = [
     'formal checkout rejects only a same round used on another date' => strpos($service, 'guide_round_date_conflict:') !== false
         && strpos($service, '$round === $roundNo && (string)$row[\'business_date\'] !== $businessDate') !== false
         && strpos($service, 'guide_date_round_conflict') === false,
-    'only settled normal sales orders occupy a guide round' => strpos($service, "->where('sales_order.order_status', 'settled')") !== false
-        && strpos($service, "->whereIn('lifecycle.operation_type', ['refund', 'void'])") !== false,
+    'only effective sales or completed unvoided entitlement services occupy a guide round' => strpos($service, "->where('sales_order.order_status', 'settled')") !== false
+        && strpos($service, "->whereIn('lifecycle.operation_type', ['refund', 'void'])") !== false
+        && strpos($service, "->where('completion_receipt.status', 'completed')") !== false
+        && strpos($service, "->where('entitlement_service.service_status', 'completed')") !== false
+        && strpos($service, "->where('service_void.status', 'succeeded')") !== false,
     'cross-date conflict returns the occupied settlement date to the cashier' => strpos($submission, 'guide_round_date_conflict:(\d{4}-\d{2}-\d{2})') !== false
         && strpos($submission, '该会员已于 ') !== false,
     'guide round has no payment-step preflight endpoint' => strpos($hangDraftController, 'public function validateGuideRound()') === false

@@ -14,6 +14,8 @@ const props = defineProps({
   guestCustomer: { type: Boolean, default: false },
   // 订单中心单行调整复用同一控件，但需要直接进入完整分配模式；收银默认行为不变。
   initialMode: { type: String, default: '' },
+  // 纯权益订单的导购更正只记录归属与轮次，不提供业绩分配模式切换。
+  simpleOnly: { type: Boolean, default: false },
   // 仅订单中心调整销售人时按岗位组展示合计；收银工作台原有文案不受影响。
   groupedAllocationSummary: { type: Boolean, default: false },
   requireCraftsmen: { type: Boolean, default: false },
@@ -51,7 +53,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'confirm', 'apply-all', 'retry', 'search-personnel'])
 
-const mode = ref(props.historyAdjustment || props.initialMode === 'full' ? 'full' : 'simple')
+const mode = ref(props.simpleOnly ? 'simple' : (props.historyAdjustment || props.initialMode === 'full' ? 'full' : 'simple'))
 const resolveInitialTab = (tab = '') => {
   return tab
 }
@@ -790,7 +792,7 @@ function historyAllocationIsValid(records) {
 
 function activateInvalidTab(tab, message) {
   activeTab.value = tab
-  mode.value = 'full'
+  if (!props.simpleOnly) mode.value = 'full'
   validationMessage.value = message
 }
 
@@ -1017,9 +1019,9 @@ function searchGroupPersonnel(scope) {
         <button type="button" aria-label="关闭" title="关闭" @click="emit('close')">×</button>
       </header>
 
-      <div class="personnel-performance-toolbar">
+      <div v-if="!simpleOnly || !isAttributionTab" class="personnel-performance-toolbar">
         <label v-if="!isAttributionTab"><span class="sr-only">搜索员工</span><input v-model="keyword" type="search" placeholder="输入关键词搜索员工"></label>
-        <div class="personnel-performance-mode" aria-label="分配模式">
+        <div v-if="!simpleOnly" class="personnel-performance-mode" aria-label="分配模式">
           <button type="button" :class="{ 'is-active': mode === 'simple' }" @click="validationMessage = ''; mode = 'simple'">简易选择</button>
           <button type="button" :class="{ 'is-active': mode === 'full' }" @click="validationMessage = ''; mode = 'full'">完整分配</button>
         </div>

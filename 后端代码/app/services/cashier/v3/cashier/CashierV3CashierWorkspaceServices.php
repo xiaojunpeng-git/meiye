@@ -370,11 +370,11 @@ final class CashierV3CashierWorkspaceServices
             );
         }
 
-        // 权益核销没有本次销售业绩。即使直接调用事务服务，也不能写入销售人快照。
-        if ($isEntitlement && ($hasSalespeople || $hasGuides || $hasSalesManagers)) {
+        // 权益核销没有本次销售业绩；只允许独立的导购轮次归属，不允许销售人或销售经理。
+        if ($isEntitlement && ($hasSalespeople || $hasSalesManagers)) {
             throw new CashierV3CommandException(
                 CashierV3ResultCode::ENTITLEMENT_LINE_INVALID,
-                '权益项目只支持设置手艺人。',
+                '权益项目只支持设置手艺人和导购。',
                 CashierV3ResultCode::STATUS_FAILED,
                 ['line_id' => $lineKey, 'reason' => 'entitlement_salespeople_forbidden']
             );
@@ -533,12 +533,9 @@ final class CashierV3CashierWorkspaceServices
             }
             $salespeople = $this->authoritativeSalespeopleInTx($settings['salespeople'], $operatorScope);
         }
-        // Guide attribution belongs to a sale line. Entitlement service rows
-        // carry only service craftsmen; retaining legacy guide snapshots on
-        // those rows makes the final authority fingerprint drift between
-        // pure-entitlement and mixed checkout paths.
-        $guides = $isSale ? $this->decodeStoredGuideSelections($line, $lineKey) : [];
-        if ($isSale && array_key_exists('guideSelections', $settings)) {
+        // 导购轮次属于服务到店事实，权益护理也保存；销售经理仍只属于销售明细。
+        $guides = $this->decodeStoredGuideSelections($line, $lineKey);
+        if ($hasGuides) {
             if (!is_array($settings['guideSelections'])) {
                 throw $this->incompleteLineSettings($lineKey, 'guide_selections_invalid');
             }
@@ -561,7 +558,7 @@ final class CashierV3CashierWorkspaceServices
             $manualLaborFeeCents = $this->manualLaborFeeCents($settings['laborManualFee'], $lineKey);
         }
 
-        // 权益仅持久化服务设置与手艺人；普通项目仍可同事务持久化销售人快照。
+        // 权益持久化服务设置、手艺人与导购；销售人及销售经理仅写销售行。
         $affected = Db::name(self::LINE_TABLE)
             ->where('id', (int)$line['id'])
             ->where('workspace_id', $workspaceId)
@@ -3023,12 +3020,8 @@ final class CashierV3CashierWorkspaceServices
             $salespeople = $lineRole === self::ROLE_SALE
                 ? $this->decodeStoredSalespeople($row, $lineKey)
                 : [];
-            // Legacy rows may still contain attribution JSON from before the
-            // entitlement boundary was enforced. Never expose or reuse it:
-            // only sale rows have guide/sales-manager attribution.
-            $guides = $lineRole === self::ROLE_SALE
-                ? $this->decodeStoredGuideSelections($row, $lineKey)
-                : [];
+            // 权益服务和销售行都可记录导购轮次，销售经理仍只属于销售行。
+            $guides = $this->decodeStoredGuideSelections($row, $lineKey);
             $salesManagers = $lineRole === self::ROLE_SALE
                 ? $this->decodeStoredSalesManagerSelections($row, $lineKey)
                 : [];

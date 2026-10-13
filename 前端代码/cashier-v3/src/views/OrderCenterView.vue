@@ -1530,6 +1530,10 @@ function salesOrderPersonnelTargetRole(role) {
 }
 
 async function openSalesOrderPersonnelEditor(record, item, role) {
+  if (record?.entitlementOnly && role === 'guides') {
+    await openServiceGuideEditor(record, item)
+    return
+  }
   const orderId = salesOrderLifecycleId(record)
   const lineId = salesOrderPersonnelLineId(item)
   if (!orderId || !lineId || !salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')) return
@@ -1570,6 +1574,37 @@ async function openSalesOrderPersonnelEditor(record, item, role) {
     kind: 'sales_order', id: String(entry.salesOrderId || orderId), version: authoritativeVersion
   }], stateContextId, { requestStateContextId: stateContextId })
   salesPersonnelEntry.value = { ...entry, lines: [line] }
+  salesPersonnelEditorOpen.value = true
+}
+
+// 纯权益行没有销售主单；由服务端重新读取导购事实及旧值标识后才开放更正。
+async function openServiceGuideEditor(record, item) {
+  if (!salesOrderActionAvailable(record, 'correct-service-order-guide', 'cashier.v3.order.staff_adjust')
+    || !Number(item?.serviceFactId) || !record?.checkoutRequestId) return
+  salesPersonnelError.value = ''
+  salesPersonnelSearchError.value = ''
+  salesPersonnelEntry.value = null
+  salesPersonnelTarget.value = null
+  const result = await requestAction('open-service-order-guide-correction', {
+    checkoutRequestId: record.checkoutRequestId,
+    serviceFactId: Number(item.serviceFactId)
+  })
+  const entry = actionData(result).serviceGuideCorrection
+  if (!entry || !['success', 'succeeded'].includes(String(actionStatus(result)))) {
+    salesPersonnelError.value = result?.result?.message || result?.data?.result?.message || '导购资料读取失败，请刷新后重试。'
+    return
+  }
+  salesPersonnelTarget.value = {
+    orderId: String(entry.checkoutRequestId), lineId: String(entry.sourceLineId),
+    serviceFactId: Number(entry.serviceFactId), role: 'guide', uiRole: 'guides', entitlementOnly: true
+  }
+  salesPersonnelEntry.value = {
+    memberId: Number(entry.memberId), salesOrderNo: entry.serviceRecordNo,
+    expectedFactIds: entry.expectedFactIds,
+    lines: [{ orderLineId: String(entry.sourceLineId), itemName: entry.itemName,
+      currentGuides: entry.currentGuides }],
+    guides: entry.currentGuides
+  }
   salesPersonnelEditorOpen.value = true
 }
 
@@ -1753,15 +1788,26 @@ async function submitSalesPersonnelAdjustment() {
   salesPersonnelSubmitting.value = true
   salesPersonnelError.value = ''
   try {
-    const result = await requestAction('adjust-sales-order-personnel', {
-      orderId: target.orderId,
-      recordVersion: entry.recordVersion ?? target.recordVersion,
-      targetOrderLineId: target.lineId,
-      targetRole: target.role,
-      personnel,
-      reason,
-      idempotencyKey
-    })
+    // 纯权益没有销售主单；提交导购与轮次，后端以整组服务事实校验并同步轮次。
+    const result = target.entitlementOnly
+      ? await requestAction('correct-service-order-guide', {
+        checkoutRequestId: target.orderId,
+        serviceFactId: target.serviceFactId,
+        expectedFactIds: entry.expectedFactIds,
+        guideEmployeeIds: personnel.map((item) => item.staffId),
+        guideRoundNo: personnel[0]?.guideRoundNo,
+        reason,
+        idempotencyKey
+      })
+      : await requestAction('adjust-sales-order-personnel', {
+        orderId: target.orderId,
+        recordVersion: entry.recordVersion ?? target.recordVersion,
+        targetOrderLineId: target.lineId,
+        targetRole: target.role,
+        personnel,
+        reason,
+        idempotencyKey
+      })
     const status = actionStatus(result)
     if (isTerminalActionStatus(status)) salesPersonnelCommandIds.value = { ...salesPersonnelCommandIds.value, [key]: null }
     if (['success', 'succeeded'].includes(String(status))) {
@@ -3519,7 +3565,7 @@ onBeforeUnmount(() => {
               <span v-else>{{ personnelNames(item, 'salesManagers') }}</span>
             </td>
             <td>
-              <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ guideRoundText(item.guides) }}</button>
+              <button v-if="salesOrderActionAvailable(record, record.entitlementOnly ? 'correct-service-order-guide' : 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust') && !item.voidedAt" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ guideRoundText(item.guides) }}</button>
               <span v-else>{{ guideRoundText(item.guides) }}</span>
             </td>
             <!-- 购买明细展示用券前金额；权益价值与整单资金继续读取各自的权威投影。 -->
@@ -3680,7 +3726,8 @@ onBeforeUnmount(() => {
     <PersonnelPerformanceOverlay
       v-if="!isPlatformReadOnly && salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
       :initial-tab="salesPersonnelTarget.uiRole"
-      initial-mode="full"
+      :initial-mode="salesPersonnelTarget.entitlementOnly ? 'simple' : 'full'"
+      :simple-only="Boolean(salesPersonnelTarget.entitlementOnly)"
       :show-craftsmen="salesPersonnelTarget.role === 'craftsman'"
       :show-salespeople="salesPersonnelTarget.role === 'salesperson'"
       :grouped-allocation-summary="salesPersonnelTarget.role === 'salesperson'"

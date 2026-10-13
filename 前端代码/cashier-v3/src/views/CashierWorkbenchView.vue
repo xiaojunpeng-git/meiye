@@ -3869,7 +3869,8 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
   const showCraftsmen = roleScope === 'personnel' && isProjectLine(line) && !cardOperationUpgradeBinding(line)
   // 卡内权益只形成服务和劳动业绩，不形成销售业绩；不能加载或提交销售人。
   const showSalespeople = roleScope === 'personnel' && !isEntitlementLine(line)
-  const showGuides = !isEntitlementLine(line) && ['guide', 'attribution'].includes(roleScope)
+  // 权益护理也有到店导购轮次，但没有本次销售人或销售经理归属。
+  const showGuides = ['guide', 'attribution'].includes(roleScope)
   const showSalesManagers = !isEntitlementLine(line) && ['salesManager', 'attribution'].includes(roleScope)
   const requestKey = `${line.id}:${Date.now()}`
   personnelOverlay.value = {
@@ -3967,10 +3968,9 @@ async function openCartLineSalespeople(line) {
 }
 
 async function openCartLineAttributions(line) {
-  if (isEntitlementLine(line)) return
   // 游客默认“无轮次”，会员也可明确选“无”；最终身份与轮次组合由服务端校验。
   activeCartLineId.value = line.id
-  await loadPersonnelOverlay(line, 'guides', 'attribution')
+  await loadPersonnelOverlay(line, 'guides', isEntitlementLine(line) ? 'guide' : 'attribution')
 }
 
 async function retryPersonnelOverlay() {
@@ -5314,7 +5314,6 @@ function localCheckoutPreviewSnapshot() {
       ...(saleLine
         ? {
             salespeople: canonicalCheckoutSalespeople(salespeople),
-            guideSelections: canonicalCheckoutAttributions(guideSelections, true),
             salesManagerSelections: canonicalCheckoutAttributions(salesManagerSelections)
           }
         : {}),
@@ -5322,6 +5321,9 @@ function localCheckoutPreviewSnapshot() {
       // their effective values in the preview rather than relying on an
       // earlier draft merge that a later projection could overwrite.
       ...(saleLine && projectLine
+      ...(saleLine || entitlementLine
+        ? { guideSelections: canonicalCheckoutAttributions(guideSelections, true) }
+        : {}),
         ? { isExperience: cartLineExperienceSelected(line) }
         : {}),
       ...(saleLine && isInventoryManagedProductLine(line)
@@ -5565,6 +5567,10 @@ function buildCheckoutSnapshot(preview = {}) {
   })
   // A pure entitlement checkout has no collection phase. Keep only payment
   // rows that already live in this one browser snapshot; no payment summary
+    // 权益结账没有销售单，导购轮次仍随该权益服务行冻结在回执快照中。
+    if (role === 'entitlement_service') {
+      next.guideSelections = canonicalCheckoutAttributions(line.guideSelections, true)
+    }
   // or selected-lines side channel may influence final submission.
   const hasSaleLines = lines.some((line) => cartLineRole(line) === 'sale')
   const zeroReceivableSale = hasSaleLines
@@ -7878,14 +7884,14 @@ onBeforeUnmount(() => {
                       {{ cartActionLabel('欠款', checkoutDebtSummary(line)) }}
                     </button>
                   </div>
-                  <div v-if="!isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--attribution">
+                  <div class="cart-line__meta-slot cart-line__meta-slot--attribution">
                     <button
                       type="button"
                       class="cart-line__meta-action cart-line__meta-action--enabled"
-                      :title="groupAttributionDisplaySummary(line) ? `导购/销售经理:${groupAttributionDisplaySummary(line)}` : '导购/销售经理'"
+                      :title="isEntitlementLine(line) ? (guideDisplaySummary(line) ? `导购:${guideDisplaySummary(line)}` : '导购') : (groupAttributionDisplaySummary(line) ? `导购/销售经理:${groupAttributionDisplaySummary(line)}` : '导购/销售经理')"
                       @click="openCartLineAttributions(line)"
                     >
-                      导购/销售经理<template v-if="groupAttributionDisplaySummary(line)">:<span class="cart-line__meta-value">{{ groupAttributionDisplaySummary(line) }}</span></template>
+                      {{ isEntitlementLine(line) ? '导购' : '导购/销售经理' }}<template v-if="isEntitlementLine(line) ? guideDisplaySummary(line) : groupAttributionDisplaySummary(line)">:<span class="cart-line__meta-value">{{ isEntitlementLine(line) ? guideDisplaySummary(line) : groupAttributionDisplaySummary(line) }}</span></template>
                     </button>
                   </div>
                   <div v-if="!isEntitlementLine(line)" class="cart-line__meta-slot cart-line__meta-slot--coupon">

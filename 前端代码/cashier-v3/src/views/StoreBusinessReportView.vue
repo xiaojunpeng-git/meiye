@@ -299,6 +299,14 @@ const currentFieldExplanations = computed(() => columns.value.map((column) => ({
 const fieldGuideIntro = computed(() => {
   if (['new_customer_analysis', 'new_customer_analysis_summary'].includes(activeReport.value)) {
     return '顾客首次办理疗程卡即计入新客，未付清也计入；后续补清不重复记人次。首次办卡或补交来源为 A 的数据不计入，已作废订单也不计入；其他补交按自身来源统计。下方说明各列的数据从哪里来。'
+  if (activeReport.value === 'field_acquisition_summary') {
+    return '本表按会员汇总 E 地推销售的有效现金收款。几月实际收款就记在几月，其他来源的收款不计；点击月金额可查看对应的 E 销售明细。'
+  }
+  if (activeReport.value === 'field_acquisition_detail') {
+    return String(dynamicFilters.value.receipt_period || '') === '1'
+      ? '当前从汇总表按收款月份查看：只显示该月实际收到现金的 E 地推销售明细，金额为该月分摊收款，不是原销售日期的全部收款。'
+      : '本表显示当次来源为 E 地推拓客的销售和纯权益护理；现金按原 E 销售明细分摊，护理按实际选择的导购轮次归列。'
+  }
   }
   if (activeReport.value === 'store_item_analysis') {
     return '分类列按当前可见的商品分类显示；每笔金额仍按发生业务时记录的分类归入。旧记录没有可用分类时显示在“未分类”，以后修改项目分类不会改变旧记录。'
@@ -409,11 +417,11 @@ const filterSchema = computed(() => {
       && !['organization_store_scope', 'date_range', 'month', 'year'].includes(type)
   })
 })
-const isCrossIndustryAnnualSummary = computed(() => activeReport.value === 'cross_industry_customer_summary')
-const usesAnnualYearFilter = computed(() => isCrossIndustryAnnualSummary.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
+const isAnnualAcquisitionSummary = computed(() => ['field_acquisition_summary', 'cross_industry_customer_summary'].includes(activeReport.value))
+const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
-// 异业汇总明确按年份选择并提交完整自然年；其余门店报表继续按日期区间，平台原有年/月规则不变。
-const reportPeriodMode = computed(() => isCrossIndustryAnnualSummary.value ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+// 两张获客汇总按完整自然年筛选；明细仍按业务日期区间，避免切换报表时串用筛选口径。
+const reportPeriodMode = computed(() => isAnnualAcquisitionSummary.value ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
   if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
@@ -827,7 +835,13 @@ function monthBounds(month) {
 }
 
 function yearBounds(year) {
-  const normalized = /^\d{4}$/.test(String(year || '')) ? String(year) : today().slice(0, 4)
+  let normalized = /^\d{4}$/.test(String(year || '')) ? String(year) : today().slice(0, 4)
+  // 年度汇总只能查询 V3 事实覆盖期内的年份；旧链接或手输越界值不能变成报表错误。
+  if (isAnnualAcquisitionSummary.value) {
+    const minYear = LEGACY_COVERAGE_START.slice(0, 4)
+    normalized = normalized < minYear ? minYear : normalized > today().slice(0, 4) ? today().slice(0, 4) : normalized
+    if (selectedYear.value !== normalized) selectedYear.value = normalized
+  }
   return { start: `${normalized}-01-01`, end: `${normalized}-12-31` }
 }
 
@@ -1011,7 +1025,7 @@ function syncActiveReportFromRoute() {
   startDate.value = String(route.query?.start_date || route.query?.end_date || defaults.start)
   endDate.value = String(route.query?.end_date || route.query?.start_date || defaults.end)
   // 无年份的新入口回到今年；不能把上一张汇总的历史年份带入默认页。
-  if (isCrossIndustryAnnualSummary.value) selectedYear.value = today().slice(0, 4)
+  if (isAnnualAcquisitionSummary.value) selectedYear.value = today().slice(0, 4)
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 
@@ -1023,7 +1037,7 @@ function syncFiltersFromRoute() {
   else if (usesNaturalMonthFilter.value && query.start_date) selectedMonth.value = String(query.start_date).slice(0, 7)
   if (query.year && /^\d{4}$/.test(String(query.year))) selectedYear.value = String(query.year)
   // 兼容旧日期链接：原后端使用结束日所在年份，改控件不能让旧链接换成另一个年度。
-  else if (isCrossIndustryAnnualSummary.value) selectedYear.value = String(query.end_date || query.start_date || today()).slice(0, 4)
+  else if (isAnnualAcquisitionSummary.value) selectedYear.value = String(query.end_date || query.start_date || today()).slice(0, 4)
   else if (usesAnnualYearFilter.value && query.start_date) selectedYear.value = String(query.start_date).slice(0, 4)
   const storeIds = String(query.store_ids || '').split(',').map(Number).filter(Boolean)
   if (storeIds.length) {
@@ -1543,7 +1557,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <label v-if="isCrossIndustryAnnualSummary || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" min="2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
+      <label v-if="isAnnualAcquisitionSummary || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" :min="isAnnualAcquisitionSummary ? LEGACY_COVERAGE_START.slice(0, 4) : 2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
       <div v-else-if="!isPlatformReport" class="store-business-report__period-picker">
         <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
       </div>

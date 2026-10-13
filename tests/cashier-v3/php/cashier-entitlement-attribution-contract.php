@@ -4,9 +4,8 @@ declare(strict_types=1);
 /**
  * Backend contract for checkout line attribution boundaries.
  *
- * Entitlement service rows only carry craftsmen. Guide and sales-manager
- * attribution are sale-line concerns and must never be reintroduced into an
- * entitlement authority snapshot. Checkout preparation is also eventless:
+ * Entitlement service rows carry craftsmen and guide rounds, but no salespeople
+ * or sales-manager attribution. Checkout preparation is also eventless:
  * formal sales, payments, inventory, service and performance facts belong to
  * the final submit transaction.
  */
@@ -35,13 +34,14 @@ function entitlementContractCheck(string $id, bool $condition, string $detail = 
 
 entitlementContractCheck(
     'EAC-01',
-    strpos($workspace, '$guides = $isSale ? $this->decodeStoredGuideSelections($line, $lineKey) : [];') !== false,
-    'guide attribution must be sale-line-only'
+    strpos($workspace, '$guides = $this->decodeStoredGuideSelections($line, $lineKey);') !== false,
+    'entitlement guide selection must survive the workspace draft'
 );
 entitlementContractCheck(
     'EAC-02',
-    strpos($workspace, 'if ($isSale && array_key_exists(\'guideSelections\', $settings))') !== false,
-    'guide settings must not be applied to entitlement rows'
+    strpos($workspace, 'if ($hasGuides) {') !== false
+        && strpos($preparation, "'guideSelections' => is_array(\$line['guideSelections'] ?? null)") !== false,
+    'guide settings must enter the entitlement checkout snapshot'
 );
 entitlementContractCheck(
     'EAC-03',
@@ -51,8 +51,8 @@ entitlementContractCheck(
 );
 entitlementContractCheck(
     'EAC-04',
-    strpos($preparation, '仅创建可编辑的结账请求') !== false
-        && strpos($preparation, 'prepare-checkout-submission 在第三步确认时重读并校验') !== false,
+    strpos($preparation, 'public function prepareInTx(') !== false
+        && strpos($preparation, 'CashierV3CheckoutSettlementKernel::saveDraft(') !== false,
     'prepare checkout must remain eventless'
 );
 entitlementContractCheck(
@@ -65,9 +65,9 @@ entitlementContractCheck(
 );
 entitlementContractCheck(
     'EAC-06',
-    strpos($workspace, '$guides = $lineRole === self::ROLE_SALE') !== false
+    strpos($workspace, '$guides = $this->decodeStoredGuideSelections($row, $lineKey);') !== false
         && strpos($workspace, '$salesManagers = $lineRole === self::ROLE_SALE') !== false,
-    'legacy entitlement attribution must be stripped from public drafts'
+    'entitlement guide must be visible while sales manager remains sale-only'
 );
 
 echo sprintf("cashier-entitlement-attribution-contract: passed=%d failed=%d\n", $passed, $failed);

@@ -109,11 +109,13 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-order-services' => self::FEATURE_ORDER_SERVICE_DETAIL,
             'open-service-records' => self::FEATURE_ORDER_SERVICE_DETAIL,
             'open-service-record-craftsman-adjustment' => self::FEATURE_ORDER_SERVICE_DETAIL,
+            'open-service-order-guide-correction' => self::FEATURE_ORDER_STAFF_ADJUST,
             'open-order-writeoffs' => self::FEATURE_ORDER_CENTER,
         ] as $action => $feature) {
             $projection[$action] = $feature;
         }
         $command['adjust-sales-order-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
+        $command['correct-service-order-guide'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-recharge-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-supplement-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-refund-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;

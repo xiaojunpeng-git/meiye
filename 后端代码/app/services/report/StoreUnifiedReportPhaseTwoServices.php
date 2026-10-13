@@ -600,85 +600,257 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         return $result;
     }
 
+    /** 地推现金只取 E 来源销售明细实际分摊到的有效收款，月份由收款业务日决定。 */
+    private function fieldMarketingPaymentAllocations(array $stores)
+    {
+        $query=$this->cashFacts($stores,'field_sale_payment')
+            ->join('cashier_v3_payment_sale_allocation_fact allocation',"allocation.tenant_id=field_sale_payment.tenant_id AND allocation.payment_fact_id=field_sale_payment.fact_id AND allocation.status='effective'")
+            ->join('cashier_v3_sale_fact field_sale',"field_sale.tenant_id=allocation.tenant_id AND field_sale.store_id=allocation.store_id AND field_sale.fact_id=allocation.sale_fact_id")
+            ->where('field_sale_payment.status','effective')->where('field_sale.status','effective')
+            ->where('field_sale_payment.source_document_type','<>','recharge_debt_repayment')
+            ->whereIn('field_sale.business_source_primary_id',$this->sourceIds('E')?:[-1]);
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query,'field_sale.tenant_id','field_sale.order_id');
+        return $query;
+    }
+
     private function fieldMarketingDetail(array $stores,array $range,array $input):array
     {
         $sourceIds=$this->sourceIds('E');$memberId=(int)($input['member_id']??0);
+        // 汇总下钻按收款月选原 E 销售明细；普通明细仍按销售/护理发生日筛选。
+        $receiptPeriod=(int)($input['receipt_period']??0)===1&&$memberId>0;
+        $receiptSaleIds=[];
+        if($receiptPeriod){
+            $receiptSaleIds=array_column($this->fieldMarketingPaymentAllocations($stores)
+                ->where('field_sale.member_id',$memberId)
+                ->whereBetween('field_sale_payment.business_date',[$range['start'],$range['end']])
+                ->fieldRaw('field_sale.fact_id')->group('field_sale.fact_id')->select()->toArray(),'fact_id');
+        }
+        // 两张地推表都按会员归行；未绑定会员的销售单保留在订单事实中，但不能合并成一条空会员报表行。
         // 导购事实使用结账明细号，销售事实使用订单明细号；经订单明细映射后才能按真实轮次归档收款。
         $base=$this->participantOrder($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_sale_fact')->alias('s'),$stores,'s'), 's', $input, $range),'s.order_id')->leftJoin('cashier_v3_sales_order o','o.order_id=s.order_id')
             ->leftJoin('cashier_v3_sales_order_line sale_line','sale_line.tenant_id=s.tenant_id AND sale_line.order_id=s.order_id AND sale_line.order_line_id=s.source_line_id')
             ->leftJoin('cashier_v3_customer_guide_round_fact guide_round',"guide_round.tenant_id=s.tenant_id AND guide_round.order_id=s.order_id AND guide_round.source_line_id=sale_line.checkout_line_id AND guide_round.status='effective'")
-            ->whereBetween('s.business_date',[$range['start'],$range['end']])->where('s.status','effective')->whereIn('s.business_source_primary_id',$sourceIds?:[-1]);
+            ->where('s.status','effective')->where('s.member_id','>',0)->whereIn('s.business_source_primary_id',$sourceIds?:[-1]);
+        if($receiptPeriod)$base->whereIn('s.fact_id',$receiptSaleIds?:['__no_field_receipt__']);
+        else $base->whereBetween('s.business_date',[$range['start'],$range['end']]);
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($base,'s.tenant_id','s.order_id');
         if($memberId>0)$base->where('s.member_id',$memberId);
         $base=$base->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.business_source_secondary_name_snapshot,s.order_id,s.source_line_id,s.business_date,s.occurred_at,MAX(o.order_note) remark,MAX(guide_round.guide_round_no) guide_round_no')
             ->group('s.store_id,s.member_id,s.order_id,s.source_line_id')->order('s.business_date','desc')->select()->toArray();
+        // 纯权益结账没有销售事实；以已完成且未作废的服务行补足报表行，
+        // 仅取 E 来源及 entitlement_only，混合结账仍由销售行承载，避免重复展示。
+        $standalone=$this->completedUnvoidedServiceFacts(
+            $this->participantCheckout($this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('standalone_service'),$stores,'standalone_service'),'standalone_service',$input,$range),'standalone_service.checkout_request_id'),
+            'standalone_service','standalone_void'
+        )->join('cashier_v3_checkout_request standalone_request','standalone_request.tenant_id=standalone_service.tenant_id AND standalone_request.request_id=standalone_service.checkout_request_id')
+            ->leftJoin('cashier_v3_checkout_business_source_selection standalone_source',"standalone_source.tenant_id=standalone_service.tenant_id AND standalone_source.store_id=standalone_service.store_id AND standalone_source.checkout_request_id=standalone_service.checkout_request_id AND standalone_source.checkout_kind='sale'")
+            ->where('standalone_request.composition','entitlement_only')
+            ->whereBetween('standalone_service.business_date',[$range['start'],$range['end']])
+            ->where('standalone_service.is_experience',0)
+            ->where('standalone_service.member_id','>',0)
+            ->where(function($source)use($sourceIds):void{
+                $source->whereIn('standalone_service.business_source_primary_id',$sourceIds?:[-1])
+                    ->whereOr('standalone_service.business_source_primary_name_snapshot','like','E%')
+                    ->whereOr('standalone_source.primary_source_id','in',$sourceIds?:[-1])
+                    ->whereOr('standalone_source.primary_source_name_snapshot','like','E%');
+            });
+        // 纯权益护理没有现金分摊，不应出现在现金月份下钻中。
+        if($receiptPeriod)$standalone->whereRaw('1=0');
+        if($memberId>0)$standalone->where('standalone_service.member_id',$memberId);
+        $standaloneServiceIds=[];
+        foreach($standalone->field('standalone_service.service_fact_id,standalone_service.tenant_id,standalone_service.store_id,standalone_service.organization_id,standalone_service.organization_path_snapshot,standalone_service.organization_name_snapshot,standalone_service.store_name_snapshot,standalone_service.member_id,standalone_service.member_name_snapshot,standalone_service.business_source_primary_id,standalone_service.business_source_primary_name_snapshot,standalone_service.business_source_secondary_name_snapshot,standalone_service.checkout_request_id,standalone_service.source_line_id,standalone_service.business_date,standalone_service.occurred_at,standalone_source.primary_source_id selected_primary_id,standalone_source.primary_source_name_snapshot selected_primary_name')->select()->toArray() as $service){
+            $sourceName=trim((string)$service['business_source_primary_name_snapshot']);
+            $isFieldSource=$sourceName!==''?$this->sourcePrefix(['name'=>$sourceName])==='E':
+                ((int)$service['business_source_primary_id']>0?in_array((int)$service['business_source_primary_id'],$sourceIds,true):
+                    (in_array((int)$service['selected_primary_id'],$sourceIds,true)||$this->sourcePrefix(['name'=>(string)$service['selected_primary_name']])==='E'));
+            if(!$isFieldSource)continue;
+            $standaloneServiceIds[(string)$service['service_fact_id']]=true;
+            $service['_service_only']=true;
+            $service['fact_id']=(string)$service['service_fact_id'];
+            $service['order_id']='';
+            $service['remark']='';
+            $service['guide_round_no']=0;
+            $base[]=$service;
+        }
+        usort($base,static function(array $left,array $right):int{
+            return strcmp((string)$right['business_date'],(string)$left['business_date'])
+                ?: ((int)$right['occurred_at']<=>(int)$left['occurred_at'])
+                ?: strcmp((string)$right['fact_id'],(string)$left['fact_id']);
+        });
         $memberIds=array_values(array_unique(array_filter(array_column($base,'member_id'))));$phones=$this->phones($memberIds);
-        $services=$this->servicesByMember($stores,$memberIds);
-        // 服务槽位按实际护理顺序；现金按结账保存的导购轮次落列。
-        // 未选择轮次单独列示，保留收款且不冒充第 1～3 轮。
+        // 地推护理只归入其发生门店与会员；结账来源和导购轮次必须取护理当次快照，
+        // 不能把同会员的 A 来源护理或另一门店的护理带入 E 来源销售行。
+        $services=$this->servicesByMember($stores,$memberIds,true);
+        $checkoutIds=[];
+        foreach($services as $memberServices)foreach($memberServices as $service){
+            $checkoutId=(string)($service['checkout_request_id']??'');
+            if($checkoutId!=='')$checkoutIds[$checkoutId]=true;
+        }
+        $selectedSources=[];$serviceRounds=[];$conflictingRounds=[];$checkoutRounds=[];$conflictingCheckoutRounds=[];
+        if($checkoutIds){
+            foreach(Db::name('cashier_v3_checkout_business_source_selection')->whereIn('store_id',$stores)->whereIn('checkout_request_id',array_keys($checkoutIds))->where('checkout_kind','sale')->field('tenant_id,store_id,checkout_request_id,primary_source_id,primary_source_name_snapshot')->select()->toArray() as $selection){
+                $key=(string)$selection['tenant_id'].'|'.(int)$selection['store_id'].'|'.(string)$selection['checkout_request_id'];
+                $selectedSources[$key]=$selection;
+            }
+            foreach($this->scope(Db::name('cashier_v3_customer_guide_round_fact'),$stores)->whereIn('checkout_request_id',array_keys($checkoutIds))->where('status','effective')->field('tenant_id,store_id,checkout_request_id,source_line_id,guide_round_no')->select()->toArray() as $guide){
+                $key=(string)$guide['tenant_id'].'|'.(int)$guide['store_id'].'|'.(string)$guide['checkout_request_id'].'|'.(string)$guide['source_line_id'];
+                $checkoutKey=(string)$guide['tenant_id'].'|'.(int)$guide['store_id'].'|'.(string)$guide['checkout_request_id'];
+                $round=(int)($guide['guide_round_no']??0);
+                // 同次结账只允许一个轮次；异常混合轮次不猜测，归入无轮次供核查。
+                if(isset($serviceRounds[$key])&&$serviceRounds[$key]!==$round)$conflictingRounds[$key]=true;
+                $serviceRounds[$key]=$round;
+                if(isset($checkoutRounds[$checkoutKey])&&$checkoutRounds[$checkoutKey]!==$round)$conflictingCheckoutRounds[$checkoutKey]=true;
+                $checkoutRounds[$checkoutKey]=$round;
+            }
+        }
+        // 服务与现金分别按各自结账保存的导购轮次落列；没有轮次的业务不能占用前三轮。
         $saleFacts=array_values(array_unique(array_filter(array_column($base,'fact_id'))));$saleCash=[];
         if($saleFacts){
-            foreach($this->cashFacts($stores,'field_sale_payment')->join('cashier_v3_payment_sale_allocation_fact allocation',"allocation.tenant_id=field_sale_payment.tenant_id AND allocation.payment_fact_id=field_sale_payment.fact_id AND allocation.status='effective'")
-                ->whereIn('allocation.sale_fact_id',$saleFacts)->where('field_sale_payment.business_date','<=',$range['end'])->where('field_sale_payment.status','effective')
-                ->fieldRaw('allocation.sale_fact_id,field_sale_payment.source_document_type,SUM(allocation.amount_cents) amount_cents')->group('allocation.sale_fact_id,field_sale_payment.source_document_type')->select()->toArray() as $payment){
-                if(in_array((string)$payment['source_document_type'],['recharge_debt_repayment'],true))continue;
+            $paymentQuery=$this->fieldMarketingPaymentAllocations($stores)->whereIn('allocation.sale_fact_id',$saleFacts);
+            if($receiptPeriod)$paymentQuery->whereBetween('field_sale_payment.business_date',[$range['start'],$range['end']]);
+            else $paymentQuery->where('field_sale_payment.business_date','<=',$range['end']);
+            foreach($paymentQuery->fieldRaw('allocation.sale_fact_id,SUM(allocation.amount_cents) amount_cents')->group('allocation.sale_fact_id')->select()->toArray() as $payment){
                 $saleCash[(string)$payment['sale_fact_id']]=(int)($saleCash[(string)$payment['sale_fact_id']]??0)+(int)$payment['amount_cents'];
             }
         }
-        $keys=array_values(array_unique(array_filter(array_column($base,'source_line_id'))));$manual=$this->annotations('field_acquisition_detail',$stores,$keys);
+        $keys=array_values(array_unique(array_map(static function(array $row):string{
+            return !empty($row['_service_only'])?'service:'.(string)$row['service_fact_id']:(string)$row['source_line_id'];
+        },$base)));$manual=$this->annotations('field_acquisition_detail',$stores,$keys);
         foreach ($base as &$row) {
-            $member = (int)$row['member_id']; $subject = (string)$row['source_line_id'];
+            $member = (int)$row['member_id']; $serviceOnly=!empty($row['_service_only']);
+            $subject=$serviceOnly?'service:'.(string)$row['service_fact_id']:(string)$row['source_line_id'];
             $row['division_name'] = (string)$row['organization_name_snapshot'];
             $row['source'] = (string)$row['business_source_secondary_name_snapshot'];
+            if($serviceOnly&&$row['source']==='')$row['source']=(string)($row['business_source_primary_name_snapshot']?:$row['selected_primary_name']?:'E地推拓客');
             $row['phone'] = $phones[$member] ?? '';
             $row['card_sale_date'] = $manual[$subject]['card_sale_date']['value'] ?? '';
             $row['card_sale_date_version'] = (int)($manual[$subject]['card_sale_date']['version'] ?? 0);
             $row['visit_over_one_hour'] = $manual[$subject]['visit_over_one_hour']['value'] ?? '';
             $row['visit_over_one_hour_version'] = (int)($manual[$subject]['visit_over_one_hour']['version'] ?? 0);
-            $allServices = $services[$member] ?? [];
+            $allServices=[];
+            foreach($services[(int)$row['store_id'].'|'.$member]??[] as $service){
+                if(!$serviceOnly&&isset($standaloneServiceIds[(string)$service['service_fact_id']]))continue;
+                if($serviceOnly&&(string)$service['service_fact_id']!==(string)$row['service_fact_id'])continue;
+                $checkoutKey=(string)$service['tenant_id'].'|'.(int)$service['store_id'].'|'.(string)$service['checkout_request_id'];
+                $sourceName=trim((string)($service['business_source_primary_name_snapshot']??''));
+                $selected=$selectedSources[$checkoutKey]??[];
+                $isFieldSource=$sourceName!==''
+                    ? $this->sourcePrefix(['name'=>$sourceName])==='E'
+                    : ((int)($service['business_source_primary_id']??0)>0
+                        ? in_array((int)$service['business_source_primary_id'],$sourceIds,true)
+                        : (in_array((int)($selected['primary_source_id']??0),$sourceIds,true)
+                            || $this->sourcePrefix(['name'=>(string)($selected['primary_source_name_snapshot']??'')])==='E'));
+                if(!$isFieldSource)continue;
+                // 新单只认护理行自身轮次；旧混合结账只有销售行导购时，
+                // 仅在整笔结账轮次唯一的情况下兼容继承，不能跨行猜测混合轮次。
+                $serviceKey=$checkoutKey.'|'.(string)($service['source_line_id']??'');
+                $service['guide_round_no']=isset($conflictingRounds[$serviceKey])?0:
+                    ($serviceRounds[$serviceKey]??(isset($conflictingCheckoutRounds[$checkoutKey])?0:($checkoutRounds[$checkoutKey]??0)));
+                $allServices[]=$service;
+            }
             $cashSlot = (int)($row['guide_round_no'] ?? 0);
             $row['cash_none'] = $this->money($cashSlot === 0 ? (int)($saleCash[(string)$row['fact_id']] ?? 0) : 0);
-            // 地推护理槽位和“四次及以上”表示门店到店：体验不占次数，人员开关不参与；手工费仍按实际护理事实。
+            // 护理列只接纳 E 来源的非体验服务；轮次从该护理结账的导购事实读取，
+            // NULL/缺失均明确留在无轮次，不能按业务日期把它顺推到第一至三次。
             $visits = StoreCustomerVisitEligibility::filter($allServices);
-            foreach (range(1, 3) as $i) {
-                $visit = $visits[$i - 1] ?? [];
-                $row['visit_'.$i.'_craftsman'] = (string)($visit['craftsman'] ?? '');
-                $row['visit_'.$i.'_date'] = (string)($visit['business_date'] ?? '');
-                $row['visit_'.$i.'_project'] = (string)($visit['project_name_snapshot'] ?? '');
-                $row['cash_'.$i] = $this->money($cashSlot === $i ? (int)($saleCash[(string)$row['fact_id']] ?? 0) : 0);
+            $row['first_e_visit_date']=(string)($visits[0]['business_date']??'');
+            foreach(range(0,3) as $round){
+                $slot=$round===0?'none':(string)$round;
+                $roundVisits=array_values(array_filter($visits,static function(array $visit)use($round):bool{
+                    return (int)($visit['guide_round_no']??0)===$round;
+                }));
+                foreach(['craftsman'=>'craftsman','date'=>'business_date','project'=>'project_name_snapshot'] as $suffix=>$field){
+                    $values=array_values(array_filter(array_map(static function(array $visit)use($field):string{
+                        return trim((string)($visit[$field]??''));
+                    },$roundVisits),static function(string $value):bool{return $value!=='';}));
+                    $row['visit_'.$slot.'_'.$suffix]=implode('、',$values);
+                }
+                if($round>0)$row['cash_'.$round]=$this->money($cashSlot===$round?(int)($saleCash[(string)$row['fact_id']]??0):0);
             }
-            // 保留原先“前三条实际服务且至少三条”的手工费口径；
-            // 人员标记不能删除朋友已经实际发生的劳动，也不能调整销售收款槽位。
+            // 手工费沿用前三条实际服务、至少三条才显示的原口径，但只在 E 来源护理中计算。
             $fee = array_sum(array_map(static function (array $service): int {
                 return (int)($service['labor_fee_amount_cents'] ?? 0);
             }, array_slice($allServices, 0, 3)));
             $row['labor_fee'] = $this->money(count($allServices) >= 3 ? $fee : 0);
             $row['fourth_and_above'] = max(0, count($visits) - 3);
-            $row['annotation_subject_key'] = $subject; $row['annotation_subject_type'] = 'sale_line';
+            $row['annotation_subject_key'] = $subject; $row['annotation_subject_type'] = $serviceOnly?'business_event_line':'sale_line';
         }
         unset($row);
         $columns=$this->columns(['division_name'=>'分公司','store_name_snapshot'=>'门店','source'=>'来源','member_name_snapshot'=>'会员','card_sale_date'=>'卖卡日期','phone'=>'手机号码','visit_over_one_hour'=>'进店满1小时']);$groups=[];
-        foreach(range(1,3)as$i){$label=['','第一次','第二次','第三次'][$i];$keys=['visit_'.$i.'_craftsman','visit_'.$i.'_date','visit_'.$i.'_project'];foreach(array_combine($keys,['手艺人','护理日期','项目名称'])as$key=>$name)$columns[]=['key'=>$key,'label'=>$name,'group_label'=>$label];$groups[]=['label'=>$label,'column_keys'=>$keys];}
+        foreach(['none'=>'无轮次',1=>'第一次',2=>'第二次',3=>'第三次'] as $slot=>$label){
+            $keys=['visit_'.$slot.'_craftsman','visit_'.$slot.'_date','visit_'.$slot.'_project'];
+            // 每列分别说明用户看到的人、日期和项目；轮次取当次护理，不按日期推算。
+            $roundText=$slot==='none'?'未选择导购轮次':'选择导购第'.$slot.'轮';
+            foreach(array_combine($keys,['手艺人','护理日期','项目名称'])as$key=>$name)$columns[]=[
+                'key'=>$key,'label'=>$name,'group_label'=>$label,
+                'source_explanation'=>'显示本门店会员已完成、未作废、非体验的 E 地推护理中，'.$roundText.'的'.$name.'；同轮多次护理按日期逐笔列出。',
+            ];
+            $groups[]=['label'=>$label,'column_keys'=>$keys];
+        }
         foreach(['labor_fee'=>'手工费','cash_none'=>'无轮次现金业绩','cash_1'=>'第一次现金业绩','cash_2'=>'第二次现金业绩','cash_3'=>'第三次现金业绩','fourth_and_above'=>'四次及以上','remark'=>'备注']as$key=>$label){
             $column=['key'=>$key,'label'=>$label];
             if($key==='cash_none'){
-                $column['source_explanation']='本笔地推销售未选择导购轮次时分摊到该销售明细的成功记账收款；后续补交仍归原销售明细，不占第1～3轮。';
+                $column['source_explanation']=$receiptPeriod
+                    ? '本次选中的收款月份内，未选择导购轮次的 E 地推销售明细实际收到的现金；补交只计入补交发生的月份。'
+                    : '本笔地推销售未选择导购轮次时分摊到该销售明细的成功记账收款；后续补交仍归原销售明细，不占第1～3轮。';
             }elseif(in_array($key,['cash_1','cash_2','cash_3'],true)){
                 $round=(int)substr($key,-1);
-                $column['source_explanation']='本笔地推销售选择导购第'.$round.'轮时分摊到该销售明细的成功记账收款；后续补交仍归原销售明细。';
+                $column['source_explanation']=$receiptPeriod
+                    ? '本次选中的收款月份内，选择导购第'.$round.'轮的 E 地推销售明细实际收到的现金；补交只计入补交发生的月份。'
+                    : '本笔地推销售选择导购第'.$round.'轮时分摊到该销售明细的成功记账收款；后续补交仍归原销售明细。';
             }
             $columns[]=$column;
         }
+        $detailExplanations=[
+            'division_name'=>'这笔地推销售或护理发生时所属的分公司，后续改名不追改历史记录。',
+            'store_name_snapshot'=>'这笔地推销售或护理发生的门店，只显示当前账号可查看的门店。',
+            'source'=>'本表只收录当次来源为 E 地推拓客的销售或纯权益护理。销售时填写了二级来源就显示该名称，未填写显示“-”；纯权益护理未填二级来源时显示当次 E 来源。',
+            'member_name_snapshot'=>'这笔销售或护理当时记录的会员姓名，后续改名不追改历史记录。',
+            'card_sale_date'=>'由员工为这一笔销售或纯权益护理手动填写的卖卡日期；未填写显示“-”，不拿护理日期代替。',
+            'phone'=>'会员资料中当前登记的手机号码；没有登记时显示“-”。',
+            'visit_over_one_hour'=>'由员工为本行手动填写的进店满 1 小时次数；未填写显示 0。',
+            'labor_fee'=>'该会员本门店前 3 条已完成、未作废的 E 来源护理所记手工费合计；不足 3 条时显示 0。',
+            'fourth_and_above'=>'该会员本门店已完成、未作废、非体验的 E 来源护理超过 3 次的次数；不足 4 次显示 0。',
+            'remark'=>'地推销售单上填写的备注；纯权益护理没有销售单备注时显示“-”。',
+        ];
+        foreach($columns as &$column)if(isset($detailExplanations[$column['key']]))$column['source_explanation']=$detailExplanations[$column['key']];unset($column);
         return $this->result('地推拓客明细表',$columns,$base,$input,$groups);
     }
 
     private function fieldMarketingSummary(array $stores,array $range,array $input):array
     {
         $detail=$this->fieldMarketingDetail($stores,$range,array_merge($input,['page'=>1,'limit'=>100,'_internal_all'=>true]));$records=[];$year=(int)substr($range['end'],0,4);
-        foreach($detail['records'] as $row){$member=(int)$row['member_id'];if(isset($records[$member]))continue;$records[$member]=['member_id'=>$member,'card_sale_date'=>$row['card_sale_date'],'member_name_snapshot'=>$row['member_name_snapshot'],'phone'=>$row['phone'],'source'=>$row['source'],'first_visit_date'=>$row['visit_1_date'],'remark'=>$row['remark'],'annotation_subject_key'=>$row['annotation_subject_key']];}
-        $memberIds=array_keys($records);$cash=$this->cashMonthlyTotals($stores,$memberIds,$year.'-01-01',$year.'-12-31');
-        foreach($records as &$row){$row['annual_total_cents']=0;$row['_drilldown']=[];foreach(range(1,12)as$m){$c=(int)($cash[(int)$row['member_id']][$m]??0);$monthKey='month_'.$m;$row[$monthKey]=$this->money($c);$row['annual_total_cents']+=$c;if($c!==0)$row['_drilldown'][$monthKey]=['report'=>'field_acquisition_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m)))],'param_map'=>['member_id'=>'member_id']];}$row['annual_total']=$this->money($row['annual_total_cents']);if((int)$row['annual_total_cents']!==0)$row['_drilldown']['annual_total']=['report'=>'field_acquisition_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31'],'param_map'=>['member_id'=>'member_id']];}unset($row);
+        // 首护日期按符合 E 来源条件的最早护理事实取值，不等同于导购“第一轮”。
+        foreach($detail['records'] as $row){$member=(int)$row['member_id'];if(isset($records[$member])){
+            $date=(string)$row['first_e_visit_date'];if($date!==''&&($records[$member]['first_visit_date']===''||$date<$records[$member]['first_visit_date']))$records[$member]['first_visit_date']=$date;
+            continue;
+        }$records[$member]=['member_id'=>$member,'card_sale_date'=>$row['card_sale_date'],'member_name_snapshot'=>$row['member_name_snapshot'],'phone'=>$row['phone'],'source'=>$row['source'],'first_visit_date'=>$row['first_e_visit_date'],'remark'=>$row['remark'],'annotation_subject_key'=>$row['annotation_subject_key']];}
+        $memberIds=array_keys($records);$cash=[];
+        if($memberIds){
+            // 只汇总报表中 E 来源销售明细的有效分摊；按实际收款业务日落月，不能按会员全部来源收款凑数。
+            $payments=$this->fieldMarketingPaymentAllocations($stores)
+                ->whereIn('field_sale.member_id',$memberIds)
+                ->whereBetween('field_sale_payment.business_date',[$year.'-01-01',$year.'-12-31'])
+                ->fieldRaw('field_sale.member_id,MONTH(field_sale_payment.business_date) month_no,SUM(allocation.amount_cents) amount_cents')
+                ->group('field_sale.member_id,MONTH(field_sale_payment.business_date)')->select()->toArray();
+            foreach($payments as $payment)$cash[(int)$payment['member_id']][(int)$payment['month_no']]=(int)$payment['amount_cents'];
+        }
+        foreach($records as &$row){$row['annual_total_cents']=0;$row['_drilldown']=[];foreach(range(1,12)as$m){$c=(int)($cash[(int)$row['member_id']][$m]??0);$monthKey='month_'.$m;$row[$monthKey]=$this->money($c);$row['annual_total_cents']+=$c;if($c!==0)$row['_drilldown'][$monthKey]=['report'=>'field_acquisition_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m))),'receipt_period'=>1],'param_map'=>['member_id'=>'member_id']];}$row['annual_total']=$this->money($row['annual_total_cents']);if((int)$row['annual_total_cents']!==0)$row['_drilldown']['annual_total']=['report'=>'field_acquisition_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31','receipt_period'=>1],'param_map'=>['member_id'=>'member_id']];}unset($row);
         $columns=$this->columns(['card_sale_date'=>'卖卡日期','member_name_snapshot'=>'会员','phone'=>'手机号码','source'=>'来源','first_visit_date'=>'首次护理日期','annual_total'=>'首年业绩合计']);foreach(range(1,12)as$m)$columns[]=['key'=>'month_'.$m,'label'=>$m.'月'];$columns[]=['key'=>'remark','label'=>'备注'];
+        $explanations=[
+            'card_sale_date'=>'本会员最近一笔入表地推销售或纯权益护理上手动填写的卖卡日期；未填显示“-”，不拿护理日期代替。',
+            'member_name_snapshot'=>'本会员最近一笔入表地推业务当时记录的姓名；同会员合并为一行。',
+            'phone'=>'会员资料中当前登记的手机号码；未登记显示“-”。',
+            'source'=>'最近一笔入表地推业务填写的二级来源；销售未填二级来源显示“-”，纯权益护理未填时显示当次 E 地推来源。',
+            'first_visit_date'=>'本会员在本表 E 来源业务中，最早一笔已完成、未作废、非体验护理的日期；不按导购轮次推算。',
+            'annual_total'=>'本自然年 1～12 月 E 地推销售明细实际分摊到的有效现金收款合计；按收款业务日期计入，其他来源收款不计。',
+            'remark'=>'最近一笔入表地推销售单填写的备注；未填写显示“-”。',
+        ];
+        foreach($columns as &$column){
+            $key=(string)$column['key'];
+            $column['source_explanation']=isset($explanations[$key])?$explanations[$key]:
+                (preg_match('/^month_(\d{1,2})$/',$key,$match)?$match[1].'月实际收到、分摊给 E 地推销售明细的有效现金；后续补交按补交的收款月份计入，其他来源收款不计。':'');
+        }unset($column);
         return $this->result('地推拓客汇总表',$columns,array_values($records),$input,[],['natural_year'=>$year,'annual_total_cents'=>$this->sumField($records,'annual_total_cents')]);
     }
 
@@ -1783,8 +1955,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
             $metricVersion = 'store-customer-service-events-v2';
         }
-        // 地推明细按导购事实轮次归档，并单列无轮次收款；汇总年度收款口径不变。
-        if ($title === '地推拓客明细表') $metricVersion = 'field-acquisition-guide-round-v3';
+        // 纯权益 E 来源护理也独立成行；汇总纳入该会员，年度收款仍取原权威收款事实。
+        if ($title === '地推拓客明细表') $metricVersion = 'field-acquisition-service-only-v5';
+        if ($title === '地推拓客汇总表') $metricVersion = 'field-acquisition-summary-service-only-v3';
         // 本表展示本次收款业务日，不再展示首次护理日；其他到店报表仍沿用服务口径。
         if ($title === '异业收客明细表') $metricVersion = 'cross-industry-cash-business-date-v3';
         // 汇总名单新增本年 G 来源补交会员；月度/年度金额仍为这些会员在相应门店的全部有效收款。
@@ -2073,7 +2246,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $this->participantCheckout($this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_service'), $stores, 'member_service'), 'member_service.checkout_request_id'),
             'member_service', 'member_service_void'
         )->whereIn('member_service.member_id', $members)
-            ->field('member_service.store_id,member_service.member_id,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at,member_service.is_experience')
+            ->field('member_service.service_fact_id,member_service.tenant_id,member_service.store_id,member_service.member_id,member_service.checkout_request_id,member_service.source_line_id,member_service.business_source_primary_id,member_service.business_source_primary_name_snapshot,member_service.business_date,member_service.project_name_snapshot,member_service.labor_fee_amount_cents,member_service.craftsmen_snapshot_json,member_service.occurred_at,member_service.is_experience')
             ->order('member_service.business_date', 'asc')->order('member_service.occurred_at', 'asc')->select()->toArray();
         $out = [];
         foreach ($rows as $row) {

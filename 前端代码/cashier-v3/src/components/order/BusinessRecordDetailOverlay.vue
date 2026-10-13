@@ -164,7 +164,7 @@ async function submitLifecycleAction() {
         <section v-if="attributionChanges.length" class="business-record-detail__changes">
           <h3>变更记录</h3>
           <p v-for="(change, index) in attributionChanges" :key="`${change.recordId}-${change.field}-${index}`">
-            {{ change.recordNo }} · {{ change.field === 'source' ? '来源' : '业务日期' }}：{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}
+            {{ change.recordNo }} · {{ change.field === 'source' ? '来源' : change.field === 'guide' ? '导购' : change.field === 'guide_round' ? '导购轮次' : '业务日期' }}：{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}
             <small>{{ change.operatorName || change.operatorId }} · {{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</small>
           </p>
         </section>

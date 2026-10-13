@@ -930,10 +930,10 @@ async function runAction(action, payload = {}) {
         </div>
 
         <section v-if="attributionChanges.length" class="sales-order-detail-section">
-          <header class="sales-order-detail-section__header"><div><h3>变更记录</h3><span>订单业务日期、来源更正及补交来源联动。</span></div></header>
+          <header class="sales-order-detail-section__header"><div><h3>变更记录</h3><span>订单日期、来源及导购归属的更正记录。</span></div></header>
           <div class="sales-order-detail-operation-list">
             <article v-for="(change, index) in attributionChanges" :key="`${change.recordId}-${change.field}-${index}`">
-              <div><strong>{{ change.recordNo }} · {{ change.field === 'source' ? '来源' : '业务日期' }}</strong><span>{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}</span></div>
+              <div><strong>{{ change.recordNo }} · {{ change.field === 'source' ? '来源' : change.field === 'guide' ? '导购' : change.field === 'guide_round' ? '导购轮次' : '业务日期' }}</strong><span>{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}</span></div>
               <div><span>{{ change.operatorName || change.operatorId }}</span><time>{{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</time></div>
             </article>
           </div>

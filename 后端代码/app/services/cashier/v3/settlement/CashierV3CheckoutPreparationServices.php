@@ -684,6 +684,7 @@ final class CashierV3CheckoutPreparationServices
                     'fullCardNo' => (string)($line['fullCardNo'] ?? ''),
                     'name' => (string)($line['name'] ?? ($line['displaySnapshot']['name'] ?? '')),
                     'craftsmen' => is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [],
+                    'guideSelections' => is_array($line['guideSelections'] ?? null) ? $line['guideSelections'] : [],
                     'serviceObject' => self::snapshotServiceObject($line['serviceObject'] ?? ''),
                     'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line) || !empty($line['friendCountsAsCustomer']),
                     'isExperience' => !empty($line['isExperience']) ? 1 : 0,
@@ -1201,6 +1202,8 @@ final class CashierV3CheckoutPreparationServices
             // line; dropping them here would make final completion see an
             // empty craftsman selection even though the user chose one.
             'craftsmen' => is_array($line['craftsmen'] ?? null) ? $line['craftsmen'] : [],
+            // 导购轮次是权益护理的到店归属，不参与权益金额或销售业绩。
+            'guideSelections' => is_array($line['guideSelections'] ?? null) ? $line['guideSelections'] : [],
             'serviceObject' => (string)($line['serviceObject'] ?? ''),
             'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line)
                 || !empty($line['friendCountsAsCustomer']),

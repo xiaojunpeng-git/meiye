@@ -1532,11 +1532,18 @@ final class CashierV3SalesOrderQueryServices
                 $craftsmenByOrderAndLine[$factOrderId][$lineKey][] = $fact;
             }
         }
+        // 纯权益导购事实归属服务回执，而列表的只读服务单 ID 是按结账请求合成的。
+        // 两种关联键只在本页已授权请求内归一，避免跨门店或同会员其他单据串行。
         foreach (Db::name('cashier_v3_customer_guide_round_fact')
-            ->whereIn('order_id', $orderIds)->where('tenant_id', $tenantIds[0])->where('status', 'effective')
-            ->field('order_id,source_line_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')
+            ->where('tenant_id', $tenantIds[0])->where('status', 'effective')
+            ->where(function ($guideScope) use ($orderIds, $requestIds): void {
+                $guideScope->whereIn('order_id', $orderIds);
+                if ($requestIds !== []) $guideScope->whereOr('checkout_request_id', 'in', $requestIds);
+            })
+            ->field('order_id,checkout_request_id,source_line_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')
             ->order('id', 'asc')->select()->toArray() as $fact) {
-            $guidesByOrderAndLine[(string)$fact['order_id']][(string)$fact['source_line_id']][] = [
+            $factOrderId = $requestToOrder[(string)($fact['checkout_request_id'] ?? '')] ?? (string)$fact['order_id'];
+            $guidesByOrderAndLine[$factOrderId][(string)$fact['source_line_id']][] = [
                 'id' => (string)$fact['guide_employee_id'], 'employeeId' => (int)$fact['guide_employee_id'],
                 'name' => (string)$fact['guide_employee_name_snapshot'], 'guideRoundNo' => (int)$fact['guide_round_no'],
             ];
@@ -1764,7 +1771,8 @@ final class CashierV3SalesOrderQueryServices
             if ($sourceLineId === '' || isset($purchaseLineIds[$sourceLineId])) continue;
             $items[] = $this->mapEntitlementServiceLine(
                 $serviceFact,
-                $snapshot['craftsmenByLine'][$sourceLineId] ?? []
+                $snapshot['craftsmenByLine'][$sourceLineId] ?? [],
+                $snapshot['guidesByLine'][$sourceLineId] ?? []
             );
         }
         $itemNames = array_values(array_unique(array_filter(array_map(function (array $item): string {
@@ -1873,7 +1881,8 @@ final class CashierV3SalesOrderQueryServices
                 return !empty($item['voidedAt']);
             })) === count($items);
             // 纯服务单按结账请求整组更正日期；来源属原选择快照，不开放编辑。
-            $mapped['availableActions'] = $allVoided ? [] : ['correct-service-order-date'];
+            // 纯权益的导购改派走服务行事实，不误授销售主单的人员调整动作。
+            $mapped['availableActions'] = $allVoided ? [] : ['correct-service-order-date', 'correct-service-order-guide'];
             $mapped['orderStatus'] = $mapped['order_status'] = $allVoided ? '已作废' : '正常';
         }
         // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
@@ -2094,9 +2103,10 @@ final class CashierV3SalesOrderQueryServices
 
     /**
      * 权益行是同次结账中已完成的服务事实，不是销售明细。因此它只提供
-     * 展示核销权益单次金额和总金额；销售应付/收款仍为空，不进入销售合计。
+     * 展示核销权益单次金额和总金额，以及该服务行自身的导购归属；
+     * 销售应付/收款仍为空，不进入销售合计。
      */
-    private function mapEntitlementServiceLine(array $serviceFact, array $craftsmen): array
+    private function mapEntitlementServiceLine(array $serviceFact, array $craftsmen, array $guides = []): array
     {
         $quantity = max(0, (int)$serviceFact['quantity']);
         $actualCents = isset($serviceFact['actual_entitlement_amount_cents']) ? max(0, (int)$serviceFact['actual_entitlement_amount_cents']) : null;
@@ -2144,7 +2154,7 @@ final class CashierV3SalesOrderQueryServices
             'detailRemark' => (string)($serviceFact['detail_remark_snapshot'] ?? ''),
             'salespeople' => [],
             'salesManagers' => [],
-            'guides' => [],
+            'guides' => array_values($guides),
             'craftsmen' => $craftsmen === []
                 ? $this->craftsmenForEntitlementServiceFact($snapshotJson)
                 : $this->salesLineCraftsmen($craftsmen, []),

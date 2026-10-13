@@ -217,6 +217,10 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                 'craftsmen' => self::entitlementCraftsmenSnapshot(
                     $row['craftsmen_snapshot_json'] ?? null
                 ),
+                // The final submit rebuilds this authority from the saved
+                // draft. Preserve the entitlement guide round here or the
+                // second draft version silently drops the cashier's choice.
+                'guideSelections' => self::attributionSnapshot($row['guide_selections_json'] ?? null),
                 'serviceObject' => (string)($row['service_object'] ?? ''),
                 'friendCountsAsCustomer' => (int)($row['friend_counts_as_customer'] ?? 1) === 1,
                 'isExperience' => (int)($row['is_experience'] ?? 0) === 1,
