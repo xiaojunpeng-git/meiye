@@ -438,6 +438,10 @@ final class InventoryStockRequestServices
             ]);
             Db::name('inventory_stock_request_line')->where('document_id', $requestId)->delete();
             $this->insertLines($requestId, $scope, $location, $command['lines'], $command['recordedAt']);
+            // Full edit replaces line IDs; carry forward the note revision stream under the same document lock.
+            (new InventoryDocumentRemarkServices())->rebaseAfterFullEdit('request', $requestId, $command['remark'], [
+                'type' => (string)$scope['operatorType'], 'id' => (int)$scope['operatorId'],
+            ]);
             return ['request_id' => $requestId, 'request_no' => (string)$document['request_no'], 'document_status' => 'APPLIED', 'idempotent' => false];
         });
     }

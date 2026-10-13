@@ -68,6 +68,14 @@ final class InventoryPlatformAccessPolicy
     public function allowsFunctionRoute(int $adminId, string $rule, string $method): bool
     {
         $rule = str_replace(['<id>', '<productid>'], [':id', ':productid'], strtolower(trim($rule)));
+        if (strtolower(trim($method)) === 'post' && $rule === 'product/inventory/v3/document-remarks/:id') {
+            try {
+                $access = $this->resolveByAdminId($adminId);
+                // Function access opens the note command; the service rechecks its exact page and warehouse scope.
+                return in_array(self::AUTH_VIEW, (array)$access['unique_auth'], true)
+                    || $this->hasLegacyPage((array)$access['unique_auth'], '*');
+            } catch (UnifiedQueryException $exception) { return false; }
+        }
         $routes = [
             'post product/inventory/v3/hq/inbound' => 'inbound',
             'post product/inventory/v3/hq/outbound' => 'outbound',
@@ -110,6 +118,8 @@ final class InventoryPlatformAccessPolicy
         $rule = str_replace(['<id>', '<productid>'], [':id', ':productid'], strtolower(trim($rule)));
         $routes = [
             'locations' => '*', 'warehouse-settings' => '*', 'import' => '*', 'import/:id/detail' => '*', 'dashboard' => 'overview',
+            // The service must still assert its requested page; this grant only reaches the generic read endpoint.
+            'document-remarks/:id' => '*',
             'hq/inbound' => 'inbound', 'hq/inbound/:id/detail' => 'inbound', 'hq/inbound/:id/outbound-details' => 'inbound',
             'hq/outbound' => 'outbound', 'hq/outbound/:id/detail' => 'outbound',
             'hq/request' => 'request', 'hq/request/:id/detail' => 'request',

@@ -213,6 +213,9 @@ export function createInventoryApi(options = {}) {
       const idempotencyKey = String(body.idempotencyKey || body.idempotency_key || '').trim() || inventoryCommandIdempotencyKey()
       return request('/v3/unified-query/commands', { method: 'POST', body: { ...body, idempotencyKey } })
     },
+    // Both hosts use one versioned note contract; the server derives the document's writable scope.
+    documentRemarkDetail(type, id, query = {}) { return request(`/v3/document-remarks/${encodeURIComponent(String(id))}`, { query: { ...query, type } }) },
+    saveDocumentRemark(id, body, query = {}) { return request(`/v3/document-remarks/${encodeURIComponent(String(id))}`, { method: 'POST', query: { ...query, type: body.type }, body }) },
     unifiedQueryExportTask(taskNo, query = {}) { return request(`/v3/unified-query/export-task/${encodeURIComponent(String(taskNo || ''))}`, { query }) },
     // Authenticated binary transport rejects JSON error envelopes instead of saving fake spreadsheets.
     downloadOutboundExport(taskNo) { return download(`/v3/unified-query/export-task/${encodeURIComponent(String(taskNo || ''))}/download`) },

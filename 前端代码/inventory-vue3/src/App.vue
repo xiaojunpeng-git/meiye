@@ -11,6 +11,7 @@ import InventoryBusinessModal from './components/InventoryBusinessModal.vue'
 import InventoryOutboundExport from './components/InventoryOutboundExport.vue'
 import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOperationalUnifiedQueryToolbar.vue'
 import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
+import InventoryRemarkModal from './components/InventoryRemarkModal.vue'
 import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
 import { formatIntegerQuantity } from './quantityFormat'
 import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLineCells } from './groupedDocumentRows'
@@ -102,6 +103,9 @@ const outboundExecutedQuery = ref(null)
 const recipeStatus = ref('')
 const recipeKeyword = ref('')
 const editor = ref('')
+const remarkEditor = ref(null)
+const remarkSaving = ref(false)
+const remarkError = ref('')
 const statusFocus = ref('')
 const remoteRows = ref([])
 const sourceRows = ref([])
@@ -788,6 +792,50 @@ function currentDocumentDetailReader() {
   })
 }
 
+/** Capture the detail's warehouse context so a later filter change cannot redirect a note command. */
+function remarkScope(page, row) {
+  if (mode.value !== 'platform') return {}
+  if (page === 'usage') return Number(row.store_id) > 0
+    ? { store_id: Number(row.store_id) }
+    : { hq_location_id: Number(row.location_id) || 0 }
+  if (page === 'inbound' || page === 'outbound') {
+    const [subject, storeId] = String(platformListWarehouseSelection.value).split(':')
+    return subject === 'STORE'
+      ? { subject: 'STORE', storeId: Number(storeId) || 0, locationId: Number(row.location_id) || 0 }
+      : { hq_location_id: Number(row.location_id) || Number(platformHqLocationId.value) || 0 }
+  }
+  return { hq_location_id: Number(platformHqLocationId.value) || 0 }
+}
+
+async function openRemarkEditor(page, row) {
+  remarkError.value = ''
+  try {
+    const scope = remarkScope(page, row)
+    const id = String(row.source_id || row.id)
+    const detail = await (mode.value === 'platform' ? platformInventoryApi : inventoryApi).documentRemarkDetail(page, id, scope)
+    if (!detail?.remark_editable) throw new Error('该单据当前不可单独编辑备注。')
+    remarkEditor.value = { page, row, id, scope, detail }
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : '备注读取失败。'
+  }
+}
+
+async function saveRemark(payload) {
+  if (!remarkEditor.value || remarkSaving.value) return
+  remarkSaving.value = true
+  remarkError.value = ''
+  try {
+    const { id, scope } = remarkEditor.value
+    await (mode.value === 'platform' ? platformInventoryApi : inventoryApi).saveDocumentRemark(id, payload, scope)
+    remarkEditor.value = null
+    await loadCurrentList()
+  } catch (error) {
+    remarkError.value = error instanceof Error ? error.message : '备注保存失败。'
+  } finally {
+    remarkSaving.value = false
+  }
+}
+
 /** 两端只展开本次列表返回的单据；原权限接口、有限并发及版本保护阻止越权和旧结果串页。 */
 async function loadGroupedDetails(page, rows) {
   const version = ++groupedDetailVersion
@@ -802,6 +850,11 @@ async function loadGroupedDetails(page, rows) {
         const detail = await readDetail(page, row)
         if (version === groupedDetailVersion) {
           groupedDetails.value = { ...groupedDetails.value, [key]: { status: 'ready', detail, lines: Array.isArray(detail?.lines) ? detail.lines : [] } }
+          // The usage header remark column must follow the same current projection as expanded lines.
+          if (page === 'usage' && active.value === page) {
+            sourceRows.value = sourceRows.value.map((item) => groupedDetailKey(item) === key ? { ...item, remark: detail?.document?.remark || '' } : item)
+            remoteRows.value = sourceRows.value.map((item) => mapApiRow(page, item))
+          }
         }
       } catch (error) {
         if (version === groupedDetailVersion) {
@@ -1691,6 +1744,7 @@ onBeforeUnmount(() => {
             </footer>
           </div>
         </section>
+        <InventoryRemarkModal v-if="remarkEditor" :page="remarkEditor.page" :detail="remarkEditor.detail" :saving="remarkSaving" :error="remarkError" @close="remarkEditor = null" @save="saveRemark" />
         <InventoryRecipeModal v-if="editor && active === 'recipe'" :recipe-id="Number(selectedDetail?.id || 0)" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" />
         <InventoryBusinessModal v-else-if="editor" :page-key="active" :modal-kind="editor" :detail="selectedDetail" :scope-name="scopeName" :default-location-name="defaultLocationName" :warehouse-options="platformLocations" :warehouse-selection="platformListWarehouseSelection" :hq-location-id="platformHqLocationId" :usage-store-id="platformUsageStoreId" :default-business-date="todayDate()" :mode="mode" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" @edit-count-draft="editor = 'count-edit'" />
         <template v-else-if="active === 'overview'">
@@ -1864,7 +1918,22 @@ onBeforeUnmount(() => {
                 <tr v-if="listLoading"><td :colspan="groupedDetailColumns[active].length" class="table-empty">正在读取单据数据...</td></tr>
                 <tr v-else-if="!currentRows.length"><td :colspan="groupedDetailColumns[active].length" class="table-empty">暂无符合条件的记录</td></tr>
                 <template v-else v-for="(row, index) in currentRows" :key="groupedDetailKey(sourceRows[index])">
-                  <tr class="inventory-group-row"><td :colspan="groupedDetailColumns[active].length"><div class="inventory-group-line"><span v-for="(cell, cellIndex) in row" :key="cellIndex"><strong>{{ currentPage.columns[cellIndex] }}：</strong><b>{{ cell }}</b></span><span class="inventory-group-line__actions"><button class="text-button" @click="openGroupedRowDetail(active, sourceRows[index])">查看</button><button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button><button v-if="active === 'request' && mode === 'platform' && sourceRows[index].can_bind_supply" class="text-button" @click="legacyRequestSupplyRow = sourceRows[index]; warehouseChoice = ''; warehouseChoiceKind = 'request-supply'">确认供货仓</button><button v-if="active === 'request' && mode === 'platform' && sourceRows[index].can_transfer" class="text-button" @click="openRequestTransfer(sourceRows[index])">转调拨</button><button v-if="active === 'request' && sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button><button v-if="active === 'transfer' && sourceRows[index].can_edit" class="text-button" @click="openTransferEditor(sourceRows[index])">编辑</button><button v-if="active === 'transfer' && sourceRows[index].can_delete" class="text-button text-button--danger" @click="requestDeleteTransferDraft(sourceRows[index])">删除</button><button v-if="active === 'transfer' && sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button><button v-if="active === 'transfer' && sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button><button v-if="sourceRows[index].can_void && active !== 'transfer'" class="text-button" @click="runDocumentAction(active === 'request' ? 'voidRequest' : 'void', sourceRows[index], active)">作废</button></span></div></td></tr>
+                  <tr class="inventory-group-row"><td :colspan="groupedDetailColumns[active].length"><div class="inventory-group-line">
+                    <span v-for="(cell, cellIndex) in row" :key="cellIndex"><strong>{{ currentPage.columns[cellIndex] }}：</strong><b>{{ cell }}</b></span>
+                    <span class="inventory-group-line__actions">
+                      <button class="text-button" @click="openGroupedRowDetail(active, sourceRows[index])">查看</button>
+                      <button v-if="groupedDetails[groupedDetailKey(sourceRows[index])]?.detail?.remark_editable" class="text-button" @click="openRemarkEditor(active, sourceRows[index])">编辑备注</button>
+                      <button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button>
+                      <button v-if="active === 'request' && mode === 'platform' && sourceRows[index].can_bind_supply" class="text-button" @click="legacyRequestSupplyRow = sourceRows[index]; warehouseChoice = ''; warehouseChoiceKind = 'request-supply'">确认供货仓</button>
+                      <button v-if="active === 'request' && mode === 'platform' && sourceRows[index].can_transfer" class="text-button" @click="openRequestTransfer(sourceRows[index])">转调拨</button>
+                      <button v-if="active === 'request' && sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button>
+                      <button v-if="active === 'transfer' && sourceRows[index].can_edit" class="text-button" @click="openTransferEditor(sourceRows[index])">编辑</button>
+                      <button v-if="active === 'transfer' && sourceRows[index].can_delete" class="text-button text-button--danger" @click="requestDeleteTransferDraft(sourceRows[index])">删除</button>
+                      <button v-if="active === 'transfer' && sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button>
+                      <button v-if="active === 'transfer' && sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button>
+                      <button v-if="sourceRows[index].can_void && active !== 'transfer'" class="text-button" @click="runDocumentAction(active === 'request' ? 'voidRequest' : 'void', sourceRows[index], active)">作废</button>
+                    </span>
+                  </div></td></tr>
                   <tr v-if="!groupedDetails[groupedDetailKey(sourceRows[index])] || groupedDetails[groupedDetailKey(sourceRows[index])].status === 'loading'" class="inventory-detail-message-row"><td :colspan="groupedDetailColumns[active].length">正在读取明细...</td></tr>
                   <tr v-else-if="groupedDetails[groupedDetailKey(sourceRows[index])].status === 'error'" class="inventory-detail-message-row inventory-detail-message-row--error"><td :colspan="groupedDetailColumns[active].length">{{ groupedDetails[groupedDetailKey(sourceRows[index])].message }}</td></tr>
                   <tr v-else-if="!groupedDetails[groupedDetailKey(sourceRows[index])].lines.length" class="inventory-detail-message-row"><td :colspan="groupedDetailColumns[active].length">该单据没有商品明细</td></tr>

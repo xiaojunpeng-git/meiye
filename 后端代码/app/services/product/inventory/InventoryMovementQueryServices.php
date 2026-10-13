@@ -65,7 +65,8 @@ final class InventoryMovementQueryServices
             ->where('f.store_id', (int)$location['store_id'])
             ->where('f.location_id', (int)$location['id'])->where('f.fact_status', 'SETTLED')
             ->where('f.source_id', $sourceId)->whereIn('f.source_type', ['manual_outbound', 'presale_claim_outbound'])
-            ->fieldRaw("COALESCE(n.document_no, f.source_id) AS order_sn, f.source_type, pc.claim_status AS presale_claim_status, pc.void_reason_snapshot AS presale_void_reason, pc.voided_at AS presale_voided_at, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
+            // Expose the stable fact ID for note targeting; never use a product ID or displayed row index.
+            ->fieldRaw("f.id, COALESCE(n.document_no, f.source_id) AS order_sn, f.source_type, pc.claim_status AS presale_claim_status, pc.void_reason_snapshot AS presale_void_reason, pc.voided_at AS presale_voided_at, f.business_date, f.recorded_at, f.detail_remark, b.product_name_snapshot AS product_name, b.sku_name_snapshot AS sku_name, b.barcode_snapshot AS barcode, b.batch_no, b.manufactured_date, b.expire_date, s.stock_unit, s.quantity_scale, f.quantity_units, f.unit_cost_cents, f.cost_amount_cents")
             ->order('f.id asc')->select()->toArray();
         if (!$facts) throw new \InvalidArgumentException('inventory_outbound_detail_missing');
 

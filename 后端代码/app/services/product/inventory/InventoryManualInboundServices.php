@@ -100,6 +100,8 @@ final class InventoryManualInboundServices
             $movementId = $this->appendMovement($factKey, $scope, $location, $stock, $batch, $line, $command, $index);
             $results[] = ['movement_fact_id' => $movementId, 'idempotent' => false];
         }
+        // The entered header remark is a mutable voucher annotation, not a batch movement fact.
+        (new InventoryDocumentRemarkServices())->initializeManual('inbound', (string)$scope['tenantId'], (string)$command['idempotencyKey'], (string)$command['remark']);
         return ['document_no' => $command['documentNo'], 'idempotency_key' => $command['idempotencyKey'], 'lines' => $results];
     }
 

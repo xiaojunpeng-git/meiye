@@ -670,6 +670,9 @@ Route::group('storeapi', function () {
 		Route::get('v3/salon-usage/projects', 'product.inventory.InventorySalonUsage/projects')->option(['real_name' => '院装核销项目选择']);
 		Route::post('v3/salon-usage/issue', 'product.inventory.InventorySalonUsage/issue')->option(['real_name' => '院装耗材领用']);
 		Route::post('v3/salon-usage/:id/void', 'product.inventory.InventorySalonUsage/void')->pattern(['id' => '\\d+'])->option(['real_name' => '院装耗材领用作废']);
+		// Only the five document note projections are mutable; the stock commands and fact rows are not.
+		Route::get('v3/document-remarks/:id', 'product.inventory.InventoryDocumentRemark/detail')->pattern(['id' => '[A-Za-z0-9:._-]+'])->option(['real_name' => '库存单据备注详情']);
+		Route::post('v3/document-remarks/:id', 'product.inventory.InventoryDocumentRemark/save')->pattern(['id' => '[A-Za-z0-9:._-]+'])->option(['real_name' => '编辑库存单据备注']);
 			//出入库统计
 			Route::get('order/overall_statistics', 'product.inventory.StoreProductStockDetail/stockOrderOverallStatistics')->option(['real_name' => '出入库顶部统计']);
 			Route::get('order/statistics', 'product.inventory.StoreProductStockDetail/stockOrderStatistics')->option(['real_name' => '出入库统计']);

@@ -2216,6 +2216,9 @@ Route::group('adminapi', function () {
 			Route::get('v3/salon-usage/:id/detail', 'v1.product.inventory.InventoryPlatformSalonUsage/detail')->pattern(['id' => '\\d+'])->option(['real_name' => '平台院装单据详情']);
 			Route::post('v3/salon-usage/issue', 'v1.product.inventory.InventoryPlatformSalonUsage/issue')->option(['real_name' => '平台院装领用']);
 			Route::post('v3/salon-usage/:id/void', 'v1.product.inventory.InventoryPlatformSalonUsage/void')->pattern(['id' => '\\d+'])->option(['real_name' => '平台院装领用作废']);
+			// Remarks have their own audited command; native list notes may change, stock facts may not.
+			Route::get('v3/document-remarks/:id', 'v1.product.inventory.InventoryPlatformDocumentRemark/detail')->pattern(['id' => '[A-Za-z0-9:._-]+'])->option(['real_name' => '平台库存单据备注详情']);
+			Route::post('v3/document-remarks/:id', 'v1.product.inventory.InventoryPlatformDocumentRemark/save')->pattern(['id' => '[A-Za-z0-9:._-]+'])->option(['real_name' => '平台编辑库存单据备注']);
 			Route::get('v3/hq/inbound', 'v1.product.inventory.InventoryPlatformHqInbound/index')->option(['real_name' => '平台总部仓入库查询']);
 			Route::get('v3/hq/inbound/:id/detail', 'v1.product.inventory.InventoryPlatformHqInbound/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台总部仓入库详情']);
 			Route::get('v3/hq/inbound/:id/outbound-details', 'v1.product.inventory.InventoryPlatformHqInbound/outboundDetails')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '平台总部仓入库批次后续出库明细']);

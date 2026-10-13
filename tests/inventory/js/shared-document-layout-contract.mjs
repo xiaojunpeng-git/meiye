@@ -15,18 +15,21 @@ const pages = ['inbound', 'outbound', 'request', 'transfer', 'usage']
 for (const mode of ['store', 'platform']) {
   const read = createDocumentDetailReader({ mode, hqLocationId: 7, storeId: 80, storeApi, platformApi })
   for (const page of pages) {
-    assert.deepEqual(await read(page, { id: 3, source_id: 'manual-18' }), { lines: [{ id: 1 }] })
+    const row = page === 'usage' ? { id: 3, store_id: 80 } : { id: 3, source_id: 'manual-18' }
+    assert.deepEqual(await read(page, row), { lines: [{ id: 1 }] })
     const call = calls.at(-1)
     assert.equal(call.prefix, mode)
-    assert.equal(call.args[0], ['inbound', 'outbound'].includes(page) ? 'manual-18' : 3)
-    if (mode === 'store') assert.equal(call.args.length, 1)
-    else assert.deepEqual(call.args[1], page === 'usage' ? { store_id: 80 } : { hq_location_id: 7 })
+    assert.equal(call.name, 'documentRemarkDetail')
+    assert.equal(call.args[0], page)
+    assert.equal(call.args[1], ['inbound', 'outbound'].includes(page) ? 'manual-18' : 3)
+    if (mode === 'store') assert.equal(call.args.length, 2)
+    else assert.deepEqual(call.args[2], page === 'usage' ? { store_id: 80 } : { hq_location_id: 7 })
   }
   assert.throws(() => read('warehouse', { id: 1 }), /不支持/)
 }
 assert.throws(() => createDocumentDetailReader({ mode: 'unknown' }), /不合法/)
 const denied = createDocumentDetailReader({ mode: 'platform', hqLocationId: 7, storeApi,
-  platformApi: { hqInboundDetail: async () => { throw new Error('forbidden') } } })
+  platformApi: { documentRemarkDetail: async () => { throw new Error('forbidden') } } })
 const previousCalls = calls.length
 await assert.rejects(denied('inbound', { id: 1 }), /forbidden/)
 assert.equal(calls.length, previousCalls)
@@ -34,7 +37,9 @@ const storeWarehouse = createDocumentDetailReader({ mode: 'platform', warehouseS
 for (const page of ['inbound', 'outbound', 'inboundTrace']) {
   await storeWarehouse(page, { source_id: 'store-document', location_id: 91 })
   assert.equal(calls.at(-1).prefix, 'platform')
-  assert.deepEqual(calls.at(-1).args, ['store-document', { subject: 'STORE', storeId: 80, locationId: 91 }])
+  assert.deepEqual(calls.at(-1).args, page === 'inboundTrace'
+    ? ['store-document', { subject: 'STORE', storeId: 80, locationId: 91 }]
+    : [page, 'store-document', { subject: 'STORE', storeId: 80, locationId: 91 }])
 }
 
 const app = readFileSync(new URL('../../../前端代码/inventory-vue3/src/App.vue', import.meta.url), 'utf8')

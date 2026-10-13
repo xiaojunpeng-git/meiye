@@ -12,22 +12,22 @@ export function createDocumentDetailReader({ mode, hqLocationId, storeId, wareho
     ? { subject: 'STORE', storeId: Number(selectedStoreId) || 0, locationId: Number(row.location_id) || 0 }
     : { hq_location_id: Number(row.location_id) || hqScope.hq_location_id }
   const readers = mode === 'platform' ? {
-    inbound: row => platformApi.hqInboundDetail(row.source_id || row.id, documentScope(row)),
+    inbound: row => platformApi.documentRemarkDetail('inbound', row.source_id || row.id, documentScope(row)),
     inboundTrace: row => platformApi.hqInboundOutboundDetails(row.source_id || row.id, documentScope(row)),
-    outbound: row => platformApi.hqOutboundDetail(row.source_id || row.id, documentScope(row)),
-    request: row => platformApi.hqRequestDetail(row.id, hqScope),
-    transfer: row => platformApi.hqCrossTransferDetail(row.id, hqScope),
+    outbound: row => platformApi.documentRemarkDetail('outbound', row.source_id || row.id, documentScope(row)),
+    request: row => platformApi.documentRemarkDetail('request', row.id, hqScope),
+    transfer: row => platformApi.documentRemarkDetail('transfer', row.id, hqScope),
     // 使用列表行原仓身份，异步换筛选器也不能把总部领用单按门店仓读取。
-    usage: row => platformApi.salonUsageDetail(row.id, Number(row.store_id) > 0
+    usage: row => platformApi.documentRemarkDetail('usage', row.id, Number(row.store_id) > 0
       ? { store_id: Number(row.store_id) }
       : { hq_location_id: Number(row.location_id) || 0 }),
   } : {
-    inbound: row => storeApi.inboundDetail(row.source_id || row.id),
+    inbound: row => storeApi.documentRemarkDetail('inbound', row.source_id || row.id),
     inboundTrace: row => storeApi.inboundOutboundDetails(row.source_id || row.id),
-    outbound: row => storeApi.outboundDetail(row.source_id || row.id),
-    request: row => storeApi.requestDetail(row.id),
-    transfer: row => storeApi.crossTransferDetail(row.id),
-    usage: row => storeApi.salonUsageDetail(row.id),
+    outbound: row => storeApi.documentRemarkDetail('outbound', row.source_id || row.id),
+    request: row => storeApi.documentRemarkDetail('request', row.id),
+    transfer: row => storeApi.documentRemarkDetail('transfer', row.id),
+    usage: row => storeApi.documentRemarkDetail('usage', row.id),
   }
   return (page, row) => {
     if (!Object.prototype.hasOwnProperty.call(readers, page)) throw new Error('不支持的库存单据类型。')

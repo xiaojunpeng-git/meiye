@@ -109,6 +109,8 @@ final class InventoryManualOutboundServices
                 $resultByIndex[$line['index']] = ['movement_fact_ids' => $facts, 'idempotent' => false];
             }
             ksort($resultByIndex, SORT_NUMERIC);
+            // Capture the original note atomically while leaving settled fact rows immutable.
+            (new InventoryDocumentRemarkServices())->initializeManual('outbound', (string)$scope['tenantId'], (string)$command['idempotencyKey'], (string)$command['remark']);
             return ['document_no' => $command['documentNo'], 'idempotency_key' => $command['idempotencyKey'], 'lines' => array_values($resultByIndex)];
     }
 

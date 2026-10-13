@@ -193,6 +193,11 @@ final class InventoryCrossSubjectTransferServices
                 'to_party_name_snapshot' => $target['partyName'], 'to_location_id' => (int)$targetLocation['id'],
                 'business_date' => $command['date'], 'remark' => $command['remark'],
             ] + $staffSnapshot);
+            // Draft replacement changes line IDs without stock effects; keep the independent note editor in sync.
+            (new InventoryDocumentRemarkServices())->rebaseAfterFullEdit('transfer', $documentId, $command['remark'], [
+                'type' => (string)($hqScope['operatorType'] ?? $source['operatorType'] ?? 'STORE_STAFF'),
+                'id' => (int)($hqScope['operatorId'] ?? $source['operatorId']),
+            ]);
             return ['transfer_id' => $documentId, 'transfer_no' => (string)$document['transfer_no'], 'document_status' => 'DRAFT'];
         });
     }
