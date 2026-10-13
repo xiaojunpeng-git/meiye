@@ -418,6 +418,10 @@ const hasCartLines = computed(() => cartLines.value.length > 0)
 // openCheckout() 内的恢复逻辑永远无法执行，工作台会被永久锁住。
 const canSubmitCart = computed(() => hasCartLines.value)
 const summary = computed(() => cart.value.summary || {})
+// 权益合计只展示当前权益服务行的实际分摊金额；购卡销售和应收仍各走原有结账口径。
+const entitlementTotalCents = computed(() => cartLines.value
+  .filter(isEntitlementLine)
+  .reduce((total, line) => total + cartLineTotalAmountCents(line), 0))
 const entitlementSelector = computed(() => localEntitlementSelector.value || {})
 const activeCheckoutComposition = computed(() => localCashierDraft.value?.checkoutComposition || cashier.value.checkoutComposition || null)
 const checkoutEntryLabel = computed(() => activeCardOperationUpgrade.value
@@ -8027,6 +8031,7 @@ onBeforeUnmount(() => {
           <span>原价<strong>{{ formatPlainAmount(summary.originalAmount) }}</strong></span>
           <span>优惠<strong>{{ formatPlainAmount(summary.discountAmount) }}</strong></span>
           <span class="cashier-checkout-summary__receivable">应收<strong>{{ formatMoney(summary.receivableAmount) }}</strong></span>
+          <span class="cashier-checkout-summary__entitlement">权益合计<strong>{{ formatMoney(Math.round(entitlementTotalCents / 100)) }}</strong></span>
         </div>
 
         <div class="cashier-checkout-actions">
