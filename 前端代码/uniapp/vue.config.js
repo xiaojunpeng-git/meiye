@@ -1,5 +1,13 @@
 module.exports = {
 	productionSourceMap: false, // 生产打包时不输出map文件，增加打包速度
+	chainWebpack: config => {
+		// HBuilderX loads babel-loader from its own CLI context. Explicitly attach
+		// the app's syntax transforms so H5 can compile existing optional chains.
+		config.module.rule('js').use('babel-loader').tap(options => ({
+			...(options || {}),
+			plugins: [...((options && options.plugins) || []), ...require('./babel.config.js').plugins]
+		}))
+	},
 	configureWebpack: config => {
 		if (process.env.NODE_ENV === 'production') {
 			config.optimization.minimizer[0].options.terserOptions.compress.warnings = false

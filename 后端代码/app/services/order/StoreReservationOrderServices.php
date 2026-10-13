@@ -25,6 +25,7 @@ use app\model\yeji\StaffYeji;
 use app\model\yeji\YejiCommission;
 use app\services\BaseServices;
 use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
+use app\services\cashier\v3\reservation\ImportedEntitlementReservationStoreServices;
 use app\services\order\store\WriteOffOrderServices;
 use app\services\other\CityAreaServices;
 use app\services\product\product\StoreProductReservationServices;
@@ -3002,6 +3003,16 @@ class StoreReservationOrderServices extends BaseServices
             }
         }
         $store_name = $storeServices->value(['id' => $order['store_id']], 'name');
+        // Imported historical rights intentionally have no sales store; the
+        // member must choose an operating store within the right's owner org.
+        $historicalStorePicker = (int)$order['store_id'] === 0
+            && (int)($order['is_system_del'] ?? 0) === 1
+            && app()->make(ImportedEntitlementReservationStoreServices::class)
+                ->holderId($uid, (int)$id, (int)$cartInfo['id']) > 0;
+        $reservationStores = $historicalStorePicker
+            ? app()->make(ImportedEntitlementReservationStoreServices::class)
+                ->availableStores($uid, (int)$id, (int)$cartInfo['id'])
+            : [];
         //获取预约订单剩余预约数量
         $maxCartNum = $this->getReservationOrderSurplusNum((int)$id, (int)$cartInfo['id'], $order);
         $card_product_id = 0;
@@ -3028,6 +3039,8 @@ class StoreReservationOrderServices extends BaseServices
             'is_show_stock' => $productInfo['is_show_stock'],
             'store_id' => $order['store_id'],
             'store_name' => $store_name,
+            'historical_store_picker' => $historicalStorePicker,
+            'reservation_store_options' => $reservationStores,
             'custom_form' => $customForm,
             'custom_form_title' => $customFormTitle,
 			'system_from_type' => $productInfo['system_form_type'] ?? 1,

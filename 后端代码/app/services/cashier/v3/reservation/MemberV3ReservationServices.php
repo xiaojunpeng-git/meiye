@@ -32,7 +32,7 @@ final class MemberV3ReservationServices
         if ($date === '1970-01-01') throw new ValidateException('预约时间无效。');
 
         $order = Db::name('store_order')->where('id', $orderId)->where('uid', $uid)
-            ->where('paid', 1)->where('is_del', 0)->where('is_system_del', 0)->where('is_user_del', 0)
+            ->where('paid', 1)->where('is_del', 0)->where('is_user_del', 0)
             ->where('refund_status', 0)->where('terminal_action', 0)->find();
         if (!$order) throw new ValidateException('获取订单信息失败!');
         $storeId = (int)($input['store_id'] ?? $order['store_id'] ?? 0);
@@ -44,6 +44,25 @@ final class MemberV3ReservationServices
         $detail = Db::name('store_order_cart_info')->where('id', $detailId)->where('oid', $orderId)
             ->where('cart_type', 2)->where('product_type', 6)->find();
         if (!$detail) throw new ValidateException('已购预约项目不存在。');
+        // Hidden technical orders are usable only when a live imported right
+        // authorizes this member and the chosen operating store.
+        $systemDeleted = (int)$order['is_system_del'];
+        if ($systemDeleted !== 0 && $systemDeleted !== 1) {
+            throw new ValidateException('获取订单信息失败!');
+        }
+        $historicalOrder = $systemDeleted === 1;
+        if ($historicalOrder) {
+            // Historical rights may span old stores; each right must book on
+            // its own scope, so do not mix another order into this booking.
+            if ($this->decodeArray($input['addon_items'] ?? []) !== []) {
+                throw new ValidateException('历史权益请逐个项目预约。');
+            }
+            $historicalStores = new ImportedEntitlementReservationStoreServices();
+            $historicalStores->assertSelectedStore($uid, $orderId, $detailId, $storeId);
+            if ($quantity > (int)$detail['write_surplus_times']) {
+                throw new ValidateException('预约次数超过剩余权益。');
+            }
+        }
 
         /** Preserve the old member form's configured custom-form requirement
          * without reading the legacy reservation authority. */
@@ -110,7 +129,7 @@ final class MemberV3ReservationServices
             array_column($addonDetails, 'id'), $staffIds, $duration,
         ], JSON_UNESCAPED_UNICODE));
 
-        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey): array {
+        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey, $historicalOrder): array {
             $rootOperation = Db::name('cashier_v3_reservation_operation')->where('tenant_id', $tenantId)
                 ->where('command_idempotency_key', $naturalKey)->lock(true)->find();
             if ($rootOperation) {
@@ -126,6 +145,26 @@ final class MemberV3ReservationServices
                 // A cancelled/rejected appointment may be booked again. The
                 // root operation lock serializes concurrent retries.
                 $naturalKey .= ':attempt:' . (count($attempts) + 1);
+            }
+            if ($historicalOrder) {
+                // Recheck after the replay gate so an existing successful
+                // booking remains idempotent if rights later change. Lock the
+                // detail before writing so a concurrent write-off cannot leave
+                // this booking with more visits than the remaining balance.
+                (new ImportedEntitlementReservationStoreServices())
+                    ->assertSelectedStore($uid, $orderId, $detailId, $storeId);
+                $remaining = (int)Db::name('store_order_cart_info')->where('id', $detailId)
+                    ->where('oid', $orderId)->lock(true)->value('write_surplus_times');
+                $reserved = (int)Db::name('cashier_v3_reservation_line')->alias('l')
+                    ->join('cashier_v3_reservation r', 'r.id=l.reservation_id')
+                    ->where('l.tenant_id', $tenantId)->where('l.entitlement_source_detail_id', $detailId)
+                    ->where('r.member_id', $uid)
+                    ->where('r.lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
+                    ->whereIn('r.status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE'])
+                    ->sum('l.quantity');
+                if ($quantity + $reserved > $remaining) {
+                    throw new ValidateException('预约次数超过剩余权益。');
+                }
             }
             $lifecycle = new CashierV3ReservationLifecycleServices();
             $lifecycle->assertStaffAvailabilityInTx($storeId, 0, $staffIds, $appointmentStart, $appointmentEnd);

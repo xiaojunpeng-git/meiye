@@ -18,18 +18,23 @@
 			   <text>预计服务时长</text>
 			   <text class="duration">{{ totalServiceDuration }} 分钟</text>
 		   </view>
-		   <view class="addon-add-btn" @click="openAddonPicker">+ 添加项目</view>
+		   <view class="addon-add-btn" v-if="!historicalStorePicker" @click="openAddonPicker">+ 添加项目</view>
 	   </view>
 
 	   <!-- 预约信息 -->
 	   <view class="info-card bg--w111-fff rd-16rpx w-710 m-auto">
-		   <navigator :url="storeListUrl" hover-class="none" class="info-row acea-row row-between-wrapper" v-if="canSelectStore">
+		   <!-- 无归店历史权益由接口返回可核销营业门店，不能沿用按商品筛选的普通门店列表。 -->
+		   <view class="info-row acea-row row-between-wrapper" v-if="historicalStorePicker" @click="openHistoricalStorePicker">
 			   <text class="info-label">预约门店</text>
-			   <view class="info-value">{{storeName}}<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999 ml-8"></text></view>
+			   <view class="info-value">{{ storeName || (historicalStoreOptions.length ? '请选择门店' : '暂无可预约门店') }}<text v-if="historicalStoreOptions.length" class="iconfont icon-ic_rightarrow fs-24 text--w111-999 ml-8"></text></view>
+		   </view>
+		   <navigator :url="storeListUrl" hover-class="none" class="info-row acea-row row-between-wrapper" v-else-if="canSelectStore">
+			   <text class="info-label">预约门店</text>
+			   <view class="info-value">{{storeName || '请选择门店'}}<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999 ml-8"></text></view>
 		   </navigator>
 		   <view class="info-row acea-row row-between-wrapper" v-else>
 			   <text class="info-label">预约门店</text>
-			   <text class="info-value">{{storeName}}</text>
+			   <text class="info-value">{{storeName || '暂无可预约门店，请联系门店'}}</text>
 		   </view>
 		   <view class="info-divider" v-if="orderId"></view>
 		   <view class="info-row acea-row row-between-wrapper" v-if="orderId">
@@ -307,6 +312,19 @@
 		<timeranges :isShow='isShow' :time='timeranges' @confrim="confrim" @cancel="cancels"></timeranges>
 		<areaWindow ref="areaWindow" :display="display" :address='addressInfoArea' :cityShow='cityShow' @submit="OnAreaAddress" @changeClose="changeAddressClose"></areaWindow>
 
+		<!-- 历史权益的可预约门店由后端组织范围给出，选择后才加载时段与老师。 -->
+		<view class="staff-mask" v-if="historicalStorePickerVisible" @click="historicalStorePickerVisible = false">
+			<view class="staff-panel staff-picker-panel" @click.stop="">
+				<view class="staff-panel-title">选择预约门店</view>
+				<input class="historical-store-search" v-model="historicalStoreSearch" placeholder="搜索门店名称" />
+				<scroll-view scroll-y class="staff-list">
+					<view class="historical-store-row" v-for="item in filteredHistoricalStores" :key="item.id" @click="chooseHistoricalStore(item)">{{ item.name }}</view>
+					<view class="staff-empty" v-if="!filteredHistoricalStores.length">没有匹配的营业门店</view>
+				</scroll-view>
+				<view class="staff-picker-footer acea-row"><view class="staff-footer-btn reset" @click="historicalStorePickerVisible = false">关闭</view></view>
+			</view>
+		</view>
+
 		<!-- 服务老师（多选） -->
 		<view class="staff-mask" v-if="staffPickerVisible" @click="staffPickerVisible = false">
 			<view class="staff-panel staff-picker-panel" @click.stop="">
@@ -451,6 +469,10 @@ export default {
 			disabledStaffIds:[],
 			staffList:[],
 			staffPickerVisible:false,
+			historicalStorePicker:false,
+			historicalStorePickerVisible:false,
+			historicalStoreSearch:'',
+			historicalStoreOptions:[],
 			selectedTimeRange:null,
 			timeBegin:'09:00:00',
 			timeEnd:'22:00:00',
@@ -587,6 +609,10 @@ export default {
 			}
 			return list;
 		},
+		filteredHistoricalStores() {
+			const keyword = this.historicalStoreSearch.trim().toLowerCase();
+			return this.historicalStoreOptions.filter(item => !keyword || String(item.name || '').toLowerCase().includes(keyword));
+		},
 		canSelectStore() {
 			if (!this.orderId) return true;
 			return Number(this.configData?.cross_store_verification) === 1;
@@ -660,6 +686,9 @@ export default {
 			return extra;
 		},
 		reservationOrderCreate(){
+			if (this.historicalStorePicker && !Number(this.storeId)) {
+				return this.$util.Tips({ title: '请先选择预约门店' });
+			}
 			if(!this.selectedTimeRange || !this.selectedTimeRange.begin){
 				return this.$util.Tips({ title: '请选择时间段' });
 			}
@@ -769,6 +798,12 @@ export default {
 			});
 		},
 		applyOrderReservationData(data, editDetail = null) {
+			this.historicalStorePicker = Boolean(data.historical_store_picker);
+			this.historicalStoreOptions = Array.isArray(data.reservation_store_options) ? data.reservation_store_options : [];
+			if (this.historicalStorePicker && !this.historicalStoreOptions.some(item => Number(item.id) === Number(this.storeId))) {
+				this.storeId = 0;
+				this.storeName = '';
+			}
 			this.serviceMark = String(editDetail?.mark ?? data.mark ?? '').trim();
 			this.customFormTitle = data.custom_form_title;
 			this.maxCartNum = data.cart_num;
@@ -1165,6 +1200,12 @@ export default {
 			} catch (e) {}
 		},
 		applyPreselectedStore() {
+			if (this.historicalStorePicker) {
+				const option = this.historicalStoreOptions.find(item => Number(item.id) === Number(this.preselectedStoreId));
+				if (option) this.chooseHistoricalStore(option);
+				this.preselectedStoreApplied = true;
+				return Promise.resolve();
+			}
 			if (this.preselectedStoreApplied || !this.preselectedStoreId) {
 				return Promise.resolve();
 			}
@@ -1552,6 +1593,11 @@ export default {
 			this.cartNum = e.detail.value;
 		}),
 		storeChange({ id, name }) {
+			if (this.historicalStorePicker) {
+				const option = this.historicalStoreOptions.find(item => Number(item.id) === Number(id));
+				if (option) this.chooseHistoricalStore(option);
+				return;
+			}
 			this.storeId = id;
 			this.storeName = name;
 			this.preselectedStoreApplied = true;
@@ -1565,6 +1611,25 @@ export default {
 				this.reservationCompute();
 				this.loadStaffList();
 			});
+		},
+		chooseHistoricalStore(item) {
+			// Keep the imported platform project identity; branch product copies
+			// are not required for the already-owned historical right.
+			this.storeId = Number(item.id);
+			this.storeName = item.name;
+			this.historicalStorePickerVisible = false;
+			this.selectedTimeRange = null;
+			this.staffChoose = [];
+			this.addonItems = [];
+			// The ordinary date/price endpoints require a branch product copy.
+			// Imported rights retain their platform project and existing time picker.
+			this.loadStaffList();
+		},
+		openHistoricalStorePicker() {
+			if (!this.historicalStoreOptions.length) {
+				return this.$util.Tips({ title: '当前没有可预约的渼约营业门店，请联系门店' });
+			}
+			this.historicalStorePickerVisible = true;
 		},
 		reservationSwitch() {
 			const switchPid = this.pid || this.productId;
@@ -1821,6 +1886,22 @@ export default {
 	}
 	.staff-picker-panel{
 		max-height: 78vh;
+	}
+	.historical-store-search{
+		box-sizing: border-box;
+		width: 100%;
+		height: 72rpx;
+		padding: 0 20rpx;
+		margin-bottom: 12rpx;
+		border-radius: 12rpx;
+		background: #f8f5f3;
+		font-size: 26rpx;
+	}
+	.historical-store-row{
+		padding: 24rpx 16rpx;
+		border-bottom: 1rpx solid #f1edeb;
+		font-size: 28rpx;
+		color: #4d3037;
 	}
 	.staff-picker-tip{
 		text-align: center;
