@@ -55,6 +55,13 @@ reportPermissionCheck(
     && str_contains($controller, 'getRolesByAuth($roles, 1)'),
     'query and export use the assigned page menu as their authority'
 );
+// The drilldown is not an independently assignable menu; both query and export
+// must inherit the parent report's permission check.
+reportPermissionCheck(
+    str_contains($controller, "'store_salesperson_performance_detail' => 'store_salesperson_performance'")
+    && str_contains($controller, "'store_salesperson_performance_detail',"),
+    'salesperson drilldown inherits the parent report permission'
+);
 reportPermissionCheck(
     str_contains($menuController, 'admin_common_menu_list_v2_')
     && str_contains($menuController, '$ruleIds'),

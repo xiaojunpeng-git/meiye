@@ -43,6 +43,8 @@ const REPORT_TABS = Object.freeze([
   // 仅由汇总单元格的服务端下钻声明进入，不能作为独立导航页签。
   { code: 'store_craftsman_consumption_detail', name: '手艺人消耗明细', hidden: true },
   { code: 'store_salesperson_performance', name: '门店销售人业绩' },
+  // 汇总单元格的后端下钻目标；沿用同一报表壳，不增加独立导航入口。
+  { code: 'store_salesperson_performance_detail', name: '销售人业绩明细', hidden: true },
   { code: 'market_performance', name: '市场业绩表' },
   { code: 'market_detail', name: '市场明细表' },
   { code: 'member_visit_analysis', name: '会员进店分析表' },
@@ -181,7 +183,7 @@ const FIELD_LOGIC = Object.freeze({
   sales_manager: '本笔新客业务结账时确认的销售经理；多人时按事实快照并列显示。',
   salesperson_names: '本条成交分配到的销售人员。',
   member_source: '本次成交时记录的会员来源。',
-  receipt_total: '本行销售明细分摊到的所有成功记账收款方式金额合计；未成功的收款不计入。',
+  receipt_total: '成交行显示分摊到本明细的成功记账收款；退款行按退款业务日显示负向退款调整。各方式与退款调整合计为收款总金额。',
   partner_performance: '本条成交各合作方分类分成业绩的合计；每个分类均按成交时的现金业绩乘以当时设置的合作方默认比例计算。',
   actual_cash_performance: '本行销售明细分摊到的成功记账收款金额，扣除本条成交的合作方业绩后得到的金额。',
   experience_cash: '体验项目默认取本行销售明细分摊到的成功记账收款金额；运营人员手动保存后以保存金额为准。',
@@ -389,7 +391,7 @@ const reportTabs = computed(() => allowedReportTabs.value.filter((tab) => !tab.h
 const isFirstPhaseReport = computed(() => [
   'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
   'store_item_analysis', 'store_craftsman_consumption',
-  'store_craftsman_consumption_detail', 'store_salesperson_performance'
+  'store_craftsman_consumption_detail', 'store_salesperson_performance', 'store_salesperson_performance_detail'
 ].includes(activeReport.value))
 const isSixDimensionReport = computed(() => SIX_DIMENSION_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => item.code === activeReport.value))
@@ -1203,6 +1205,11 @@ function rowKey(row) {
   return String(row?._market_group_key || row?.annotation_subject_key || row?.source_line_id || row?.order_line_id || row?.order_id || row?.order_no_snapshot || '')
 }
 
+// Refund rows are immutable adjustment facts, not editable sale-line supplements.
+function canEditReportRow(row) {
+  return !(activeReport.value === 'member_consumption_detail' && row?.consume_type === '退款')
+}
+
 function annotationStoreScope(row) {
   if (!isPlatformReport.value) return {}
   if (String(row?.annotation_subject_type || '') === 'phase_four_month') return { store_id: 0 }
@@ -1212,6 +1219,7 @@ function annotationStoreScope(row) {
 }
 
 function beginEdit(row) {
+  if (!canEditReportRow(row)) return
   // 市场明细的会员日行和游客订单行都由后端下发稳定主键；
   // 前端不用姓名、空会员 ID 或显示文本猜测可写对象。
   if (activeReport.value === 'market_detail' && !row?.annotation_subject_key) {
@@ -1661,7 +1669,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
                 <template v-else>{{ formatCell(row[column.key]) }}</template>
               </td>
               <td v-if="editableReport">
-                <button v-if="editingRow !== row" type="button" class="button button--text" @click="beginEdit(row)">编辑</button>
+                <button v-if="editingRow !== row && canEditReportRow(row)" type="button" class="button button--text" @click="beginEdit(row)">编辑</button>
+                <span v-else-if="editingRow !== row">-</span>
                 <template v-else>
                   <button type="button" class="button button--text" :disabled="savingEdit" @click="saveEdit">{{ savingEdit ? '保存中' : '保存' }}</button>
                   <button type="button" class="button button--text" :disabled="savingEdit" @click="cancelEdit">取消</button>

@@ -30,6 +30,7 @@ class StoreUnifiedReportServices extends BaseServices
             // 明细只通过“门店手艺人消耗”中的受控下钻进入，不能单独作为导航入口。
             ['folder' => '门店运营', 'code' => 'store_craftsman_consumption_detail', 'name' => '手艺人消耗明细', 'hidden' => true],
             ['folder' => '门店运营', 'code' => 'store_salesperson_performance', 'name' => '门店销售人业绩'],
+            ['folder' => '门店运营', 'code' => 'store_salesperson_performance_detail', 'name' => '销售人业绩明细', 'hidden' => true],
         ], StoreUnifiedReportPhaseTwoServices::catalogEntries());
     }
 
@@ -64,7 +65,7 @@ class StoreUnifiedReportServices extends BaseServices
         if (in_array($report, [
             'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
             'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail',
-            'store_salesperson_performance',
+            'store_salesperson_performance', 'store_salesperson_performance_detail',
         ], true)) {
             return array_merge($meta, $this->operationsReport($report, $storeId, $range, $input));
         }
@@ -109,6 +110,7 @@ class StoreUnifiedReportServices extends BaseServices
             case 'store_craftsman_consumption': return $this->craftsmanConsumption($storeId, $range, $input);
             case 'store_craftsman_consumption_detail': return $this->craftsmanConsumptionDetail($storeId, $range, $input);
             case 'store_salesperson_performance': return $this->salespersonPerformance($storeId, $range, $input);
+            case 'store_salesperson_performance_detail': return $this->salespersonPerformanceDetail($storeId, $range, $input);
             default: throw new \InvalidArgumentException('不支持的门店运营报表类型');
         }
     }
@@ -350,7 +352,7 @@ class StoreUnifiedReportServices extends BaseServices
         ]), ['month'=>88, 'division_name'=>130, 'city_manager'=>130, 'store_summary'=>132, 'performance_type'=>220]);
         // 汇总逐列解释实际分组和计数边界，不能把体验数量说成去重人数；只更新说明，不改变指标。
         $explanations = [
-            'month'=>'销售记录按销售业务日期归入月份；跨日补交欠款按补交收款业务日期归入月份。只统计所选日期范围内的记录。',
+            'month'=>'销售按成交日、补交按收款日、合作方退款按退款业务日归入月份。只统计所选日期范围内的记录。',
             'division_name'=>'这家门店当前所属的分公司；没有配置时显示“未配置分公司”。',
             'store_summary'=>'本行汇总的门店名称，使用业务发生时记录的名称。不同门店分别列示。',
             'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；同一门店、月份和分类汇总为一行。平台改分类后，历史行的分类归属会更新，金额事实不变。',
@@ -358,7 +360,7 @@ class StoreUnifiedReportServices extends BaseServices
             'member_count'=>'查询日期内本门店、本月份、本分类成交过的会员人数；同一会员重复成交只算1人，未关联会员的销售不计入。补交欠款不增加人数。一个会员可能出现在多行，因此合计栏显示“-”，不直接相加。',
             'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交欠款不增加消耗业绩。',
             'labor_amount'=>'查询日期内销售明细对应的有效手艺人分配记录，累计其中的手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
-            'sale_amount'=>'查询日期内已记账并分配到本分类的现金业绩合计，不含未收欠款、余额支付和旧卡录入。例：成交2086元、已收106元、欠1980元，只计106元；以后补交1980元，计入补交日期。',
+            'sale_amount'=>'查询日期内已记账并分配到本分类的现金业绩净额；原成交可核实合作方归属的退款按实际退款金额在退款日负向冲减。不含未收欠款、余额支付和无法关联原成交分类的旧卡退款。',
         ];
         foreach ($columns as &$column) {
             $column['source_explanation'] = $explanations[$column['key']];
@@ -441,6 +443,26 @@ class StoreUnifiedReportServices extends BaseServices
             }
             $rows[$key]['sale_amount_cents'] += (int)$payment['amount_cents'];
         }
+        // A refund is its own dated negative business fact. Only a verified
+        // original partner allocation can attribute it to a partner category.
+        $refundReader = new StoreMemberConsumptionRefundReadServices();
+        $refundQuery = $refundReader->query($stores, $range, $input, $this->participantEmployeeId);
+        $refundIds = (clone $refundQuery)->column('refund_operation.id');
+        foreach ($refundReader->rows($refundQuery, array_map('intval', $refundIds)) as $refund) {
+            if ((int)$refund['partner_category_id_snapshot'] <= 0
+                || trim((string)$refund['partner_name_snapshot']) === '') continue;
+            $row = $refund + [
+                '_sale_activity' => false, 'quantity' => 0, 'is_experience' => 0,
+                'labor_amount_cents' => 0, 'consumption_amount_cents' => 0,
+            ];
+            $row['store_name'] = (string)$refund['store_name_snapshot'];
+            $row['source_type'] = 'refund';
+            $row['order_no_snapshot'] = (string)$refund['order_no_snapshot'];
+            $row['category_id_snapshot'] = (int)$refund['current_category_id'];
+            $row['sale_amount_cents'] = (int)$refund['amount_cents'];
+            $row['_market_group_key'] = 'refund:' . (string)$refund['order_id'];
+            $rows[$row['_market_group_key']] = $row;
+        }
         $rows = array_values($rows);
         usort($rows, static function (array $left, array $right): int {
             return strcmp((string)$right['business_date'], (string)$left['business_date'])
@@ -487,10 +509,11 @@ class StoreUnifiedReportServices extends BaseServices
         unset($row);
         foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = (string)$row['category_path_snapshot']; $row['experience_project'] = $row['experience']; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
         unset($row);
-        // 销售单号沿用原销售发生时的快照；补交行不改成补交单号，页面和导出共用列定义。
+        // 原销售与补交保留原单号；退款行显示退款单号，另列原销售单号便于追查。
         $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
             ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],
-            ['key'=>'order_no_snapshot','label'=>'销售单号','source_explanation'=>'显示原销售单据生成时保存的单号；欠款补交仍显示对应的原销售单号，不显示补交单号。'],
+            ['key'=>'order_no_snapshot','label'=>'业务单号','source_explanation'=>'成交及补交显示原销售单号；退款显示独立退款单号。'],
+            ['key'=>'original_sale_no','label'=>'原销售单号','source_explanation'=>'退款对应的原销售单号；无法核实原单时留空。'],
             ['key'=>'performance_type','label'=>'业绩类型','source_explanation'=>'按商品或卡内项目关联的平台商品当前分类显示，与合作方品项汇总使用同一分类口径。'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'复诊'],['key'=>'medical_followup','label'=>'类型'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
         ]), ['division_name'=>130, 'city_manager'=>130, 'store_name_snapshot'=>126, 'member_name_snapshot'=>88, 'member_phone'=>116, 'order_no_snapshot'=>165, 'performance_type'=>220, 'business_date'=>104]);
         // 本表逐列解释实际取值，不能用通用套话代替业务口径；这里只改说明，不改统计或人工字段规则。
@@ -499,9 +522,10 @@ class StoreUnifiedReportServices extends BaseServices
             'store_name_snapshot'=>'办理原销售单据的门店名称，使用销售时记录的名称。',
             'member_name_snapshot'=>'原销售单据上的会员姓名，使用销售时记录的姓名。',
             'member_phone'=>'会员档案中当前保存的手机号；没有手机号时显示“-”。',
-            'order_no_snapshot'=>'这笔交易的原销售单号。补交欠款时仍显示原销售单号，不换成补交单号。',
+            'order_no_snapshot'=>'成交及补交显示原销售单号；退款显示独立退款单号。',
+            'original_sale_no'=>'退款对应的原销售单号；无法核实原单时留空。',
             'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；平台改分类后，历史行的分类归属随之更新。',
-            'business_date'=>'销售记录显示销售业务日期；跨日补交欠款的记录显示补交收款业务日期。',
+            'business_date'=>'销售显示成交日期，补交显示补交收款日期，退款显示退款业务日期。',
             'experience_project'=>'销售时记为体验的明细显示“是”，其余显示“否”；单独补交欠款的记录不重复计为体验。',
             'medical_elevation'=>'人工填写的复诊信息，系统不自动判断；未填写时显示“-”。',
             'medical_followup'=>'人工填写的业务类型，系统不自动分类；未填写时显示“-”。',
@@ -509,8 +533,8 @@ class StoreUnifiedReportServices extends BaseServices
             'consumption'=>'这里显示消耗金额，不是次数，与“消耗金额”列相同；单独补交欠款不重复计入消耗。',
             'consumption_amount'=>'本条销售明细在查询日期内完成服务后，按本分类计算的消耗金额；只购买、未完成服务不产生消耗，单独补交欠款也不增加消耗。',
             'labor_fee'=>'本条销售明细对应的有效手艺人手工费合计；单独补交欠款不增加手工费。',
-            'quantity'=>'原销售明细的购买数量；单独补交欠款显示0，避免重复计算购买数量。',
-            'deal_amount'=>'本行在查询日期内已记账的现金业绩，不含未收欠款、余额支付和旧卡录入。例：成交2086元、已收106元、欠1980元，这里显示106元；以后补交的款计入补交日期。',
+            'quantity'=>'原销售明细的购买数量；补交和退款调整行显示0，不重复改变成交数量。',
+            'deal_amount'=>'本行在查询日期内已记账的现金业绩；退款按实际退款日以负数冲减。未核实原销售合作方归属的退款不分配到合作方分类。',
             'expert_name'=>'人工填写的专家姓名；未填写时显示“-”，不会自动取销售人或手艺人的姓名。',
             'partner_label'=>'销售时商品或卡内项目分类对应的合作方名称；之后修改分类或合作方配置，不改变这里的历史名称。',
             'remark'=>'人工填写的本条明细备注；未填写时显示“-”，备注不改变金额和统计结果。',
@@ -536,16 +560,60 @@ class StoreUnifiedReportServices extends BaseServices
     private function memberConsumptionDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input, false);
-        // 会员消费明细以有效销售明细为展示边界，不再以已分摊收款净额 > 0
-        // 作为入表门槛。欠款、零元或其他尚无收款的真实成交行仍展示，
-        // 收款列依然只读有效收款分摊，不伪造现金业绩。
-        $total = (int)(clone $query)->count('s.id');
+        $stores = is_array($storeId) ? $storeId : [(int)$storeId];
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $refundReader = new StoreMemberConsumptionRefundReadServices();
+        $refundQuery = $refundReader->query($stores, $range, $input, $this->participantEmployeeId);
+        // Original sales retain their sale date and gross amount. A completed
+        // refund is a separate negative business-day row; union identities
+        // before paging so filtered totals, the screen and export agree.
+        $refundKeys = (clone $refundQuery)->fieldRaw("refund_operation.id entry_id,refund_operation.business_date,'refund' entry_kind")
+            ->buildSql(false);
+        $saleKeys = (clone $query)->fieldRaw("s.id entry_id,s.business_date,'sale' entry_kind")
+            ->unionAll($refundKeys)->buildSql();
+        $entries = Db::table([$saleKeys => 'member_activity']);
+        $total = (int)(clone $entries)->count();
+        $ordered = (clone $entries)->field('entry_id,entry_kind,business_date')
+            ->order('business_date', 'desc')->order('entry_id', 'desc')->order('entry_kind', 'asc');
+        if (empty($input['_internal_all'])) $ordered->page($this->page($input), $this->limit($input));
+        $pageEntries = $ordered->select()->toArray();
+        $saleIds = $refundIds = [];
+        foreach ($pageEntries as $entry) {
+            if ((string)$entry['entry_kind'] === 'refund') $refundIds[] = (int)$entry['entry_id'];
+            else $saleIds[] = (int)$entry['entry_id'];
+        }
         $partnerDefinitions = $this->partnerPerformanceDefinitions($storeId);
         $summaryValues = $this->memberConsumptionSummaryValues($query, $storeId, $partnerDefinitions);
-        $rowQuery = (clone $query)->fieldRaw("s.fact_id,s.tenant_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.item_id current_product_id,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc');
-        // 导出沿用相同的后端过滤，但不能被页面分页截断。
-        if (empty($input['_internal_all'])) $rowQuery->page($this->page($input), $this->limit($input));
-        $rows = $rowQuery->select()->toArray();
+        $refundCents = $refundReader->amountCents($refundQuery);
+        $allRefundIds = array_map('intval', (clone $refundQuery)->column('refund_operation.id'));
+        $refundRows = $refundReader->rows($refundQuery, $allRefundIds);
+        $refundById = [];
+        $refundShares = [];
+        $verifiedRefundCents = 0;
+        foreach ($refundRows as $refund) {
+            $refundById[(int)$refund['id']] = $refund;
+            if ((string)($refund['original_sale_fact_id'] ?? '') !== '') {
+                $verifiedRefundCents += (int)$refund['amount_cents'];
+            }
+            $categoryId = (int)$refund['partner_category_id_snapshot'];
+            if ($categoryId > 0) $refundShares[$categoryId] = (int)($refundShares[$categoryId] ?? 0)
+                + (int)$refund['partner_share_cents'];
+        }
+        $refundShareCents = array_sum($refundShares);
+        $summaryValues['payment_refund_adjustment'] = $this->money($refundCents);
+        $summaryValues['receipt_total'] = $this->money((int)$summaryValues['receipt_total_cents'] + $refundCents);
+        $summaryValues['partner_performance'] = $this->money((int)$summaryValues['partner_performance_cents'] + $refundShareCents);
+        $summaryValues['actual_cash_performance'] = $this->money((int)$summaryValues['actual_cash_performance_cents']
+            + $verifiedRefundCents - $refundShareCents);
+        foreach ($partnerDefinitions as $definition) {
+            $categoryId = (int)$definition['category_id'];
+            $summaryValues[(string)$definition['key']] = $this->money(
+                (int)($summaryValues['partner_share_cents_by_category'][$categoryId] ?? 0)
+                + (int)($refundShares[$categoryId] ?? 0));
+        }
+        $rows = $saleIds === [] ? [] : (clone $query)->whereIn('s.id', $saleIds)
+            ->fieldRaw("s.id,s.fact_id,s.tenant_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.item_id current_product_id,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")
+            ->select()->toArray();
         $this->projectSaleCategories($rows, 'current_product_id', 'current_category_id', 'category_path_snapshot');
         $this->decorateMemberConsumptionRows($rows, $storeId, $partnerDefinitions, $this->cardPartnerSharesBySaleFact($rows, $storeId));
         foreach ($rows as &$row) {
@@ -563,18 +631,65 @@ class StoreUnifiedReportServices extends BaseServices
         // annotation is the controlled projection for these two editable
         // columns and must win on every subsequent query/refresh.
         $rows = $this->attachAnnotations($rows, 'member_consumption_detail', $storeId, !empty($input['_internal_all']));
+        $byEntry = [];
+        foreach ($rows as $row) $byEntry['sale:' . (int)$row['id']] = $row;
+        foreach ($refundIds as $refundId) {
+            if (!isset($refundById[$refundId])) continue;
+            $refund = $refundById[$refundId];
+            $this->applyOrganizationDimensions($refund);
+            $refund['_market_group_key'] = 'refund:' . (string)$refund['order_id'];
+            $amount = (int)$refund['amount_cents'];
+            $refund['consume_type'] = '退款';
+            $refund['member_name'] = (string)$refund['member_name_snapshot'];
+            $refund['consumption_detail'] = (string)$refund['item_name_snapshot'];
+            $refund['category'] = (string)$refund['category_path_snapshot'];
+            $refund['sale_amount'] = $this->money($amount);
+            $refund['receipt_total'] = $this->money($amount);
+            $partnerShare = (int)$refund['partner_share_cents'];
+            $hasOriginalSale = (string)($refund['original_sale_fact_id'] ?? '') !== '';
+            // Old refunds without a verifiable original sale cannot borrow a
+            // current partner ratio or be treated as zero-share cash.
+            $refund['actual_cash_performance'] = $hasOriginalSale ? $this->money($amount - $partnerShare) : '';
+            $refund['payment_refund_adjustment'] = $this->money($amount);
+            $refund['partner_performance'] = $hasOriginalSale ? $this->money($partnerShare) : '';
+            $refund['experience_cash'] = '0';
+            $refund['quantity'] = 0;
+            foreach ($this->memberConsumptionPaymentMethods() as $method) {
+                if ($method['code'] !== 'refund_adjustment') $refund['payment_' . $method['code']] = '0';
+            }
+            foreach ($partnerDefinitions as $definition) {
+                $refund[$definition['key']] = (int)$definition['category_id'] === (int)$refund['partner_category_id_snapshot']
+                    ? $this->money($partnerShare) : ($hasOriginalSale ? '0' : '');
+            }
+            $byEntry['refund:' . (int)$refund['id']] = $refund;
+        }
+        $rows = [];
+        foreach ($pageEntries as $entry) {
+            $key = (string)$entry['entry_kind'] . ':' . (int)$entry['entry_id'];
+            if (isset($byEntry[$key])) $rows[] = $byEntry[$key];
+        }
         $columns = array_merge($this->organizationDimensionColumns(), [
-            ['key'=>'business_date','label'=>'日期'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
+            ['key'=>'business_date','label'=>'日期'], ['key'=>'order_no_snapshot','label'=>'业务单号','source_explanation'=>'成交显示原销售单号；退款显示退款单号，按各自业务日期入表。'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
             ['key'=>'consumption_detail','label'=>'消费明细'], ['key'=>'category','label'=>'分类','source_explanation'=>'按本行商品关联的平台商品当前分类显示；平台改分类后，历史明细分类同步更新，金额不变。'], ['key'=>'sales_manager_name','label'=>'销售经理'],
             ['key'=>'guide_round_no','label'=>'导购业绩次数'], ['key'=>'guide_names','label'=>'导购人员'], ['key'=>'salesperson_names','label'=>'销售'],
             ['key'=>'member_source','label'=>'会员来源'],
         ]);
-        foreach ($this->paymentMethodDefinitions() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
-        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式','source_explanation'=>'显示本行销售明细已分摊的有效记账收款净额；各收款方式合计为本行收款总金额，退款或作废的反向收款会抵减。收款为 0 的有效销售明细也会展示。'];
-        foreach ($partnerDefinitions as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩'];
+        foreach ($this->memberConsumptionPaymentMethods() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
+        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式','source_explanation'=>'成交行显示已分摊的有效记账收款；退款行在退款业务日单列负向退款调整，不冒充原支付方式。各方式及退款调整合计为收款总金额。'];
+        foreach ($partnerDefinitions as $definition) $columns[] = [
+            'key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩',
+            'source_explanation'=>'成交使用保存的合作方分成快照；退款按原成交比例在退款日冲减，不能从当前分类配置倒推历史比例。',
+        ];
         foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','分成后现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
+        foreach ($columns as &$column) {
+            if ($column['key'] === 'partner_performance') $column['source_explanation'] =
+                '合作方成交使用原销售分成快照；退款按原成交比例冲减。没有可核实原销售事实的旧退款不猜测分成，明细显示未核算。';
+            if ($column['key'] === 'actual_cash_performance') $column['source_explanation'] =
+                '已核实原成交的退款按原分成比例冲减；没有原销售事实的旧退款仍记入收款总额，但不计入本列，明细显示未核算。';
+        }
+        unset($column);
         $columns = $this->fixedColumns($columns, [
-            'business_date'=>104, 'consume_type'=>88, 'member_name'=>88,
+            'business_date'=>104, 'order_no_snapshot'=>150, 'consume_type'=>88, 'member_name'=>88,
             'consumption_detail'=>138, 'category'=>116,
         ]);
         return [
@@ -659,9 +774,9 @@ class StoreUnifiedReportServices extends BaseServices
             ['label' => '门店', 'column_keys' => ['store_name'], 'rowspan' => 2, 'tone' => 'basic'],
         ];
         foreach ([
-            ['cash', '现金业绩', '成功收款后记下的现金业绩，不含余额支付和欠款。', 'payment'],
-            ['share', '分成业绩', '各分类现金业绩按成交时记录的合作方比例计算后相加。', 'partner'],
-            ['actual', '分成后业绩', '现金业绩减去分成业绩；该列不是实际业绩，也不是实际收款金额。', 'result'],
+            ['cash', '现金业绩', '成功收款金额扣除退款成功日的现金退款；不含余额支付和欠款。', 'payment'],
+            ['share', '分成业绩', '各分类成交时记录的合作方分成，退款按原成交比例冲减。', 'partner'],
+            ['actual', '分成后业绩', '本表现金业绩减去分成业绩；该列不是实际收款金额。', 'result'],
             ['consume', '消耗业绩', '已完成服务或核销记下的消耗金额；发生冲销时按冲销日期扣回。', 'consumption'],
         ] as $summary) {
             [$metric, $label, $logic, $tone] = $summary;
@@ -682,12 +797,12 @@ class StoreUnifiedReportServices extends BaseServices
             // “未分类”承接没有可信平台商品关联或平台分类失效的历史金额。
             $isUnclassified = (int)$definition['category_id'] === 0;
             $metricExplanations = $isUnclassified ? [
-                ['cash', '现金业绩', '所选日期内已有收款记录，但商品未关联有效平台分类的现金业绩；不含余额支付和欠款。'],
-                ['after_split', '分成后业绩', '上述未分类现金业绩减去成交时已记录的合作方分成金额；未设置分成时等于现金业绩。'],
+                ['cash', '现金业绩', '所选日期内未关联有效平台分类的成功收款扣除同期间现金退款；不含余额支付和欠款。'],
+                ['after_split', '分成后业绩', '上述未分类现金业绩减去成交时已记录、并随退款冲减的合作方分成金额。'],
                 ['consume', '消耗业绩', '所选日期内完成的服务或核销，项目未关联有效平台分类时归入此列；冲销按发生日扣回，原金额不变。'],
             ] : [
-                ['cash', '现金业绩', '所选日期内成功收款的现金业绩，按商品或卡内项目的平台当前分类归入本列；不含余额支付和欠款。'],
-                ['after_split', '分成后业绩', '本分类现金业绩减去成交时记录的合作方分成金额；平台改分类会改变分类归属，不改变原金额和分成比例。'],
+                ['cash', '现金业绩', '所选日期内成功收款扣除现金退款，按商品或卡内项目的平台当前分类归入本列；不含余额支付和欠款。'],
+                ['after_split', '分成后业绩', '本分类净现金业绩减去成交时记录、并随退款按原比例冲减的合作方分成金额。'],
                 ['consume', '消耗业绩', '所选日期内已完成服务或核销的消耗金额，按项目的平台当前分类归入本列；冲销按发生日扣回。'],
             ];
             foreach ($metricExplanations as $metric) {
@@ -730,7 +845,7 @@ class StoreUnifiedReportServices extends BaseServices
         unset($column);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'store_name'=>140]);
         return [
-            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-current-category-v2', 'columns' => $columns,
+            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-current-category-refund-v3', 'columns' => $columns,
             'column_groups' => $groups, 'records' => array_values($rows),
             'total' => count($rows), 'page' => 1, 'page_size' => count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
@@ -779,6 +894,30 @@ class StoreUnifiedReportServices extends BaseServices
             $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
             $categories[$storeKey][$category['id']]['cash_cents'] = (int)$entry['metric_value'];
         }
+        // The registered refund reader owns sale-linked adjustments. Standalone
+        // card/document refunds are excluded here and reintroduced below with
+        // their verified original product, so one cash refund is deducted once.
+        $refundBuckets = $metricReader->categoryReportBucketsWithoutStandaloneRefunds(
+            CashierV3ScopeResolver::TENANT_SCOPE_ID, $authorizedStores, $range, $categoryIds,
+            $metricFilters, $this->participantEmployeeId
+        );
+        $refundTotals = [];
+        foreach ($refundBuckets as $entry) {
+            $entry['category_id_snapshot'] = (int)($entry['category_id'] ?? 0);
+            $entry['category_path_snapshot'] = (string)($entry['category_path'] ?? '');
+            $this->applyOrganizationDimensions($entry);
+            $storeKey = $this->itemAnalysisStore($stores, $entry);
+            $refundTotals[$storeKey] = (int)$entry['store_metric_value'];
+            $category = $this->itemAnalysisConfiguredCategory(
+                $definitions, (int)$entry['category_id_snapshot'], (string)$entry['category_path_snapshot']
+            );
+            if ($category === null) continue;
+            $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
+            $categories[$storeKey][$category['id']]['cash_cents'] -= (int)$entry['metric_value'];
+        }
+        foreach ($refundTotals as $storeKey => $refundCents) {
+            $stores[$storeKey]['cash_cents'] -= $refundCents;
+        }
         foreach ($shareRows as $entry) {
             $this->applyOrganizationDimensions($entry);
             $storeKey = $this->itemAnalysisStore($stores, $entry);
@@ -791,6 +930,31 @@ class StoreUnifiedReportServices extends BaseServices
             if ($category === null) continue;
             $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
             $categories[$storeKey][$category['id']]['share_cents'] += (int)$entry['share_cents'];
+        }
+        $refundReader = new StoreMemberConsumptionRefundReadServices();
+        $refundQuery = $refundReader->query($authorizedStores, $range, $input, $this->participantEmployeeId);
+        $refundIds = array_column((clone $refundQuery)->field('refund_operation.id')->select()->toArray(), 'id');
+        // Bound each product/category lookup; this report never needs the
+        // refund salespeople names used by the member detail page.
+        foreach (array_chunk($refundIds, 500) as $batch) {
+            foreach ($refundReader->rows($refundQuery, $batch, false) as $entry) {
+                $this->applyOrganizationDimensions($entry);
+                $storeKey = $this->itemAnalysisStore($stores, $entry);
+                $shareCents = (int)$entry['partner_share_cents'];
+                $stores[$storeKey]['share_cents'] += $shareCents;
+                // Sale-linked refunds were already counted by the metric Reader;
+                // only independent payment facts need their own cash adjustment.
+                $standalone = in_array((string)$entry['source_document_type'],
+                    ['manual_refund', 'imported_card_refund'], true);
+                if ($standalone) $stores[$storeKey]['cash_cents'] += (int)$entry['amount_cents'];
+                $category = $this->itemAnalysisConfiguredCategory(
+                    $definitions, (int)$entry['current_category_id'], (string)$entry['category_path_snapshot']
+                );
+                if ($category === null) continue;
+                $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
+                $categories[$storeKey][$category['id']]['share_cents'] += $shareCents;
+                if ($standalone) $categories[$storeKey][$category['id']]['cash_cents'] += (int)$entry['amount_cents'];
+            }
         }
         $consumeRows = $this->participantEmployeeId > 0
             ? $metricReader->categoryReportBucketsForParticipant('consume_amount', CashierV3ScopeResolver::TENANT_SCOPE_ID, $authorizedStores, $range, $categoryIds, $metricFilters, $this->participantEmployeeId)
@@ -1132,11 +1296,11 @@ class StoreUnifiedReportServices extends BaseServices
         $employeeIds = $this->personnelSelection($input, 'salesperson_id');
         $matrix = ($stores === [] || $employeeIds === null)
             ? ['records' => [], 'summary' => ['day_metric_values' => [], 'total_metric_value' => 0]]
-            : (new \app\services\query\metric\RegisteredMetricReadServices())->personnelDayMatrix('staff_sales_yeji', '0', $stores, $range, $employeeIds);
+            : (new StoreSalespersonNetReadServices())->matrix($stores, $range, $employeeIds);
         $by = $matrix['records'];
         $summaryPerformance = $matrix['summary']['day_metric_values'];
-        // 销售人只产生销售业绩事实，不产生手艺人手工费；每个金额列同时声明
-        // 精确下钻参数，浏览器不得根据姓名或表格位置猜测订单筛选条件。
+        // Sales and refund allocations share the same person/day facts. Drill
+        // into those facts, not the sale-only order-center list.
         $columns = array_merge($this->organizationDimensionColumns(), [[
             'key'=>'employee_name','label'=>'销售人',
             'source_explanation'=>'显示结账完成后实际分到销售业绩的员工；同一笔成交分给多人时，每个人分别统计。',
@@ -1160,7 +1324,7 @@ class StoreUnifiedReportServices extends BaseServices
                 $row[$key] = $this->money($value);
                 if ($value !== 0) {
                     $row['_drilldown'][$key] = [
-                        'report'=>'order_center_sales',
+                        'report'=>'store_salesperson_performance_detail',
                         'params'=>['day_of_month'=>$day],
                         'param_map'=>['salesperson_id'=>'employee_id','store_ids'=>'store_id'],
                     ];
@@ -1170,7 +1334,7 @@ class StoreUnifiedReportServices extends BaseServices
             $row['total_performance']=$this->money($row['total_performance_cents']);
             if ($row['total_performance_cents'] !== 0) {
                 $row['_drilldown']['total_performance'] = [
-                    'report'=>'order_center_sales','params'=>['day_of_month'=>0],
+                    'report'=>'store_salesperson_performance_detail','params'=>['day_of_month'=>0],
                     'param_map'=>['salesperson_id'=>'employee_id','store_ids'=>'store_id'],
                 ];
             }
@@ -1181,6 +1345,48 @@ class StoreUnifiedReportServices extends BaseServices
             'title'=>'门店销售人业绩','columns'=>$columns,'records'=>$by,'total'=>count($by),'page'=>1,'page_size'=>count($by),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true], 'summary_row'=>$this->summaryRow($columns, $summaryValues),
+        ];
+    }
+
+    /** The hidden detail retains exactly the summary's employee, store and day-of-month scope. */
+    private function salespersonPerformanceDetail($storeId, array $range, array $input): array
+    {
+        $stores = is_array($storeId) ? array_values(array_unique(array_map('intval', $storeId))) : [(int)$storeId];
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $employeeIds = $this->personnelSelection($input, 'salesperson_id');
+        $day = (int)($input['day_of_month'] ?? 0);
+        if ($day < 0 || $day > 31) throw new \InvalidArgumentException('日序号无效');
+        $exportAll = !empty($input['_internal_all']);
+        $details = $employeeIds === null
+            ? ['records' => [], 'total' => 0, 'amount_cents' => 0]
+            : (new StoreSalespersonNetReadServices())->detail($stores, $range, $employeeIds, $day,
+                $this->page($input), $this->limit($input), $exportAll);
+        $rows = $details['records'];
+        foreach ($rows as &$row) {
+            $this->applyOrganizationDimensions($row);
+            $row['_market_group_key'] = (string)$row['fact_id'];
+            $isRefund = (string)$row['performance_type'] === 'refund_sales_deduction';
+            $row['business_type'] = $isRefund ? '退款冲减' : '销售分配';
+            $row['document_no'] = $isRefund ? (string)$row['refund_no'] : (string)$row['order_no_snapshot'];
+            $row['original_no'] = $isRefund ? (string)$row['original_no'] : '';
+            $row['performance_amount'] = $this->money((int)$row['amount_cents']);
+        }
+        unset($row);
+        $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
+            ['key'=>'business_date','label'=>'业务日期'],
+            ['key'=>'business_type','label'=>'业绩类型','source_explanation'=>'销售人正向分配或有效退款负向冲减；退款作废和人员改派的旧归属不显示。'],
+            ['key'=>'document_no','label'=>'业务单号','source_explanation'=>'销售分配显示原销售单号，退款冲减显示退款单号。'],
+            ['key'=>'original_no','label'=>'原销售单号','source_explanation'=>'退款对应的原销售单号；无可信关联时留空。'],
+            ['key'=>'member_name','label'=>'会员'], ['key'=>'employee_name','label'=>'销售人'],
+            ['key'=>'performance_amount','label'=>'销售业绩','source_explanation'=>'逐人有效销售分配金额及退款日负向冲减，金额在分精度求和后按元展示。'],
+        ]), ['business_date'=>104,'business_type'=>96,'document_no'=>160,'employee_name'=>104]);
+        return [
+            'title'=>'销售人业绩明细','columns'=>$columns,'records'=>$rows,
+            'total'=>(int)$details['total'],'page'=>$this->page($input),'page_size'=>$this->limit($input),
+            'filter_schema'=>$this->organizationDimensionFilterSchema($range),
+            'table_layout'=>['fixed'=>true],
+            'summary_row'=>$this->summaryRow($columns, ['business_date'=>'合计',
+                'performance_amount'=>$this->money((int)$details['amount_cents'])]),
         ];
     }
 
@@ -1571,6 +1777,14 @@ class StoreUnifiedReportServices extends BaseServices
         return $out;
     }
 
+    /** Refund cash has no verified original tender; keep its signed amount in an explicit adjustment column. */
+    private function memberConsumptionPaymentMethods(): array
+    {
+        $methods = $this->paymentMethodDefinitions();
+        $methods[] = ['code' => 'refund_adjustment', 'label' => '退款调整'];
+        return $methods;
+    }
+
     /**
      * Column metadata follows the current category switches, while row values
      * come only from the successful-checkout snapshots.  This deliberately
@@ -1745,7 +1959,7 @@ class StoreUnifiedReportServices extends BaseServices
             $managers = $this->withStoreScope(Db::name('cashier_v3_sales_manager_fact'), $storeId)->whereIn('order_id',$orderIds)->where('status','effective')->field('order_id,sales_manager_name_snapshot')->select()->toArray();
             foreach ($managers as $manager) $managerByOrder[(string)$manager['order_id']][] = $manager;
         }
-        $methods = $this->paymentMethodDefinitions();
+        $methods = $this->memberConsumptionPaymentMethods();
         foreach ($rows as &$row) {
             $order = (string)($row['order_id'] ?? '');
             $payments = $paymentBySaleFact[(string)($row['fact_id'] ?? '')] ?? [];
@@ -1838,12 +2052,13 @@ class StoreUnifiedReportServices extends BaseServices
 
         $values = ['quantity'=>(int)($base['quantity'] ?? 0)];
         $receiptTotal = 0;
-        foreach ($this->paymentMethodDefinitions() as $method) {
+        foreach ($this->memberConsumptionPaymentMethods() as $method) {
             $amount = (int)($payments[(string)$method['code']] ?? 0);
             $values['payment_' . $method['code']] = $this->money($amount);
             $receiptTotal += $amount;
         }
         $values['receipt_total'] = $this->money($receiptTotal);
+        $values['receipt_total_cents'] = $receiptTotal;
         $partnerTotal = 0;
         foreach ($partnerDefinitions as $definition) {
             $amount = (int)($shareByCategory[(int)$definition['category_id']] ?? 0);
@@ -1851,7 +2066,10 @@ class StoreUnifiedReportServices extends BaseServices
             $partnerTotal += $amount;
         }
         $values['partner_performance'] = $this->money($partnerTotal);
+        $values['partner_performance_cents'] = $partnerTotal;
+        $values['partner_share_cents_by_category'] = $shareByCategory;
         $values['actual_cash_performance'] = $this->money($receiptTotal - $partnerTotal);
+        $values['actual_cash_performance_cents'] = $receiptTotal - $partnerTotal;
         return $values;
     }
 

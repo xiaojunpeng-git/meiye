@@ -1175,7 +1175,7 @@ final class RegisteredMetricReadServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function categoryRowsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId): array
+    private function categoryRowsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId, bool $excludeStandaloneRefunds = false): array
     {
         $this->assertScope($tenantId, $stores, $range);
         if ($categoryIds !== [] && array_keys($categoryIds) !== range(0, count($categoryIds) - 1)) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
@@ -1197,8 +1197,8 @@ final class RegisteredMetricReadServices
         $projection = $contract['category_reader'] ?? ($contract['source']['category_reader'] ?? null);
         if (!is_array($projection) || !is_string($projection['strategy'] ?? null)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $handlers = [
-            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
-                return $this->cashCategoryRows($tenantId, $stores, $range, $queryCategoryIds, (string)($projection['mode'] ?? ''), $queryFilters);
+            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters, $excludeStandaloneRefunds): array {
+                return $this->cashCategoryRows($tenantId, $stores, $range, $queryCategoryIds, (string)($projection['mode'] ?? ''), $queryFilters, $excludeStandaloneRefunds);
             },
             'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
                 return $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
@@ -1283,15 +1283,27 @@ final class RegisteredMetricReadServices
         return $this->categoryReportBucketsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId);
     }
 
+    /**
+     * Sale-linked refunds stay in the registered metric. Standalone card refunds
+     * are classified from their verified original product by the report reader,
+     * so this variant excludes them here to avoid double counting.
+     * @return array<int,array<string,mixed>>
+     */
+    public function categoryReportBucketsWithoutStandaloneRefunds(string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId = 0): array
+    {
+        if ($participantEmployeeId < 0) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
+        return $this->categoryReportBucketsWithParticipant('refund_performance', $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId, true);
+    }
+
     /** @return array<int,array<string,mixed>> */
-    private function categoryReportBucketsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId): array
+    private function categoryReportBucketsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId, bool $excludeStandaloneRefunds = false): array
     {
         $contract = MetricDefinitionRegistry::get($metricCode);
         $field = ($contract['storage_unit'] ?? null) === 'count' ? 'quantity' : 'amount_cents';
         $buckets = [];
         $storeTotals = [];
         $dimensions = new StoreUnifiedReportOrganizationDimensionServices();
-        foreach ($this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId) as $row) {
+        foreach ($this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId, $excludeStandaloneRefunds) as $row) {
             $storeId = $this->integer($row['store_id'] ?? null);
             $day = (string)($row['business_date'] ?? '');
             if (!in_array($storeId, $stores, true) || $day < $range['start'] || $day > $range['end']) $this->fail('METRIC_SOURCE_RESULT_INVALID');
@@ -1661,7 +1673,7 @@ final class RegisteredMetricReadServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function cashCategoryRows(string $tenantId, array $stores, array $range, array $categoryIds, string $mode, array $filters): array
+    private function cashCategoryRows(string $tenantId, array $stores, array $range, array $categoryIds, string $mode, array $filters, bool $excludeStandaloneRefunds = false): array
     {
         if (!in_array($mode, ['positive', 'refund', 'net'], true)) $this->fail('METRIC_SOURCE_TYPE_INVALID');
         $base = $this->saleCashQuery($tenantId, $stores, $range);
@@ -1718,9 +1730,11 @@ final class RegisteredMetricReadServices
             )->select()->toArray());
             // A migrated-card refund likewise has no defensible sale category; keep it in
             // unfiltered cash/refund totals without fabricating an item allocation.
-            $rows = array_merge($rows, $importedCardRefund->fieldRaw(
-                "CONCAT('imported-card-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'旧卡退款' item_name,'imported_card_refund' product_type_snapshot,0 category_id,'' category_path"
-            )->select()->toArray());
+            if (!$excludeStandaloneRefunds) {
+                $rows = array_merge($rows, $importedCardRefund->fieldRaw(
+                    "CONCAT('imported-card-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'旧卡退款' item_name,'imported_card_refund' product_type_snapshot,0 category_id,'' category_path"
+                )->select()->toArray());
+            }
         }
         if ($cards === []) return $rows;
 

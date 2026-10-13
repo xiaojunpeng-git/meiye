@@ -31,6 +31,7 @@ class UnifiedReport extends AuthController
     private const STORE_OPERATION_REPORTS = [
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
         'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail', 'store_salesperson_performance',
+        'store_salesperson_performance_detail',
         'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_annual_summary',
         'field_acquisition_detail', 'field_acquisition_summary', 'cross_industry_customer_detail',
         'cross_industry_customer_summary', 'new_customer_analysis', 'new_customer_analysis_summary',
@@ -644,8 +645,10 @@ class UnifiedReport extends AuthController
         // A detail page is only reachable from its parent summary.  It must
         // inherit that exact menu permission rather than introducing a hidden
         // second permission that could be omitted from existing roles.
-        $permissionReport = $report === 'store_craftsman_consumption_detail'
-            ? 'store_craftsman_consumption' : $report;
+        $permissionReport = [
+            'store_craftsman_consumption_detail' => 'store_craftsman_consumption',
+            'store_salesperson_performance_detail' => 'store_salesperson_performance',
+        ][$report] ?? $report;
         $expected = 'admin-report-store-operations-' . $permissionReport;
         $menus = app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 1);
         foreach ($menus as $menu) {

@@ -33,7 +33,7 @@ itemAnalysisAssert(
 itemAnalysisAssert(
     str_contains($service, '$this->money($cash - $share)')
         && str_contains($service, "['share', '分成业绩'")
-        && str_contains($service, '该列不是实际业绩')
+        && str_contains($service, '该列不是实际收款金额')
         && str_contains($service, 'array_slice($parts, 0, 2)'),
     'after-split performance subtracts share and is not mislabeled as actual performance'
 );
@@ -71,6 +71,15 @@ itemAnalysisAssert(
         && str_contains($service, 'COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents')
         && str_contains($service, '(int)($entry[\'category_id_snapshot\'] ?? 0)'),
     'category grouping follows the linked platform product while partner share cents stay frozen'
+);
+itemAnalysisAssert(
+    str_contains($service, 'categoryReportBucketsWithoutStandaloneRefunds(')
+        && str_contains($service, 'new StoreMemberConsumptionRefundReadServices()')
+        && str_contains($service, "['manual_refund', 'imported_card_refund']")
+        && str_contains($service, "['cash_cents'] -= (int)\$entry['metric_value']")
+        && str_contains($service, "['share_cents'] += \$shareCents")
+        && str_contains($service, 'store-item-analysis-current-category-refund-v3'),
+    'refund adjustments net existing cash and frozen partner share without new display columns'
 );
 itemAnalysisAssert(
     str_contains($service, "'rowspan' => 2")
