@@ -129,16 +129,6 @@ function getChilden(data) {
   return util.resolveDefaultMenuPath(data);
 }
 
-// 仓库主数据仍可按权限访问，但不作为库存管理导航入口展示。
-function hideWarehouseSettingsMenu(menus, prefix) {
-  const warehousePath = `${prefix}/stock/warehouse`;
-  return (menus || []).filter(item => item && item.path !== warehousePath).map(item => (
-    Array.isArray(item.children)
-      ? { ...item, children: hideWarehouseSettingsMenu(item.children, prefix) }
-      : item
-  ));
-}
-
 export default {
   namespaced: true,
   state: {
@@ -181,10 +171,11 @@ export default {
       } else {
         filtered = filterMenu(state.sider, [], []);
       }
-      return hideWarehouseSettingsMenu(normalizeProductBusinessConfigMenu(
+      // 仓库设置是否可见由后端菜单与岗位规则决定；这里不再额外隐藏已授权入口。
+      return normalizeProductBusinessConfigMenu(
         normalizeOrganizationWorkspaceMenu(filterMoheAiManagementMenu(filtered, userInfo, aiVerified), Setting.roterPre),
         Setting.roterPre
-      ), Setting.roterPre);
+      );
     },
     // 处理顶部路由递归
 
