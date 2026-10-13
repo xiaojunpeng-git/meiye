@@ -459,25 +459,12 @@ watch(
   { immediate: true }
 )
 
-async function openMemberDetail(record) {
+function openMemberDetail(record) {
   const memberId = memberRecordId(record)
   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
     detail: { memberId, record }
   }))
-  const response = await requestAction('open-member-detail', {
-    memberId,
-    recordVersion: record.revision
-  })
-  const detailEnvelope = response?.result && typeof response.result === 'object'
-    ? response
-    : (response?.data && typeof response.data === 'object' ? response.data : {})
-  const detail = detailEnvelope?.data?.detail
-  if (unifiedQueryActionSucceeded(response) && detail && typeof detail === 'object') {
-    window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
-      detail: { memberId, fallback: detail }
-    }))
-  }
-  return response
+  // The shell handles this event and performs the sole authorized detail read.
 }
 
 function resultData(response) {

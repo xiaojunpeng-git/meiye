@@ -2,6 +2,7 @@
 
 $root = dirname(__DIR__, 3);
 $kernel = file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutSettlementKernel.php');
+$preparation = file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php');
 $repository = file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutRequestRepository.php');
 $projection = file_get_contents($root . '/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php');
 $salesPlan = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php');
@@ -12,13 +13,16 @@ $entitlementKernel = file_get_contents($root . '/后端代码/app/services/cashi
 $entitlementPlan = file_get_contents($root . '/后端代码/app/services/cashier/v3/checkout/persistence/CashierV3EntitlementCompletionPlanV1.php');
 $serviceQuery = file_get_contents($root . '/后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php');
 $migration = file_get_contents($root . '/后端代码/database/upgrades/2026-09-16-收银V3购物车明细备注唯一快照/02-正式升级.sql');
+$entitlementAdapterStart = strpos($preparation, 'private function entitlementSnapshotLine(');
+$entitlementAdapter = $entitlementAdapterStart === false ? '' : substr($preparation, $entitlementAdapterStart);
 
 $checks = [
-    'checkout_accepts_optional_detail_remark' => strpos($kernel, "'detailRemark'], 'saleLines['") !== false
+    'checkout_accepts_optional_detail_remark' => strpos($kernel, "'detailRemark', 'couponPaymentCents'], 'saleLines['") !== false
         && strpos($kernel, "'manualLaborFeeCents', 'detailRemark'") !== false
         && substr_count($kernel, "'detailRemarkSnapshot' => (string)(\$line['detailRemark'] ?? ''),") === 2,
     'checkout_draft_persists_snapshot' => strpos($repository, "'detailRemarkSnapshot' => 'detail_remark_snapshot'") !== false
         && strpos($repository, "'detail_remark_snapshot' => (string)(\$row['detailRemarkSnapshot'] ?? ''),") !== false,
+    'entitlement_authority_adapter_preserves_detail_remark' => strpos($entitlementAdapter, "'detailRemark' => (string)(\$line['detailRemark'] ?? ''),") !== false,
     'projection_rechecks_fingerprint_and_exposes_snapshot' => substr_count($projection, "'detailRemark' => \$detailRemark,") === 2
         && substr_count($projection, "\$fingerprintInput['detailRemark'] = \$detailRemark;") === 2,
     'sales_order_persists_and_reads_snapshot' => strpos($salesPlan, "'detail_remark_snapshot' => \$line['detail_remark_snapshot'],") !== false

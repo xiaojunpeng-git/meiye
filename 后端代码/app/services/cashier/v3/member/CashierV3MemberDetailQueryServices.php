@@ -43,21 +43,31 @@ final class CashierV3MemberDetailQueryServices
         $tenantId = $scope->tenantId();
         $detailIds = array_map('intval', Db::name('store_order_cart_info')
             ->where('oid', (int)$holder['oid'])->where('cart_type', 2)->where('product_type', 6)->column('id'));
+        // A V3 card purchase belongs to one issued holder and one immutable sales line.
+        // Legacy cards have no receipt, so their missing line remark remains blank.
+        $purchaseRemark = (string)(Db::name('cashier_v3_card_purchase_receipt')->alias('receipt')
+            ->leftJoin('cashier_v3_sales_order_line line',
+                'line.tenant_id=receipt.tenant_id AND line.order_line_id=receipt.sales_order_line_id')
+            ->where('receipt.tenant_id', $tenantId)->where('receipt.card_holder_id', $holderId)
+            ->value('line.detail_remark_snapshot') ?? '');
         $rows = [];
         $append = static function (string $key, string $type, string $content, string $amount,
-            string $date, int $time, string $store, string $operatorName, string $result) use (&$rows): void {
-            $rows[] = compact('key', 'type', 'content', 'amount', 'date', 'time', 'store', 'operatorName', 'result');
+            string $date, int $time, string $store, string $operatorName, string $result,
+            string $detailRemark = '') use (&$rows): void {
+            $rows[] = compact('key', 'type', 'content', 'amount', 'date', 'time', 'store', 'operatorName', 'result', 'detailRemark');
         };
         $append('card:' . $holderId, '购卡', (string)$holder['card_name'],
             (string)($order['pay_price'] ?? '0.00'), date('Y-m-d', (int)$holder['add_time']),
             (int)$holder['add_time'], (string)Db::name('system_store')->where('id', (int)$holder['store_id'])->value('name'),
-            '', '卡号：' . (string)$holder['card_no']);
+            '', '卡号：' . (string)$holder['card_no'], $purchaseRemark);
+        // Non-cart card operations retain their own reason or collection note;
+        // do not borrow the originating sale line's remark for a later event.
         foreach (Db::name('cashier_v3_card_operation')->where('tenant_id', $tenantId)
             ->where('source_card_holder_id', $holderId)->select()->toArray() as $row) {
             $append('operation:' . $row['operation_id'], $this->cardOperationTypeLabel((string)$row['operation_type']),
                 (string)$row['target_catalog_name_snapshot'], $this->moneyFromCents((int)$row['settlement_delta_cents']),
                 (string)$row['business_date'], (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
-                (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot']);
+                (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot'], (string)$row['reason_snapshot']);
         }
         foreach (Db::name('cashier_v3_refund_adjustment')->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->where('status', 'effective')->select()->toArray() as $row) {
@@ -65,7 +75,8 @@ final class CashierV3MemberDetailQueryServices
                 $this->moneyFromCents((int)$row['refund_amount_cents']), (string)$row['business_date'],
                 (int)$row['occurred_at'], (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
                 (string)Db::name('system_store_staff')->where('id', (int)$row['operator_id'])->value('staff_name'),
-                ((int)$row['void_target'] ? '作废本卡' : '不作废') . '；' . (string)$row['reason_snapshot']);
+                ((int)$row['void_target'] ? '作废本卡' : '不作废') . '；' . (string)$row['reason_snapshot'],
+                (string)$row['reason_snapshot']);
         }
         if ($detailIds !== []) {
             $used = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
@@ -73,30 +84,43 @@ final class CashierV3MemberDetailQueryServices
                     'dl.line_id=sf.source_line_id AND dl.tenant_id=sf.tenant_id AND dl.draft_status=\'committed\'')
                 ->where('sf.tenant_id', $tenantId)->where('sf.member_id', $memberId)
                 ->whereIn('dl.entitlement_source_detail_id', $detailIds)
-                ->field('sf.service_fact_id,sf.project_name_snapshot,sf.quantity,sf.business_date,sf.occurred_at,sf.store_name_snapshot,sf.operator_name_snapshot')
+                ->field('sf.service_fact_id,sf.project_name_snapshot,sf.quantity,sf.business_date,sf.occurred_at,sf.store_name_snapshot,sf.operator_name_snapshot,sf.detail_remark_snapshot')
                 ->select()->toArray();
             foreach ($used as $row) {
                 $append('writeoff:' . $row['service_fact_id'], '核销',
                     (string)$row['project_name_snapshot'] . ' ×' . (int)$row['quantity'], '',
                     (string)$row['business_date'], (int)$row['occurred_at'],
-                    (string)$row['store_name_snapshot'], (string)$row['operator_name_snapshot'], '已完成');
+                    (string)$row['store_name_snapshot'], (string)$row['operator_name_snapshot'], '已完成',
+                    (string)($row['detail_remark_snapshot'] ?? ''));
             }
         }
         $debts = Db::name('store_debt')->where('order_id', (int)$holder['oid'])->column('id');
         if ($debts !== []) {
-            foreach (Db::name('cashier_v3_debt_repayment')->where('tenant_id', $tenantId)
-                ->whereIn('debt_id', $debts)->where('status', 'succeeded')->select()->toArray() as $row) {
+            $repayments = Db::name('cashier_v3_debt_repayment')->where('tenant_id', $tenantId)
+                ->whereIn('debt_id', $debts)->where('status', 'succeeded')->select()->toArray();
+            $repaymentRemarks = [];
+            $repaymentIds = array_column($repayments, 'repayment_id');
+            if ($repaymentIds !== []) {
+                // Repayment remarks belong to collection lines, not the repayment header.
+                foreach (Db::name('cashier_v3_debt_repayment_collection')->whereIn('repayment_id', $repaymentIds)
+                    ->field('repayment_id,remark_snapshot')->order('payment_line_no asc')->select()->toArray() as $collection) {
+                    $remark = trim((string)$collection['remark_snapshot']);
+                    if ($remark !== '') $repaymentRemarks[(string)$collection['repayment_id']][$remark] = $remark;
+                }
+            }
+            foreach ($repayments as $row) {
                 $append('repayment:' . $row['repayment_id'], '补交', (string)$row['repayment_no'],
                     $this->moneyFromCents((int)$row['repayment_amount_cents']), (string)$row['business_date'],
                     (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
-                    (string)$row['operator_name_snapshot'], '已完成');
+                    (string)$row['operator_name_snapshot'], '已完成',
+                    implode('；', $repaymentRemarks[(string)$row['repayment_id']] ?? []));
             }
             foreach (Db::name('cashier_v3_debt_cancellation')->where('tenant_id', $tenantId)
                 ->whereIn('debt_id', $debts)->select()->toArray() as $row) {
                 $append('debt-cancel:' . $row['cancellation_id'], '取消欠款', (string)$row['debt_no_snapshot'],
                     $this->moneyFromCents((int)$row['cancelled_debt_cents']), (string)$row['business_date'],
                     (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
-                    (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot']);
+                    (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot'], (string)$row['reason_snapshot']);
             }
         }
         usort($rows, static fn(array $a, array $b): int => [$b['time'], $b['key']] <=> [$a['time'], $a['key']]);
@@ -285,29 +309,40 @@ final class CashierV3MemberDetailQueryServices
             $storeId = $operatorScope->storeId();
         }
         $detailQuery = $this->detailQuery($detailQuery);
+        // Explicit tab reads return the active tab and shared summary only.
+        // A missing tab keeps the complete legacy projection for callers that
+        // intentionally request it; no business authority or scope changes.
+        $tab = $detailQuery['tab'];
+        $loadAll = $tab === '';
         $cards = $this->cards($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'assets' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'assets' ? $detailQuery['status'] : 'active', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'assets' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
-        $services = $this->services($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'writeoff' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'writeoff' ? $detailQuery['dateTo'] : '');
+        $services = ($loadAll || $tab === 'writeoff')
+            ? $this->services($memberId, $operatorScope->tenantId(), $tab === 'writeoff' ? $detailQuery['keyword'] : '', $tab === 'writeoff' ? $detailQuery['dateFrom'] : '', $tab === 'writeoff' ? $detailQuery['dateTo'] : '')
+            : null;
         // “有效”代表会员当前仍持有的赠送/预售，不受查询区缓存的日期限制；
         // “全部”才允许按业务日期追查历史。后端也强制此口径，避免旧前端误传日期。
-        $giftStatus = $detailQuery['tab'] === 'gift' ? $detailQuery['status'] : 'active';
-        $gifts = $this->gifts($memberId, $operatorScope->tenantId(),
-            $detailQuery['tab'] === 'gift' ? $detailQuery['keyword'] : '', $giftStatus,
-            $detailQuery['tab'] === 'gift' && $giftStatus === '' ? $detailQuery['dateFrom'] : '',
-            $detailQuery['tab'] === 'gift' && $giftStatus === '' ? $detailQuery['dateTo'] : '');
-        $care = $this->care($memberId, $operatorScope->tenantId(), $detailQuery['tab'] === 'care' ? $detailQuery['keyword'] : '', $detailQuery['tab'] === 'care' ? $detailQuery['status'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $detailQuery['tab'] === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '');
-        $balanceChanges = $this->balanceChanges($memberId, $operatorScope->tenantId());
+        $giftStatus = $tab === 'gift' ? $detailQuery['status'] : 'active';
+        $gifts = ($loadAll || $tab === 'gift')
+            ? $this->gifts($memberId, $operatorScope->tenantId(),
+                $tab === 'gift' ? $detailQuery['keyword'] : '', $giftStatus,
+                $tab === 'gift' && $giftStatus === '' ? $detailQuery['dateFrom'] : '',
+                $tab === 'gift' && $giftStatus === '' ? $detailQuery['dateTo'] : '')
+            : null;
+        $care = ($loadAll || $tab === 'profile' || $tab === 'care')
+            ? $this->care($memberId, $operatorScope->tenantId(), $tab === 'care' ? $detailQuery['keyword'] : '', $tab === 'care' ? $detailQuery['status'] : '', $tab === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '', $tab === 'care' && $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '')
+            : null;
+        $balanceChanges = ($loadAll || $tab === 'balance-changes')
+            ? $this->balanceChanges($memberId, $operatorScope->tenantId())
+            : null;
         // 券实例属于会员当前持有权益；只在优惠券页签读取，不能从赠送事实反推可用券。
         $coupons = $detailQuery['tab'] === 'coupons'
             ? $this->coupons($memberId, $detailQuery['keyword'], $detailQuery['status'],
                 $detailQuery['status'] === '' ? $detailQuery['dateFrom'] : '',
                 $detailQuery['status'] === '' ? $detailQuery['dateTo'] : '')
             : [];
-        $cardOperations = $this->cardOperations(
-            $memberId,
-            $operatorScope->tenantId(),
-            $detailQuery['tab'] === 'card-operations' ? $detailQuery['keyword'] : ''
-        );
-        $overview = $this->overview($memberId, $operatorScope->tenantId(), $services);
+        $cardOperations = ($loadAll || $tab === 'card-operations')
+            ? $this->cardOperations($memberId, $operatorScope->tenantId(), $tab === 'card-operations' ? $detailQuery['keyword'] : '')
+            : null;
+        $overview = $this->overview($memberId, $operatorScope->tenantId());
         $remainingTimes = 0;
         $remainingAmount = '0.00';
         $activeCardCount = 0;
@@ -340,7 +375,7 @@ final class CashierV3MemberDetailQueryServices
         $principalBalance = $this->moneyFromCents((int)$balanceSnapshot['principalCents']);
         $giftBalance = $this->moneyFromCents((int)$balanceSnapshot['giftCents']);
 
-        return [
+        $detail = [
             'member' => [
                 'id' => (string)$memberId,
                 'memberId' => $memberId,
@@ -388,30 +423,40 @@ final class CashierV3MemberDetailQueryServices
             ],
             'cards' => $cards,
             'coupons' => $coupons,
-            // 余额记录只读取 V3 不可变 balance_changed 事实；本金和赠金拆分不从
-            // 页面、订单或当前余额反推。
-            'balanceChanges' => $balanceChanges,
-            'cardOperations' => $cardOperations,
-            'serviceRecords' => $services,
-            'giftRecords' => $gifts,
-            'careRecords' => $care['records'],
-            'careTasks' => $care['tasks'],
             'latestVisit' => $overview['latestVisit'],
-            'careReminder' => $care['reminder'],
             'tabStates' => [
                 'profile' => ['total' => 1, 'dataStatus' => 'authoritative'],
                 'assets' => ['total' => count($cards), 'dataStatus' => 'authoritative'],
                 'coupons' => ['total' => count($coupons), 'dataStatus' => 'authoritative'],
-                'balance-changes' => ['total' => count($balanceChanges), 'dataStatus' => 'authoritative'],
-                'card-operations' => ['total' => count($cardOperations), 'dataStatus' => 'authoritative'],
-                'writeoff' => ['total' => count($services), 'dataStatus' => 'authoritative'],
-                'care' => ['total' => count($care['records']), 'dataStatus' => 'authoritative'],
-                'gift' => ['total' => count($gifts), 'dataStatus' => 'authoritative'],
             ],
             'dataAsOf' => date('c'),
             'detailQuery' => $detailQuery,
             'projectionContractVersion' => 'cashier-v3-member-detail-v3',
         ];
+        if ($balanceChanges !== null) {
+            // 余额记录只读取 V3 不可变 balance_changed 事实；本金和赠金拆分不从页面反推。
+            $detail['balanceChanges'] = $balanceChanges;
+            $detail['tabStates']['balance-changes'] = ['total' => count($balanceChanges), 'dataStatus' => 'authoritative'];
+        }
+        if ($cardOperations !== null) {
+            $detail['cardOperations'] = $cardOperations;
+            $detail['tabStates']['card-operations'] = ['total' => count($cardOperations), 'dataStatus' => 'authoritative'];
+        }
+        if ($services !== null) {
+            $detail['serviceRecords'] = $services;
+            $detail['tabStates']['writeoff'] = ['total' => count($services), 'dataStatus' => 'authoritative'];
+        }
+        if ($gifts !== null) {
+            $detail['giftRecords'] = $gifts;
+            $detail['tabStates']['gift'] = ['total' => count($gifts), 'dataStatus' => 'authoritative'];
+        }
+        if ($care !== null) {
+            $detail['careRecords'] = $care['records'];
+            $detail['careTasks'] = $care['tasks'];
+            $detail['careReminder'] = $care['reminder'];
+            $detail['tabStates']['care'] = ['total' => count($care['records']), 'dataStatus' => 'authoritative'];
+        }
+        return $detail;
     }
 
     /**
@@ -488,6 +533,7 @@ final class CashierV3MemberDetailQueryServices
                 'sf.project_name_snapshot', 'wf.source_name_snapshot AS source_name_snapshot',
                 'wf.source_code_snapshot AS source_code_snapshot', 'sf.store_name_snapshot',
                 'sf.quantity', 'sf.craftsmen_snapshot_json', 'sf.service_status',
+                'sf.detail_remark_snapshot',
                 'sf.business_date', 'sf.settled_at', 'sf.occurred_at',
                 'sf.operator_name_snapshot', 'sf.document_no_snapshot',
             ]))
@@ -510,6 +556,8 @@ final class CashierV3MemberDetailQueryServices
                 'craftsmenSummary' => $this->craftsmenSummary((string)($row['craftsmen_snapshot_json'] ?? ''), (array)($labor['names'] ?? [])),
                 'laborPerformanceAmount' => $labor === null ? null : $this->moneyFromCents((int)$labor['amountCents']),
                 'laborPerformanceStatus' => $labor === null ? 'pending' : 'recorded',
+                // A service's cart-line note is persisted on its own completed fact.
+                'detailRemark' => (string)($row['detail_remark_snapshot'] ?? ''),
                 'operatorName' => (string)$row['operator_name_snapshot'],
                 'statusLabel' => '已完成',
                 'completedAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
@@ -758,10 +806,12 @@ final class CashierV3MemberDetailQueryServices
      */
     private function migratedProjectGifts(int $memberId, string $keyword, string $status, string $dateFrom, string $dateTo): array
     {
-        $query = Db::name('store_order_cart_info')->alias('ci')
-            ->join('store_order o', 'o.id=ci.oid AND o.uid=ci.uid')
+        // Begin with this member's indexed orders. Starting at cart details
+        // made MySQL scan paid orders across all members before finding gifts.
+        $query = Db::name('store_order')->alias('o')->force('uid')
+            ->join('store_order_cart_info ci', 'ci.oid=o.id AND ci.uid=o.uid')
             ->leftJoin('system_store ss', 'ss.id=o.store_id')
-            ->where('ci.uid', $memberId)->where('ci.cart_type', 2)
+            ->where('o.uid', $memberId)->where('ci.cart_type', 2)
             ->where('ci.product_type', 6)->where('ci.is_gift', 1)
             ->where('ci.source_type', 'migration')->where('o.paid', 1)
             ->where('o.is_del', 0)->where('o.is_system_del', 0)->where('o.is_user_del', 0);
@@ -899,8 +949,8 @@ final class CashierV3MemberDetailQueryServices
         ] : []];
     }
 
-    /** @param array<int,array<string,mixed>> $services @return array<string,mixed> */
-    private function overview(int $memberId, string $tenantId, array $services): array
+    /** @return array<string,mixed> */
+    private function overview(int $memberId, string $tenantId): array
     {
         $salesQuery = Db::name('cashier_v3_sale_fact')->where('tenant_id', $tenantId)
             ->where('member_id', $memberId)->where('status', 'effective');
@@ -1408,7 +1458,7 @@ final class CashierV3MemberDetailQueryServices
     private function detailQuery(array $raw): array
     {
         $tab = trim((string)($raw['tab'] ?? ''));
-        $allowedTabs = ['assets', 'card-operations', 'coupons', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points'];
+        $allowedTabs = ['profile', 'archive', 'assets', 'card-operations', 'coupons', 'sales', 'writeoff', 'care', 'debt', 'gift', 'points', 'balance-changes'];
         $keyword = trim((string)($raw['keyword'] ?? ''));
         $status = trim((string)($raw['status'] ?? ''));
         if (!in_array($status, ['', 'active', 'unfinished'], true)) $status = '';

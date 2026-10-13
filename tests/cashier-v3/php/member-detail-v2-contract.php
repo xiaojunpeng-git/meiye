@@ -21,15 +21,23 @@ function memberDetailV2Ok(string $name, bool $condition): void
 
 memberDetailV2Ok('member detail exposes only authoritative V3 service records',
     strpos($detail, "Db::name('cashier_v3_entitlement_service_fact')") !== false
-    && strpos($detail, "->where('service_status', 'completed')") !== false
+    && strpos($detail, "->where('sf.service_status', 'completed')") !== false
     && strpos($detail, "'service_record_no'") !== false
-    && strpos($detail, "'service_fact_id'") === false);
+    && strpos($detail, "'id' => 'service:' . (string)\$row['id']") !== false);
 memberDetailV2Ok('service records join card snapshots from the matching writeoff authority',
     strpos($detail, "->leftJoin(") !== false
     && strpos($detail, "'cashier_v3_entitlement_writeoff_fact wf'") !== false
     && strpos($detail, 'wf.tenant_id = sf.tenant_id AND wf.checkout_request_id = sf.checkout_request_id AND wf.source_line_id = sf.source_line_id') !== false
     && strpos($detail, "'wf.source_name_snapshot AS source_name_snapshot'") !== false
     && strpos($detail, "'wf.source_code_snapshot AS source_code_snapshot'") !== false);
+memberDetailV2Ok('service and card timelines expose remarks from their own immutable business rows',
+    strpos($detail, "'sf.detail_remark_snapshot'") !== false
+    && strpos($detail, "'detailRemark' => (string)(\$row['detail_remark_snapshot'] ?? '')") !== false
+    && strpos($detail, "Db::name('cashier_v3_card_purchase_receipt')->alias('receipt')") !== false
+    && strpos($detail, "line.order_line_id=receipt.sales_order_line_id") !== false
+    && strpos($detail, 'sf.operator_name_snapshot,sf.detail_remark_snapshot') !== false
+    && strpos($detail, "Db::name('cashier_v3_debt_repayment_collection')") !== false
+    && strpos($detail, "'detailRemark'") !== false);
 memberDetailV2Ok('member detail exposes V3 gift facts from both approved gift authorities',
     strpos($detail, "Db::name('cashier_v3_gift_fact')") !== false
     && strpos($detail, "'cashier_v3_direct_gift_authority'") !== false
@@ -40,11 +48,11 @@ memberDetailV2Ok('member detail exposes formal care records and tasks without fa
     && strpos($detail, "->where('status', 'NORMAL')") !== false
     && strpos($detail, "->field('task_key,task_no") !== false
     && strpos($detail, "'id' => 'care-task:' . (string)\$row['task_key']") !== false
-    && strpos($detail, "'careRecords' => \$care['records']") !== false);
+    && strpos($detail, "\$detail['careRecords'] = \$care['records']") !== false);
 memberDetailV2Ok('overview is derived from service and settled sales authorities',
     strpos($detail, "Db::name('cashier_v3_sale_fact')") !== false
     && strpos($detail, "->where('status', 'effective')") !== false
-    && strpos($detail, "COUNT(DISTINCT business_date) AS visit_count") !== false
+    && strpos($detail, "COUNT(DISTINCT sf.business_date) AS visit_count") !== false
     && strpos($detail, "'totalConsumptionAmount'") !== false);
 memberDetailV2Ok('member balance projection reuses the formal balance authority snapshot',
     strpos($detail, 'new CashierV3MemberBalanceProvider()') !== false
@@ -65,7 +73,7 @@ memberDetailV2Ok('card operation records read the immutable authority across sto
     && strpos($detail, "->whereOr('member_id_after', \$memberId)") !== false
     && strpos($detail, "\$this->applyStoreScope(\$query, 'store_id', \$dataScope)") === false
     && strpos($detail, "'card_transfer' => '卡转让'") !== false
-    && strpos($detail, "'cardOperations' => \$cardOperations") !== false);
+    && strpos($detail, "\$detail['cardOperations'] = \$cardOperations") !== false);
 memberDetailV2Ok('labor performance joins only the matching completed service line authority',
     strpos($detail, "Db::name('cashier_v3_performance_fact')") !== false
     && strpos($detail, "->where('performance_type', 'labor_performance_allocated')") !== false
