@@ -167,3 +167,32 @@ if ($groupAlwaysResult['count']!==$list['count'] || count($groupAlwaysResult['ro
     throw new RuntimeException('GROUPED_MEMBER_OR_BRANCH_LOST');
 }
 echo "PASS local grouped OR branch: a failed alternative does not erase authorized members\n";
+// Each dated predicate reads its own member-grain fact window. Derive the
+// expected intersection from two independent authorized Reader queries.
+$referenceDay=$range['end'];
+$previousWeek=['kind'=>'relative_days','days'=>7,'end_offset_days'=>-7];
+$recentWeek=['kind'=>'relative_days','days'=>7,'end_offset_days'=>0];
+$periods=[$previousWeek,$recentWeek];$singleSets=[];
+foreach ($periods as $index=>$period) {
+    $singleSets[$index]=$reader->conditionMembers('0',$storeIds,
+        \app\services\ai\execution\AiTemporalPeriodResolver::resolve($period,$referenceDay),
+        ['subject'=>'member','relation'=>'all','conditions'=>[
+            ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0],
+        ]],100);
+}
+$firstIds=array_column($singleSets[0]['rows'],'member_id');
+$secondIds=array_column($singleSets[1]['rows'],'member_id');
+$expectedIds=array_values(array_intersect($firstIds,$secondIds));sort($expectedIds,SORT_NUMERIC);
+$datedSet=['subject'=>'member','relation'=>'all','conditions'=>[
+    ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0,'period'=>$previousWeek],
+    ['metric_code'=>'member_service_visit_count','operator'=>'eq','value'=>0,'period'=>$recentWeek],
+]];
+$datedCount=$reader->conditionMembers('0',$storeIds,$range,$datedSet,0);
+$datedList=$reader->conditionMembers('0',$storeIds,$range,$datedSet,100);
+$actualIds=array_column($datedList['rows'],'member_id');sort($actualIds,SORT_NUMERIC);
+if ($datedCount['count']!==count($expectedIds)||$datedList['count']!==count($expectedIds)
+    ||$actualIds!==$expectedIds) throw new RuntimeException('INDEPENDENT_PERIOD_POPULATION_DRIFT');
+foreach ($datedList['rows'] as $member) if (($member['condition_values']??null)!==[0,0]) {
+    throw new RuntimeException('INDEPENDENT_PERIOD_VALUES_INVALID');
+}
+echo "PASS local different condition periods: same-metric intersections use independent fact windows\n";

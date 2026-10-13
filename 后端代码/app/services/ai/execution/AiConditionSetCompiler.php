@@ -28,10 +28,12 @@ final class AiConditionSetCompiler
             ||!\app\services\query\metric\MetricConditionExpression::valid(
                 $binding['expression'],count($binding['conditions'])
             ))) $this->fail();
-        $conditions=[];
+        $conditions=[];$periodScoped=false;$unscopedFacts=false;
         foreach ($binding['conditions'] as $condition) {
             $conditionKeys=is_array($condition)?array_keys($condition):[];sort($conditionKeys,SORT_STRING);
-            if ($conditionKeys!==['metric_code','operator','quantity','unit']
+            $hasPeriod=$conditionKeys===['metric_code','operator','period','quantity','unit'];
+            if ((!$hasPeriod && $conditionKeys!==['metric_code','operator','quantity','unit'])
+                ||($hasPeriod && !AiTemporalPeriodResolver::valid($condition['period']))
                 ||!is_string($condition['metric_code']??null)||$condition['metric_code']===''
                 ||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
                 ||!is_string($condition['quantity']??null)||!in_array($condition['unit']??null,['yuan','count','day'],true)) $this->fail();
@@ -42,6 +44,12 @@ final class AiConditionSetCompiler
             if (!is_array($contract)||empty($contract['ai_query_ready'])
                 ||!in_array($operation,(array)($contract['query_shapes']??[]),true)
                 ||!in_array($binding['subject'],(array)($contract['condition_subjects']??[]),true)) $this->fail('AI_QUERY_SHAPE_NOT_READY');
+            $aggregation=$contract['threshold_count']['aggregation']??null;
+            // Current assets have no historical snapshot source. A stated
+            // period is admissible only for a registered period/as-of metric.
+            if ($hasPeriod && $aggregation==='current_state') $this->fail('AI_UNSUPPORTED_CONDITION');
+            $periodScoped=$periodScoped||$hasPeriod;
+            $unscopedFacts=$unscopedFacts||(!$hasPeriod && $aggregation!=='current_state');
             $storage=$contract['storage_unit']??null;
             $expectedUnit=$contract['condition_unit']??($storage==='fen'?'yuan':'count');
             if (!is_string($expectedUnit)||$condition['unit']!==$expectedUnit) $this->fail();
@@ -55,7 +63,15 @@ final class AiConditionSetCompiler
                 $value=$this->scaled($condition['quantity'],1);
             } else $this->fail('AI_METRIC_NOT_READY');
             if ($value<0||$value>self::MAX_VALUE) $this->fail();
-            $conditions[]=['metric_code'=>$code,'operator'=>$condition['operator'],'value'=>$value];
+            $item=['metric_code'=>$code,'operator'=>$condition['operator'],'value'=>$value];
+            if ($hasPeriod) $item['period']=$condition['period'];
+            $conditions[]=$item;
+        }
+        // Mixed dated predicates cannot silently use today for an unlabelled
+        // fact condition. Current-state assets remain valid alongside them.
+        if ($periodScoped && $unscopedFacts) $this->fail('AI_UNSUPPORTED_CONDITION');
+        if ($periodScoped && !in_array($binding['subject'],['member','person','store'],true)) {
+            $this->fail('AI_UNSUPPORTED_CONDITION');
         }
         $set=['subject'=>$binding['subject'],'relation'=>$binding['relation'],'conditions'=>$conditions];
         if ($hasExpression) $set['expression']=$binding['expression'];

@@ -195,6 +195,12 @@ final class AiRegisteredPlanCompiler
         foreach ($query['store_ids'] as $id) if (!is_int($id)||$id<1) AiRegistryValue::fail('AI_SCOPE_INVALID');
         if (count(array_unique($query['store_ids']))!==count($query['store_ids'])||array_diff($query['store_ids'],$capabilities['store_ids']??[])) AiRegistryValue::fail('AI_SCOPE_INVALID');
         $this->range($query['start_date'],$query['end_date']);
+        if ($conditionPopulation) {
+            foreach ($query['condition_set']['conditions'] as $condition) if (isset($condition['period'])) {
+                if ($query['start_date']!==$query['end_date']) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
+                AiTemporalPeriodResolver::resolve($condition['period'],$query['end_date']);
+            }
+        }
         if ($query['query_shape']==='comparison') {
             if (!is_array($query['compare_range'])) AiRegistryValue::fail('AI_DATE_INVALID');
             AiRegistryValue::exact($query['compare_range'],['start','end']);
@@ -249,7 +255,10 @@ final class AiRegisteredPlanCompiler
             $metrics=[];
             foreach ($set['conditions'] as $condition) {
                 $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
-                if ($keys!==['metric_code','operator','value']||!is_string($condition['metric_code']??null)||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
+                $hasPeriod=$keys===['metric_code','operator','period','value'];
+                if ((!$hasPeriod && $keys!==['metric_code','operator','value'])
+                    ||($hasPeriod && !AiTemporalPeriodResolver::valid($condition['period']))
+                    ||!is_string($condition['metric_code']??null)||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
                     ||!is_int($condition['value']??null)||abs($condition['value'])>100000000000) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
                 $metrics[]=$condition['metric_code'];
             }

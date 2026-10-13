@@ -1348,6 +1348,17 @@ final class AiGatewayServices
     {
         $conditionCompiler=new AiConditionSetCompiler();
         $conditionSet=$conditionCompiler->compile($intent['aggregate_condition'],$caps,$intent['operation']);
+        $hasScopedPeriod=false;
+        foreach ($conditionSet['conditions'] as $condition) $hasScopedPeriod=$hasScopedPeriod||isset($condition['period']);
+        if ($hasScopedPeriod) {
+            // Each predicate owns its date; the plan's singleton range is
+            // solely the frozen reference day for relative/calendar periods.
+            // A separate whole-query date would assign two meanings to a leaf.
+            if ($intent['periods']!==[]) throw new AiContractException('AI_UNSUPPORTED_CONDITION');
+            $projection['dates']=[];
+            $projection['date_terms']=[['code'=>'TODAY']];
+            $projection['date_grouping_ambiguous']=false;
+        }
         if (($projection['date_terms']??[])===[] && $conditionCompiler->usesCurrentSnapshot($conditionSet,$caps)) {
             $projection['date_terms']=[['code'=>'TODAY']];
         }
@@ -1824,8 +1835,14 @@ final class AiGatewayServices
         if ($periodTerm!==null) {
             $query=$sourceContext['query'];
             $shape=$query['query_shape']??null;
+            // "Change the period" cannot identify which predicate to revise
+            // after different conditions carried different signed periods.
+            $hasScopedPeriod=false;
+            foreach ((array)($query['condition_set']['conditions']??[]) as $condition) {
+                $hasScopedPeriod=$hasScopedPeriod||isset($condition['period']);
+            }
             if (in_array($shape,['summary','breakdown','trend','ranking','threshold_count','condition_count','condition_list'],true)
-                && ($query['compare_range']??null)===null) {
+                && !$hasScopedPeriod && ($query['compare_range']??null)===null) {
                 $checkpoint();
                 $range=(new AiWorkflowPlanner())->normalizePeriod($periodTerm,$today);
                 $query['start_date']=$range['start'];$query['end_date']=$range['end'];

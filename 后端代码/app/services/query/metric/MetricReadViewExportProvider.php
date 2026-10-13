@@ -227,13 +227,16 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         $sourceLabel=$sourceFilter?($result['source_label']??null):null;
         if ($sourceFilter && (!is_string($sourceLabel)||trim($sourceLabel)==='')) throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         $range=['start'=>$view['query']['start_date'],'end'=>$view['query']['end_date']];
+        $periodScoped=false;
+        foreach ($set['conditions'] as $condition) $periodScoped=$periodScoped||isset($condition['period']);
         $objectLabel=['person'=>'人员','member'=>'客户','store'=>'门店','order'=>'销售订单',
             'sale_line'=>'销售明细','card'=>'卡项','project'=>'项目','product'=>'产品'][$subject]
             ??MetricDefinitionRegistry::overviewObjectLabel($subject);
         if (!is_string($objectLabel)||$objectLabel==='') throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         if ($shape==='condition_count') {
             self::append($rows,['metric_name'=>$sourceFilter?'首次疗程来源会员数':'符合条件的'.$objectLabel.'数量',
-                'period_name'=>'本期','start_date'=>$range['start'],'end_date'=>$range['end'],
+                'period_name'=>$periodScoped?'按各条件期间':'本期',
+                'start_date'=>$periodScoped?'':$range['start'],'end_date'=>$periodScoped?'':$range['end'],
                 'store_name'=>$sourceFilter?$sourceLabel.'；范围：当前授权范围':'当前授权范围',
                 'ranking_direction'=>'','business_date'=>'','unit'=>$subject==='store'?'家':($subject==='order'?'笔':($subject==='sale_line'?'条':($subject==='person'||$subject==='member'?'人':'个')))],$result['count'],'count');
             return;
@@ -245,14 +248,32 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
             if (!is_int($object[$idKey]??null)||!is_string($object[$nameKey]??null)||$object[$nameKey]===''||!is_array($object['metrics']??null)) {
                 throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
             }
-            foreach ($set['conditions']??[] as $condition) {
-                $metric=$condition['metric_code']??null;$contract=$capabilities[$metric]??null;$value=$object['metrics'][$metric]??null;
-                if (!is_array($contract)||empty($contract['ai_query_ready'])||!is_int($value)) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
+            if ($periodScoped && (!is_array($object['condition_values']??null)
+                ||count($object['condition_values'])!==count($set['conditions']))) {
+                throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+            }
+            $seenCodes=[];
+            foreach ($set['conditions']??[] as $index=>$condition) {
+                $metric=$condition['metric_code']??null;$contract=$capabilities[$metric]??null;
+                // Repeated bounds on the same undated value produce one
+                // export column; dated repeats remain separate observations.
+                if (!$periodScoped && isset($seenCodes[$metric])) continue;
+                $seenCodes[$metric]=true;
+                $value=$periodScoped?($object['condition_values'][$index]??null):($object['metrics'][$metric]??null);
+                if (!is_array($contract)||empty($contract['ai_query_ready'])) throw new \RuntimeException('METRIC_EXPORT_METRIC_NOT_READY');
+                $conditionRange=isset($condition['period'])
+                    ?\app\services\ai\execution\AiTemporalPeriodResolver::resolve($condition['period'],$range['end'])
+                    :$range;
+                $periodName=$periodScoped?(isset($condition['period'])
+                    ?$conditionRange['start'].' 至 '.$conditionRange['end']:'当前'):'本期';
                 $unit=self::displayUnit($metric,(string)($contract['storage_unit']??''));
-                self::append($rows,['metric_name'=>$contract['name'],'period_name'=>'本期','start_date'=>$range['start'],'end_date'=>$range['end'],
+                $base=['metric_name'=>$contract['name'],'period_name'=>$periodName,
+                    'start_date'=>$conditionRange['start'],'end_date'=>$conditionRange['end'],
                     'store_name'=>$object[$nameKey].'；范围：'.($sourceFilter?$sourceLabel.'；':'').'当前授权范围',
-                    'ranking_direction'=>'','business_date'=>'','unit'=>$unit],
-                    $value,(string)$contract['storage_unit']);
+                    'ranking_direction'=>'','business_date'=>'','unit'=>$unit];
+                if ($value===null && ($contract['threshold_count']['aggregation']??null)==='as_of_age_days') {
+                    $rows[]=array_merge(['row_id'=>(string)(count($rows)+1)],$base,['metric_value'=>'未记录']);
+                } else self::append($rows,$base,$value,(string)$contract['storage_unit']);
             }
         }
     }

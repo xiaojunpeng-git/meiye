@@ -517,7 +517,27 @@ final class MetricReadViewServices
                 if (!isset($names[$storeId])) $this->fail('METRIC_STORE_LABEL_UNAVAILABLE');
                 $values[$storeId]=['store_id'=>$storeId,'store_name'=>$names[$storeId],'metrics'=>[]];
             }
-            foreach (array_unique(array_column($conditionSet['conditions'],'metric_code')) as $metric) {
+            $periodScoped=$this->hasConditionPeriods($conditionSet);
+            if ($periodScoped) {
+                foreach ($conditionSet['conditions'] as $index=>$condition) {
+                    $metric=$condition['metric_code'];
+                    $conditionRange=$this->conditionPeriodRange($condition,$range);
+                    foreach ($values as &$row) $row['condition_values'][$index]=0;
+                    unset($row);
+                    foreach ($reader->dailyStoreTotals($binding['tenant_id'],$binding['store_ids'],$conditionRange,$metric) as $point) {
+                        $storeId=(int)($point['store_id']??0);
+                        if (!isset($values[$storeId])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                        $values[$storeId]['condition_values'][$index]=$this->addAmount(
+                            $values[$storeId]['condition_values'][$index],(int)($point['amount_cents']??0)
+                        );
+                    }
+                }
+                foreach ($values as &$row) foreach ($conditionSet['conditions'] as $index=>$condition) {
+                    $row['metrics'][$condition['metric_code']]=$row['metrics'][$condition['metric_code']]
+                        ??$row['condition_values'][$index];
+                }
+                unset($row);
+            } else foreach (array_unique(array_column($conditionSet['conditions'],'metric_code')) as $metric) {
                 foreach ($values as &$row) $row['metrics'][$metric]=0;
                 unset($row);
                 foreach ($reader->dailyStoreTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric) as $point) {
@@ -531,8 +551,9 @@ final class MetricReadViewServices
             $rows=[];
             foreach ($values as $row) {
                 $matches=[];
-                foreach ($conditionSet['conditions'] as $condition) {
-                    $matches[]=$this->matchesCondition($row['metrics'][$condition['metric_code']],$condition['operator'],$condition['value']);
+                foreach ($conditionSet['conditions'] as $index=>$condition) {
+                    $actual=$periodScoped?$row['condition_values'][$index]:$row['metrics'][$condition['metric_code']];
+                    $matches[]=$this->matchesCondition($actual,$condition['operator'],$condition['value']);
                 }
                 $qualified=isset($conditionSet['expression'])
                     ? MetricConditionExpression::evaluate($conditionSet['expression'],$matches)
@@ -572,7 +593,28 @@ final class MetricReadViewServices
             if (!isset($personnel['names'][$employee])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
             $values[$employee]=['employee_id'=>$employee,'employee_name'=>$personnel['names'][$employee],'metrics'=>[]];
         }
-        foreach (array_unique(array_column($conditionSet['conditions'],'metric_code')) as $metric) {
+        $periodScoped=$this->hasConditionPeriods($conditionSet);
+        if ($periodScoped) {
+            foreach ($conditionSet['conditions'] as $index=>$condition) {
+                $metric=$condition['metric_code'];
+                $conditionRange=$this->conditionPeriodRange($condition,$range);
+                foreach ($values as &$row) $row['condition_values'][$index]=0;
+                unset($row);
+                $points=$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$conditionRange,$metric,$personnel['pairs']);
+                foreach ($points as $point) {
+                    $employee=(int)($point['employee_id']??0);
+                    if (!isset($values[$employee])) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                    $values[$employee]['condition_values'][$index]=$this->addAmount(
+                        $values[$employee]['condition_values'][$index],(int)($point['amount_cents']??0)
+                    );
+                }
+            }
+            foreach ($values as &$row) foreach ($conditionSet['conditions'] as $index=>$condition) {
+                $row['metrics'][$condition['metric_code']]=$row['metrics'][$condition['metric_code']]
+                    ??$row['condition_values'][$index];
+            }
+            unset($row);
+        } else foreach (array_unique(array_column($conditionSet['conditions'],'metric_code')) as $metric) {
             foreach ($values as &$row) $row['metrics'][$metric]=0;
             unset($row);
             $points=$reader->personnelTotals($binding['tenant_id'],$binding['store_ids'],$range,$metric,$personnel['pairs']);
@@ -585,7 +627,10 @@ final class MetricReadViewServices
         $rows=[];
         foreach ($values as $row) {
             $matches=[];
-            foreach ($conditionSet['conditions'] as $condition) $matches[]=$this->matchesCondition($row['metrics'][$condition['metric_code']],$condition['operator'],$condition['value']);
+            foreach ($conditionSet['conditions'] as $index=>$condition) {
+                $actual=$periodScoped?$row['condition_values'][$index]:$row['metrics'][$condition['metric_code']];
+                $matches[]=$this->matchesCondition($actual,$condition['operator'],$condition['value']);
+            }
             $qualified=isset($conditionSet['expression'])
                 ? MetricConditionExpression::evaluate($conditionSet['expression'],$matches)
                 : ($conditionSet['relation']==='all' ? !in_array(false,$matches,true) : in_array(true,$matches,true));
@@ -607,6 +652,22 @@ final class MetricReadViewServices
     private function matchesCondition(int $actual,string $operator,int $target): bool
     {
         return ['gte'=>$actual>=$target,'gt'=>$actual>$target,'lte'=>$actual<=$target,'lt'=>$actual<$target,'eq'=>$actual===$target][$operator]??false;
+    }
+
+    /** A typed leaf period overrides only that predicate's fact window. */
+    private function conditionPeriodRange(array $condition,array $referenceRange): array
+    {
+        return isset($condition['period'])
+            ?\app\services\ai\execution\AiTemporalPeriodResolver::resolve(
+                $condition['period'],$referenceRange['end']
+            )
+            :$referenceRange;
+    }
+
+    private function hasConditionPeriods(array $set): bool
+    {
+        foreach ($set['conditions'] as $condition) if (isset($condition['period'])) return true;
+        return false;
     }
     private function personnelSelection(array $query,array $binding): ?array
     {
@@ -757,7 +818,10 @@ final class MetricReadViewServices
             $conditionMetrics=[];
             foreach ($set['conditions'] as $condition) {
                 $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
-                if ($keys!==['metric_code','operator','value']||!is_string($condition['metric_code']??null)||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
+                $hasPeriod=$keys===['metric_code','operator','period','value'];
+                if ((!$hasPeriod && $keys!==['metric_code','operator','value'])
+                    ||($hasPeriod && !\app\services\ai\execution\AiTemporalPeriodResolver::valid($condition['period']))
+                    ||!is_string($condition['metric_code']??null)||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)
                     ||!is_int($condition['value']??null)||abs($condition['value'])>100000000000) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
                 $conditionMetrics[]=$condition['metric_code'];
             }
@@ -773,7 +837,9 @@ final class MetricReadViewServices
                 ||!is_array($binding['conditions']??null)||count($binding['conditions'])!==count($set['conditions'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             foreach ($binding['conditions'] as $index=>$condition) {
                 $conditionKeys=is_array($condition)?array_keys($condition):[];sort($conditionKeys,SORT_STRING);
-                if ($conditionKeys!==['metric_code','operator','quantity','unit']
+                $hasPeriod=$conditionKeys===['metric_code','operator','period','quantity','unit'];
+                if ((!$hasPeriod && $conditionKeys!==['metric_code','operator','quantity','unit'])
+                    ||($condition['period']??null)!==($set['conditions'][$index]['period']??null)
                     ||($condition['metric_code']??null)!==$set['conditions'][$index]['metric_code']
                     ||($condition['operator']??null)!==$set['conditions'][$index]['operator']
                     ||!is_string($condition['quantity']??null)||!preg_match('/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$/D',$condition['quantity'])
@@ -837,6 +903,13 @@ final class MetricReadViewServices
         if (count($query['metric_codes'])>2 && !in_array($query['query_shape'],['summary','breakdown','comparison','condition_count','condition_list'],true)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         if (count(array_unique($query['metric_codes'])) !== count($query['metric_codes'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
         $this->range(['start' => $query['start_date'], 'end' => $query['end_date']]);
+        if ($conditionPopulation) foreach ($query['condition_set']['conditions'] as $condition) {
+            if (!isset($condition['period'])) continue;
+            if ($query['start_date']!==$query['end_date']) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+            $this->range(\app\services\ai\execution\AiTemporalPeriodResolver::resolve(
+                $condition['period'],$query['end_date']
+            ));
+        }
         if ($query['query_shape'] === 'comparison') {
             if (!is_array($query['compare_range'])) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             $this->range($query['compare_range']);

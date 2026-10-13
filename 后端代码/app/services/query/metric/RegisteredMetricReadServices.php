@@ -5,6 +5,7 @@ namespace app\services\query\metric;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\report\StoreReportNormalDataScopeServices;
 use app\services\report\StoreReportParticipantScopeServices;
+use app\services\report\StoreReportCurrentProductCategoryServices;
 use app\services\report\StoreUnifiedReportOrganizationDimensionServices;
 use think\facade\Db;
 
@@ -27,6 +28,15 @@ final class RegisteredMetricReadServices
     private $useRightsIndex;
     private $cacheServiceCustomers;
     private $serviceCustomerCache = [];
+    private bool $currentReportProductCategory = false;
+
+    /** Report-only projection: category changes follow the linked platform product; source facts stay immutable. */
+    public static function withCurrentReportProductCategory(): self
+    {
+        $reader = new self();
+        $reader->currentReportProductCategory = true;
+        return $reader;
+    }
 
     /** Cache opt-in is reserved for readers whose lifetime is one consistent read transaction. */
     public function __construct(?callable $queryFactory = null, ?callable $normalFacts = null, ?callable $normalServices = null, ?bool $useRightsIndex = null, bool $cacheServiceCustomers = false)
@@ -135,22 +145,15 @@ final class RegisteredMetricReadServices
             || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
             || count($conditionSet['conditions']) > MetricDefinitionRegistry::MAX_CONDITIONS) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
 
-        // Current rights are not period facts. Keep their existing full
-        // population reader for a single predicate; mixed current assets use
-        // the bounded authorized-member evaluator below.
-        $rightsConditions=array_values(array_filter($conditionSet['conditions'],static function($condition):bool {
-            if (!is_array($condition) || !is_string($condition['metric_code']??null)) return false;
-            return (MetricDefinitionRegistry::get($condition['metric_code'])['reader_strategy']??null)==='member_current_rights_amount';
-        }));
-        if ($rightsConditions!==[]) {
-            if (count($conditionSet['conditions'])===1) {
-                return $this->currentRightsAmountMembers($tenantId,$stores,$rightsConditions[0],$limit);
         if (isset($conditionSet['expression']) && (!MetricConditionExpression::valid(
             $conditionSet['expression'],count($conditionSet['conditions'])
         ) || $conditionSet['relation']!==$conditionSet['expression']['relation'])) {
             $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
         if (isset($conditionSet['expression'])) {
+            return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
+        }
+        foreach ($conditionSet['conditions'] as $condition) if (isset($condition['period'])) {
             return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
         }
 
@@ -172,6 +175,16 @@ final class RegisteredMetricReadServices
             }
         }
 
+        // Current rights are not period facts. Keep their existing full
+        // population reader for a single predicate; mixed current assets use
+        // the bounded authorized-member evaluator below.
+        $rightsConditions=array_values(array_filter($conditionSet['conditions'],static function($condition):bool {
+            if (!is_array($condition) || !is_string($condition['metric_code']??null)) return false;
+            return (MetricDefinitionRegistry::get($condition['metric_code'])['reader_strategy']??null)==='member_current_rights_amount';
+        }));
+        if ($rightsConditions!==[]) {
+            if (count($conditionSet['conditions'])===1) {
+                return $this->currentRightsAmountMembers($tenantId,$stores,$rightsConditions[0],$limit);
             }
             return $this->batchedMemberConditionMembers($tenantId,$stores,$range,$conditionSet,$limit);
         }
@@ -314,11 +327,15 @@ final class RegisteredMetricReadServices
      */
     private function batchedMemberConditionMembers(string $tenantId,array $stores,array $range,array $set,int $limit): array
     {
-        $conditions=$set['conditions'];$assetCodes=[];$factCodes=[];
+        $conditions=$set['conditions'];$assetCodes=[];$factCodes=[];$conditionKeys=[];
+        $periodScoped=false;
         foreach ($conditions as $condition) {
             $keys=is_array($condition)?array_keys($condition):[];sort($keys,SORT_STRING);
             $code=is_array($condition)?($condition['metric_code']??null):null;
-            if ($keys!==['metric_code','operator','value']||!is_string($code)
+            $hasPeriod=$keys===['metric_code','operator','period','value'];
+            if ((!$hasPeriod && $keys!==['metric_code','operator','value'])
+                ||($hasPeriod && !\app\services\ai\execution\AiTemporalPeriodResolver::valid($condition['period']))
+                ||!is_string($code)
                 ||!is_int($condition['value']??null)||$condition['value']<0||$condition['value']>100000000000) {
                 $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
             }
@@ -326,12 +343,21 @@ final class RegisteredMetricReadServices
             if (!in_array($condition['operator'],(array)($definition['source']['threshold_count']['operators']??[]),true)) {
                 $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
             }
+            $periodScoped=$periodScoped||$hasPeriod;
+            // The key identifies a registered value at one stated period;
+            // repeated bounds at that same period reuse one aggregate read.
+            $key=$hasPeriod?$code.'|'.json_encode($condition['period']):$code;
+            $conditionKeys[]=$key;
             if (in_array($definition['reader_strategy'],['member_current_assets','member_current_rights_amount'],true)) {
+                if ($hasPeriod) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
                 $assetCodes[$code]=true;
             } else {
-                $factCodes[$code]=true;
+                $factCodes[$key]=['code'=>$code,'range'=>$hasPeriod
+                    ?\app\services\ai\execution\AiTemporalPeriodResolver::resolve($condition['period'],$range['end'])
+                    :$range];
             }
         }
+        if ($periodScoped && $range['start']!==$range['end']) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $assetReader=new MemberCurrentAssetMetricReadServices();
         // For an intersection, a registered fact predicate can seed the
         // candidate IDs. This avoids reading every current balance/card in a
@@ -345,9 +371,14 @@ final class RegisteredMetricReadServices
             : array_keys($conditions);
         if ($set['relation']==='all') foreach ($seedIndexes as $index) {
             $condition=$conditions[$index];
-            if (!isset($factCodes[$condition['metric_code']])) continue;
+            if (!isset($factCodes[$conditionKeys[$index]])) continue;
+            // A period total with no fact is zero. A predicate satisfied by
+            // zero cannot seed from observed fact rows without losing valid
+            // members; an unknown last-visit age never satisfies a bound.
+            $missing=$this->missingMemberConditionValue($condition['metric_code']);
+            if ($missing!==null && $this->matchesAssetCondition($missing,$condition)) continue;
             [$seedQuery,$seedExpression]=$this->memberMetricAggregateQuery(
-                $condition['metric_code'],$tenantId,$stores,$range
+                $condition['metric_code'],$tenantId,$stores,$factCodes[$conditionKeys[$index]]['range']
             );
             $seed=$seedQuery->having($seedExpression.' '
                 .$this->conditionSqlOperator($condition['operator']).' '.$condition['value']);
@@ -356,11 +387,6 @@ final class RegisteredMetricReadServices
         $count=0;$rows=[];$cursor=0;
         do {
             $candidateIds=null;
-            // A period total with no fact is zero. A predicate satisfied by
-            // zero cannot seed from observed fact rows without losing valid
-            // members; an unknown last-visit age never satisfies a bound.
-            $missing=$this->missingMemberConditionValue($condition['metric_code']);
-            if ($missing!==null && $this->matchesAssetCondition($missing,$condition)) continue;
             if ($seed!==null) {
                 $seedRows=(clone $seed)->where('s.member_id','>',$cursor)
                     ->fieldRaw('s.member_id member_id')->order('s.member_id','asc')
@@ -395,13 +421,13 @@ final class RegisteredMetricReadServices
                 if ($candidateIds===null) $cursor=$id;
             }
             $values=[];
-            foreach (array_keys($factCodes) as $code) {
-                [$query,$expression]=$this->memberMetricAggregateQuery($code,$tenantId,$stores,$range);
+            foreach ($factCodes as $key=>$factSpec) {
+                [$query,$expression]=$this->memberMetricAggregateQuery($factSpec['code'],$tenantId,$stores,$factSpec['range']);
                 foreach ($query->whereIn('s.member_id',$ids)
                     ->fieldRaw('s.member_id member_id,'.$expression.' metric_value')->select()->toArray() as $fact) {
                     $id=$this->integer($fact['member_id']??null);
                     if (!in_array($id,$ids,true)) $this->fail('METRIC_SOURCE_RESULT_INVALID');
-                    $values[$id][$code]=$this->integer($fact['metric_value']??null);
+                    $values[$id][$key]=$this->integer($fact['metric_value']??null);
                 }
             }
             $candidates=[];
@@ -410,8 +436,8 @@ final class RegisteredMetricReadServices
                     $candidates[]=$id;continue;
                 }
                 $matches=[];
-                foreach ($conditions as $condition) if (isset($factCodes[$condition['metric_code']])) {
-                    $value=$values[$id][$condition['metric_code']]??null;
+                foreach ($conditions as $index=>$condition) if (isset($factCodes[$conditionKeys[$index]])) {
+                    $value=$values[$id][$conditionKeys[$index]]??null;
                     if ($value===null) $value=$this->missingMemberConditionValue($condition['metric_code']);
                     $matches[]=is_int($value) && $this->matchesAssetCondition($value,$condition);
                 }
@@ -424,11 +450,13 @@ final class RegisteredMetricReadServices
             }
             foreach ($members as $member) {
                 $id=$this->integer($member['uid']);
-                $matches=[];$display=[];
-                foreach ($conditions as $condition) {
-                    $code=$condition['metric_code'];$value=$values[$id][$code]??null;
-                    if ($value===null && isset($factCodes[$code])) $value=$this->missingMemberConditionValue($code);
-                    $display[$code]=$value;
+                $matches=[];$display=[];$conditionValues=[];
+                foreach ($conditions as $index=>$condition) {
+                    $code=$condition['metric_code'];$key=$conditionKeys[$index];
+                    $value=$values[$id][$key]??null;
+                    if ($value===null && isset($factCodes[$key])) $value=$this->missingMemberConditionValue($code);
+                    if (!array_key_exists($code,$display)) $display[$code]=$value;
+                    $conditionValues[]=$value;
                     $matches[]=is_int($value) && $this->matchesAssetCondition($value,$condition);
                 }
                 $qualified=isset($set['expression'])
@@ -439,7 +467,9 @@ final class RegisteredMetricReadServices
                 if ($limit>0 && count($rows)<$limit) {
                     $name=trim((string)($member['member_name']??''));
                     if ($name==='') $this->fail('METRIC_SOURCE_RESULT_INVALID');
-                    $rows[]=['member_id'=>$id,'member_name'=>$name,'metrics'=>$display];
+                    $row=['member_id'=>$id,'member_name'=>$name,'metrics'=>$display];
+                    if ($periodScoped) $row['condition_values']=$conditionValues;
+                    $rows[]=$row;
                 }
             }
         } while (($candidateIds===null?count($members):count($candidateIds))===100);

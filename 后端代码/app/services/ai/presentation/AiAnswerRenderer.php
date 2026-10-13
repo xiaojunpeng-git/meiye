@@ -62,8 +62,16 @@ final class AiAnswerRenderer
                         $identity=$object[$idKey]??null;
                         $validIdentity=$idKey==='entity_id'?$this->conditionEntityIdentity($identity):is_int($identity);
                         if (!$validIdentity||!is_string($object[$nameKey]??null)||!is_array($object['metrics']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
-                        foreach (array_unique(array_column($set['conditions'],'metric_code')) as $code) {
-                            $value=$object['metrics'][$code]??null;
+                        $periodScoped=false;
+                        foreach ($set['conditions'] as $condition) $periodScoped=$periodScoped||isset($condition['period']);
+                        if ($periodScoped && (!is_array($object['condition_values']??null)
+                            ||array_keys($object['condition_values'])!==range(0,count($set['conditions'])-1))) {
+                            throw new RuntimeException('AI_EVIDENCE_INVALID');
+                        }
+                        $displayCodes=$periodScoped?array_column($set['conditions'],'metric_code')
+                            :array_values(array_unique(array_column($set['conditions'],'metric_code')));
+                        foreach ($displayCodes as $index=>$code) {
+                            $value=$periodScoped?$object['condition_values'][$index]:($object['metrics'][$code]??null);
                             $metricTip=$dictionary->getTooltip($code);$metric=$registered[$code]??null;
                             // A member with no observed completed service has
                             // no known last-visit age. In an OR result another
@@ -73,9 +81,19 @@ final class AiAnswerRenderer
                                 && ($metric['threshold_count']['aggregation']??null)==='as_of_age_days';
                             if ((!is_int($value)&&!$ageUnknown)||!is_array($metric)||empty($metricTip['user_ready'])) throw new RuntimeException('AI_EVIDENCE_INVALID');
                             $metricUnit=$this->displayUnit($metricTip,(string)$metric['storage_unit']);
-                            $rows[]=['label'=>$object[$nameKey],'metric'=>$metricTip['name'],
+                            $periodLabel='本期';
+                            if ($periodScoped) {
+                                $period=isset($set['conditions'][$index]['period'])
+                                    ?\app\services\ai\execution\AiTemporalPeriodResolver::resolve(
+                                        $set['conditions'][$index]['period'],$view['query']['end_date']
+                                    ) : null;
+                                $periodLabel=$period===null?'当前':$period['start'].' 至 '.$period['end'];
+                            }
+                            $rows[]=['label'=>$object[$nameKey],
+                                'metric'=>$periodScoped?$metricTip['name'].'（'.$periodLabel.'）':$metricTip['name'],
                                 'value'=>$ageUnknown?'未记录':$this->metricValue($value,(string)$metric['storage_unit']),
-                                'unit'=>$ageUnknown?'':$metricUnit,'period'=>'current','period_label'=>'本期'];
+                                'unit'=>$ageUnknown?'':$metricUnit,
+                                'period'=>$periodScoped?'condition_'.$index:'current','period_label'=>$periodLabel];
                         }
                     }
                 }
@@ -416,7 +434,10 @@ final class AiAnswerRenderer
         $capabilities=MetricReadViewServices::metricCapabilities();
         foreach ($set['conditions'] as $condition) if (!is_array($condition)||!is_string($condition['metric_code']??null)
             ||!in_array($set['subject'],(array)($capabilities[$condition['metric_code']]['condition_subjects']??[]),true)
-            ||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)||!is_int($condition['value']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
+            ||!in_array($condition['operator']??null,['gte','gt','lte','lt','eq'],true)||!is_int($condition['value']??null)
+            ||(isset($condition['period']) && !\app\services\ai\execution\AiTemporalPeriodResolver::valid(
+                $condition['period']
+            ))) throw new RuntimeException('AI_EVIDENCE_INVALID');
         return $set;
     }
 

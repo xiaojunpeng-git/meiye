@@ -188,6 +188,47 @@ csCheck(strpos($memberMultiAnswer['summary'],'全部2项条件')!==false
     &&($memberMultiAnswer['table']['rows'][0]['unit']??null)==='次'
     &&($memberMultiAnswer['table']['rows'][1]['unit']??null)==='元',
     'member multi-condition evidence renders every registered metric and its own unit');
+// Predicate periods are typed and signed per leaf. The query date is only
+// their frozen reference day; the list must label both measured windows.
+$dated=$memberMulti;
+$dated['start_date']='2026-09-19';$dated['end_date']='2026-09-19';
+$dated['aggregate_condition']['conditions'][0]['period']=[
+    'kind'=>'calendar_period','unit'=>'month','offset'=>-1,'count'=>1,'end_mode'=>'full',
+];
+$dated['aggregate_condition']['conditions'][1]['period']=[
+    'kind'=>'calendar_period','unit'=>'month','offset'=>0,'count'=>1,'end_mode'=>'to_reference',
+];
+$dated['condition_set']=(new AiConditionSetCompiler())->compile(
+    $dated['aggregate_condition'],['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_list'
+);
+$datedCaps=$memberCapabilities;$datedCaps['metric_codes']=$dated['metric_codes'];
+$datedCompiled=(new AiRegisteredPlanCompiler())->compile(['query'=>$dated,'output_format'=>'screen'],$datedCaps);
+csCheck($datedCompiled['query']['condition_set']['conditions'][0]['period']['offset']===-1
+    &&$datedCompiled['query']['condition_set']['conditions'][1]['period']['offset']===0
+    &&$normalizeMetricQuery($views,$dated)['condition_set']['conditions'][1]['period']['offset']===0,
+    'separate typed condition periods survive signed compilation and Reader admission');
+$datedEvidence=['query'=>$dated,'results'=>[[
+    'period'=>'current','metric_code'=>'member_service_visit_count','storage_unit'=>'count',
+    'object_kind'=>'member','condition_set'=>$dated['condition_set'],'count'=>1,
+    'list_limit'=>100,'has_more'=>false,'rows'=>[[
+        'member_id'=>101,'member_name'=>'测试会员','metrics'=>[
+            'member_service_visit_count'=>4,'sales_collected_amount'=>2350000,
+        ],'condition_values'=>[4,2350000],
+    ]],
+]]];
+$datedAnswer=(new AiAnswerRenderer())->render($datedEvidence);
+$datedExport=MetricReadViewExportProvider::project($datedEvidence);
+csCheck(count($datedAnswer['table']['rows'])===2
+    &&strpos($datedAnswer['table']['rows'][0]['metric'],'2026-08-01 至 2026-08-31')!==false
+    &&strpos($datedAnswer['table']['rows'][1]['metric'],'2026-09-01 至 2026-09-19')!==false
+    &&($datedExport[0]['period_name']??null)==='2026-08-01 至 2026-08-31'
+    &&($datedExport[1]['period_name']??null)==='2026-09-01 至 2026-09-19',
+    'screen and export identify the factual window of every dated predicate');
+$missingPeriod=$dated['aggregate_condition'];unset($missingPeriod['conditions'][1]['period']);
+csReject(static function()use($missingPeriod):void {
+    (new AiConditionSetCompiler())->compile($missingPeriod,
+        ['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_list');
+},'AI_UNSUPPORTED_CONDITION');
 $assetAny=$assetQuery;$assetAny['condition_set']['relation']='any';
 $assetAny['aggregate_condition']['relation']='any';
 $assetAnyView=['query'=>$assetAny,'results'=>[[
@@ -211,6 +252,20 @@ csCheck(count($memberExport)===1&&$memberExport[0]['store_name']==='测试会员
     'member condition list export reuses verified rows and registered units instead of exporting only the count');
 $view=$views->create([],$query);
 csCheck($view['results'][0]['count']===1&&$view['results'][0]['rows'][0]['employee_name']==='甲员工','AND set evaluates against one authorised current-personnel population');
+$datedPersonnel=$query;
+$datedPersonnel['aggregate_condition']['conditions'][0]['period']=[
+    'kind'=>'date_range','start'=>'2026-09-01','end'=>'2026-09-19',
+];
+$datedPersonnel['aggregate_condition']['conditions'][1]['period']=[
+    'kind'=>'date_range','start'=>'2026-09-19','end'=>'2026-09-19',
+];
+$datedPersonnel['condition_set']=(new AiConditionSetCompiler())->compile(
+    $datedPersonnel['aggregate_condition'],$capabilities,'condition_list'
+);
+$datedPersonnelView=$views->create([],$datedPersonnel);
+csCheck($datedPersonnelView['results'][0]['count']===1
+    &&count($datedPersonnelView['results'][0]['rows'][0]['condition_values']??[])===2,
+    'personnel condition list keeps separate registered values for two periods');
 // Two stated bounds are predicates on one registered value, so the signed
 // metric list remains unique while the condition carrier keeps both bounds.
 $rangeQuery=$query;
@@ -227,6 +282,9 @@ $rangeCompiled=(new AiRegisteredPlanCompiler())->compile(['query'=>$rangeQuery,'
 csCheck($rangeCompiled['query']['condition_set']===$rangeQuery['condition_set']
     &&$views->create([],$rangeQuery)['results'][0]['count']===1,
     'same-metric lower and upper bounds keep one selected metric and one qualifying person');
+$rangeExport=MetricReadViewExportProvider::project($views->create([],$rangeQuery));
+csCheck(count($rangeExport)===1,
+    'two undated bounds on one metric export one measured column');
 $grouped=$query;
 $grouped['aggregate_condition']['conditions']=[
     ['metric_code'=>'staff_sales_yeji','operator'=>'gte','quantity'=>'50000','unit'=>'yuan'],
@@ -946,6 +1004,36 @@ csCheck($groupBound['metric_codes']===['staff_sales_yeji','staff_labor_yeji']
     &&array_column($groupBound['aggregate_condition']['conditions'],'metric_code')===
         ['staff_sales_yeji','staff_labor_yeji','staff_sales_yeji'],
     'mixed grouping and repeated metric remain identical across understood and bound contracts');
+$datedSafe=$safe;
+$datedSafe['question']='上月销售业绩达到5万元且本月服务次数达到24次的员工有哪些？';
+$datedSafe['evidence_messages'][0]['text']=$datedSafe['question'];
+$datedSemantic=$semantic;
+$datedSemantic['goal']='列出分别满足上月销售业绩和本月服务次数条件的员工';
+$datedSemantic['requirements'][0]['evidence'][0]['quote']=$datedSafe['question'];
+$datedSemantic['requirements'][0]['fields']=array_values(array_diff(
+    $datedSemantic['requirements'][0]['fields'],['periods']
+));
+unset($datedSemantic['requirements'][0]['values']['periods']);
+$datedSemantic['requirements'][0]['values']['aggregate_condition']['conditions'][0]['period']=[
+    'kind'=>'calendar_period','unit'=>'month','offset'=>-1,'count'=>1,'end_mode'=>'full',
+];
+$datedSemantic['requirements'][0]['values']['aggregate_condition']['conditions'][1]['period']=[
+    'kind'=>'calendar_period','unit'=>'month','offset'=>0,'count'=>1,'end_mode'=>'to_reference',
+];
+$datedSemantic=AiIntentUnderstandingContract::normalize($datedSemantic,$datedSafe);
+$datedBinding=$binding;
+$datedBinding['periods']=[];
+$datedBinding['aggregate_condition']['conditions'][0]['period']=
+    $datedSemantic['requirements'][0]['values']['aggregate_condition']['conditions'][0]['period'];
+$datedBinding['aggregate_condition']['conditions'][1]['period']=
+    $datedSemantic['requirements'][0]['values']['aggregate_condition']['conditions'][1]['period'];
+$datedBound=AiIntentResultContract::normalize(
+    $datedBinding,['staff_sales_yeji','staff_service_num'],[],$datedSafe,$datedSemantic
+);
+csCheck($datedBound['periods']===[]
+    &&$datedBound['aggregate_condition']['conditions'][0]['period']['offset']===-1
+    &&$datedBound['aggregate_condition']['conditions'][1]['period']['offset']===0,
+    'different dates stay attached to their own understood and bound predicates');
 $bound=AiIntentResultContract::normalize($binding,['staff_sales_yeji','staff_service_num'],[],$safe,$semantic);
 csCheck($bound['aggregate_condition']===$boundCondition&&$bound['metric_codes']===['staff_sales_yeji','staff_service_num'],
     'understood condition meanings bind to registered codes without changing thresholds, relation or order');
