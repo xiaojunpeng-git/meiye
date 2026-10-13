@@ -176,6 +176,14 @@ try {
     $reportBeforeDelete = $service->report($scope,$filters);
     $ledgerBeforeDelete = $service->ledger($scope,$filters);
     $listBeforeDelete = $service->listDocuments($scope,$filters);
+    $listedDocument = null;
+    foreach ($listBeforeDelete['list'] as $listedRow) {
+        if ((int)$listedRow['id'] === $id) { $listedDocument = $listedRow; break; }
+    }
+    // 列表以单据分页，但当前页必须一次带齐明细及合计，前端不能再逐单补查或按明细误分页。
+    $assert($listedDocument !== null, 'Current document appears in authorized document page');
+    $assert((int)$listedDocument['line_count'] === 1 && count($listedDocument['lines']) === 1, 'Document page carries complete grouped lines');
+    $assert((int)$listedDocument['amount_cents'] === 12345 && (int)$listedDocument['lines'][0]['amount_cents'] === 12345, 'Grouped document and line amounts agree');
     $denied(static function () use ($service,$scope,$operator,$id) { $service->deleteDraft($scope,$operator,$id); }, 'fund_document_operator_forbidden');
     $denied(static function () use ($service,$scope,$editor,$id) { $service->deleteDraft($scope,$editor,$id); }, 'fund_document_operator_forbidden');
     // 本店非录入人须经独立删除判权；字符串标记、审核权限、跨店和平台不能借此放行。

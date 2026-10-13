@@ -8,6 +8,11 @@ use think\facade\Db;
 
 final class StoreFundServices
 {
+    // 收支单分页是固定业务契约，服务端不接受客户端缩小或放大页尺寸。
+    private const DOCUMENT_PAGE_SIZE = 100;
+    // 台账分页同样固定为 100 条，余额必须先连续计算再截取当前页。
+    private const LEDGER_PAGE_SIZE = 100;
+
     public function subjects(bool $includeDisabled = false): array
     {
         $query = Db::name('store_fund_subject')->order('sort_order asc,id asc');
@@ -27,17 +32,39 @@ final class StoreFundServices
         return (array)Db::name('store_fund_subject')->where('id',$id)->find();
     }
 
-    /** 已逻辑删除的单据不进入任何状态筛选或分页总数，原单及明细仍保留。 */
+    /**
+     * 单据是列表和分页的唯一粒度；当前页明细批量随单据返回，供前端分组展示。
+     * 已逻辑删除的单据不进入状态筛选或分页总数，明细也不能脱离权限范围单独暴露。
+     */
     public function listDocuments(array $scope, array $filters): array
     {
         $query = Db::name('store_fund_document')->alias('d')->leftJoin('system_store s','s.id=d.store_id')
             ->field('d.*,s.name as store_name')->where('d.document_status','<>','DELETED');
         $this->applyScope($query, $scope); $this->applyFilters($query, $filters, false);
         if (!empty($filters['subject_id'])) $query->whereExists(function ($sub) use ($filters) { $sub->name('store_fund_document_line')->whereRaw('document_id=d.id')->where('subject_id',(int)$filters['subject_id']); });
-        $page=max(1,(int)($filters['page']??1)); $limit=min(100,max(1,(int)($filters['limit']??20)));
+        $page=max(1,(int)($filters['page']??1)); $limit=self::DOCUMENT_PAGE_SIZE;
         $count=(clone $query)->count();
         $rows=$query->order('d.business_date desc,d.id desc')->page($page,$limit)->select()->toArray();
-        foreach ($rows as &$row) { $row['amount_cents']=(int)Db::name('store_fund_document_line')->where('document_id',$row['id'])->sum('amount_cents'); $row['amount']=$this->amount((int)$row['amount_cents']); }
+        $linesByDocument = [];
+        if ($rows) {
+            $documentIds = array_map('intval', array_column($rows, 'id'));
+            $lines = Db::name('store_fund_document_line')
+                ->whereIn('document_id', $documentIds)
+                ->order('document_id asc,line_no asc')
+                ->select()->toArray();
+            foreach ($lines as $line) {
+                $line['amount_cents'] = (int)$line['amount_cents'];
+                $line['amount'] = $this->amount($line['amount_cents']);
+                $linesByDocument[(int)$line['document_id']][] = $line;
+            }
+        }
+        foreach ($rows as &$row) {
+            $row['lines'] = $linesByDocument[(int)$row['id']] ?? [];
+            $row['line_count'] = count($row['lines']);
+            $row['amount_cents'] = array_sum(array_column($row['lines'], 'amount_cents'));
+            $row['amount'] = $this->amount((int)$row['amount_cents']);
+        }
+        unset($row);
         return ['list'=>$rows,'count'=>$count,'page'=>$page,'limit'=>$limit];
     }
 
@@ -160,14 +187,18 @@ final class StoreFundServices
         });
     }
 
-    public function ledger(array $scope, array $filters): array
+    public function ledger(array $scope, array $filters, bool $paginate = true): array
     {
         $query=Db::name('store_fund_document_line')->alias('l')->join('store_fund_document d','d.id=l.document_id')->leftJoin('system_store s','s.id=d.store_id')->where('d.document_status','APPROVED')->field('d.id,d.document_no,d.store_id,s.name store_name,d.business_date,d.direction,d.summary document_summary,l.*');
         $openingBalance=$this->openingBalance($scope,$filters);
         $this->applyScope($query,$scope); $this->applyFilters($query,$filters, true);
         $rows=$query->order('d.business_date asc,d.id asc,l.line_no asc')->select()->toArray(); $balance=$openingBalance;
         foreach ($rows as &$row) { $signed=$row['direction']==='INCOME'?(int)$row['amount_cents']:-(int)$row['amount_cents']; $balance+=$signed; $row['signed_amount_cents']=$signed; $row['balance_cents']=$balance; $row['signed_amount']=$this->amount($signed); $row['balance']=$this->amount($balance); }
-        return ['list'=>$rows,'opening_balance_cents'=>$openingBalance,'opening_balance'=>$this->amount($openingBalance),'current_balance_cents'=>$balance,'current_balance'=>$this->amount($balance)];
+        unset($row);
+        $count=count($rows); $page=max(1,(int)($filters['page']??1)); $limit=self::LEDGER_PAGE_SIZE;
+        // 导出读取完整授权结果；页面接口只返回当前页，但每条余额仍基于完整时间序列。
+        if ($paginate) $rows=array_slice($rows,($page-1)*$limit,$limit);
+        return ['list'=>$rows,'count'=>$count,'page'=>$page,'limit'=>$limit,'opening_balance_cents'=>$openingBalance,'opening_balance'=>$this->amount($openingBalance),'current_balance_cents'=>$balance,'current_balance'=>$this->amount($balance)];
     }
 
     public function report(array $scope, array $filters): array
@@ -190,7 +221,7 @@ final class StoreFundServices
     /** Exports reuse the exact same authorized query projections as the visible tables. */
     public function exportLedger(array $scope, array $filters): array
     {
-        $result=$this->ledger($scope,$filters);
+        $result=$this->ledger($scope,$filters,false);
         $withStore=true;
         $records=[[ 'business_date'=>(string)($filters['date_from']??''), 'document_no'=>'-', 'store_name'=>'-', 'subject_name'=>'-', 'direction'=>'期初', 'amount'=>'-', 'balance'=>$result['opening_balance'], 'summary'=>'-' ]];
         foreach ($result['list'] as $row) $records[]=[
