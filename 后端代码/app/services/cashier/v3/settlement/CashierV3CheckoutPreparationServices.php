@@ -1205,6 +1205,9 @@ final class CashierV3CheckoutPreparationServices
             'friendCountsAsCustomer' => !array_key_exists('friendCountsAsCustomer', $line)
                 || !empty($line['friendCountsAsCustomer']),
             'isExperience' => !empty($line['isExperience']) ? 1 : 0,
+            // Keep the cashier's line note on the immutable entitlement line;
+            // the completion fact and every service-history view read this snapshot.
+            'detailRemark' => (string)($line['detailRemark'] ?? ''),
         ];
         if (array_key_exists('manualLaborFeeCents', $line)) {
             $result['manualLaborFeeCents'] = (int)$line['manualLaborFeeCents'];

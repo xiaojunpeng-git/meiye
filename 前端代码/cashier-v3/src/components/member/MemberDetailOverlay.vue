@@ -35,7 +35,7 @@ import { formatMoney } from '@/services/cashierV3Bridge'
  *     sourceNo, operatorName, remark, actions }],
  *   writeoffRecords: [{ serviceNo, businessDate, projectName, sourceLabel, cardName,
  *     cardNo, usedTimes, storeName, craftsmenSummary, laborPerformanceAmount,
- *     operatorName, statusLabel, isSupplement, actions }],
+ *     detailRemark, operatorName, statusLabel, isSupplement, actions }],
  *   salesOrders: [{ orderNo, businessDate, orderTypeLabel, payableAmount,
  *     actualReceivedAmount, statusLabel, completedAt, actions }],
  *   giftRecords: [{ giftNo, businessDate, sourceType, sourceOrderNo, sourceAction,
@@ -1048,7 +1048,7 @@ async function triggerAction(action, context = {}) {
               <div class="member-detail-overlay__table-wrap">
                 <table class="member-detail-overlay__table member-detail-overlay__table--wide">
                   <thead>
-                    <tr><th>服务记录号</th><th>业务日期</th><th>服务项目</th><th>服务来源</th><th>来源卡名称</th><th>完整卡号</th><th>本次使用次数</th><th>服务门店</th><th>手艺人</th><th>劳动业绩</th><th>核销操作人</th><th>服务状态</th><th>补单标记</th><th>操作</th></tr>
+                    <tr><th>服务记录号</th><th>业务日期</th><th>服务项目</th><th>服务来源</th><th>来源卡名称</th><th>完整卡号</th><th>本次使用次数</th><th>服务门店</th><th>手艺人</th><th>劳动业绩</th><th>明细备注</th><th>核销操作人</th><th>服务状态</th><th>补单标记</th><th>操作</th></tr>
                   </thead>
                   <tbody>
                     <tr v-for="(record, index) in writeoffRecords" :key="recordKey(record, 'writeoff', index)">
@@ -1062,12 +1062,13 @@ async function triggerAction(action, context = {}) {
                       <td>{{ text(firstValue(record, ['storeName', 'serviceStoreName'])) }}</td>
                       <td>{{ listText(firstValue(record, ['craftsmenSummary', 'craftsmen', 'staffSummary'])) }}</td>
                       <td class="member-detail-overlay__money">{{ laborPerformanceDisplay(record) }}</td>
+                      <td class="member-detail-overlay__detail-remark">{{ text(firstValue(record, ['detailRemark'])) }}</td>
                       <td>{{ text(firstValue(record, ['operatorName', 'writeoffOperatorName', 'operator'])) }}</td>
                       <td><span class="member-detail-overlay__record-status">{{ serviceStatus(record) }}</span></td>
                       <td>{{ firstValue(record, ['isSupplement', 'supplementFlag', 'isMakeup']) === true ? '补单' : '—' }}</td>
                       <td><div class="member-detail-overlay__record-actions"><button v-for="action in recordActions(record, `writeoff-${index}`)" :key="action.key" type="button" class="member-detail-overlay__inline-action" :disabled="!onAction || action.disabled || activeActionKey !== ''" :title="action.disabledReason || ''" @click="triggerAction(action, { scope: 'writeoff-record', record })">{{ activeActionKey === action.key ? '处理中…' : action.label }}</button></div></td>
                     </tr>
-                    <tr v-if="!writeoffRecords.length"><td colspan="14" class="member-detail-overlay__table-empty">暂无可查看的服务记录</td></tr>
+                    <tr v-if="!writeoffRecords.length"><td colspan="15" class="member-detail-overlay__table-empty">暂无可查看的服务记录</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1355,14 +1356,15 @@ async function triggerAction(action, context = {}) {
         <p v-if="cardHistoryError" class="member-detail-overlay__error" role="alert">{{ cardHistoryError }}</p>
         <div class="member-detail-overlay__table-wrap member-detail-overlay__history-table">
           <table class="member-detail-overlay__table member-detail-overlay__table--wide">
-            <thead><tr><th>时间</th><th>操作</th><th>内容</th><th>金额</th><th>门店</th><th>操作人</th><th>结果</th></tr></thead>
+            <thead><tr><th>时间</th><th>操作</th><th>内容</th><th>金额</th><th>明细备注</th><th>门店</th><th>操作人</th><th>结果</th></tr></thead>
             <tbody>
               <tr v-for="record in cardHistory.records" :key="record.key">
                 <td>{{ new Date(record.time * 1000).toLocaleString('zh-CN') }}</td>
                 <td>{{ record.type }}</td><td>{{ record.content }}</td><td>{{ record.amount || '—' }}</td>
+                <td class="member-detail-overlay__detail-remark">{{ text(record.detailRemark) }}</td>
                 <td>{{ record.store || '—' }}</td><td>{{ record.operatorName || '—' }}</td><td>{{ record.result || '—' }}</td>
               </tr>
-              <tr v-if="!cardHistory.records.length && !cardHistoryLoading"><td colspan="7" class="member-detail-overlay__table-empty">暂无操作记录</td></tr>
+              <tr v-if="!cardHistory.records.length && !cardHistoryLoading"><td colspan="8" class="member-detail-overlay__table-empty">暂无操作记录</td></tr>
             </tbody>
           </table>
         </div>
@@ -1942,6 +1944,12 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__table td {
   overflow-wrap: anywhere;
+}
+
+.member-detail-overlay__detail-remark {
+  min-width: 140px;
+  max-width: 260px;
+  white-space: pre-wrap;
 }
 
 .member-detail-overlay__table td small {

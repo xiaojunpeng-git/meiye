@@ -2395,7 +2395,7 @@ async function openWorkflowMemberSelector(context = currentWorkflowSelectorConte
   return { result: { status: 'success' } }
 }
 
-async function openWorkflowMemberDetail(memberId) {
+function openWorkflowMemberDetail(memberId) {
   if (!memberId) return
   const member = workflowMember.value && String(memberDetailId(workflowMember.value)) === String(memberId)
     ? workflowMember.value
@@ -2403,7 +2403,8 @@ async function openWorkflowMemberDetail(memberId) {
   window.dispatchEvent(new CustomEvent('cashier-v3:open-member-detail', {
     detail: { memberId, member }
   }))
-  return requestCashierV3Action('open-member-detail', { memberId })
+  // The shell event owns the detail read; a second action would repeat the
+  // same cross-store rights projection while the dialog is already loading.
 }
 
 function selectGuestOrderFromWorkflow() {
