@@ -34,7 +34,7 @@ $controller = $read('后端代码/app/controller/mobile/merchant/Customer.php');
 $command = $read('后端代码/app/services/mobile/customer/MobileCustomerUnifiedQueryCommandServices.php');
 $routes = $read('后端代码/route/api-mobile.php');
 $exceptionHandle = $read('后端代码/app/ExceptionHandle.php');
-$contract = json_decode($read('前端代码/mobile-vue3/src/merchant/contracts/mobile-customer-v1.contract.json'), true);
+$contract = json_decode($read('前端代码/mobile-vue3/src/shared/contracts/mobile-customer-v1.contract.json'), true);
 
 $assert('MC-API-01',
 	str_contains($resolver, "public const CONTRACT_VERSION = 'mobile-merchant-v1'")
@@ -110,12 +110,14 @@ $assert('MC-API-07',
 $assert('MC-API-08',
     str_contains($query, 'public function assertMemberVisible')
     && str_contains($serviceRecords, "cashier_v3_entitlement_service_fact")
+    && str_contains($serviceRecords, "mobile_customer_legacy_service_record")
     && str_contains($serviceRecords, "->where('sf.service_status', 'completed')")
-    && str_contains($serviceRecords, "CASHIER_V3_COMPLETED_SERVICE_FACT")
+    && str_contains($serviceRecords, "COMPLETED_SERVICE_FACT_AND_IMPORTED_LEGACY_WORK")
     && str_contains($controller, 'public function serviceRecords()')
     && str_contains($routes, "customers/service-records")
     && is_array($contract)
-    && ($contract['endpoints']['queryCustomerServiceRecords']['authority'] ?? '') === 'CASHIER_V3_COMPLETED_SERVICE_FACT'
+    && ($contract['endpoints']['queryCustomerServiceRecords']['authority'] ?? '') === 'COMPLETED_SERVICE_FACT_AND_IMPORTED_LEGACY_WORK'
+    && ($contract['endpoints']['queryCustomerServiceRecords']['legacyStoreScope'] ?? '') === 'ALL_OLD_STORES_AFTER_MEMBER_VISIBILITY_CHECK'
     && ($contract['endpoints']['queryCustomerServiceRecords']['authorization'] ?? '') === 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE'
 );
 $assert('MC-API-09',

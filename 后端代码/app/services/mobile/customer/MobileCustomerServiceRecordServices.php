@@ -5,9 +5,10 @@ namespace app\services\mobile\customer;
 use think\facade\Db;
 
 /**
- * Mobile read projection for the member's actual V3 completed-service facts.
- * It owns neither checkout nor service completion and never reads sales orders
- * as a substitute for a service record.
+ * Mobile read projection for completed V3 facts and imported completed legacy
+ * work snapshots. Legacy rows are display-only and cannot become V3 service,
+ * writeoff, labor or reporting facts. A visible customer permits their legacy
+ * history across old stores; current V3 facts retain the merchant store scope.
  */
 final class MobileCustomerServiceRecordServices
 {
@@ -28,63 +29,109 @@ final class MobileCustomerServiceRecordServices
         $this->customers->assertMemberVisible($merchantContext, $memberId);
         $page = max(1, (int)($payload['page'] ?? 1));
         $pageSize = min(self::MAX_PAGE_SIZE, max(1, (int)($payload['pageSize'] ?? $payload['limit'] ?? 20)));
-        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
-            ->leftJoin(
-                'cashier_v3_entitlement_writeoff_fact wf',
-                'wf.tenant_id = sf.tenant_id AND wf.checkout_request_id = sf.checkout_request_id AND wf.source_line_id = sf.source_line_id'
-            )
+        $current = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
             ->where('sf.tenant_id', self::TENANT_ID)
             ->where('sf.member_id', $memberId)
             ->where('sf.service_status', 'completed');
-        $this->applyServiceScope($query, $merchantContext);
-
-        $total = (int)(clone $query)->count('sf.id');
-        $rows = $query->field(implode(',', [
-            'sf.id', 'sf.service_fact_id', 'sf.business_date', 'sf.project_name_snapshot', 'sf.quantity',
-            'sf.store_name_snapshot', 'sf.craftsmen_snapshot_json', 'sf.operator_name_snapshot',
-            'sf.settled_at', 'sf.occurred_at', 'wf.is_gift', 'wf.source_kind',
-            'wf.source_name_snapshot AS source_name_snapshot', 'wf.source_code_snapshot AS source_code_snapshot',
-        ]))->order('sf.settled_at', 'desc')->order('sf.id', 'desc')->page($page, $pageSize)->select()->toArray();
+        $this->applyServiceScope($current, $merchantContext);
+        $currentTotal = (int)(clone $current)->count('sf.id');
+        $legacyTotal = (int)Db::name('mobile_customer_legacy_service_record')
+            ->where('source_system', 'morestore')->where('member_id', $memberId)->count();
+        $total = $currentTotal + $legacyTotal;
+        $rows = $total > 0 ? $this->mergedPage($merchantContext, $memberId, $page, $pageSize) : [];
 
         return [
             'memberId' => $memberId,
             'records' => array_map(function (array $row): array {
                 return [
-                    'id' => 'service:' . (int)$row['id'],
-                    'serviceRecordNo' => (string)$row['service_fact_id'],
+                    'id' => ((int)$row['origin'] === 1 ? 'legacy:' : 'service:') . (int)$row['row_id'],
+                    'serviceRecordNo' => (string)$row['service_record_no'],
                     'businessDate' => (string)$row['business_date'],
-                    'projectName' => (string)$row['project_name_snapshot'],
+                    'projectName' => (string)$row['project_name'],
                     'usedTimes' => (int)$row['quantity'],
-                    'storeName' => (string)$row['store_name_snapshot'],
-                    'craftsmenSummary' => $this->craftsmenSummary((string)$row['craftsmen_snapshot_json']),
-                    'operatorName' => (string)$row['operator_name_snapshot'],
-                    'entitlementSource' => $this->entitlementSource($row),
-                    'sourceCardName' => (string)$row['source_name_snapshot'],
-                    'sourceCardNo' => (string)$row['source_code_snapshot'],
+                    'storeName' => (string)$row['store_name'],
+                    'craftsmenSummary' => (int)$row['origin'] === 1
+                        ? (string)$row['craftsmen'] : $this->craftsmenSummary((string)$row['craftsmen']),
+                    'operatorName' => (string)$row['operator_name'],
+                    'entitlementSource' => (int)$row['origin'] === 1
+                        ? ((string)$row['source_card_name'] !== '' ? '卡项权益' : '')
+                        : $this->entitlementSource($row),
+                    'sourceCardName' => (string)$row['source_card_name'],
+                    'sourceCardNo' => (string)$row['source_card_no'],
                     'serviceStatus' => '已完成',
-                    'serviceCompletedAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
+                    'serviceCompletedAt' => $this->dateTime((int)$row['completed_at']),
                 ];
             }, $rows),
             'total' => $total,
             'page' => $page,
             'pageSize' => $pageSize,
             'hasMore' => $page * $pageSize < $total,
-            'dataAuthority' => 'CASHIER_V3_COMPLETED_SERVICE_FACT',
+            'dataAuthority' => 'COMPLETED_SERVICE_FACT_AND_IMPORTED_LEGACY_WORK',
         ];
+    }
+
+    /**
+     * SQL sorts both read models before paging, so a legacy visit cannot be
+     * omitted or repeated when old and new completion timestamps interleave.
+     * All interpolated values are server-derived positive integers; table names
+     * use the validated connection prefix, never a client supplied value.
+     */
+    private function mergedPage(array $merchantContext, int $memberId, int $page, int $pageSize): array
+    {
+        $prefix = (string)Db::connect()->getConfig('prefix');
+        if (!preg_match('/^[A-Za-z0-9_]*$/', $prefix)) {
+            throw new \RuntimeException('Invalid database table prefix');
+        }
+        $stores = $this->serviceStoreIds($merchantContext);
+        $storeCondition = $stores === [] ? '1=0' : 'sf.store_id IN (' . implode(',', $stores) . ')';
+        $offset = ($page - 1) * $pageSize;
+        $sql = 'SELECT * FROM ('
+            . 'SELECT 0 origin,sf.id row_id,sf.service_fact_id service_record_no,'
+            . 'sf.business_date,sf.project_name_snapshot project_name,sf.quantity,'
+            . 'sf.store_name_snapshot store_name,sf.craftsmen_snapshot_json craftsmen,'
+            . 'sf.operator_name_snapshot operator_name,'
+            . 'COALESCE(NULLIF(sf.settled_at,0),sf.occurred_at) completed_at,'
+            . 'wf.is_gift,wf.source_kind,wf.source_name_snapshot source_card_name,'
+            . 'wf.source_code_snapshot source_card_no '
+            . 'FROM ' . $prefix . 'cashier_v3_entitlement_service_fact sf '
+            . 'LEFT JOIN ' . $prefix . 'cashier_v3_entitlement_writeoff_fact wf '
+            . 'ON wf.tenant_id=sf.tenant_id AND wf.checkout_request_id=sf.checkout_request_id '
+            . 'AND wf.source_line_id=sf.source_line_id '
+            . "WHERE sf.tenant_id='0' AND sf.member_id={$memberId} "
+            . "AND sf.service_status='completed' AND {$storeCondition} "
+            . 'UNION ALL '
+            . "SELECT 1 origin,l.id row_id,CONCAT('legacy:',l.source_work_id) service_record_no,"
+            . 'l.business_date,l.project_name_snapshot project_name,l.quantity,'
+            . 'l.store_name_snapshot store_name,l.craftsman_name_snapshot craftsmen,'
+            . "'' operator_name,l.completed_at,0 is_gift,'' source_kind,"
+            . "l.source_card_name_snapshot source_card_name,'' source_card_no "
+            . 'FROM ' . $prefix . 'mobile_customer_legacy_service_record l '
+            . "WHERE l.source_system='morestore' AND l.member_id={$memberId}"
+            . ") merged ORDER BY completed_at DESC,origin ASC,row_id DESC LIMIT {$offset},{$pageSize}";
+        return Db::query($sql);
     }
 
     private function applyServiceScope($query, array $merchantContext): void
     {
-        if ((string)$merchantContext['dataScopeMode'] === 'PERSONAL_SELF') {
-            $query->where('sf.store_id', (int)$merchantContext['storeId']);
-            return;
-        }
-        $stores = array_values(array_filter(array_map('intval', (array)($merchantContext['visibleStoreIds'] ?? []))));
+        $stores = $this->serviceStoreIds($merchantContext);
         if ($stores === []) {
             $query->whereRaw('1 = 0');
             return;
         }
         $query->whereIn('sf.store_id', $stores);
+    }
+
+    /** Existing completed V3 services keep their original merchant store scope. */
+    private function serviceStoreIds(array $merchantContext): array
+    {
+        if ((string)($merchantContext['dataScopeMode'] ?? '') === 'PERSONAL_SELF') {
+            $storeId = (int)($merchantContext['storeId'] ?? 0);
+            return $storeId > 0 ? [$storeId] : [];
+        }
+        return array_values(array_unique(array_filter(array_map('intval',
+            (array)($merchantContext['visibleStoreIds'] ?? [])), static function (int $id): bool {
+            return $id > 0;
+        })));
     }
 
     private function entitlementSource(array $row): string

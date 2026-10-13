@@ -1,0 +1,13 @@
+{
+  "batch_key": "008-morestore-service-history-r1",
+  "target_instance": "008.cc3798.com",
+  "source_database": "morestore",
+  "target_database": "mohe_008",
+  "source_cutoff_policy": "consistent_snapshot_at_apply",
+  "minimum_source_rows": 49635,
+  "required_sample_work_id": 51080,
+  "required_sample_member_id": 421,
+  "included_old_work_statuses": [4, 6],
+  "required_old_writeoff_time": true,
+  "read_only_projection": true
+}

@@ -239,7 +239,7 @@ test('each merchant primary page keeps the confirmed five-way navigation', () =>
 
 test('mobile customer contract keeps customer scope server enforced', () => {
 	const contract = JSON.parse(fs.readFileSync(
-		path.join(mobileRoot, 'src', 'merchant', 'contracts', 'mobile-customer-v1.contract.json'),
+		path.join(mobileRoot, 'src', 'shared', 'contracts', 'mobile-customer-v1.contract.json'),
 		'utf8'
 	))
 	assert.equal(contract.contractVersion, 'mobile-customer-v1')
@@ -258,7 +258,8 @@ test('mobile customer contract keeps customer scope server enforced', () => {
 	assert.equal(contract.dataAuthority.capabilitiesMustNotDependOnFineGrainedRole, true)
 	assert.equal(contract.endpoints.queryCustomers.authorization, 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE')
 	assert.equal(contract.endpoints.queryCustomerServiceRecords.authorization, 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE')
-	assert.equal(contract.endpoints.queryCustomerServiceRecords.authority, 'CASHIER_V3_COMPLETED_SERVICE_FACT')
+	assert.equal(contract.endpoints.queryCustomerServiceRecords.authority, 'COMPLETED_SERVICE_FACT_AND_IMPORTED_LEGACY_WORK')
+	assert.equal(contract.endpoints.queryCustomerServiceRecords.legacyStoreScope, 'ALL_OLD_STORES_AFTER_MEMBER_VISIBILITY_CHECK')
 	assert.equal(contract.endpoints.queryCustomerRecentSummary.authorization, 'MERCHANT_SESSION_CURRENT_INSTANCE')
 	assert.deepEqual(contract.endpoints.queryCustomerRecentSummary.authority, ['CASHIER_V3_COMPLETED_SERVICE_FACT', 'CASHIER_V3_SALE_FACT'])
 	assert.equal(contract.endpoints.queryCustomerOrderRecords.authorization, 'MERCHANT_SESSION_CURRENT_INSTANCE')
