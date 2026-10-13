@@ -883,14 +883,15 @@ final class CashierV3OrderCenterRecordQueryServices
         ]);
         $total = (int)(clone $query)->count('rlo.id');
         $rows = $this->pageRows($query, $criteria, 'rlo.settled_at', 'rlo.id', implode(',', [
-            'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_no_snapshot', 'rlo.request_json',
+            'rlo.id', 'rlo.operation_id', 'rlo.operation_no', 'rlo.source_type', 'rlo.source_order_id', 'rlo.source_order_no_snapshot', 'rlo.request_json',
             'rlo.member_id', 'rlo.store_id', 'rlo.reason_snapshot', 'rlo.cash_refund_cents',
             'rlo.status', 'rlo.business_date', 'rlo.settled_at', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name', 'cso.order_no AS card_sales_order_no',
             'card_product.category_name_snapshot AS card_category_name,card_product.item_name_snapshot AS card_product_name',
-            'ra.target_type AS adjustment_target_type,ra.target_name_snapshot AS adjustment_target_name,ra.catalog_item_id,ra.catalog_kind,ra.balance_credit_cents,ra.balance_kind,ra.void_target,ra.remaining_after_cents,ra.times_after,ra.closed_remaining_cents,ra.salespeople_snapshot_json',
+            'ra.target_type AS adjustment_target_type,ra.target_name_snapshot AS adjustment_target_name,ra.card_holder_id AS refund_card_holder_id,ra.catalog_item_id,ra.catalog_kind,ra.balance_credit_cents,ra.balance_kind,ra.void_target,ra.remaining_after_cents,ra.times_after,ra.closed_remaining_cents,ra.salespeople_snapshot_json',
             'refund_line.category_name_snapshot AS adjustment_category_name',
         ]));
+        $platformCardCategories = $this->platformCardCategoriesForRefunds($rows);
         $refundAttribution = [];
         $refundIds = array_values(array_unique(array_map(static fn(array $row): string => (string)$row['operation_id'], $rows)));
         if ($refundIds !== []) {
@@ -950,7 +951,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 $salesRefundLines[(string)$line['operation_id']][] = $line;
             }
         }
-        return [array_map(function (array $row) use ($importedSnapshots, $refundAttribution, $salesRefundLines): array {
+        return [array_map(function (array $row) use ($importedSnapshots, $refundAttribution, $salesRefundLines, $platformCardCategories): array {
             $snapshot = (string)$row['source_type'] === 'imported_card'
                 ? ($importedSnapshots[(string)$row['operation_id']] ?? '[]')
                 : (string)($row['salespeople_snapshot_json'] ?? '[]');
@@ -983,6 +984,7 @@ final class CashierV3OrderCenterRecordQueryServices
                     . ' ¥' . number_format((int)round((int)($row['balance_credit_cents'] ?? 0) / 100), 0, '.', ',')
                     . '；' . $voidLabel . '；' . (string)$row['reason_snapshot']
                 : (string)$row['reason_snapshot']);
+            $row['platform_card_category_name'] = $platformCardCategories[(string)$row['operation_id']] ?? '';
             $product = self::refundProductColumns($row, $salesRefundLines[(string)$row['operation_id']] ?? []);
             return [
                 'id' => 'refund:' . (string)$row['operation_id'],
@@ -1019,7 +1021,111 @@ final class CashierV3OrderCenterRecordQueryServices
         }, $rows), $total];
     }
 
-    /** Refund product columns describe the refunded target at that operation, never today's catalog. */
+    /**
+     * Legacy card refunds lack a purchase-line category snapshot. Read the current
+     * platform category through the holder's member, original order and product IDs;
+     * never guess from a card or project name or mutate the refund fact.
+     */
+    private function platformCardCategoriesForRefunds(array $rows): array
+    {
+        $pending = array_values(array_filter($rows, static fn(array $row): bool =>
+            (string)$row['source_type'] === 'card'
+            && trim((string)($row['card_category_name'] ?? '')) === ''
+            && (int)($row['refund_card_holder_id'] ?? 0) > 0));
+        if ($pending === []) return [];
+
+        $holderIds = array_values(array_unique(array_map(
+            static fn(array $row): int => (int)$row['refund_card_holder_id'], $pending)));
+        $holders = Db::name('user_card_holder')->whereIn('id', $holderIds)
+            ->field('id,uid,oid,product_id')->select()->toArray();
+        $holdersById = array_column($holders, null, 'id');
+        $productByOperation = [];
+        foreach ($pending as $row) {
+            $holder = $holdersById[(int)$row['refund_card_holder_id']] ?? null;
+            if (!$holder || (int)$holder['uid'] !== (int)$row['member_id']
+                || (string)$holder['oid'] !== (string)$row['source_order_id']
+                || (int)$holder['product_id'] <= 0) continue;
+            $productByOperation[(string)$row['operation_id']] = (int)$holder['product_id'];
+        }
+        if ($productByOperation === []) return [];
+
+        $products = Db::name('store_product')->whereIn('id', array_values(array_unique(array_values($productByOperation))))
+            ->where('is_del', 0)->field('id,pid,cate_id')->select()->toArray();
+        $productsById = array_column($products, null, 'id');
+        $parentIds = [];
+        foreach ($products as $product) {
+            if (in_array(trim((string)$product['cate_id']), ['', '0'], true) && (int)$product['pid'] > 0) {
+                $parentIds[] = (int)$product['pid'];
+            }
+        }
+        $parentsById = $parentIds === [] ? [] : array_column(Db::name('store_product')
+            ->whereIn('id', array_values(array_unique($parentIds)))->where('type', 0)->where('is_del', 0)
+            ->field('id,cate_id')->select()->toArray(), null, 'id');
+
+        $rawByProduct = [];
+        $neededCategoryIds = [];
+        foreach ($products as $product) {
+            $rawIds = trim((string)$product['cate_id']);
+            if (in_array($rawIds, ['', '0'], true)) {
+                $rawIds = trim((string)($parentsById[(int)$product['pid']]['cate_id'] ?? ''));
+            }
+            foreach (explode(',', $rawIds) as $rawId) {
+                $rawId = trim($rawId);
+                if (preg_match('/^[1-9][0-9]*$/D', $rawId) !== 1) continue;
+                $rawByProduct[(int)$product['id']][] = (int)$rawId;
+                $neededCategoryIds[(int)$rawId] = true;
+            }
+        }
+        $categories = [];
+        for ($depth = 0; $depth < 12 && $neededCategoryIds !== []; $depth++) {
+            $found = Db::name('store_product_category')->whereIn('id', array_keys($neededCategoryIds))
+                ->where('type', 0)->where('relation_id', 0)
+                ->field('id,pid,cate_name')->select()->toArray();
+            $neededCategoryIds = [];
+            foreach ($found as $category) {
+                $categories[(int)$category['id']] = $category;
+                $parentId = (int)$category['pid'];
+                if ($parentId > 0 && !isset($categories[$parentId])) $neededCategoryIds[$parentId] = true;
+            }
+        }
+
+        $resolved = [];
+        foreach ($productByOperation as $operationId => $productId) {
+            if (!isset($productsById[$productId])) continue;
+            $paths = [];
+            foreach ($rawByProduct[$productId] ?? [] as $categoryId) {
+                $path = self::platformCategoryPath($categoryId, $categories);
+                if ($path !== '') $paths[$path] = true;
+            }
+            $labels = array_keys($paths);
+            // If both an ancestor and its child are selected, show the specific path once.
+            $labels = array_values(array_filter($labels, static function (string $label) use ($labels): bool {
+                foreach ($labels as $other) {
+                    if ($other !== $label && strpos($other, $label . '/') === 0) return false;
+                }
+                return true;
+            }));
+            if ($labels !== []) $resolved[$operationId] = implode('、', $labels);
+        }
+        return $resolved;
+    }
+
+    /** Broken, cyclic or deleted ancestry cannot supply a trustworthy category path. */
+    private static function platformCategoryPath(int $categoryId, array $categories): string
+    {
+        $names = [];
+        $seen = [];
+        while ($categoryId > 0 && isset($categories[$categoryId]) && !isset($seen[$categoryId]) && count($names) < 12) {
+            $seen[$categoryId] = true;
+            $name = trim((string)($categories[$categoryId]['cate_name'] ?? ''));
+            if ($name === '') return '';
+            $names[] = $name;
+            $categoryId = (int)($categories[$categoryId]['pid'] ?? 0);
+        }
+        return $categoryId === 0 ? implode('/', array_reverse($names)) : '';
+    }
+
+    /** Refund columns use sale snapshots first; legacy cards show current platform classification. */
     private static function refundProductColumns(array $row, array $salesLines): array
     {
         $sourceType = (string)$row['source_type'];
@@ -1039,8 +1145,8 @@ final class CashierV3OrderCenterRecordQueryServices
             return ['category' => '', 'name' => is_array($request) ? trim((string)($request['cardName'] ?? '')) : ''];
         }
         if ($sourceType === 'card') {
-            // V3 购卡回执能定位原销售商品快照；旧卡只有退款目标快照，分类保持空白。
-            return ['category' => trim((string)($row['card_category_name'] ?? '')),
+            // 新卡保留成交时分类；缺少销售快照的旧卡按平台商品当前分类展示。
+            return ['category' => trim((string)(($row['card_category_name'] ?? '') ?: ($row['platform_card_category_name'] ?? ''))),
                 'name' => trim((string)($row['card_product_name'] ?? ''))
                     ?: trim((string)($row['adjustment_target_name'] ?? ''))];
         }

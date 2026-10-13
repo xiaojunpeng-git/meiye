@@ -23,6 +23,12 @@ $cases = [
         [], ['category' => '六维', 'name' => '六维卡']],
     ['old card', ['source_type' => 'card', 'adjustment_target_name' => '卡内项目'],
         [], ['category' => '', 'name' => '卡内项目']],
+    ['old card current platform category', ['source_type' => 'card',
+        'platform_card_category_name' => '生美/卡项', 'adjustment_target_name' => '东方熏蒸'],
+        [], ['category' => '生美/卡项', 'name' => '东方熏蒸']],
+    ['card sale snapshot wins', ['source_type' => 'card', 'card_category_name' => '原销售分类',
+        'platform_card_category_name' => '当前分类', 'card_product_name' => '原销售卡'],
+        [], ['category' => '原销售分类', 'name' => '原销售卡']],
     ['catalog', ['source_type' => 'catalog', 'adjustment_target_name' => '无原单商品',
         'request_json' => json_encode(['_productCategoryNameSnapshot' => '私美'], JSON_UNESCAPED_UNICODE)],
         [], ['category' => '私美', 'name' => '无原单商品']],
@@ -40,6 +46,16 @@ foreach ($cases as [$label, $row, $lines, $expected]) {
     if ($actual !== $expected) {
         throw new RuntimeException($label . ' product columns mismatch: ' . json_encode($actual, JSON_UNESCAPED_UNICODE));
     }
+}
+
+// A current category is only displayable when the complete platform hierarchy is valid.
+$path = new ReflectionMethod(CashierV3OrderCenterRecordQueryServices::class, 'platformCategoryPath');
+if (PHP_VERSION_ID < 80100) $path->setAccessible(true);
+$categories = [1 => ['pid' => 0, 'cate_name' => '生美'], 2 => ['pid' => 1, 'cate_name' => '卡项']];
+if ($path->invoke(null, 2, $categories) !== '生美/卡项'
+    || $path->invoke(null, 3, [3 => ['pid' => 9, 'cate_name' => '孤立']]) !== ''
+    || $path->invoke(null, 4, [4 => ['pid' => 5, 'cate_name' => '循环'], 5 => ['pid' => 4, 'cate_name' => '循环']]) !== '') {
+    throw new RuntimeException('platform card category path must reject broken ancestry');
 }
 
 $fields = array_column(CashierV3OrderCenterUnifiedQueryContract::definition('order_center_refund')['fields'], 'key');

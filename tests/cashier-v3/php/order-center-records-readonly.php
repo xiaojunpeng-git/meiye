@@ -94,7 +94,7 @@ recordOk('退款记录只读取收银 V3 退款生命周期事实，不兼容旧
     && strpos($orderCenterSource, "->where('rlo.operation_type', 'refund')") !== false
     && strpos($orderCenterSource, "->where('rlo.status', 'succeeded')") !== false
     && strpos($orderCenterSource, "Db::name('store_order_refund')") === false
-    && strpos($orderCenterSource, "'refundStatus' => '已退款'") !== false);
+    && strpos($orderCenterSource, "'refundStatus' => (string)\$row['status'] === 'voided' ? '已作废' : '已退款'") !== false);
 recordOk('退款页签使用退款记录名称', strpos($orderCenterSource, "['key' => 'refund', 'label' => '退款记录'") !== false);
 recordOk('订单中心投影合同统一升级至退款事实 v3',
     strpos($orderCenterSource, "CONTRACT_VERSION = 'cashier-v3.order-center.v3'") !== false
