@@ -855,6 +855,8 @@ final class CashierV3CheckoutProjectionServices
                 65535,
                 'line.detail_remark_snapshot'
             );
+            // 旧权益单没有导购快照；仅新单的非空选择参与行指纹，保持旧单可读。
+            $entitlementGuides = self::attributionSnapshot($row['guide_selections_json'] ?? null);
             $fingerprintInput = [
                 'authorityKey' => $authorityKey,
                 'sourceKind' => $sourceKind,
@@ -871,6 +873,9 @@ final class CashierV3CheckoutProjectionServices
                 'projectCategoryIdSnapshot' => $categoryId,
                 'projectCategoryNameSnapshot' => $categoryName,
             ];
+            if ($entitlementGuides !== []) {
+                $fingerprintInput['guideSelections'] = $entitlementGuides;
+            }
             if ($detailRemark !== '') {
                 $fingerprintInput['detailRemark'] = $detailRemark;
             }
@@ -913,6 +918,7 @@ final class CashierV3CheckoutProjectionServices
                 'serviceSource' => '卡内项目',
                 'categoryId' => $categoryId,
                 'categoryName' => $categoryName,
+                'guideSelections' => $entitlementGuides,
                 'detailRemark' => $detailRemark,
             ];
         }

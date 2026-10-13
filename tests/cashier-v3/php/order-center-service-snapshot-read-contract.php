@@ -28,6 +28,16 @@ $service = [
     'actual_entitlement_amount_cents' => 3000, 'service_fact_id' => 'ESF-1',
     'service_status' => 'completed',
 ];
+// 权益行只回显本次服务行的导购事实，不把它计入销售金额或销售人。
+$guideLine = $method->invoke($reader, $service, [], [[
+    'employeeId' => 31, 'name' => '测试导购', 'guideRoundNo' => 2,
+]]);
+if (($guideLine['guides'][0]['name'] ?? '') !== '测试导购'
+    || ($guideLine['guides'][0]['guideRoundNo'] ?? null) !== 2
+    || $guideLine['salespeople'] !== []
+    || $guideLine['payableAmount'] !== null) {
+    throw new RuntimeException('entitlement_guide_not_mapped_to_service_line');
+}
 $correctedLine = $method->invoke($reader, array_merge($service, $correctedRows[0]), []);
 if ($correctedLine['unitPrice'] !== 66.0 || $correctedLine['entitlementAmount'] !== 66.0
     || $correctedLine['payableAmount'] !== null) {

@@ -1085,6 +1085,7 @@ final class CashierV3CheckoutSettlementKernel
             ], [
                 'entitlementInstanceType',
                 'craftsmen',
+                'guideSelections',
                 'serviceObject',
                 'friendCountsAsCustomer',
                 'isExperience',
@@ -1175,6 +1176,27 @@ final class CashierV3CheckoutSettlementKernel
                     || !empty($line['friendCountsAsCustomer']) ? 1 : 0,
                 'isExperience' => !empty($line['isExperience']) ? 1 : 0,
             ];
+            // 权益导购只记录到店轮次，不创建销售人、销售经理或金额分配。
+            if (array_key_exists('guideSelections', $line)) {
+                $rawGuides = $line['guideSelections'];
+                if (!is_array($rawGuides) || !self::isList($rawGuides)) {
+                    throw self::failure('entitlement_guide_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                }
+                $guides = [];
+                foreach ($rawGuides as $guide) {
+                    if (!is_array($guide)) {
+                        throw self::failure('entitlement_guide_snapshot_invalid', ['authorityKey' => $authorityKey]);
+                    }
+                    $round = self::nonNegativeInt($guide['guideRoundNo'] ?? $guide['guide_round_no'] ?? 0, 'entitlementLine.guideRoundNo');
+                    if ($round > 3) throw self::failure('entitlement_guide_round_invalid', ['authorityKey' => $authorityKey]);
+                    $guides[] = [
+                        'employeeId' => self::positiveInt($guide['employeeId'] ?? 0, 'entitlementLine.guideEmployeeId'),
+                        'name' => self::text($guide['name'] ?? '', 128, 'entitlementLine.guideName', true),
+                        'guideRoundNo' => $round,
+                    ];
+                }
+                if ($guides !== []) $normalized['guideSelections'] = $guides;
+            }
             if ($instanceType === 'independent_gift') {
                 $normalized['entitlementInstanceType'] = $instanceType;
             }
@@ -1711,7 +1733,9 @@ final class CashierV3CheckoutSettlementKernel
                     $line['craftsmen'] ?? []
                 ),
                 'salespeopleSnapshotJson' => '[]',
-                'guideSelectionsJson' => '[]',
+                'guideSelectionsJson' => array_key_exists('guideSelections', $line)
+                    ? CashierV3CheckoutSettlementCanonicalizer::encode($line['guideSelections'])
+                    : '[]',
                 'salesManagerSelectionsJson' => '[]',
                 'manualLaborFeeCents' => $line['manualLaborFeeCents'] ?? null,
                 'cardPurchaseSnapshotJson' => '[]',

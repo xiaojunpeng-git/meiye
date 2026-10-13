@@ -757,6 +757,16 @@ class CashierV3ActionManifest
             ],
             'correct-sales-order-attribution' => self::attributionCorrectionEventContract('correct-sales-order-attribution'),
             'correct-service-order-date' => self::attributionCorrectionEventContract('correct-service-order-date'),
+            'correct-service-order-guide' => [
+                'required_event_types' => ['service_record.guide_corrected'],
+                'allowed_event_types' => ['service_record.guide_corrected'],
+                'event_rules' => ['service_record.guide_corrected' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'aggregate_type' => 'service_record', 'source_type' => 'correct-service-order-guide',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['service_record.guide_corrected' => []],
+            ],
             'correct-recharge-order-attribution' => self::attributionCorrectionEventContract('correct-recharge-order-attribution'),
             'correct-debt-repayment-date' => self::attributionCorrectionEventContract('correct-debt-repayment-date'),
             'correct-debt-repayment-source' => self::attributionCorrectionEventContract('correct-debt-repayment-source'),

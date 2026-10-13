@@ -46,29 +46,8 @@ final class CashierV3GuideRoundFactServices
         if (count($rounds) !== 1) throw $this->invalid('guide_round_conflict');
         $roundNo = (int)array_key_first($rounds);
         $this->assertCustomerRound((int)$authority['member_id'], $roundNo);
-        // 只把已成功结账且尚未退款/作废的销售单视为轮次历史。草稿、
-        // 失败结账和之后已经撤销的单据均不占用本次导购轮次。
-        $existing = $memberId === 0 ? [] : Db::name(self::TABLE)->alias('guide_fact')
-            ->where('guide_fact.tenant_id', $tenant)
-            ->where('guide_fact.member_id', $memberId)
-            ->where('guide_fact.status', 'effective')
-            ->whereExists(function ($order) {
-                $order->name('cashier_v3_sales_order')->alias('sales_order')
-                    ->whereRaw('sales_order.tenant_id = guide_fact.tenant_id')
-                    ->whereRaw('sales_order.order_id = guide_fact.order_id')
-                    ->where('sales_order.order_status', 'settled')
-                    ->where('sales_order.order_direction', 'forward')
-                    ->where('sales_order.settled_at', '>', 0);
-            })
-            ->whereNotExists(function ($operation) {
-                $operation->name('cashier_v3_order_lifecycle_operation')->alias('lifecycle')
-                    ->whereRaw('lifecycle.tenant_id = guide_fact.tenant_id')
-                    ->whereRaw('lifecycle.source_order_id = guide_fact.order_id')
-                    ->where('lifecycle.source_type', 'sales')
-                    ->where('lifecycle.status', 'succeeded')
-                    ->whereIn('lifecycle.operation_type', ['refund', 'void']);
-            })
-            ->field('guide_fact.*')->lock(true)->select()->toArray();
+        // 销售单和纯权益回执都可占用轮次；失败或已冲销的服务不算历史。
+        $existing = $memberId === 0 ? [] : $this->effectiveHistoryRowsInTx($tenant, $memberId);
         $businessDate = (string)$authority['business_date'];
         foreach ($existing as $row) {
             $round = (int)$row['guide_round_no'];
@@ -192,6 +171,24 @@ final class CashierV3GuideRoundFactServices
         return $query->field('member_id,order_id,source_line_id,business_date,guide_round_no,guide_employee_id,guide_employee_name_snapshot')->select()->toArray();
     }
 
+    /**
+     * A historical correction keeps the checkout intact but may move its
+     * member round. Exclude that checkout's old facts while enforcing the
+     * same cross-date rule as a new successful checkout.
+     */
+    public function assertCorrectionRoundAvailableInTx(string $tenant, int $memberId, string $requestId, int $roundNo, string $businessDate): void
+    {
+        CashierV3TransactionGuard::assertInTransaction('guideRoundFact.assertCorrectionRoundAvailableInTx');
+        $this->assertCustomerRound($memberId, $roundNo);
+        if ($memberId === 0 || $roundNo === 0) return;
+        foreach ($this->effectiveHistoryRowsInTx($tenant, $memberId) as $row) {
+            if ((string)$row['checkout_request_id'] === $requestId) continue;
+            if ((int)$row['guide_round_no'] === $roundNo && (string)$row['business_date'] !== $businessDate) {
+                throw $this->invalid('guide_round_date_conflict:' . (string)$row['business_date']);
+            }
+        }
+    }
+
     private function normalizeSelections(array $selections): array
     {
         $result = [];
@@ -251,7 +248,7 @@ final class CashierV3GuideRoundFactServices
 
     private function effectiveHistoryRowsInTx(string $tenant, int $memberId): array
     {
-        return Db::name(self::TABLE)->alias('guide_fact')
+        $salesRows = Db::name(self::TABLE)->alias('guide_fact')
             ->where('guide_fact.tenant_id', $tenant)
             ->where('guide_fact.member_id', $memberId)
             ->where('guide_fact.status', 'effective')
@@ -272,6 +269,33 @@ final class CashierV3GuideRoundFactServices
                     ->whereIn('lifecycle.operation_type', ['refund', 'void']);
             })
             ->field('guide_fact.*')->lock(true)->select()->toArray();
+        // 权益完成回执不是销售订单。只有回执已完成、对应护理仍有效时，
+        // 才允许其导购轮次占用会员历史，避免服务作废后仍挡住下一次轮次。
+        $entitlementRows = Db::name(self::TABLE)->alias('guide_fact')
+            ->where('guide_fact.tenant_id', $tenant)
+            ->where('guide_fact.member_id', $memberId)
+            ->where('guide_fact.status', 'effective')
+            ->whereExists(function ($receipt) {
+                $receipt->name('cashier_v3_entitlement_completion_receipt')->alias('completion_receipt')
+                    ->whereRaw('completion_receipt.tenant_id = guide_fact.tenant_id')
+                    ->whereRaw('completion_receipt.receipt_id = guide_fact.order_id')
+                    ->where('completion_receipt.status', 'completed');
+            })
+            ->whereExists(function ($service) {
+                $service->name('cashier_v3_entitlement_service_fact')->alias('entitlement_service')
+                    ->whereRaw('entitlement_service.tenant_id = guide_fact.tenant_id')
+                    ->whereRaw('entitlement_service.checkout_request_id = guide_fact.checkout_request_id')
+                    ->whereRaw('entitlement_service.source_line_id = guide_fact.source_line_id')
+                    ->where('entitlement_service.service_status', 'completed')
+                    ->whereNotExists(function ($void) {
+                        $void->name('cashier_v3_service_record_void_operation')->alias('service_void')
+                            ->whereRaw('service_void.tenant_id = entitlement_service.tenant_id')
+                            ->whereRaw('service_void.service_fact_id = entitlement_service.id')
+                            ->where('service_void.status', 'succeeded');
+                    });
+            })
+            ->field('guide_fact.*')->lock(true)->select()->toArray();
+        return array_merge($salesRows, $entitlementRows);
     }
 
     /** 游客只能是“无”；会员可选“无”或第 1～3 轮，服务端按权威身份复核。 */

@@ -876,6 +876,61 @@ checkoutAssert('entitlement-only composition has zero receivable and cash perfor
         && $entitlementOnlyResult['totals']['cashPerformanceAmountCents'] === 0
         && $entitlementOnlyResult['totals']['entitlementActualAmountCents'] === 4000);
 
+// 导购是权益护理的到店归属，不能因此生成销售收款或销售业绩。
+$entitlementWithGuide = $entitlementOnly;
+$entitlementWithGuide['entitlementLines'][0]['guideSelections'] = [[
+    'employeeId' => 101,
+    'name' => '导购甲',
+    'guideRoundNo' => 2,
+]];
+checkoutResign($entitlementWithGuide);
+$entitlementGuideResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 72),
+    $entitlementWithGuide,
+    null,
+    $secret
+);
+checkoutAssert('pure entitlement keeps guide round on its own line without sale money',
+    json_decode((string)($entitlementGuideResult['lineDrafts'][0]['guideSelectionsJson'] ?? ''), true) === [[
+        'employeeId' => 101, 'guideRoundNo' => 2, 'name' => '导购甲',
+    ]]
+        && ($entitlementGuideResult['lineDrafts'][1]['guideSelectionsJson'] ?? '') === '[]'
+        && $entitlementGuideResult['totals']['cashPerformanceAmountCents'] === 0,
+    json_encode(array_column($entitlementGuideResult['lineDrafts'], 'guideSelectionsJson'), JSON_UNESCAPED_UNICODE));
+$entitlementGuideSaved = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 74),
+    $entitlementWithGuide,
+    null,
+    $secret
+);
+$entitlementGuideAggregate = checkoutProjectionAggregate($entitlementGuideSaved);
+$entitlementGuideAggregate['request'] += $couponAggregate['request'];
+$entitlementGuideAggregate['currentRequest'] = [];
+$entitlementGuideAggregate['verifiedSources'] = $couponAggregate['verifiedSources'];
+$rebuiltEntitlementGuide = (new CashierV3CheckoutDraftAuthorityRebuilder())->rebuild(
+    $entitlementGuideAggregate,
+    $entitlementGuideAggregate['workspaceCurrentVersion'],
+    'roles:' . str_repeat('a', 32),
+    1785258003
+);
+// Submission preparation reads persisted draft rows, not the first browser
+// snapshot. Its rebuild must keep the same guide round on the service line.
+checkoutAssert('pure entitlement guide survives saved-draft authority rebuild',
+    ($rebuiltEntitlementGuide['entitlementLines'][0]['guideSelections'][0]['employeeId'] ?? 0) === 101
+    && ($rebuiltEntitlementGuide['entitlementLines'][0]['guideSelections'][0]['guideRoundNo'] ?? 0) === 2
+    && ($rebuiltEntitlementGuide['entitlementLines'][1]['guideSelections'] ?? null) === []);
+$entitlementWithGuide['entitlementLines'][0]['guideSelections'][0]['guideRoundNo'] = 4;
+checkoutResign($entitlementWithGuide);
+checkoutAssert('pure entitlement rejects an out-of-range guide round',
+    checkoutReason(static function () use ($entitlementWithGuide, $secret): void {
+        CashierV3CheckoutSettlementKernel::prepareSubmission(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 73),
+            $entitlementWithGuide,
+            null,
+            $secret
+        );
+    }) === 'entitlement_guide_round_invalid');
+
 $fractionalEntitlement = $entitlementOnly;
 $fractionalEntitlement['entitlementLines'][0]['actualEntitlementAmountCents'] = 155333;
 $fractionalEntitlement['entitlementLines'][1]['actualEntitlementAmountCents'] = 4667;

@@ -667,6 +667,28 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 || ($result['planFingerprint'] ?? null) !== $plan->fingerprint()) {
                 throw self::failure('checkout_entitlement_persistence_authority_mismatch');
             }
+            // 纯权益没有销售单；以已完成的权益回执关联导购事实，失败即回滚核销。
+            $entitlementGuides = self::lockedGuideSelectionsByCheckoutLine(
+                (array)($context->aggregate()['lines'] ?? []), 'entitlement_service'
+            );
+            if ($entitlementGuides !== []) {
+                $this->persistGuideRoundFactsInTx([
+                    'tenant_id' => (string)$request['tenant_id'],
+                    'organization_id' => $context->operatorScope()->organizationId(),
+                    'store_id' => (int)$request['store_id'],
+                    'member_id' => (int)$request['member_id'],
+                    'member_name_snapshot' => (string)($request['member_name_snapshot'] ?? ''),
+                    'order_id' => (string)$result['receiptId'],
+                    'order_no_snapshot' => (string)$result['receiptId'],
+                    'checkout_request_id' => (string)$authority['checkoutRequestId'],
+                    'business_date' => (string)$request['business_date'],
+                    'operator_id' => $context->operatorScope()->operatorId(),
+                    'business_event_no' => (string)($event['event_no'] ?? ''),
+                    'command_idempotency_key' => (string)$authority['commandIdempotencyKey'],
+                    'occurred_at' => (int)$authority['settledAt'],
+                    'recorded_at' => (int)$authority['settledAt'],
+                ], $entitlementGuides, $context->operatorScope(), $context->dataScope());
+            }
             return $result;
         });
     }
@@ -736,9 +758,9 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 'occurred_at' => (int)$authority['settledAt'],
                 'recorded_at' => (int)$authority['settledAt'],
             ];
-            $guideSelectionsByLine = self::lockedGuideSelectionsByCheckoutLine((array)($aggregate['lines'] ?? []));
+            $guideSelectionsByLine = self::lockedGuideSelectionsByCheckoutLine((array)($aggregate['lines'] ?? []), 'sale');
             if ($guideSelectionsByLine !== []) {
-                (new CashierV3GuideRoundFactServices())->persistInTx(
+                $this->persistGuideRoundFactsInTx(
                     $factAuthority,
                     $guideSelectionsByLine,
                     $context->operatorScope(),
@@ -776,11 +798,12 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         });
     }
 
-    private static function lockedGuideSelectionsByCheckoutLine(array $lines): array
+    private static function lockedGuideSelectionsByCheckoutLine(array $lines, string $lineRole = ''): array
     {
         $result = [];
         foreach ($lines as $line) {
             if (!is_array($line)) continue;
+            if ($lineRole !== '' && (string)($line['line_role'] ?? $line['lineRole'] ?? '') !== $lineRole) continue;
             $lineId = trim((string)($line['line_id'] ?? $line['line_key'] ?? $line['checkout_line_id'] ?? $line['id'] ?? ''));
             if ($lineId === '') continue;
             $raw = $line['guide_selections_json'] ?? $line['guideSelections'] ?? $line['guide_selections'] ?? [];
@@ -793,6 +816,32 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
             $result[$lineId] = array_values($raw);
         }
         return $result;
+    }
+
+    /** 轮次规则失败必须作为可理解的结账失败返回，且由外层事务整体回滚。 */
+    private function persistGuideRoundFactsInTx(
+        array $authority,
+        array $selectionsByLine,
+        CashierV3OperatorScope $operatorScope,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        try {
+            (new CashierV3GuideRoundFactServices())->persistInTx(
+                $authority, $selectionsByLine, $operatorScope, $dataScope
+            );
+        } catch (\InvalidArgumentException $exception) {
+            $reason = $exception->getMessage();
+            $message = '导购轮次保存失败，本次结账已回滚。';
+            if (preg_match('/^guide_round_date_conflict:(\d{4}-\d{2}-\d{2})$/D', $reason, $matches)) {
+                $message = '该会员已于 ' . $matches[1] . ' 使用本轮导购，请选择其他轮次。';
+            }
+            throw new CashierV3CommandException(
+                CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                $message,
+                CashierV3ResultCode::STATUS_FAILED,
+                ['reason' => $reason]
+            );
+        }
     }
 
     private static function lockedSalesManagerSelectionsByCheckoutLine(array $lines): array

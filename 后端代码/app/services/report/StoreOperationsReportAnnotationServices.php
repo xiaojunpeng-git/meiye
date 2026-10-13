@@ -173,6 +173,18 @@ final class StoreOperationsReportAnnotationServices
             $sourceFactId = 0;
             $sourceOrderId = (string)$resolved['source_order_id'];
             $sourceLineId = '';
+        } elseif ($reportCode === 'field_acquisition_detail' && $subjectType === 'business_event_line') {
+            // 纯权益护理行不能借用销售行键；保存手动字段前反查真实服务与参与权限。
+            if (strpos($subjectKey, 'service:') !== 0) throw new \InvalidArgumentException('地推护理行键无效');
+            $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
+                $scope['tenant_id'], $subjectType, $subjectKey,
+                $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
+            );
+            if ($resolved === null) throw new \InvalidArgumentException('地推护理记录不存在或无权编辑');
+            $storeId = (int)$resolved['store_id'];
+            $sourceFactId = (int)$resolved['source_fact_id'];
+            $sourceOrderId = (string)$resolved['source_order_id'];
+            $sourceLineId = (string)$resolved['source_line_id'];
         } elseif ($reportCode === 'six_dimension_consumption_refund_detail') {
             if ($subjectType !== 'business_event_line') {
                 throw new \InvalidArgumentException('客诉数量必须绑定真实业务事件');

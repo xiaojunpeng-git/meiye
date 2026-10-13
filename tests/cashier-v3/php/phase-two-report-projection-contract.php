@@ -36,7 +36,7 @@ foreach ([
     'MAX(guide_round.guide_round_no) guide_round_no',
     '$cashSlot = (int)($row[\'guide_round_no\'] ?? 0)',
     '$row[\'cash_none\'] = $this->money($cashSlot === 0',
-    '$row[\'cash_\'.$i] = $this->money($cashSlot === $i',
+    '$row[\'cash_\'.$round]=$this->money($cashSlot===$round',
     "'cash_none'=>'无轮次现金业绩','cash_1'=>'第一次现金业绩'",
     "['labor_fee','cash_none','cash_1','cash_2','cash_3']",
 ] as $needle) {
@@ -45,9 +45,23 @@ foreach ([
 if (strpos($service, '$saleSlots[') !== false) {
     throw new RuntimeException('field acquisition cash must not fall back to sale order position without a guide round');
 }
-if (strpos($service, "'source_explanation']='本笔地推销售选择导购第'") === false
-    || strpos($service, "field-acquisition-guide-round-v3") === false) {
+if (strpos($service, "'本笔地推销售选择导购第'") === false
+    || strpos($service, '补交只计入补交发生的月份') === false
+    || strpos($service, "field-acquisition-service-only-v5") === false) {
     throw new RuntimeException('field acquisition round explanation and metric version must come from the backend');
+}
+// 护理来源与轮次以服务当次结账为准，不能把同会员的其他来源护理顺排进前三轮。
+foreach ([
+    "'none'=>'无轮次',1=>'第一次'",
+    "'visit_'.\$slot.'_date'",
+    "'first_e_visit_date'",
+    "'cashier_v3_checkout_business_source_selection'",
+    "'cashier_v3_customer_guide_round_fact'",
+    'StoreCustomerVisitEligibility::filter($allServices)',
+    "->where('standalone_request.composition','entitlement_only')",
+    "'service:'.(string)\$row['service_fact_id']",
+] as $needle) {
+    if (strpos($service, $needle) === false) throw new RuntimeException('field acquisition E-source service round contract missing: ' . $needle);
 }
 foreach ([
     "array_merge(\$input, ['_internal_all' => true, 'page' => 1])",

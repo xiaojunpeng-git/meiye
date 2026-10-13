@@ -36,6 +36,22 @@ final class CashierV3OrderLifecycleModule
             return ['data' => ['attributionChanges' => $attribution->history((array)($scope['payload'] ?? []),
                 $scope['operator_scope'], $scope['data_scope'])], 'message' => '变更记录已读取。'];
         });
+        // 纯权益没有销售主单，导购更正使用服务行自身的权威事实和乐观旧值校验。
+        $serviceGuide = new CashierV3ServiceGuideCorrectionServices();
+        $dispatcher->handlers()->registerProjection('open-service-order-guide-correction', static function (array $scope) use ($serviceGuide): array {
+            return ['data' => ['serviceGuideCorrection' => $serviceGuide->entry(
+                (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],
+                'message' => '当前导购已读取。'];
+        });
+        $dispatcher->handlers()->registerCommand('correct-service-order-guide', static function (array $scope) use ($serviceGuide): array {
+            $result = $serviceGuide->executeInTx($scope);
+            return ['data' => ['serviceGuideCorrection' => $result], 'business_no' => (string)$result['operationId'],
+                'touched' => ['order_center'], 'message' => '导购已修改。'];
+        });
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('correct-service-order-guide', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
         $service = new CashierV3OrderLifecycleServices($workspace, new CashierV3SaleCatalogServices());
         $importedCardRefund = new CashierV3ImportedCardRefundServices();
         $unifiedRefund = new CashierV3UnifiedRefundServices();
