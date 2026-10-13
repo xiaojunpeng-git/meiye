@@ -67,6 +67,12 @@ final class AiAnswerRenderer
                     }
                     $conditionSummary.=' 资产金额为查询时的当前值。';
                 }
+                if (isset($set['sort'])) {
+                    $sort=$set['sort'];$label=$dictionary->getTooltip($sort['metric_code']);
+                    if (empty($label['user_ready'])) throw new RuntimeException('AI_EVIDENCE_INVALID');
+                    $conditionSummary.=' 按'.$label['name'].($sort['direction']==='desc'?'从高到低':'从低到高')
+                        .'排序，结果取前'.($sort['limit']??20).'人。';
+                }
                 $conditionObjectLabel=$this->conditionObjectLabel($subject,$row);
                 if ($shape==='condition_list') {
                     if (!is_array($row['rows']??null)) throw new RuntimeException('AI_EVIDENCE_INVALID');
@@ -287,7 +293,9 @@ final class AiAnswerRenderer
         if ($member && $shape === 'ranking') {
             if ($rows) $notes[] = '仅按所选指标排名；相同数值并列。';
         }
-        if ($conditionListHasMore) $notes[]='符合条件的结果较多，当前展示前'.$conditionListLimit.'条；总数以结论中的精确数量为准。';
+        if ($conditionListHasMore) $notes[]=isset($view['query']['condition_set']['sort'])
+            ?'符合条件的结果较多，列表按指定顺序仅展示所选前列；总数以结论中的精确数量为准。'
+            :'符合条件的结果较多，当前展示前'.$conditionListLimit.'条；总数以结论中的精确数量为准。';
         if ($breakdownHiddenZeroCount>0) $notes[]='已隐藏'.$breakdownHiddenZeroCount.$this->objectCounter($breakdownObjectLabel??'对象').'0值'.($breakdownObjectLabel??'对象').'。';
         if ($breakdownHasMore) $notes[]='原查询结果只保留了部分明细，请重新提问以获取完整明细。';
         if ($dimensionLabel !== null && $shape==='ranking') {
@@ -319,7 +327,11 @@ final class AiAnswerRenderer
         $answer['presentation'] = $this->presentation($shape, $facts, $conclusion, $periodLabel, $notes, $objectKind);
         // Screen paging is a presentation concern. The signed Reader view
         // retains every row for the independent file worker and follow-ups.
-        return $screenLimit ? self::limitTables($answer,!$conditionListHasMore&&!$breakdownHasMore) : $answer;
+        $topSelectionComplete=$shape==='condition_list' && isset($view['query']['condition_set']['sort']);
+        return $screenLimit ? self::limitTables($answer,
+            (!$conditionListHasMore||$topSelectionComplete)&&!$breakdownHasMore,
+            $topSelectionComplete?'所选前'.($view['query']['condition_set']['sort']['limit']??20).'人的完整明细':'完整明细'
+        ) : $answer;
     }
 
     /** A display label only: never replace the underlying business_date fact. */
@@ -331,7 +343,7 @@ final class AiAnswerRenderer
     }
 
     /** Cap each final business table, never its backing evidence or export. */
-    public static function limitTables(array $answer,bool $sourceComplete=true): array
+    public static function limitTables(array $answer,bool $sourceComplete=true,string $fileDescription='完整明细'): array
     {
         $needsFile=false;
         if (isset($answer['table']['rows']) && is_array($answer['table']['rows'])) {
@@ -344,12 +356,12 @@ final class AiAnswerRenderer
         }
         foreach ($answer['sections']??[] as $index=>$section) {
             if (!is_array($section)||!is_array($section['answer']??null)) continue;
-            $answer['sections'][$index]['answer']=self::limitTables($section['answer'],$sourceComplete);
+            $answer['sections'][$index]['answer']=self::limitTables($section['answer'],$sourceComplete,$fileDescription);
             $needsFile=$needsFile||!empty($answer['sections'][$index]['answer']['auto_export_required']);
         }
         if ($needsFile) {
             $answer['auto_export_required']=true;
-            $note='页面仅展示前20条；完整明细另行生成 Excel。';
+            $note='页面仅展示前20条；'.$fileDescription.'另行生成 Excel。';
             // Collection summaries already contain their child summaries;
             // repeating the file notice adds noise without new information.
             if (strpos((string)$answer['summary'],$note)===false) $answer['summary'].=' '.$note;
@@ -453,9 +465,11 @@ final class AiAnswerRenderer
         $set=$query['condition_set']??null;$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
         $hasExpression=in_array('expression',$keys,true);
         $hasResults=in_array('result_metric_codes',$keys,true);
+        $hasSort=in_array('sort',$keys,true);
         $expected=['conditions','relation','subject'];
         if ($hasExpression) $expected[]='expression';
         if ($hasResults) $expected[]='result_metric_codes';
+        if ($hasSort) $expected[]='sort';
         sort($expected,SORT_STRING);
         if ($keys!==$expected||!is_string($set['subject']??null)
             ||!preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$set['subject'])||!in_array($set['relation']??null,['all','any'],true)
@@ -480,6 +494,16 @@ final class AiAnswerRenderer
                     ||($contract['threshold_count']['aggregation']??null)!=='current_state') {
                     throw new RuntimeException('AI_EVIDENCE_INVALID');
                 }
+            }
+        }
+        if ($hasSort) {
+            $sort=$set['sort'];$sortKeys=is_array($sort)?array_keys($sort):[];sort($sortKeys,SORT_STRING);
+            if (($query['query_shape']??null)!=='condition_list'||!$hasResults
+                ||$sortKeys!==['direction','limit','metric_code']
+                ||!in_array($sort['metric_code']??null,$set['result_metric_codes'],true)
+                ||!in_array($sort['direction']??null,['asc','desc'],true)
+                ||(($sort['limit']??null)!==null && (!is_int($sort['limit'])||$sort['limit']<1||$sort['limit']>100))) {
+                throw new RuntimeException('AI_EVIDENCE_INVALID');
             }
         }
         return $set;

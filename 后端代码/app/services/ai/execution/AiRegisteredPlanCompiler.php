@@ -239,9 +239,11 @@ final class AiRegisteredPlanCompiler
             $set=$query['condition_set'];$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
             $hasExpression=in_array('expression',$keys,true);
             $hasResults=in_array('result_metric_codes',$keys,true);
+            $hasSort=in_array('sort',$keys,true);
             $expectedKeys=['conditions','relation','subject'];
             if ($hasExpression) $expectedKeys[]='expression';
             if ($hasResults) $expectedKeys[]='result_metric_codes';
+            if ($hasSort) $expectedKeys[]='sort';
             sort($expectedKeys,SORT_STRING);
             $conditionSubject=$set['subject']??null;
             $expectedFilters=$conditionSubject==='person'
@@ -277,6 +279,9 @@ final class AiRegisteredPlanCompiler
                 }
                 $metrics=array_merge($metrics,$set['result_metric_codes']);
             }
+            if ($hasSort && ($query['query_shape']!=='condition_list'||!$hasResults
+                ||!is_array($set['sort'])||!in_array($set['sort']['metric_code']??null,
+                    $set['result_metric_codes'],true))) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if (array_values(array_unique($metrics))!==$query['metric_codes']) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             if (!is_array($query['aggregate_condition'])) AiRegistryValue::fail('AI_UNSUPPORTED_CONDITION');
             try {

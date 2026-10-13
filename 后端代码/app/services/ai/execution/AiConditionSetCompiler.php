@@ -18,9 +18,11 @@ final class AiConditionSetCompiler
         $keys=array_keys($binding);sort($keys,SORT_STRING);
         $hasExpression=in_array('expression',$keys,true);
         $hasResults=in_array('result_metric_codes',$keys,true);
+        $hasSort=in_array('sort',$keys,true);
         $expected=['conditions','relation','result_form','subject'];
         if ($hasExpression) $expected[]='expression';
         if ($hasResults) $expected[]='result_metric_codes';
+        if ($hasSort) $expected[]='sort';
         sort($expected,SORT_STRING);
         if ($keys!==$expected
             ||!in_array($binding['relation']??null,['all','any'],true)
@@ -97,6 +99,19 @@ final class AiConditionSetCompiler
                     ||($contract['storage_unit']??null)!=='fen') $this->fail('AI_QUERY_SHAPE_NOT_READY');
             }
             $set['result_metric_codes']=$results;
+        }
+        if ($hasSort) {
+            $sort=$binding['sort'];$sortKeys=is_array($sort)?array_keys($sort):[];sort($sortKeys,SORT_STRING);
+            // A sorted list must order by a registered current asset already
+            // requested as a return metric of that same authorized cohort.
+            if ($operation!=='condition_list'||$binding['subject']!=='member'||!$hasResults
+                ||$sortKeys!==['direction','limit','metric_code']
+                ||!in_array($sort['direction']??null,['asc','desc'],true)
+                ||!in_array($sort['metric_code']??null,$set['result_metric_codes'],true)
+                ||(($sort['limit']??null)!==null && (!is_int($sort['limit'])||$sort['limit']<1||$sort['limit']>100))) {
+                $this->fail('AI_UNSUPPORTED_CONDITION');
+            }
+            $set['sort']=$sort;
         }
         return $set;
     }

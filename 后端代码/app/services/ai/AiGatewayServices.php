@@ -6029,13 +6029,12 @@ final class AiGatewayServices
      */
     private function applyUniqueRegisteredMetricTermBinding(array $intent,array $understanding,array $summaries,?array $sourceQuery,array $safeQuestion): array
     {
-        // A complete accepted condition set owns a positional metric for
-        // every predicate. The single-exact-title recovery below must never
-        // collapse that set to one attractive registry term and leave an
-        // inconsistent query for the plan compiler to reject.
+        // A complete accepted condition set owns every predicate and any
+        // requested return metric, even when it has only one predicate. The
+        // single-title recovery below must never collapse that carrier.
         if (in_array($intent['operation']??null,['condition_count','condition_list'],true)
             && is_array($intent['aggregate_condition']['conditions']??null)
-            && count($intent['aggregate_condition']['conditions'])>1) return $intent;
+            && $intent['aggregate_condition']['conditions']!==[]) return $intent;
         $requirements=[];
         foreach ((array)($understanding['requirements']??[]) as $requirement) {
             if (is_array($requirement) && in_array('metric_codes',(array)($requirement['fields']??[]),true)) $requirements[]=$requirement;

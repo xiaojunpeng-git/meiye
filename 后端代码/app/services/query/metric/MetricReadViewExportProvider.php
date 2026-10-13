@@ -238,6 +238,18 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
         if ($resultCodes!==[] && (!is_array($totals)||array_keys($totals)!==$resultCodes)) {
             throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
         }
+        $sortLabel='';
+        if (isset($set['sort'])) {
+            $sort=$set['sort'];$sortCode=$sort['metric_code']??null;
+            $contract=is_string($sortCode)?($capabilities[$sortCode]??null):null;
+            if ($shape!=='condition_list'||!is_array($contract)
+                ||!in_array($sortCode,$resultCodes,true)
+                ||!in_array($sort['direction']??null,['asc','desc'],true)
+                ||($result['list_limit']??null)!==($sort['limit']??20)) {
+                throw new \RuntimeException('METRIC_EXPORT_RESULT_INVALID');
+            }
+            $sortLabel=$contract['name'].' '.($sort['direction']==='desc'?'从高到低':'从低到高');
+        }
         if ($shape==='condition_count') {
             self::append($rows,['metric_name'=>$sourceFilter?'首次疗程来源会员数':'符合条件的'.$objectLabel.'数量',
                 'period_name'=>$periodScoped?'按各条件期间':'本期',
@@ -284,7 +296,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
                 $base=['metric_name'=>$contract['name'],'period_name'=>$periodName,
                     'start_date'=>$conditionRange['start'],'end_date'=>$conditionRange['end'],
                     'store_name'=>$object[$nameKey].'；范围：'.($sourceFilter?$sourceLabel.'；':'').'当前授权范围',
-                    'ranking_direction'=>'','business_date'=>'','unit'=>$unit];
+                    'ranking_direction'=>$sortLabel,'business_date'=>'','unit'=>$unit];
                 if ($value===null && ($contract['threshold_count']['aggregation']??null)==='as_of_age_days') {
                     $rows[]=array_merge(['row_id'=>(string)(count($rows)+1)],$base,['metric_value'=>'未记录']);
                 } else self::append($rows,$base,$value,(string)$contract['storage_unit']);
@@ -297,7 +309,7 @@ final class MetricReadViewExportProvider implements UnifiedQueryProvider
                 self::append($rows,['metric_name'=>$contract['name'],'period_name'=>'当前',
                     'start_date'=>$range['end'],'end_date'=>$range['end'],
                     'store_name'=>$object[$nameKey].'；范围：当前授权范围',
-                    'ranking_direction'=>'','business_date'=>'','unit'=>'元'],$value,'fen');
+                    'ranking_direction'=>$sortLabel,'business_date'=>'','unit'=>'元'],$value,'fen');
             }
         }
     }

@@ -96,10 +96,13 @@ $memberRows=Db::name('store_user')->alias('su')->join('user u','u.uid=su.uid')
     ->where('su.store_id',$largerStore)->distinct(true)->field('su.uid')->order('su.uid','asc')
     ->select()->toArray();
 $memberIds=array_map('intval',array_column($memberRows,'uid'));
-$expectedCents=0;
+$expectedCents=0;$assetById=[];
 foreach (array_chunk($memberIds,100) as $batch) {
     foreach ((new MemberCurrentAssetMetricReadServices())->values('0',[$largerStore],$batch,
-        ['member_total_assets']) as $assets) $expectedCents+=$assets['member_total_assets'];
+        ['member_total_assets']) as $memberId=>$assets) {
+        $assetById[(int)$memberId]=$assets['member_total_assets'];
+        $expectedCents+=$assets['member_total_assets'];
+    }
 }
 $largerCohort=['subject'=>'member','relation'=>'all','conditions'=>[
     ['metric_code'=>'member_account_balance','operator'=>'gte','value'=>0],
@@ -110,6 +113,35 @@ if ($largerCount['count']!==count($memberIds)
     throw new RuntimeException('CROSS_BATCH_COHORT_TOTAL_DRIFT');
 }
 echo "PASS local cross-batch cohort: exact count and assets total include all authorized members\n";
+// Ranking is computed over all 141 authorized members, with member ID as
+// the deterministic tie break. A first-batch sort cannot satisfy this check.
+foreach (['desc'=>5,'asc'=>3] as $direction=>$take) {
+    $expectedIds=array_keys($assetById);
+    usort($expectedIds,static function(int $left,int $right)use($assetById,$direction):int {
+        $compare=$assetById[$left]<=>$assetById[$right];
+        return $compare===0?($left<=>$right):($direction==='desc'?- $compare:$compare);
+    });
+    $sortedSet=$largerCohort;
+    $sortedSet['sort']=['metric_code'=>'member_total_assets','direction'=>$direction,'limit'=>$take];
+    $sorted=$reader->conditionMembers('0',[$largerStore],$range,$sortedSet,$take);
+    if ($sorted['count']!==count($memberIds)
+        ||$sorted['result_totals']!==['member_total_assets'=>$expectedCents]
+        ||array_column($sorted['rows'],'member_id')!==array_slice($expectedIds,0,$take)
+        ||$sorted['has_more']!==true) throw new RuntimeException('CROSS_BATCH_COHORT_SORT_DRIFT');
+}
+$openSort=$largerCohort;
+$openSort['sort']=['metric_code'=>'member_total_assets','direction'=>'desc','limit'=>null];
+$openResult=$reader->conditionMembers('0',[$largerStore],$range,$openSort,20);
+$expectedOpenIds=array_keys($assetById);
+usort($expectedOpenIds,static function(int $left,int $right)use($assetById):int {
+    $compare=$assetById[$right]<=>$assetById[$left];
+    return $compare===0?($left<=>$right):$compare;
+});
+if ($openResult['count']!==count($memberIds)||$openResult['limit']!==20
+    ||array_column($openResult['rows'],'member_id')!==array_slice($expectedOpenIds,0,20)) {
+    throw new RuntimeException('OPEN_COHORT_SORT_DRIFT');
+}
+echo "PASS local cross-batch sorted cohort: both directions use the full authorized population\n";
 // Compare repeated lower/upper predicates to the same authority values from
 // the already enumerated member population; no SQL fact multiplication or
 // first-page-only count may change the answer.

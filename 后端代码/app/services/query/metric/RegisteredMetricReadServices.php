@@ -145,6 +145,9 @@ final class RegisteredMetricReadServices
             || !in_array($conditionSet['relation'] ?? null, ['all', 'any'], true)
             || !is_array($conditionSet['conditions'] ?? null) || count($conditionSet['conditions']) < 1
             || count($conditionSet['conditions']) > MetricDefinitionRegistry::MAX_CONDITIONS) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        if (array_key_exists('sort',$conditionSet) && !isset($conditionSet['result_metric_codes'])) {
+            $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
 
         if (isset($conditionSet['expression']) && (!MetricConditionExpression::valid(
             $conditionSet['expression'],count($conditionSet['conditions'])
@@ -345,6 +348,15 @@ final class RegisteredMetricReadServices
                 ||!in_array($definition['reader_strategy'],['member_current_assets','member_current_rights_amount'],true)
                 ||($definition['storage_unit']??null)!=='fen') $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         }
+        $sort=$set['sort']??null;
+        if ($sort!==null) {
+            $sortKeys=is_array($sort)?array_keys($sort):[];sort($sortKeys,SORT_STRING);
+            if ($sortKeys!==['direction','limit','metric_code']||$limit<1
+                ||!in_array($sort['metric_code']??null,$resultCodes,true)
+                ||!in_array($sort['direction']??null,['asc','desc'],true)
+                ||(($sort['limit']??null)!==null && (!is_int($sort['limit'])||$sort['limit']<1||$sort['limit']>100))
+                ||$limit!==($sort['limit']??20)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
+        }
         $resultTotals=array_fill_keys($resultCodes,0);
         $periodScoped=false;
         foreach ($conditions as $condition) {
@@ -508,9 +520,20 @@ final class RegisteredMetricReadServices
                 }
                 unset($row);
             }
-            foreach ($qualifiedRows as $row) if ($limit>0 && count($rows)<$limit) $rows[]=$row;
+            if ($sort!==null) {
+                // Keep only the best bounded preview after comparing every
+                // qualified member; sorting the first SQL page would lie.
+                $rows=array_merge($rows,array_values($qualifiedRows));
+                usort($rows,static function(array $left,array $right)use($sort):int {
+                    $code=$sort['metric_code'];
+                    $comparison=$left['metrics'][$code]<=>$right['metrics'][$code];
+                    if ($comparison!==0) return $sort['direction']==='desc' ? -$comparison : $comparison;
+                    return $left['member_id']<=>$right['member_id'];
+                });
+                if (count($rows)>$limit) $rows=array_slice($rows,0,$limit);
+            } else foreach ($qualifiedRows as $row) if ($limit>0 && count($rows)<$limit) $rows[]=$row;
         } while (($candidateIds===null?count($members):count($candidateIds))===100);
-        if ($limit>=self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
+        if ($sort===null && $limit>=self::AI_DETAIL_LIMIT && $count>$limit) $this->fail('METRIC_GROUP_OUTPUT_TOO_LARGE');
         $result=['count'=>$count,'rows'=>$rows,'limit'=>$limit,'has_more'=>$count>count($rows)];
         if ($resultCodes!==[]) $result['result_totals']=$resultTotals;
         return $result;

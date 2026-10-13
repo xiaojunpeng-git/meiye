@@ -6,6 +6,7 @@ use app\services\ai\execution\AiConditionSetCompiler;
 use app\services\ai\execution\AiWorkflowPlanner;
 use app\services\ai\contract\AiIntentUnderstandingContract;
 use app\services\ai\contract\AiIntentResultContract;
+use app\services\ai\AiGatewayServices;
 use app\services\ai\context\IntentContextMerger;
 use app\services\ai\presentation\AiAnswerRenderer;
 use app\services\query\metric\GroupPerformanceMetricReadServices;
@@ -187,6 +188,57 @@ csCheck(strpos($cohortAnswer['summary'],'会员总资产合计1,250元')!==false
 $cohortExport=MetricReadViewExportProvider::project($cohortEvidence);
 csCheck(count($cohortExport)===6 && in_array('会员总资产',array_column($cohortExport,'metric_name'),true),
     'cohort list export retains extra registered asset values for each matching member');
+$sortedQuery=$cohortQuery;
+$sortedQuery['aggregate_condition']['sort']=[
+    'metric_code'=>'member_total_assets','direction'=>'desc','limit'=>2,
+];
+$sortedQuery['condition_set']=(new AiConditionSetCompiler())->compile(
+    $sortedQuery['aggregate_condition'],['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_list'
+);
+$compiledSort=(new AiRegisteredPlanCompiler())->compile(['query'=>$sortedQuery,'output_format'=>'screen'],$cohortCaps)
+    ['query']['condition_set']['sort'];
+$readerSort=$normalizeMetricQuery($views,$sortedQuery)['condition_set']['sort'];
+csCheck($compiledSort==$sortedQuery['aggregate_condition']['sort']
+    &&$readerSort==$sortedQuery['aggregate_condition']['sort'],
+    'sorted cohort retains its registered current-asset key through signed plan and Reader contract');
+$sortedResult=$cohortResult;
+$sortedResult['condition_set']=$sortedQuery['condition_set'];
+$sortedResult['list_limit']=2;
+$sortedEvidence=['query'=>$sortedQuery,'results'=>[$sortedResult]];
+$sortedAnswer=(new AiAnswerRenderer())->render($sortedEvidence);
+$sortedExport=MetricReadViewExportProvider::project($sortedEvidence);
+csCheck(strpos($sortedAnswer['summary'],'会员总资产从高到低排序')!==false
+    &&($sortedAnswer['table']['rows'][0]['label']??null)==='甲会员'
+    &&($sortedExport[0]['ranking_direction']??null)==='会员总资产 从高到低',
+    'sorted answer and export state the registered order while retaining cohort totals');
+$tenQuery=$sortedQuery;$tenQuery['aggregate_condition']['sort']['limit']=10;
+$tenQuery['condition_set']['sort']['limit']=10;
+$tenResult=$sortedResult;$tenResult['condition_set']=$tenQuery['condition_set'];
+$tenResult['count']=10;$tenResult['list_limit']=10;$tenResult['has_more']=false;$tenResult['rows']=[];
+$tenResult['result_totals']=['member_total_assets'=>0,'member_account_balance'=>0];
+for ($index=1;$index<=10;$index++) {
+    $assets=100000-$index*1000;$balance=60000-$index*500;
+    $tenResult['rows'][]=['member_id'=>$index,'member_name'=>'会员'.$index,'metrics'=>[
+        'sales_collected_amount'=>200000,'member_total_assets'=>$assets,'member_account_balance'=>$balance,
+    ]];
+    $tenResult['result_totals']['member_total_assets']+=$assets;
+    $tenResult['result_totals']['member_account_balance']+=$balance;
+}
+$tenAnswer=(new AiAnswerRenderer())->render(['query'=>$tenQuery,'results'=>[$tenResult]]);
+csCheck(($tenAnswer['auto_export_required']??false)===true
+    &&count($tenAnswer['table']['rows'])===20
+    &&strpos($tenAnswer['summary'],'所选前10人的完整明细另行生成 Excel')!==false,
+    'a complete requested top ten remains exportable when three visible metrics exceed the screen row cap');
+csReject(static function()use($sortedQuery):void {
+    $wrong=$sortedQuery['aggregate_condition'];$wrong['sort']['metric_code']='sales_collected_amount';
+    (new AiConditionSetCompiler())->compile($wrong,
+        ['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_list');
+},'AI_UNSUPPORTED_CONDITION');
+csReject(static function()use($sortedQuery):void {
+    $wrong=$sortedQuery['aggregate_condition'];$wrong['result_form']='count';
+    (new AiConditionSetCompiler())->compile($wrong,
+        ['metric_readiness'=>MetricReadViewServices::metricCapabilities()],'condition_count');
+},'AI_UNSUPPORTED_CONDITION');
 $cohortCount=$cohortQuery;$cohortCount['query_shape']='condition_count';
 $cohortCount['aggregate_condition']['result_form']='count';
 $cohortCountResult=$cohortResult;unset($cohortCountResult['rows'],$cohortCountResult['list_limit'],$cohortCountResult['has_more']);
@@ -1026,6 +1078,53 @@ $cohortBound=AiIntentResultContract::normalize($cohortCandidate,
 csCheck($cohortBound['metric_codes']===['member_account_balance','member_total_assets']
     &&($cohortBound['aggregate_condition']['result_metric_codes']??null)===['member_total_assets'],
     'binding maps both explicit metric terms without turning the returned asset into a predicate');
+$lateRebinder=new ReflectionMethod(AiGatewayServices::class,'applyUniqueRegisteredMetricTermBinding');
+$lateGateway=(new ReflectionClass(AiGatewayServices::class))->newInstanceWithoutConstructor();
+csCheck($lateRebinder->invoke($lateGateway,$cohortBound,$cohortSemantic,[],null,$cohortSafe)===$cohortBound,
+    'gateway single-title repair cannot collapse one predicate plus an independent result metric');
+$sortedSafe=$cohortSafe;
+$sortedSafe['question']='余额超过500元的会员按总资产从高到低列出前2名';
+$sortedSafe['evidence_messages'][0]['text']=$sortedSafe['question'];
+$sortedSemantic=$cohortSemantic;
+$sortedSemantic['goal']='列出余额超过500元的会员并按总资产排序';
+$sortedSemantic['requirements'][0]['meaning']=$sortedSafe['question'];
+$sortedSemantic['requirements'][0]['evidence'][0]['quote']=$sortedSafe['question'];
+$sortedSemantic['requirements'][0]['values']['operation']='condition_list';
+$sortedSemantic['requirements'][0]['values']['aggregate_condition']['result_form']='list';
+$sortedSemantic['requirements'][0]['values']['aggregate_condition']['sort']=[
+    'metric_term'=>'总资产','direction'=>'desc','limit'=>2,
+];
+$sortedSemantic=AiIntentUnderstandingContract::normalize($sortedSemantic,$sortedSafe);
+csReject(static function()use($sortedSemantic,$sortedSafe):void {
+    $wrong=$sortedSemantic;
+    $wrong['requirements'][0]['values']['aggregate_condition']['sort']['metric_term']='权益金额';
+    AiIntentUnderstandingContract::normalize($wrong,$sortedSafe);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
+csReject(static function()use($sortedSemantic,$sortedSafe):void {
+    $wrong=$sortedSemantic;
+    $wrong['requirements'][0]['values']['aggregate_condition']['sort']['direction']='sideways';
+    AiIntentUnderstandingContract::normalize($wrong,$sortedSafe);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
+$sortedCandidate=AiIntentResultContract::canonicalizeUniqueExactMetricBinding(
+    $cohortCandidate,$sortedSemantic,$sortedSafe,['member_account_balance','member_total_assets']
+);
+$sortedBound=AiIntentResultContract::normalize($sortedCandidate,
+    ['member_account_balance','member_total_assets'],[],$sortedSafe,$sortedSemantic);
+csCheck($sortedBound['operation']==='condition_list'
+    &&($sortedBound['aggregate_condition']['sort']??null)===[
+        'metric_code'=>'member_total_assets','direction'=>'desc','limit'=>2,
+    ] &&$sortedBound['ranking']===['direction'=>'unspecified','limit'=>null],
+    'filtered member ordering keeps a bound result metric within the cohort carrier');
+csReject(static function()use($sortedCandidate,$sortedSafe,$sortedSemantic):void {
+    $wrong=$sortedCandidate;$wrong['aggregate_condition']['sort']['metric_code']='member_account_balance';
+    AiIntentResultContract::normalize($wrong,
+        ['member_account_balance','member_total_assets'],[],$sortedSafe,$sortedSemantic);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
+csReject(static function()use($sortedCandidate,$sortedSafe,$sortedSemantic):void {
+    $wrong=$sortedCandidate;$wrong['aggregate_condition']['sort']['direction']='asc';
+    AiIntentResultContract::normalize($wrong,
+        ['member_account_balance','member_total_assets'],[],$sortedSafe,$sortedSemantic);
+},'AI_MODEL_INTENT_CONTRACT_INVALID');
 csReject(static function()use($cohortCandidate,$cohortSafe,$cohortSemantic):void {
     $wrong=$cohortCandidate;
     $wrong['aggregate_condition']['result_metric_codes']=['member_account_balance'];

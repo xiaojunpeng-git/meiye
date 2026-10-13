@@ -486,8 +486,9 @@ final class MetricReadViewServices
                 // Other condition sets retain their existing full-view limit.
                 $rightsOnly=count($conditionSet['conditions'])===1
                     && ($conditionSet['conditions'][0]['metric_code']??null)==='member_remaining_project_amount';
-                $listLimit=$rightsOnly?20
-                    :RegisteredMetricReadServices::AI_DETAIL_LIMIT;
+                $listLimit=isset($conditionSet['sort'])
+                    ?($conditionSet['sort']['limit']??20)
+                    :($rightsOnly?20:RegisteredMetricReadServices::AI_DETAIL_LIMIT);
                 $population=$reader->conditionMembers(
                     $binding['tenant_id'],$binding['store_ids'],$range,$conditionSet,
                     $shape==='condition_list'?$listLimit:0
@@ -807,9 +808,11 @@ final class MetricReadViewServices
             $set=$query['condition_set'];$keys=is_array($set)?array_keys($set):[];sort($keys,SORT_STRING);
             $hasExpression=in_array('expression',$keys,true);
             $hasResults=in_array('result_metric_codes',$keys,true);
+            $hasSort=in_array('sort',$keys,true);
             $expectedKeys=['conditions','relation','subject'];
             if ($hasExpression) $expectedKeys[]='expression';
             if ($hasResults) $expectedKeys[]='result_metric_codes';
+            if ($hasSort) $expectedKeys[]='sort';
             sort($expectedKeys,SORT_STRING);
             $conditionSubject=$set['subject']??null;
             $expectedFilters=$conditionSubject==='person'
@@ -852,14 +855,25 @@ final class MetricReadViewServices
                 }
                 $conditionMetrics=array_merge($conditionMetrics,$set['result_metric_codes']);
             }
+            if ($hasSort) {
+                $sort=$set['sort'];$sortKeys=is_array($sort)?array_keys($sort):[];sort($sortKeys,SORT_STRING);
+                if ($query['query_shape']!=='condition_list'||!$hasResults||$sortKeys!==['direction','limit','metric_code']
+                    ||!in_array($sort['metric_code']??null,$set['result_metric_codes'],true)
+                    ||!in_array($sort['direction']??null,['asc','desc'],true)
+                    ||(($sort['limit']??null)!==null && (!is_int($sort['limit'])||$sort['limit']<1||$sort['limit']>100))) {
+                    $this->fail('METRIC_QUERY_SCHEMA_INVALID');
+                }
+            }
             if ($query['metric_codes']!==array_values(array_unique($conditionMetrics))) $this->fail('METRIC_QUERY_SCHEMA_INVALID');
             $binding=$query['aggregate_condition'];$bindingKeys=is_array($binding)?array_keys($binding):[];sort($bindingKeys,SORT_STRING);
             $expectedBinding=['conditions','relation','result_form','subject'];
             if ($hasExpression) $expectedBinding[]='expression';
             if ($hasResults) $expectedBinding[]='result_metric_codes';
+            if ($hasSort) $expectedBinding[]='sort';
             sort($expectedBinding,SORT_STRING);
             if ($bindingKeys!==$expectedBinding
                 ||($binding['result_metric_codes']??null)!==($set['result_metric_codes']??null)
+                ||($binding['sort']??null)!==($set['sort']??null)
                 ||($binding['expression']??null)!==($set['expression']??null)
                 ||($binding['subject']??null)!==$conditionSubject
                 ||($binding['relation']??null)!==$set['relation']
