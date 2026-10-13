@@ -159,7 +159,8 @@ test('customer detail re-queries the selected member within the current merchant
 	for (const removedCopy of ['最近动态', '仅显示当前账号可查看的信息', '客情提醒', '资产与权益', '资产概览', '明细查询']) {
 		assert.equal(detail.includes(removedCopy), false, removedCopy)
 	}
-	assert.equal(detail.includes('余额异动仅显示可审计的 V3 记录'), true)
+	assert.equal(detail.includes('旧站账户当时结余'), true)
+	assert.equal(detail.includes('record.balanceSplitKnown !== false'), true)
 	assert.equal(detail.includes('CASHIER_V3_COMPLETED_SERVICE_FACT'), false)
 })
 
@@ -270,8 +271,10 @@ test('mobile customer contract keeps customer scope server enforced', () => {
 	assert.equal(contract.endpoints.queryCustomerAssetRecords.authorization, 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE')
 	assert.deepEqual(contract.endpoints.queryCustomerAssetRecords.requestBodyRequired, ['memberId', 'detailType'])
 	assert.deepEqual(contract.endpoints.queryCustomerAssetRecords.authorityByDetailType, {
-		entitlements: 'CURRENT_CARD_ENTITLEMENT', balance_changes: 'CASHIER_V3_BALANCE_FACT', debts: 'STORE_DEBT'
+		entitlements: 'CURRENT_CARD_ENTITLEMENT', balance_changes: 'CASHIER_V3_BALANCE_FACT_AND_IMPORTED_LEGACY_MONEY', debts: 'STORE_DEBT'
 	})
+	assert.equal(contract.endpoints.queryCustomerAssetRecords.legacyBalanceStoreScope, 'ALL_OLD_STORES_AFTER_MEMBER_VISIBILITY_CHECK')
+	assert.equal(contract.endpoints.queryCustomerAssetRecords.legacyBalanceSplitKnown, false)
 	assert.equal(contract.endpoints.customerProfileDraft.authorization, 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE')
 	assert.equal(contract.endpoints.customerProfileDetail.authorization, 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE')
 	assert.deepEqual(contract.endpoints.createCustomerProfile.requestBodyRequired, ['name', 'phone', 'idempotencyKey'])

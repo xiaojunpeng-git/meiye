@@ -131,7 +131,9 @@ $assert('MC-API-09',
     && str_contains($routes, 'customers/asset-records')
     && is_array($contract)
     && ($contract['endpoints']['queryCustomerAssetRecords']['authorization'] ?? '') === 'MERCHANT_SESSION_AND_SERVER_DATA_SCOPE'
-    && ($contract['endpoints']['queryCustomerAssetRecords']['authorityByDetailType']['balance_changes'] ?? '') === 'CASHIER_V3_BALANCE_FACT'
+    && ($contract['endpoints']['queryCustomerAssetRecords']['authorityByDetailType']['balance_changes'] ?? '') === 'CASHIER_V3_BALANCE_FACT_AND_IMPORTED_LEGACY_MONEY'
+    && ($contract['endpoints']['queryCustomerAssetRecords']['legacyBalanceStoreScope'] ?? '') === 'ALL_OLD_STORES_AFTER_MEMBER_VISIBILITY_CHECK'
+    && ($contract['endpoints']['queryCustomerAssetRecords']['legacyBalanceSplitKnown'] ?? null) === false
 );
 $assert('MC-API-10',
     str_contains($memberProvider, "'u.add_time', 'u.level', 'u.birthday'")

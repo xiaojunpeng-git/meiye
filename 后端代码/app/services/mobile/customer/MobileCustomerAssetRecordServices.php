@@ -10,7 +10,7 @@ use think\facade\Db;
  * Read-only asset drill-downs for the mobile member detail.
  *
  * Each detail keeps its own authority: current card rights, V3 immutable
- * balance-change facts, and debt authority. This class never derives a ledger
+ * balance-change facts plus imported display-only old history, and debt authority. This class never derives a ledger
  * from the member balance summary and never mutates a financial resource.
  */
 final class MobileCustomerAssetRecordServices
@@ -151,24 +151,48 @@ final class MobileCustomerAssetRecordServices
 
     private function balanceChanges(int $memberId, array $storeIds, int $page, int $pageSize): array
     {
-        if ($storeIds === []) return $this->pagePayload('balance_changes', $memberId, [], 0, $page, $pageSize, 'CASHIER_V3_BALANCE_FACT');
-        $query = Db::name('cashier_v3_balance_fact')->alias('bf')
+        $authority = 'CASHIER_V3_BALANCE_FACT_AND_IMPORTED_LEGACY_MONEY';
+        $current = Db::name('cashier_v3_balance_fact')->alias('bf')
             ->where('bf.tenant_id', self::TENANT_ID)->where('bf.member_id', $memberId)
-            ->where('bf.fact_type', 'balance_changed')->where('bf.status', 'effective')
-            ->whereIn('bf.store_id', $storeIds);
-        $total = (int)(clone $query)->count('bf.id');
-        $rows = $query->field('bf.id,bf.fact_id,bf.business_date,bf.occurred_at,bf.settled_at,bf.balance_change_type,bf.principal_delta_cents,bf.bonus_delta_cents,bf.principal_after_cents,bf.bonus_after_cents,bf.order_no_snapshot,bf.source_document_type,bf.store_name_snapshot,bf.operator_name_snapshot')
-            ->order('bf.settled_at', 'desc')->order('bf.id', 'desc')->page($page, $pageSize)->select()->toArray();
+            ->where('bf.fact_type', 'balance_changed')->where('bf.status', 'effective');
+        // Current financial facts retain merchant store scope. Old balance was
+        // shared across stores, so a visible member grants all their imported
+        // historical rows; it never grants another member or a spendable asset.
+        if ($storeIds === []) $current->whereRaw('1 = 0');
+        else $current->whereIn('bf.store_id', $storeIds);
+        $legacy = Db::name('mobile_customer_legacy_balance_record')
+            ->where('source_system', 'morestore')->where('member_id', $memberId);
+        $total = (int)(clone $current)->count('bf.id') + (int)(clone $legacy)->count();
+        $rows = $total > 0 ? $this->mergedBalancePage($memberId, $storeIds, $page, $pageSize) : [];
         $records = array_map(function (array $row): array {
+            if ((int)$row['origin'] === 1) {
+                // Old money rows do not reliably split principal and gifts.
+                // The recorded after-value belongs to that old account/time.
+                return [
+                    'id' => 'legacy-balance:' . (int)$row['row_id'],
+                    'changeNo' => 'legacy:' . (int)$row['source_money_id'],
+                    'businessDate' => date('Y-m-d', (int)$row['event_at']),
+                    'occurredAt' => $this->dateTime((int)$row['event_at']),
+                    'typeLabel' => trim((string)$row['title_snapshot']) ?: (string)$row['source_type'],
+                    'changeAmount' => ((int)$row['pm'] === 0 ? '-' : '') . (string)$row['amount_yuan'],
+                    'balanceAfter' => (string)$row['balance_after_yuan'],
+                    'balanceSplitKnown' => false,
+                    'sourceReference' => (string)$row['mark_snapshot'],
+                    'sourceTypeLabel' => '',
+                    'storeName' => (string)$row['store_name_snapshot'],
+                    'operatorName' => '',
+                    'statusLabel' => '已生效',
+                ];
+            }
             $principalDelta = (int)$row['principal_delta_cents'];
             $bonusDelta = (int)$row['bonus_delta_cents'];
             $principalAfter = max(0, (int)$row['principal_after_cents']);
             $bonusAfter = max(0, (int)$row['bonus_after_cents']);
             return [
-                'id' => 'balance:' . (int)$row['id'],
+                'id' => 'balance:' . (int)$row['row_id'],
                 'changeNo' => (string)$row['fact_id'],
                 'businessDate' => (string)$row['business_date'],
-                'occurredAt' => $this->dateTime((int)($row['settled_at'] ?: $row['occurred_at'])),
+                'occurredAt' => $this->dateTime((int)$row['event_at']),
                 'typeLabel' => $this->balanceTypeLabel((string)$row['balance_change_type']),
                 'changeAmount' => $this->cents($principalDelta + $bonusDelta),
                 'principalDelta' => $this->cents($principalDelta),
@@ -176,6 +200,7 @@ final class MobileCustomerAssetRecordServices
                 'principalAfter' => $this->cents($principalAfter),
                 'bonusAfter' => $this->cents($bonusAfter),
                 'balanceAfter' => $this->cents($principalAfter + $bonusAfter),
+                'balanceSplitKnown' => true,
                 'sourceReference' => (string)$row['order_no_snapshot'],
                 'sourceTypeLabel' => $this->sourceDocumentLabel((string)$row['source_document_type']),
                 'storeName' => (string)$row['store_name_snapshot'],
@@ -183,7 +208,39 @@ final class MobileCustomerAssetRecordServices
                 'statusLabel' => '已生效',
             ];
         }, $rows);
-        return $this->pagePayload('balance_changes', $memberId, $records, $total, $page, $pageSize, 'CASHIER_V3_BALANCE_FACT');
+        return $this->pagePayload('balance_changes', $memberId, $records, $total, $page, $pageSize, $authority);
+    }
+
+    /** Sort the union before pagination so old and new events cannot disappear at a page boundary. */
+    private function mergedBalancePage(int $memberId, array $storeIds, int $page, int $pageSize): array
+    {
+        $prefix = (string)Db::connect()->getConfig('prefix');
+        if (!preg_match('/^[A-Za-z0-9_]*$/', $prefix)) throw new \RuntimeException('Invalid database table prefix');
+        $stores = array_values(array_filter(array_map('intval', $storeIds), static function (int $id): bool { return $id > 0; }));
+        $storeCondition = $stores === [] ? '1=0' : 'bf.store_id IN (' . implode(',', $stores) . ')';
+        $offset = ($page - 1) * $pageSize;
+        // Every interpolated number is server-derived and cast to a positive integer.
+        $sql = 'SELECT * FROM ('
+            . 'SELECT 0 origin,bf.id row_id,COALESCE(NULLIF(bf.settled_at,0),bf.occurred_at) event_at,'
+            . 'bf.fact_id,bf.business_date,bf.balance_change_type,bf.principal_delta_cents,'
+            . 'bf.bonus_delta_cents,bf.principal_after_cents,bf.bonus_after_cents,'
+            . 'bf.order_no_snapshot,bf.source_document_type,bf.store_name_snapshot,bf.operator_name_snapshot,'
+            . "0 source_money_id,'' source_type,'' title_snapshot,'' mark_snapshot,0 pm,"
+            . '0 amount_yuan,0 balance_after_yuan '
+            . 'FROM ' . $prefix . 'cashier_v3_balance_fact bf '
+            . "WHERE bf.tenant_id='0' AND bf.member_id={$memberId} "
+            . "AND bf.fact_type='balance_changed' AND bf.status='effective' AND {$storeCondition} "
+            . 'UNION ALL '
+            . 'SELECT 1 origin,l.id row_id,l.occurred_at event_at,'
+            . "'' fact_id,'' business_date,'' balance_change_type,0 principal_delta_cents,"
+            . '0 bonus_delta_cents,0 principal_after_cents,0 bonus_after_cents,'
+            . "'' order_no_snapshot,'' source_document_type,l.store_name_snapshot,"
+            . "'' operator_name_snapshot,l.source_money_id,l.source_type,l.title_snapshot,"
+            . 'l.mark_snapshot,l.pm,l.amount_yuan,l.balance_after_yuan '
+            . 'FROM ' . $prefix . 'mobile_customer_legacy_balance_record l '
+            . "WHERE l.source_system='morestore' AND l.member_id={$memberId}"
+            . ") merged ORDER BY event_at DESC,origin ASC,row_id DESC LIMIT {$offset},{$pageSize}";
+        return Db::query($sql);
     }
 
     private function debts(int $memberId, array $storeIds, int $page, int $pageSize): array
