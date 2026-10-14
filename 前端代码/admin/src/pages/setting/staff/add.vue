@@ -596,7 +596,8 @@ function getDefaultStaffForm() {
     can_choose: 1,
     cashier_salesperson_enabled: 1,
     cashier_craftsman_enabled: 1,
-    craftsman_performance_type: 'commission',
+    // 新建默认同时计消耗业绩和手工费，编辑时以已保存类型为准。
+    craftsman_performance_type: 'commission_labor',
     is_reservable: 1,
     is_fencheng: 0,
     mobile_enabled: 0,
@@ -1107,7 +1108,7 @@ export default {
         ),
         craftsman_performance_type: ['commission', 'labor', 'commission_labor'].includes(String((data && data.craftsman_performance_type) || ''))
           ? String(data.craftsman_performance_type)
-          : base.craftsman_performance_type,
+          : 'commission', // 旧详情缺少该字段时沿用原编辑兼容值，不把新建默认写回历史员工。
         is_fencheng: Number((data && data.is_fencheng) != null ? data.is_fencheng : base.is_fencheng),
         mobile_enabled: mobileAuthLoaded
           ? (Number(data.mobile_enabled) === 1 ? 1 : 0)
