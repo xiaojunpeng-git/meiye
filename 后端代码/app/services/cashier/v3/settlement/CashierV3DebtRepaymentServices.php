@@ -15,6 +15,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use app\services\report\CustomerLifecycleFactServices;
 use app\services\report\StoreReportPaymentSaleAllocationFactServices;
 use think\facade\Db;
@@ -255,6 +256,13 @@ final class CashierV3DebtRepaymentServices
             'payload' => ['contractVersion' => self::SUBMIT_CONTRACT_VERSION, 'debtId' => $debtId, 'amountCents' => $amount, 'salesOrderId' => (string)$authority['sales_order_id'], 'salespeopleSnapshotFingerprint' => hash('sha256', json_encode($selectedSalespeople, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))],
         ]);
         $this->persistFactsInTx($payments, $authority, $items, $itemTargets, $personnel, $selectedSalespeople, $repaymentId, $repaymentNo, $requestId, $amount, $commandKey, $event, $dimensions, $operator, $dataScope, $now, $businessDate, $businessSource);
+        // 人员归属与补交收款同事务生效，失败时整笔补交回滚；轮次不记新到店。
+        (new CashierV3SupplementAttributionServices())->persistInitialInTx(
+            $repaymentId, $repaymentNo, (int)$authority['member_id'], $businessDate, $amount,
+            (array)($checkoutSnapshot['guideSelections'] ?? []),
+            (array)($checkoutSnapshot['salesManagerSelections'] ?? []),
+            $commandKey, (string)$event['event_no'], $operator, $dataScope
+        );
         if ($repaidAfter === $total) {
             (new CustomerLifecycleFactServices())->recordDebtCompletionInTx(
                 $dataScope->tenantId(), (string)$authority['sales_order_id'], $now
@@ -371,6 +379,10 @@ final class CashierV3DebtRepaymentServices
             'balanceVersion' => (int)$balance['accountVersion'],
             'salespersonAllocations' => is_array($snapshot['salespersonAllocations'] ?? null)
                 ? array_values($snapshot['salespersonAllocations']) : [],
+            'guideSelections' => is_array($snapshot['guideSelections'] ?? null)
+                ? array_values($snapshot['guideSelections']) : [],
+            'salesManagerSelections' => is_array($snapshot['salesManagerSelections'] ?? null)
+                ? array_values($snapshot['salesManagerSelections']) : [],
             'paymentLines' => array_map(static function (array $line): array {
                 return ['paymentMethod' => $line['paymentMethod'],
                     'amount' => (string)intdiv((int)$line['amountCents'], 100),

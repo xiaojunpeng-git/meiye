@@ -93,6 +93,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
             'open-sales-order-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
             'open-recharge-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
             'open-supplement-personnel-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
+            'open-supplement-attribution-adjustment' => self::FEATURE_ORDER_STAFF_ADJUST,
             'open-order-refunds' => self::FEATURE_ORDER_REFUND,
             'open-refunds' => self::FEATURE_ORDER_REFUND,
             'query-imported-card-refund-candidates' => self::FEATURE_ORDER_REFUND,
@@ -118,6 +119,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['correct-service-order-guide'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-recharge-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-supplement-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
+        $command['adjust-supplement-attribution'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-refund-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-refund-attribution'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['adjust-imported-refund-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;

@@ -5620,7 +5620,9 @@ function buildCheckoutSnapshot(preview = {}) {
       ? {
           repaymentAmount: Number(snapshot.repaymentAmount || 0),
           rechargeDebt: snapshot.rechargeDebt === true,
-          salespersonAllocations: clonePlain(snapshot.salespersonAllocations || [])
+          salespersonAllocations: clonePlain(snapshot.salespersonAllocations || []),
+          guideSelections: clonePlain(snapshot.guideSelections || []),
+          salesManagerSelections: clonePlain(snapshot.salesManagerSelections || [])
         }
       : {}),
     source: sourceSnapshot,
@@ -6884,6 +6886,9 @@ async function openPreparedCheckout(event = {}) {
       source: clonePlain(intent.businessSource || {}),
       sourceDocument: { type: 'debt_repayment', id: String(debtId), no: String(intent.record?.debtNo || '') },
       lines: [line], orderLines: [line],
+      // 人员归属在欠款弹窗确认后冻结进本次补交快照，不继承购物车当前行。
+      guideSelections: clonePlain(intent.guideSelections || []),
+      salesManagerSelections: clonePlain(intent.salesManagerSelections || []),
       summary: { originalAmount: amount, discountAmount: 0, receivableAmount: amount },
       debtAmount: 0, balancePaymentAmount: 0,
       finalChanges: [],

@@ -749,6 +749,16 @@ class CashierV3ActionManifest
                 'event_rules' => ['supplement.personnel_adjusted' => ['min_count' => 1, 'max_count' => 1, 'aggregate_type' => 'debt_repayment', 'source_type' => 'adjust-supplement-personnel']],
                 'eventless_reason' => '', 'activation_blocked_until_event_contract' => false, 'consumers' => ['supplement.personnel_adjusted' => []],
             ],
+            'adjust-supplement-attribution' => [
+                'required_event_types' => ['supplement.attribution_adjusted'],
+                'allowed_event_types' => ['supplement.attribution_adjusted'],
+                'event_rules' => ['supplement.attribution_adjusted' => [
+                    'min_count' => 1, 'max_count' => 1,
+                    'source_type' => 'adjust-supplement-attribution',
+                ]],
+                'eventless_reason' => '', 'activation_blocked_until_event_contract' => false,
+                'consumers' => ['supplement.attribution_adjusted' => []],
+            ],
             'update-sales-order-note' => [
                 'required_event_types' => ['sales_order.note_updated'],
                 'allowed_event_types' => ['sales_order.note_updated'],

@@ -42,6 +42,13 @@ const repaymentBusinessDate = ref('')
 const validationMessage = ref('')
 const paymentLines = ref([])
 const salespersonAllocations = ref([])
+// 补交人员归属只属于本次收款，原销售单的导购和经理仅作为可修改的默认草稿。
+const guideSelections = ref([])
+const salesManagerSelections = ref([])
+const isAttributionSelectorOpen = ref(false)
+const attributionCandidates = ref({ guides: [], salesManagers: [] })
+const attributionSearchLoading = ref(false)
+const attributionSearchError = ref('')
 const salespersonCandidates = ref([])
 const isSalespersonSelectorOpen = ref(false)
 const isSalespersonLoading = ref(false)
@@ -98,6 +105,10 @@ const paymentMethodLabel = (code) => historicalPaymentMethods.find((method) => m
 const salespersonSummary = computed(() => salespersonAllocations.value.length
   ? salespersonAllocations.value.map(salespersonLabel).join('、')
   : '暂未选择')
+const attributionSummary = computed(() => [
+  guideSelections.value.length ? `导购：${guideSelections.value.map((person) => person.name).join('、')}` : '',
+  salesManagerSelections.value.length ? `销售经理：${salesManagerSelections.value.map((person) => person.name).join('、')}` : ''
+].filter(Boolean).join('；') || '暂未选择')
 const originalRepaymentSource = computed(() => selectedDebt.value?.originalBusinessSource || null)
 const selectedRepaymentPrimary = computed(() => repaymentSources.value.find(
   (source) => Number(source.id) === Number(repaymentSourcePrimaryId.value)
@@ -126,6 +137,8 @@ watch(records, (nextRecords) => {
   repayAmount.value = ''
   paymentLines.value = []
   salespersonAllocations.value = []
+  guideSelections.value = []
+  salesManagerSelections.value = []
   repaymentSourcePrimaryId.value = 0
   repaymentSourceSecondaryId.value = 0
   repaymentRewardAmountCents.value = 0
@@ -170,6 +183,8 @@ function selectRepayment(record) {
   repaymentBusinessDate.value = String(props.businessDate || '')
   paymentLines.value = [{ id: nextPaymentLineId(), paymentMethod: 'unionpay', amount: wholeYuanString(remainingAmount(record)), collectionReference: '', remark: '' }]
   salespersonAllocations.value = []
+  guideSelections.value = Array.isArray(record.originalGuideSelections) ? record.originalGuideSelections.map((item) => ({ ...item })) : []
+  salesManagerSelections.value = Array.isArray(record.originalSalesManagerSelections) ? record.originalSalesManagerSelections.map((item) => ({ ...item })) : []
   // 原单快照仅作默认选择。历史导入欠款可能没有来源，此时必须由操作员明确选择。
   repaymentSourcePrimaryId.value = Number(record.originalBusinessSource?.primarySourceId || 0)
   repaymentSourceSecondaryId.value = Number(record.originalBusinessSource?.secondarySourceId || 0)
@@ -279,6 +294,13 @@ function submitRepayment() {
       // 同一选择器在本次会话中的展示，不能用浏览器标志突破职位配置。
       performanceIndependent: Boolean(item.performanceIndependent),
       allocationGroupKey: String(item.allocationGroupKey || '')
+    })),
+    guideSelections: guideSelections.value.map((item) => ({
+      staffId: Number(item.employeeId || item.staffId || item.id || 0),
+      guideRoundNo: Number(item.guideRoundNo || 0)
+    })),
+    salesManagerSelections: salesManagerSelections.value.map((item) => ({
+      staffId: Number(item.employeeId || item.staffId || item.id || 0)
     }))
   })
 }
@@ -339,6 +361,51 @@ function confirmSalespeople(result = {}) {
   salespersonAllocations.value = Array.isArray(result.salespeople) ? result.salespeople.map((item) => ({ ...item })) : []
   isSalespersonSelectorOpen.value = false
 }
+
+function openAttributionSelector() {
+  attributionSearchError.value = ''
+  isAttributionSelectorOpen.value = true
+}
+
+function confirmAttributions(result = {}) {
+  guideSelections.value = Array.isArray(result.guideSelections) ? result.guideSelections.map((item) => ({ ...item })) : []
+  salesManagerSelections.value = Array.isArray(result.salesManagerSelections) ? result.salesManagerSelections.map((item) => ({ ...item })) : []
+  isAttributionSelectorOpen.value = false
+}
+
+async function searchAttributions({ scope, keyword, target } = {}) {
+  if (scope !== 'group_attributions' || !['guide', 'salesManager'].includes(target)
+    || String(keyword || '').trim().length < 2) return
+  attributionSearchLoading.value = true
+  attributionSearchError.value = ''
+  try {
+    const people = []
+    let page = 1
+    let total = 0
+    do {
+      const response = await requestCashierV3Action('query-query-entities', {
+        entityType: 'person', selectorEntry: 'cashier',
+        selectorContext: { scope: 'group_attributions', lineRole: 'sale',
+          memberId: Number(props.member.id || props.member.memberId || 0) },
+        keyword: String(keyword).trim(), page, pageSize: 20, silent: true
+      })
+      const envelope = response?.data?.result ? response.data : response
+      const data = envelope?.data || {}
+      if (!['success', 'succeeded'].includes(String(envelope?.result?.status || '')) || !Array.isArray(data.records)) {
+        throw new Error(envelope?.result?.message || '人员搜索失败。')
+      }
+      people.push(...data.records)
+      total = Math.max(0, Number(data.total) || people.length)
+      page++
+    } while (people.length < total && page <= 20)
+    attributionCandidates.value = { ...attributionCandidates.value,
+      [target === 'guide' ? 'guides' : 'salesManagers']: people }
+  } catch (error) {
+    attributionSearchError.value = error instanceof Error ? error.message : '人员搜索失败。'
+  } finally {
+    attributionSearchLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -398,21 +465,28 @@ function confirmSalespeople(result = {}) {
           </table>
         </div>
 
-        <section v-if="selectedDebt" class="member-debt-overlay__repayment" aria-label="本次还款金额">
-          <div>
-            <span>本次针对</span>
-            <strong>{{ value(selectedDebt, ['summary', 'itemSummary', 'productName']) }}</strong>
-            <small>每次只能还一条欠款，剩余 {{ formatMoney(remainingAmount(selectedDebt)) }}</small>
+        <!-- 日期只作用于本次选中的欠款；独立成框并放在原有品名收款框左侧。 -->
+        <div v-if="selectedDebt" class="member-debt-overlay__repayment-layout">
+          <div class="member-debt-overlay__business-date">
+            <label for="member-debt-repayment-business-date">业务日期</label>
+            <input id="member-debt-repayment-business-date" v-model="repaymentBusinessDate" type="date" :disabled="isPreparing" aria-label="补交业务日期">
           </div>
-          <label>
-            <span>还款金额</span>
-            <input v-model="repayAmount" type="text" inputmode="numeric" pattern="[0-9]*" :disabled="isPreparing" @input="normalizeRepayAmount">
-          </label>
-          <button type="button" class="button button--primary" :disabled="isPreparing" @click="submitRepayment">
-            {{ isPreparing ? '正在准备收款…' : selectedDebtIsRecharge ? '确认补交' : '下一步：确认收款' }}
-          </button>
-          <p v-if="validationMessage" role="alert">{{ validationMessage }}</p>
-        </section>
+          <section class="member-debt-overlay__repayment" aria-label="本次还款金额">
+            <div>
+              <span>本次针对</span>
+              <strong>{{ value(selectedDebt, ['summary', 'itemSummary', 'productName']) }}</strong>
+              <small>每次只能还一条欠款，剩余 {{ formatMoney(remainingAmount(selectedDebt)) }}</small>
+            </div>
+            <label>
+              <span>还款金额</span>
+              <input v-model="repayAmount" type="text" inputmode="numeric" pattern="[0-9]*" :disabled="isPreparing" @input="normalizeRepayAmount">
+            </label>
+            <button type="button" class="button button--primary" :disabled="isPreparing" @click="submitRepayment">
+              {{ isPreparing ? '正在准备收款…' : selectedDebtIsRecharge ? '确认补交' : '下一步：确认收款' }}
+            </button>
+            <p v-if="validationMessage" role="alert">{{ validationMessage }}</p>
+          </section>
+        </div>
         <!-- 充值欠款进入统一结账收款页；这里不再维护第二套收款控件。 -->
         <section v-if="false && selectedDebt && selectedDebtIsRecharge" class="member-debt-overlay__recharge-payment" aria-label="充值欠款收款信息">
           <header>
@@ -451,10 +525,6 @@ function confirmSalespeople(result = {}) {
           </dl>
         </section>
         <section v-if="selectedDebt" class="member-debt-overlay__repayment-context" aria-label="补交业务信息">
-          <div class="member-debt-overlay__business-date">
-            <label for="member-debt-repayment-business-date">业务日期</label>
-            <input id="member-debt-repayment-business-date" v-model="repaymentBusinessDate" type="date" :disabled="isPreparing" aria-label="补交业务日期">
-          </div>
           <div class="member-debt-overlay__business-source" aria-label="本次补交客户来源">
             <label for="member-debt-repayment-source-primary">来源</label>
             <select id="member-debt-repayment-source-primary" v-model.number="repaymentSourcePrimaryId" :disabled="isPreparing || repaymentSourcesLoading" @change="changeRepaymentSource">
@@ -473,6 +543,9 @@ function confirmSalespeople(result = {}) {
           <div class="member-debt-overlay__recharge-salespeople" aria-label="销售人分配">
             <header><strong>销售人分配</strong><span>{{ salespersonSummary }}</span><button type="button" class="button button--secondary" @click="openSalespersonSelector">选择销售人</button></header>
             <span v-for="person in salespersonAllocations" :key="person.staffId || person.id">{{ salespersonLabel(person) }}</span>
+          </div>
+          <div class="member-debt-overlay__recharge-salespeople" aria-label="导购和销售经理">
+            <header><strong>导购/销售经理</strong><span :title="attributionSummary">{{ attributionSummary }}</span><button type="button" class="button button--secondary" :disabled="isPreparing" @click="openAttributionSelector">选择人员</button></header>
           </div>
         </section>
       </main>
@@ -508,6 +581,23 @@ function confirmSalespeople(result = {}) {
       @close="isSalespersonSelectorOpen = false"
       @confirm="confirmSalespeople"
       @retry="openSalespersonSelector"
+    />
+    <PersonnelPerformanceOverlay
+      v-if="isAttributionSelectorOpen"
+      initial-tab="guides"
+      :show-craftsmen="false"
+      :show-salespeople="false"
+      :show-guides="true"
+      :show-sales-managers="true"
+      :guide-candidates="attributionCandidates.guides"
+      :sales-manager-candidates="attributionCandidates.salesManagers"
+      :selected-guides="guideSelections"
+      :selected-sales-managers="salesManagerSelections"
+      :attribution-search-loading="attributionSearchLoading"
+      :attribution-search-error="attributionSearchError"
+      @search-personnel="searchAttributions"
+      @close="isAttributionSelectorOpen = false"
+      @confirm="confirmAttributions"
     />
   </div>
 </template>
@@ -564,7 +654,6 @@ function confirmSalespeople(result = {}) {
   font-size: 20px;
   letter-spacing: 0;
 }
-
 .member-debt-overlay__header-summary {
   min-width: 180px;
   padding-left: 20px;
@@ -667,6 +756,8 @@ function confirmSalespeople(result = {}) {
   font-weight: 700;
 }
 
+.member-debt-overlay__repayment-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: stretch; gap: 12px; }
+
 .member-debt-overlay__repayment {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 220px auto;
@@ -716,7 +807,7 @@ function confirmSalespeople(result = {}) {
 
 .member-debt-overlay__recharge-payment,
 .member-debt-overlay__recharge-salespeople { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
-.member-debt-overlay__repayment-context { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(190px, 1fr) minmax(260px, 1.5fr); gap: 14px; }
+.member-debt-overlay__repayment-context { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(250px, 1.3fr) minmax(280px, 1.5fr); gap: 14px; }
 .member-debt-overlay__business-date { display: grid; align-content: center; gap: 7px; padding: 16px 18px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
 .member-debt-overlay__business-source { display: grid; align-content: center; gap: 7px; padding: 12px 14px; border: 1px solid #dde4ec; border-radius: 6px; background: #fff; }
 .member-debt-overlay__business-source label { color: #6b7787; font-size: 12px; }
@@ -803,6 +894,7 @@ function confirmSalespeople(result = {}) {
     grid-row: 1;
   }
 
+  .member-debt-overlay__repayment-layout,
   .member-debt-overlay__repayment {
     grid-template-columns: 1fr;
   }

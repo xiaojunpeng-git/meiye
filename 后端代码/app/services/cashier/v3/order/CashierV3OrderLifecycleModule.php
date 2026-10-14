@@ -57,6 +57,23 @@ final class CashierV3OrderLifecycleModule
         $unifiedRefund = new CashierV3UnifiedRefundServices();
         $refundPersonnel = new CashierV3RefundSalespersonServices();
         $refundAttribution = new CashierV3RefundAttributionServices();
+        $supplementAttribution = new CashierV3SupplementAttributionServices();
+        $dispatcher->handlers()->registerProjection('open-supplement-attribution-adjustment', static function (array $scope) use ($supplementAttribution): array {
+            return ['data' => ['supplementAttributionAdjustment' => $supplementAttribution->entry(
+                (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],
+                'message' => '补交导购/销售经理已读取。'];
+        });
+        $dispatcher->handlers()->registerCommand('adjust-supplement-attribution', static function (array $scope) use ($supplementAttribution): array {
+            $result = $supplementAttribution->adjustInTx($scope);
+            return ['data' => ['supplementAttributionAdjustment' => $result],
+                'business_no' => (string)$result['operationNo'], 'touched' => ['supplement_record'],
+                'message' => (string)$result['message']];
+        });
+        // 版本和当前门店补交单在事务内锁定；归属调整不继承收银购物车上下文。
+        $dispatcher->policies()->register(new CashierV3ContextPolicy('adjust-supplement-attribution', [], [], static function (): array {
+            return ['required' => [], 'allowed' => [], 'identities' => [],
+                'required_read_roles' => [], 'required_touched_roles' => [], 'allows_empty_contexts' => true];
+        }, [], [], [], true));
         $dispatcher->handlers()->registerProjection('query-unified-refund-candidates', static function (array $scope) use ($unifiedRefund): array {
             return ['data' => ['unifiedRefundCandidates' => $unifiedRefund->candidates(
                 (array)($scope['payload'] ?? []), $scope['operator_scope'], $scope['data_scope'])],

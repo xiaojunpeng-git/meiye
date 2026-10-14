@@ -519,6 +519,8 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($rows === []) return [[], $total];
 
         $salespeople = $this->supplementSalespeople(array_column($rows, 'repayment_id'), 'debt_repayment', $criteria['tenantId']);
+        $attributions = (new CashierV3SupplementAttributionServices())->currentRows(
+            (string)$criteria['tenantId'], array_column($rows, 'repayment_id'));
 
         $repaymentIds = array_values(array_unique(array_filter(array_column($rows, 'repayment_id'))));
         $paymentMethods = [];
@@ -535,7 +537,7 @@ final class CashierV3OrderCenterRecordQueryServices
 
         $productNames = $this->supplementDebtProductNames($rows);
         $productCategories = $this->supplementDebtProductCategories($rows);
-        return [array_map(function (array $row) use ($paymentMethods, $salespeople, $productNames, $productCategories): array {
+        return [array_map(function (array $row) use ($paymentMethods, $salespeople, $attributions, $productNames, $productCategories): array {
             $repaymentId = (string)$row['repayment_id'];
             return [
                 'id' => 'v3-sales-supplement:' . $repaymentId,
@@ -556,6 +558,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'supplementAmount' => $this->centsToMoney((int)$row['repayment_amount_cents']),
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
+                'supplementAttributionSummary' => self::supplementAttributionSummary($attributions[$repaymentId] ?? []),
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
@@ -599,6 +602,8 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($rows === []) return [[], $total];
 
         $salespeople = $this->supplementSalespeople(array_column($rows, 'repayment_id'), 'recharge_debt_repayment', $criteria['tenantId']);
+        $attributions = (new CashierV3SupplementAttributionServices())->currentRows(
+            (string)$criteria['tenantId'], array_column($rows, 'repayment_id'));
 
         $repaymentIds = array_values(array_unique(array_filter(array_column($rows, 'repayment_id'))));
         $paymentMethods = [];
@@ -612,7 +617,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 if ($repaymentId !== '') $paymentMethods[$repaymentId][] = $this->paymentLabel((string)($payment['payment_method'] ?? ''));
             }
         }
-        return [array_map(function (array $row) use ($paymentMethods, $salespeople): array {
+        return [array_map(function (array $row) use ($paymentMethods, $salespeople, $attributions): array {
             $repaymentId = (string)$row['repayment_id'];
             return [
                 'id' => 'v3-supplement:' . $repaymentId,
@@ -633,6 +638,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'supplementAmount' => $this->centsToMoney((int)$row['amount_cents']),
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
+                'supplementAttributionSummary' => self::supplementAttributionSummary($attributions[$repaymentId] ?? []),
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
@@ -744,6 +750,24 @@ final class CashierV3OrderCenterRecordQueryServices
         $out = [];
         foreach ($names as $id => $values) $out[$id] = implode('、', array_values(array_unique($values)));
         return $out;
+    }
+
+    /** 补交列表与导出共用最新完整版本；导购轮次只作本笔归属展示。 */
+    private static function supplementAttributionSummary(array $rows): string
+    {
+        $guides = $managers = [];
+        foreach ($rows as $row) {
+            $name = trim((string)($row['employee_name_snapshot'] ?? ''));
+            if ($name === '') continue;
+            if ((string)$row['role'] === 'guide') {
+                $round = (int)($row['guide_round_no'] ?? 0);
+                $guides[] = $name . ($round > 0 ? '（第' . $round . '轮）' : '（无轮次）');
+            } elseif ((string)$row['role'] === 'sales_manager') $managers[] = $name;
+        }
+        return implode('；', array_filter([
+            $guides ? '导购：' . implode('、', array_unique($guides)) : '',
+            $managers ? '销售经理：' . implode('、', array_unique($managers)) : '',
+        ]));
     }
 
     /** 人员金额取当前未冲销的业绩事实；历史无角色后缀只省略“售前”，不能省略金额。 */

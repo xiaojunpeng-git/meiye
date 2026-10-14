@@ -16,6 +16,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactIdFactory;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use app\services\user\UserBalanceAtomicServices;
 use think\facade\Db;
@@ -194,6 +195,11 @@ final class CashierV3RechargeDebtRepaymentServices
             'payload' => ['contractVersion' => 'cashier-v3-recharge-debt-repayment-v1','rechargeId' => $rechargeId,'debtId' => $input['debtId'],'amountCents' => $input['amountCents'],'balanceLedgerId' => $ledgerId,'salespeopleSnapshotFingerprint' => hash('sha256', json_encode($input['salespeople'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES))],
         ]);
         $this->persistFactsInTx($input, $operator, $dataScope, $rechargeId, $repaymentId, $repaymentNo, $now, $businessDate, $event, $ledgerId, $afterBalance, $commandKey);
+        (new CashierV3SupplementAttributionServices())->persistInitialInTx(
+            $repaymentId, $repaymentNo, $input['memberId'], $businessDate, $input['amountCents'],
+            $input['guideSelections'], $input['salesManagerSelections'], $commandKey,
+            (string)$event['event_no'], $operator, $dataScope
+        );
         return ['data' => ['repayment' => ['repaymentId' => $repaymentId,'repaymentNo' => $repaymentNo,'amount' => self::money($input['amountCents']),'balanceVersion' => (int)$afterBalance['accountVersion'],'businessEventNo' => (string)$event['event_no']]], 'business_no' => $repaymentNo, 'touched' => ['member_balance'], 'message' => '充值欠款补交成功，已补足会员储值本金。'];
     }
 
@@ -228,7 +234,10 @@ final class CashierV3RechargeDebtRepaymentServices
         $out=[]; foreach($lines as $line){$method=trim((string)($line['paymentMethod']??''));$cents=self::inputCents(is_array($line)?($line['amount']??null):null);$reference=trim((string)($line['collectionReference']??''));$remark=trim((string)($line['remark']??''));if(!in_array($method,self::PAYMENT_METHODS,true)||$cents<=0||strlen($reference)>128||strlen($remark)>255)throw self::failure('recharge_repayment_payment_invalid');$out[]=['paymentMethod'=>$method,'amountCents'=>$cents,'collectionReference'=>$reference,'remark'=>$remark];}
         // 浏览器提交本次选中的 ID；名称仍由事务内原单快照或有效目录确定。
         $source = is_array($payload['businessSource'] ?? null) ? $payload['businessSource'] : [];
-        return ['memberId'=>$memberId,'debtId'=>$debtId,'amountCents'=>$amount,'balanceVersion'=>$version,'paymentLines'=>$out,'salespersonAllocations'=>$salespeople,'businessDate'=>trim((string)($payload['businessDate'] ?? '')),'businessSource'=>self::sourceSnapshotColumns($source),'rewardAmountCents'=>CashierV3RepaymentReward::cents($source['rewardAmountCents'] ?? 0)];
+        return ['memberId'=>$memberId,'debtId'=>$debtId,'amountCents'=>$amount,'balanceVersion'=>$version,'paymentLines'=>$out,'salespersonAllocations'=>$salespeople,
+            'guideSelections'=>is_array($payload['guideSelections'] ?? null) ? array_values($payload['guideSelections']) : [],
+            'salesManagerSelections'=>is_array($payload['salesManagerSelections'] ?? null) ? array_values($payload['salesManagerSelections']) : [],
+            'businessDate'=>trim((string)($payload['businessDate'] ?? '')),'businessSource'=>self::sourceSnapshotColumns($source),'rewardAmountCents'=>CashierV3RepaymentReward::cents($source['rewardAmountCents'] ?? 0)];
     }
     /** 将来源快照映射为补交记录与收款事实共用的可查询字段。 */
     private static function sourceSnapshotColumns(array $source): array

@@ -335,6 +335,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'operator' => ['operatorName', 'operator'], 'refund_order_no' => ['refundOrderNo', 'refundNo'], 'source_order_no' => ['sourceOrderNo'],
             'refund_summary' => ['refundSummary', 'summary'], 'product_category' => ['productCategory'],
             'refund_amount' => ['refundAmount'], 'refund_attribution' => ['refundAttributionSummary'], 'refund_method' => ['refundMethod'],
+            'supplement_attribution' => ['supplementAttributionSummary'],
             'refund_status' => ['refundStatus', 'statusLabel'], 'refund_completed_at' => ['refundCompletedAt', 'completedAt'],
             'debt_no' => ['debtNo'], 'source_type' => ['sourceType'], 'product_name' => ['productName'], 'original_debt_amount' => ['originalDebtAmount', 'totalDebtAmount'],
             'repaid_amount' => ['repaidAmount'], 'remaining_amount' => ['remainingAmount'], 'debt_status' => ['debtStatus', 'statusLabel'], 'created_at' => ['createdAt'],

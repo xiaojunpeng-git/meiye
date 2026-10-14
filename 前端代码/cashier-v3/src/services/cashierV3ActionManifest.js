@@ -265,6 +265,8 @@ const C5_ACTIONS = {
     'correct-service-order-guide': FEATURE_ORDER_STAFF_ADJUST,
     'adjust-recharge-personnel': FEATURE_ORDER_STAFF_ADJUST,
     'adjust-supplement-personnel': FEATURE_ORDER_STAFF_ADJUST,
+    // 补交导购/经理是独立版本，沿用订单人员调整权限，不改原销售人员事实。
+    'adjust-supplement-attribution': FEATURE_ORDER_STAFF_ADJUST,
     'adjust-refund-personnel': FEATURE_ORDER_STAFF_ADJUST,
     'adjust-refund-attribution': FEATURE_ORDER_STAFF_ADJUST,
     'adjust-imported-refund-personnel': FEATURE_ORDER_STAFF_ADJUST,
@@ -329,6 +331,7 @@ const C5_ACTIONS = {
     'query-order-center-debt-changes': FEATURE_ORDER_CENTER,
     'open-recharge-personnel-adjustment': FEATURE_ORDER_STAFF_ADJUST,
     'open-supplement-personnel-adjustment': FEATURE_ORDER_STAFF_ADJUST,
+    'open-supplement-attribution-adjustment': FEATURE_ORDER_STAFF_ADJUST,
     'open-refund-personnel-adjustment': FEATURE_ORDER_STAFF_ADJUST,
     'open-refund-attribution-adjustment': FEATURE_ORDER_STAFF_ADJUST,
     'open-sales-order-detail': FEATURE_ORDER_CENTER,

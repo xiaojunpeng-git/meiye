@@ -55,6 +55,22 @@ final class CashierV3MemberDebtProjectionServices
 
             $debtIds = array_values(array_filter(array_map('intval', array_column($rows, 'id'))));
             $summariesByDebt = $this->summariesForDebts($debtIds);
+            // 原销售的人员事实只作本次补交的默认草稿，不能用它代替补交自己的
+            // 归属快照；按已授权会员欠款行的来源单批量读取，避免逐条查询。
+            $saleOrderIds = array_values(array_unique(array_filter(array_map('strval', array_column($rows, 'sales_order_id')))));
+            $originalGuides = $originalManagers = [];
+            if ($saleOrderIds !== []) {
+                foreach (Db::name('cashier_v3_customer_guide_round_fact')->where('tenant_id', $scope->tenantId())
+                    ->whereIn('order_id', $saleOrderIds)->where('status', 'effective')
+                    ->field('order_id,member_id,guide_employee_id,guide_employee_name_snapshot,guide_round_no')->select()->toArray() as $fact) {
+                    $originalGuides[(string)$fact['order_id']][] = $fact;
+                }
+                foreach (Db::name('cashier_v3_sales_manager_fact')->where('tenant_id', $scope->tenantId())
+                    ->whereIn('order_id', $saleOrderIds)->where('status', 'effective')
+                    ->field('order_id,member_id,sales_manager_employee_id,sales_manager_name_snapshot')->select()->toArray() as $fact) {
+                    $originalManagers[(string)$fact['order_id']][] = $fact;
+                }
+            }
             $records = [];
             $total = '0.00';
             foreach ($rows as $row) {
@@ -98,6 +114,22 @@ final class CashierV3MemberDebtProjectionServices
                     || ($originalSource['secondarySourceId'] > 0 && trim($originalSource['secondarySourceNameSnapshot']) === ''))) {
                     $originalSource = null;
                 }
+                $saleOrderId = (string)($row['sales_order_id'] ?? '');
+                $defaultGuides = [];
+                foreach ($originalGuides[$saleOrderId] ?? [] as $fact) {
+                    if ((int)$fact['member_id'] !== $memberId) continue;
+                    $employeeId = (int)$fact['guide_employee_id'];
+                    $defaultGuides[$employeeId] = ['staffId' => $employeeId, 'employeeId' => $employeeId,
+                        'name' => (string)$fact['guide_employee_name_snapshot'],
+                        'guideRoundNo' => (int)($fact['guide_round_no'] ?? 0)];
+                }
+                $defaultManagers = [];
+                foreach ($originalManagers[$saleOrderId] ?? [] as $fact) {
+                    if ((int)$fact['member_id'] !== $memberId) continue;
+                    $employeeId = (int)$fact['sales_manager_employee_id'];
+                    $defaultManagers[$employeeId] = ['staffId' => $employeeId, 'employeeId' => $employeeId,
+                        'name' => (string)$fact['sales_manager_name_snapshot']];
+                }
                 $records[] = [
                     'id' => (string)$debtId,
                     'debtId' => $debtId,
@@ -106,6 +138,8 @@ final class CashierV3MemberDebtProjectionServices
                     'sourceLabel' => $isRecharge ? '充值欠款' : '销售订单欠款',
                     'sourceOrderNo' => $orderNo,
                     'originalBusinessSource' => $originalSource,
+                    'originalGuideSelections' => array_values($defaultGuides),
+                    'originalSalesManagerSelections' => array_values($defaultManagers),
                     'summary' => $isRecharge ? '储值充值' : ($summariesByDebt[$debtId] ?? '销售订单欠款'),
                     'originalDebtAmount' => $original,
                     'repaidAmount' => $repaid,

@@ -76,6 +76,18 @@ const recordPersonnelReason = ref('')
 const recordPersonnelError = ref('')
 const recordPersonnelSubmitting = ref(false)
 const recordPersonnelCommandIds = ref({})
+// 补交归属独立于销售人业绩调整，允许清空并保留完整人员版本。
+const supplementAttributionEntry = ref(null)
+const supplementAttributionTarget = ref(null)
+const supplementAttributionEditorOpen = ref(false)
+const supplementAttributionPending = ref(null)
+const supplementAttributionReason = ref('')
+const supplementAttributionError = ref('')
+const supplementAttributionSubmitting = ref(false)
+const supplementAttributionCommandIds = ref({})
+const supplementAttributionSearchLoading = ref(false)
+const supplementAttributionSearchError = ref('')
+let supplementAttributionSearchSerial = 0
 // 退款导购/经理是独立归属，不能复用会分配退款业绩的销售人编辑状态。
 const refundAttributionEntry = ref(null)
 const refundAttributionTarget = ref(null)
@@ -300,7 +312,7 @@ const ORDER_TABS = [
       field('supplement_order_no', '补交单号', 'text', { quickFilterHidden: true }), field('source', '客户来源'),
       field('business_date', '业务日期', 'date', { defaultQuick: true, quickDateRange: true, quickLabelHidden: true }),
       field('member_name', '会员姓名'), field('phone', '手机号'), field('debt_summary', '欠款摘要'), field('product_category', '商品分类'), field('product_name', '商品名称'),
-      field('salesperson', '销售人', 'person'), field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
+      field('salesperson', '销售人', 'person'), field('supplement_attribution', '导购/销售经理', 'person'), field('supplement_amount', '补交金额', 'money'), field('payment_method', '收款方式'),
       field('store', '补交门店', 'store'), field('operator', '操作人', 'person'),
       field('payment_status', '支付状态', 'status'), field('payment_completed_at', '支付完成时间', 'date'),
       field('debt_no', '欠款编号'), field('source_order_no', '来源订单号')
@@ -352,6 +364,7 @@ const FIELD_ALIASES = {
   debt_amount: ['debtAmount', 'outstandingDebtAmount'], coupon_discount_amount: ['couponDiscountAmount'], actual_received_amount: ['actualReceivedAmount'],
   payment_method: ['paymentSummary', 'paymentMethod'], salesperson: ['salespersonSummary', 'salespersonName'],
   refund_attribution: ['refundAttributionSummary'],
+  supplement_attribution: ['supplementAttributionSummary'],
   cashier: ['cashierName', 'operatorName'], source: ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary'],
   payment_status: ['paymentStatus'], order_status: ['orderStatus', 'statusLabel'], supplement: ['supplementLabel', 'isSupplement'],
   occurred_at: ['occurredAt'], payment_completed_at: ['paymentCompletedAt', 'completedAt'], recharge_order_no: ['rechargeOrderNo', 'orderNo'],
@@ -1996,6 +2009,129 @@ async function submitRecordPersonnelAdjustment() {
   }
 }
 
+// 补交列表值仅用于定位，编辑时从补交归属版本重新读取人员和并发版本。
+async function openSupplementAttributionEditor(record) {
+  if (activeTabKey.value !== 'supplement' || !canUseCashierV3Operation('cashier.v3.order.staff_adjust')) return
+  const recordId = recordPersonnelId(record, 'supplement')
+  if (!recordId || !String(record?.id || '').startsWith('v3-')) return
+  supplementAttributionError.value = ''
+  supplementAttributionTarget.value = { recordId, recordNo: String(record.supplementOrderNo || '') }
+  try {
+    const response = await requestAction('open-supplement-attribution-adjustment', { recordId })
+    const entry = actionData(response).supplementAttributionAdjustment
+    if (!['success', 'succeeded'].includes(String(actionStatus(response))) || !entry
+      || !Number.isSafeInteger(Number(entry.recordVersion)) || Number(entry.recordVersion) < 0) {
+      throw new Error(response?.result?.message || '补交归属读取失败，请刷新后重试。')
+    }
+    supplementAttributionEntry.value = entry
+    supplementAttributionEditorOpen.value = true
+  } catch (error) {
+    supplementAttributionError.value = error?.message || '补交归属读取失败，请刷新后重试。'
+  }
+}
+
+function closeSupplementAttributionEditor(force = false) {
+  if (supplementAttributionSubmitting.value && !force) return
+  supplementAttributionSearchSerial++
+  supplementAttributionEditorOpen.value = false
+  supplementAttributionEntry.value = null
+  supplementAttributionTarget.value = null
+  supplementAttributionPending.value = null
+  supplementAttributionReason.value = ''
+  supplementAttributionError.value = ''
+}
+
+function prepareSupplementAttributionReason(assignment = {}) {
+  supplementAttributionPending.value = assignment
+  supplementAttributionEntry.value = { ...supplementAttributionEntry.value,
+    currentGuides: assignment.guideSelections || [],
+    currentSalesManagers: assignment.salesManagerSelections || [] }
+  supplementAttributionReason.value = ''
+  supplementAttributionError.value = ''
+  supplementAttributionEditorOpen.value = false
+}
+
+function cancelSupplementAttributionReason() {
+  if (supplementAttributionSubmitting.value) return
+  supplementAttributionPending.value = null
+  supplementAttributionReason.value = ''
+  supplementAttributionEditorOpen.value = Boolean(supplementAttributionEntry.value)
+}
+
+async function searchSupplementAttribution({ scope, keyword, target } = {}) {
+  if (scope !== 'group_attributions' || !['guide', 'salesManager'].includes(target)
+    || !supplementAttributionEditorOpen.value || String(keyword || '').trim().length < 2) return
+  const entry = supplementAttributionEntry.value
+  const serial = ++supplementAttributionSearchSerial
+  supplementAttributionSearchLoading.value = true
+  supplementAttributionSearchError.value = ''
+  try {
+    const people = []
+    let page = 1
+    let total = 0
+    do {
+      const response = await requestAction('query-query-entities', {
+        entityType: 'person', selectorEntry: 'order_center',
+        selectorContext: { scope: 'group_attributions', lineRole: 'sale',
+          memberId: Number(entry.memberId || 0) },
+        keyword: String(keyword).trim(), page, pageSize: 20, silent: true
+      })
+      const data = actionData(response)
+      if (!['success', 'succeeded'].includes(String(actionStatus(response))) || !Array.isArray(data.records)) {
+        throw new Error(response?.result?.message || '人员搜索失败。')
+      }
+      people.push(...data.records)
+      total = Math.max(0, Number(data.total) || people.length)
+      page++
+    } while (people.length < total && page <= 20)
+    if (serial !== supplementAttributionSearchSerial || entry !== supplementAttributionEntry.value) return
+    supplementAttributionEntry.value = { ...entry,
+      [target === 'guide' ? 'guides' : 'salesManagers']: people }
+  } catch (error) {
+    if (serial === supplementAttributionSearchSerial) supplementAttributionSearchError.value = error?.message || '人员搜索失败。'
+  } finally {
+    if (serial === supplementAttributionSearchSerial) supplementAttributionSearchLoading.value = false
+  }
+}
+
+async function submitSupplementAttributionAdjustment() {
+  const entry = supplementAttributionEntry.value
+  const target = supplementAttributionTarget.value
+  const reason = String(supplementAttributionReason.value || '').trim()
+  if (!entry || !target) return
+  if (!reason || reason.length > 255) { supplementAttributionError.value = '请填写不超过255字的修改原因。'; return }
+  const selected = supplementAttributionPending.value || {}
+  const guideSelections = (selected.guideSelections || []).map((item) => ({
+    staffId: Number(item.employeeId || item.staffId || item.id || 0), guideRoundNo: Number(item.guideRoundNo || 0)
+  }))
+  const salesManagerSelections = (selected.salesManagerSelections || []).map((item) => ({
+    staffId: Number(item.employeeId || item.staffId || item.id || 0)
+  }))
+  const key = `${target.recordId}:${entry.recordVersion}`
+  const idempotencyKey = supplementAttributionCommandIds.value[key] || createCashierV3CommandId()
+  supplementAttributionCommandIds.value = { ...supplementAttributionCommandIds.value, [key]: idempotencyKey }
+  supplementAttributionSubmitting.value = true
+  supplementAttributionError.value = ''
+  try {
+    const response = await requestAction('adjust-supplement-attribution', {
+      recordId: target.recordId, recordVersion: entry.recordVersion,
+      guideSelections, salesManagerSelections, reason, idempotencyKey
+    })
+    const status = actionStatus(response)
+    if (isTerminalActionStatus(status)) supplementAttributionCommandIds.value = { ...supplementAttributionCommandIds.value, [key]: null }
+    if (['success', 'succeeded'].includes(String(status))) {
+      closeSupplementAttributionEditor(true)
+      await queryRecords({}, false)
+      return
+    }
+    supplementAttributionError.value = response?.result?.message || '补交归属修改未完成，请稍后重试。'
+  } catch (error) {
+    supplementAttributionError.value = error?.message || '补交归属修改未完成，请稍后重试。'
+  } finally {
+    supplementAttributionSubmitting.value = false
+  }
+}
+
 // 列表值只负责定位记录；当前人员与并发版本必须重新从退款权威记录读取。
 async function openRefundAttributionEditor(record) {
   if (activeTabKey.value !== 'refund' || !editableRefundSourceTypes.has(record?.refundSourceType)
@@ -3637,6 +3773,13 @@ onBeforeUnmount(() => {
                 {{ displayRecordField(record, fieldItem.key) }}
               </button>
               <button
+                v-else-if="!isPlatformReadOnly && fieldItem.key === 'supplement_attribution' && activeTabKey === 'supplement' && String(record?.id || '').startsWith('v3-') && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
+                type="button"
+                class="order-link"
+                title="修改补交导购/销售经理"
+                @click="openSupplementAttributionEditor(record)"
+              >{{ displayRecordField(record, fieldItem.key) }}</button>
+              <button
                 v-else-if="!isPlatformReadOnly && fieldItem.key === 'refund_attribution' && activeTabKey === 'refund' && editableRefundSourceTypes.has(record.refundSourceType) && canUseCashierV3Operation('cashier.v3.order.staff_adjust')"
                 type="button"
                 class="order-link"
@@ -3773,6 +3916,26 @@ onBeforeUnmount(() => {
       :load-error="recordPersonnelError"
       @close="closeRecordPersonnelEditor"
       @confirm="prepareRecordPersonnelReason"
+    />
+
+    <PersonnelPerformanceOverlay
+      v-if="!isPlatformReadOnly && supplementAttributionEditorOpen && supplementAttributionEntry"
+      initial-tab="guides"
+      :show-craftsmen="false"
+      :show-salespeople="false"
+      :show-guides="true"
+      :show-sales-managers="true"
+      :guide-candidates="supplementAttributionEntry.guides || []"
+      :sales-manager-candidates="supplementAttributionEntry.salesManagers || []"
+      :selected-guides="supplementAttributionEntry.currentGuides || []"
+      :selected-sales-managers="supplementAttributionEntry.currentSalesManagers || []"
+      :attribution-search-loading="supplementAttributionSearchLoading"
+      :attribution-search-error="supplementAttributionSearchError"
+      :saving="supplementAttributionSubmitting"
+      :load-error="supplementAttributionError"
+      @search-personnel="searchSupplementAttribution"
+      @close="closeSupplementAttributionEditor"
+      @confirm="prepareSupplementAttributionReason"
     />
 
     <PersonnelPerformanceOverlay
@@ -4134,6 +4297,24 @@ onBeforeUnmount(() => {
         <footer class="service-void-modal__actions">
           <button type="button" class="button" :disabled="recordPersonnelSubmitting" @click="cancelRecordPersonnelReason">返回修改</button>
           <button type="button" class="button button--primary" :disabled="recordPersonnelSubmitting" @click="submitRecordPersonnelAdjustment">{{ recordPersonnelSubmitting ? '保存中…' : '确认保存' }}</button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="!isPlatformReadOnly && supplementAttributionPending && supplementAttributionTarget" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="supplement-attribution-reason-title">
+      <div class="service-void-modal__backdrop" @click="cancelSupplementAttributionReason"></div>
+      <section class="service-void-modal__panel">
+        <header class="service-void-modal__head">
+          <h2 id="supplement-attribution-reason-title">填写修改原因</h2>
+          <button type="button" class="service-void-modal__close" :disabled="supplementAttributionSubmitting" @click="cancelSupplementAttributionReason">×</button>
+        </header>
+        <p class="service-void-modal__record">补交记录 · {{ supplementAttributionTarget.recordNo || supplementAttributionTarget.recordId }}</p>
+        <label class="service-void-modal__label" for="supplement-attribution-reason">修改原因</label>
+        <textarea id="supplement-attribution-reason" v-model="supplementAttributionReason" class="service-void-modal__textarea" maxlength="255" rows="4" placeholder="请输入修改原因"></textarea>
+        <p v-if="supplementAttributionError" class="service-void-modal__error" role="alert">{{ supplementAttributionError }}</p>
+        <footer class="service-void-modal__actions">
+          <button type="button" class="button" :disabled="supplementAttributionSubmitting" @click="cancelSupplementAttributionReason">返回修改</button>
+          <button type="button" class="button button--primary" :disabled="supplementAttributionSubmitting" @click="submitSupplementAttributionAdjustment">{{ supplementAttributionSubmitting ? '保存中…' : '确认保存' }}</button>
         </footer>
       </section>
     </div>
