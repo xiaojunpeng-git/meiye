@@ -11,10 +11,16 @@
 
 <script>
 import { SIX_DIMENSION_REPORTS, SIX_DIMENSION_REPORT_CODES } from '@/libs/sixDimensionReports'
+import { PHASE_FOUR_REPORTS, PHASE_FOUR_REPORT_CODES } from '@/libs/phaseFourReports'
+
+// This frame is shared by six-dimension and operations routes. Preserve the
+// route's registered report code; never substitute a different business report.
+const FRAME_REPORTS = [...SIX_DIMENSION_REPORTS, ...PHASE_FOUR_REPORTS]
+const FRAME_REPORT_CODES = [...SIX_DIMENSION_REPORT_CODES, ...PHASE_FOUR_REPORT_CODES]
 
 function resolveReportCode (route) {
   const requested = String(route.meta.reportCode || route.params.report || route.query.report || '').trim()
-  return SIX_DIMENSION_REPORT_CODES.includes(requested) ? requested : SIX_DIMENSION_REPORT_CODES[0]
+  return FRAME_REPORT_CODES.includes(requested) ? requested : SIX_DIMENSION_REPORT_CODES[0]
 }
 
 export default {
@@ -25,7 +31,7 @@ export default {
     },
     reportTitle () {
       if (this.isTierConfig) return '消费分级设置'
-      const report = SIX_DIMENSION_REPORTS.find(item => item.code === this.reportCode)
+      const report = FRAME_REPORTS.find(item => item.code === this.reportCode)
       return report ? report.title : '六维数据中心'
     },
     isTierConfig () {
