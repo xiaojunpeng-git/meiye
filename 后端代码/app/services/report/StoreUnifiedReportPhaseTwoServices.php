@@ -1319,8 +1319,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'store_name' => '显示该笔业务实际发生的门店。',
             'business_date' => '销售按成交日期、补交按实际补交业务日期、退款按退款成功日期显示，不改写原成交日期。',
             'salesperson' => '显示本笔销售、补交或退款业绩当前归属的销售人或销售经理；经理与销售人各按自己的业绩分别统计，不合并为门店现金总额。',
-            'beauty_category' => '卡项按卡内项目关联的平台商品当前“生美”二级分类归组，不按卡项外层分类。退款只能归入可核对的原卡内项目分类，无法核对的退款不猜算。分类调整后历史月份会重新归组，原成交金额不变。',
-            'daily_cash' => '显示本行人员在该日期、该生美二级分类分配到的现金业绩；补交按本次收款及原卡项商品分摊，退款在成功日记负数。销售人与销售经理分别记账，不可把两类人员金额相加当作门店收款。',
+            'beauty_category' => '卡项按卡内项目关联的平台商品当前“生美”二级分类归组，不按卡项外层分类。历史导入卡仅在原单项目 ID 和金额可核对时归组；退款无法核对原卡内项目分类的不猜算。分类调整后历史月份会重新归组，原成交金额不变。',
+            'daily_cash' => '显示本行人员在该日期、该生美二级分类分配到的现金业绩；补交按本次收款及原卡项商品分摊，历史卡项须先对账原单项目总额；退款在成功日记负数。销售人与销售经理分别记账，不可把两类人员金额相加当作门店收款。',
             'cumulative_cash' => '从本月1日到本行日期，累计该人员在同一生美二级分类的销售业绩并扣除已完成的现金退款；不同二级分类不合并凑门槛。',
             'share_30000_before' => '该人员本月有生美二级分类累计达到3万元、且没有分类达到5万元时，只在达标分类本月最后一笔业务上显示该分类金额；同月只选金额最高的一类。此列不是已发放的分成。',
             'share_30000_after' => '分成后金额尚无已确认的计算和兑现记录，暂不显示；空白不代表已发放或金额为零。',
@@ -1335,9 +1335,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         unset($column);
         $result=$this->result('销售人生美大单统计表',$columns,$facts,$input);
-        // v4 admits an exact completed card-purchase receipt when an older sale
-        // has no category-allocation fact; cash, person, and refund day are unchanged.
-        $result['metric_version']='beauty-large-order-repayment-v5';
+        // v6 also admits reconciled historical card repayments with no V3 original-sale fact.
+        $result['metric_version']='beauty-large-order-repayment-v6';
         return $result;
     }
 
@@ -1430,6 +1429,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $components = $query->fieldRaw('repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot division_name,repayment_payment.store_name_snapshot store_name,repayment_payment.business_date,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.order_id repayment_id,repayment.repayment_no,repayment.repayment_amount_cents,allocation.sale_fact_id,card_component.component_product_id,MAX(card_total.sale_total_cents) sale_total_cents,MAX(card_component.component_sale_cents) component_sale_cents,SUM(allocation.amount_cents) allocated_payment_cents')
             ->group('repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot,repayment_payment.store_name_snapshot,repayment_payment.business_date,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.order_id,repayment.repayment_no,repayment.repayment_amount_cents,allocation.sale_fact_id,card_component.component_product_id')
             ->select()->toArray();
+        $components = array_merge($components, $this->legacyCardRepaymentComponents($stores, $range, $input));
         $repaymentIds = array_values(array_unique(array_filter(array_column($components, 'repayment_id'))));
         if ($repaymentIds === []) return [];
         $salesRows = $this->participantEmployeeFact($this->scope(
@@ -1488,6 +1488,64 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }
         }
         return $out;
+    }
+
+    /**
+     * Historical imported cards have an original order and priced project lines but no V3 sale fact.
+     * Admit only a fully reconciled repayment with no normal payment allocation; the original
+     * project product ID still goes through the same current platform-category resolver.
+     */
+    private function legacyCardRepaymentComponents(array $stores, array $range, array $input): array
+    {
+        $query = $this->applyOrganizationFilters($this->scope(
+            Db::name('cashier_v3_payment_fact')->alias('repayment_payment'), $stores, 'repayment_payment'),
+            'repayment_payment', $input, $range)
+            ->join('cashier_v3_debt_repayment repayment',
+                "repayment.tenant_id=repayment_payment.tenant_id AND repayment.repayment_id=repayment_payment.order_id AND repayment.status='succeeded'")
+            ->join('store_debt legacy_debt',
+                'legacy_debt.id=repayment.debt_id AND legacy_debt.store_id=repayment.store_id AND legacy_debt.uid=repayment.member_id')
+            ->join('store_order legacy_order',
+                "legacy_order.id=legacy_debt.order_id AND legacy_order.order_id=repayment.sales_order_id AND legacy_order.store_id=repayment.store_id AND legacy_order.uid=repayment.member_id AND legacy_order.channel_type='migration' AND legacy_order.product_type=5 AND legacy_order.is_del=0")
+            ->join('store_order_cart_info legacy_line',
+                "legacy_line.oid=legacy_order.id AND legacy_line.product_type=6 AND legacy_line.source_type='migration'")
+            ->where('repayment_payment.source_document_type', 'debt_repayment')
+            ->where('repayment_payment.fact_direction', 'forward')
+            ->where('repayment_payment.status', 'effective')
+            ->whereBetween('repayment_payment.business_date', [$range['start'], $range['end']])
+            ->where('legacy_line.product_id', '>', 0)->where('legacy_line.total_price', '>', 0)
+            ->where('legacy_order.total_price', '>', 0)
+            ->whereNotExists(function ($sub): void {
+                $sub->name('cashier_v3_payment_fact')->alias('existing_payment')
+                    ->join('cashier_v3_payment_sale_allocation_fact existing_allocation',
+                        "existing_allocation.tenant_id=existing_payment.tenant_id AND existing_allocation.payment_fact_id=existing_payment.fact_id AND existing_allocation.status='effective'")
+                    ->whereRaw('existing_payment.tenant_id=repayment_payment.tenant_id')
+                    ->whereRaw('existing_payment.order_id=repayment_payment.order_id');
+            })
+            ->whereNotExists(function ($sub): void {
+                $sub->name('store_order_cart_info')->alias('invalid_legacy_line')
+                    ->whereRaw('invalid_legacy_line.oid=legacy_order.id')
+                    ->where('invalid_legacy_line.product_type', 6)
+                    ->whereRaw("invalid_legacy_line.source_type<>'migration' OR invalid_legacy_line.product_id<=0 OR invalid_legacy_line.total_price<=0");
+            });
+        $rows = $query->fieldRaw('repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot division_name,repayment_payment.store_name_snapshot store_name,repayment_payment.business_date,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.order_id repayment_id,repayment.repayment_no,repayment.repayment_amount_cents,legacy_order.id legacy_order_id,ROUND(legacy_order.total_price*100) original_total_cents,legacy_line.id legacy_line_id,legacy_line.product_id component_product_id,ROUND(MAX(legacy_line.total_price)*100) component_sale_cents,SUM(repayment_payment.amount_cents) allocated_payment_cents')
+            ->group('repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot,repayment_payment.store_name_snapshot,repayment_payment.business_date,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.order_id,repayment.repayment_no,repayment.repayment_amount_cents,legacy_order.id,legacy_order.total_price,legacy_line.id,legacy_line.product_id')
+            ->select()->toArray();
+        $totals = [];
+        foreach ($rows as $row) {
+            $id = (string)$row['repayment_id'];
+            $totals[$id] = (int)($totals[$id] ?? 0) + (int)$row['component_sale_cents'];
+        }
+        $verified = [];
+        foreach ($rows as $row) {
+            $id = (string)$row['repayment_id'];
+            if ((int)$row['allocated_payment_cents'] !== (int)$row['repayment_amount_cents']
+                || (int)$row['original_total_cents'] <= 0
+                || $totals[$id] !== (int)$row['original_total_cents']) continue;
+            $row['sale_total_cents'] = $totals[$id];
+            $row['sale_fact_id'] = 'legacy-order:' . (string)$row['legacy_order_id'] . ':line:' . (string)$row['legacy_line_id'];
+            $verified[] = $row;
+        }
+        return $verified;
     }
 
     /**
