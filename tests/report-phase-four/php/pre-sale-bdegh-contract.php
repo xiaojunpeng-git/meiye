@@ -43,4 +43,24 @@ if ($metrics['2026-04']['first_year_amount'] !== 225000) throw new RuntimeExcept
 if ($metrics['2026-05']['first_year_amount'] !== 0) throw new RuntimeException('the annual cohort amount must not repeat in later months');
 if (count($metrics) !== 12) throw new RuntimeException('the optimized report must still return all twelve months');
 
+$sameDayFacts = [
+    ['member_id' => 105, 'order_id' => 'first-order', 'business_date' => '2026-10-07', 'amount_cents' => 300000, 'business_source_label' => 'B导购引流'],
+    ['member_id' => 105, 'order_id' => 'another-order', 'business_date' => '2026-10-07', 'amount_cents' => 150000, 'business_source_label' => 'D线上引流'],
+    ['member_id' => 105, 'order_id' => 'next-day-payment', 'business_date' => '2026-10-08', 'amount_cents' => 20000, 'business_source_label' => 'B导购引流'],
+];
+$sameDayOnly = $call('aggregateBdeghMonthlyMetrics', array_slice($sameDayFacts, 0, 2), ['start' => '2026-01-01', 'end' => '2026-12-31'], $rule);
+if ($sameDayOnly['2026-10']['deal_amount'] !== 450000 || $sameDayOnly['2026-10']['transition_people'] !== 0 || $sameDayOnly['2026-10']['transition_amount'] !== 0) {
+    throw new RuntimeException('same-day distinct orders must not create a second cash event');
+}
+$sameDayMetrics = $call('aggregateBdeghMonthlyMetrics', $sameDayFacts, ['start' => '2026-01-01', 'end' => '2026-12-31'], $rule);
+if ($sameDayMetrics['2026-10']['deal_people'] !== 1 || $sameDayMetrics['2026-10']['deal_amount'] !== 450000) {
+    throw new RuntimeException('different orders for one member on one business day must be one first cash event');
+}
+if ($sameDayMetrics['2026-10']['transition_people'] !== 1 || $sameDayMetrics['2026-10']['transition_amount'] !== 20000) {
+    throw new RuntimeException('only the later cash day may become the second cash event');
+}
+if ($sameDayMetrics['2026-10']['first_year_amount'] !== 470000) {
+    throw new RuntimeException('first-year cash must retain all same-day and later-day receipts');
+}
+
 echo "pre-sale BDEGH contract: PASS\n";
