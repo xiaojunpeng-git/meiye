@@ -31,7 +31,7 @@ draftEditAssert('both transfer lists expose deletion only for editable source-st
 draftEditAssert('detail exposes a token derived from persisted document and ordered lines',
     strpos($service, "\$document['edit_token'] = \$this->draftEditToken(\$document, \$lines)") !== false
     && strpos($service, 'return hash(\'sha256\'') !== false);
-draftEditAssert('edit locks draft and rejects stale versions or existing dispatch allocations',
+draftEditAssert('edit locks draft and rejects stale versions while detecting dispatch history',
     strpos($update, 'lockedSubjectDocument($source, $documentId, true)') !== false
     && strpos($update, '$this->assertSourceDraft($source, $document, \'edit\')') !== false
     && strpos($service, "\$document['document_status'] !== 'DRAFT'") !== false
@@ -41,9 +41,10 @@ draftEditAssert('request association and receiving subject remain fixed for link
     strpos($update, "\$document['request_document_id'] !== (int)\$command['requestDocumentId']") !== false
     && strpos($update, 'inventory_cross_transfer_request_target_locked') !== false
     && strpos($update, '$this->requestDocument($target, $command[\'requestDocumentId\'], $source)') !== false);
-draftEditAssert('edit replaces only draft lines and header, not inventory or settlement facts',
+draftEditAssert('unshipped edit replaces lines, withdrawn edit retains past generations without stock facts',
     strpos($update, "Db::name('inventory_cross_transfer_line')->where('document_id', \$documentId)->delete()") !== false
-    && strpos($update, '$this->persistDraftLines($source, $target, $request, $command, $documentId)') !== false
+    && strpos($update, "->where('retired_at', 0)->update(['retired_at' => \$command['now']])") !== false
+    && strpos($update, '$this->persistDraftLines($source, $target, $request, $command, $documentId, $generation)') !== false
     && strpos($update, "Db::name('inventory_cross_transfer_document')->where('id', \$documentId)->update") !== false
     && strpos($update, 'appendFact(') === false && strpos($update, 'decreaseSource(') === false);
 draftEditAssert('store command route is authenticated through the existing transfer controller',
@@ -59,7 +60,7 @@ draftEditAssert('view-mode exception is restricted to transfer commands and the 
     strpos($policy, "!empty(\$profile['_cashier_v3_delegated'])") !== false
     && strpos($policy, "(int)(\$profile['store_id'] ?? 0) !== \$storeId") !== false
     && strpos($middleware, 'isDelegatedTransferCommand(') !== false
-    && strpos($middleware, '(?:update|delete-draft|dispatch|receive)') !== false);
+    && strpos($middleware, '(?:update|delete-draft|dispatch|receive|withdraw|reverse)') !== false);
 draftEditAssert('store draft creation rechecks target organization on the server',
     strpos($service, 'if (!$this->sameOrganizationRoot($sourceScope, $target)) throw new \\RuntimeException(\'inventory_cross_transfer_target_scope_denied\')') !== false);
 

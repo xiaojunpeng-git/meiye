@@ -90,6 +90,10 @@ button { cursor: pointer; }
 .inventory-period-filter, .count-period-filter { width: min(290px, 100%); align-self: end; }
 .inventory-statistics-period { margin-bottom: 12px; }
 
+/* 平台调拨增加快捷筛选后允许控件换行，避免嵌入平台后台时压住查询按钮。 */
+.filter-card--platform-transfer { flex-wrap: wrap; }
+.filter-card--platform-transfer > .secondary-button { align-self: end; }
+
 /* 统计页的业务日期是单个周期按钮，按其内容预留独立宽度并让后续字段正常换行。 */
 .inventory-unified-query--statistics .unified-query-top-field:has(.uq-period-trigger) {
   flex: 0 0 340px;

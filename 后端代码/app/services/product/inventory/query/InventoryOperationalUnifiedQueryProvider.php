@@ -58,6 +58,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
     private function execute(array $context, array $payload, array $definitions): array
     {
         // 已验证的查询条件传入领域投影，允许统计在事实层按同一周期先聚合，再交给统一查询做权限和分页。
+        $payload = $this->withoutInTransitTransferPeriod($payload);
         $rows = $this->sourceRows($context, $payload);
         [$rows, $payload] = $this->includeDraftsOutsideCompletionPeriod($rows, $payload);
         return $this->execution->execute($this->pageCode(), $rows, $definitions, $payload, $context,
@@ -65,6 +66,29 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
                 return (string)($row['tenant_id'] ?? '') === (string)$context['tenant_id']
                     && (int)($row['store_id'] ?? 0) === (int)$context['store_id'];
             });
+    }
+
+    /** 在途是未完结调拨清单；只对已验证的明确状态条件忽略顶部调拨日期，不改变其他筛选或权限。 */
+    private function withoutInTransitTransferPeriod(array $payload): array
+    {
+        if (!$this->hasInTransitTransferFilter($payload)) return $payload;
+        $payload['topFilterConditions'] = array_values(array_filter(
+            (array)($payload['topFilterConditions'] ?? []),
+            static fn (array $condition): bool => (string)($condition['field_key'] ?? '') !== 'business_date'
+        ));
+        return $payload;
+    }
+
+    /** Only a validated, conjunctive top-level status permits the SQL status pushdown. */
+    private function hasInTransitTransferFilter(array $payload): bool
+    {
+        if ($this->pageCode() !== 'inventory_transfer' || (string)($payload['filterRelation'] ?? 'all') !== 'all') return false;
+        foreach ((array)($payload['topFilterConditions'] ?? []) as $condition) {
+            if ((string)($condition['field_key'] ?? '') === 'status_name'
+                && (string)($condition['operator'] ?? '') === 'equal'
+                && (string)($condition['value'] ?? '') === '在途') return true;
+        }
+        return false;
     }
 
     /** 盘点周期只约束已完成单据；创建人草稿没有完成日期，仍须留在列表供查看和续编。
@@ -104,7 +128,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             case 'inventory_movement': $rows = $this->movementRows($tenantId, $storeId, $locationIds, $canViewCost); break;
             case 'inventory_count': $rows = $this->countRows($tenantId, $storeId, $locationIds, $canViewCost, $context); break;
             case 'inventory_request': $rows = $this->requestRows($tenantId, $storeId, $locationIds, $canViewCost); break;
-            case 'inventory_transfer': $rows = $this->transferRows($tenantId, $storeId, $locationIds, $canViewCost); break;
+            case 'inventory_transfer': $rows = $this->transferRows($tenantId, $storeId, $locationIds, $canViewCost, $this->hasInTransitTransferFilter($payload)); break;
             case 'inventory_salon_usage': $rows = $this->usageRows($tenantId, $storeId, $locationIds); break;
             case 'inventory_import': $rows = $this->importRows($tenantId, $storeId); break;
             default: throw new \LogicException('inventory_operational_page_code_invalid');
@@ -285,11 +309,18 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
         return $this->bounded($rows);
     }
 
-    private function transferRows(string $tenantId, int $storeId, array $locationIds, bool $canViewCost): array
+    private function transferRows(string $tenantId, int $storeId, array $locationIds, bool $canViewCost, bool $onlyInTransit): array
     {
-        $rows = Db::name('inventory_cross_transfer_document')->alias('d')->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id')->leftJoin('inventory_cross_transfer_batch_allocation a', 'a.line_id=l.id')
-            ->where('d.tenant_id', $tenantId)->where(function ($query) use ($storeId, $locationIds): void { $query->where(function ($q) use ($storeId, $locationIds): void { $q->where('d.from_party_type', 'STORE')->where('d.from_party_id', $storeId)->whereIn('d.from_location_id', $locationIds); })->whereOr(function ($q) use ($storeId, $locationIds): void { $q->where('d.to_party_type', 'STORE')->where('d.to_party_id', $storeId)->whereIn('d.to_location_id', $locationIds); }); })
-            ->field('d.id,d.transfer_no order_sn,d.document_status,d.document_status status_name,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,d.from_party_type,d.from_party_id,d.from_location_id,d.to_party_type,d.to_party_id,d.to_location_id,d.initiator_store_id,d.from_party_name_snapshot from_party_name,d.to_party_name_snapshot to_party_name,COUNT(DISTINCT l.id) detail_count,SUM((a.quantity_units*a.unit_cost_cents)/POW(10,a.quantity_scale)) transfer_amount_cents')
+        $query = Db::name('inventory_cross_transfer_document')->alias('d')->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id AND l.retired_at=0')->leftJoin('inventory_cross_transfer_batch_allocation a', 'a.line_id=l.id AND a.withdrawn_at=0')
+            ->where('d.tenant_id', $tenantId)->where(function ($query) use ($storeId, $locationIds): void {
+                $query->where(function ($source) use ($storeId, $locationIds): void { $source->where('d.from_party_type', 'STORE')->where('d.from_party_id', $storeId)->whereIn('d.from_location_id', $locationIds); })
+                    // 接收方不能通过统一查询、合计或导出提前看到未发货草稿。
+                    ->whereOr(function ($target) use ($storeId, $locationIds): void { $target->where('d.to_party_type', 'STORE')->where('d.to_party_id', $storeId)->whereIn('d.to_location_id', $locationIds)->whereIn('d.document_status', ['DISPATCHED', 'RECEIVED']); });
+            });
+        // 先限制在途状态再读取，避免大量其他状态占满统一查询的来源窗口。
+        if ($onlyInTransit) $query->where('d.document_status', 'DISPATCHED');
+        $rows = $query
+            ->field('d.id,d.transfer_no order_sn,d.document_status,d.document_status status_name,d.withdrawal_count,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,d.from_party_type,d.from_party_id,d.from_location_id,d.to_party_type,d.to_party_id,d.to_location_id,d.initiator_store_id,d.from_party_name_snapshot from_party_name,d.to_party_name_snapshot to_party_name,COUNT(DISTINCT l.id) detail_count,SUM((a.quantity_units*a.unit_cost_cents)/POW(10,a.quantity_scale)) transfer_amount_cents')
             ->group('d.id')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         foreach ($rows as &$row) {
             $fromCurrentStore = (string)$row['from_party_type'] === 'STORE'
@@ -302,11 +333,12 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
             $row['status_name'] = $this->transferStatusName((string)$row['document_status']);
             $row['can_dispatch'] = (string)$row['document_status'] === 'DRAFT' && $fromCurrentStore;
             $row['can_edit'] = $row['can_dispatch'];
-            $row['can_delete'] = $row['can_edit'];
+            $row['can_delete'] = $row['can_edit'] && (int)$row['withdrawal_count'] === 0;
+            $row['can_withdraw'] = (string)$row['document_status'] === 'DISPATCHED' && $fromCurrentStore;
             $row['can_receive'] = (string)$row['document_status'] === 'DISPATCHED' && $toCurrentStore;
-            // 调拨状态与历史冲销记录仍可查询；当前业务入口不再允许作废调拨。
+            // 撤回后的草稿保留旧流水，提供记名作废而非物理删除。
             $row['can_cancel'] = false;
-            $row['can_reverse'] = false;
+            $row['can_reverse'] = $row['can_edit'] && (int)$row['withdrawal_count'] > 0;
             if (!$canViewCost) $row['transfer_amount_cents'] = null;
             unset($row['from_party_type'], $row['from_party_id'], $row['from_location_id'], $row['to_party_type'], $row['to_party_id'], $row['to_location_id'], $row['initiator_store_id']);
         }

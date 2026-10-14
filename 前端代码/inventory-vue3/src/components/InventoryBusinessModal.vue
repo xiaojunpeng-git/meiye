@@ -151,8 +151,8 @@ const usageWarehouseScope = computed(() => {
 })
 const catalogApi = computed(() => isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi)
 const catalogQuery = computed(() => {
-  // 盘点的账面数要与确认命令锁定的当前库存一致；普通选品仍沿用原目录口径。
-  if (!isPlatformHeadquarters.value) return props.pageKey === 'count' ? { for_count: 1, include_count_batches: 1 } : {}
+  // 盘点按当前账面数，出库按可扣减批次；其余选品仍沿用现行目录口径。
+  if (!isPlatformHeadquarters.value) return props.pageKey === 'count' ? { for_count: 1, include_count_batches: 1 } : props.pageKey === 'outbound' ? { for_outbound_stock: 1 } : {}
   // 请货明细仍按“请货方”目录保存，保证后端可校验请求商品；
   // “当前库存”则必须来自供货方库存主体，不能误展示请货方库存。
   const selection = props.pageKey === 'request'
@@ -243,11 +243,13 @@ function formatQuantity(units, scale = 0) {
 
 function allocationStatus(allocation) {
   if (Number(allocation?.received_at || 0) > 0) return '已收货'
-  if (Number(allocation?.dispatched_at || 0) > 0) return '在途'
+  if (Number(allocation?.dispatched_at || 0) > 0) return isPlatformHeadquarters.value ? '未收货' : '在途'
   return '待发货'
 }
 
 function detailStatus(detail, fallback = '-') {
+  // 仅平台调拨改展示词，门店端和服务端的 DISPATCHED 状态契约保持不变。
+  if (props.pageKey === 'transfer' && isPlatformHeadquarters.value && (detail?.document_status === 'DISPATCHED' || ['DISPATCHED', '在途'].includes(detail?.status_name))) return '未收货'
   return inventoryStatusLabel(detail?.status_name || detail?.document_status, fallback)
 }
 
@@ -1346,7 +1348,7 @@ function submitPrimaryEditor() {
             </template>
             <template v-else-if="pageKey === 'transfer' && detail?.transfer_no">
               <div class="detail-meta"><span>调拨单号：<b>{{ detail.transfer_no }}</b></span><span>调出方：{{ detail.from_party_name_snapshot }}</span><span>调入方：{{ detail.to_party_name_snapshot }}</span><span>状态：{{ detailStatus(detail) }}</span><span>调拨日期：{{ detail.business_date }}</span></div>
-              <section class="line-section"><header><div><h3>调拨商品</h3><p>{{ detail.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>调拨数量</th><th>库存单位</th><th>批次分配</th><th>状态</th><th>明细备注</th></tr></thead><tbody><tr v-if="!transferDetailLines.length"><td colspan="7" class="modal-empty">该调拨单没有商品明细</td></tr><template v-for="line in transferDetailLines" :key="line.id"><tr><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ formatQuantity(line.requested_quantity_units, line.quantity_scale) }}</td><td>{{ line.stock_unit_snapshot }}</td><td>{{ line.allocations?.length || 0 }} 个批次</td><td>{{ detail.status_name || detail.document_status }}</td><td>{{ line.detail_remark || '-' }}</td></tr><tr v-for="allocation in line.allocations || []" :key="allocation.id" class="allocation-row"><td colspan="2">批次 ID：{{ allocation.from_batch_id }}</td><td>{{ formatQuantity(allocation.quantity_units, allocation.quantity_scale) }}</td><td>单位成本：{{ allocation.unit_cost_cents === null ? '-' : `¥${(Number(allocation.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>目标批次 ID：{{ allocation.to_batch_id || '-' }}</td><td>{{ allocationStatus(allocation) }}</td><td></td></tr></template></tbody></table></div></section>
+              <section class="line-section"><header><div><h3>调拨商品</h3><p>{{ detail.remark || '无备注' }}</p></div></header><div class="modal-table-scroll"><table><thead><tr><th>商品</th><th>规格</th><th>调拨数量</th><th>库存单位</th><th>批次分配</th><th>状态</th><th>明细备注</th></tr></thead><tbody><tr v-if="!transferDetailLines.length"><td colspan="7" class="modal-empty">该调拨单没有商品明细</td></tr><template v-for="line in transferDetailLines" :key="line.id"><tr><td>{{ line.product_name_snapshot }}</td><td>{{ line.sku_name_snapshot || '默认规格' }}</td><td>{{ formatQuantity(line.requested_quantity_units, line.quantity_scale) }}</td><td>{{ line.stock_unit_snapshot }}</td><td>{{ line.allocations?.length || 0 }} 个批次</td><td>{{ detailStatus(detail) }}</td><td>{{ line.detail_remark || '-' }}</td></tr><tr v-for="allocation in line.allocations || []" :key="allocation.id" class="allocation-row"><td colspan="2">批次 ID：{{ allocation.from_batch_id }}</td><td>{{ formatQuantity(allocation.quantity_units, allocation.quantity_scale) }}</td><td>单位成本：{{ allocation.unit_cost_cents === null ? '-' : `¥${(Number(allocation.unit_cost_cents) / 100).toFixed(2)}` }}</td><td>目标批次 ID：{{ allocation.to_batch_id || '-' }}</td><td>{{ allocationStatus(allocation) }}</td><td></td></tr></template></tbody></table></div></section>
             </template>
             <div v-else class="detail-meta"><span>此单据详情读取接口尚未接入。</span></div>
           </template>
@@ -1425,7 +1427,7 @@ function submitPrimaryEditor() {
             <footer v-if="['inbound', 'outbound', 'request', 'transfer'].includes(pageKey)" class="line-total"><span>明细数量：{{ selectedRows.length }} 项</span><strong v-if="pageKey === 'inbound'">入库金额按填写单价计算</strong><strong v-else-if="pageKey === 'outbound'">出库成本由服务端按实际批次计算</strong></footer>
           </section>
 
-          <aside v-if="!isDetail && ['request', 'transfer'].includes(pageKey)" class="modal-notice"><AlertTriangle :size="17" /><div><strong>操作注意事项</strong><p>{{ pageKey === 'request' ? '请货不会变动库存；供货方发货时，系统会优先扣减最早到期的可用批次。收货完成后，已收数量会累计到请货单。' : '保存草稿不变动库存；调出方发货后进入在途，调入方确认收货才增加库存。' }}</p></div></aside>
+          <aside v-if="!isDetail && ['request', 'transfer'].includes(pageKey)" class="modal-notice"><AlertTriangle :size="17" /><div><strong>操作注意事项</strong><p>{{ pageKey === 'request' ? '请货不会变动库存；供货方发货时，系统会优先扣减最早到期的可用批次。收货完成后，已收数量会累计到请货单。' : isPlatformHeadquarters ? '保存草稿不变动库存；调出方发货后进入未收货，调入方确认收货才增加库存。' : '保存草稿不变动库存；调出方发货后进入在途，调入方确认收货才增加库存。' }}</p></div></aside>
           <p v-if="submitError && pageKey !== 'count'" class="catalog-error">{{ submitError }}</p>
         </main>
 

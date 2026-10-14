@@ -91,6 +91,9 @@ final class InventoryPlatformAccessPolicy
             'post product/inventory/v3/hq/cross-transfer/:id/delete-draft' => 'transfer',
             'post product/inventory/v3/hq/cross-transfer/:id/dispatch' => 'transfer',
             'post product/inventory/v3/hq/cross-transfer/:id/receive' => 'transfer',
+            // 撤回和撤回后作废沿用调拨工作流写权限，不能借查看菜单获得库存写权限。
+            'post product/inventory/v3/hq/cross-transfer/:id/withdraw' => 'transfer',
+            'post product/inventory/v3/hq/cross-transfer/:id/reverse' => 'transfer',
             'get product/inventory/v3/hq/cross-transfer/incoming-requests' => 'transfer',
             'get product/inventory/v3/hq/cross-transfer/transfer-staffs' => 'transfer',
             'get product/inventory/v3/hq/catalog' => 'catalog',

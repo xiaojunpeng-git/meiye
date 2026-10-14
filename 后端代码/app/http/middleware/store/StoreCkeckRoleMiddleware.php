@@ -82,7 +82,8 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
         if ($method !== 'POST') return false;
         $path = ltrim($path, '/');
         return $path === 'storeapi/product/inventory/v3/cross-transfer'
-            || preg_match('#^storeapi/product/inventory/v3/cross-transfer/[0-9]+/(?:update|delete-draft|dispatch|receive)$#D', $path) === 1;
+            // 只扩展同一调拨单的撤回/记名作废命令，服务层仍复核调出方与单据状态。
+            || preg_match('#^storeapi/product/inventory/v3/cross-transfer/[0-9]+/(?:update|delete-draft|dispatch|receive|withdraw|reverse)$#D', $path) === 1;
     }
 
     /**

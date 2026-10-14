@@ -97,6 +97,25 @@ const statisticsExecutedQuery = ref({})
 const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage', 'import'])
 const usesBusinessDatePeriod = (page = active.value) => businessDatePages.has(page) && (page !== 'import' || mode.value === 'store')
 const storeOperationalStatus = ref('')
+// 在途调拨是当前待收货清单，不能被历史调拨日期挡住；其他状态仍沿用已选周期。
+const filtersBusinessDatePeriod = (page = active.value) => usesBusinessDatePeriod(page)
+  && !(page === 'transfer' && (mode.value === 'store'
+    ? storeOperationalStatus.value === '在途'
+    : platformTransferStatus.value === 'DISPATCHED'))
+
+// 平台将已发货未签收的调拨称为“未收货”；状态编码仍由服务端决定。
+const transferStatusDisplay = (row) => mode.value === 'platform' && (row?.document_status === 'DISPATCHED' || ['DISPATCHED', '在途'].includes(row?.status_name))
+  ? '未收货'
+  : inventoryStatusLabel(row?.status_name)
+
+// 快捷入口只改变当前列表筛选，不放宽服务端按岗位和仓库计算的数据权限。
+async function showAllUnreceivedTransfers() {
+  keyword.value = ''
+  platformTransferFromParty.value = 'ALL:0'
+  platformTransferToParty.value = 'ALL:0'
+  platformTransferStatus.value = 'DISPATCHED'
+  await loadCurrentList()
+}
 const outboundTypeFilter = ref('')
 const outboundFilterTypes = ['过期退货', '试用出库', '报废出库', '其他出库', '对内出库', '对外出库', '手工出库', '预售领用出库']
 const outboundExecutedQuery = ref(null)
@@ -999,11 +1018,12 @@ async function requestDeleteTransferDraft(row) {
 
 function runDocumentAction(action, row, documentType = active.value) {
   const labels = {
-    dispatch: '发货', receive: '确认收货',
-    void: `作废${{ inbound: '入库单', outbound: '出库单', usage: '院装领用单' }[documentType] || '单据'}`,
+    dispatch: '发货', receive: '确认收货', withdraw: '撤回发货',
+    void: `作废${{ inbound: '入库单', outbound: '出库单', transfer: '调拨单', usage: '院装领用单' }[documentType] || '单据'}`,
     voidRequest: '作废请货单'
   }
   const requiresReason = ['void', 'voidRequest'].includes(action)
+  // 撤回与作废使用稳定命令键；同一弹窗重试不能重复回补库存或重复记审计。
   transferActionConfirmation.value = {
     action,
     row,
@@ -1011,7 +1031,7 @@ function runDocumentAction(action, row, documentType = active.value) {
     label: labels[action] || '执行该操作',
     requiresReason,
     reason: '',
-    idempotencyKey: requiresReason ? inventoryCommandIdempotencyKey() : ''
+    idempotencyKey: requiresReason || action === 'withdraw' ? inventoryCommandIdempotencyKey() : ''
   }
 }
 
@@ -1035,14 +1055,18 @@ async function confirmTransferAction() {
       const payload = { hq_location_id: Number(action === 'receive' && row.to_party_type === 'HQ' ? row.to_location_id : row.from_party_type === 'HQ' ? row.from_location_id : row.location_id || platformHqLocationId.value) }
       if (action === 'dispatch') await platformInventoryApi.dispatchHqCrossTransfer(row.id, payload)
       else if (action === 'receive') await platformInventoryApi.receiveHqCrossTransfer(row.id, payload)
+      else if (action === 'withdraw') await platformInventoryApi.withdrawHqCrossTransfer(row.id, { ...payload, idempotency_key: confirmation.idempotencyKey })
       else if (action === 'deleteDraft') await platformInventoryApi.deleteHqCrossTransferDraft(row.id, { ...payload, expected_edit_token: confirmation.expectedEditToken })
+      else if (action === 'void' && documentType === 'transfer') await platformInventoryApi.voidWithdrawnHqCrossTransfer(row.id, { ...payload, ...command })
       else if (action === 'void' && documentType === 'inbound') await platformInventoryApi.voidHqInbound(sourceId, { ...payload, ...command })
       else if (action === 'void' && documentType === 'outbound') await platformInventoryApi.voidHqOutbound(sourceId, { ...payload, ...command })
       else if (action === 'void' && documentType === 'usage') await platformInventoryApi.voidSalonUsage(row.id, { ...(Number(row.store_id) > 0 ? { store_id: Number(row.store_id) } : { hq_location_id: Number(row.location_id) }), ...command })
       else if (action === 'voidRequest') await platformInventoryApi.voidHqRequest(row.id, { ...payload, ...command })
     } else if (action === 'dispatch') await inventoryApi.dispatchCrossTransfer(row.id)
     else if (action === 'receive') await inventoryApi.receiveCrossTransfer(row.id)
+    else if (action === 'withdraw') await inventoryApi.withdrawCrossTransfer(row.id, { idempotency_key: confirmation.idempotencyKey })
     else if (action === 'deleteDraft') await inventoryApi.deleteCrossTransferDraft(row.id, { expected_edit_token: confirmation.expectedEditToken })
+    else if (action === 'void' && documentType === 'transfer') await inventoryApi.voidWithdrawnCrossTransfer(row.id, command)
     else if (action === 'void' && documentType === 'inbound') await inventoryApi.voidInbound(sourceId, command)
     else if (action === 'void' && documentType === 'outbound') await inventoryApi.voidOutbound(sourceId, command)
     else if (action === 'void' && documentType === 'usage') await inventoryApi.voidSalonUsage(row.id, command)
@@ -1116,7 +1140,7 @@ function mapApiRow(page, row) {
     // 只展示该行的权威名称；缺失时留空占位，避免将仓库或当前筛选范围冒充单据门店。
     case 'count': return [text(row.order_sn), text(mode.value === 'platform' ? row.location_name || row.store_name : row.store_name), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), countStatusName(row.status_name), operationTime(row.operation_at), text(row.operator_name)]
     case 'request': return [text(row.order_sn), text(row.request_date || row.business_date), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.detail_count), inventoryStatusLabel(row.status_name), operationTime(row.operation_at), text(row.operator_name || row.operator_name_snapshot)]
-    case 'transfer': return [text(row.order_sn), text(row.business_date), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), inventoryStatusLabel(row.status_name), operationTime(row.operation_at), text(row.operator_name)]
+    case 'transfer': return [text(row.order_sn), text(row.business_date), text(row.from_party_name || row.from_store_name), text(row.to_party_name || row.to_store_name), text(row.detail_count), transferStatusDisplay(row), operationTime(row.operation_at), text(row.operator_name)]
     // 项目为空是合法的院装领退单据；列表须明确显示未关联，不能误认为缺失数据。
     case 'usage': return [text(row.usage_no), text(row.business_date), text(row.operation_type === 'RETURN' ? '退回' : '领用'), text(row.location_name), text(row.project_name_snapshot, '未关联项目'), `${text(row.detail_count, '0')} 项`, text(row.remark), inventoryStatusLabel(row.document_status, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
     case 'import': return [text(row.source_file_name), row.direction === 'inbound' ? '入库导入' : '出库导入', text(row.business_type), text(row.total_count, '0'), text(row.success_count, '0'), text(row.failure_count, '0'), text(row.document_no), text(row.status === 'SUCCEEDED' ? '成功' : row.status === 'FAILED' ? '失败' : '处理中'), operationTime(row.operation_at || row.updated_at), text(row.operator_name)]
@@ -1264,7 +1288,7 @@ async function loadCurrentList(unifiedQuery = null) {
       if (platformTransferStatus.value) query.status = platformTransferStatus.value
     }
     const businessPeriod = businessDateRange.value
-    if (usesBusinessDatePeriod() && mode.value === 'platform' && businessPeriod.min && businessPeriod.max) {
+    if (filtersBusinessDatePeriod() && mode.value === 'platform' && businessPeriod.min && businessPeriod.max) {
       query.business_date_from = businessPeriod.min
       query.business_date_to = businessPeriod.max
       if (active.value === 'usage') {
@@ -1292,7 +1316,7 @@ async function loadCurrentList(unifiedQuery = null) {
       ? { ...unifiedOperationalQuery, pageCode: `inventory_${active.value}`, subject: 'STORE', storeId: Number(listWarehouseId) || 0,
           topFilterConditions: [
             ...(Array.isArray(unifiedOperationalQuery.topFilterConditions) ? unifiedOperationalQuery.topFilterConditions : []),
-            ...(usesBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
+            ...(filtersBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
               ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }]
               : [])
           ] }
@@ -1305,7 +1329,7 @@ async function loadCurrentList(unifiedQuery = null) {
         ...(operationalStatusFilterValue() ? [{ field: 'status_name', operator: 'eq', value: operationalStatusFilterValue() }] : []),
         ...(active.value === 'outbound' && outboundTypeFilter.value ? [{ field: 'order_type_name', operator: 'eq', value: outboundTypeFilter.value }] : []),
         ...countDateConditions,
-        ...(usesBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
+        ...(filtersBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
           ? [{ field: 'business_date', operator: 'between', value: [businessPeriod.min, businessPeriod.max] }] : [])
       ]
     }
@@ -1709,6 +1733,7 @@ onBeforeUnmount(() => {
           <div class="transfer-confirmation-dialog">
             <h2>确认{{ transferActionConfirmation.label }}</h2>
             <p v-if="transferActionConfirmation.action === 'deleteDraft'">单据 {{ transferActionConfirmation.row.order_sn || transferActionConfirmation.row.id }} 的草稿及商品明细将永久删除，无法恢复。已发货或已有库存流水、请货履约的调拨单不能删除。</p>
+            <p v-else-if="transferActionConfirmation.action === 'withdraw'">单据 {{ transferActionConfirmation.row.order_sn || transferActionConfirmation.row.id }} 尚未收货。撤回后调出方原批次库存会恢复，单据变为草稿；原发货和撤回流水会保留。</p>
             <p v-else>单据 {{ transferActionConfirmation.row.order_sn || transferActionConfirmation.row.document_no || transferActionConfirmation.row.id }} 将执行{{ transferActionConfirmation.label }}。原单和原始库存流水会保留。</p>
             <p v-if="transferActionConfirmation.error" class="inventory-load-error" role="alert">{{ transferActionConfirmation.error }}</p>
             <label v-if="transferActionConfirmation.requiresReason" class="transfer-confirmation-dialog__reason">
@@ -1887,7 +1912,7 @@ onBeforeUnmount(() => {
             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="queryStoreOperationalPage" /></div>
             <label v-if="active === 'outbound'">出库类型<select v-model="outboundTypeFilter" aria-label="出库类型"><option value="">全部</option><option v-for="type in outboundFilterTypes" :key="type" :value="type">{{ type }}</option></select></label>
             <label>状态<select v-model="storeOperationalStatus" @change="onStoreOperationalStatusChanged"><option value="">全部</option><option v-for="status in storeOperationalStatusOptions" :key="status" :value="status">{{ status }}</option></select></label>
-            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
+            <div v-if="filtersBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading" @click="queryStoreOperationalPage">{{ listLoading ? '查询中' : '查询' }}</button>
             <InventoryOutboundExport v-if="active === 'outbound'" :query="outboundExecutedQuery" :count="remoteTotal" :disabled="listLoading || Boolean(listError)" :request-action="inventoryUnifiedQueryRequestAction" :download="inventoryApi.downloadOutboundExport" />
@@ -1898,14 +1923,14 @@ onBeforeUnmount(() => {
             <button class="primary-button" :disabled="listLoading" @click="active === 'warehouse' ? queryWarehouseSettings() : loadCurrentList()">{{ listLoading ? '查询中' : '查询' }}</button>
             <button class="secondary-button" :disabled="listLoading" @click="recipeStatus = ''; recipeKeyword = ''; loadCurrentList()">重置</button>
           </section>
-          <section v-else-if="!(active === 'stock')" class="filter-card">
+          <section v-else-if="!(active === 'stock')" class="filter-card" :class="{ 'filter-card--platform-transfer': mode === 'platform' && active === 'transfer' }">
             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="loadCurrentList" /></div>
             <template v-if="mode === 'platform' && active === 'request'"><label>请货方<InventoryStoreSelector v-model="platformRequestPartySelection" :options="platformRequestPartySelectorOptions" placeholder="全部请货方" /></label><label>供货方<InventoryStoreSelector v-model="platformRequestSupplyPartySelection" :options="platformRequestSupplyPartySelectorOptions" placeholder="全部供货方" /></label><label>请货状态<select v-model="platformRequestStatus"><option value="">全部</option><option value="APPLIED">申请中</option><option value="PARTIAL">部分调拨</option><option value="DONE">已完成</option><option value="CANCELLED">已取消</option><option value="TERMINATED">已终止</option><option value="VOIDED">已作废</option></select></label></template>
-            <template v-else-if="mode === 'platform' && active === 'transfer'"><label>调出方<InventoryStoreSelector v-model="platformTransferFromParty" :options="platformWarehouseSelectorOptions" placeholder="全部调出方" /></label><label>调入方<InventoryStoreSelector v-model="platformTransferToParty" :options="platformTransferTargetOptions" searchable placeholder="全部调入方" /></label><label>调拨状态<select v-model="platformTransferStatus"><option value="">全部</option><option value="DRAFT">草稿</option><option value="DISPATCHED">在途</option><option value="RECEIVED">已收货</option><option value="CANCELLED">已取消</option><option value="REVERSED">已作废</option></select></label></template>
+            <template v-else-if="mode === 'platform' && active === 'transfer'"><label>调出方<InventoryStoreSelector v-model="platformTransferFromParty" :options="platformWarehouseSelectorOptions" placeholder="全部调出方" /></label><label>调入方<InventoryStoreSelector v-model="platformTransferToParty" :options="platformTransferTargetOptions" searchable placeholder="全部调入方" /></label><button class="secondary-button" type="button" :disabled="listLoading" @click="showAllUnreceivedTransfers">未收货</button><label>调拨状态<select v-model="platformTransferStatus"><option value="">全部</option><option value="DRAFT">草稿</option><option value="DISPATCHED">未收货</option><option value="RECEIVED">已收货</option><option value="CANCELLED">已取消</option><option value="REVERSED">已作废</option></select></label></template>
             <label v-else-if="active === 'warehouse'">仓库状态<select v-model="warehouseSettingsStatus" @change="queryWarehouseSettings"><option value="">全部</option><option value="ACTIVE">启用</option><option value="INACTIVE">停用</option></select></label>
             <label v-else-if="mode === 'platform'">库存仓<InventoryStoreSelector v-model="platformListWarehouseSelection" :options="platformListWarehouseOptions" placeholder="选择库存仓" :presentation="['inbound', 'outbound', 'count', 'usage'].includes(active) ? 'dropdown' : 'modal'" /></label>
             <label v-if="!(['inbound', 'outbound', 'warehouse'].includes(active) || (mode === 'platform' && ['request', 'transfer'].includes(active)))" v-for="filter in currentPage.filters.slice(0, 2)" :key="filter">{{ filter }}<select><option>全部</option></select></label>
-            <div v-if="usesBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
+            <div v-if="filtersBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresWarehouse && !platformListWarehouseOptions.length)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
@@ -1931,13 +1956,15 @@ onBeforeUnmount(() => {
                       <button v-if="active === 'transfer' && sourceRows[index].can_delete" class="text-button text-button--danger" @click="requestDeleteTransferDraft(sourceRows[index])">删除</button>
                       <button v-if="active === 'transfer' && sourceRows[index].can_dispatch" class="text-button" @click="runTransferAction('dispatch', sourceRows[index])">发货</button>
                       <button v-if="active === 'transfer' && sourceRows[index].can_receive" class="text-button" @click="runTransferAction('receive', sourceRows[index])">收货</button>
+                      <button v-if="active === 'transfer' && sourceRows[index].can_withdraw" class="text-button" @click="runTransferAction('withdraw', sourceRows[index])">撤回</button>
+                      <button v-if="active === 'transfer' && sourceRows[index].can_reverse" class="text-button text-button--danger" @click="runDocumentAction('void', sourceRows[index], 'transfer')">作废</button>
                       <button v-if="sourceRows[index].can_void && active !== 'transfer'" class="text-button" @click="runDocumentAction(active === 'request' ? 'voidRequest' : 'void', sourceRows[index], active)">作废</button>
                     </span>
                   </div></td></tr>
                   <tr v-if="!groupedDetails[groupedDetailKey(sourceRows[index])] || groupedDetails[groupedDetailKey(sourceRows[index])].status === 'loading'" class="inventory-detail-message-row"><td :colspan="groupedDetailColumns[active].length">正在读取明细...</td></tr>
                   <tr v-else-if="groupedDetails[groupedDetailKey(sourceRows[index])].status === 'error'" class="inventory-detail-message-row inventory-detail-message-row--error"><td :colspan="groupedDetailColumns[active].length">{{ groupedDetails[groupedDetailKey(sourceRows[index])].message }}</td></tr>
                   <tr v-else-if="!groupedDetails[groupedDetailKey(sourceRows[index])].lines.length" class="inventory-detail-message-row"><td :colspan="groupedDetailColumns[active].length">该单据没有商品明细</td></tr>
-                  <tr v-else v-for="(line, lineIndex) in groupedDetails[groupedDetailKey(sourceRows[index])].lines" :key="line.id || line.line_id || lineIndex" class="inventory-detail-line"><td v-for="(cell, cellIndex) in groupedLineCells(active, line, groupedDetails[groupedDetailKey(sourceRows[index])].detail)" :key="cellIndex">{{ cell }}</td></tr>
+                  <tr v-else v-for="(line, lineIndex) in groupedDetails[groupedDetailKey(sourceRows[index])].lines" :key="line.id || line.line_id || lineIndex" class="inventory-detail-line"><td v-for="(cell, cellIndex) in groupedLineCells(active, line, groupedDetails[groupedDetailKey(sourceRows[index])].detail)" :key="cellIndex">{{ mode === 'platform' && active === 'transfer' && cellIndex === 5 ? transferStatusDisplay(groupedDetails[groupedDetailKey(sourceRows[index])].detail) : cell }}</td></tr>
                 </template>
               </tbody>
             </table>

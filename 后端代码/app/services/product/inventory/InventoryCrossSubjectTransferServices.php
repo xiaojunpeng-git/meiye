@@ -31,29 +31,31 @@ final class InventoryCrossSubjectTransferServices
     {
         $scope = $this->scope($storeId, $operatorId, false);
         $query = Db::name('inventory_cross_transfer_document')->alias('d')
-            ->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id')
+            ->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id AND l.retired_at=0')
             ->where('d.tenant_id', $scope['tenantId'])
             ->where(function ($query) use ($scope): void {
                 $query->where(function ($inner) use ($scope): void { $inner->where('d.from_party_type', 'STORE')->where('d.from_party_id', $scope['storeId']); })
-                    ->whereOr(function ($inner) use ($scope): void { $inner->where('d.to_party_type', 'STORE')->where('d.to_party_id', $scope['storeId']); });
+                    // 草稿只属于调出方；调入方直到发货后才有可读单据。
+                    ->whereOr(function ($inner) use ($scope): void { $inner->where('d.to_party_type', 'STORE')->where('d.to_party_id', $scope['storeId'])->whereIn('d.document_status', ['DISPATCHED', 'RECEIVED']); });
             });
         if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
         $this->applyListKeyword($query, $keyword);
         $count = (int)(clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.quantity_scale*0)+0) quantity_placeholder')
+        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.withdrawal_count,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.quantity_scale*0)+0) quantity_placeholder')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         foreach ($list as &$row) {
-            $amount = (int)Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', (int)$row['id'])
+            $amount = (int)Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', (int)$row['id'])->where('withdrawn_at', 0)
                 ->sum(Db::raw('(quantity_units * unit_cost_cents) / POW(10, quantity_scale)'));
             $row['transfer_amount_cents'] = $canViewCost ? $amount : null;
             $row['status_name'] = $this->statusName((string)$row['status_name']);
             $row['can_dispatch'] = (string)$row['document_status'] === 'DRAFT' && (int)$row['from_party_id'] === $scope['storeId'];
             $row['can_edit'] = $row['can_dispatch'];
-            $row['can_delete'] = $row['can_edit'];
+            $row['can_delete'] = $row['can_edit'] && (int)$row['withdrawal_count'] === 0;
+            $row['can_withdraw'] = (string)$row['document_status'] === 'DISPATCHED' && (int)$row['from_party_id'] === $scope['storeId'];
             $row['can_receive'] = (string)$row['document_status'] === 'DISPATCHED' && (int)$row['to_party_id'] === $scope['storeId'];
-            // 历史调拨及冲销事实仍可读；当前业务不开放草稿取消或库存冲销入口。
+            // 已撤回草稿只能记名作废，不能再物理删除曾发生的库存流水。
             $row['can_cancel'] = false;
-            $row['can_reverse'] = false;
+            $row['can_reverse'] = $row['can_edit'] && (int)$row['withdrawal_count'] > 0;
         }
         unset($row);
         return ['count' => $count, 'list' => $list];
@@ -63,13 +65,16 @@ final class InventoryCrossSubjectTransferServices
     {
         $scope = $this->scope($storeId, $operatorId, false);
         $document = $this->lockedStoreDocument($scope, $documentId, false);
-        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->select()->toArray();
+        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->where('retired_at', 0)->order('line_no asc')->select()->toArray();
         $document['edit_token'] = $this->draftEditToken($document, $lines);
         $document['can_edit'] = (string)$document['document_status'] === 'DRAFT'
             && (string)$document['from_party_type'] === 'STORE' && (int)$document['from_party_id'] === $scope['storeId'];
-        $document['can_delete'] = $document['can_edit'];
+        $document['can_delete'] = $document['can_edit'] && (int)$document['withdrawal_count'] === 0;
+        $document['can_withdraw'] = (string)$document['document_status'] === 'DISPATCHED'
+            && (string)$document['from_party_type'] === 'STORE' && (int)$document['from_party_id'] === $scope['storeId'];
+        $document['can_reverse'] = $document['can_edit'] && (int)$document['withdrawal_count'] > 0;
         foreach ($lines as &$line) {
-            $allocations = Db::name('inventory_cross_transfer_batch_allocation')->where('line_id', (int)$line['id'])->order('id asc')->select()->toArray();
+            $allocations = Db::name('inventory_cross_transfer_batch_allocation')->where('line_id', (int)$line['id'])->where('withdrawn_at', 0)->order('id asc')->select()->toArray();
             if (!$canViewCost) foreach ($allocations as &$allocation) $allocation['unit_cost_cents'] = null;
             unset($allocation);
             $line['allocations'] = $allocations;
@@ -166,9 +171,9 @@ final class InventoryCrossSubjectTransferServices
         return Db::transaction(function () use ($source, $target, $documentId, $command, $expectedToken, $hqScope): array {
             $document = $this->lockedSubjectDocument($source, $documentId, true);
             $this->assertSourceDraft($source, $document, 'edit');
-            $previousLines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->lock(true)->select()->toArray();
+            $previousLines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->where('retired_at', 0)->order('line_no asc')->lock(true)->select()->toArray();
             if (!hash_equals($this->draftEditToken($document, $previousLines), $expectedToken)) throw new \RuntimeException('inventory_cross_transfer_draft_changed');
-            if (Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->lock(true)->find()) throw new \RuntimeException('inventory_cross_transfer_edit_state_invalid');
+            $hasDispatchHistory = (bool)Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->lock(true)->find();
 
             $this->assertSameTenant($source, $target);
             $source['location'] = $this->subjectLocation($source, $command['now']);
@@ -180,8 +185,15 @@ final class InventoryCrossSubjectTransferServices
                     || (int)$document['to_party_id'] !== (int)$target['partyId'] || (int)$document['to_location_id'] !== (int)$target['location']['id']))) throw new \RuntimeException('inventory_cross_transfer_request_target_locked');
             $request = $this->requestDocument($target, $command['requestDocumentId'], $source);
             $targetLocation = $this->subjectLocation($target, $command['now']);
-            Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->delete();
-            $this->persistDraftLines($source, $target, $request, $command, $documentId);
+            // 已发货明细仍被历史分配和流水引用；退役后另起明细代次，不删除审计链。
+            $generation = 1;
+            if ($hasDispatchHistory) {
+                $generation = (int)Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->max('line_generation') + 1;
+                Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->where('retired_at', 0)->update(['retired_at' => $command['now']]);
+            } else {
+                Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->delete();
+            }
+            $this->persistDraftLines($source, $target, $request, $command, $documentId, $generation);
             // 平台记名人员必须重新验证，不信任浏览器提交的员工 ID 或旧快照。
             $staff = $hqScope === null ? null : $this->platformTransferStaff($hqScope, $source, $target, (int)$command['transferStaffId']);
             $staffSnapshot = $staff === null ? [] : [
@@ -218,7 +230,9 @@ final class InventoryCrossSubjectTransferServices
         return Db::transaction(function () use ($source, $documentId, $expectedToken): array {
             $document = $this->lockedSubjectDocument($source, $documentId, true);
             $this->assertSourceDraft($source, $document, 'delete');
-            $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->lock(true)->select()->toArray();
+            // 撤回后虽回到草稿，已有库存事实仍必须留档，不能借删除接口物理移除。
+            if ((int)$document['withdrawal_count'] > 0) throw new \RuntimeException('inventory_cross_transfer_delete_facts_exist');
+            $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->where('retired_at', 0)->order('line_no asc')->lock(true)->select()->toArray();
             if (!hash_equals($this->draftEditToken($document, $lines), $expectedToken)) throw new \RuntimeException('inventory_cross_transfer_draft_changed');
             // Draft deletion is safe only before dispatch or receipt has left any independent fact.
             if (Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->lock(true)->find()
@@ -403,14 +417,29 @@ final class InventoryCrossSubjectTransferServices
     {
         // 查询只解析可读范围；按钮能力仍取后端写授权，不能由单据状态独自决定。
         $scope = $this->headquartersScope($adminInfo, $hqLocationId, false);
-        $query = Db::name('inventory_cross_transfer_document')->alias('d')->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id')
-            ->where('d.tenant_id', $scope['tenantId'])->where(function ($inner) use ($scope): void {
-                $inner->whereIn('d.from_location_id', $scope['hqLocationIds'])->whereOr(function ($target) use ($scope): void { $target->whereIn('d.to_location_id', $scope['hqLocationIds']); });
+        $query = Db::name('inventory_cross_transfer_document')->alias('d')->leftJoin('inventory_cross_transfer_line l', 'l.document_id=d.id AND l.retired_at=0')
+            ->where('d.tenant_id', $scope['tenantId'])->where(function ($inner) use ($scope, $hqLocationId, $fromPartyType, $fromPartyId): void {
+                $inner->where(function ($source) use ($scope, $hqLocationId): void {
+                    $source->whereIn('d.from_location_id', $scope['hqLocationIds'])
+                        ->where(function ($visible) use ($hqLocationId): void {
+                            $visible->where('d.document_status', '<>', 'DRAFT')->whereOr('d.from_location_id', $hqLocationId);
+                        });
+                })->whereOr(function ($target) use ($scope): void { $target->whereIn('d.to_location_id', $scope['hqLocationIds'])->whereIn('d.document_status', ['DISPATCHED', 'RECEIVED']); });
                 if ($scope['allowedStoreIds']) {
-                    $inner->whereOr(function ($source) use ($scope): void { $source->where('d.from_party_type', 'STORE')->whereIn('d.from_party_id', $scope['allowedStoreIds']); });
+                    // 门店草稿只在操作者明确切到该调出门店时出现，不混入总部仓接收清单。
+                    $inner->whereOr(function ($source) use ($scope, $fromPartyType, $fromPartyId): void {
+                        $source->where('d.from_party_type', 'STORE')->whereIn('d.from_party_id', $scope['allowedStoreIds'])
+                            ->where(function ($visible) use ($fromPartyType, $fromPartyId): void {
+                                $visible->where('d.document_status', '<>', 'DRAFT');
+                                if (strtoupper(trim($fromPartyType)) === 'STORE' && $fromPartyId > 0) {
+                                    $visible->whereOr('d.from_party_id', $fromPartyId);
+                                }
+                            });
+                    });
                 }
             });
-        if ($dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
+        // 在途单是当前待收货清单；即使调用方附带旧日期，也不能漏掉跨日未收货单。
+        if ($status !== 'DISPATCHED' && $dateFrom !== '' && $dateTo !== '') $query->whereBetween('d.business_date', [$dateFrom, $dateTo]);
         $this->applyListKeyword($query, $keyword);
         if (in_array(strtoupper(trim($fromPartyType)), ['HQ', 'STORE'], true)) $query->where('d.from_party_type', strtoupper(trim($fromPartyType)))->where('d.from_party_id', $fromPartyId);
         if (in_array(strtoupper(trim($toPartyType)), ['HQ', 'STORE'], true)) $query->where('d.to_party_type', strtoupper(trim($toPartyType)))->where('d.to_party_id', $toPartyId);
@@ -419,7 +448,7 @@ final class InventoryCrossSubjectTransferServices
         if ($toLocationId > 0) $query->where('d.to_location_id', $toLocationId);
         if ($status !== '') $query->where('d.document_status', $status);
         $count = (int)(clone $query)->group('d.id')->count();
-        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_location_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_location_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count')
+        $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_location_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_location_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.withdrawal_count,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count')
             ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
         foreach ($list as &$row) {
             $row['status_name'] = $this->statusName((string)$row['status_name']);
@@ -429,10 +458,11 @@ final class InventoryCrossSubjectTransferServices
             // 已有调拨编辑功能覆盖源方草稿流程；收货仍必须是本总部仓的在途单。
             $row['can_dispatch'] = $scope['canCreate'] && (string)$row['document_status'] === 'DRAFT' && $sourceAllowed;
             $row['can_edit'] = $row['can_dispatch'];
-            $row['can_delete'] = $row['can_edit'];
+            $row['can_delete'] = $row['can_edit'] && (int)$row['withdrawal_count'] === 0;
+            $row['can_withdraw'] = $scope['canCreate'] && (string)$row['document_status'] === 'DISPATCHED' && $sourceAllowed;
             $row['can_receive'] = $scope['canCreate'] && (string)$row['document_status'] === 'DISPATCHED' && in_array((int)$row['to_location_id'], $scope['hqLocationIds'], true);
             $row['can_cancel'] = false;
-            $row['can_reverse'] = false;
+            $row['can_reverse'] = $row['can_edit'] && (int)$row['withdrawal_count'] > 0;
         }
         unset($row);
         return ['count' => $count, 'list' => $list, 'can_create' => $scope['canCreate']];
@@ -445,11 +475,11 @@ final class InventoryCrossSubjectTransferServices
         $documentScope = $this->platformDocumentAccessScope($scope, $adminInfo, $documentId, false);
         $document = $this->lockedSubjectDocument($documentScope, $documentId, false);
         $canViewCost = in_array('inventory.cost.view', (array)((new InventoryPlatformAccessPolicy())->resolve($adminInfo)['features'] ?? []), true);
-        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('line_no asc')->select()->toArray();
+        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->where('retired_at', 0)->order('line_no asc')->select()->toArray();
         // 版本仅取持久化内容；展示能力、成本脱敏及 allocations 不参与签名。
         $editToken = $this->draftEditToken($document, $lines);
         foreach ($lines as &$line) {
-            $line['allocations'] = Db::name('inventory_cross_transfer_batch_allocation')->where('line_id', (int)$line['id'])->order('id asc')->select()->toArray();
+            $line['allocations'] = Db::name('inventory_cross_transfer_batch_allocation')->where('line_id', (int)$line['id'])->where('withdrawn_at', 0)->order('id asc')->select()->toArray();
             if (!$canViewCost) foreach ($line['allocations'] as &$allocation) $allocation['unit_cost_cents'] = null;
             unset($allocation);
         }
@@ -461,7 +491,9 @@ final class InventoryCrossSubjectTransferServices
             ? in_array((int)$document['from_location_id'], $scope['hqLocationIds'], true)
             : (($scope['isSuperAdmin'] || in_array((int)$document['from_party_id'], $scope['allowedStoreIds'], true)) && $this->sameOrganizationRoot($scope, $documentScope));
         $document['can_edit'] = $scope['canCreate'] && $sourceAllowed && (string)$document['document_status'] === 'DRAFT';
-        $document['can_delete'] = $document['can_edit'];
+        $document['can_delete'] = $document['can_edit'] && (int)$document['withdrawal_count'] === 0;
+        $document['can_withdraw'] = $scope['canCreate'] && $sourceAllowed && (string)$document['document_status'] === 'DISPATCHED';
+        $document['can_reverse'] = $document['can_edit'] && (int)$document['withdrawal_count'] > 0;
         $document['edit_token'] = $editToken;
         return $document;
     }
@@ -496,6 +528,18 @@ final class InventoryCrossSubjectTransferServices
         return Db::transaction(fn (): array => $this->receive($scope, $documentId));
     }
 
+    /** 撤回仅由当前调出方发起；单据锁与收货共用，库存回补和反向流水必须同事务完成。 */
+    public function withdrawForStore(int $storeId, int $operatorId, int $documentId, array $input): array
+    {
+        return Db::transaction(fn (): array => $this->withdraw($this->scope($storeId, $operatorId, true), $documentId, $input));
+    }
+
+    public function withdrawForHeadquarters(array $adminInfo, int $hqLocationId, int $documentId, array $input): array
+    {
+        $scope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+        return Db::transaction(fn (): array => $this->withdraw($this->platformSourceScope($scope, $documentId, true), $documentId, $input));
+    }
+
     public function cancelForStore(int $storeId, int $operatorId, int $documentId): array
     {
         // 保留旧调用契约但在领域服务处拒绝写入，防止控制器外调用绕过新禁令。
@@ -509,12 +553,13 @@ final class InventoryCrossSubjectTransferServices
 
     public function reverseForStore(int $storeId, int $operatorId, int $documentId, array $input): array
     {
-        throw new \RuntimeException('inventory_cross_transfer_void_disabled');
+        return Db::transaction(fn (): array => $this->voidWithdrawnDraft($this->scope($storeId, $operatorId, true), $documentId, $input));
     }
 
     public function reverseForHeadquarters(array $adminInfo, int $hqLocationId, int $documentId, array $input): array
     {
-        throw new \RuntimeException('inventory_cross_transfer_void_disabled');
+        $scope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+        return Db::transaction(fn (): array => $this->voidWithdrawnDraft($this->platformSourceScope($scope, $documentId, true), $documentId, $input));
     }
 
     private function createDraft(array $source, array $target, array $command): array
@@ -545,13 +590,13 @@ final class InventoryCrossSubjectTransferServices
     }
 
     /** Validate each source/target SKU and any request line before persisting a draft's replaceable lines. */
-    private function persistDraftLines(array $source, array $target, ?array $request, array $command, int $documentId): void
+    private function persistDraftLines(array $source, array $target, ?array $request, array $command, int $documentId, int $generation = 1): void
     {
         foreach ($command['lines'] as $line) {
             $catalog = $this->crossCatalog($source, $target, $line);
             $requestLine = $this->requestLine($request, $line['requestLineId'], $catalog, $line['quantity']);
             Db::name('inventory_cross_transfer_line')->insert([
-                'document_id' => $documentId, 'line_no' => $line['index'] + 1, 'request_line_id' => $requestLine ? (int)$requestLine['id'] : 0,
+                'document_id' => $documentId, 'line_no' => $line['index'] + 1, 'line_generation' => $generation, 'request_line_id' => $requestLine ? (int)$requestLine['id'] : 0,
                 'from_product_id' => $catalog['fromProductId'], 'from_sku_id' => $catalog['fromSkuId'], 'from_sku_unique' => $catalog['fromSkuUnique'],
                 'to_product_id' => $catalog['toProductId'], 'to_sku_id' => $catalog['toSkuId'], 'to_sku_unique' => $catalog['toSkuUnique'],
                 'requested_quantity_units' => $catalog['units'], 'quantity_scale' => $catalog['scale'], 'product_name_snapshot' => $catalog['productName'],
@@ -569,12 +614,14 @@ final class InventoryCrossSubjectTransferServices
     private function dispatch(array $scope, int $documentId): array
     {
         $document = $this->lockedSubjectDocument($scope, $documentId, true);
+        $this->assertSourceParty($scope, $document, 'dispatch');
         if ((string)$document['document_status'] === 'DISPATCHED') return ['transfer_id' => $documentId, 'document_status' => 'DISPATCHED', 'idempotent' => true];
         if ((string)$document['document_status'] !== 'DRAFT' || (string)$document['from_party_type'] !== $scope['partyType'] || (int)$document['from_party_id'] !== (int)$scope['partyId']) throw new \RuntimeException('inventory_cross_transfer_dispatch_state_invalid');
         $sourceLocation = $this->subjectLocation($scope, time());
         if ((int)$sourceLocation['id'] !== (int)$document['from_location_id']) throw new \RuntimeException('inventory_cross_transfer_source_location_changed');
-        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('from_product_id asc,from_sku_id asc,id asc')->lock(true)->select()->toArray();
+        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->where('retired_at', 0)->order('from_product_id asc,from_sku_id asc,id asc')->lock(true)->select()->toArray();
         if (!$lines) throw new \RuntimeException('inventory_cross_transfer_line_missing');
+        $attempt = (int)Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)->max('dispatch_attempt') + 1;
         $now = time();
         foreach ($lines as $line) {
             $this->assertRequestRemaining((int)$line['request_line_id'], (int)$line['requested_quantity_units']);
@@ -584,7 +631,7 @@ final class InventoryCrossSubjectTransferServices
             foreach ($allocations as $allocation) {
                 $batch = $allocation['batch'];
                 $allocationId = (int)Db::name('inventory_cross_transfer_batch_allocation')->insertGetId([
-                    'document_id' => $documentId, 'line_id' => (int)$line['id'], 'from_stock_id' => (int)$stock['id'], 'from_batch_id' => (int)$batch['id'],
+                    'document_id' => $documentId, 'line_id' => (int)$line['id'], 'dispatch_attempt' => $attempt, 'from_stock_id' => (int)$stock['id'], 'from_batch_id' => (int)$batch['id'],
                     'origin_batch_id' => (int)$batch['origin_batch_id'], 'quantity_units' => $allocation['units'], 'unit_cost_cents' => (int)$batch['unit_cost_cents'],
                     'quantity_scale' => (int)$stock['quantity_scale'], 'dispatched_at' => $now,
                 ]);
@@ -598,15 +645,17 @@ final class InventoryCrossSubjectTransferServices
     private function receive(array $scope, int $documentId): array
     {
         $document = $this->lockedSubjectDocument($scope, $documentId, true);
+        if ((string)$document['to_party_type'] !== (string)$scope['partyType']
+            || (int)$document['to_party_id'] !== (int)$scope['partyId']) throw new \RuntimeException('inventory_cross_transfer_receive_state_invalid');
         if ((string)$document['document_status'] === 'RECEIVED') return ['transfer_id' => $documentId, 'document_status' => 'RECEIVED', 'idempotent' => true];
         if ((string)$document['document_status'] !== 'DISPATCHED' || (string)$document['to_party_type'] !== $scope['partyType'] || (int)$document['to_party_id'] !== (int)$scope['partyId']) throw new \RuntimeException('inventory_cross_transfer_receive_state_invalid');
         $location = $this->subjectLocation($scope, time());
         if ((int)$location['id'] !== (int)$document['to_location_id']) throw new \RuntimeException('inventory_cross_transfer_target_location_changed');
-        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->order('to_product_id asc,to_sku_id asc,id asc')->lock(true)->select()->toArray();
+        $lines = Db::name('inventory_cross_transfer_line')->where('document_id', $documentId)->where('retired_at', 0)->order('to_product_id asc,to_sku_id asc,id asc')->lock(true)->select()->toArray();
         $now = time();
         foreach ($lines as $line) {
             $stock = $this->targetStock($location, $line, $now);
-            $allocations = Db::name('inventory_cross_transfer_batch_allocation')->where('line_id', (int)$line['id'])->where('received_at', 0)->order('id asc')->lock(true)->select()->toArray();
+            $allocations = Db::name('inventory_cross_transfer_batch_allocation')->where('line_id', (int)$line['id'])->where('received_at', 0)->where('withdrawn_at', 0)->order('id asc')->lock(true)->select()->toArray();
             if (!$allocations) throw new \RuntimeException('inventory_cross_transfer_allocation_missing');
             foreach ($allocations as $allocation) {
                 $sourceBatch = Db::name('inventory_batch')->where('id', (int)$allocation['from_batch_id'])->find();
@@ -625,6 +674,128 @@ final class InventoryCrossSubjectTransferServices
         $this->refreshRequestStatus((int)$document['request_document_id']);
         Db::name('inventory_cross_transfer_document')->where('id', $documentId)->where('document_status', 'DISPATCHED')->update(['document_status' => 'RECEIVED', 'received_by_operator_id' => $scope['operatorId'], 'received_at' => $now]);
         return ['transfer_id' => $documentId, 'document_status' => 'RECEIVED', 'idempotent' => false];
+    }
+
+    /** 保留每轮发货分配与原负向事实，以逐批次正向事实撤销本轮扣减。 */
+    private function withdraw(array $scope, int $documentId, array $input): array
+    {
+        $key = $this->lifecycleKey($input);
+        $document = $this->lockedSubjectDocument($scope, $documentId, true);
+        $this->assertSourceParty($scope, $document, 'withdraw');
+        $existing = $this->lifecycleReplay($scope, $document, 'WITHDRAW', $key, '');
+        if ($existing) return $existing;
+        if ((string)$document['document_status'] !== 'DISPATCHED' || (int)$document['received_at'] > 0) throw new \RuntimeException('inventory_cross_transfer_withdraw_state_invalid');
+        $allocations = Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)
+            ->where('withdrawn_at', 0)->order('id asc')->lock(true)->select()->toArray();
+        if (!$allocations) throw new \RuntimeException('inventory_cross_transfer_allocation_missing');
+        $attempt = (int)$allocations[0]['dispatch_attempt'];
+        $now = time();
+        foreach ($allocations as $allocation) {
+            if ((int)$allocation['dispatch_attempt'] !== $attempt || (int)$allocation['received_at'] > 0) throw new \RuntimeException('inventory_cross_transfer_withdraw_state_invalid');
+            $stock = Db::name('inventory_stock')->where('id', (int)$allocation['from_stock_id'])->lock(true)->find();
+            $batch = Db::name('inventory_batch')->where('id', (int)$allocation['from_batch_id'])->lock(true)->find();
+            if (!$stock || !$batch || (int)$batch['stock_id'] !== (int)$stock['id']
+                || (int)$stock['location_id'] !== (int)$document['from_location_id']
+                || (int)$stock['quantity_scale'] !== (int)$allocation['quantity_scale']
+                || (int)$batch['unit_cost_cents'] !== (int)$allocation['unit_cost_cents']
+                || (string)$batch['batch_status'] !== 'ACTIVE') throw new \RuntimeException('inventory_cross_transfer_source_batch_changed');
+            $original = Db::name('inventory_batch_movement_fact')->where('tenant_id', (string)$document['tenant_id'])
+                ->where('source_type', 'cross_transfer_out')->where('source_id', (string)$document['transfer_no'])
+                ->where('source_detail_id', (string)$allocation['id'])->lock(true)->find();
+            if (!$original || (int)$original['stock_id'] !== (int)$stock['id'] || (int)$original['batch_id'] !== (int)$batch['id']
+                || (int)$original['quantity_units'] !== (int)$allocation['quantity_units']
+                || Db::name('inventory_batch_movement_fact')->where('reversal_of', (int)$original['id'])->lock(true)->find()) {
+                throw new \RuntimeException('inventory_cross_transfer_withdraw_fact_invalid');
+            }
+            $this->increaseTarget((array)$stock, (array)$batch, (int)$allocation['quantity_units'], $now);
+            (new InventoryBatchMovementFactServices())->append([
+                'factKey' => 'cross_transfer_withdraw:' . hash('sha256', (string)$document['transfer_no'] . ':' . $allocation['id']),
+                'tenantId' => (string)$scope['tenantId'], 'organizationId' => (string)$scope['organizationId'],
+                'organizationPath' => (string)$scope['organizationPath'], 'storeId' => (int)$scope['storeId'],
+                'stockId' => (int)$stock['id'], 'batchId' => (int)$batch['id'], 'direction' => 1,
+                'quantityUnits' => (int)$original['quantity_units'], 'unitCostCents' => (int)$original['unit_cost_cents'],
+                'costAmountCents' => (int)$original['cost_amount_cents'], 'sourceType' => 'cross_transfer_withdraw',
+                'sourceId' => (string)$document['transfer_no'], 'sourceDetailId' => (string)$allocation['id'],
+                'reversalOf' => (int)$original['id'], 'businessDate' => date('Y-m-d', $now),
+                'occurredAt' => $now, 'settledAt' => $now, 'recordedAt' => $now,
+                'operatorType' => (string)($scope['operatorType'] ?? ''), 'operatorId' => (int)$scope['operatorId'],
+                'operatorName' => (string)($scope['operatorName'] ?? ''),
+            ]);
+            if (Db::name('inventory_cross_transfer_batch_allocation')->where('id', (int)$allocation['id'])
+                ->where('received_at', 0)->where('withdrawn_at', 0)->update(['withdrawn_at' => $now]) !== 1) {
+                throw new \RuntimeException('inventory_cross_transfer_withdraw_state_invalid');
+            }
+        }
+        $this->recordLifecycle($scope, $document, 'WITHDRAW', $attempt, $key, '', $now);
+        if (Db::name('inventory_cross_transfer_document')->where('id', $documentId)->where('document_status', 'DISPATCHED')
+            ->update(['document_status' => 'DRAFT', 'withdrawal_count' => (int)$document['withdrawal_count'] + 1,
+                'dispatched_at' => 0, 'dispatched_by_operator_id' => 0]) !== 1) throw new \RuntimeException('inventory_cross_transfer_withdraw_state_invalid');
+        return ['transfer_id' => $documentId, 'document_status' => 'DRAFT', 'idempotent' => false];
+    }
+
+    /** 已撤回草稿的作废是终态标记，不能删除曾发生的出库与撤回事实。 */
+    private function voidWithdrawnDraft(array $scope, int $documentId, array $input): array
+    {
+        $key = $this->lifecycleKey($input);
+        $reason = trim((string)($input['reason'] ?? ''));
+        if (mb_strlen($reason) < 2 || mb_strlen($reason) > 500) throw new \InvalidArgumentException('inventory_cross_transfer_void_reason_invalid');
+        $document = $this->lockedSubjectDocument($scope, $documentId, true);
+        $this->assertSourceParty($scope, $document, 'reverse');
+        $existing = $this->lifecycleReplay($scope, $document, 'VOID', $key, $reason);
+        if ($existing) return $existing;
+        if ((string)$document['document_status'] !== 'DRAFT' || (int)$document['withdrawal_count'] <= 0) throw new \RuntimeException('inventory_cross_transfer_void_state_invalid');
+        if (Db::name('inventory_cross_transfer_batch_allocation')->where('document_id', $documentId)
+            ->where(function ($query): void { $query->where('withdrawn_at', 0)->whereOr('received_at', '>', 0); })->lock(true)->find()) {
+            throw new \RuntimeException('inventory_cross_transfer_void_state_invalid');
+        }
+        $now = time();
+        $this->recordLifecycle($scope, $document, 'VOID', (int)$document['withdrawal_count'], $key, $reason, $now);
+        if (Db::name('inventory_cross_transfer_document')->where('id', $documentId)->where('document_status', 'DRAFT')
+            ->update(['document_status' => 'REVERSED', 'cancelled_at' => $now]) !== 1) throw new \RuntimeException('inventory_cross_transfer_void_state_invalid');
+        return ['transfer_id' => $documentId, 'document_status' => 'REVERSED', 'idempotent' => false];
+    }
+
+    private function lifecycleKey(array $input): string
+    {
+        $key = trim((string)($input['idempotency_key'] ?? ''));
+        if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) throw new \InvalidArgumentException('inventory_cross_transfer_idempotency_invalid');
+        return $key;
+    }
+
+    /** 重试只能读回同一命令；旧撤回键在再次发货后不得触发第二次库存回补。 */
+    private function lifecycleReplay(array $scope, array $document, string $action, string $key, string $reason): ?array
+    {
+        $operation = Db::name('inventory_cross_transfer_lifecycle_operation')->where('tenant_id', (string)$scope['tenantId'])->where('idempotency_key', $key)->lock(true)->find();
+        if (!$operation) return null;
+        if ((int)$operation['transfer_document_id'] !== (int)$document['id'] || (string)$operation['action'] !== $action
+            || (string)$operation['reason'] !== $reason) throw new \RuntimeException('inventory_cross_transfer_idempotency_conflict');
+        // 历史命令只能在其原轮次的结果状态重放；新一轮发货不能复用旧撤回键。
+        if ((int)$operation['dispatch_attempt'] !== (int)$document['withdrawal_count']
+            || ($action === 'WITHDRAW' && (string)$document['document_status'] !== 'DRAFT')
+            || ($action === 'VOID' && (string)$document['document_status'] !== 'REVERSED')) {
+            throw new \RuntimeException('inventory_cross_transfer_idempotency_conflict');
+        }
+        return ['transfer_id' => (int)$document['id'], 'document_status' => (string)$document['document_status'], 'idempotent' => true];
+    }
+
+    private function recordLifecycle(array $scope, array $document, string $action, int $attempt, string $key, string $reason, int $now): void
+    {
+        Db::name('inventory_cross_transfer_lifecycle_operation')->insert([
+            'tenant_id' => (string)$scope['tenantId'], 'transfer_document_id' => (int)$document['id'],
+            'action' => $action, 'dispatch_attempt' => $attempt, 'idempotency_key' => $key,
+            'request_fingerprint' => hash('sha256', implode(':', [(string)$document['id'], $action, (string)$attempt, $reason])),
+            'reason' => $reason, 'operator_type' => (string)($scope['operatorType'] ?? ''),
+            'operator_id' => (int)$scope['operatorId'], 'operator_name_snapshot' => (string)($scope['operatorName'] ?? ''),
+            'occurred_at' => $now, 'recorded_at' => $now,
+        ]);
+    }
+
+    private function assertSourceParty(array $scope, array $document, string $action): void
+    {
+        if ((string)$document['from_party_type'] !== (string)$scope['partyType'] || (int)$document['from_party_id'] !== (int)$scope['partyId']
+            || ($scope['partyType'] === 'HQ' && (int)$document['from_location_id'] !== (int)$scope['location']['id'])) {
+            throw new \RuntimeException('inventory_cross_transfer_' . $action . '_state_invalid');
+        }
     }
 
     private function normalize(array $input): array
@@ -909,7 +1080,59 @@ final class InventoryCrossSubjectTransferServices
     private function decreaseSource(array $stock,array $allocations,int $units,int $now):void{if(Db::name('inventory_stock')->where('id',(int)$stock['id'])->where('version',(int)$stock['version'])->where('available_quantity_units','>=',$units)->update(['available_quantity_units'=>(int)$stock['available_quantity_units']-$units,'version'=>(int)$stock['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_cross_transfer_source_stock_changed');foreach($allocations as $allocation){$batch=$allocation['batch'];if(Db::name('inventory_batch')->where('id',(int)$batch['id'])->where('version',(int)$batch['version'])->where('available_quantity_units','>=',$allocation['units'])->update(['available_quantity_units'=>(int)$batch['available_quantity_units']-$allocation['units'],'version'=>(int)$batch['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_cross_transfer_source_batch_changed');}}
 
     private function targetStock(array $location,array $line,int $now):array{$query=Db::name('inventory_stock')->where('tenant_id',(string)$location['tenant_id'])->where('location_id',(int)$location['id'])->where('consumable_product_id',(int)$line['to_product_id'])->where('sku_id',(int)$line['to_sku_id'])->where('product_unique',(string)$line['to_sku_unique'])->where('stock_status',InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD);$stock=$query->lock(true)->find();if($stock){if((int)$stock['quantity_scale']!==(int)$line['quantity_scale'])throw new \RuntimeException('inventory_cross_transfer_quantity_scale_conflict');return(array)$stock;}try{$id=(int)Db::name('inventory_stock')->insertGetId(['tenant_id'=>$location['tenant_id'],'organization_id'=>$location['organization_id'],'organization_path'=>$location['organization_path'],'location_id'=>(int)$location['id'],'store_id'=>(int)$location['store_id'],'consumable_product_id'=>(int)$line['to_product_id'],'sku_id'=>(int)$line['to_sku_id'],'product_unique'=>(string)$line['to_sku_unique'],'stock_status'=>InventoryEntitlementCompletionContract::STOCK_STATUS_GOOD,'stock_unit'=>$line['stock_unit_snapshot'],'quantity_scale'=>(int)$line['quantity_scale'],'available_quantity_units'=>0,'estimated_unit_cost_cents'=>0,'version'=>1,'created_at'=>$now,'updated_at'=>$now]);}catch(\Throwable $exception){$stock=$query->lock(true)->find();if(!$stock)throw$exception;return(array)$stock;}$stock=Db::name('inventory_stock')->where('id',$id)->lock(true)->find();if(!$stock)throw new \RuntimeException('inventory_cross_transfer_target_stock_create_failed');return(array)$stock;}
-    private function targetBatch(array $stock,array $source,array $document,int $now):array{$batch=Db::name('inventory_batch')->where('stock_id',(int)$stock['id'])->where('batch_no',(string)$source['batch_no'])->lock(true)->find();if($batch){if((int)$batch['origin_batch_id']!==(int)$source['origin_batch_id']||(int)$batch['unit_cost_cents']!==(int)$source['unit_cost_cents']||(string)$batch['batch_status']!=='ACTIVE')throw new \RuntimeException('inventory_cross_transfer_target_batch_conflict');return(array)$batch;}$id=(int)Db::name('inventory_batch')->insertGetId(['stock_id'=>(int)$stock['id'],'origin_batch_id'=>(int)$source['origin_batch_id'],'source_batch_id'=>(int)$source['id'],'batch_no'=>$source['batch_no'],'manufactured_date'=>$source['manufactured_date'],'expire_date'=>$source['expire_date'],'received_at'=>$now,'received_business_date'=>$document['business_date'],'available_quantity_units'=>0,'unit_cost_cents'=>(int)$source['unit_cost_cents'],'cost_allocated_quantity_units'=>0,'batch_status'=>'ACTIVE','version'=>1,'product_name_snapshot'=>$source['product_name_snapshot'],'sku_name_snapshot'=>$source['sku_name_snapshot'],'product_code_snapshot'=>$source['product_code_snapshot'],'barcode_snapshot'=>$source['barcode_snapshot'],'brand_name_snapshot'=>$source['brand_name_snapshot'],'category_name_snapshot'=>$source['category_name_snapshot'],'source_order_no_snapshot'=>$document['transfer_no'],'data_quality'=>$source['data_quality'],'created_at'=>$now,'updated_at'=>$now]);$batch=Db::name('inventory_batch')->where('id',$id)->lock(true)->find();if(!$batch)throw new \RuntimeException('inventory_cross_transfer_target_batch_create_failed');return(array)$batch;}
+    /** 同号批次可能来自不同原始入库，按血缘复用；批次号冲突时保留原号前缀并追加来源标识。 */
+    private function targetBatch(array $stock, array $source, array $document, int $now): array
+    {
+        $stockId = (int)$stock['id'];
+        $originId = (int)$source['origin_batch_id'];
+        if ($originId <= 0) throw new \RuntimeException('inventory_cross_transfer_source_batch_lineage_missing');
+        $batch = Db::name('inventory_batch')->where('stock_id', $stockId)->where('origin_batch_id', $originId)
+            ->order('id asc')->lock(true)->find();
+        if ($batch) {
+            if ((int)$batch['unit_cost_cents'] !== (int)$source['unit_cost_cents']
+                || (string)$batch['batch_status'] !== 'ACTIVE') {
+                throw new \RuntimeException('inventory_cross_transfer_target_batch_conflict');
+            }
+            return (array)$batch;
+        }
+
+        $batchNo = (string)$source['batch_no'];
+        // 旧库存仍以仓库+批次号唯一；只为异源同号生成稳定且可读的仓内编号。
+        if (Db::name('inventory_batch')->where('stock_id', $stockId)->where('batch_no', $batchNo)->lock(true)->find()) {
+            $batchNo = $this->disambiguatedTargetBatchNo($stockId, $batchNo, $originId);
+        }
+        $id = (int)Db::name('inventory_batch')->insertGetId([
+            'stock_id' => $stockId, 'origin_batch_id' => $originId, 'source_batch_id' => (int)$source['id'],
+            'batch_no' => $batchNo, 'manufactured_date' => $source['manufactured_date'],
+            'expire_date' => $source['expire_date'], 'received_at' => $now,
+            'received_business_date' => $document['business_date'], 'available_quantity_units' => 0,
+            'unit_cost_cents' => (int)$source['unit_cost_cents'], 'cost_allocated_quantity_units' => 0,
+            'batch_status' => 'ACTIVE', 'version' => 1,
+            'product_name_snapshot' => $source['product_name_snapshot'],
+            'sku_name_snapshot' => $source['sku_name_snapshot'],
+            'product_code_snapshot' => $source['product_code_snapshot'],
+            'barcode_snapshot' => $source['barcode_snapshot'],
+            'brand_name_snapshot' => $source['brand_name_snapshot'],
+            'category_name_snapshot' => $source['category_name_snapshot'],
+            'source_order_no_snapshot' => $document['transfer_no'], 'data_quality' => $source['data_quality'],
+            'created_at' => $now, 'updated_at' => $now,
+        ]);
+        $batch = Db::name('inventory_batch')->where('id', $id)->lock(true)->find();
+        if (!$batch) throw new \RuntimeException('inventory_cross_transfer_target_batch_create_failed');
+        return (array)$batch;
+    }
+
+    /** 候选号在目标库存行锁内寻找，避免与人工批次号撞名；长度遵守批次号 64 字节约束。 */
+    private function disambiguatedTargetBatchNo(int $stockId, string $sourceNo, int $originId): string
+    {
+        for ($attempt = 0; $attempt < 100; $attempt++) {
+            $suffix = '~o' . $originId . ($attempt === 0 ? '' : '-' . $attempt);
+            $candidate = substr($sourceNo, 0, 64 - strlen($suffix)) . $suffix;
+            if (!Db::name('inventory_batch')->where('stock_id', $stockId)->where('batch_no', $candidate)
+                ->lock(true)->find()) return $candidate;
+        }
+        throw new \RuntimeException('inventory_cross_transfer_target_batch_number_exhausted');
+    }
     private function increaseTarget(array $stock,array $batch,int $units,int $now):void{$new=(int)$stock['available_quantity_units']+$units;$estimated=$new===0?(int)$batch['unit_cost_cents']:intdiv((int)$stock['available_quantity_units']*(int)$stock['estimated_unit_cost_cents']+$units*(int)$batch['unit_cost_cents'],$new);if(Db::name('inventory_stock')->where('id',(int)$stock['id'])->where('version',(int)$stock['version'])->update(['available_quantity_units'=>$new,'estimated_unit_cost_cents'=>$estimated,'version'=>(int)$stock['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_cross_transfer_target_stock_changed');if(Db::name('inventory_batch')->where('id',(int)$batch['id'])->where('version',(int)$batch['version'])->update(['available_quantity_units'=>(int)$batch['available_quantity_units']+$units,'version'=>(int)$batch['version']+1,'updated_at'=>$now])!==1)throw new \RuntimeException('inventory_cross_transfer_target_batch_changed');}
     private function appendFact(array $scope,array $stock,array $batch,int $direction,int $units,string $type,string $sourceId,int $detailId,string $date,int $now):void{(new InventoryBatchMovementFactServices())->append(['factKey'=>$type.':'.hash('sha256',$sourceId.':'.$detailId),'tenantId'=>$scope['tenantId'],'organizationId'=>$scope['organizationId'],'organizationPath'=>$scope['organizationPath'],'storeId'=>$scope['storeId'],'stockId'=>(int)$stock['id'],'batchId'=>(int)$batch['id'],'direction'=>$direction,'quantityUnits'=>$units,'unitCostCents'=>(int)$batch['unit_cost_cents'],'costAmountCents'=>intdiv($units*(int)$batch['unit_cost_cents'],10**(int)$stock['quantity_scale']),'sourceType'=>$type,'sourceId'=>$sourceId,'sourceDetailId'=>(string)$detailId,'reversalOf'=>0,'businessDate'=>$date,'occurredAt'=>$now,'settledAt'=>$now,'recordedAt'=>$now,'operatorType'=>(string)($scope['operatorType']??''),'operatorId'=>(int)($scope['operatorId']??0),'operatorName'=>(string)($scope['operatorName']??'')]);}
 
@@ -941,7 +1164,7 @@ final class InventoryCrossSubjectTransferServices
             $source = $this->scope((int)$document['from_party_id'], (int)$hqScope['operatorId'], false);
             if ($this->sameOrganizationRoot($hqScope, $source)) return $source;
         }
-        if ((string)$document['to_party_type'] === 'HQ' && in_array((int)$document['to_location_id'], $hqScope['hqLocationIds'], true)) {
+        if (in_array((string)$document['document_status'], ['DISPATCHED', 'RECEIVED'], true) && (string)$document['to_party_type'] === 'HQ' && in_array((int)$document['to_location_id'], $hqScope['hqLocationIds'], true)) {
             return $this->headquartersScope($adminInfo, (int)$document['to_location_id'], false);
         }
         throw new \RuntimeException('inventory_cross_transfer_scope_denied');
@@ -963,8 +1186,38 @@ final class InventoryCrossSubjectTransferServices
         return $leftRoot !== '' && $leftRoot === $rightRoot;
     }
 
-    private function lockedStoreDocument(array $scope,int $id,bool $lock):array{$query=Db::name('inventory_cross_transfer_document')->where('id',$id)->where('tenant_id',$scope['tenantId'])->where(function($q)use($scope):void{$q->where(function($i)use($scope):void{$i->where('from_party_type','STORE')->where('from_party_id',$scope['storeId']);})->whereOr(function($i)use($scope):void{$i->where('to_party_type','STORE')->where('to_party_id',$scope['storeId']);});});if($lock)$query->lock(true);$row=$query->find();if(!$row)throw new \RuntimeException('inventory_cross_transfer_not_found');return(array)$row;}
-    private function lockedSubjectDocument(array $scope,int $id,bool $lock):array{$query=Db::name('inventory_cross_transfer_document')->where('id',$id)->where('tenant_id',$scope['tenantId'])->where(function($q)use($scope):void{$q->where(function($i)use($scope):void{$i->where('from_party_type',$scope['partyType'])->where('from_party_id',(int)$scope['partyId']);if($scope['partyType']==='HQ')$i->where('from_location_id',(int)$scope['location']['id']);})->whereOr(function($i)use($scope):void{$i->where('to_party_type',$scope['partyType'])->where('to_party_id',(int)$scope['partyId']);if($scope['partyType']==='HQ')$i->where('to_location_id',(int)$scope['location']['id']);});});if($lock)$query->lock(true);$row=$query->find();if(!$row)throw new \RuntimeException('inventory_cross_transfer_not_found');return(array)$row;}
+    /** 同一单据的源方草稿可读，目标方草稿无论列表还是直查都不存在。 */
+    private function lockedStoreDocument(array $scope, int $id, bool $lock): array
+    {
+        $query = Db::name('inventory_cross_transfer_document')->where('id', $id)->where('tenant_id', $scope['tenantId'])
+            ->where(function ($q) use ($scope): void {
+                $q->where(function ($source) use ($scope): void { $source->where('from_party_type', 'STORE')->where('from_party_id', $scope['storeId']); })
+                    ->whereOr(function ($target) use ($scope): void { $target->where('to_party_type', 'STORE')->where('to_party_id', $scope['storeId'])->whereIn('document_status', ['DISPATCHED', 'RECEIVED']); });
+            });
+        if ($lock) $query->lock(true);
+        $row = $query->find();
+        if (!$row) throw new \RuntimeException('inventory_cross_transfer_not_found');
+        return (array)$row;
+    }
+
+    /** 发货和收货在单据锁内使用相同可见性边界，避免目标方预读未发草稿。 */
+    private function lockedSubjectDocument(array $scope, int $id, bool $lock): array
+    {
+        $query = Db::name('inventory_cross_transfer_document')->where('id', $id)->where('tenant_id', $scope['tenantId'])
+            ->where(function ($q) use ($scope): void {
+                $q->where(function ($source) use ($scope): void {
+                    $source->where('from_party_type', $scope['partyType'])->where('from_party_id', (int)$scope['partyId']);
+                    if ($scope['partyType'] === 'HQ') $source->where('from_location_id', (int)$scope['location']['id']);
+                })->whereOr(function ($target) use ($scope): void {
+                    $target->where('to_party_type', $scope['partyType'])->where('to_party_id', (int)$scope['partyId'])->whereIn('document_status', ['DISPATCHED', 'RECEIVED']);
+                    if ($scope['partyType'] === 'HQ') $target->where('to_location_id', (int)$scope['location']['id']);
+                });
+            });
+        if ($lock) $query->lock(true);
+        $row = $query->find();
+        if (!$row) throw new \RuntimeException('inventory_cross_transfer_not_found');
+        return (array)$row;
+    }
     private function assertSameTenant(array $from,array $to):void{if((string)$from['tenantId'] !== (string)$to['tenantId'])throw new \RuntimeException('inventory_cross_transfer_target_scope_denied');}
     private function fulfilledUnits(int $requestLineId):int{$fulfilled=(int)Db::name('inventory_stock_request_fulfillment')->where('request_line_id',$requestLineId)->sum('fulfilled_quantity_units');$reversed=(int)Db::name('inventory_stock_request_fulfillment_reversal')->where('request_line_id',$requestLineId)->sum('reversed_quantity_units');return max(0,$fulfilled-$reversed);}
     private function assertRequestRemaining(int $requestLineId,int $units):void{if($requestLineId<=0)return;$line=Db::name('inventory_stock_request_line')->where('id',$requestLineId)->lock(true)->find();$document=$line?Db::name('inventory_stock_request_document')->where('id',(int)$line['document_id'])->lock(true)->find():null;if(!$line||!$document||!in_array((string)$document['document_status'],['APPLIED','PARTIAL'],true))throw new \RuntimeException('inventory_cross_transfer_request_unavailable');$requested=(int)$line['requested_quantity_units'];$fulfilled=$this->fulfilledUnits($requestLineId);if($requested<$fulfilled+$units)throw new \RuntimeException('inventory_cross_transfer_request_quantity_exceeded');}

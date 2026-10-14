@@ -161,6 +161,21 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
         }
     }
 
+    /** 平台只替当前授权的调出方提交撤回，库存与流水由共享服务一次完成。 */
+    public function withdraw(int $id)
+    {
+        try {
+            $input = (array)$this->request->post();
+            return $this->success('发货已撤回，调拨单恢复为草稿。', $this->services->withdrawForHeadquarters(
+                (array)$this->adminInfo, (int)($input['hq_location_id'] ?? 0), $id, $input
+            ));
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('撤回请求无效，请刷新后重试。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+        }
+    }
+
     public function cancel(int $id)
     {
         // 平台旧接口同样拒绝写入，不能靠直调 URL 绕过调拨只读作废规则。
@@ -169,7 +184,16 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
 
     public function reverse(int $id)
     {
-        return $this->fail('调拨单不支持作废。', ['code' => 'inventory_cross_transfer_void_disabled']);
+        try {
+            $input = (array)$this->request->post();
+            return $this->success('已撤回的调拨草稿已作废。', $this->services->reverseForHeadquarters(
+                (array)$this->adminInfo, (int)($input['hq_location_id'] ?? 0), $id, $input
+            ));
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('作废原因或请求参数无效。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+        }
     }
 
     private function message(string $code): string
@@ -188,6 +212,11 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
             'inventory_cross_transfer_request_quantity_exceeded' => '调拨数量超过请货单剩余可调数量，请刷新后重试。',
             'inventory_cross_transfer_dispatch_state_invalid' => '当前调拨单不可发货。',
             'inventory_cross_transfer_receive_state_invalid' => '当前调拨单不可收货。',
+            'inventory_cross_transfer_withdraw_state_invalid' => '仅调出方可撤回尚未收货的在途单，请刷新后重试。',
+            'inventory_cross_transfer_withdraw_fact_invalid' => '原发货流水不完整，无法安全撤回，请联系管理员。',
+            'inventory_cross_transfer_source_batch_changed' => '原发货批次状态已变化，无法安全撤回，请联系管理员。',
+            'inventory_cross_transfer_void_state_invalid' => '仅已撤回的调拨草稿可以作废。',
+            'inventory_cross_transfer_idempotency_conflict' => '该操作请求已失效或已用于其他操作，请重新操作。',
             'inventory_cross_transfer_edit_state_invalid' => '仅调出方可编辑未发货草稿。',
             'inventory_cross_transfer_delete_state_invalid' => '仅调出方可删除未发货草稿。',
             'inventory_cross_transfer_draft_changed' => '草稿已被修改，请刷新后重试。',
@@ -195,6 +224,9 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
             'inventory_cross_transfer_request_target_locked' => '关联请货单的调入方不可更改。',
             'inventory_cross_transfer_scope_denied' => '当前账号无权操作该调拨单。',
             'inventory_cross_transfer_target_scope_denied' => '只能操作当前组织范围内的调拨。',
+            'inventory_cross_transfer_source_batch_lineage_missing' => '原发货批次缺少来源记录，无法安全收货，请联系管理员核对。',
+            'inventory_cross_transfer_target_batch_conflict' => '调入仓同来源批次的成本或状态不一致，无法安全收货，请联系管理员核对。',
+            'inventory_cross_transfer_target_batch_number_exhausted' => '调入仓批次编号已被占用，无法安全收货，请联系管理员核对。',
             'inventory_cross_transfer_transfer_staff_invalid' => '请选择当前授权组织范围内的在职员工。',
         ][$code] ?? '总部调拨未完成，请刷新后重试。';
     }

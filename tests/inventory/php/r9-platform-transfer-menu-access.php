@@ -67,7 +67,8 @@ try {
     foreach ([['get', 'dashboard'], ['get', 'batch-stock'], ['get', 'hq/inbound'],
         ['get', 'hq/request'], ['get', 'hq/cross-transfer/incoming-requests'],
         ['post', 'hq/cross-transfer'], ['post', 'hq/cross-transfer/<id>/dispatch'],
-        ['post', 'hq/cross-transfer/<id>/receive'], ['get', 'not-registered']] as $case) {
+        ['post', 'hq/cross-transfer/<id>/receive'], ['post', 'hq/cross-transfer/<id>/withdraw'],
+        ['post', 'hq/cross-transfer/<id>/reverse'], ['get', 'not-registered']] as $case) {
         [$request->testMethod, $route] = $case;
         $request->testRule = 'adminapi/product/inventory/v3/' . $route;
         try { $roles->verifiAuth($request); throw new RuntimeException('Unexpected route grant ' . $route); }
@@ -221,7 +222,9 @@ try {
             try { $roles->verifiAuth($request); throw new LogicException('Foreign create leaked'); }
             catch (AuthException $expected) { echo 'PASS foreign create denied: ' . $page . ' -> ' . $otherPage . PHP_EOL; }
         }
-        foreach (['hq/cross-transfer/<id>/dispatch', 'hq/cross-transfer/<id>/receive', 'hq/cross-transfer/<id>/update', 'hq/cross-transfer/<id>/delete-draft', 'hq/inbound/<id>/void', 'locations', 'import', 'hq/count/draft/<id>/delete'] as $forbiddenRoute) {
+        foreach (['hq/cross-transfer/<id>/dispatch', 'hq/cross-transfer/<id>/receive', 'hq/cross-transfer/<id>/withdraw',
+            'hq/cross-transfer/<id>/reverse', 'hq/cross-transfer/<id>/update', 'hq/cross-transfer/<id>/delete-draft',
+            'hq/inbound/<id>/void', 'locations', 'import', 'hq/count/draft/<id>/delete'] as $forbiddenRoute) {
             $request->testRule = 'adminapi/product/inventory/v3/' . $forbiddenRoute;
             // 第9轮确认：调拨编辑功能覆盖发收货，但不能借此开放其他库存命令。
             if ($page === 'transfer' && strpos($forbiddenRoute, 'hq/cross-transfer/') === 0) {

@@ -16,7 +16,7 @@ class InventoryStoreCatalog extends AuthController
         $this->services = $services;
     }
 
-    /** Count callers request the current locked-stock projection; store scope still comes only from the session. */
+    /** Count and outbound callers opt into their own stock-backed views; store scope still comes only from the session. */
     public function search()
     {
         [$keyword, $categoryId, $page, $limit, $forCount] = $this->request->getMore([
@@ -40,7 +40,8 @@ class InventoryStoreCatalog extends AuthController
                     && (new \app\services\product\inventory\InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.stock'),
                 // 普通导入与清零共用本仓现存批次入口；旧清零参数保留给既有调用。
                 (int)$this->request->get('for_existing_stock', 0) === 1
-                    || (int)$this->request->get('for_zero_count', 0) === 1
+                    || (int)$this->request->get('for_zero_count', 0) === 1,
+                (int)$this->request->get('for_outbound_stock', 0) === 1
             );
         } catch (\RuntimeException $exception) {
             if ($exception->getMessage() !== 'inventory_stock_count_batch_balance_mismatch') throw $exception;

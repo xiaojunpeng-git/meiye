@@ -191,7 +191,10 @@ final class InventoryDocumentRemarkServices
             ->where('document_type', $type)->where('source_id', (string)$documentId)->lock(true)->find();
         if (!$state) return;
         $lineTable = $type === 'request' ? 'inventory_stock_request_line' : 'inventory_cross_transfer_line';
-        $rows = Db::name($lineTable)->where('document_id', $documentId)->field('id,detail_remark')->order('id asc')->select()->toArray();
+        $query = Db::name($lineTable)->where('document_id', $documentId);
+        // 撤回后重编调拨会保留旧发货明细，备注投影只能指向本轮仍有效的明细。
+        if ($type === 'transfer') $query->where('retired_at', 0);
+        $rows = $query->field('id,detail_remark')->order('id asc')->select()->toArray();
         $notes = [];
         foreach ($rows as $row) $notes[(string)$row['id']] = (string)($row['detail_remark'] ?? '');
         if (!$notes) throw new \RuntimeException('inventory_document_remark_lines_incomplete');

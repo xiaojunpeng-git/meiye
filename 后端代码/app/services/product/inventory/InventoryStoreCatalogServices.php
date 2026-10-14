@@ -43,7 +43,7 @@ final class InventoryStoreCatalogServices
     /**
      * 门店身份只来自认证会话；普通查询按有效目录筛选，现存库存盘点仅限该门店默认仓。
      */
-    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false, bool $includeCountBatches = false, bool $canViewCost = false, bool $forExistingStock = false, bool $inventoryOnly = true): array
+    public function search(int $storeId, string $keyword, int $categoryId = 0, int $page = 1, int $limit = 20, bool $forCount = false, bool $includeCountBatches = false, bool $canViewCost = false, bool $forExistingStock = false, bool $inventoryOnly = true, bool $forOutboundStock = false): array
     {
         $keyword = trim($keyword);
         if ($storeId <= 0 || $categoryId < 0 || mb_strlen($keyword) > 64) {
@@ -51,6 +51,12 @@ final class InventoryStoreCatalogServices
         }
         $page = max(1, $page);
         $limit = max(1, min($limit, 50));
+        if ($forOutboundStock) {
+            if ($forCount || $includeCountBatches || $forExistingStock || !$inventoryOnly) {
+                throw new \InvalidArgumentException('inventory_catalog_outbound_stock_invalid');
+            }
+            return $this->positiveBatchOutboundCatalog($storeId, $keyword, $categoryId, $page, $limit);
+        }
         if ($forExistingStock) {
             if (!$forCount || !$includeCountBatches || $keyword !== '' || $categoryId !== 0) {
                 throw new \InvalidArgumentException('inventory_catalog_existing_stock_invalid');
@@ -126,6 +132,81 @@ final class InventoryStoreCatalogServices
             if (!$locationId) throw new \RuntimeException('inventory_catalog_source_scope_denied');
             $list = (new InventoryCountBatchCatalog())->attach($list, CashierV3ScopeResolver::TENANT_SCOPE_ID, $locationId, $canViewCost);
         }
+        return compact('list', 'total', 'page', 'limit', 'categories');
+    }
+
+    /** 出库只能选本仓可扣减的真实库存；历史目录缺失时使用批次快照，不按同名商品串账。 */
+    private function positiveBatchOutboundCatalog(int $storeId, string $keyword, int $categoryId, int $page, int $limit): array
+    {
+        $tenantId = CashierV3ScopeResolver::TENANT_SCOPE_ID;
+        $locationId = (int)Db::name('inventory_location')->where('tenant_id', $tenantId)
+            ->where('store_id', $storeId)->where('location_type', 'STORE')->where('is_default', 1)
+            ->where('location_status', 'ACTIVE')->value('id');
+        if (!$locationId) throw new \RuntimeException('inventory_catalog_source_scope_denied');
+
+        $query = Db::name('inventory_stock')->alias('s')->join('inventory_batch b', 'b.stock_id=s.id')
+            ->where('s.tenant_id', $tenantId)->where('s.store_id', $storeId)->where('s.location_id', $locationId)
+            ->where('s.stock_status', 'GOOD')->where('s.available_quantity_units', '>', 0)
+            ->where('b.batch_status', 'ACTIVE')->where('b.available_quantity_units', '>', 0)
+            ->when($keyword !== '', function ($query) use ($keyword): void {
+                $like = '%' . $keyword . '%';
+                $query->where(function ($match) use ($keyword, $like): void {
+                    $match->whereLike('b.product_name_snapshot|b.sku_name_snapshot', $like);
+                    // 编码快照采用 ASCII 排序规则，中文关键词不能与其直接比较。
+                    if (preg_match('/^[\x00-\x7F]+$/D', $keyword) === 1) {
+                        $match->whereOr('b.product_code_snapshot|b.barcode_snapshot|s.product_unique', 'like', $like);
+                    }
+                });
+            })
+            ->when($categoryId > 0, function ($query) use ($categoryId): void {
+                // 失效目录没有当前分类；只有当前仍挂在该分类的商品才参与分类筛选。
+                $query->whereIn('s.consumable_product_id', function ($categoryQuery) use ($categoryId): void {
+                    $categoryQuery->name('store_product_relation')->where('type', 1)->where('status', 1)
+                        ->where('relation_id', $categoryId)->field('product_id');
+                });
+            });
+        $total = (int)(clone $query)->count('DISTINCT s.id');
+        $stocks = $query->fieldRaw('s.id AS stock_id,s.consumable_product_id AS product_id,s.sku_id,s.product_unique AS sku_unique,s.stock_unit,s.quantity_scale,s.available_quantity_units,MIN(b.id) AS snapshot_batch_id')
+            ->group('s.id')->order('s.id asc')->page($page, $limit)->select()->toArray();
+        $batchRows = $stocks ? Db::name('inventory_batch')->whereIn('stock_id', array_column($stocks, 'stock_id'))
+            ->where('batch_status', 'ACTIVE')->where('available_quantity_units', '>', 0)
+            ->field('id,stock_id,product_name_snapshot,sku_name_snapshot,product_code_snapshot,barcode_snapshot,available_quantity_units')
+            ->select()->toArray() : [];
+        $snapshots = [];
+        $batchTotals = [];
+        foreach ($batchRows as $batch) {
+            $stockId = (int)$batch['stock_id'];
+            $batchTotals[$stockId] = ($batchTotals[$stockId] ?? 0) + (int)$batch['available_quantity_units'];
+            $snapshots[(int)$batch['id']] = $batch;
+        }
+        $list = [];
+        foreach ($stocks as $stock) {
+            $stockId = (int)$stock['stock_id'];
+            if (($batchTotals[$stockId] ?? 0) !== (int)$stock['available_quantity_units']
+                || !isset($snapshots[(int)$stock['snapshot_batch_id']])) {
+                throw new \RuntimeException('inventory_stock_count_batch_balance_mismatch');
+            }
+            $snapshot = $snapshots[(int)$stock['snapshot_batch_id']];
+            $list[] = [
+                'product_id' => (int)$stock['product_id'], 'sku_id' => (int)$stock['sku_id'],
+                'sku_unique' => (string)$stock['sku_unique'],
+                'product_name' => (string)$snapshot['product_name_snapshot'],
+                'sku_name' => (string)$snapshot['sku_name_snapshot'],
+                'product_code' => (string)$snapshot['product_code_snapshot'],
+                'barcode' => (string)$snapshot['barcode_snapshot'], 'sku_code' => '',
+                'stock_unit' => (string)$stock['stock_unit'], 'no_expiry_management' => 0,
+                'available_quantity' => InventoryBatchStockQueryContract::unitsToDecimal(
+                    (int)$stock['available_quantity_units'], (int)$stock['quantity_scale']
+                ),
+            ];
+        }
+        $categories = Db::name('store_product_category')->alias('c')
+            ->join('store_product_relation r', 'r.relation_id=c.id AND r.type=1 AND r.status=1')
+            ->join('store_product p', 'p.id=r.product_id')
+            ->where('p.type', 1)->where('p.relation_id', $storeId)
+            ->where(function ($query): void { PhysicalProductSelectionPolicy::apply($query); })
+            ->where('c.is_show', 1)->field(['c.id' => 'id', 'c.cate_name' => 'name', 'c.pid' => 'parent_id'])
+            ->group('c.id')->order('c.sort desc,c.id asc')->select()->toArray();
         return compact('list', 'total', 'page', 'limit', 'categories');
     }
 

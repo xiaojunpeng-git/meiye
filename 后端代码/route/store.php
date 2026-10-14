@@ -661,6 +661,7 @@ Route::group('storeapi', function () {
 		Route::post('v3/cross-transfer/:id/delete-draft', 'product.inventory.InventoryCrossSubjectTransfer/deleteDraft')->option(['real_name' => '跨门店库存调拨草稿永久删除']);
 		Route::post('v3/cross-transfer/:id/dispatch', 'product.inventory.InventoryCrossSubjectTransfer/dispatch')->option(['real_name' => '跨门店库存调拨发货']);
 		Route::post('v3/cross-transfer/:id/receive', 'product.inventory.InventoryCrossSubjectTransfer/receive')->option(['real_name' => '跨门店库存调拨收货']);
+		Route::post('v3/cross-transfer/:id/withdraw', 'product.inventory.InventoryCrossSubjectTransfer/withdraw')->option(['real_name' => '跨门店库存调拨撤回发货']);
 		Route::post('v3/cross-transfer/:id/cancel', 'product.inventory.InventoryCrossSubjectTransfer/cancel')->option(['real_name' => '跨门店库存调拨取消']);
 		Route::post('v3/cross-transfer/:id/reverse', 'product.inventory.InventoryCrossSubjectTransfer/reverse')->option(['real_name' => '跨主体库存调拨作废']);
 		Route::get('v3/transfer', 'product.inventory.InventoryBatchTransfer/index')->option(['real_name' => '批次库存调拨单查询']);
