@@ -81,7 +81,8 @@ function defaultEditorValues() {
     staffName: '', phone: '', avatar: '/static/images/staff/avatar_male.png', account: '', password: '',
     positionIds: [], scopeMode: 'personal', scopeVersion: 0, scopeTouched: false,
     workMemberId: 0, notify: false, status: true, statusVersion: 0,
-    salespersonEnabled: true, craftsmanEnabled: true, craftsmanPerformanceType: 'commission', mobileEnabled: false, isCustomer: false, customerUrl: '',
+    // 仅新建员工预选双项业绩；编辑时仍由详情中的已保存类型覆盖。
+    salespersonEnabled: true, craftsmanEnabled: true, craftsmanPerformanceType: 'commission_labor', mobileEnabled: false, isCustomer: false, customerUrl: '',
     isReservable: true, employeeNumber: '', idCard: '', age: '', joinArea: '', joinDate: '',
     birthdayDate: '', birthdayType: 1, birthdayArea: '', nowArea: '', contractBegin: '',
     contractEnd: '', salaryStatus: true, department: '', employmentTypeCode: 'internal', employmentTypeVersion: 1

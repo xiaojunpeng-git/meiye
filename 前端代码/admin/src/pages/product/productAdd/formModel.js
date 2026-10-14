@@ -138,7 +138,7 @@ export const defaultObj = {
   is_sync_stock: 0, //库存同步
   is_sync_show: 1, //状态同步
   is_inventory: 1, //是否参与库存管理（仅产品类型）
-  allow_negative_stock: 1, //是否允许负库存
+  allow_negative_stock: 0, // 新建产品默认禁止负库存；编辑/复制仍回显来源商品的已保存设置。
   salon_stock_enabled: 0, //是否可作为院装耗材（仅产品类型且参与库存）
   no_expiry_management: 0, //免录批次和有效期，仅影响后续入库及盘点，不修改历史批次。
 };
