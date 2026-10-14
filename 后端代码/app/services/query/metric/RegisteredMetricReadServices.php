@@ -1493,7 +1493,7 @@ final class RegisteredMetricReadServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function categoryRowsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId): array
+    private function categoryRowsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId, bool $excludeStandaloneRefunds = false): array
     {
         $this->assertScope($tenantId, $stores, $range);
         if ($categoryIds !== [] && array_keys($categoryIds) !== range(0, count($categoryIds) - 1)) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
@@ -1515,8 +1515,8 @@ final class RegisteredMetricReadServices
         $projection = $contract['category_reader'] ?? ($contract['source']['category_reader'] ?? null);
         if (!is_array($projection) || !is_string($projection['strategy'] ?? null)) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $handlers = [
-            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
-                return $this->cashCategoryRows($tenantId, $stores, $range, $queryCategoryIds, (string)($projection['mode'] ?? ''), $queryFilters);
+            'cash_sale_allocation' => function () use ($projection, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters, $excludeStandaloneRefunds): array {
+                return $this->cashCategoryRows($tenantId, $stores, $range, $queryCategoryIds, (string)($projection['mode'] ?? ''), $queryFilters, $excludeStandaloneRefunds);
             },
             'completed_service_performance' => function () use ($contract, $tenantId, $stores, $range, $queryCategoryIds, $queryFilters): array {
                 return $this->completedServicePerformanceCategoryRows($contract['source'], $tenantId, $stores, $range, $queryCategoryIds, $queryFilters);
@@ -1601,50 +1601,70 @@ final class RegisteredMetricReadServices
         return $this->categoryReportBucketsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId);
     }
 
+    /**
+     * Store-item refunds retain the registered sale-linked refund population,
+     * while standalone card/document refunds are classified by their verified
+     * original product in the report. Excluding only that second population
+     * prevents counting its negative payment fact twice.
+     */
+    public function categoryReportBucketsWithoutStandaloneRefunds(string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId = 0): array
+    {
+        if ($participantEmployeeId < 0) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
+        return $this->categoryReportBucketsWithParticipant('refund_performance', $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId, true);
+    }
+
     /** @return array<int,array<string,mixed>> */
-    private function categoryReportBucketsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId): array
+    private function categoryReportBucketsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId, bool $excludeStandaloneRefunds = false): array
     {
         $contract = MetricDefinitionRegistry::get($metricCode);
         $field = ($contract['storage_unit'] ?? null) === 'count' ? 'quantity' : 'amount_cents';
         $buckets = [];
         $storeTotals = [];
         $dimensions = new StoreUnifiedReportOrganizationDimensionServices();
-        foreach ($this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId) as $row) {
-            $storeId = $this->integer($row['store_id'] ?? null);
-            $day = (string)($row['business_date'] ?? '');
-            if (!in_array($storeId, $stores, true) || $day < $range['start'] || $day > $range['end']) $this->fail('METRIC_SOURCE_RESULT_INVALID');
-            $categoryId = $this->integer($row['category_id'] ?? $row['project_category_id_snapshot'] ?? 0);
-            $categoryPath = (string)($row['category_path'] ?? $row['category_path_snapshot'] ?? $row['project_category_path_snapshot'] ?? '');
-            // Organization dimensions are a server-owned report projection.
-            // Resolve them before grouping so consumers receive one final
-            // display bucket instead of re-adding business metric values.
-            $dimensions->project(
-                $row,
-                (string)($row['organization_id'] ?? ''),
-                (string)($row['organization_path_snapshot'] ?? ''),
-                $day
-            );
-            $companyId = (string)($row['company_dimension_id'] ?? '');
-            $managerId = (string)($row['city_manager_dimension_id'] ?? '');
-            $storeKey = implode('|', [$storeId, $companyId, $managerId]);
-            $key = implode('|', [$storeKey, $categoryId, $categoryPath]);
-            if (!isset($buckets[$key])) {
-                $buckets[$key] = [
-                    'store_id' => $storeId, 'business_date' => $day,
-                    'store_name_snapshot' => (string)($row['store_name_snapshot'] ?? $row['store_name'] ?? ''),
-                    'organization_id' => (int)($row['organization_id'] ?? 0),
-                    'organization_path_snapshot' => (string)($row['organization_path_snapshot'] ?? ''),
-                    'company_dimension_id' => $companyId,
-                    'company' => (string)($row['company'] ?? ''),
-                    'city_manager_dimension_id' => $managerId,
-                    'city_manager' => (string)($row['city_manager'] ?? ''),
-                    'category_id' => $categoryId, 'category_path' => $categoryPath,
-                    'metric_value' => 0,
-                ];
+        // Resolve all fact rows against one current dimension snapshot. Without
+        // this boundary each business date re-queries the same organization map.
+        $dimensions->beginCurrentDimensionSnapshot();
+        try {
+            $rows = $this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId, $excludeStandaloneRefunds);
+            foreach ($rows as $row) {
+                $storeId = $this->integer($row['store_id'] ?? null);
+                $day = (string)($row['business_date'] ?? '');
+                if (!in_array($storeId, $stores, true) || $day < $range['start'] || $day > $range['end']) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $categoryId = $this->integer($row['category_id'] ?? $row['project_category_id_snapshot'] ?? 0);
+                $categoryPath = (string)($row['category_path'] ?? $row['category_path_snapshot'] ?? $row['project_category_path_snapshot'] ?? '');
+                // Organization dimensions are a server-owned report projection.
+                // Resolve them before grouping so consumers receive one final
+                // display bucket instead of re-adding business metric values.
+                $dimensions->project(
+                    $row,
+                    (string)($row['organization_id'] ?? ''),
+                    (string)($row['organization_path_snapshot'] ?? ''),
+                    $day
+                );
+                $companyId = (string)($row['company_dimension_id'] ?? '');
+                $managerId = (string)($row['city_manager_dimension_id'] ?? '');
+                $storeKey = implode('|', [$storeId, $companyId, $managerId]);
+                $key = implode('|', [$storeKey, $categoryId, $categoryPath]);
+                if (!isset($buckets[$key])) {
+                    $buckets[$key] = [
+                        'store_id' => $storeId, 'business_date' => $day,
+                        'store_name_snapshot' => (string)($row['store_name_snapshot'] ?? $row['store_name'] ?? ''),
+                        'organization_id' => (int)($row['organization_id'] ?? 0),
+                        'organization_path_snapshot' => (string)($row['organization_path_snapshot'] ?? ''),
+                        'company_dimension_id' => $companyId,
+                        'company' => (string)($row['company'] ?? ''),
+                        'city_manager_dimension_id' => $managerId,
+                        'city_manager' => (string)($row['city_manager'] ?? ''),
+                        'category_id' => $categoryId, 'category_path' => $categoryPath,
+                        'metric_value' => 0,
+                    ];
+                }
+                $amount = $this->integer($row[$field] ?? null);
+                $buckets[$key]['metric_value'] = $this->add($buckets[$key]['metric_value'], $amount);
+                $storeTotals[$storeKey] = $this->add((int)($storeTotals[$storeKey] ?? 0), $amount);
             }
-            $amount = $this->integer($row[$field] ?? null);
-            $buckets[$key]['metric_value'] = $this->add($buckets[$key]['metric_value'], $amount);
-            $storeTotals[$storeKey] = $this->add((int)($storeTotals[$storeKey] ?? 0), $amount);
+        } finally {
+            $dimensions->endCurrentDimensionSnapshot();
         }
         foreach ($buckets as &$bucket) {
             $storeKey = implode('|', [(int)$bucket['store_id'], (string)$bucket['company_dimension_id'], (string)$bucket['city_manager_dimension_id']]);
@@ -1979,7 +1999,7 @@ final class RegisteredMetricReadServices
     }
 
     /** @return array<int,array<string,mixed>> */
-    private function cashCategoryRows(string $tenantId, array $stores, array $range, array $categoryIds, string $mode, array $filters): array
+    private function cashCategoryRows(string $tenantId, array $stores, array $range, array $categoryIds, string $mode, array $filters, bool $excludeStandaloneRefunds = false): array
     {
         if (!in_array($mode, ['positive', 'refund', 'net'], true)) $this->fail('METRIC_SOURCE_TYPE_INVALID');
         $base = $this->saleCashQuery($tenantId, $stores, $range);
@@ -2036,9 +2056,11 @@ final class RegisteredMetricReadServices
             )->select()->toArray());
             // A migrated-card refund likewise has no defensible sale category; keep it in
             // unfiltered cash/refund totals without fabricating an item allocation.
-            $rows = array_merge($rows, $importedCardRefund->fieldRaw(
-                "CONCAT('manual-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='manual_refund' THEN '卡项或单据退款' ELSE '旧卡退款' END item_name,p.source_document_type product_type_snapshot,0 category_id,'' category_path"
-            )->select()->toArray());
+            if (!$excludeStandaloneRefunds) {
+                $rows = array_merge($rows, $importedCardRefund->fieldRaw(
+                    "CONCAT('manual-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='manual_refund' THEN '卡项或单据退款' ELSE '旧卡退款' END item_name,p.source_document_type product_type_snapshot,0 category_id,'' category_path"
+                )->select()->toArray());
+            }
         }
         if ($cards === []) return $rows;
 

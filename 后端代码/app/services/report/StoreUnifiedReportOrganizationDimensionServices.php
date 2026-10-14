@@ -32,6 +32,10 @@ final class StoreUnifiedReportOrganizationDimensionServices
     /** Cache current assignments only for one explicit multi-store projection. */
     public function beginCurrentDimensionSnapshot(): void
     {
+        // A new report read must see current assignments, including changes made
+        // since a long-lived worker's previous request.
+        $this->resolved = [];
+        $this->storePaths = null;
         $this->currentDimensions = [];
     }
 
@@ -39,6 +43,8 @@ final class StoreUnifiedReportOrganizationDimensionServices
     public function endCurrentDimensionSnapshot(): void
     {
         $this->currentDimensions = null;
+        $this->resolved = [];
+        $this->storePaths = null;
     }
 
     public function __construct(?StoreUnifiedReportPhaseThreeFoundationServices $foundation = null)
