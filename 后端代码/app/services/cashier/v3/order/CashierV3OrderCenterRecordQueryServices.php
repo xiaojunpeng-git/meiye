@@ -902,6 +902,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'refund_line.category_name_snapshot AS adjustment_category_name',
         ]));
         $platformCardCategories = $this->platformCardCategoriesForRefunds($rows);
+        $platformCatalogCategories = $this->platformCatalogCategoriesForRefunds($rows);
         $refundAttribution = [];
         $refundIds = array_values(array_unique(array_map(static fn(array $row): string => (string)$row['operation_id'], $rows)));
         if ($refundIds !== []) {
@@ -961,7 +962,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 $salesRefundLines[(string)$line['operation_id']][] = $line;
             }
         }
-        return [array_map(function (array $row) use ($importedSnapshots, $refundAttribution, $salesRefundLines, $platformCardCategories): array {
+        return [array_map(function (array $row) use ($importedSnapshots, $refundAttribution, $salesRefundLines, $platformCardCategories, $platformCatalogCategories): array {
             $snapshot = (string)$row['source_type'] === 'imported_card'
                 ? ($importedSnapshots[(string)$row['operation_id']] ?? '[]')
                 : (string)($row['salespeople_snapshot_json'] ?? '[]');
@@ -995,6 +996,7 @@ final class CashierV3OrderCenterRecordQueryServices
                     . '；' . $voidLabel . '；' . (string)$row['reason_snapshot']
                 : (string)$row['reason_snapshot']);
             $row['platform_card_category_name'] = $platformCardCategories[(string)$row['operation_id']] ?? '';
+            $row['platform_catalog_category_name'] = $platformCatalogCategories[(string)$row['operation_id']] ?? '';
             $product = self::refundProductColumns($row, $salesRefundLines[(string)$row['operation_id']] ?? []);
             return [
                 'id' => 'refund:' . (string)$row['operation_id'],
@@ -1057,6 +1059,47 @@ final class CashierV3OrderCenterRecordQueryServices
                 || (int)$holder['product_id'] <= 0) continue;
             $productByOperation[(string)$row['operation_id']] = (int)$holder['product_id'];
         }
+        return $this->platformProductCategoriesForRefunds($productByOperation);
+    }
+
+    /**
+     * Old unlinked refunds identify a store catalog SKU, not a sale line. Resolve
+     * SKU ID to platform product ID before reading its current category; never
+     * infer a category from the saved product name or another store's catalog.
+     */
+    private function platformCatalogCategoriesForRefunds(array $rows): array
+    {
+        $pending = array_values(array_filter($rows, static function (array $row): bool {
+            if ((string)$row['source_type'] !== 'catalog'
+                || (int)($row['catalog_item_id'] ?? 0) <= 0
+                || (int)($row['store_id'] ?? 0) <= 0) return false;
+            $request = json_decode((string)($row['request_json'] ?? ''), true);
+            return !is_array($request) || trim((string)($request['_productCategoryNameSnapshot'] ?? '')) === '';
+        }));
+        if ($pending === []) return [];
+
+        $skuIds = array_values(array_unique(array_map(
+            static fn(array $row): int => (int)$row['catalog_item_id'], $pending)));
+        $skus = Db::name('store_product_attr_value')->alias('sku')
+            ->join('store_product product', 'product.id=sku.product_id')
+            ->whereIn('sku.id', $skuIds)->where('sku.type', 0)
+            ->where('product.type', 1)->where('product.is_del', 0)
+            ->whereIn('product.product_type', [0, 4, 5, 6])
+            ->field('sku.id AS sku_id,sku.product_id,product.relation_id AS store_id')
+            ->select()->toArray();
+        $skusById = array_column($skus, null, 'sku_id');
+        $productByOperation = [];
+        foreach ($pending as $row) {
+            $sku = $skusById[(int)$row['catalog_item_id']] ?? null;
+            if (!$sku || (int)$sku['store_id'] !== (int)$row['store_id']) continue;
+            $productByOperation[(string)$row['operation_id']] = (int)$sku['product_id'];
+        }
+        return $this->platformProductCategoriesForRefunds($productByOperation);
+    }
+
+    /** Only verified product IDs enter this batched, complete platform category-path lookup. */
+    private function platformProductCategoriesForRefunds(array $productByOperation): array
+    {
         if ($productByOperation === []) return [];
 
         $products = Db::name('store_product')->whereIn('id', array_values(array_unique(array_values($productByOperation))))
@@ -1135,7 +1178,7 @@ final class CashierV3OrderCenterRecordQueryServices
         return $categoryId === 0 ? implode('/', array_reverse($names)) : '';
     }
 
-    /** Refund columns use sale snapshots first; legacy cards show current platform classification. */
+    /** Refund columns prefer saved sale/refund snapshots; old card/catalog rows use verified current platform classification. */
     private static function refundProductColumns(array $row, array $salesLines): array
     {
         $sourceType = (string)$row['source_type'];
@@ -1166,7 +1209,9 @@ final class CashierV3OrderCenterRecordQueryServices
         }
         if ($sourceType === 'catalog') {
             $request = json_decode((string)($row['request_json'] ?? ''), true);
-            return ['category' => is_array($request) ? trim((string)($request['_productCategoryNameSnapshot'] ?? '')) : '',
+            $savedCategory = is_array($request) ? trim((string)($request['_productCategoryNameSnapshot'] ?? '')) : '';
+            return ['category' => $savedCategory !== '' ? $savedCategory
+                    : trim((string)($row['platform_catalog_category_name'] ?? '')),
                 'name' => trim((string)($row['adjustment_target_name'] ?? ''))];
         }
         return ['category' => '', 'name' => ''];
