@@ -5317,13 +5317,13 @@ function localCheckoutPreviewSnapshot() {
             salesManagerSelections: canonicalCheckoutAttributions(salesManagerSelections)
           }
         : {}),
+      ...(saleLine || entitlementLine
+        ? { guideSelections: canonicalCheckoutAttributions(guideSelections, true) }
+        : {}),
       // These switches live in the browser until final confirmation. Freeze
       // their effective values in the preview rather than relying on an
       // earlier draft merge that a later projection could overwrite.
       ...(saleLine && projectLine
-      ...(saleLine || entitlementLine
-        ? { guideSelections: canonicalCheckoutAttributions(guideSelections, true) }
-        : {}),
         ? { isExperience: cartLineExperienceSelected(line) }
         : {}),
       ...(saleLine && isInventoryManagedProductLine(line)
@@ -5563,14 +5563,14 @@ function buildCheckoutSnapshot(preview = {}) {
       // catalogue definition after the checkout wizard has opened.
       next.cardPurchaseSnapshot = checkoutCardPurchaseSnapshot(line)
     }
-    return next
-  })
-  // A pure entitlement checkout has no collection phase. Keep only payment
-  // rows that already live in this one browser snapshot; no payment summary
     // 权益结账没有销售单，导购轮次仍随该权益服务行冻结在回执快照中。
     if (role === 'entitlement_service') {
       next.guideSelections = canonicalCheckoutAttributions(line.guideSelections, true)
     }
+    return next
+  })
+  // A pure entitlement checkout has no collection phase. Keep only payment
+  // rows that already live in this one browser snapshot; no payment summary
   // or selected-lines side channel may influence final submission.
   const hasSaleLines = lines.some((line) => cartLineRole(line) === 'sale')
   const zeroReceivableSale = hasSaleLines
