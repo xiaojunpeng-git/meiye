@@ -1270,20 +1270,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             'first_year_amount' => $firstYearAmount,
         ];
     }
-    private function inactiveMemberCount(array $services, string $monthEnd): int
-    {
-        $cutoff = date('Y-m-d', strtotime($monthEnd . ' -90 days'));
-        $members = [];
-        foreach ($services as $service) {
-            $memberId = (int)($service['member_id'] ?? 0);
-            if ($memberId > 0 && (string)($service['business_date'] ?? '') < $cutoff) $members[$memberId] = true;
-        }
-        return count($members);
-    }
-    private function categoryFacts(array $facts, string $category): array { return array_values(array_filter($facts, static function (array $fact) use ($category): bool { return preg_match('/^' . preg_quote($category, '/') . '(?:\\s*\\/|$)/u', trim((string)($fact['category_path'] ?? ''))) === 1; })); }
-    /** 自营/合作由发生时冻结的商品分类路径判断，不能由现时商品名称或人员档案反推。 */
-    private function teamFacts(array $facts, bool $partner): array
-    {
 
     /** One authorized cash read feeds all twelve BDEGH rows; no category or service query is needed. */
     private function bdeghMonthlyMetrics(array $stores, array $range, array $rule): array
@@ -1346,6 +1332,20 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
         return $months;
     }
+    private function inactiveMemberCount(array $services, string $monthEnd): int
+    {
+        $cutoff = date('Y-m-d', strtotime($monthEnd . ' -90 days'));
+        $members = [];
+        foreach ($services as $service) {
+            $memberId = (int)($service['member_id'] ?? 0);
+            if ($memberId > 0 && (string)($service['business_date'] ?? '') < $cutoff) $members[$memberId] = true;
+        }
+        return count($members);
+    }
+    private function categoryFacts(array $facts, string $category): array { return array_values(array_filter($facts, static function (array $fact) use ($category): bool { return preg_match('/^' . preg_quote($category, '/') . '(?:\\s*\\/|$)/u', trim((string)($fact['category_path'] ?? ''))) === 1; })); }
+    /** 自营/合作由发生时冻结的商品分类路径判断，不能由现时商品名称或人员档案反推。 */
+    private function teamFacts(array $facts, bool $partner): array
+    {
         return array_values(array_filter($facts, static function (array $fact) use ($partner): bool {
             $isPartner = str_contains((string)($fact['category_path'] ?? ''), '合作');
             return $isPartner === $partner;
