@@ -4,6 +4,7 @@ namespace app\services\report;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use app\services\metric\MetricDictionaryServices;
 use think\facade\Db;
 
@@ -485,19 +486,149 @@ class StoreUnifiedReportServices extends BaseServices
         ];
     }
 
+    /** 补交只从成功收款及原销售分摊事实入表，按补交业务日而非原销售日筛选。 */
+    private function memberConsumptionSupplementQuery($storeId, array $range, array $input)
+    {
+        $query = Db::name('cashier_v3_payment_fact')->alias('repayment_payment')
+            ->join('cashier_v3_debt_repayment repayment',
+                "repayment.tenant_id=repayment_payment.tenant_id AND repayment.repayment_id=repayment_payment.order_id AND repayment.status='succeeded'")
+            ->join('cashier_v3_payment_sale_allocation_fact allocation',
+                "allocation.tenant_id=repayment_payment.tenant_id AND allocation.payment_fact_id=repayment_payment.fact_id AND allocation.status='effective' AND allocation.fact_direction='forward'")
+            ->join('cashier_v3_sale_fact s',
+                "s.tenant_id=allocation.tenant_id AND s.fact_id=allocation.sale_fact_id AND s.status='effective' AND s.fact_direction='forward'")
+            ->leftJoin('cashier_v3_report_sale_dimension_fact d',
+                'd.tenant_id=s.tenant_id AND d.store_id=s.store_id AND d.sale_fact_id=s.fact_id')
+            ->where('repayment_payment.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('repayment_payment.source_document_type', 'debt_repayment')
+            ->where('repayment_payment.fact_direction', 'forward')
+            ->where('repayment_payment.status', 'effective')
+            ->whereBetween('repayment_payment.business_date', [$range['start'], $range['end']]);
+        if (is_array($storeId)) $query->whereIn('repayment_payment.store_id', array_values(array_unique(array_map('intval', $storeId))));
+        else $query->where('repayment_payment.store_id', (int)$storeId);
+        $this->normalDataScope()->excludeVoidedSupplementAllocations($query, 'allocation');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
+        $this->organizationDimensions()->applyFilters($query, 'repayment_payment', $input, $range);
+        if ($this->participantEmployeeId > 0) {
+            // 补交是独立收款单；个人报表按本笔人员核权，不能借原销售参与关系看他人的补交。
+            (new StoreReportParticipantScopeServices())->applySupplement($query,
+                'repayment_payment.order_id', $this->participantEmployeeId);
+        }
+        $this->operationFilters($query, $input, false);
+        return $query;
+    }
+
+    /** 本笔补交按原销售明细分摊展示，人员读取补交自身最新版本。 */
+    private function memberConsumptionSupplementRows($query, array $entryIds, $storeId, array $partnerDefinitions): array
+    {
+        if ($entryIds === []) return [];
+        $repaymentIds = $saleFactIds = [];
+        foreach ($entryIds as $entryId) {
+            [$repaymentId, $saleFactId] = array_pad(explode('|', (string)$entryId, 2), 2, '');
+            if ($repaymentId !== '' && $saleFactId !== '') {
+                $repaymentIds[] = $repaymentId;
+                $saleFactIds[] = $saleFactId;
+            }
+        }
+        if ($repaymentIds === []) return [];
+        $raw = (clone $query)->whereIn('repayment_payment.order_id', array_values(array_unique($repaymentIds)))
+            ->whereIn('allocation.sale_fact_id', array_values(array_unique($saleFactIds)))
+            ->fieldRaw('repayment_payment.order_id repayment_id,repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.store_name_snapshot,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.business_date,repayment_payment.business_source_label_snapshot,repayment_payment.payment_method,allocation.sale_fact_id,allocation.amount_cents,repayment.repayment_no,s.item_name_snapshot,d.item_id current_product_id,d.category_path_snapshot')
+            ->select()->toArray();
+        // 分类沿原销售商品快照，补交只改变本次收款日及人员归属。
+        $selectedEntries = array_fill_keys($entryIds, true);
+        $byEntry = [];
+        foreach ($raw as $item) {
+            $key = (string)$item['repayment_id'] . '|' . (string)$item['sale_fact_id'];
+            if (!isset($selectedEntries[$key])) continue;
+            if (!isset($byEntry[$key])) {
+                $this->applyOrganizationDimensions($item);
+                $item['order_no_snapshot'] = (string)$item['repayment_no'];
+                $item['consume_type'] = '补交';
+                $item['member_name'] = (string)$item['member_name_snapshot'];
+                $item['consumption_detail'] = (string)$item['item_name_snapshot'];
+                $item['category'] = (string)$item['category_path_snapshot'];
+                $item['member_source'] = (string)$item['business_source_label_snapshot'];
+                $item['quantity'] = 0;
+                $item['experience_cash'] = '0';
+                $item['experience_payment_method'] = '';
+                $item['_payment_cents'] = [];
+                $byEntry[$key] = $item;
+            }
+            $method = (string)$item['payment_method'];
+            $byEntry[$key]['_payment_cents'][$method] = (int)($byEntry[$key]['_payment_cents'][$method] ?? 0)
+                + (int)$item['amount_cents'];
+        }
+        $attributions = (new CashierV3SupplementAttributionServices())->currentRows(
+            CashierV3ScopeResolver::TENANT_SCOPE_ID, array_values(array_unique($repaymentIds)));
+        $salespersonRows = Db::name('cashier_v3_performance_fact')->alias('person')
+            ->where('person.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereIn('person.order_id', array_values(array_unique($repaymentIds)))
+            ->where('person.source_document_type', 'debt_repayment')
+            ->where('person.performance_type', 'sales_performance_allocated')
+            ->where('person.fact_direction', 'forward')->where('person.status', 'effective')
+            ->whereNotExists(function ($reverse) {
+                $reverse->name('cashier_v3_performance_fact')->alias('person_reverse')
+                    ->whereRaw('person_reverse.tenant_id=person.tenant_id')
+                    ->whereRaw('person_reverse.reversal_of=person.fact_id')
+                    ->where('person_reverse.fact_direction', 'reversal');
+            })->field('person.order_id,person.employee_name_snapshot')->select()->toArray();
+        $salesNames = [];
+        foreach ($salespersonRows as $person) $salesNames[(string)$person['order_id']][] = (string)$person['employee_name_snapshot'];
+        foreach ($byEntry as &$row) {
+            $repaymentId = (string)$row['repayment_id'];
+            $receiptCents = 0;
+            foreach ($this->paymentMethodDefinitions() as $method) {
+                $amount = (int)($row['_payment_cents'][$method['code']] ?? 0);
+                $row['payment_' . $method['code']] = $this->money($amount);
+                $receiptCents += $amount;
+            }
+            $row['receipt_total'] = $this->money($receiptCents);
+            $row['actual_cash_performance'] = $this->money($receiptCents);
+            $row['partner_performance'] = $this->money(0);
+            foreach ($partnerDefinitions as $definition) $row[$definition['key']] = $this->money(0);
+            $row['salesperson_names'] = implode('、', array_values(array_unique($salesNames[$repaymentId] ?? [])));
+            $guides = $managers = []; $rounds = [];
+            foreach ($attributions[$repaymentId] ?? [] as $person) {
+                if ((string)$person['role'] === 'guide') {
+                    $guides[] = (string)$person['employee_name_snapshot'];
+                    $rounds[] = (int)($person['guide_round_no'] ?? 0);
+                } elseif ((string)$person['role'] === 'sales_manager') $managers[] = (string)$person['employee_name_snapshot'];
+            }
+            $row['sales_manager_name'] = implode('、', array_values(array_unique($managers)));
+            $row['guide_names'] = implode('、', array_values(array_unique($guides)));
+            $row['guide_round_no'] = $rounds ? (max($rounds) > 0 ? max($rounds) : '无') : '';
+            unset($row['_payment_cents']);
+        }
+        unset($row);
+        return $byEntry;
+    }
+
     private function memberConsumptionDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input, false);
-        // 会员消费明细以有效销售明细为展示边界，不再以已分摊收款净额 > 0
-        // 作为入表门槛。欠款、零元或其他尚无收款的真实成交行仍展示，
-        // 收款列依然只读有效收款分摊，不伪造现金业绩。
-        $total = (int)(clone $query)->count('s.id');
+        $supplementQuery = $this->memberConsumptionSupplementQuery($storeId, $range, $input);
+        // 销售和补交先按各自业务日合并行键再分页，导出和合计沿用同一筛选权限。
+        $saleKeys = (clone $query)->fieldRaw("s.id entry_id,s.business_date,'sale' entry_kind");
+        $supplementKeys = (clone $supplementQuery)
+            ->fieldRaw("CONCAT(repayment_payment.order_id,'|',allocation.sale_fact_id) entry_id,repayment_payment.business_date,'supplement' entry_kind")
+            ->group('repayment_payment.order_id,allocation.sale_fact_id,repayment_payment.business_date')->buildSql(false);
+        $entriesSql = $saleKeys->unionAll($supplementKeys)->buildSql();
+        $entries = Db::table([$entriesSql => 'member_activity']);
+        $total = (int)(clone $entries)->count();
+        $ordered = (clone $entries)->field('entry_id,entry_kind,business_date')
+            ->order('business_date','desc')->order('entry_id','desc')->order('entry_kind','asc');
+        if (empty($input['_internal_all'])) $ordered->page($this->page($input),$this->limit($input));
+        $pageEntries = $ordered->select()->toArray();
+        $saleIds = $supplementEntryIds = [];
+        foreach ($pageEntries as $entry) {
+            if ((string)$entry['entry_kind'] === 'supplement') $supplementEntryIds[] = (string)$entry['entry_id'];
+            else $saleIds[] = (int)$entry['entry_id'];
+        }
         $partnerDefinitions = $this->partnerPerformanceDefinitions($storeId);
-        $summaryValues = $this->memberConsumptionSummaryValues($query, $storeId, $partnerDefinitions);
-        $rowQuery = (clone $query)->fieldRaw("s.fact_id,s.tenant_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")->order('s.business_date','desc')->order('s.id','desc');
-        // 导出沿用相同的后端过滤，但不能被页面分页截断。
-        if (empty($input['_internal_all'])) $rowQuery->page($this->page($input), $this->limit($input));
-        $rows = $rowQuery->select()->toArray();
+        $summaryValues = $this->memberConsumptionSummaryValues($query,$supplementQuery,$storeId,$partnerDefinitions);
+        $rows = $saleIds === [] ? [] : (clone $query)->whereIn('s.id',$saleIds)
+            ->fieldRaw("s.id,s.fact_id,s.tenant_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")
+            ->select()->toArray();
         $this->decorateMemberConsumptionRows($rows, $storeId, $partnerDefinitions, $this->cardPartnerSharesBySaleFact($rows, $storeId));
         foreach ($rows as &$row) {
             $this->applyOrganizationDimensions($row);
@@ -514,10 +645,20 @@ class StoreUnifiedReportServices extends BaseServices
         // annotation is the controlled projection for these two editable
         // columns and must win on every subsequent query/refresh.
         $rows = $this->attachAnnotations($rows, 'member_consumption_detail', $storeId, !empty($input['_internal_all']));
+        $byEntry = [];
+        foreach ($rows as $row) $byEntry['sale:' . (int)$row['id']] = $row;
+        foreach ($this->memberConsumptionSupplementRows($supplementQuery,$supplementEntryIds,$storeId,$partnerDefinitions) as $entryId=>$supplement) {
+            $byEntry['supplement:' . $entryId] = $supplement;
+        }
+        $rows = [];
+        foreach ($pageEntries as $entry) {
+            $key = (string)$entry['entry_kind'] . ':' . (string)$entry['entry_id'];
+            if (isset($byEntry[$key])) $rows[] = $byEntry[$key];
+        }
         $columns = array_merge($this->organizationDimensionColumns(), [
-            ['key'=>'business_date','label'=>'日期'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
+            ['key'=>'business_date','label'=>'日期'], ['key'=>'order_no_snapshot','label'=>'业务单号'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
             ['key'=>'consumption_detail','label'=>'消费明细'], ['key'=>'category','label'=>'分类'], ['key'=>'sales_manager_name','label'=>'销售经理'],
-            ['key'=>'guide_round_no','label'=>'导购业绩次数'], ['key'=>'guide_names','label'=>'导购人员'], ['key'=>'salesperson_names','label'=>'销售'],
+            ['key'=>'guide_round_no','label'=>'导购业绩次数','source_explanation'=>'补交显示本笔最新归属轮次，不新增到店次数。'], ['key'=>'guide_names','label'=>'导购人员','source_explanation'=>'补交显示本笔最新导购归属，不改原销售。'], ['key'=>'salesperson_names','label'=>'销售'],
             ['key'=>'member_source','label'=>'会员来源'],
         ]);
         foreach ($this->paymentMethodDefinitions() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
@@ -525,11 +666,11 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($partnerDefinitions as $definition) $columns[] = ['key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩'];
         foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','分成后现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
         $columns = $this->fixedColumns($columns, [
-            'business_date'=>104, 'consume_type'=>88, 'member_name'=>88,
+            'business_date'=>104, 'order_no_snapshot'=>150, 'consume_type'=>88, 'member_name'=>88,
             'consumption_detail'=>138, 'category'=>116,
         ]);
         return [
-            'title'=>'会员消费明细','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
+            'title'=>'会员消费明细','metric_version'=>'member-consumption-supplement-attribution-v3','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, array_merge(['business_date'=>'合计'], $summaryValues)),
@@ -1671,9 +1812,17 @@ class StoreUnifiedReportServices extends BaseServices
         if ($saleFactIds) {
             // Correlated void predicates require an explicit SQL alias; the
             // logical ThinkPHP table name omits the configured database prefix.
-            $payments = $this->withStoreScope(Db::name('cashier_v3_payment_sale_allocation_fact')->alias('allocation'), $storeId)
-                ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
-                ->field('sale_fact_id,payment_method,SUM(amount_cents) amount_cents')->group('sale_fact_id,payment_method');
+            $payments = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('allocation')
+                ->join('cashier_v3_payment_fact original_payment',
+                    'original_payment.tenant_id=allocation.tenant_id AND original_payment.fact_id=allocation.payment_fact_id')
+                ->where('allocation.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('allocation.sale_fact_id', $saleFactIds)->where('allocation.status', 'effective')
+                // 原销售行不重复展示补交；本次补交按自身日期另列。
+                ->where('original_payment.source_document_type','<>','debt_repayment')
+                ->fieldRaw('allocation.sale_fact_id,allocation.payment_method,SUM(allocation.amount_cents) amount_cents')
+                ->group('allocation.sale_fact_id,allocation.payment_method');
+            if (is_array($storeId)) $payments->whereIn('allocation.store_id',array_values(array_unique(array_map('intval',$storeId))));
+            else $payments->where('allocation.store_id',(int)$storeId);
             $this->normalDataScope()->excludeVoidedSupplementAllocations($payments, 'allocation');
             $payments = $payments->select()->toArray();
             foreach ($payments as $payment) $paymentBySaleFact[(string)$payment['sale_fact_id']][(string)$payment['payment_method']] = (int)$payment['amount_cents'];
@@ -1770,14 +1919,23 @@ class StoreUnifiedReportServices extends BaseServices
      * respective columns; manual experience overrides intentionally remain a
      * row-level operating supplement and are not merged into a business total.
      */
-    private function memberConsumptionSummaryValues($query, $storeId, array $partnerDefinitions): array
+    private function memberConsumptionSummaryValues($query, $supplementQuery, $storeId, array $partnerDefinitions): array
     {
         $base = (clone $query)->fieldRaw('SUM(s.quantity) quantity')->find() ?: [];
         $paymentRows = (clone $query)
             ->join('cashier_v3_payment_sale_allocation_fact pa', "pa.sale_fact_id=s.fact_id AND pa.status='effective'")
+            ->join('cashier_v3_payment_fact original_payment',
+                'original_payment.tenant_id=pa.tenant_id AND original_payment.fact_id=pa.payment_fact_id')
+            ->where('original_payment.source_document_type','<>','debt_repayment')
             ->fieldRaw('pa.payment_method,SUM(pa.amount_cents) amount_cents')->group('pa.payment_method')->select()->toArray();
         $payments = [];
         foreach ($paymentRows as $payment) $payments[(string)$payment['payment_method']] = (int)$payment['amount_cents'];
+        // 补交独立归日；汇总取同一权限查询下的全部有效分摊，不能按可见页求和。
+        foreach ((clone $supplementQuery)->fieldRaw('repayment_payment.payment_method,SUM(allocation.amount_cents) amount_cents')
+            ->group('repayment_payment.payment_method')->select()->toArray() as $payment) {
+            $method = (string)$payment['payment_method'];
+            $payments[$method] = (int)($payments[$method] ?? 0) + (int)$payment['amount_cents'];
+        }
 
         $shareByCategory = [];
         foreach ((clone $query)->where('s.source_type', '<>', 'card')
