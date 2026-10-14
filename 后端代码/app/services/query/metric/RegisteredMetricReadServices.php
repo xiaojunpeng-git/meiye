@@ -2047,13 +2047,15 @@ final class RegisteredMetricReadServices
             $rows = array_merge($rows, $recharge->fieldRaw(
                 "CONCAT('recharge-payment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='recharge' THEN '充值' ELSE '充值欠款补交' END item_name,'recharge' product_type_snapshot,0 category_id,'' category_path"
             )->select()->toArray());
-            // A migrated debt may have no V3 source sale line.  Its successful
-            // payment is still cash performance, but has no defensible product
-            // category.  Keep it visible only in the unfiltered population;
-            // category filters must not invent a relation that was never saved.
-            $rows = array_merge($rows, $unallocatedDebtRepayment->fieldRaw(
+            // Historical cards without a V3 sale line can still have verified
+            // priced component products. Keep the payment grain and amount;
+            // only the current report-category projection may split its display.
+            $debtPayments = $unallocatedDebtRepayment->fieldRaw(
                 "CONCAT('sales-debt-repayment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'销售欠款补交（未关联原销售明细）' item_name,'sales_debt_repayment_unallocated' product_type_snapshot,0 category_id,'' category_path"
-            )->select()->toArray());
+            )->select()->toArray();
+            $rows = array_merge($rows, $this->currentReportProductCategory
+                ? $this->projectHistoricalCardRepaymentComponents($debtPayments, $tenantId)
+                : $debtPayments);
             // A migrated-card refund likewise has no defensible sale category; keep it in
             // unfiltered cash/refund totals without fabricating an item allocation.
             if (!$excludeStandaloneRefunds) {
@@ -2298,6 +2300,99 @@ final class RegisteredMetricReadServices
         if ($mode === 'positive') $query->where($field, '>', 0);
         elseif ($mode === 'refund') $query->where($field, '<', 0);
         elseif ($mode !== 'net') $this->fail('METRIC_SOURCE_TYPE_INVALID');
+    }
+
+    /**
+     * A migrated card repayment has no V3 sale allocation, but its original priced
+     * project lines can identify current platform categories. Require one debt card,
+     * an exact original-price reconciliation, and a fully accounted payment before
+     * splitting display rows; unresolved money stays in the unclassified row.
+     * No business fact or historical category snapshot is changed.
+     */
+    private function projectHistoricalCardRepaymentComponents(array $payments, string $tenantId): array
+    {
+        if ($payments === []) return $payments;
+        $ids = array_values(array_unique(array_filter(array_map(static function (array $payment): string {
+            return trim((string)($payment['order_id'] ?? ''));
+        }, $payments))));
+        $verified = [];
+        foreach (array_chunk($ids, 200) as $batch) {
+            $origins = Db::name('cashier_v3_debt_repayment')->alias('repayment')
+                ->join('store_debt debt', 'debt.id=repayment.debt_id AND debt.store_id=repayment.store_id AND debt.uid=repayment.member_id')
+                ->join('store_order original_order', "original_order.id=debt.order_id AND original_order.order_id=repayment.sales_order_id AND original_order.store_id=repayment.store_id AND original_order.uid=repayment.member_id AND original_order.channel_type='migration' AND original_order.product_type=5 AND original_order.is_del=0")
+                ->join('store_debt_item debt_item', 'debt_item.debt_id=debt.id')
+                ->where('repayment.tenant_id', $tenantId)->whereIn('repayment.repayment_id', $batch)
+                ->where('repayment.status', 'succeeded')->where('original_order.total_price', '>', 0)
+                ->fieldRaw('repayment.repayment_id,repayment.store_id,repayment.member_id,repayment.repayment_amount_cents,original_order.id original_order_id,ROUND(original_order.total_price*100) original_total_cents,debt_item.id debt_item_id,debt_item.order_id debt_item_order_id,debt_item.product_type debt_product_type')
+                ->select()->toArray();
+            $byRepayment = [];
+            foreach ($origins as $origin) $byRepayment[(string)$origin['repayment_id']][] = $origin;
+            $singleCard = [];
+            foreach ($byRepayment as $id => $parts) {
+                $origin = $parts[0];
+                if (count($parts) !== 1 || (int)$origin['debt_product_type'] !== 5
+                    || (int)$origin['debt_item_order_id'] !== (int)$origin['original_order_id']) continue;
+                $singleCard[$id] = $origin;
+            }
+            if ($singleCard === []) continue;
+            $orderIds = array_values(array_unique(array_map(static function (array $origin): int {
+                return (int)$origin['original_order_id'];
+            }, $singleCard)));
+            $lines = Db::name('store_order_cart_info')->whereIn('oid', $orderIds)
+                ->whereIn('product_type', [5, 6])
+                ->fieldRaw('id,oid,product_id,product_type,source_type,ROUND(total_price*100) sale_amount_cents')
+                ->order('id', 'asc')->select()->toArray();
+            $byOrder = []; $cardCounts = [];
+            foreach ($lines as $line) {
+                $orderId = (int)$line['oid'];
+                if ((int)$line['product_type'] === 5) $cardCounts[$orderId] = (int)($cardCounts[$orderId] ?? 0) + 1;
+                else $byOrder[$orderId][] = $line;
+            }
+            $allocated = Db::name('cashier_v3_payment_fact')->alias('payment')
+                ->join('cashier_v3_payment_sale_allocation_fact allocation', 'allocation.tenant_id=payment.tenant_id AND allocation.payment_fact_id=payment.fact_id')
+                ->where('payment.tenant_id', $tenantId)->whereIn('payment.order_id', $batch)
+                ->where('allocation.status', 'effective')->column('payment.order_id');
+            $allocated = array_fill_keys(array_map('strval', $allocated), true);
+            foreach ($singleCard as $id => $origin) {
+                if (isset($allocated[$id])) continue;
+                $components = $byOrder[(int)$origin['original_order_id']] ?? [];
+                if ($components === [] || (int)($cardCounts[(int)$origin['original_order_id']] ?? 0) !== 1) continue;
+                $total = 0;
+                foreach ($components as $component) {
+                    if ((string)$component['source_type'] !== 'migration'
+                        || (int)$component['product_id'] <= 0 || (int)$component['sale_amount_cents'] <= 0) continue 2;
+                    $total = $this->add($total, (int)$component['sale_amount_cents']);
+                }
+                if ($total === (int)$origin['original_total_cents']) $verified[$id] = ['origin' => $origin, 'components' => $components];
+            }
+        }
+        $paymentTotals = [];
+        foreach ($payments as $payment) {
+            $id = (string)$payment['order_id'];
+            $paymentTotals[$id] = $this->add((int)($paymentTotals[$id] ?? 0), (int)$payment['amount_cents']);
+        }
+        $rows = [];
+        foreach ($payments as $payment) {
+            $id = (string)$payment['order_id'];
+            $candidate = $verified[$id] ?? null;
+            if ($candidate === null || (int)$payment['amount_cents'] <= 0
+                || (int)$payment['store_id'] !== (int)$candidate['origin']['store_id']
+                || (int)$payment['member_id'] !== (int)$candidate['origin']['member_id']
+                || $paymentTotals[$id] !== (int)$candidate['origin']['repayment_amount_cents']) {
+                $rows[] = $payment;
+                continue;
+            }
+            foreach ($this->allocate((int)$payment['amount_cents'], $candidate['components']) as $allocation) {
+                $component = $allocation['item'];
+                $rows[] = array_merge($payment, [
+                    'amount_cents' => $allocation['amount_cents'],
+                    'item_id' => (int)$component['product_id'],
+                    'item_name' => '历史卡欠款补交项目',
+                    'product_type_snapshot' => 'card_component',
+                ]);
+            }
+        }
+        return $rows;
     }
 
     /** @return array<int,array{item:array<string,mixed>,amount_cents:int}> */
@@ -2916,7 +3011,8 @@ final class RegisteredMetricReadServices
      * sale allocations. Historical debts can legitimately lack an original V3
      * sale line, so no allocation may be created for them. Read those payment
      * facts exactly once from their own authoritative grain instead of
-     * dropping them or fabricating a sale/category relation.
+     * dropping them. A current-category report may separately verify the original
+     * card's priced project before projecting a category; the fact stays unchanged.
      */
     private function unallocatedSalesDebtRepaymentCashQuery(string $tenantId, array $stores, array $range)
     {

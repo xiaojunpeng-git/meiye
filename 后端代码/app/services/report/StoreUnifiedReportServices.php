@@ -943,11 +943,11 @@ class StoreUnifiedReportServices extends BaseServices
             // “未分类”承接没有可信平台商品关联或平台分类失效的历史金额。
             $isUnclassified = (int)$definition['category_id'] === 0;
             $metricExplanations = $isUnclassified ? [
-                ['cash', '现金业绩', '所选日期内未关联有效平台分类的成功收款扣除同期间现金退款；不含余额支付和欠款。'],
+                ['cash', '现金业绩', '所选日期内未关联有效平台分类，或历史卡补交无法核对原单项目的成功收款扣除同期间现金退款；不含余额支付和未补交的欠款。'],
                 ['after_split', '分成后业绩', '上述未分类现金业绩减去成交时已记录、并随退款冲减的合作方分成金额。'],
                 ['consume', '消耗业绩', '所选日期内完成的服务或核销，项目未关联有效平台分类时归入此列；冲销按发生日扣回，原金额不变。'],
             ] : [
-                ['cash', '现金业绩', '所选日期内成功收款扣除现金退款，按商品或卡内项目的平台当前分类归入本列；不含余额支付和欠款。'],
+                ['cash', '现金业绩', '所选日期内成功收款扣除现金退款，按商品或卡内项目的平台当前分类归入本列；可核对原单项目的历史卡补交也按卡内项目分类，不含余额支付和未补交的欠款。'],
                 ['after_split', '分成后业绩', '本分类净现金业绩减去成交时记录、并随退款按原比例冲减的合作方分成金额。'],
                 ['consume', '消耗业绩', '所选日期内已完成服务或核销的消耗金额，按项目的平台当前分类归入本列；冲销按发生日扣回。'],
             ];
@@ -991,7 +991,7 @@ class StoreUnifiedReportServices extends BaseServices
         unset($column);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'store_name'=>140]);
         return [
-            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-current-category-refund-v3', 'columns' => $columns,
+            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-historical-card-repayment-v4', 'columns' => $columns,
             'column_groups' => $groups, 'records' => array_values($rows),
             'total' => count($rows), 'page' => 1, 'page_size' => count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),

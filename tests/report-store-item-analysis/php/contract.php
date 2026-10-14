@@ -33,7 +33,7 @@ itemAnalysisAssert(
 itemAnalysisAssert(
     str_contains($service, '$this->money($cash - $share)')
         && str_contains($service, "['share', '分成业绩'")
-        && str_contains($service, '该列不是实际业绩')
+        && str_contains($service, '该列不是实际收款金额')
         && str_contains($service, 'array_slice($parts, 0, 2)'),
     'after-split performance subtracts share and is not mislabeled as actual performance'
 );
@@ -48,11 +48,11 @@ itemAnalysisAssert(
 itemAnalysisAssert(
     str_contains($service, '$definitions = $this->itemAnalysisCategoryDefinitions($storeId);')
         && str_contains($service, "Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)")
-        && str_contains($service, "field('id,pid,cate_name,is_show')")
-        && str_contains($service, '(int)($category[\'is_show\'] ?? 0) === 1')
-        && str_contains($service, 'all currently visible product categories')
+        && str_contains($service, "field('id,pid,cate_name')")
+        && str_contains($service, 'is_show only hides catalog choices')
+        && str_contains($service, 'every existing platform category')
         && str_contains($service, 'CashierV3ScopeResolver::TENANT_SCOPE_ID'),
-    'category headers come from all visible product categories even without period facts'
+    'category headers include existing hidden platform categories even without period facts'
 );
 itemAnalysisAssert(
     str_contains($metricReader, 'cashier_v3_card_sale_category_allocation_fact')
@@ -65,10 +65,21 @@ itemAnalysisAssert(
     'cash and consumption use persisted category facts rather than browser calculation'
 );
 itemAnalysisAssert(
-    str_contains($service, 'COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot')
+    str_contains($service, "projectSaleCategories(\$shareRows, 'current_product_id', 'category_id_snapshot', 'category_path_snapshot')")
+        && str_contains($service, 'RegisteredMetricReadServices::withCurrentReportProductCategory()')
+        && str_contains($metricReader, 'projectCurrentReportCategories($rows, $categoryIds, $filters)')
         && str_contains($service, 'COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents')
         && str_contains($service, '(int)($entry[\'category_id_snapshot\'] ?? 0)'),
-    'category grouping uses the product snapshot while partner amounts stay in frozen share cents'
+    'category grouping follows the linked platform product while partner share cents stay frozen'
+);
+itemAnalysisAssert(
+    str_contains($service, 'categoryReportBucketsWithoutStandaloneRefunds(')
+        && str_contains($service, 'new StoreMemberConsumptionRefundReadServices()')
+        && str_contains($service, "['manual_refund', 'imported_card_refund']")
+        && str_contains($service, "['cash_cents'] -= (int)\$entry['metric_value']")
+        && str_contains($service, "['share_cents'] += \$shareCents")
+        && str_contains($service, 'store-item-analysis-historical-card-repayment-v4'),
+    'refund adjustments net existing cash and frozen partner share without new display columns'
 );
 itemAnalysisAssert(
     str_contains($service, "'rowspan' => 2")
