@@ -41,8 +41,8 @@ foreach ($detail['records'] as $row) {
         (string)$row['business_date'], (string)$row['_summary_group_key']]);
     if (isset($saleKeys[$key])) throw new RuntimeException('same-day, same-source repayment was not merged into its sale line');
 }
-if (($detail['metric_version'] ?? '') !== 'new-customer-first-sale-v5'
-    || ($summary['metric_version'] ?? '') !== 'new-customer-first-sale-grouped-v6') {
+if (($detail['metric_version'] ?? '') !== 'new-customer-first-sale-v6'
+    || ($summary['metric_version'] ?? '') !== 'new-customer-first-sale-grouped-v7') {
     throw new RuntimeException('new-customer reports have incorrect dedicated metric versions');
 }
 // 汇总不得按会员拆行；同店同人员和来源的不同会员合并，异店同名则保持独立。
@@ -99,28 +99,43 @@ $toCents = static function ($amount): int {
     $cents = ((int)$parts[0]) * 100 + (int)str_pad(substr($parts[1] ?? '', 0, 2), 2, '0');
     return $negative ? -$cents : $cents;
 };
-// 新客两表共用首次疗程卡销售事件的来源口径；即使 A 来源后来停用，历史 A 事件也不能回流。
-$aSourceIds = array_map('intval', array_column(array_filter(
+// 两表按一级来源 A/G/E 排除首次办卡及补交；已停用来源仍须按 ID 与历史快照排除。
+$excludedSourceIds = array_map('intval', array_column(array_filter(
     Db::name('cashier_v3_business_source')->where('parent_id', 0)->field('id,name')->select()->toArray(),
-    static fn (array $source): bool => preg_match('/^A/u', trim((string)$source['name'])) === 1
+    static fn (array $source): bool => preg_match('/^[AGE]/u', trim((string)$source['name'])) === 1
 ), 'id'));
-$aOrders = $aSourceIds ? Db::name('cashier_v3_customer_lifecycle_fact')
-    ->whereIn('source_primary_id', $aSourceIds)->whereIn('event_type', ['course_pending_settlement', 'first_course_completed'])
+$excludedOrders = $excludedSourceIds ? Db::name('cashier_v3_customer_lifecycle_fact')
+    ->whereIn('source_primary_id', $excludedSourceIds)->whereIn('event_type', ['course_pending_settlement', 'first_course_completed'])
     ->where('status', 'effective')->whereBetween('business_date', [$range['start'], $range['end']])
     ->column('related_order_id') : [];
-if ($aSourceIds) {
-    // 首单及后续补交只要自身来源为 A，均不得进入新客两表。
+if ($excludedSourceIds) {
+    // 明确按每个被排除的来源筛选，也不能绕过后端统一行集。
     foreach (['new_customer_analysis', 'new_customer_analysis_summary'] as $reportCode) {
-        $aResult = $service->query($reportCode, $stores, $range, ['source_id' => $aSourceIds[0], '_internal_all' => true]);
-        if (($aResult['records'] ?? []) !== []) throw new RuntimeException('source A bypassed the new-customer report exclusion');
+        foreach ($excludedSourceIds as $sourceId) {
+            $excludedResult = $service->query($reportCode, $stores, $range, ['source_id' => $sourceId, '_internal_all' => true]);
+            if (($excludedResult['records'] ?? []) !== []) throw new RuntimeException('source A/G/E bypassed the new-customer report exclusion');
+        }
     }
+}
+$excludedSource = new ReflectionMethod($service, 'isExcludedNewCustomerSource');
+$excludedSource->setAccessible(true);
+foreach (['A历史', 'G历史', 'E历史'] as $snapshot) {
+    if (!$excludedSource->invoke($service, 0, $snapshot, [])) {
+        throw new RuntimeException('excluded historical source snapshot leaked: ' . $snapshot);
+    }
+}
+if ($excludedSource->invoke($service, 0, 'B导购引流', [])) {
+    throw new RuntimeException('allowed B source was excluded');
+}
+if (!$excludedSource->invoke($service, 73, 'B已改名来源', [73])) {
+    throw new RuntimeException('renamed excluded source ID leaked');
 }
 $orders = [];
 foreach ($detail['records'] as $row) {
     $order = (string)($row['order_id'] ?? '');
     if ($order === '') throw new RuntimeException('new customer detail has no first-card order');
-    if (in_array($order, $aOrders, true)) throw new RuntimeException('source A leaked into new-customer detail');
-    if (preg_match('/^A/u', trim((string)($row['source'] ?? ''))) === 1) throw new RuntimeException('source A repayment leaked into detail');
+    if (in_array($order, $excludedOrders, true)) throw new RuntimeException('source A/G/E leaked into new-customer detail');
+    if (preg_match('/^[AGE]/u', trim((string)($row['source'] ?? ''))) === 1) throw new RuntimeException('source A/G/E repayment leaked into detail');
     $orders[$order] = true;
     if ((string)($row['business_date'] ?? '') < $range['start'] || (string)($row['business_date'] ?? '') > $range['end']) {
         throw new RuntimeException('first-course sale is outside the selected dates');
@@ -131,9 +146,9 @@ foreach ($summary['summary_row'] ?? [] as $key => $value) {
     if (preg_match('/^month_\d+_count$/', (string)$key)) $count += (int)$value;
 }
 foreach ($summary['records'] as $row) {
-    if (in_array((int)($row['source_id'] ?? 0), $aSourceIds, true)
-        || preg_match('/^A/u', trim((string)($row['source'] ?? ''))) === 1) {
-        throw new RuntimeException('source A leaked into summary');
+    if (in_array((int)($row['source_id'] ?? 0), $excludedSourceIds, true)
+        || preg_match('/^[AGE]/u', trim((string)($row['source'] ?? ''))) === 1) {
+        throw new RuntimeException('source A/G/E leaked into summary');
     }
 }
 if (count($orders) !== $count) {
@@ -161,7 +176,7 @@ if (array_intersect(array_keys($orders), $voids)) {
 $allCourseEvents = Db::name('cashier_v3_customer_lifecycle_fact')
     ->whereIn('event_type', ['course_pending_settlement', 'first_course_completed'])
     ->where('status', 'effective')->where('business_date', '<=', $range['end'])
-    ->field('tenant_id,store_id,member_id,related_order_id,source_primary_id,business_date')
+    ->field('tenant_id,store_id,member_id,related_order_id,source_primary_id,source_label_snapshot,business_date')
     ->order('occurred_at', 'asc')->order('id', 'asc')->select()->toArray();
 $firstByMember = [];
 foreach ($allCourseEvents as $event) {
@@ -173,7 +188,8 @@ $expected = [];
 foreach ($firstByMember as $event) {
     if (!in_array((int)$event['store_id'], $stores, true)
         || (string)$event['business_date'] < $range['start']
-        || in_array((int)$event['source_primary_id'], $aSourceIds, true)) continue;
+        || in_array((int)$event['source_primary_id'], $excludedSourceIds, true)
+        || preg_match('/^[AGE]/u', trim((string)($event['source_label_snapshot'] ?? ''))) === 1) continue;
     $expected[] = (string)$event['related_order_id'];
 }
 $expected = array_values(array_unique($expected));
@@ -185,7 +201,13 @@ if ($actual !== $expected) {
 }
 // 欠款订单在销售当日入表：已收部分只进定金，不把未收欠款伪装成现金。
 $pendingOrder = Db::name('cashier_v3_sales_order')->where('order_no', 'XS26100300005')->value('order_id');
-if ($pendingOrder) {
+$pendingEvent = $pendingOrder ? Db::name('cashier_v3_customer_lifecycle_fact')
+    ->where('related_order_id', $pendingOrder)
+    ->whereIn('event_type', ['course_pending_settlement', 'first_course_completed'])
+    ->where('status', 'effective')->field('source_primary_id,source_label_snapshot')->find() : null;
+// 本地旧订单号可留存而首次疗程卡资格事件已不存在；仅在资格事实可核实时断言该夹具。
+if ($pendingEvent && !$excludedSource->invoke($service, (int)$pendingEvent['source_primary_id'],
+    (string)$pendingEvent['source_label_snapshot'], $excludedSourceIds)) {
     $pendingRange = ['start' => '2026-10-03', 'end' => '2026-10-03'];
     $pendingDetail = $service->query('new_customer_analysis', [23], $pendingRange, ['_internal_all' => true]);
     $pendingSummary = $service->query('new_customer_analysis_summary', [23], $pendingRange, ['_internal_all' => true]);
@@ -208,19 +230,19 @@ if ($pendingOrder) {
         }
     }
     if (count(array_filter($pendingDetail['records'], static fn (array $row): bool =>
-        preg_match('/^A/u', trim((string)($row['source'] ?? ''))) === 1)) !== 0
+        preg_match('/^[AGE]/u', trim((string)($row['source'] ?? ''))) === 1)) !== 0
         || count(array_filter($pendingSummary['records'], static fn (array $row): bool =>
-            preg_match('/^A/u', trim((string)($row['source'] ?? ''))) === 1)) !== 0) {
-        throw new RuntimeException('A-source repayment still appears in the first-course reports');
+            preg_match('/^[AGE]/u', trim((string)($row['source'] ?? ''))) === 1)) !== 0) {
+        throw new RuntimeException('A/G/E-source repayment still appears in the first-course reports');
     }
 }
-// 页面与导出必须走同一查询，避免只在屏幕隐藏来源 A，CSV 仍泄露旧口径。
+// 页面与导出必须走同一查询，避免只在屏幕隐藏来源 A/G/E，CSV 仍泄露旧口径。
 $reportService = new StoreUnifiedReportServices();
 foreach (['new_customer_analysis' => $detail, 'new_customer_analysis_summary' => $summary] as $code => $visibleReport) {
     $export = $reportService->export($stores, ['report' => $code, 'start_date' => $range['start'], 'end_date' => $range['end']]);
     if (($export['records'] ?? []) != $visibleReport['records']
         || ($export['summary_row'] ?? []) != ($visibleReport['summary_row'] ?? [])
-        || ($export['metric_version'] ?? '') !== ($code === 'new_customer_analysis_summary' ? 'new-customer-first-sale-grouped-v6' : 'new-customer-first-sale-v5')) {
+        || ($export['metric_version'] ?? '') !== ($code === 'new_customer_analysis_summary' ? 'new-customer-first-sale-grouped-v7' : 'new-customer-first-sale-v6')) {
         throw new RuntimeException($code . ' export differs from query scope or metric version');
     }
 }

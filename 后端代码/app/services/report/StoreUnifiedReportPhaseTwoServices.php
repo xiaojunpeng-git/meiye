@@ -992,7 +992,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     /**
      * 查询顾客首次有效疗程卡销售的对应订单，含全款和欠款销售。
      * 用首次销售业务日决定新客月份，并隐藏已作废原单；后续补清只计收款。
-     * 本组新客汇总/明细按已确认口径排除一级来源 A；按来源 ID 判定，
+     * 本组新客汇总/明细排除一级来源 A、G、E；按来源 ID 和发生时快照判定，
      * 包含已停用但仍有历史事实的来源，不能只凭当前展示名称过滤。
      * 门店、组织和个人参与范围与其他门店报表使用同一后端权限限制。
      */
@@ -1118,7 +1118,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach($repaymentRows as $saleFact=>$items){$base=$baseRowsByFact[$saleFact]??null;if(!$base)continue;foreach($items as $item){
             $repayPeople=$repaymentSalespeople[(string)$item['repayment_order_id']]??[];
             $repaySourceId=(int)$item['business_source_primary_id'];$repaySource=(string)$item['business_source_label_snapshot'];
-            // 新客明细与汇总统一排除 A 来源补交；不能因为原首单是 B 就让 A 收款混入。
+            // 补交按自身来源排除 A/G/E；原首单合格也不能让被排除来源的收款混入。
             if($this->isExcludedNewCustomerSource($repaySourceId,$repaySource,$excludedSourceIds))continue;
             if(($sourceId>0&&$repaySourceId!==$sourceId)||($sourceLabel!==''&&$repaySource!==$sourceLabel)||!$this->newCustomerPersonnelMatches([],$repayPeople,[],$input))continue;
             $repay=$base;unset($repay['_exclude_personnel']);$repay['business_date']=(string)$item['business_date'];$repay['store_id']=(int)$item['store_id'];$repay['organization_id']=(string)$item['organization_id'];$repay['organization_path_snapshot']=(string)$item['organization_path_snapshot'];$repay['store_name_snapshot']=(string)$item['store_name_snapshot'];$repay['division_name']=(string)$item['organization_name_snapshot'];$this->projectOrganization($repay,(string)$repay['organization_id'],(string)$repay['organization_path_snapshot'],(string)$repay['business_date']);$repay['source']=$repaySource;$repay['guide']='';$repay['sales_manager']='';$repay['salesperson']=$this->newCustomerNames($repayPeople,'employee_id','employee_name_snapshot');$repay['_summary_group_key']=$this->newCustomerSummaryGroupKey($repay,'',$repay['salesperson'],'',$repaySourceId,$repaySource);$repay['craftsman']='';$repay['experience_card_amount']='';$repay['labor_fee']=$this->money(0);$repay['guide_effective_count']=0;$repay['guide_performance_round']='';$repay['full_payment']=$this->money(0);$repay['deposit_payment']=$this->money(0);$repay['cleared_payment']=$this->money((int)$item['amount_cents']);$repay['annotation_subject_key']=(string)$item['payment_fact_id'];$repay['annotation_subject_type']='debt_repayment';
@@ -1167,7 +1167,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach($firstOrders as $order=>$event){if((string)$event['business_date']<$range['start'])continue;$saleRows=$saleRowsByOrder[$order]??[];if(!$saleRows)continue;$guideRows=$guides[$order]??[];$salespersonRows=[];$managerRows=[];foreach($saleRows as $sale){$line=(string)$sale['source_line_id'];$salespersonRows=array_merge($salespersonRows,$salespeople[$line]??[]);$managerRows=array_merge($managerRows,$managers[$line]??[]);} $sale=$saleRows[0];$this->newCustomerSummaryAddRow($records,['store_id'=>$sale['store_id'],'member_id'=>$event['member_id'],'member_name'=>$sale['member_name_snapshot'],'organization_id'=>$sale['organization_id'],'organization_path_snapshot'=>$sale['organization_path_snapshot'],'division_name'=>$sale['organization_name_snapshot'],'store_name'=>$sale['store_name_snapshot'],'business_date'=>$event['business_date']],$guideRows,$salespersonRows,$managerRows,0,'full',1,(string)$event['source_label_snapshot'],(int)$event['source_primary_id'],$input);}
         // 补交来源是收款事件自己的历史快照；原办卡来源只决定新客资格，不覆盖补交归因。
         $repaymentSalespeople=$this->newCustomerRepaymentSalespeople($stores,array_values(array_unique(array_column($repayments,'repayment_order_id'))));foreach($repayments as $row){
-            // 与明细共用 A 来源判定；合计、下钻及导出都从相同的后端行集得出。
+            // 与明细共用 A/G/E 来源判定；合计、下钻及导出都从相同的后端行集得出。
             if($this->isExcludedNewCustomerSource((int)$row['business_source_primary_id'],(string)$row['business_source_label_snapshot'],$excludedSourceIds))continue;
             $this->newCustomerSummaryAddRow($records,$row,[], $repaymentSalespeople[(string)$row['repayment_order_id']]??[],[],(int)$row['amount_cents'],'cleared',0,(string)$row['business_source_label_snapshot'],(int)$row['business_source_primary_id'],$input);
         }
@@ -2286,19 +2286,19 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         ];
     }
     private function sourceIds(string $prefix):array{return $this->sourceIdsMany([$prefix]);}
-    /** 新客两表排除全部一级 A 来源，包括已停用但仍存在历史快照的来源。 */
+    /** 新客两表排除一级 A、G、E 来源，包括已停用但仍存在历史快照的来源。 */
     private function newCustomerExcludedSourceIds():array
     {
         $ids=[];
         foreach(Db::name('cashier_v3_business_source')->where('parent_id',0)->field('id,name')->select()->toArray() as $source){
-            if($this->sourcePrefix($source)==='A')$ids[]=(int)$source['id'];
+            if(in_array($this->sourcePrefix($source),['A','G','E'],true))$ids[]=(int)$source['id'];
         }
         return $ids;
     }
-    /** 历史来源可能改名或删除：ID 与发生时名称任一指向 A，均不进入新客收款行。 */
+    /** 历史来源可能改名或删除：ID 与发生时名称任一指向 A/G/E，均不进入新客收款行。 */
     private function isExcludedNewCustomerSource(int $sourceId,string $label,array $excludedIds):bool
     {
-        return in_array($sourceId,$excludedIds,true)||$this->sourcePrefix(['name'=>$label])==='A';
+        return in_array($sourceId,$excludedIds,true)||in_array($this->sourcePrefix(['name'=>$label]),['A','G','E'],true);
     }
     private function sourceIdsMany(array $prefixes):array{$ids=[];foreach($this->primarySources()as$s)if(in_array($this->sourcePrefix($s),$prefixes,true))$ids[]=(int)$s['id'];return $ids;}
     private function sourcePrefix(array $source):string{$name=trim((string)($source['name']??''));return preg_match('/^([A-Z])/u',$name,$m)?$m[1]:'';}
@@ -2345,7 +2345,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->appendDimensionFiltersToRows($records);
         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
         // 未付清订单入表改变两张新客表的资格和统计时间，不能复用旧口径版本。
-        $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v6':($title==='新客明细表'?'new-customer-first-sale-v5':'store-operations-phase-two-v1');
+        $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v7':($title==='新客明细表'?'new-customer-first-sale-v6':'store-operations-phase-two-v1');
         // 有效人员按日达标，K 人次按有效退款会员日；普通来源体验人次规则保持不变。
         $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
         if ($isMarketReport) $metricVersion = 'market-imported-debt-effective-v6';
@@ -2517,7 +2517,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'guide'=>'显示首次办理疗程卡订单中记录的导购；未填写则显示空白。',
             'salesperson'=>'显示首次办理疗程卡订单中记录的销售人；未填写则显示空白。',
             'sales_manager'=>'显示首次办理疗程卡订单中记录的销售经理；未填写则显示空白。',
-            'source'=>'首次办理疗程卡的明细显示办卡订单来源；补交按收款时记录的来源统计。首次办卡或补交来源为 A 的数据均不进入本表。',
+            'source'=>'首次办理疗程卡的明细显示办卡订单来源；补交按收款时记录的来源统计。首次办卡或补交来源为 A、G、E 的数据均不进入本表。',
             'age'=>'当前订单没有可核实的年龄资料，因此暂不显示年龄。',
             'phone'=>'显示会员资料中当前保存的手机号码。',
             'care_project'=>'显示首次办理疗程卡订单中的商品或项目名称。',

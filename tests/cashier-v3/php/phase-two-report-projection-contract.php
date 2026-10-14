@@ -19,8 +19,8 @@ foreach ([
     'private function summaryRow',
     'private function summaryMetricKind',
     "'metric_version'=>\$metricVersion",
-    "'new-customer-first-sale-grouped-v6'",
-    "'new-customer-first-sale-v5':'store-operations-phase-two-v1'",
+    "'new-customer-first-sale-grouped-v7'",
+    "'new-customer-first-sale-v6':'store-operations-phase-two-v1'",
     "'data_as_of'=>date('Y-m-d H:i:s')",
     'if(!$columns)return[]',
 ] as $needle) {
