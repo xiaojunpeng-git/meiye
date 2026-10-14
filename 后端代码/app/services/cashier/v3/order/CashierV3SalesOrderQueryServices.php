@@ -1849,6 +1849,8 @@ final class CashierV3SalesOrderQueryServices
             'salespersonSummary' => implode('、', array_keys($salespersonNames)), 'cashierName' => (string)$header['operator_name_snapshot'],
             'orderNote' => (string)($header['order_note'] ?? ''),
             'source' => $this->businessSourceLabel($header),
+            // 更正命令比较原始快照；列表占位符“—”不能冒充已保存的来源。
+            'sourceExpectedValue' => $this->businessSourceLabel($header, false),
             'businessSourcePrimaryId' => (int)$header['business_source_primary_id'],
             'businessSourceSecondaryId' => (int)$header['business_source_secondary_id'],
             'economicsDataStatus' => $economicsStatus, 'cashPerformanceDataStatus' => $economicsStatus,
@@ -2931,9 +2933,9 @@ final class CashierV3SalesOrderQueryServices
 
     /**
      * 销售来源由结账时选定的快照决定。二级来源被选择时优先显示它，
-     * 否则显示一级来源；旧订单缺少快照时保留最小可读兜底。
+     * 否则显示一级来源；列表为空时显示占位符，更正比较时保留原始空值。
      */
-    private function businessSourceLabel(array $header): string
+    private function businessSourceLabel(array $header, bool $displayFallback = true): string
     {
         foreach ([
             $header['business_source_secondary_name_snapshot'] ?? '',
@@ -2945,7 +2947,7 @@ final class CashierV3SalesOrderQueryServices
                 return $label;
             }
         }
-        return '—';
+        return $displayFallback ? '—' : '';
     }
 
     private function moneyFromCents(int $cents): float
