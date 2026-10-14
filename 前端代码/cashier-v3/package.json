@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 18087 --strictPort",
+    "prebuild": "node ../../tests/cashier-v3/js/entitlement-experience-checkout-snapshot.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 18087 --strictPort"
   },

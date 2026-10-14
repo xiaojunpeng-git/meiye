@@ -68,7 +68,7 @@ const benefit = (id, experience = false) => ({
   id, lineRole: 'entitlement_service', kind: '项目', quantity: 1,
   name: '权益测试项目', isExperience: experience, serviceObject: 'self',
   friendCountsAsCustomer: true, actualAmount: 349, amount: 349, finalAmount: 349,
-  craftsmen: [{ staffId: 11 }]
+  craftsmen: [{ staffId: 11 }], guideSelections: [{ staffId: 12, guideRound: 1 }]
 })
 
 // Cover true and explicit false, per-line isolation, and mixed checkout. The
@@ -94,6 +94,9 @@ for (const [selected, initial] of [[true, false], [false, true]]) {
     equal(submitted.lines[1].isExperience, false, 'HTTP snapshot must preserve non-experience lines')
     equal(submitted.lines[0].actualAmount, 349, 'experience selection must not change entitlement valuation')
     equal(submitted.lines[0].quantity, 1, 'experience selection must not change entitlement usage')
+    // Pure entitlement checkout must freeze guide attribution inside each line's snapshot.
+    equal(submitted.lines[0].guideSelections[0].staffId, 12, 'entitlement guide must survive final snapshot')
+    equal(submitted.lines[0].guideSelections[0].guideRound, 1, 'entitlement guide round must survive final snapshot')
     if (mixed) equal(submitted.lines[2].isExperience, true, 'purchased experience projects must keep working')
   }
 }
