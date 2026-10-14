@@ -163,6 +163,15 @@ class EmployeeStaffWriteServices extends BaseServices
 
             $staffPayload['employee_id'] = $employeeId;
 
+            // 仅初始化新任职且调用方未指定类型时读取无店默认；不覆盖既有门店配置。
+            if ($staffId <= 0 && !array_key_exists('craftsman_performance_type', $staffPayload)) {
+                $defaultType = Db::name('employee')->where('id', $employeeId)->value('default_craftsman_performance_type');
+                if ($defaultType !== null) {
+                    $staffPayload['craftsman_performance_type'] = app()->make(EmployeeCraftsmanPerformanceTypeServices::class)
+                        ->normalize($defaultType);
+                }
+            }
+
             if ($staffId > 0) {
                 $update = $staffPayload;
                 unset($update['uid'], $update['add_time']);

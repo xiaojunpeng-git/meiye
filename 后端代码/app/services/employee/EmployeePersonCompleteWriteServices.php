@@ -124,6 +124,13 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         // 门店编辑其他档案字段时不重写人员权限；新员工与明确修改范围时才写统一权限。
         $scopeWrite = $source === 'hq' || $employeeIdHint <= 0 || array_key_exists('scope_mode', $input);
         $storeId = (int)($input['store_id'] ?? 0);
+        // 无店设置属于员工主档；必须携带读回版本，不能再成功响应却丢弃输入。
+        if ($storeId === 0 && array_key_exists('craftsman_performance_type', $input)) {
+            if (filter_var($input['craftsman_setting_version'] ?? null, FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => 1]]) === false) {
+                throw new AdminException('请刷新员工档案后保存手艺人服务业绩类型');
+            }
+        }
         // 任职结束不接受门店端调用、伪造零门店或顺带改岗位；岗位只关闭不迁移。
         $clearCurrentStore = (int)($input['clear_current_store'] ?? 0) === 1;
         if ($clearCurrentStore && ($source !== 'hq' || $storeId !== 0 || $employeeIdHint <= 0
@@ -181,6 +188,13 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         if ($source === 'store') {
             $payload['scope_write'] = $scopeWrite ? 1 : 0;
             $payload['scope_version'] = array_key_exists('scope_version', $input) ? (int)$input['scope_version'] : null;
+        }
+        if (array_key_exists('craftsman_setting_version', $input)) {
+            $payload['craftsman_setting_version'] = (int)$input['craftsman_setting_version'];
+        }
+        // 缺失字段现在表示保留/继承，不能与显式写 commission 共用幂等指纹。
+        if (!array_key_exists('craftsman_performance_type', $input)) {
+            $payload['craftsman_type_omitted'] = true;
         }
         // 只扩展新命令的指纹；普通保存保持旧指纹结构，避免已成功请求重试时误报冲突。
         if ($clearCurrentStore) {
@@ -427,11 +441,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
             'status_version' => (int)($emp['status_version'] ?? 0),
             'education' => (string)($emp['education'] ?? ''),
             'education_version' => (int)($emp['education_version'] ?? 0),
+            'craftsman_setting_version' => (int)($emp['craftsman_setting_version'] ?? 1),
             'departure_records' => $this->departureRecords($employeeId),
         ];
         $craftsmanType = $staff
             ? (string)($staff['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)
-            : EmployeeCraftsmanPerformanceTypeServices::COMMISSION;
+            : (string)($emp['default_craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION);
         $result = array_merge($result, app()->make(EmployeeCraftsmanPerformanceTypeServices::class)->project($craftsmanType));
         // 员工授权是手机端唯一入口开关。任职渠道记录仅供兼容和审计，
         // 无店直属员工没有任职记录也可以由组织数据权限限定可操作门店。
@@ -591,6 +606,12 @@ class EmployeePersonCompleteWriteServices extends BaseServices
         $this->maybeFail('employee', $input);
         $employeeUpsert = $this->upsertEmployee($employeeIdHint, $phone, $staffName, $avatar, $opCtx, $source);
         $employeeId = (int)$employeeUpsert['employee_id'];
+        if ($storeId === 0 && array_key_exists('craftsman_performance_type', $input)) {
+            app()->make(EmployeeCraftsmanPerformanceTypeServices::class)->saveDefaultInTx(
+                $employeeId, (string)$input['craftsman_performance_type'],
+                (int)$input['craftsman_setting_version'], $opCtx
+            );
+        }
         // 新建任职时若按手机号命中既有员工主档，人员类型属于该主档，不能拿
         // “新员工”表单默认的版本 0 覆盖或触发其乐观锁冲突。
         $reusedExistingEmployee = $employeeIdHint <= 0 && !empty($employeeUpsert['reused_existing']);
@@ -671,7 +692,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 'cashier_salesperson_enabled' => (int)($input['cashier_salesperson_enabled'] ?? 1) === 1 ? 1 : 0,
                 'cashier_craftsman_enabled' => (int)($input['cashier_craftsman_enabled'] ?? 1) === 1 ? 1 : 0,
                 'craftsman_performance_type' => app()->make(EmployeeCraftsmanPerformanceTypeServices::class)
-                    ->normalize($input['craftsman_performance_type'] ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION),
+                    ->normalize($input['craftsman_performance_type'] ?? ($existStaff['craftsman_performance_type']
+                        ?? Db::name('employee')->where('id', $employeeId)->value('default_craftsman_performance_type')
+                        ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION)),
                 'is_fencheng' => (int)($input['is_fencheng'] ?? 0) === 1 ? 1 : 0,
                 'is_reservable' => array_key_exists('is_reservable', $input)
                     ? ((int)$input['is_reservable'] === 1 ? 1 : 0) : 1,
@@ -892,7 +915,9 @@ class EmployeePersonCompleteWriteServices extends BaseServices
                 : 1,
             'craftsman_performance_type' => $staffId > 0
                 ? (string)Db::name('system_store_staff')->where('id', $staffId)->value('craftsman_performance_type')
-                : EmployeeCraftsmanPerformanceTypeServices::COMMISSION,
+                : (string)(Db::name('employee')->where('id', $employeeId)->value('default_craftsman_performance_type')
+                    ?? EmployeeCraftsmanPerformanceTypeServices::COMMISSION),
+            'craftsman_setting_version' => (int)Db::name('employee')->where('id', $employeeId)->value('craftsman_setting_version'),
             'mobile_enabled' => $mobileAccessOut !== null
                 ? (int)$mobileAccessOut['enabled']
                 : ($this->hasEmployeeMobileAuthTable()

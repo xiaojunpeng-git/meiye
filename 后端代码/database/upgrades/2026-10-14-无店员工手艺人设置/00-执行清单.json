@@ -1,0 +1,10 @@
+{
+  "scope": "无店员工独立保存手艺人服务业绩类型；新任职未指定类型时继承；已有门店任职独立且不回填",
+  "compatibility": "MySQL 5.6+, eb_ prefix, repeatable column checks",
+  "preflight": "确认实例、代码版本、employee与employee_change_log表及database_upgrade_log表存在；备份employee结构和数据、升级日志；核对两新增列名称无冲突",
+  "order": "先迁移，再发布后端与平台前端；禁止新代码连接未迁移库",
+  "verification": "两列存在且类型正确；无店保存/重开/列表一致；版本冲突与重放；首次任职继承且原有任职不受影响",
+  "rollback": "回退应用版本并保留新增列和已保存数据；不自动DROP列，不修改既有任职；数据库恢复须另经授权",
+  "production": "未执行，未获本轮生产迁移或部署授权",
+  "local": "仅本机Docker开发库执行并验证，业务测试采用事务回滚"
+}

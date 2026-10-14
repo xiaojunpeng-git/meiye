@@ -395,7 +395,7 @@ export default {
     }
   },
   actions: {
-    getMenusNavList({ commit, state, rootState }) {
+    getMenusNavList({ commit, dispatch, state, rootState }) {
       return new Promise((resolve, reject) => {
         const requestToken = Vue.prototype.__getToken();
         menusApi()
@@ -405,6 +405,16 @@ export default {
             if (!requestToken || requestToken !== Vue.prototype.__getToken()) {
               resolve(res);
               return;
+            }
+            // 菜单树和功能权限来自同一个岗位投影响应。刷新菜单时必须同步
+            // 替换路由守卫与 v-auth 使用的快照，否则岗位改权后会出现“菜单已更新、页面仍 403”。
+            if (Array.isArray(res.data.unique)) {
+              const access = res.data.unique.slice();
+              localStorage.setItem('unique_auth', access);
+              await dispatch('admin/user/set', {
+                ...(rootState.admin.user.info || {}),
+                access
+              }, { root: true });
             }
             util.makeMenu(Setting.roterPre, res.data.menus);
             commit('getmenusNav', res.data.menus);

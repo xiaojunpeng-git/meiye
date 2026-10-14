@@ -46,18 +46,29 @@ $roles = app()->make(SystemRoleServices::class);
 Db::startTrans();
 try {
     $employeeId = (int)Db::name('employee')->insertGetId(['name' => $tag, 'status' => 1, 'is_del' => 0]);
+    $passwordHash = password_hash($password, PASSWORD_BCRYPT);
     Db::name('employee_internal_account')->insert([
-        'employee_id' => $employeeId, 'account' => $tag, 'pwd' => password_hash($password, PASSWORD_BCRYPT), 'status' => 1
+        'employee_id' => $employeeId, 'account' => $tag, 'pwd' => $passwordHash, 'status' => 1
     ]);
     $positionId = (int)Db::name('position')->insertGetId(['name' => $tag, 'status' => 1, 'use_platform' => 1]);
     $bindingId = (int)Db::name('staff_job_position')->insertGetId([
         'employee_id' => $employeeId, 'position_id' => $positionId, 'request_token' => $tag, 'status' => 1
+    ]);
+    $legacyMenuId = (int)Db::name('system_menus')->where('pid', 0)->where('type', 1)->where('auth_type', 1)
+        ->where('is_show', 1)->where('is_del', 0)->value('id');
+    $legacyRoleId = (int)Db::name('system_role')->insertGetId([
+        'role_name' => $tag . '-legacy', 'rules' => (string)$legacyMenuId, 'status' => 1,
+    ]);
+    Db::name('system_admin')->insert([
+        'account' => $tag, 'pwd' => $passwordHash, 'real_name' => $tag, 'roles' => (string)$legacyRoleId,
+        'level' => 1, 'admin_type' => 0, 'status' => 1, 'is_del' => 0, 'employee_id' => $employeeId,
     ]);
     expectR9($entry->employeeHasPlatformEntry($employeeId), 'enabled entry without menu rules permits login');
     $result = $login->login($tag, $password, 'admin');
     $tokens[] = $result['token'];
     expectR9(!empty($result['token']) && $result['menus'] === [] && $result['unique_auth'] === [], 'real password login returns session with empty menus and permissions');
     $adminId = (int)$result['user_info']['id'];
+    expectR9(Db::name('system_admin')->where('id', $adminId)->value('roles') === '', 'employee platform account drops legacy manual roles and follows empty job projection');
     Db::name('system_admin')->where('id', $adminId)->update(['phone' => $tag]);
     // Controller-owned SMS verification is not bypassed here; exercise its already-verified service path only.
     $sms = $login->login($tag, '', 'admin', true);

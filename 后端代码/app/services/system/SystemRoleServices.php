@@ -176,11 +176,18 @@ class SystemRoleServices extends BaseServices
     public function getRolesByAuth(array $roles, int $auth_type = 1, int $type = 1, string $cachePrefix = self::ADMIN_RULES_LEVEL)
     {
         if (empty($roles)) return [];
-        $cacheName = md5($cachePrefix . '_' . $auth_type . '_' . $type . '_' . implode('_', $roles));
-        return CacheService::redisHandler('system_menus')->remember($cacheName, function () use ($roles, $auth_type, $type) {
+        // 岗位投影原地更新角色规则，角色 ID 不变。每次读取当前有效角色的规则，
+        // 按规则内容隔离缓存，保证新增、撤销权限和停用角色立即影响报表及 API 鉴权。
+        $ruleIds = array_values(array_unique(array_filter(array_map('intval',
+            $this->getRoleIds($roles, $type == 3 ? 'cashier_rules' : 'rules')),
+            static function ($id) { return $id > 0; })));
+        if (!$ruleIds) return [];
+        sort($ruleIds, SORT_NUMERIC);
+        $cacheName = md5($cachePrefix . '_rules_v2_' . $auth_type . '_' . $type . '_' . implode('_', $ruleIds));
+        return CacheService::redisHandler('system_menus')->remember($cacheName, function () use ($ruleIds, $auth_type, $type) {
             /** @var SystemMenusServices $menusService */
             $menusService = app()->make(SystemMenusServices::class);
-            return $menusService->getColumn([['id', 'IN', $this->getRoleIds($roles, $type == 3 ? 'cashier_rules' : 'rules')], ['auth_type', '=', $auth_type], ['type', '=', $type]], 'api_url,methods,unique_auth');
+            return $menusService->getColumn([['id', 'IN', $ruleIds], ['auth_type', '=', $auth_type], ['type', '=', $type]], 'api_url,methods,unique_auth');
         });
     }
 

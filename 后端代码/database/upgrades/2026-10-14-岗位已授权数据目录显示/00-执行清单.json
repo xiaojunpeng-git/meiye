@@ -1,0 +1,9 @@
+{
+  "purpose": "恢复岗位中可勾选的日常运营、其他报表目录，与登录菜单一致",
+  "scope": "仅更新两个未删除、非隐藏详情的既有平台菜单 is_show；不新增角色授权，不改报表归属和数据范围",
+  "preflight": "逐实例备份 unique_auth=admin-report-sale/admin-report-other-reports 的完整菜单行，确认路径及前端目录路由已部署",
+  "sql": "02-正式升级.sql",
+  "rollback": "按该实例备份逐行恢复 is_show；禁止把本地 ID 或旧值直接用于其他实例",
+  "local_applied": {"database_host": "de34b8634512", "database": "ruihao", "before": [{"id": 1987, "is_show": 0}, {"id": 2238, "is_show": 0}], "after_is_show": 1, "affected_rows": 2},
+  "production": "未执行；仍需独立部署和生产迁移授权"
+}

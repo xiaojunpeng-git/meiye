@@ -526,7 +526,8 @@ class StaffJobPositionServices extends BaseServices
     }
 
     /**
-     * 按员工全部有效岗位的 platform channel rules 并集，投影到 system_admin.roles（type=0）
+     * 按员工全部有效岗位的 platform channel rules 并集，投影到 system_admin.roles（type=0）。
+     * 已关联 employee 的平台账号只能挂当前岗位投影角色；历史手工角色不得扩大功能权限。
      * @return array{employee_id:int,role_id:int,rules:string,rule_ids:int[],admin_ids:int[],auth_version:int}
      */
     public function projectPlatformAdminRoles(int $employeeId): array
@@ -544,7 +545,6 @@ class StaffJobPositionServices extends BaseServices
             $this->disablePlatformProjectedRole($employeeId);
         }
 
-        $projectedIds = $this->listPlatformProjectedRoleIds($employeeId);
         $admins = Db::name('system_admin')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
@@ -553,16 +553,9 @@ class StaffJobPositionServices extends BaseServices
         $adminIds = [];
         foreach ($admins as $admin) {
             $adminId = (int)$admin['id'];
-            $oldRoles = array_values(array_filter(array_map('intval', explode(',', (string)($admin['roles'] ?? '')))));
-            $kept = array_values(array_filter($oldRoles, static function ($rid) use ($projectedIds) {
-                return !in_array((int)$rid, $projectedIds, true);
-            }));
-            $merged = $roleId > 0
-                ? array_values(array_unique(array_merge($kept, [$roleId])))
-                : $kept;
-            sort($merged);
             Db::name('system_admin')->where('id', $adminId)->update([
-                'roles' => implode(',', $merged),
+                // system_admin.roles 是旧鉴权链的兼容载体，不是人员可单独叠加的授权入口。
+                'roles' => $roleId > 0 ? (string)$roleId : '',
             ]);
             $adminIds[] = $adminId;
         }
@@ -609,31 +602,18 @@ class StaffJobPositionServices extends BaseServices
             $diffs[] = 'projected_role_should_disable';
         }
 
-        $projectedIds = $this->listPlatformProjectedRoleIds($employeeId);
         $admins = Db::name('system_admin')
             ->where('employee_id', $employeeId)
             ->where('is_del', 0)
             ->field('id,roles')
             ->select()->toArray();
+        $expectedAdminRoles = $expected && $roleId > 0 && $roleStatus === 1 ? [$roleId] : [];
         foreach ($admins as $admin) {
             $roles = array_values(array_filter(array_map('intval', explode(',', (string)($admin['roles'] ?? '')))));
-            $hasProj = $roleId > 0 && in_array($roleId, $roles, true);
-            $stale = array_values(array_filter($roles, static function ($rid) use ($projectedIds, $roleId) {
-                return in_array((int)$rid, $projectedIds, true) && (int)$rid !== (int)$roleId;
-            }));
-            if ($expected && !$hasProj) {
-                $diffs[] = 'admin_' . (int)$admin['id'] . '_missing_projected_role';
-            }
-            if ($stale) {
-                $diffs[] = 'admin_' . (int)$admin['id'] . '_stale_projected_roles';
-            }
-            if (!$expected) {
-                foreach ($roles as $rid) {
-                    if (in_array((int)$rid, $projectedIds, true)) {
-                        $diffs[] = 'admin_' . (int)$admin['id'] . '_has_orphan_projected_role';
-                        break;
-                    }
-                }
+            sort($roles);
+            if ($roles !== $expectedAdminRoles) {
+                // 多出的历史角色和缺失的岗位投影都必须在登录自愈时纠正。
+                $diffs[] = 'admin_' . (int)$admin['id'] . '_roles_not_exact_projection';
             }
         }
 

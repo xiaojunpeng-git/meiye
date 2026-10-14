@@ -39,6 +39,17 @@ export default {
   },
   component: BasicLayout,
   children: [
+    // Saved directory grants must have a real landing route even when all
+    // children have moved elsewhere; child permissions remain independent.
+    ...[
+      ['sale', '日常运营', 'admin-report-sale'],
+      ['other-reports', '其他报表', 'admin-report-other-reports']
+    ].map(([path, title, auth]) => ({
+      path,
+      name: `${pre}directory_${path}`,
+      meta: { auth: [auth], title },
+      component: () => import('@/pages/report/data/report_directory')
+    })),
     {
       path: 'business-center',
       name: `${pre}business_center`,
@@ -171,10 +182,11 @@ export default {
       path: 'store-operations/:report',
       name: `${pre}store_operations_report`,
       meta: {
-        // The report code is the authorization boundary. The page and export
-        // APIs perform the concrete report permission check after resolving
-        // :report; inheriting the legacy sales permission here would allow an
-        // unrelated sales role to enter every store-operations report.
+        // The guard resolves this dynamic leaf to its exact report grant.
+        // An empty auth list fails closed until resolved; do not inherit the
+        // layout's admin-report grant or grant access from a directory alone.
+        auth: [],
+        storeOperationReport: true,
         title: '门店运营报表'
       },
       component: () => import('@/pages/report/data/store_business')

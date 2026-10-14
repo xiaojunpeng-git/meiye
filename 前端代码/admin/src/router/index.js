@@ -24,6 +24,8 @@ import { includeArray } from '@/libs/system';
 import { isAgentPath } from '@/utils/pathUtils';
 import moheAiRequest from '@/api/moheAi';
 import { managementRouteAccess } from '../../../shared/mohe-ai/management-route-access.mjs';
+import { STORE_OPERATION_REPORT_CODES } from '@/libs/storeOperationReports';
+import { PHASE_SIX_REPORT_CODES } from '@/libs/phaseSixReports';
 
 Vue.use(VueRouter);
 
@@ -138,7 +140,18 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
   const permissionRoute = [...to.matched]
     .reverse()
     .find(route => route.meta && route.meta.auth);
-  const meta = permissionRoute ? permissionRoute.meta : {};
+  let meta = permissionRoute ? permissionRoute.meta : {};
+  // Menu ancestors are navigation containers, not additional job grants.
+  // Resolve only registered frame reports, then use the same exact grant for
+  // cached and refreshed checks. The backend still enforces report/data scope.
+  if (meta.storeOperationReport) {
+    const report = String(to.params.report || '');
+    const prefix = STORE_OPERATION_REPORT_CODES.includes(report)
+      ? 'admin-report-store-operations-'
+      : PHASE_SIX_REPORT_CODES.includes(report) ? 'admin-report-phase-six-' : '';
+    if (!prefix) return next({ name: '403' });
+    meta = { ...meta, auth: [`${prefix}${report}`] };
+  }
   const userInfo = store.state.admin.user.info || {};
   // Old login snapshots may not include account. Resolve this dedicated entry
   // from the current server principal, never from root-level or cached access.
@@ -163,10 +176,24 @@ async function handleAuthenticatedRoute(to, next, agent_access, access) {
   const isRootAdmin = (
     Number(userInfo.level) === 0 && Number(userInfo.admin_type || userInfo.adminType || 0) !== 3
   ) || account === 'admin';
-  const isPermission = isRootAdmin || includeArray(
+  let isPermission = isRootAdmin || includeArray(
     meta.auth,
     meta.isAgentRoute ? agent_access : access
   );
+
+  // 岗位权限可在当前登录会话存续期间变更。只在本地快照拒绝页面时向服务端
+  // 复核一次当前岗位投影，避免旧 unique_auth 把新授权的深链接误导向 403。
+  if (!isPermission && !meta.isAgentRoute) {
+    try {
+      const refreshed = await store.dispatch('admin/menus/getMenusNavList');
+      const freshAccess = refreshed && refreshed.data && Array.isArray(refreshed.data.unique)
+        ? refreshed.data.unique
+        : [];
+      isPermission = includeArray(meta.auth, freshAccess);
+    } catch (ignored) {
+      // 菜单接口失败时保持拒绝，不回退到历史权限或放行。
+    }
+  }
 
   return next(isPermission ? undefined : { name: '403' });
 }

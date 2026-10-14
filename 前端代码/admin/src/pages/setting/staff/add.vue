@@ -598,6 +598,7 @@ function getDefaultStaffForm() {
     cashier_craftsman_enabled: 1,
     // 新建默认同时计消耗业绩和手工费，编辑时以已保存类型为准。
     craftsman_performance_type: 'commission_labor',
+    craftsman_setting_version: 1,
     is_reservable: 1,
     is_fencheng: 0,
     mobile_enabled: 0,
@@ -1109,6 +1110,8 @@ export default {
         craftsman_performance_type: ['commission', 'labor', 'commission_labor'].includes(String((data && data.craftsman_performance_type) || ''))
           ? String(data.craftsman_performance_type)
           : 'commission', // 旧详情缺少该字段时沿用原编辑兼容值，不把新建默认写回历史员工。
+        // 旧响应缺少版本时不猜测；服务端拒绝无版本写入，避免覆盖并发设置。
+        craftsman_setting_version: Number(data && data.craftsman_setting_version) || null,
         is_fencheng: Number((data && data.is_fencheng) != null ? data.is_fencheng : base.is_fencheng),
         mobile_enabled: mobileAuthLoaded
           ? (Number(data.mobile_enabled) === 1 ? 1 : 0)
@@ -1402,6 +1405,11 @@ export default {
       payload.craftsman_performance_type = ['commission', 'labor', 'commission_labor'].includes(String(this.formInline.craftsman_performance_type || ''))
         ? String(this.formInline.craftsman_performance_type)
           : 'commission';
+      if (payload.store_id === 0) {
+        payload.craftsman_setting_version = this.formInline.craftsman_setting_version;
+      } else {
+        delete payload.craftsman_setting_version;
+      }
       // Legacy consumers still read can_choose. Keep it as an OR projection
       // while V3 uses the two role-specific authoritative switches.
       payload.can_choose = payload.cashier_salesperson_enabled === 1

@@ -88,4 +88,10 @@ context.handlePublicRoute({ path: '/admin/403' }, value => { publicDecision = va
 assert.equal(publicDecision, undefined);
 assert.equal(context.includeArray(['business-read'], []), false);
 assert.equal(context.includeArray(true, []), true);
-console.log('PASS empty menus + empty permissions, granted permissions + empty menus, normal navigation, stale-state clearing, 403 session retention, three login methods');
+const menusStore = read('store/modules/admin/modules/menus.js');
+assert.ok(menusStore.includes("if (Array.isArray(res.data.unique))"));
+assert.ok(menusStore.includes("localStorage.setItem('unique_auth', access)"));
+assert.ok(menusStore.includes("await dispatch('admin/user/set'"));
+assert.ok(guard.includes("const refreshed = await store.dispatch('admin/menus/getMenusNavList')"));
+assert.ok(guard.includes('isPermission = includeArray(meta.auth, freshAccess)'));
+console.log('PASS empty menus + empty permissions, granted permissions + empty menus, current job-permission refresh, normal navigation, stale-state clearing, 403 session retention, three login methods');

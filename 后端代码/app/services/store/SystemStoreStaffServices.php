@@ -364,6 +364,7 @@ class SystemStoreStaffServices extends BaseServices
             }
             unset($item);
             $this->projectClearedCurrentStoreRows($list);
+            $this->projectNoStoreCraftsmanSettings($list);
             $this->enrichStaffPositionLabels($list);
             $this->enrichMobileEnabled($list);
         }
@@ -538,6 +539,7 @@ class SystemStoreStaffServices extends BaseServices
         }
         unset($row);
         $this->projectClearedCurrentStoreRows($list);
+        $this->projectNoStoreCraftsmanSettings($list);
         $this->enrichStaffPositionLabels($list);
         $this->enrichMobileEnabled($list);
         return compact('list', 'count');
@@ -581,6 +583,25 @@ class SystemStoreStaffServices extends BaseServices
                 'status' => (int)$employee['status'], 'employment_type_code' => (string)$employee['employment_type_code'],
                 'can_choose' => 0, 'cashier_salesperson_enabled' => 0, 'cashier_craftsman_enabled' => 0,
             ]);
+        }
+        unset($row);
+    }
+
+    /** 仅批量补齐本页已授权无店员工的设置，不改变人员范围或历史任职配置。 */
+    protected function projectNoStoreCraftsmanSettings(array &$list): void
+    {
+        $ids = [];
+        foreach ($list as $row) {
+            if ((int)($row['is_organization_direct'] ?? 0) === 1) $ids[] = (int)$row['employee_id'];
+        }
+        if (!$ids) return;
+        $types = Db::name('employee')->whereIn('id', $ids)->where('is_del', 0)
+            ->column('default_craftsman_performance_type', 'id');
+        $service = app()->make(\app\services\employee\EmployeeCraftsmanPerformanceTypeServices::class);
+        foreach ($list as &$row) {
+            if ((int)($row['is_organization_direct'] ?? 0) === 1) {
+                $row = array_merge($row, $service->project((string)($types[(int)$row['employee_id']] ?? 'commission')));
+            }
         }
         unset($row);
     }

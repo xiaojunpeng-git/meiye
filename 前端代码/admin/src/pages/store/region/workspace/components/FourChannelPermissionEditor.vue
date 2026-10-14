@@ -78,6 +78,7 @@
         :data="displayTree"
         show-checkbox
         check-directly
+        check-strictly
         :ref="'tree_' + current"
         @on-toggle-expand="onToggleExpand"
         @on-check-change="onCheckChange"
@@ -88,32 +89,21 @@
 </template>
 
 <script>
+import {
+  applyPermissionIds as markChecked,
+  setPermissionChecks as setChecked,
+  collectPermissionIds as collectIds,
+  togglePermissionNode,
+} from '@/libs/permissionTreeSelection';
+
 function cloneMenus(list) {
   return JSON.parse(JSON.stringify(list || []));
-}
-
-function markChecked(nodes, idSet) {
-  (nodes || []).forEach((n) => {
-    const id = Number(n.id);
-    n.checked = idSet.has(id);
-    n.selected = false;
-    if (n.children && n.children.length) {
-      markChecked(n.children, idSet);
-    }
-  });
 }
 
 function setExpand(nodes, expand) {
   (nodes || []).forEach((n) => {
     n.expand = !!expand;
     if (n.children && n.children.length) setExpand(n.children, expand);
-  });
-}
-
-function setChecked(nodes, checked) {
-  (nodes || []).forEach((n) => {
-    n.checked = !!checked;
-    if (n.children && n.children.length) setChecked(n.children, checked);
   });
 }
 
@@ -169,24 +159,8 @@ function filterTree(nodes, keyword) {
   return walk(nodes);
 }
 
-function collectIds(nodes, acc) {
-  (nodes || []).forEach((n) => {
-    if (n.checked) acc.push(Number(n.id));
-    if (n.children && n.children.length) collectIds(n.children, acc);
-  });
-  return acc;
-}
-
 function countChecked(nodes) {
-  let n = 0;
-  const walk = (list) => {
-    (list || []).forEach((item) => {
-      if (item.checked) n += 1;
-      if (item.children && item.children.length) walk(item.children);
-    });
-  };
-  walk(nodes);
-  return n;
+  return collectIds(nodes).length;
 }
 
 function normalizeEntries(src) {
@@ -439,49 +413,18 @@ export default {
       }
       this.emitChange();
     },
-    syncFromTreeRef(checkedNodes) {
+    syncFromTreeRef(changedNode) {
       if (this.isCurrentLocked) return;
       const ref = this.$refs['tree_' + this.current];
       const tree = Array.isArray(ref) ? ref[0] : ref;
       if (!tree) return;
-      let ids = [];
-      if (Array.isArray(checkedNodes)) {
-        // iView emits the post-toggle checked list synchronously. Prefer it
-        // over reading flatState again after the parent value watcher runs.
-        ids = checkedNodes.map((n) => Number(n.id)).filter((n) => n > 0);
-      } else if (typeof tree.getCheckedAndIndeterminateNodes === 'function') {
-        ids = (tree.getCheckedAndIndeterminateNodes() || []).map((n) => Number(n.id)).filter((n) => n > 0);
-      } else if (typeof tree.getCheckedNodes === 'function') {
-        ids = (tree.getCheckedNodes() || []).map((n) => Number(n.id)).filter((n) => n > 0);
-      }
-      const visibleSet = new Set(ids);
       // Keep the rendered arrow state when the check sync replaces the source tree.
       mergeExpandState(this.trees[this.current], tree.stateTree);
       this.expandedIds[this.current] = new Set();
       collectExpandedIds(this.trees[this.current], this.expandedIds[this.current]);
-      const kw = String(this.keyword || '').trim().toLowerCase();
-      if (!kw) {
-        markChecked(this.trees[this.current], visibleSet);
-      } else {
-        const walk = (nodes) => {
-          let any = false;
-          (nodes || []).forEach((n) => {
-            const title = String(n.title || n.menu_name || n.label || '').toLowerCase();
-            const childHit = walk(n.children || []);
-            const selfHit = title.indexOf(kw) >= 0;
-            if (selfHit || childHit) {
-              any = true;
-              if (!(n.children && n.children.length)) {
-                n.checked = visibleSet.has(Number(n.id));
-              } else if (selfHit) {
-                n.checked = visibleSet.has(Number(n.id));
-              }
-            }
-          });
-          return any;
-        };
-        walk(this.trees[this.current]);
-      }
+      // Disable iView's implicit parent-to-child hydration. Cascade only the
+      // node the user actually clicked, preserving saved and hidden rule IDs.
+      togglePermissionNode(this.trees[this.current], changedNode.id, changedNode.checked);
       this.trees[this.current] = cloneMenus(this.trees[this.current]);
       this.emitChange();
     },
@@ -494,13 +437,14 @@ export default {
       }
       this.expandedIds[this.current] = ids;
     },
-    onCheckChange(checkedNodes) {
+    onCheckChange(checkedNodes, node) {
       // Capture expansion synchronously while the iView node still has the
       // user's current state. The parent input watcher may remount Tree before
       // the nextTick check synchronization runs.
       this.expandedIds[this.current] = new Set();
       collectExpandedIds(this.trees[this.current], this.expandedIds[this.current]);
-      this.$nextTick(() => this.syncFromTreeRef(checkedNodes));
+      const changedNode = { id: Number(node.id), checked: !!node.checked };
+      this.$nextTick(() => this.syncFromTreeRef(changedNode));
     },
     expandAll(expand) {
       if (this.isCurrentLocked) return;

@@ -670,7 +670,6 @@ class SystemStoreStaff extends AuthController
             'can_choose' => (int)($raw['can_choose'] ?? 1),
             'cashier_salesperson_enabled' => (int)($raw['cashier_salesperson_enabled'] ?? 1),
             'cashier_craftsman_enabled' => (int)($raw['cashier_craftsman_enabled'] ?? 1),
-            'craftsman_performance_type' => (string)($raw['craftsman_performance_type'] ?? 'commission'),
             'is_fencheng' => (int)($raw['is_fencheng'] ?? 0),
             'is_reservable' => (int)($raw['is_reservable'] ?? 1),
             'verify_status' => (int)($raw['verify_status'] ?? 1),
@@ -678,6 +677,10 @@ class SystemStoreStaff extends AuthController
             'is_customer' => (int)($raw['is_customer'] ?? 0),
             'request_token' => $bodyToken,
         ];
+        // 缺失表示不修改；无店编辑必须把读取版本一并交给统一保存事务。
+        foreach (['craftsman_performance_type', 'craftsman_setting_version'] as $field) {
+            if (array_key_exists($field, $raw)) $input[$field] = $raw[$field];
+        }
         // 显式转发原任职与版本，由同一保存事务校验并结束；不能只清空显示文本。
         if ($clearCurrentStore) {
             foreach (['clear_current_store', 'clear_store_id', 'current_store_version'] as $field) {
