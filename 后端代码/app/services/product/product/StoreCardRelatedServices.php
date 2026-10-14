@@ -13,6 +13,8 @@ namespace app\services\product\product;
 
 
 use app\dao\product\product\StoreCardRelatedDao;
+use app\services\cashier\v3\CashierV3ProjectLaborDefault;
+use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\BaseServices;
 use app\services\product\sku\StoreProductAttrValueServices;
 use mohe\exceptions\AdminException;
@@ -364,6 +366,11 @@ class StoreCardRelatedServices extends BaseServices
             if ($productId <= 0 || $unique === '') {
                 throw new AdminException('卡项关联商品或 SKU 参数有误');
             }
+            $laborFeeCents = array_key_exists('labor_fee_cents', $item)
+                ? (int)$item['labor_fee_cents']
+                : ((int)($item['product_type'] ?? $item['productType'] ?? 0) === 6
+                    ? CashierV3ProjectLaborDefault::cents($productId, CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    : 0);
             $rows[] = [
                 'card_product_id' => $cardProductId,
                 'product_id' => $productId,
@@ -373,6 +380,8 @@ class StoreCardRelatedServices extends BaseServices
                 'price' => $item['price'] ?? 0,
                 'write_times' => $item['write_times'] ?? $item['writeTimes'] ?? 0,
                 'writeoff_amount' => $item['writeoff_amount'] ?? $item['writeoffAmount'] ?? 0,
+                // 每张卡独立配置手工费；关联重建、门店同步均沿用同一金额（分）。
+                'labor_fee_cents' => max(0, $laborFeeCents),
                 'status' => (int)($item['status'] ?? 1),
                 'add_time' => (int)($item['add_time'] ?? time()),
             ];

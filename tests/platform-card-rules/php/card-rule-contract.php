@@ -32,6 +32,7 @@ $base = static function (string $type, int $validity = 2): array {
             'unique' => 'sku-101',
             'write_times' => 3,
             'writeoff_amount' => 88,
+            'labor_fee' => 42,
         ]],
     ];
 };
@@ -57,6 +58,7 @@ $normal = $service->normalizeForSave($base(StoreCardRuleServices::NORMAL));
 $assert($normal['card_num'] === 0 && $normal['card_num_type'] === 0, 'normal legacy projection');
 $assert($normal['related'][0]['write_times'] === 3, 'normal independent times');
 $assert($normal['related'][0]['writeoff_amount'] === 0, 'normal amount cleared');
+$assert($normal['related'][0]['labor_fee_cents'] === 4200, 'card project labor fee persists in cents');
 
 $choiceKindInput = $base(StoreCardRuleServices::CHOICE_KIND);
 $choiceKindInput['card_choice_limit'] = 1;
@@ -92,11 +94,21 @@ $lockedDefinition['card_shared_times'] = 12;
 $lockedDefinition['attr']['days'] = 180;
 $lockedDefinition['related'][0]['write_times'] = 0;
 $lockedDefinition['related'][0]['writeoff_amount'] = 0;
+$lockedDefinition['related'][0]['labor_fee_cents'] = 4200;
 $locked = $service->preserveLockedDefinition($tampered, $lockedDefinition);
 $assert($locked['card_rule_type'] === StoreCardRuleServices::CHOICE_COUNT, 'store edit preserves synced rule type');
 $assert($locked['card_shared_times'] === 12, 'store edit preserves synced shared count');
 $assert($locked['attr']['write_valid'] === 2 && $locked['attr']['days'] === 180, 'store edit preserves synced validity');
 $assert($locked['related'][0]['write_times'] === 0, 'store edit preserves synced project rule');
+$assert($locked['related'][0]['labor_fee_cents'] === 4200, 'store edit preserves synced card labor fee');
+
+$invalidLabor = $base(StoreCardRuleServices::NORMAL);
+$invalidLabor['related'][0]['labor_fee'] = '42.50';
+$expectFailure(
+    static fn() => $service->normalizeForSave($invalidLabor),
+    '必须是整数元',
+    'card labor rejects fractional amount'
+);
 
 $expectFailure(
     static fn() => $service->normalizeForSave($base(StoreCardRuleServices::TIME, 1)),

@@ -2,6 +2,8 @@
 
 namespace app\services\product\product;
 
+use app\services\cashier\v3\CashierV3ProjectLaborDefault;
+use app\services\cashier\v3\CashierV3ScopeResolver;
 use mohe\exceptions\AdminException;
 
 class StoreCardRuleServices
@@ -96,6 +98,20 @@ class StoreCardRuleServices
         }
 
         foreach ($related as $index => &$row) {
+            // 卡内手工费按关联项目保存，允许 0 元；和项目通用默认值、已完成服务事实分开。
+            $defaultLaborFee = 0;
+            if (!array_key_exists('labor_fee', $row)) {
+                $defaultLaborFee = array_key_exists('labor_fee_cents', $row)
+                    ? intdiv(max(0, (int)$row['labor_fee_cents']), 100)
+                    : intdiv(CashierV3ProjectLaborDefault::cents(
+                        (int)($row['product_id'] ?? 0), CashierV3ScopeResolver::TENANT_SCOPE_ID
+                    ), 100);
+            }
+            $row['labor_fee'] = $this->nonNegativeMoney(
+                $row['labor_fee'] ?? $defaultLaborFee,
+                '第' . ($index + 1) . '个项目的手工费'
+            );
+            $row['labor_fee_cents'] = (int)$row['labor_fee'] * 100;
             if (in_array($type, [self::NORMAL, self::CHOICE_KIND], true)) {
                 $row['write_times'] = $this->positiveInteger(
                     $row['write_times'] ?? 0,

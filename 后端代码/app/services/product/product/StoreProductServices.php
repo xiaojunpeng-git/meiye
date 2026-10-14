@@ -1939,6 +1939,24 @@ class StoreProductServices extends BaseServices
         $where['store_stock'] = $store_stock > 0 ? $store_stock : 2;
         $data = $this->getProductList($where, $isStock, $limit, ['attrValue', 'descriptions']);
         if ($data['list']) {
+            $cardProjectLabor = [];
+            if ((int)($where['choose_type'] ?? 0) === 97) {
+                // 卡内新增项目的初值来自项目规则；只按本页项目批量读取，保存后由卡内关联独立持有。
+                $projectIds = array_values(array_unique(array_map(static function ($row) {
+                    return (int)($row['pid'] ?: $row['id']);
+                }, $data['list'])));
+                if ($projectIds) {
+                    try {
+                        $cardProjectLabor = Db::name('cashier_v3_project_performance_rule')
+                            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                            ->whereIn('project_id', $projectIds)
+                            ->column('labor_configured_unit_amount_cents', 'project_id');
+                    } catch (\Throwable $exception) {
+                        // 旧实例缺少项目规则升级时仍可选项目，手工初值按 0；保存前迁移门禁另行核对。
+                        $cardProjectLabor = [];
+                    }
+                }
+            }
             $supplierIds = $storeIds = [];
             foreach ($data['list'] as $value) {
                 switch ($value['type']) {
@@ -1972,6 +1990,13 @@ class StoreProductServices extends BaseServices
             /** @var StoreProductLabelServices $storeProductLabelServices */
             $storeProductLabelServices = app()->make(StoreProductLabelServices::class);
             foreach ($data['list'] as &$item) {
+                if ((int)($where['choose_type'] ?? 0) === 97) {
+                    $masterId = (int)($item['pid'] ?: $item['id']);
+                    foreach ($item['attrValue'] as &$sku) {
+                        $sku['labor_fee'] = (int)round((int)($cardProjectLabor[$masterId] ?? 0) / 100);
+                    }
+                    unset($sku);
+                }
                 $item['cate_name'] = '';
                 if (isset($item['cate_id']) && $item['cate_id']) {
                     $cate_ids = explode(',', $item['cate_id']);

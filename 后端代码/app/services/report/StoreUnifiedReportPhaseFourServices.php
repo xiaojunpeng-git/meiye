@@ -696,7 +696,9 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->monthlySpec('transition_people', '售中转换人数', '来源符合本表规则且第二次产生现金业绩的不同会员数。', false, ['售中转换人数']),
             $this->monthlySpec('transition_amount', '售中转换业绩', '售中转换会员第二次成功现金业绩，按销售明细和卡内项目分摊。', false, ['售中转换业绩']),
             $this->monthlySpec('transition_rate', '售中转换率', '售中转换人数除以成交人数；分母为零显示“-”。', false, ['售中转换率']),
-            $this->monthlySpec('first_year_amount', '首年业绩', '本年度首次成为本表来源会员的会员，在本年度内累计形成的净现金业绩。', false, ['首年业绩']),
+            $this->monthlySpec('first_year_amount', '首年业绩', $report === 'operations_pre_sale_bdegh'
+                ? '首次 B/D/E/G/H 现金成交发生在本年且归属本月的会员，汇总其本年度所有来源的净现金业绩；全年仅归属一次。'
+                : '本年度首次成为本表来源会员的会员，在本年度内累计形成的净现金业绩。', false, ['首年业绩']),
         ];
         return $this->monthlyProjection((string)$definition['name'], $report, $stores, $range, $input, $specs, $this->preSaleRule($report));
     }
@@ -826,8 +828,11 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     private function monthlyProjection(string $title, string $report, array $stores, array $range, array $input, array $specs, array $rule): array
     {
         $rows = [];
+        // This source-only report needs one authorized cash-fact scan for the
+        // year. Service, prior-year and product-category queries cannot affect it.
+        $bdeghMetrics = $report === 'operations_pre_sale_bdegh' ? $this->bdeghMonthlyMetrics($stores, $range, $rule) : [];
         $requiresCashHistory = in_array($report, [
-            'operations_pre_sale_bdegh', 'operations_referral_beautician_pre_sale',
+            'operations_referral_beautician_pre_sale',
             'marketing_acquisition_pre_sale', 'marketing_referral_pre_sale',
         ], true);
         $cashHistory = $requiresCashHistory
@@ -836,11 +841,11 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             ? $this->serviceRows($stores, ['end' => $range['end']], []) : [];
         foreach ($this->months($range) as $month) {
             $monthRange = ['start' => $month . '-01', 'end' => date('Y-m-t', strtotime($month . '-01'))];
-            $allCash = $this->cashRows($stores, $monthRange, []);
-            $cash = $this->filterSourceFacts($allCash, $rule);
-            $services = $this->serviceRows($stores, $monthRange, []);
+            $allCash = $bdeghMetrics !== [] ? [] : $this->cashRows($stores, $monthRange, []);
+            $cash = $bdeghMetrics !== [] ? [] : $this->filterSourceFacts($allCash, $rule);
+            $services = $bdeghMetrics !== [] ? [] : $this->serviceRows($stores, $monthRange, []);
             $previousMonth = date('Y-m', strtotime($month . '-01 -1 year'));
-            $previousCash = $this->cashRows($stores, ['start' => $previousMonth . '-01', 'end' => date('Y-m-t', strtotime($previousMonth . '-01'))], []);
+            $previousCash = $bdeghMetrics !== [] ? [] : $this->cashRows($stores, ['start' => $previousMonth . '-01', 'end' => date('Y-m-t', strtotime($previousMonth . '-01'))], []);
             $row = ['month' => $month];
             $context = compact('report', 'stores', 'monthRange', 'allCash', 'cash', 'services', 'previousCash', 'rule', 'cashHistory', 'serviceHistory');
             foreach ($specs as $spec) {
@@ -849,6 +854,11 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                     $manual = $this->manualValue($report, $this->manualSubject($report, $month, 0), $key);
                     $row[$key] = !$this->hasManualValue($manual) ? '-' : (str_contains($key, 'amount') || str_contains($key, 'performance') ? $this->money((int)$manual['value']) : (int)$manual['value']);
                     $row[$key . '_version'] = $manual === null ? 0 : (int)$manual['version'];
+                    continue;
+                }
+                if (array_key_exists($key, (array)($bdeghMetrics[$month] ?? []))) {
+                    $value = (int)$bdeghMetrics[$month][$key];
+                    $row[$key] = in_array($key, ['deal_amount', 'transition_amount', 'first_year_amount'], true) ? $this->money($value) : $value;
                     continue;
                 }
                 $row[$key] = $this->monthlyValue($key, $row, $context);
@@ -974,7 +984,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
     }
 
-    private function cashRows(array $stores, array $range, array $categoryIds): array
+    /** Keep sale allocation, reversal, void and personnel scope identical for all cash projections. */
+    private function cashFactBaseQuery(array $stores, array $range)
     {
         $base = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('p')
             ->leftJoin('cashier_v3_payment_sale_allocation_fact original', 'original.tenant_id=p.tenant_id AND original.allocation_fact_id=p.reversal_of')
@@ -986,6 +997,20 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         if (isset($range['start']) && (string)$range['start'] !== '') $base->whereBetween('p.business_date', [$range['start'], $range['end']]);
         else $base->where('p.business_date', '<=', (string)$range['end']);
         if ($this->participantEmployeeId > 0) (new StoreReportParticipantScopeServices())->applyOrder($base, 'p.order_id', $this->participantEmployeeId);
+        return $base;
+    }
+
+    /** Source-only reports need the payment allocation, not product/category expansion. */
+    private function sourceCashRows(array $stores, array $range): array
+    {
+        return $this->cashFactBaseQuery($stores, $range)
+            ->fieldRaw('p.id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,s.business_source_label_snapshot business_source_label')
+            ->select()->toArray();
+    }
+
+    private function cashRows(array $stores, array $range, array $categoryIds): array
+    {
+        $base = $this->cashFactBaseQuery($stores, $range);
 
         // Non-card sales have one frozen sale-dimension row. Cards deliberately
         // do not use that outer category: their payment is allocated to each
@@ -1172,7 +1197,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     private function preSaleRule(string $report): array
     {
         return [
-            'operations_pre_sale_bdegh' => ['tokens' => ['BDEGH']],
+            // BDEGH denotes five primary source codes, not one literal label.
+            'operations_pre_sale_bdegh' => ['source_codes' => ['B', 'D', 'E', 'G', 'H']],
             'operations_referral_beautician_pre_sale' => ['tokens' => ['CF']],
             'marketing_acquisition_pre_sale' => ['tokens' => ['B导购引流']],
             'marketing_referral_pre_sale' => ['tokens' => ['C', 'F']],
@@ -1258,6 +1284,68 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     /** 自营/合作由发生时冻结的商品分类路径判断，不能由现时商品名称或人员档案反推。 */
     private function teamFacts(array $facts, bool $partner): array
     {
+
+    /** One authorized cash read feeds all twelve BDEGH rows; no category or service query is needed. */
+    private function bdeghMonthlyMetrics(array $stores, array $range, array $rule): array
+    {
+        return $this->aggregateBdeghMonthlyMetrics($this->sourceCashRows($stores, ['end' => $range['end']]), $range, $rule);
+    }
+
+    /**
+     * Group payment allocations into purchases before choosing the first and
+     * second positive BDEGH events. A member enters the annual cohort only in
+     * their first BDEGH month; all their annual cash, including other sources
+     * and refunds, is then counted once in that month's first-year amount.
+     */
+    private function aggregateBdeghMonthlyMetrics(array $facts, array $range, array $rule): array
+    {
+        $months = [];
+        foreach ($this->months($range) as $month) {
+            $months[$month] = ['deal_people' => 0, 'deal_amount' => 0, 'transition_people' => 0, 'transition_amount' => 0, 'first_year_amount' => 0];
+        }
+        $annualCash = [];
+        foreach ($facts as $fact) {
+            $memberId = (int)($fact['member_id'] ?? 0);
+            $year = substr((string)($fact['business_date'] ?? ''), 0, 4);
+            if ($memberId <= 0 || strlen($year) !== 4) continue;
+            $annualCash[$year][$memberId] = (int)($annualCash[$year][$memberId] ?? 0) + (int)($fact['amount_cents'] ?? 0);
+        }
+        $eventsByMember = [];
+        foreach ($this->filterSourceFacts($facts, $rule) as $fact) {
+            $memberId = (int)($fact['member_id'] ?? 0);
+            $date = (string)($fact['business_date'] ?? '');
+            if ($memberId <= 0 || $date === '') continue;
+            // One checkout may contain several sale lines and payment methods.
+            // It contributes one event per cash date; later payments remain distinct.
+            $orderId = trim((string)($fact['order_id'] ?? ''));
+            $line = trim((string)($fact['source_line_id'] ?? ''));
+            $eventKey = ($orderId !== '' ? 'order:' . $orderId : 'line:' . ($line !== '' ? $line : (string)($fact['id'] ?? ''))) . '|' . $date;
+            $eventsByMember[$memberId][$eventKey]['date'] = $date;
+            $eventsByMember[$memberId][$eventKey]['key'] = $eventKey;
+            $eventsByMember[$memberId][$eventKey]['amount_cents'] = (int)($eventsByMember[$memberId][$eventKey]['amount_cents'] ?? 0) + (int)($fact['amount_cents'] ?? 0);
+        }
+        foreach ($eventsByMember as $memberId => $events) {
+            $positive = array_values(array_filter($events, static fn(array $event): bool => (int)$event['amount_cents'] > 0));
+            usort($positive, static fn(array $a, array $b): int => strcmp((string)$a['date'], (string)$b['date']) ?: strcmp((string)$a['key'], (string)$b['key']));
+            if ($positive === []) continue;
+            $first = $positive[0];
+            $firstMonth = substr((string)$first['date'], 0, 7);
+            if (isset($months[$firstMonth])) {
+                if ((int)$first['amount_cents'] >= 50000) $months[$firstMonth]['deal_people']++;
+                $months[$firstMonth]['deal_amount'] += (int)$first['amount_cents'];
+                $months[$firstMonth]['first_year_amount'] += (int)($annualCash[substr((string)$first['date'], 0, 4)][$memberId] ?? 0);
+            }
+            if (isset($positive[1])) {
+                $second = $positive[1];
+                $secondMonth = substr((string)$second['date'], 0, 7);
+                if (isset($months[$secondMonth])) {
+                    $months[$secondMonth]['transition_people']++;
+                    $months[$secondMonth]['transition_amount'] += (int)$second['amount_cents'];
+                }
+            }
+        }
+        return $months;
+    }
         return array_values(array_filter($facts, static function (array $fact) use ($partner): bool {
             $isPartner = str_contains((string)($fact['category_path'] ?? ''), '合作');
             return $isPartner === $partner;
