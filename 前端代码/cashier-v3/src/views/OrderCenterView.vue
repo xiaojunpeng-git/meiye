@@ -36,6 +36,7 @@ import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
 import { guideRoundText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
 import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
+import { orderAttributionExpectedValue } from '@/services/orderAttributionExpectedValue'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const isPrinterSetupOpen = ref(false)
@@ -1439,10 +1440,12 @@ async function openAttributionEditor(record, field) {
   const identity = attributionIdentity(record)
   if (!identity) return
   attributionError.value = ''
+  const displayedValue = String(recordFieldValue(record, field) || '')
+  const expectedValue = orderAttributionExpectedValue(record, field, displayedValue)
   attributionEditor.value = {
     ...identity, field, recordNo: displayRecordField(record, activeTab.value.primaryField),
-    expectedValue: String(recordFieldValue(record, field) || ''),
-    newValue: field === 'business_date' ? String(recordFieldValue(record, field) || '') : '',
+    expectedValue,
+    newValue: field === 'business_date' ? displayedValue : '',
     expectedPrimarySourceId: Number(record.businessSourcePrimaryId || 0),
     expectedSecondarySourceId: Number(record.businessSourceSecondaryId || 0),
     primarySourceId: Number(record.businessSourcePrimaryId || 0),
