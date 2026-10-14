@@ -46,7 +46,14 @@ if (!app.includes("const filters=ref({date_from:monthStart(),date_to:today()")) 
 if (!app.includes('page:documentsPage.value,limit:documentsLimit.value') || !app.includes('documentsCount.value=Number(data.count)') || !app.includes('changeDocumentPage(documentsPage+1)')) throw new Error('收支单没有使用服务端分页与总数')
 if (!app.includes('documentsLimit=ref(100)') || !app.includes('每页 100 张') || app.includes('changeDocumentLimit')) throw new Error('收支单必须按当前业务规则固定每页 100 张')
 if (!app.includes('class="fund-document-group"') || !app.includes('v-for="line in r.lines"') || !app.includes('line.subject_name_snapshot')) throw new Error('收支单没有按单据头和科目明细分组展示')
-if (!app.includes('function displayMoney(cents)') || !app.includes('displayMoney(line.amount_cents)')) throw new Error('新增明细金额没有按元四舍五入为整数展示')
+// 单据合计和明细都显示到分；只验证展示，不改服务端金额和录入换算。
+if (!app.includes('displayDocumentMoney(r.amount_cents)') || !app.includes('displayDocumentMoney(line.amount_cents)')) throw new Error('收支单金额展示范围错误')
+const detailMoneySource = app.split('\n').find(line => line.startsWith('function displayDocumentMoney(cents)'))
+if (!detailMoneySource) throw new Error('缺少收支单金额格式化函数')
+const displayDocumentMoney = new Function(`${detailMoneySource}; return displayDocumentMoney`)()
+for (const [cents, expected] of [[0, '¥0.00'], [5, '¥0.05'], [105, '¥1.05'], [125199, '¥1,251.99'], [-105, '-¥1.05'], ['bad', '-']]) {
+  if (displayDocumentMoney(cents) !== expected) throw new Error(`收支单金额 ${cents} 展示错误：${displayDocumentMoney(cents)}`)
+}
 if (!app.includes('class="panel entry-panel"') || !app.includes('class="table-wrap entry-table-wrap"')) throw new Error('收支单结果区缺少固定分页与独立滚动布局')
 if (!app.includes('class="fund-pagination entry-pagination"') || !app.includes('class="fund-pagination__current">{{documentsPage}}')) throw new Error('收支单分页栏没有沿用会员领用的右侧页码样式')
 if (!fundStyles.includes('.entry-panel{display:flex;flex-direction:column;height:calc(100vh - 96px);min-height:420px;overflow:hidden;padding-bottom:0}') || !fundStyles.includes('.entry-panel .fund-pagination.entry-pagination{justify-content:flex-end;margin:0;padding:12px}') || !fundStyles.includes('.entry-pagination>span{margin-right:0}')) throw new Error('收支单分页没有固定置底或未按会员领用样式右对齐')
