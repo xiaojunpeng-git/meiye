@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/** Four-rule issued-card write-off authority contract; no database writes. */
+/** Issued-card write-off authority contract, including independent combination groups; no database writes. */
 
 $root = getenv('CASHIER_V3_BACKEND_ROOT');
 $root = is_string($root) && $root !== '' ? rtrim($root, '/') : __DIR__ . '/../../../后端代码';
@@ -103,6 +103,33 @@ ruleAuthorityCheck('CARD-RULE-03 choice-count projects share one whole-card coun
     && $sharedTwo['remainingTimes'] === 7
     && $sharedOne['totalTimes'] === 10
     && $sharedOne['sourceKindLabel'] === '任选次数卡');
+
+// 一组种数满额只封锁该组候选项目；另一组共享次数继续由自己的组状态控制。
+$combinationState = ruleState('combination');
+$kindGroup = [
+    'group_no' => 1, 'group_name_snapshot' => '面部任选', 'group_rule_type' => 'choice_kind',
+    'choice_limit' => 1, 'selected_kind_count' => 1,
+];
+$countGroup = [
+    'group_no' => 2, 'group_name_snapshot' => '身体共享', 'group_rule_type' => 'choice_count',
+    'shared_total_times' => 2, 'shared_remaining_times' => 1,
+];
+$blockedKind = $normalize->invoke($service, $combinationState,
+    ruleComponent(['combination_group_no' => 1, 'selection_status' => 'candidate']), $kindGroup);
+$selectedKind = $normalize->invoke($service, $combinationState,
+    ruleComponent(['combination_group_no' => 1, 'selection_status' => 'selected']), $kindGroup);
+$countCandidate = $normalize->invoke($service, $combinationState,
+    ruleComponent(['combination_group_no' => 2, 'remaining_times' => 0]), $countGroup);
+ruleAuthorityCheck('CARD-RULE-COMBO combination choice limit and shared count remain group-local',
+    $blockedKind['choiceAvailable'] === false
+    && $selectedKind['choiceAvailable'] === true
+    && $countCandidate['remainingTimes'] === 1
+    && $countCandidate['totalTimes'] === 2
+    && $countCandidate['choiceAvailable'] === true
+    && $countCandidate['cardRuleType'] === 'combination'
+    && $countCandidate['combinationGroupNo'] === 2
+    && $blockedKind['combinationChoiceLimit'] === 1
+    && $blockedKind['combinationSelectedKindCount'] === 1);
 
 $time = $normalize->invoke(
     $service,

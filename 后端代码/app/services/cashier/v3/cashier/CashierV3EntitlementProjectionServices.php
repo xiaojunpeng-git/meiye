@@ -781,9 +781,10 @@ final class CashierV3EntitlementProjectionServices
                 && (string)$ruleAuthority['ruleType'] === 'choice_count'
                 && !$centCapableOperationDetail;
             $holderId = (int)$holder['id'];
-            if ($sharedPurchase && !array_key_exists($holderId, $sharedLimitByHolder)) {
+            $sharedKey = $holderId . ':' . (int)($ruleAuthority['combinationGroupNo'] ?? 0);
+            if ($sharedPurchase && !array_key_exists($sharedKey, $sharedLimitByHolder)) {
                 // 同一任选次卡的项目共享次数限制；只读投影复用一次，提交仍逐笔重新核验。
-                $sharedLimitByHolder[$holderId] = $this->cardRules->debtLimitForDetail($cart, $order, false);
+                $sharedLimitByHolder[$sharedKey] = $this->cardRules->debtLimitForDetail($cart, $order, false);
             }
             if ($sharedPurchase) {
                 // 任选次数卡只有一份整卡购买金额。项目分摊事实不能再除以
@@ -815,7 +816,7 @@ final class CashierV3EntitlementProjectionServices
                 false,
                 $pendingDebt,
                 $cancelledByOrder[$orderId],
-                $sharedPurchase ? $sharedLimitByHolder[$holderId] : null
+                $sharedPurchase ? $sharedLimitByHolder[$sharedKey] : null
             );
             if (is_array($ruleAuthority)) {
                 $effective = min($rawSurplus, max(0, (int)$effective));
@@ -866,6 +867,15 @@ final class CashierV3EntitlementProjectionServices
                 'debtLimitedRemainingTimes' => $effective,
                 'purchaseTimes' => max(0, (int)$cart['write_times']),
                 'purchaseAmount' => $amounts['purchaseAmount'],
+                'cardRuleType' => (string)($ruleAuthority['cardRuleType'] ?? ''),
+                'combinationGroupNo' => (int)($ruleAuthority['combinationGroupNo'] ?? 0),
+                'combinationGroupName' => (string)($ruleAuthority['combinationGroupName'] ?? ''),
+                'combinationGroupRule' => (string)($ruleAuthority['ruleType'] ?? ''),
+                // 前置提示只读已售卡组状态；正式核销仍在事务内复核种数上限。
+                'combinationChoiceLimit' => (int)($ruleAuthority['combinationChoiceLimit'] ?? 0),
+                'combinationSelectedKindCount' => (int)($ruleAuthority['combinationSelectedKindCount'] ?? 0),
+                'combinationSelectionStatus' => (string)($ruleAuthority['selectionStatus'] ?? ''),
+                'combinationRawRemainingAmount' => $amounts['remainingAmount'],
                 // 可用金额扣除未付/已取消部分；购买金额及每次原分摊快照仍保留历史。
                 'remainingAmount' => $writeoff->usableEntitlementAmount($cart, $order, $amounts['remainingAmount'], (float)$pendingDebt, $cartsByOrder[(int)$order['id']] ?? []),
                 'totalPurchaseTimes' => $amounts['totalPurchaseTimes'],
@@ -890,7 +900,8 @@ final class CashierV3EntitlementProjectionServices
                         && ((string)$ruleAuthority['stateStatus'] !== 'active'
                             || empty($ruleAuthority['choiceAvailable']))),
                 'disabledReason' => $reason,
-                'cardRuleType' => is_array($ruleAuthority) ? (string)$ruleAuthority['ruleType'] : '',
+                // cardRuleType 保留整卡类型；组合内生效规则已由 combinationGroupRule 单独提供。
+                // 覆写为组规则会使共享组金额在父卡汇总时被当成多个独立项目重复计入。
                 'writeoffAmount' => is_array($ruleAuthority)
                     ? $this->centsToMoney((int)$ruleAuthority['writeoffAmountCents'])
                     : null,
@@ -962,11 +973,16 @@ final class CashierV3EntitlementProjectionServices
                     'code' => (string)$holderRuleAuthority['sourceKind'],
                     'label' => (string)$holderRuleAuthority['sourceKindLabel'],
                 ];
-                $remaining = (int)$holderRuleAuthority['remainingTimes'];
-                $purchaseTimes = (int)$holderRuleAuthority['totalTimes'];
+                // 组合卡父行只展示目前最多可兑现的组次数，避免已封锁候选项目虚增余次。
+                $remaining = (string)($holderRuleAuthority['cardRuleType'] ?? '') === 'combination'
+                    ? CashierV3CombinationRemainingTimes::fromAuthorities($holderRuleAuthorities)
+                    : (int)$holderRuleAuthority['remainingTimes'];
+                $purchaseTimes = (string)($holderRuleAuthority['cardRuleType'] ?? '') === 'combination'
+                    ? (int)$holder['write_times'] : (int)$holderRuleAuthority['totalTimes'];
             }
             $debtLimitedRemaining = min($remaining, $availableTimes);
-            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count') {
+            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count'
+                && (string)($holderRuleAuthority['cardRuleType'] ?? '') !== 'combination') {
                 // 任选次数卡各项目共享一池；不能把每行可用次数相加成多份余次。
                 $firstDetailId = (int)($projects[0]['id'] ?? 0);
                 foreach ($cartsByOrder[(int)$order['id']] ?? [] as $sourceCart) {
@@ -987,7 +1003,8 @@ final class CashierV3EntitlementProjectionServices
                 : ($kind['code'] === 'time_card'
                 ? $this->timeCardSourceAmounts($order)
                 : $this->sourceAmounts($projects));
-            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count') {
+            if (is_array($holderRuleAuthority) && (string)$holderRuleAuthority['ruleType'] === 'choice_count'
+                && (string)($holderRuleAuthority['cardRuleType'] ?? '') !== 'combination') {
                 $returned = (int)($sharedRefunds[$holderId]['returned'] ?? 0);
                 $removed = (int)($sharedRefunds[$holderId]['removed'] ?? 0);
                 $shared = CashierV3SharedCardPurchaseAmount::project($order, $holderRuleAuthority, [
@@ -1029,6 +1046,12 @@ final class CashierV3EntitlementProjectionServices
                         : bcadd($cardDisabled ? '0.00' : $sharedRemaining, $independent['remainingAmount'], 2),
                     'calculationVersion' => CashierV3SharedCardPurchaseAmount::CALCULATION_VERSION,
                 ];
+            }
+            if (is_array($holderRuleAuthority) && (string)($holderRuleAuthority['cardRuleType'] ?? '') === 'combination'
+                && $sourceAmounts['remainingAmount'] !== null) {
+                $blocked = bcadd($outstandingDebtAmount, $this->cancelledDebt($order, null, $tenantId), 2);
+                $usable = bcsub($sourceAmounts['remainingAmount'], $blocked, 2);
+                $sourceAmounts['remainingAmount'] = bccomp($usable, '0', 2) > 0 ? $usable : '0.00';
             }
             // 时间卡父行没有项目金额汇总，仍须排除不可再使用的欠款/取消额。
             if ($kind['code'] === 'time_card' && $sourceAmounts['remainingAmount'] !== null) {
@@ -1375,9 +1398,18 @@ final class CashierV3EntitlementProjectionServices
         $purchase = '0.00';
         $remaining = '0.00';
         $versions = [];
+        $countedCombinationGroups = [];
         foreach ($projects as $project) {
+            $groupNo = (int)($project['combinationGroupNo'] ?? 0);
+            if (($project['cardRuleType'] ?? '') === 'combination'
+                && ($project['combinationGroupRule'] ?? '') === 'choice_count') {
+                if (isset($countedCombinationGroups[$groupNo])) continue;
+                $countedCombinationGroups[$groupNo] = true;
+            }
             $projectPurchase = $project['purchaseAmount'] ?? null;
-            $projectRemaining = $project['remainingAmount'] ?? null;
+            $projectRemaining = ($project['cardRuleType'] ?? '') === 'combination'
+                ? ($project['combinationRawRemainingAmount'] ?? null)
+                : ($project['remainingAmount'] ?? null);
             if (!is_string($projectPurchase) || !is_string($projectRemaining)) {
                 return [
                     'purchaseAmount' => null,

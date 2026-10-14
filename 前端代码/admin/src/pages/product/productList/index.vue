@@ -1545,6 +1545,7 @@ export default {
         { label: "任选种数卡", value: "choice_kind" },
         { label: "任选次数卡", value: "choice_count" },
         { label: "时间卡", value: "time" },
+        { label: "组合卡", value: "combination" },
       ],
       formTypeList: [],
       formColumns: [

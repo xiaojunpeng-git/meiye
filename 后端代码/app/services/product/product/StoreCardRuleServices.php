@@ -12,12 +12,14 @@ class StoreCardRuleServices
     public const CHOICE_KIND = 'choice_kind';
     public const CHOICE_COUNT = 'choice_count';
     public const TIME = 'time';
+    public const COMBINATION = 'combination';
 
     private const TYPES = [
         self::NORMAL,
         self::CHOICE_KIND,
         self::CHOICE_COUNT,
         self::TIME,
+        self::COMBINATION,
     ];
 
     public function preserveLockedDefinition(array $submitted, array $definition): array
@@ -97,6 +99,9 @@ class StoreCardRuleServices
             $sharedTimes = $this->positiveInteger($data['card_shared_times'] ?? 0, '共享总次数');
         }
 
+        // 组合定义随卡关系一并重建；售出时另存不可变快照，不让后续编辑改旧权益。
+        $groups = $type === self::COMBINATION ? $this->validateCombinationGroups($related) : [];
+
         foreach ($related as $index => &$row) {
             // 卡内手工费按关联项目保存，允许 0 元；和项目通用默认值、已完成服务事实分开。
             $defaultLaborFee = 0;
@@ -112,13 +117,16 @@ class StoreCardRuleServices
                 '第' . ($index + 1) . '个项目的手工费'
             );
             $row['labor_fee_cents'] = (int)$row['labor_fee'] * 100;
-            if (in_array($type, [self::NORMAL, self::CHOICE_KIND], true)) {
+            $usesIndependentTimes = in_array($type, [self::NORMAL, self::CHOICE_KIND], true)
+                || ($type === self::COMBINATION
+                    && $groups[(int)($row['combination_group_no'] ?? 0)]['rule'] === self::CHOICE_KIND);
+            if ($usesIndependentTimes) {
                 $row['write_times'] = $this->positiveInteger(
                     $row['write_times'] ?? 0,
                     '第' . ($index + 1) . '个项目的可使用次数'
                 );
                 $row['writeoff_amount'] = 0;
-            } elseif ($type === self::CHOICE_COUNT) {
+            } elseif ($type === self::CHOICE_COUNT || $type === self::COMBINATION) {
                 $row['write_times'] = 0;
                 $row['writeoff_amount'] = 0;
             } else {
@@ -135,7 +143,7 @@ class StoreCardRuleServices
 
         $data['related'] = $related;
         $data['card_rule_type'] = $type;
-        $data['card_rule_version'] = 1;
+        $data['card_rule_version'] = $type === self::COMBINATION ? 2 : 1;
         $data['card_choice_limit'] = $choiceLimit;
         $data['card_shared_times'] = $sharedTimes;
 
@@ -153,6 +161,54 @@ class StoreCardRuleServices
         }
 
         return $data;
+    }
+
+    /**
+     * 每组独立使用现有任选种数或任选次数语义；一个项目只能归属一组，
+     * 使核销时可由项目直接定位组，不增加收银端“选择组合”步骤。
+     * @return array<int,array{rule:string,choice_limit:int,shared_times:int}>
+     */
+    private function validateCombinationGroups(array $related): array
+    {
+        $groups = [];
+        $projectOwners = [];
+        foreach ($related as $row) {
+            $no = (int)($row['combination_group_no'] ?? 0);
+            $name = trim((string)($row['combination_group_name'] ?? ''));
+            $rule = trim((string)($row['combination_group_rule'] ?? ''));
+            $choice = (int)($row['combination_choice_limit'] ?? 0);
+            $shared = (int)($row['combination_shared_times'] ?? 0);
+            $projectId = (int)($row['product_id'] ?? $row['productId'] ?? 0);
+            if ($no <= 0 || $no > 20 || $name === '' || mb_strlen($name) > 64
+                || !in_array($rule, [self::CHOICE_KIND, self::CHOICE_COUNT], true)
+                || ($rule === self::CHOICE_KIND && ($choice <= 0 || $shared !== 0))
+                || ($rule === self::CHOICE_COUNT && ($shared <= 0 || $choice !== 0))) {
+                throw new AdminException('组合卡分组名称、类型或次数配置无效');
+            }
+            $definition = ['name' => $name, 'rule' => $rule, 'choice_limit' => $choice,
+                'shared_times' => $shared];
+            if (isset($groups[$no]) && $groups[$no]['definition'] !== $definition) {
+                throw new AdminException('同一组合的规则配置必须一致');
+            }
+            $groups[$no]['definition'] = $definition;
+            $groups[$no]['count'] = (int)($groups[$no]['count'] ?? 0) + 1;
+            if (isset($projectOwners[$projectId]) && $projectOwners[$projectId] !== $no) {
+                throw new AdminException('同一项目不能放进多个组合');
+            }
+            $projectOwners[$projectId] = $no;
+        }
+        ksort($groups, SORT_NUMERIC);
+        if (!$groups || array_keys($groups) !== range(1, count($groups))) {
+            throw new AdminException('组合必须从组合1开始连续设置');
+        }
+        foreach ($groups as $no => $entry) {
+            if ($entry['definition']['rule'] === self::CHOICE_KIND
+                && $entry['definition']['choice_limit'] > $entry['count']) {
+                throw new AdminException('第' . $no . '个组合的最多可选种数不能超过项目数');
+            }
+            $groups[$no] = $entry['definition'];
+        }
+        return $groups;
     }
 
     private function assertValidity(array $data, string $type): void

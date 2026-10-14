@@ -944,6 +944,7 @@ export default {
         choice_kind: '任选种数卡',
         choice_count: '任选次数卡',
         time: '时间卡',
+        combination: '组合卡',
       }[this.formValidate.card_rule_type] || '—';
     },
     cardValidityText() {
@@ -972,6 +973,22 @@ export default {
         },
         { title: '售价', key: 'price' },
       ];
+      if (this.formValidate.card_rule_type === 'combination') {
+        // 查看页直接显示已保存的组归属与次数，避免只看到扁平项目列表。
+        columns.unshift({
+          title: '组合与规则',
+          minWidth: 180,
+          render: (h, params) => {
+            const row = params.row;
+            const rule = row.combination_group_rule === 'choice_kind'
+              ? `任选${row.combination_choice_limit}种`
+              : `共享${row.combination_shared_times}次`;
+            return h('span', `${row.combination_group_name || `组合${row.combination_group_no}`} · ${rule}`);
+          },
+        });
+        columns.push({ title: '项目可用次数', render: (h, params) => h('span',
+          params.row.combination_group_rule === 'choice_kind' ? String(params.row.write_times) : '按组共享') });
+      }
       if (['normal', 'choice_kind'].includes(this.formValidate.card_rule_type)) {
         columns.push({
           title: this.formValidate.card_rule_type === 'choice_kind'

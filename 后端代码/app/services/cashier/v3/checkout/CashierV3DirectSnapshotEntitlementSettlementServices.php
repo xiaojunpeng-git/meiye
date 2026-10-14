@@ -693,24 +693,26 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             // 同一卡跨项目结账也只能走一条整卡次数轴。锁定后的次数/退款事实
             // 重算实绩；旧草稿或并发变化不能让浏览器金额替代权威金额落账。
             $holderId = (int)$authority['holder']['id'];
+            // 组合卡每组各有次数池；普通任选次数卡的组号为 0，保持原轴。
+            $sharedPoolKey = $holderId . ':' . (int)($authority['combinationGroupNo'] ?? 0);
             $consumed = (int)$authority['totalPurchaseTimes']
                 - (int)$authority['physicalRemainingTimes'] - (int)$authority['refundRemovedTimes'];
-            if (!isset($sharedCursors[$holderId])) {
-                $sharedCursors[$holderId] = ['consumed' => $consumed, 'selected' => 0,
+            if (!isset($sharedCursors[$sharedPoolKey])) {
+                $sharedCursors[$sharedPoolKey] = ['consumed' => $consumed, 'selected' => 0,
                     'remaining' => (int)$authority['physicalRemainingTimes']];
-            } elseif ($sharedCursors[$holderId]['consumed'] !== $consumed
-                || $sharedCursors[$holderId]['remaining'] !== (int)$authority['physicalRemainingTimes']) {
+            } elseif ($sharedCursors[$sharedPoolKey]['consumed'] !== $consumed
+                || $sharedCursors[$sharedPoolKey]['remaining'] !== (int)$authority['physicalRemainingTimes']) {
                 throw self::failure('authority_shared_card_snapshot_inconsistent', ['lineId' => $lineId]);
             }
             $quantity = (int)$intentsByLine[$lineId]['quantity'];
-            $sharedCursors[$holderId]['selected'] += $quantity;
-            if ($sharedCursors[$holderId]['selected'] > $sharedCursors[$holderId]['remaining']) {
+            $sharedCursors[$sharedPoolKey]['selected'] += $quantity;
+            if ($sharedCursors[$sharedPoolKey]['selected'] > $sharedCursors[$sharedPoolKey]['remaining']) {
                 throw self::failure('authority_shared_card_times_insufficient', ['lineId' => $lineId]);
             }
             $expected = CashierV3EntitlementCompletionKernel::allocateActualAmountCents(
                 (int)bcmul((string)$authority['purchaseAmount'], '100', 0),
                 (int)$authority['totalPurchaseTimes'],
-                $consumed + $sharedCursors[$holderId]['selected'] - $quantity,
+                $consumed + $sharedCursors[$sharedPoolKey]['selected'] - $quantity,
                 $quantity,
                 (string)$authority['amountCalculationVersion']
             );
@@ -1325,6 +1327,7 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
             ));
             $result[$lineId] = [
                 'holder' => $holder,
+                'combinationGroupNo' => (int)($ruleAuthority['combinationGroupNo'] ?? 0),
                 'detail' => $detail,
                 'order' => $order,
                 'sourceKind' => $sourceKind,

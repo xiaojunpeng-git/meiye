@@ -476,7 +476,8 @@ class StoreProduct extends BaseModel
      */
     public function searchCardRuleTypeAttr($query, $value)
     {
-        if (in_array($value, ['normal', 'choice_kind', 'choice_count', 'time'], true)) {
+        // 列表筛选只接受已实现的卡规则，组合卡与其他规则使用同一目录查询入口。
+        if (in_array($value, ['normal', 'choice_kind', 'choice_count', 'time', 'combination'], true)) {
             $query->where('card_rule_type', $value);
         }
     }

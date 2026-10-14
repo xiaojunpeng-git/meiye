@@ -734,6 +734,10 @@ final class CashierV3CardPurchaseIssuanceServices
         $allTimes = 0;
         $isCustomCard = (string)($purchase['sourceKind'] ?? '') === 'custom_card';
         $ruleType = trim((string)($purchase['ruleType'] ?? ''));
+        $combinationGroups = [];
+        foreach ((array)($purchase['combinationGroups'] ?? []) as $group) {
+            $combinationGroups[(int)($group['groupNo'] ?? 0)] = $group;
+        }
         foreach ((array)($purchase['components'] ?? []) as $index => $component) {
             if (!is_array($component)) {
                 throw self::failure('card_purchase_component_invalid');
@@ -742,12 +746,18 @@ final class CashierV3CardPurchaseIssuanceServices
             $skuUnique = trim((string)($component['skuUnique'] ?? ''));
             $productType = (int)($component['productType'] ?? -1);
             $times = (int)($component['writeTimes'] ?? 0);
+            $groupNo = (int)($component['combinationGroupNo'] ?? 0);
+            $group = $ruleType === 'combination' ? ($combinationGroups[$groupNo] ?? null) : null;
+            if ($ruleType === 'combination' && (!$group || $groupNo <= 0)) {
+                throw self::failure('card_purchase_combination_group_invalid');
+            }
             $priceCents = (int)($isCustomCard
                 ? ($component['configuredAmountCents'] ?? -1)
                 : ($component['configuredPriceCents'] ?? -1));
             $usesIndependentTimes = $isCustomCard
                 || $ruleType === ''
-                || in_array($ruleType, ['normal', 'choice_kind'], true);
+                || in_array($ruleType, ['normal', 'choice_kind'], true)
+                || ($ruleType === 'combination' && ($group['ruleType'] ?? '') === 'choice_kind');
             if ($productId <= 0 || $skuUnique === '' || !in_array($productType, [0, 6], true)
                 || ($usesIndependentTimes ? $times <= 0 : $times !== 0)
                 || $priceCents < 0) {
@@ -763,6 +773,9 @@ final class CashierV3CardPurchaseIssuanceServices
             $legacyTimes = $times;
             if ($ruleType === 'choice_count') {
                 $legacyTimes = (int)($purchase['sharedTimes'] ?? 0);
+            } elseif ($ruleType === 'combination' && !$usesIndependentTimes) {
+                // 旧明细仍按项目展示余额；权威扣减按该组唯一共享池执行。
+                $legacyTimes = (int)$group['sharedTimes'];
             } elseif ($ruleType === 'time') {
                 $legacyTimes = self::TIME_CARD_COMPATIBILITY_CAPACITY;
             }
@@ -775,6 +788,7 @@ final class CashierV3CardPurchaseIssuanceServices
                 'write_times' => $times,
                 'legacy_projection_times' => $legacyTimes,
                 'card_rule_type' => $ruleType,
+                'combination_group_no' => $groupNo,
                 'block_writeoff_on_debt' => (int)($purchase['blockWriteoffOnDebt'] ?? 0),
                 'writeoff_amount_cents' => (int)($component['writeoffAmountCents'] ?? 0),
                 'pay_price' => self::money($amount),
@@ -851,6 +865,19 @@ final class CashierV3CardPurchaseIssuanceServices
         }
         if ($ruleType === 'choice_count') {
             $allTimes = (int)($purchase['sharedTimes'] ?? 0);
+        } elseif ($ruleType === 'combination') {
+            // 共享组按组只计一次，任选种数组按各项目的独立余次累计。
+            $allTimes = 0;
+            foreach ($issuedComponents as $entry) {
+                $snapshot = $entry['snapshot'];
+                $groupNo = (int)($snapshot['combinationGroupNo'] ?? 0);
+                if (($combinationGroups[$groupNo]['ruleType'] ?? '') === 'choice_kind') {
+                    $allTimes += (int)($snapshot['writeTimes'] ?? 0);
+                }
+            }
+            foreach ($combinationGroups as $group) {
+                if (($group['ruleType'] ?? '') === 'choice_count') $allTimes += (int)$group['sharedTimes'];
+            }
         } elseif ($ruleType === 'time') {
             $allTimes = self::TIME_CARD_COMPATIBILITY_CAPACITY;
         }

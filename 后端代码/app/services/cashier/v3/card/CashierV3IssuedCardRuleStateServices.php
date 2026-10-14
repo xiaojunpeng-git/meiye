@@ -13,6 +13,7 @@ final class CashierV3IssuedCardRuleStateServices
 {
     public const STATE_TABLE = 'cashier_v3_card_rule_state';
     public const COMPONENT_TABLE = 'cashier_v3_card_rule_component';
+    public const GROUP_TABLE = 'cashier_v3_card_rule_group_state';
     public const CONTRACT_VERSION = 'cashier-v3-issued-card-rule-state-v1';
 
     public function issueInTx(
@@ -39,6 +40,7 @@ final class CashierV3IssuedCardRuleStateServices
         $sharedTimes = (int)($purchase['sharedTimes'] ?? 0);
         $holderId = (int)($holder['holderId'] ?? 0);
         $components = array_values((array)($issued['issuedComponents'] ?? []));
+        $groups = array_values((array)($purchase['combinationGroups'] ?? []));
         $this->assertDefinition(
             $ruleType,
             $ruleVersion,
@@ -46,7 +48,8 @@ final class CashierV3IssuedCardRuleStateServices
             $choiceLimit,
             $sharedTimes,
             $holderId,
-            $components
+            $components,
+            $groups
         );
 
         $stateId = 'CRS-' . strtoupper(substr(hash('sha256', $receiptId . '|' . $holderId), 0, 40));
@@ -65,6 +68,7 @@ final class CashierV3IssuedCardRuleStateServices
             'sharedTimes' => $sharedTimes,
             'validity' => $validity,
             'components' => array_values((array)($purchase['components'] ?? [])),
+            'combinationGroups' => $groups,
         ];
         $fingerprint = self::fingerprint($snapshot);
         $stateDbId = (int)Db::name(self::STATE_TABLE)->insertGetId([
@@ -101,6 +105,40 @@ final class CashierV3IssuedCardRuleStateServices
             throw self::failure('issued_card_rule_state_insert_failed');
         }
 
+        if ($ruleType === 'combination') {
+            foreach ($groups as $group) {
+                // 每组单独冻结选择/共享池，防止一组核销消耗另一组的名额。
+                $groupSnapshot = [
+                    'groupNo' => (int)$group['groupNo'],
+                    'nameSnapshot' => (string)$group['nameSnapshot'],
+                    'ruleType' => (string)$group['ruleType'],
+                    'choiceLimit' => (int)$group['choiceLimit'],
+                    'sharedTimes' => (int)$group['sharedTimes'],
+                ];
+                $groupId = (int)Db::name(self::GROUP_TABLE)->insertGetId([
+                    'tenant_id' => (string)($header['tenant_id'] ?? ''),
+                    'rule_state_id' => $stateDbId,
+                    'card_holder_id' => $holderId,
+                    'group_no' => $groupSnapshot['groupNo'],
+                    'group_name_snapshot' => $groupSnapshot['nameSnapshot'],
+                    'group_rule_type' => $groupSnapshot['ruleType'],
+                    'choice_limit' => $groupSnapshot['choiceLimit'],
+                    'selected_kind_count' => 0,
+                    'shared_total_times' => $groupSnapshot['sharedTimes'],
+                    'shared_remaining_times' => $groupSnapshot['sharedTimes'],
+                    'immutable_fingerprint' => self::fingerprint($groupSnapshot),
+                    'definition_snapshot_json' => self::json($groupSnapshot),
+                    'state_version' => 1,
+                    'status' => 'active',
+                    'occurred_at' => $occurredAt,
+                    'recorded_at' => $occurredAt,
+                    'add_time' => $occurredAt,
+                    'update_time' => $occurredAt,
+                ]);
+                if ($groupId <= 0) throw self::failure('issued_card_rule_group_insert_failed');
+            }
+        }
+
         $componentStateIds = [];
         foreach ($components as $index => $issuedComponent) {
             $component = is_array($issuedComponent['snapshot'] ?? null)
@@ -109,7 +147,10 @@ final class CashierV3IssuedCardRuleStateServices
             $relationId = (int)($component['relationId'] ?? 0);
             $productId = (int)($component['productId'] ?? 0);
             $skuUnique = trim((string)($component['skuUnique'] ?? ''));
+            $groupNo = (int)($component['combinationGroupNo'] ?? 0);
+            $groupRule = (string)($component['combinationGroupRule'] ?? '');
             $totalTimes = in_array($ruleType, ['normal', 'choice_kind'], true)
+                || ($ruleType === 'combination' && $groupRule === 'choice_kind')
                 ? (int)($component['writeTimes'] ?? 0) : 0;
             if ($detailId <= 0 || $relationId <= 0 || $productId <= 0 || $skuUnique === '') {
                 throw self::failure('issued_card_rule_component_invalid');
@@ -126,6 +167,7 @@ final class CashierV3IssuedCardRuleStateServices
                 'card_holder_id' => $holderId,
                 'legacy_detail_id' => $detailId,
                 'relation_id' => $relationId,
+                'combination_group_no' => $ruleType === 'combination' ? $groupNo : 0,
                 'project_product_id' => $productId,
                 'project_sku_id' => (int)($component['skuId'] ?? 0),
                 'project_sku_unique' => $skuUnique,
@@ -134,7 +176,8 @@ final class CashierV3IssuedCardRuleStateServices
                 'total_times' => $totalTimes,
                 'remaining_times' => $totalTimes,
                 'writeoff_amount_cents' => (int)($component['writeoffAmountCents'] ?? 0),
-                'selection_status' => $ruleType === 'choice_kind' ? 'candidate' : 'not_applicable',
+                'selection_status' => $ruleType === 'choice_kind'
+                    || ($ruleType === 'combination' && $groupRule === 'choice_kind') ? 'candidate' : 'not_applicable',
                 'selected_at' => 0,
                 'selected_store_id' => 0,
                 'immutable_fingerprint' => $componentFingerprint,
@@ -168,13 +211,34 @@ final class CashierV3IssuedCardRuleStateServices
         int $choiceLimit,
         int $sharedTimes,
         int $holderId,
-        array $components
+        array $components,
+        array $groups
     ): void {
-        if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time'], true)
+        if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time', 'combination'], true)
             || $holderId <= 0 || !$components
             || ($ruleType === 'choice_kind' ? ($choiceLimit <= 0 || $choiceLimit > count($components)) : $choiceLimit !== 0)
-            || ($ruleType === 'choice_count' ? $sharedTimes <= 0 : $sharedTimes !== 0)) {
+            || ($ruleType === 'choice_count' ? $sharedTimes <= 0 : $sharedTimes !== 0)
+            || ($ruleType === 'combination' && !$groups)) {
             throw self::failure('issued_card_rule_definition_invalid');
+        }
+        if ($ruleType === 'combination') {
+            $byNo = [];
+            foreach ($groups as $group) {
+                $no = (int)($group['groupNo'] ?? 0);
+                if ($no <= 0 || isset($byNo[$no]) || !in_array((string)($group['ruleType'] ?? ''), ['choice_kind', 'choice_count'], true)) {
+                    throw self::failure('issued_card_rule_group_invalid');
+                }
+                $byNo[$no] = $group;
+            }
+            ksort($byNo);
+            if (array_keys($byNo) !== range(1, count($byNo))) throw self::failure('issued_card_rule_group_sequence_invalid');
+            foreach ($components as $entry) {
+                $component = (array)($entry['snapshot'] ?? []);
+                $no = (int)($component['combinationGroupNo'] ?? 0);
+                if (!isset($byNo[$no]) || (string)($component['combinationGroupRule'] ?? '') !== (string)$byNo[$no]['ruleType']) {
+                    throw self::failure('issued_card_rule_component_group_invalid');
+                }
+            }
         }
     }
 

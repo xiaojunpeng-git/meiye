@@ -1021,6 +1021,7 @@
                 <Radio label="choice_kind">任选种数卡</Radio>
                 <Radio label="choice_count">任选次数卡</Radio>
                 <Radio label="time">时间卡</Radio>
+                <Radio label="combination">组合卡</Radio>
               </RadioGroup>
               <div class="card-rule-summary" v-if="cardRuleSummary">{{ cardRuleSummary }}</div>
             </FormItem>
@@ -1189,7 +1190,39 @@
               ></InputNumber>
               <div class="tips">核销任意卡内项目都会扣减同一个共享次数池</div>
             </FormItem>
-            <FormItem v-if="formData.product_type == 5" label="卡内项目：" required key="cardData">
+            <FormItem v-if="formData.product_type == 5 && formData.card_rule_type === 'combination'" label="卡内组合：" required key="combinationGroups">
+              <Button type="primary" :disabled="combinationGroups.length >= 20" @click="addCombinationGroup">添加组合</Button>
+              <div class="card-combination-group" v-for="group in combinationGroups" :key="group.no">
+                <div class="card-combination-group__head">
+                  <strong>组合{{ group.no }}</strong>
+                  <Input v-model="group.name" :maxlength="64" placeholder="组合名称" style="width: 180px" />
+                  <RadioGroup v-model="group.rule" @on-change="resetCombinationGroupRule(group.no)">
+                    <Radio label="choice_kind">任选种数</Radio>
+                    <Radio label="choice_count">任选次数</Radio>
+                  </RadioGroup>
+                  <span>{{ group.rule === 'choice_kind' ? '最多可选项目种数' : '共享总次数' }}</span>
+                  <InputNumber v-if="group.rule === 'choice_kind'" v-model="group.choice_limit" :min="1" :precision="0" />
+                  <InputNumber v-else v-model="group.shared_times" :min="1" :precision="0" />
+                  <Button @click="openCombinationProjectPicker(group.no)">添加项目</Button>
+                  <a @click="removeCombinationGroup(group.no)">删除组合</a>
+                </div>
+                <Table class="mt-20" :columns="combinationColumns(group.rule)" :data="combinationCardRows(group.no)">
+                  <template slot-scope="{ row }" slot="product">{{ row.store_names || row.store_name }}</template>
+                  <template slot-scope="{ row }" slot="price">{{ formatWholeYuan(row.price) }}</template>
+                  <template slot-scope="{ row }" slot="labor_fee">
+                    <InputNumber v-model="cardData[combinationCardIndex(row)].labor_fee" :min="0" :max="999999999" :precision="0" />
+                  </template>
+                  <template slot-scope="{ row }" slot="write_times">
+                    <InputNumber v-model="cardData[combinationCardIndex(row)].write_times" :min="1" :max="99999999" :precision="0" />
+                  </template>
+                  <template slot-scope="{ row }" slot="action">
+                    <a @click="cardDataRowDelete(combinationCardIndex(row))">删除</a>
+                  </template>
+                </Table>
+              </div>
+              <div class="card-rule-preview" v-if="cardData.length">{{ cardRulePreview }}</div>
+            </FormItem>
+            <FormItem v-if="formData.product_type == 5 && formData.card_rule_type !== 'combination'" label="卡内项目：" required key="cardData">
               <Button type="primary" @click="goodsModal = true">添加项目</Button>
               <Button type="primary" class="ml-10" :disabled="!cardDataSelection.length" @click="cardDataDelete">批量删除</Button>
               <Table class="mt-20" :columns="cardRuleColumns" :data="cardData" @on-selection-change="cardDataChange">
@@ -1645,7 +1678,7 @@
     </Modal>
 	<stockSet ref="stockSet" :timeData='specTimeData' @modalStockSet='modalStockSet'></stockSet>
   <!-- 商品列表弹窗 -->
-  <Modal v-model="goodsModal" title="项目列表" footerHide  class="paymentFooter" scrollable width="900">
+  <Modal v-model="goodsModal" :title="formData.card_rule_type === 'combination' ? '选择项目 · 组合' + combinationPickerGroupNo : '项目列表'" footerHide  class="paymentFooter" scrollable width="900">
     <goods-attr :chooseType="97" ref="goodSattr" v-if="goodsModal" @getProductId="getAtterId"></goods-attr>
   </Modal>
   </div>
@@ -1933,6 +1966,9 @@ export default {
 	  specTimeData:[], //多规格对应属性库存数据
 	  specIndex:0, //多规格对应索引值
     goodsModal: false,
+    // 项目仍提交到既有 related；组合头仅维护每组限制，不另设售价或结账步骤。
+    combinationGroups: [],
+    combinationPickerGroupNo: 0,
     cardColumns:[
       {
           type: 'selection',
@@ -2189,6 +2225,7 @@ export default {
         choice_kind: '使用期间最多选择指定种数，首次核销即锁定该项目。',
         choice_count: '卡内所有项目共享总次数，每次可以任选其中一个项目。',
         time: '卡内项目在有效期内不限次，每个项目单独配置单次核销金额。',
+        combination: '每组独立设置任选种数或任选次数，核销项目时自动定位所属组合；仅支持整卡退款。',
       };
       return summaries[this.formData.card_rule_type] || '';
     },
@@ -2206,6 +2243,9 @@ export default {
       }
       if (this.formData.card_rule_type === 'time') {
         return `本卡包含${projectCount}个项目，有效期内不限次数使用。`;
+      }
+      if (this.formData.card_rule_type === 'combination') {
+        return `本卡包含${this.combinationGroups.length}个组合、${projectCount}个项目；各组合独立计次。`;
       }
       return '';
     },
@@ -3363,9 +3403,30 @@ export default {
             writeoff_amount: Number(item.writeoff_amount || 0),
             // 卡内手工是卡与项目的独立设置；编辑时回显已保存值，不能重取项目默认值覆盖人工修改。
             labor_fee: Number(item.labor_fee_cents || 0) / 100,
+            combination_group_no: Number(item.combination_group_no || 0),
+            combination_group_name: String(item.combination_group_name || ''),
+            combination_group_rule: String(item.combination_group_rule || ''),
+            combination_choice_limit: Number(item.combination_choice_limit || 0),
+            combination_shared_times: Number(item.combination_shared_times || 0),
           };
         });
         this.cardData = related;
+        if (data.card_rule_type === 'combination') {
+          const groups = new Map();
+          related.forEach((row) => {
+            const no = Number(row.combination_group_no || 0);
+            if (no > 0 && !groups.has(no)) {
+              groups.set(no, {
+                no,
+                name: String(row.combination_group_name || `组合${no}`),
+                rule: String(row.combination_group_rule || 'choice_kind'),
+                choice_limit: Number(row.combination_choice_limit || 0),
+                shared_times: Number(row.combination_shared_times || 0),
+              });
+            }
+          });
+          this.combinationGroups = [...groups.values()].sort((a, b) => a.no - b.no);
+        }
       }
       if (data.product_type == 6) {
 	  if(!data.is_advance){
@@ -3903,7 +3964,18 @@ export default {
 	  this.$set(formData, 'cancel_reservation_time', this.formData.cancel_reservation_time);
 	  this.$set(formData, 'project_service_duration', this.formData.project_service_duration || 0);
 	  this.$set(formData, 'addon_service_duration', this.formData.addon_service_duration || 0);
-	  this.$set(formData, 'related', this.cardData);
+      // 组合配置随每条卡项目关系保存；后端在销售时冻结，不追改已售卡。
+      this.$set(formData, 'related', this.formData.card_rule_type === 'combination'
+        ? this.cardData.map((row) => {
+          const group = this.combinationGroups.find((candidate) => candidate.no === Number(row.combination_group_no));
+          return {
+            ...row,
+            combination_group_name: group ? group.name.trim() : '',
+            combination_group_rule: group ? group.rule : '',
+            combination_choice_limit: group && group.rule === 'choice_kind' ? Number(group.choice_limit || 0) : 0,
+            combination_shared_times: group && group.rule === 'choice_count' ? Number(group.shared_times || 0) : 0,
+          };
+        }) : this.cardData);
       this.$set(
         formData,
         'label_id',
@@ -3934,7 +4006,7 @@ export default {
     validateCardRuleSettings(formData) {
       if (Number(formData.product_type) !== 5) return true;
       const ruleType = formData.card_rule_type;
-      if (!['normal', 'choice_kind', 'choice_count', 'time'].includes(ruleType)) {
+      if (!['normal', 'choice_kind', 'choice_count', 'time', 'combination'].includes(ruleType)) {
         this.$Message.warning('请选择卡项规则');
         return false;
       }
@@ -3971,6 +4043,37 @@ export default {
         if (!Number.isInteger(sharedTimes) || sharedTimes <= 0) {
           this.$Message.warning('共享总次数必须是大于0的整数');
           return false;
+        }
+      }
+      if (ruleType === 'combination') {
+        if (!this.combinationGroups.length || this.combinationGroups.length > 20) {
+          this.$Message.warning('请设置1至20个组合');
+          return false;
+        }
+        const seen = new Set();
+        for (const group of this.combinationGroups) {
+          const rows = formData.related.filter((row) => Number(row.combination_group_no) === group.no);
+          if (!group.name.trim() || !rows.length || !['choice_kind', 'choice_count'].includes(group.rule)) {
+            this.$Message.warning(`组合${group.no}需要名称、规则和至少一个项目`);
+            return false;
+          }
+          const limit = Number(group.rule === 'choice_kind' ? group.choice_limit : group.shared_times);
+          if (!Number.isInteger(limit) || limit <= 0 || (group.rule === 'choice_kind' && limit > rows.length)) {
+            this.$Message.warning(`组合${group.no}的可选种数或共享次数无效`);
+            return false;
+          }
+          if (rows.some((row) => group.rule === 'choice_kind' && (!Number.isInteger(Number(row.write_times)) || Number(row.write_times) <= 0))) {
+            this.$Message.warning(`组合${group.no}每个项目都要设置可使用次数`);
+            return false;
+          }
+          for (const row of rows) {
+            const project = Number(row.product_id || row.productId || 0);
+            if (seen.has(project)) {
+              this.$Message.warning('同一项目不能加入多个组合');
+              return false;
+            }
+            seen.add(project);
+          }
         }
       }
       if (['normal', 'choice_kind'].includes(ruleType)) {
@@ -4132,18 +4235,63 @@ export default {
       this.infoData(data);
       this.success = true;
     },
-    // 添加卡项选择的商品
+    // 同一卡内明细只能归属一个组合；重复选择须留在选择框并给出反馈，避免静默关闭造成“添加无效”。
     getAtterId(selectCardData){
-      this.goodsModal = false;
       const uniqueSet = new Set(this.cardData.map((item) => item.unique));
       const newCardData = selectCardData.filter((item) => !uniqueSet.has(item.unique));
+      const duplicateCount = selectCardData.length - newCardData.length;
+      if (this.formData.card_rule_type === 'combination' && !newCardData.length) {
+        this.$Message.warning('所选项目已在卡内组合中，请选择其他项目');
+        return;
+      }
+      this.goodsModal = false;
       newCardData.forEach((item) => {
         item.write_times = 1;
         item.writeoff_amount = 0;
+        if (this.formData.card_rule_type === 'combination') {
+          this.$set(item, 'combination_group_no', this.combinationPickerGroupNo);
+        }
         // 新增项目才继承项目手工费，后续在卡内可独立调整。
         this.$set(item, 'labor_fee', Number(item.labor_fee || 0));
       });
       this.cardData = [...this.cardData, ...newCardData];
+      this.combinationPickerGroupNo = 0;
+      if (this.formData.card_rule_type === 'combination' && duplicateCount) {
+        this.$Message.warning(`已跳过 ${duplicateCount} 个卡内已有项目`);
+      }
+    },
+    /** 每个项目只属于一个组合，核销时据项目识别组，结账端不增加选择操作。 */
+    addCombinationGroup() {
+      const no = this.combinationGroups.length + 1;
+      if (no <= 20) this.combinationGroups.push({ no, name: `组合${no}`, rule: 'choice_kind', choice_limit: 1, shared_times: 1 });
+    },
+    removeCombinationGroup(no) {
+      this.cardData = this.cardData.filter((row) => Number(row.combination_group_no) !== no);
+      this.combinationGroups = this.combinationGroups.filter((group) => group.no !== no)
+        .map((group, index) => ({ ...group, no: index + 1 }));
+      this.cardData.forEach((row) => {
+        if (Number(row.combination_group_no) > no) row.combination_group_no -= 1;
+      });
+    },
+    resetCombinationGroupRule(no) {
+      // 两种规则的项目计数口径不同，切换时回到明确初值，避免旧值暗中生效。
+      this.cardData.filter((row) => Number(row.combination_group_no) === no)
+        .forEach((row) => { row.write_times = 1; });
+    },
+    openCombinationProjectPicker(no) {
+      this.combinationPickerGroupNo = no;
+      this.goodsModal = true;
+    },
+    combinationCardRows(no) {
+      return this.cardData.filter((row) => Number(row.combination_group_no) === no);
+    },
+    combinationCardIndex(row) {
+      return this.cardData.findIndex((candidate) => candidate.unique === row.unique);
+    },
+    combinationColumns(rule) {
+      const columns = this.cardRuleColumns.filter((column) => column.type !== 'selection');
+      if (rule === 'choice_kind') columns.splice(columns.length - 1, 0, { title: '选中后可使用次数', slot: 'write_times', minWidth: 150 });
+      return columns;
     },
     formatWholeYuan(value) {
       const amount = Number(value);
@@ -4154,6 +4302,7 @@ export default {
       const applyChange = () => {
         this.cardData = [];
         this.cardDataSelection = [];
+        this.combinationGroups = [];
         this.$set(this.formData, 'card_choice_limit', 0);
         this.$set(this.formData, 'card_shared_times', 0);
         this.$set(this.formData, 'card_num', 0);
@@ -4636,6 +4785,18 @@ export default {
 }
 .card-rule-preview {
   margin-top: 16px;
+}
+.card-combination-group {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #dce7f4;
+  border-radius: 4px;
+}
+.card-combination-group__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }
 .seeCatMy {
   color: #2d8cf0;

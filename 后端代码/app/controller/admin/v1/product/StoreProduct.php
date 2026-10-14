@@ -220,7 +220,7 @@ class StoreProduct extends AuthController
 			['field_key', ''],//搜索字段类型
             ['store_name', ''],//关键词
 			['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
-            ['card_rule_type', ''],//卡项规则：普通卡、任选种数卡、任选次数卡、时间卡
+            ['card_rule_type', ''],//卡项规则：普通卡、任选种数卡、任选次数卡、时间卡、组合卡
             ['cate_id', ''],//分类
 			['supplier_id', 0],//供应商
             ['type', 1, '', 'status'],//商品状态

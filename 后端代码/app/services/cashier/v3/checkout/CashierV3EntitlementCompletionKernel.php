@@ -450,7 +450,9 @@ final class CashierV3EntitlementCompletionKernel
 
     private static function isCentCapableAmountCalculation(string $version): bool
     {
-        return str_starts_with($version, 'operation-cent-');
+        // 组合卡共享组延用项目实收分摊事实，可能含分尾差；仅该显式版本走分精度。
+        return str_starts_with($version, 'operation-cent-')
+            || str_starts_with($version, 'shared-card-purchase-amount-operation-cent-combination-group-');
     }
 
     /**

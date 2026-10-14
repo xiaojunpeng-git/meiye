@@ -206,8 +206,8 @@ cardPurchaseCheck('CPU-11 new configured cards persist immutable rule and compon
     && strpos($ruleSource, "CashierV3TransactionGuard::assertInTransaction('issuedCardRuleState')") !== false
     && strpos($ruleMigration, 'eb_cashier_v3_card_rule_state') !== false
     && strpos($ruleMigration, 'eb_cashier_v3_card_rule_component') !== false);
-cardPurchaseCheck('CPU-12 issued state supports independent, choice, shared and time-card counters without old-card backfill',
-    strpos($ruleSource, "['normal', 'choice_kind', 'choice_count', 'time']") !== false
+cardPurchaseCheck('CPU-12 issued state supports independent, choice, shared, time and combination cards without old-card backfill',
+    strpos($ruleSource, "['normal', 'choice_kind', 'choice_count', 'time', 'combination']") !== false
     && strpos($ruleSource, "'shared_remaining_times' => \$sharedTimes") !== false
     && strpos($ruleSource, "'writeoff_amount_cents'") !== false
     && strpos($ruleMigration, 'No historic holder/card row is read or changed') !== false);

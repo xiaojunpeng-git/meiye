@@ -32,6 +32,7 @@ import {
 } from '@/services/cashierV3OrderProjectionContract'
 import { salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
 import { checkoutBalancePreview } from '@/services/cashierV3CheckoutBalancePreview'
+import { combinationChoicePreflightFailure } from '@/services/cashierV3CombinationChoicePreflight'
 import CashierCheckoutOverlay from '@/components/cashier/CashierCheckoutOverlay.vue'
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 import CashierGuidedBusinessPanel from '@/components/cashier/CashierGuidedBusinessPanel.vue'
@@ -2403,8 +2404,10 @@ function isResponseBoundCommittedCashierDraft(draft) {
 }
 
 function isRuleCardPurchase(item = {}) {
+  // 组合卡沿用已存在的卡项选购预览和结账草稿；组规则只在售后权益核销时生效。
+  // 若落入普通商品直加分支，会绕过卡项预览并丢失选卡后的会员上下文。
   return item.kind === '卡项'
-    && ['normal', 'choice_kind', 'choice_count', 'time'].includes(item.cardRuleType)
+    && ['normal', 'choice_kind', 'choice_count', 'time', 'combination'].includes(item.cardRuleType)
     && item.cardPreview
     && Array.isArray(item.cardPreview.components)
 }
@@ -2413,7 +2416,18 @@ function cardPreviewRuleDescription(preview = {}) {
   if (preview.ruleType === 'choice_kind') return `卡内项目任选，最多选择 ${preview.choiceLimit} 种。`
   if (preview.ruleType === 'choice_count') return `卡内项目共享 ${preview.sharedTimes} 次。`
   if (preview.ruleType === 'time') return '有效期内不限次，每个项目按配置的单次核销金额核销。'
+  if (preview.ruleType === 'combination') return '卡内各组合独立使用，组内按任选种数或共享次数核销。'
   return '卡内项目按各自配置的次数核销。'
+}
+
+function cardPreviewCombinationComponentText(component = {}, preview = {}) {
+  // 共享次数组的项目本身不配置独立次数，预览必须展示所属组合的次数池，
+  // 避免把 0 次误读成该项目不可核销；这里只展示发卡快照，不改变结账金额与流程。
+  const group = (preview.combinationGroups || []).find((item) =>
+    Number(item.groupNo) === Number(component.combinationGroupNo))
+  if (!group) return '组合配置待核对'
+  if (group.ruleType === 'choice_count') return `${group.nameSnapshot} · 共享 ${group.sharedTimes} 次`
+  return `${group.nameSnapshot} · ${component.writeTimes} 次 · 任选 ${group.choiceLimit} 种`
 }
 
 function cardPreviewValidityText(validity = {}) {
@@ -3491,6 +3505,14 @@ function normalizeEntitlementAppendLines(lines = []) {
           ? 'independent' : (project.isGift ? 'holder_backed' : 'none'),
         sourceType: String(project.sourceType || ''),
         sourceDetailId: Number(detailId || 0),
+        // 兼容不带展示快照的旧添加入口，前置提示仍按已售卡投影逐组判断。
+        cardRuleType: String(project.cardRuleType || ''),
+        combinationGroupNo: Number(project.combinationGroupNo || 0),
+        combinationGroupName: String(project.combinationGroupName || ''),
+        combinationGroupRule: String(project.combinationGroupRule || ''),
+        combinationChoiceLimit: Number(project.combinationChoiceLimit || 0),
+        combinationSelectedKindCount: Number(project.combinationSelectedKindCount || 0),
+        combinationSelectionStatus: String(project.combinationSelectionStatus || ''),
         entitlementSourceName: String(source.name || ''),
         fullCardNo: String(source.fullCardNo || ''),
         remainingTimes: Number(project.remainingTimes || 0),
@@ -5704,6 +5726,12 @@ async function openCheckout() {
   if (entitlementFailure) {
     const blocked = { result: { status: 'failed', ...entitlementFailure } }
     reportCheckoutEntryFailure(blocked, entitlementFailure.message)
+    return blocked
+  }
+  const combinationFailure = combinationChoicePreflightFailure(preview.lines, entitlementSelector.value?.sources)
+  if (combinationFailure) {
+    const blocked = { result: { status: 'failed', ...combinationFailure } }
+    reportCheckoutEntryFailure(blocked, combinationFailure.message)
     return blocked
   }
   localCheckoutPreview.value = preview
@@ -8335,6 +8363,7 @@ onBeforeUnmount(() => {
             <div v-for="component in pendingCardPurchase.cardPreview.components" :key="`${component.name}-${component.specification}`">
               <span>{{ component.name }}<template v-if="component.specification"> · {{ component.specification }}</template></span>
               <strong v-if="pendingCardPurchase.cardPreview.ruleType === 'time'">单次核销 {{ formatPlainAmount(component.writeoffAmountCents / 100) }}</strong>
+              <strong v-else-if="pendingCardPurchase.cardPreview.ruleType === 'combination'">{{ cardPreviewCombinationComponentText(component, pendingCardPurchase.cardPreview) }}</strong>
               <strong v-else-if="pendingCardPurchase.cardPreview.ruleType !== 'choice_count'">{{ component.writeTimes }} 次</strong>
             </div>
           </section>

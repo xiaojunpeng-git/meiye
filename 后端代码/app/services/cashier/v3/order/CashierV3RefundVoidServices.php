@@ -151,6 +151,11 @@ final class CashierV3RefundVoidServices
                 throw self::failure($label . '在退款后又发生变化，不能安全恢复原权益。', 'refund_void_rights_' . $part . '_changed');
             }
         }
+        if (array_key_exists('groups', $after)
+            && json_encode($current['groups'] ?? null, JSON_UNESCAPED_UNICODE)
+                !== json_encode($after['groups'], JSON_UNESCAPED_UNICODE)) {
+            throw self::failure('组合卡分组在退款后又发生变化，不能安全恢复。', 'refund_void_rights_groups_changed');
+        }
         $later = Db::name(CashierV3UnifiedRefundServices::TABLE)->where('tenant_id', $scope->tenantId())
             ->where('card_holder_id', $holderId)->where('status', 'effective')
             ->where('id', '>', (int)$adjustment['id'])->count();
@@ -189,6 +194,19 @@ final class CashierV3RefundVoidServices
                 ->where('state_version', (int)$afterComponent['state_version'])
                 ->update(['status' => (string)$component['status'],
                     'remaining_times' => (int)$component['remaining_times'],
+                    'state_version' => Db::raw('state_version+1'), 'update_time' => $now]);
+        }
+        foreach ((array)($before['groups'] ?? []) as $index => $group) {
+            $afterGroup = $after['groups'][$index] ?? null;
+            if (!$afterGroup || (int)$afterGroup['id'] !== (int)$group['id']) {
+                throw self::failure('组合卡分组恢复快照不一致。', 'refund_void_group_snapshot_invalid');
+            }
+            Db::name('cashier_v3_card_rule_group_state')->where('id', (int)$group['id'])
+                ->where('tenant_id', $scope->tenantId())
+                ->where('state_version', (int)$afterGroup['state_version'])
+                ->update(['status' => (string)$group['status'],
+                    'shared_remaining_times' => (int)$group['shared_remaining_times'],
+                    'selected_kind_count' => (int)$group['selected_kind_count'],
                     'state_version' => Db::raw('state_version+1'), 'update_time' => $now]);
         }
         foreach ($before['carts'] as $cart) Db::name('store_order_cart_info')->where('id', (int)$cart['id'])

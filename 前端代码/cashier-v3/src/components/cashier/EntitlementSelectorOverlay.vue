@@ -253,6 +253,13 @@ function displayProjectRemainingAmount(source = {}, project = {}) {
   return isTimeCardSource(source) ? '—' : displayAmount(project.remainingAmount)
 }
 
+function displayProjectName(project = {}) {
+  // 组合归属只加在权益列表的展示名上；加入购物车仍使用原项目名和权威明细 ID。
+  const name = String(project.name || '项目')
+  const groupName = String(project.combinationGroupName || '').trim()
+  return project.cardRuleType === 'combination' && groupName ? `[${groupName}]${name}` : name
+}
+
 function sourceCardNo(source = {}) {
   return String(source.fullCardNo || '—').trim() || '—'
 }
@@ -297,6 +304,14 @@ function addProject(source = {}, project = {}) {
       giftSourceType: independentGift ? 'independent' : (project.isGift ? 'holder_backed' : 'none'),
       sourceType: String(project.sourceType || ''),
       sourceDetailId: Number(project.entitlementSourceDetailId || project.sourceDetailId || project.id || 0),
+      // 仅为点击收银底部按钮时说明组合任选限制；服务端最终扣次不信任这些展示值。
+      cardRuleType: String(project.cardRuleType || ''),
+      combinationGroupNo: Number(project.combinationGroupNo || 0),
+      combinationGroupName: String(project.combinationGroupName || ''),
+      combinationGroupRule: String(project.combinationGroupRule || ''),
+      combinationChoiceLimit: Number(project.combinationChoiceLimit || 0),
+      combinationSelectedKindCount: Number(project.combinationSelectedKindCount || 0),
+      combinationSelectionStatus: String(project.combinationSelectionStatus || ''),
       entitlementSourceName: String(source.name || ''),
       fullCardNo: String(source.fullCardNo || ''),
       remainingTimes: Number(project.remainingTimes || 0),
@@ -511,8 +526,11 @@ function operationProjectSelected(source = {}, project = {}) {
                 @click="addProject(source, project)"
               >{{ ['project-replacement', 'project-upgrade'].includes(operationMode) ? (operationProjectSelected(source, project) ? '已添加' : '添加') : addButtonLabel(source, project) }}</button>
               <span v-else aria-hidden="true" />
-              <div class="cashier-entitlement-table__project-name">
-                <strong :title="project.name || '项目'">{{ project.name || '项目' }}</strong>
+              <div
+                class="cashier-entitlement-table__project-name"
+                :class="{ 'is-combination': project.cardRuleType === 'combination' && project.combinationGroupName }"
+              >
+                <strong :title="displayProjectName(project)">{{ displayProjectName(project) }}</strong>
                 <small v-if="project.disabledReason || project.unavailableReason">{{ project.disabledReason || project.unavailableReason }}</small>
               </div>
               <span>{{ displayProjectRemainingTimes(source, project) }}</span>
@@ -554,3 +572,17 @@ function operationProjectSelected(source = {}, project = {}) {
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* 组合前缀和项目名同属显示文案，允许本列换行以免窄表格隐藏项目名。 */
+.cashier-entitlement-table__project-name.is-combination {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.cashier-entitlement-table__project-name.is-combination > strong {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+</style>

@@ -395,7 +395,8 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
     {
         $rows = $this->rows(Db::name('store_card_related')
             ->where('card_product_id', $cardProductId)
-            ->field('id,card_product_id,product_id,product_type,product_attr_unique,cost,price,write_times,writeoff_amount,status')
+            // 组合归属属于售卖定义，锁单与普通目录读取必须取同一组字段。
+            ->field('id,card_product_id,product_id,product_type,product_attr_unique,cost,price,write_times,writeoff_amount,combination_group_no,combination_group_name,combination_group_rule,combination_choice_limit,combination_shared_times,status')
             ->order('id asc')
             ->select());
         return array_values(array_filter($rows, static function (array $row): bool {
@@ -496,7 +497,7 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
         return $this->rows(Db::name('store_card_related')
             ->whereIn('card_product_id', $ids)
             ->where('status', 1)
-            ->field('id,card_product_id,product_id,product_type,product_attr_unique,cost,price,write_times,writeoff_amount,status')
+            ->field('id,card_product_id,product_id,product_type,product_attr_unique,cost,price,write_times,writeoff_amount,combination_group_no,combination_group_name,combination_group_rule,combination_choice_limit,combination_shared_times,status')
             ->order('card_product_id asc,id asc')
             ->select());
     }

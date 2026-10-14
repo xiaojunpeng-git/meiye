@@ -34,7 +34,7 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         if (!$component) return null;
         $state = $this->row(Db::name(CashierV3IssuedCardRuleStateServices::STATE_TABLE)
             ->where('id', (int)$component['rule_state_id'])->find());
-        if (!$state || (string)$state['rule_type'] !== 'choice_count') return null;
+        if (!$state || !in_array((string)$state['rule_type'], ['choice_count', 'combination'], true)) return null;
         $holder = $this->row(Db::name('user_card_holder')
             ->where('id', (int)$state['card_holder_id'])->lock($lock)->find());
         if (!$holder || (int)$holder['oid'] !== (int)($order['id'] ?? 0)
@@ -43,6 +43,11 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
         $snapshot = $this->snapshotForHolder((string)$state['tenant_id'], (int)$holder['id'], $lock);
         if ($snapshot === null) throw self::failure('card_rule_cancellation_snapshot_missing');
+        if ((string)$state['rule_type'] === 'combination') {
+            $group = $this->groupForComponent($snapshot, $component);
+            return (string)($group['group_rule_type'] ?? '') === 'choice_count'
+                ? $this->debtLimitedCombinationTimes($snapshot, $group, $order, $lock) : null;
+        }
         return $this->debtLimitedSharedTimes($snapshot, $order, $lock);
     }
 
@@ -106,7 +111,7 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         if ($component === null) {
             throw self::failure('card_rule_component_missing', ['holderId' => $holderId, 'detailId' => $detailId]);
         }
-        return $this->normalizeAuthority($snapshot['state'], $component);
+        return $this->normalizeAuthority($snapshot['state'], $component, $this->groupForComponent($snapshot, $component));
     }
 
     /** @return array<int,array> keyed by legacy detail id */
@@ -120,7 +125,8 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         foreach ($snapshot['components'] as $component) {
             $result[(int)$component['legacy_detail_id']] = $this->normalizeAuthority(
                 $snapshot['state'],
-                $component
+                $component,
+                $this->groupForComponent($snapshot, $component)
             );
         }
         return $result;
@@ -153,13 +159,25 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
         $byState = [];
         foreach ($components as $component) $byState[(int)$component['rule_state_id']][] = $component;
+        $groupStates = array_values(array_filter($states, static function (array $state): bool {
+            return (string)$state['rule_type'] === 'combination';
+        }));
+        $groupsByState = [];
+        if ($groupStates) {
+            $groups = $this->rows(Db::name(CashierV3IssuedCardRuleStateServices::GROUP_TABLE)
+                ->where('tenant_id', $tenantId)->whereIn('rule_state_id', array_column($groupStates, 'id'))
+                ->order('group_no asc')->select());
+            foreach ($groups as $group) $groupsByState[(int)$group['rule_state_id']][(int)$group['group_no']] = $group;
+        }
         $result = [];
         foreach ($states as $state) {
             $stateComponents = $byState[(int)$state['id']] ?? [];
-            $this->assertStateSnapshot($state, $stateComponents);
+            $stateGroups = $groupsByState[(int)$state['id']] ?? [];
+            $this->assertStateSnapshot($state, $stateComponents, $stateGroups);
             $holderId = (int)$state['card_holder_id'];
             foreach ($stateComponents as $component) {
-                $result[$holderId][(int)$component['legacy_detail_id']] = $this->normalizeAuthority($state, $component);
+                $group = $stateGroups[(int)($component['combination_group_no'] ?? 0)] ?? [];
+                $result[$holderId][(int)$component['legacy_detail_id']] = $this->normalizeAuthority($state, $component, $group);
             }
         }
         return $result;
@@ -190,14 +208,22 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 $componentQuery->lock(true);
             }
             $components = $this->rows($componentQuery->select());
+            $groups = [];
+            if ((string)$state['rule_type'] === 'combination') {
+                $groupQuery = Db::name(CashierV3IssuedCardRuleStateServices::GROUP_TABLE)
+                    ->where('tenant_id', $tenantId)->where('rule_state_id', (int)$state['id'])
+                    ->order('group_no asc');
+                if ($lock) $groupQuery->lock(true);
+                foreach ($this->rows($groupQuery->select()) as $group) $groups[(int)$group['group_no']] = $group;
+            }
         } catch (\Throwable $exception) {
             if ($this->missingOptionalTable($exception)) {
                 return null;
             }
             throw $exception;
         }
-        $this->assertStateSnapshot($state, $components);
-        return ['state' => $state, 'components' => $components];
+        $this->assertStateSnapshot($state, $components, $groups);
+        return ['state' => $state, 'components' => $components, 'groups' => $groups];
     }
 
     public function fingerprintSnapshotForHolder(string $tenantId, int $holderId, bool $lock = false): ?array
@@ -211,6 +237,9 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             'components' => array_values(array_map(function (array $row): array {
                 return $this->mutableComponentFingerprintFields($row);
             }, $snapshot['components'])),
+            'groups' => array_values(array_map(function (array $row): array {
+                return $this->mutableGroupFingerprintFields($row);
+            }, $snapshot['groups'])),
         ];
     }
 
@@ -229,6 +258,8 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 return [
                     'state' => $this->mutableStateFingerprintFields($snapshot['state']),
                     'component' => $this->mutableComponentFingerprintFields($component),
+                    'group' => $this->groupForComponent($snapshot, $component)
+                        ? $this->mutableGroupFingerprintFields($this->groupForComponent($snapshot, $component)) : null,
                 ];
             }
         }
@@ -287,6 +318,7 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             $ruleType = (string)$state['rule_type'];
             $totalQuantity = 0;
             $newSelections = [];
+            $groupQuantities = [];
             foreach ($holderDeductions as $deduction) {
                 $detailId = (int)$deduction['source_detail_id'];
                 $quantity = (int)$deduction['deduct_physical_times'];
@@ -296,7 +328,8 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                     || (string)$component['status'] !== 'active' || $quantity <= 0) {
                     throw self::failure('card_rule_deduction_component_invalid', ['detailId' => $detailId]);
                 }
-                $authority = $this->normalizeAuthority($state, $component);
+                $group = $this->groupForComponent($snapshot, $component);
+                $authority = $this->normalizeAuthority($state, $component, $group);
                 // A replacement target owns an independent legacy entitlement
                 // line even when its source card uses one shared choice-count
                 // pool. The shared pool remains the rule-level service limit,
@@ -310,9 +343,14 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 if ($expectedAuthorityRemaining !== $expected || $quantity > $expected) {
                     throw self::failure('card_rule_deduction_version_conflict', ['detailId' => $detailId]);
                 }
-                if ($ruleType === 'choice_kind'
+                if (($ruleType === 'choice_kind'
+                    || ($ruleType === 'combination' && (string)($group['group_rule_type'] ?? '') === 'choice_kind'))
                     && (string)$component['selection_status'] === 'candidate') {
-                    $newSelections[$detailId] = true;
+                    $newSelections[(int)($component['combination_group_no'] ?? 0)][$detailId] = true;
+                }
+                if ($ruleType === 'combination') {
+                    $groupNo = (int)$component['combination_group_no'];
+                    $groupQuantities[$groupNo] = (int)($groupQuantities[$groupNo] ?? 0) + $quantity;
                 }
                 $totalQuantity += $quantity;
                 $results[$detailId] = [
@@ -325,10 +363,13 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             }
 
             if ($ruleType === 'choice_kind'
-                && (int)$state['selected_kind_count'] + count($newSelections) > (int)$state['choice_limit']) {
+                && (int)$state['selected_kind_count'] + count($newSelections[0] ?? []) > (int)$state['choice_limit']) {
                 throw self::failure('card_rule_choice_limit_exceeded', ['holderId' => $holderId]);
             }
-            if ($ruleType === 'choice_count') {
+            if ($ruleType === 'combination') {
+                $this->deductCombinationInTx($snapshot, $holderDeductions, $componentsByDetail,
+                    $groupQuantities, $newSelections, $currentHolder, $storeId, $occurredAt);
+            } elseif ($ruleType === 'choice_count') {
                 $remaining = (int)$state['shared_remaining_times'];
                 if ($totalQuantity > $remaining) {
                     throw self::failure('card_rule_shared_times_insufficient', ['holderId' => $holderId]);
@@ -375,12 +416,90 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 }
                 $stateChanges = [];
                 if ($ruleType === 'choice_kind' && $newSelections) {
-                    $stateChanges['selected_kind_count'] = (int)$state['selected_kind_count'] + count($newSelections);
+                    $stateChanges['selected_kind_count'] = (int)$state['selected_kind_count'] + count($newSelections[0] ?? []);
                 }
                 $this->updateState($state, $stateChanges, $occurredAt);
             }
         }
         return $results;
+    }
+
+    /**
+     * 一个组合的共享池或种数只在本组扣减；整单先汇总同组多个项目，
+     * 再一次校验并写入，异常由外层核销事务整体回滚。
+     */
+    private function deductCombinationInTx(
+        array $snapshot,
+        array $deductions,
+        array $componentsByDetail,
+        array $groupQuantities,
+        array $newSelections,
+        array $holder,
+        int $storeId,
+        int $occurredAt
+    ): void {
+        $state = $snapshot['state'];
+        foreach ($groupQuantities as $no => $quantity) {
+            $group = $snapshot['groups'][$no] ?? null;
+            if (!$group || $quantity <= 0) throw self::failure('card_rule_combination_group_missing');
+            if ((string)$group['group_rule_type'] === 'choice_count') {
+                $remaining = (int)$group['shared_remaining_times'];
+                if ($quantity > $remaining) throw self::failure('card_rule_combination_shared_insufficient');
+                $order = $this->row(Db::name('store_order')
+                    ->where('id', (int)($holder['oid'] ?? 0))->lock(true)->find());
+                if (!$order) throw self::failure('card_rule_cancellation_origin_missing');
+                $limit = $this->debtLimitedCombinationTimes($snapshot, $group, $order, true);
+                if ($quantity > $limit) throw self::failure('card_rule_combination_debt_limit');
+                $after = $remaining - $quantity;
+                $this->updateGroup($group, [
+                    'shared_remaining_times' => $after,
+                    'status' => $after === 0 ? 'exhausted' : 'active',
+                ], $occurredAt);
+            } elseif ((string)$group['group_rule_type'] === 'choice_kind') {
+                $selected = count($newSelections[$no] ?? []);
+                if ((int)$group['selected_kind_count'] + $selected > (int)$group['choice_limit']) {
+                    throw self::failure('card_rule_combination_choice_limit');
+                }
+                if ($selected) $this->updateGroup($group, [
+                    'selected_kind_count' => (int)$group['selected_kind_count'] + $selected,
+                ], $occurredAt);
+            } else {
+                throw self::failure('card_rule_combination_group_type_invalid');
+            }
+        }
+        foreach ($deductions as $deduction) {
+            $detailId = (int)$deduction['source_detail_id'];
+            $component = $componentsByDetail[$detailId];
+            $group = $snapshot['groups'][(int)$component['combination_group_no']];
+            if ((string)$group['group_rule_type'] !== 'choice_kind') continue;
+            $after = (int)$component['remaining_times'] - (int)$deduction['deduct_physical_times'];
+            if ($after < 0) throw self::failure('card_rule_combination_component_insufficient');
+            $changes = ['remaining_times' => $after, 'status' => $after === 0 ? 'exhausted' : 'active'];
+            if ((string)$component['selection_status'] === 'candidate') {
+                $changes['selection_status'] = 'selected';
+                $changes['selected_at'] = $occurredAt;
+                $changes['selected_store_id'] = $storeId;
+            }
+            $this->updateComponent($component, $changes, $occurredAt);
+        }
+        // 卡级版本使持卡人清单和核销上下文在任一组变化后失效。
+        $this->updateState($state, [], $occurredAt);
+    }
+
+    /** 债务按整卡可收金额比例限制每组物理池，不让未收款抵扣任意组合。 */
+    private function debtLimitedCombinationTimes(array $snapshot, array $group, array $order, bool $lock): int
+    {
+        $remaining = (int)$group['shared_remaining_times'];
+        $unavailable = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
+            ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), (string)$snapshot['state']['tenant_id'], $lock);
+        if (bccomp($unavailable, '0', 2) <= 0) return $remaining;
+        $line = $this->row(Db::name('cashier_v3_sales_order_line')
+            ->where('order_id', (string)$snapshot['state']['sales_order_id'])
+            ->where('order_line_id', (string)$snapshot['state']['sales_order_line_id'])
+            ->field('sale_amount_cents')->lock($lock)->find());
+        if (!$line) throw self::failure('card_rule_cancellation_sale_missing');
+        return self::sharedTimesAfterCancellation((int)$group['shared_total_times'], $remaining,
+            (int)$line['sale_amount_cents'], (int)bcmul($unavailable, '100', 0));
     }
 
     /**
@@ -472,6 +591,11 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
         $state = $snapshot['state'];
         $ruleType = (string)$state['rule_type'];
+        // 项目替换/升级会生成新权益明细，目前没有组归属迁移契约；
+        // 明确拒绝，不能生成无组项目破坏整张组合卡后续核销。
+        if ($ruleType === 'combination') {
+            throw self::failure('card_rule_combination_project_operation_unsupported');
+        }
         $components = [];
         foreach ($snapshot['components'] as $component) {
             $components[(int)$component['legacy_detail_id']] = $component;
@@ -665,18 +789,33 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
     }
 
-    private function normalizeAuthority(array $state, array $component): array
+    private function groupForComponent(array $snapshot, array $component): array
+    {
+        if ((string)$snapshot['state']['rule_type'] !== 'combination') return [];
+        $no = (int)($component['combination_group_no'] ?? 0);
+        $group = $snapshot['groups'][$no] ?? null;
+        if (!$group || (int)$group['rule_state_id'] !== (int)$snapshot['state']['id']) {
+            throw self::failure('card_rule_combination_group_missing');
+        }
+        return $group;
+    }
+
+    private function normalizeAuthority(array $state, array $component, array $group = []): array
     {
         $ruleType = (string)$state['rule_type'];
-        $remaining = in_array($ruleType, ['normal', 'choice_kind'], true)
+        $effectiveRule = $ruleType === 'combination' ? (string)($group['group_rule_type'] ?? '') : $ruleType;
+        if ($ruleType === 'combination' && !in_array($effectiveRule, ['choice_kind', 'choice_count'], true)) {
+            throw self::failure('card_rule_combination_group_missing');
+        }
+        $remaining = in_array($effectiveRule, ['normal', 'choice_kind'], true)
             ? (int)$component['remaining_times']
-            : ($ruleType === 'choice_count'
-                ? (int)$state['shared_remaining_times']
+            : ($effectiveRule === 'choice_count'
+                ? (int)($ruleType === 'combination' ? $group['shared_remaining_times'] : $state['shared_remaining_times'])
                 : self::TIME_CARD_VIRTUAL_TIMES);
-        $total = in_array($ruleType, ['normal', 'choice_kind'], true)
+        $total = in_array($effectiveRule, ['normal', 'choice_kind'], true)
             ? (int)$component['total_times']
-            : ($ruleType === 'choice_count'
-                ? (int)$state['shared_total_times']
+            : ($effectiveRule === 'choice_count'
+                ? (int)($ruleType === 'combination' ? $group['shared_total_times'] : $state['shared_total_times'])
                 : self::TIME_CARD_VIRTUAL_TIMES);
         $componentSnapshot = json_decode((string)$component['component_snapshot_json'], true);
         $componentSnapshot = is_array($componentSnapshot) ? $componentSnapshot : [];
@@ -690,21 +829,29 @@ final class CashierV3CardRuleEntitlementAuthorityServices
             throw self::failure('card_rule_component_amount_invalid');
         }
         $selected = (string)$component['selection_status'];
-        $choiceAvailable = $ruleType !== 'choice_kind'
+        $choiceAvailable = $effectiveRule !== 'choice_kind'
             || $selected === 'selected'
             || ($selected === 'candidate'
-                && (int)$state['selected_kind_count'] < (int)$state['choice_limit']);
+                && (int)($ruleType === 'combination' ? $group['selected_kind_count'] : $state['selected_kind_count'])
+                    < (int)($ruleType === 'combination' ? $group['choice_limit'] : $state['choice_limit']));
         return [
-            'ruleType' => $ruleType,
+            // 现有收银选择器继续识别两种任选规则；真实卡类型单独保留供退款与追溯。
+            'ruleType' => $effectiveRule,
+            'cardRuleType' => $ruleType,
+            'combinationGroupNo' => $ruleType === 'combination' ? (int)$group['group_no'] : 0,
+            'combinationGroupName' => $ruleType === 'combination' ? (string)$group['group_name_snapshot'] : '',
+            // 父卡展示需要扣除已无选择名额的候选项目，读取已签发组状态而非现售配置。
+            'combinationChoiceLimit' => $ruleType === 'combination' ? (int)$group['choice_limit'] : 0,
+            'combinationSelectedKindCount' => $ruleType === 'combination' ? (int)$group['selected_kind_count'] : 0,
             'ruleVersion' => (int)$state['rule_version'],
             'stateVersion' => (int)$state['state_version'],
-            'sourceKind' => $ruleType === 'time' ? 'time_card' : 'count_card',
+            'sourceKind' => $effectiveRule === 'time' ? 'time_card' : 'count_card',
             'sourceKindLabel' => [
                 'normal' => '普通卡',
                 'choice_kind' => '任选种数卡',
                 'choice_count' => '任选次数卡',
                 'time' => '时间卡',
-            ][$ruleType],
+            ][$effectiveRule],
             'remainingTimes' => $remaining,
             'totalTimes' => $total,
             'unitAmountCents' => $unitAmount,
@@ -719,10 +866,10 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         ];
     }
 
-    private function assertStateSnapshot(array $state, array $components): void
+    private function assertStateSnapshot(array $state, array $components, array $groups = []): void
     {
         $ruleType = (string)($state['rule_type'] ?? '');
-        if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time'], true)
+        if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time', 'combination'], true)
             || (int)($state['state_version'] ?? 0) <= 0 || !$components) {
             throw self::failure('card_rule_state_snapshot_invalid');
         }
@@ -738,6 +885,29 @@ final class CashierV3CardRuleEntitlementAuthorityServices
                 || (int)$component['rule_state_id'] !== (int)$state['id']
                 || (int)$component['card_holder_id'] !== (int)$state['card_holder_id']) {
                 throw self::failure('card_rule_component_fingerprint_invalid');
+            }
+            if ($ruleType === 'combination' && !isset($groups[(int)($component['combination_group_no'] ?? 0)])) {
+                throw self::failure('card_rule_combination_component_group_invalid');
+            }
+            if ($ruleType === 'combination' && (int)$component['combination_group_no']
+                !== (int)($componentSnapshot['combinationGroupNo'] ?? 0)) {
+                throw self::failure('card_rule_combination_component_group_mismatch');
+            }
+        }
+        if ($ruleType === 'combination') {
+            $definitions = (array)($snapshot['combinationGroups'] ?? []);
+            if (!$groups || count($groups) !== count($definitions)) throw self::failure('card_rule_combination_groups_missing');
+            foreach ($groups as $group) {
+                $groupSnapshot = json_decode((string)$group['definition_snapshot_json'], true);
+                if (!is_array($groupSnapshot)
+                    || !hash_equals((string)$group['immutable_fingerprint'], self::fingerprint($groupSnapshot))
+                    || (int)$group['rule_state_id'] !== (int)$state['id']
+                    || (int)$group['group_no'] !== (int)($groupSnapshot['groupNo'] ?? 0)
+                    || (string)$group['group_rule_type'] !== (string)($groupSnapshot['ruleType'] ?? '')
+                    || (int)$group['choice_limit'] !== (int)($groupSnapshot['choiceLimit'] ?? -1)
+                    || (int)$group['shared_total_times'] !== (int)($groupSnapshot['sharedTimes'] ?? -1)) {
+                    throw self::failure('card_rule_combination_group_fingerprint_invalid');
+                }
             }
         }
     }
@@ -774,7 +944,19 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
         $type = (string)$state['rule_type'];
         if ($type === 'time') return 0;
-        if ($type === 'choice_count') {
+        if ($type === 'combination') {
+            $group = $this->groupForComponent($snapshot, $component);
+            if ((string)$group['group_rule_type'] === 'choice_count') {
+                $remaining = (int)$group['shared_remaining_times'];
+                if ($quantity > (int)$group['shared_total_times'] - $remaining) throw self::failure('card_rule_restore_overflow');
+                $this->updateGroup($group, ['shared_remaining_times' => $remaining + $quantity, 'status' => 'active'], $time);
+            } else {
+                $remaining = (int)$component['remaining_times'];
+                if ($quantity > (int)$component['total_times'] - $remaining) throw self::failure('card_rule_restore_overflow');
+                $this->updateComponent($component, ['remaining_times' => $remaining + $quantity, 'status' => 'active'], $time);
+            }
+            $this->updateState($state, ['status' => 'active'], $time);
+        } elseif ($type === 'choice_count') {
             $remaining = (int)$state['shared_remaining_times'];
             if ($quantity > (int)$state['shared_total_times'] - $remaining) throw self::failure('card_rule_restore_overflow');
             $this->updateState($state, ['shared_remaining_times' => $remaining + $quantity, 'status' => 'active'], $time);
@@ -817,6 +999,25 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         }
     }
 
+    private function updateGroup(array $group, array $changes, int $time): void
+    {
+        $version = (int)$group['state_version'];
+        $changes['state_version'] = $version + 1;
+        $changes['update_time'] = $time;
+        $affected = (int)Db::name(CashierV3IssuedCardRuleStateServices::GROUP_TABLE)
+            ->where('id', (int)$group['id'])->where('state_version', $version)->update($changes);
+        if ($affected !== 1) throw self::failure('card_rule_combination_group_update_conflict');
+    }
+
+    private function mutableGroupFingerprintFields(array $group): array
+    {
+        return $this->pick($group, [
+            'id', 'tenant_id', 'rule_state_id', 'card_holder_id', 'group_no', 'group_rule_type',
+            'choice_limit', 'selected_kind_count', 'shared_total_times', 'shared_remaining_times',
+            'immutable_fingerprint', 'state_version', 'status',
+        ]);
+    }
+
     private function mutableStateFingerprintFields(array $state): array
     {
         return $this->pick($state, [
@@ -833,6 +1034,7 @@ final class CashierV3CardRuleEntitlementAuthorityServices
         return $this->pick($component, [
             'id', 'component_state_id', 'tenant_id', 'rule_state_id', 'card_holder_id',
             'legacy_detail_id', 'relation_id', 'project_product_id', 'project_sku_id',
+            'combination_group_no',
             'project_sku_unique', 'project_type', 'total_times', 'remaining_times',
             'writeoff_amount_cents', 'selection_status', 'selected_at', 'selected_store_id',
             'immutable_fingerprint', 'state_version', 'status',

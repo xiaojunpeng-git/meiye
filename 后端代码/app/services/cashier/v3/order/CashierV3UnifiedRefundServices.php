@@ -16,6 +16,7 @@ use app\services\cashier\v3\card\CashierV3CardComponentPurchaseAmountAuthority;
 use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
+use app\services\cashier\v3\cashier\CashierV3SharedCardPurchaseAmount;
 use app\services\order\store\WriteOffOrderServices;
 use app\services\user\UserBalanceAtomicServices;
 use think\facade\Db;
@@ -161,12 +162,17 @@ final class CashierV3UnifiedRefundServices
         if ($snapshot['voided'] || !$snapshot['canRefund']) {
             throw self::fail((string)$snapshot['unavailableReason'], 'refund_target_unavailable');
         }
-        if ($mode === 'card' && (($snapshot['ruleType'] === 'choice_count' && $componentId !== 0)
-            || ($snapshot['ruleType'] !== 'choice_count' && $componentId <= 0))) {
+        $wholeCardRule = $mode === 'card' && in_array($snapshot['ruleType'], ['choice_count', 'combination'], true);
+        if ($mode === 'card' && (($wholeCardRule && $componentId !== 0)
+            || (!$wholeCardRule && $componentId <= 0))) {
             throw self::fail('请重新选择可退款的卡项项目。', 'refund_component_invalid');
         }
+        // 组合卡只能整卡终止，服务已用金额仍按原权益事实结算。
+        if ($mode === 'card' && $snapshot['ruleType'] === 'combination' && !$void) {
+            throw self::fail('组合卡仅支持整卡退款，请选择整卡作废。', 'refund_combination_whole_card_required');
+        }
         $target = $mode === 'card'
-            ? ($snapshot['ruleType'] === 'choice_count' ? $snapshot['components'][0]
+            ? ($wholeCardRule ? $snapshot['components'][0]
                 : $this->selectedCardComponent($snapshot, $componentId))
             : $snapshot;
         $remaining = (int)$target['usableRemainingAmountCents'];
@@ -393,6 +399,7 @@ final class CashierV3UnifiedRefundServices
         $components = [];
         $sum = 0;
         $sharedCount = (string)($rule['rule_type'] ?? '') === 'choice_count';
+        $combination = (string)($rule['rule_type'] ?? '') === 'combination';
         if ($sharedCount) {
             // A choice-count card has one monetary value and one usage pool. Legacy
             // project carts are selectable services, not independent refundable balances.
@@ -425,6 +432,54 @@ final class CashierV3UnifiedRefundServices
                 'purchaseAmountCents' => $purchase, 'remainingAmountCents' => $sum,
                 'totalTimes' => $total, 'remainingTimes' => $left, 'refundedCents' => $refunded,
                 'removedTimes' => $removed];
+        } elseif ($combination) {
+            // 每个共享组只计一次金额与余次；任选种数项目仍用既有项目实收分摊。
+            $allocations = (new CashierV3CardSaleActualAmountServices())->forOrders([$originId], $carts);
+            $authorities = (new CashierV3CardRuleEntitlementAuthorityServices())
+                ->authoritiesForHolders($tenantId, [$holderId])[$holderId] ?? [];
+            $seenSharedGroups = [];
+            $purchaseSum = 0;
+            $saleOrder = ['id' => $originId, 'pay_price' => (string)$candidate['pay_price']];
+            foreach ($carts as $cart) {
+                $cartInfo = json_decode((string)($cart['cart_info'] ?? ''), true);
+                $cartInfo = is_array($cartInfo) ? $cartInfo : [];
+                $authority = $authorities[(int)$cart['id']] ?? null;
+                $groupNo = (int)($cartInfo['combination_group_no'] ?? 0);
+                if (!is_array($authority) || $groupNo <= 0
+                    || (int)($authority['combinationGroupNo'] ?? 0) !== $groupNo) {
+                    throw self::fail('组合卡分组权益资料不一致。', 'refund_combination_group_invalid');
+                }
+                if ((string)$authority['ruleType'] === 'choice_count') {
+                    if (isset($seenSharedGroups[$groupNo])) continue;
+                    $seenSharedGroups[$groupNo] = true;
+                    $projection = CashierV3SharedCardPurchaseAmount::project($saleOrder, $authority, $cartInfo);
+                    if ($projection === null) throw self::fail('组合卡共享组金额无法核对。', 'refund_combination_amount_invalid');
+                    $purchaseSum += self::moneyCents($projection['purchaseAmount'], true);
+                    $sum += self::moneyCents($projection['remainingAmount'], true);
+                } else {
+                    $amount = (new CashierV3CardComponentPurchaseAmountAuthority())->resolve(
+                        $cart, $cartInfo, $allocations, $authority)['purchaseAmountCents'];
+                    $purchaseSum += $amount;
+                    $total = (int)$authority['totalTimes'];
+                    $left = (int)$authority['remainingTimes'];
+                    if ($total <= 0 || $left < 0 || $left > $total) {
+                        throw self::fail('组合卡项目次数无法核对。', 'refund_combination_times_invalid');
+                    }
+                    $sum += self::moneyCents(CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                        self::centsToMoney($amount), $total, $total - $left,
+                        $cartInfo + ['amountCalculationVersion' => $amount % 100 === 0
+                            ? CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION
+                            : 'operation-cent-combination-project-v1']), true);
+                }
+            }
+            if ($purchaseSum !== self::moneyCents((string)$candidate['pay_price'], false)) {
+                throw self::fail('组合卡已售金额与项目分摊不一致。', 'refund_combination_sale_mismatch');
+            }
+            $components[] = ['id' => 0, 'name' => (string)$candidate['card_name'] . '（整卡）',
+                'purchaseAmountCents' => $purchaseSum, 'remainingAmountCents' => $sum,
+                'totalTimes' => (int)$candidate['write_times'],
+                'remainingTimes' => (int)$candidate['write_surplus_times'],
+                'refundedCents' => 0, 'removedTimes' => 0];
         } else {
             $allocations = (new CashierV3CardSaleActualAmountServices())->forOrders([$originId], $carts);
             $ruleAuthorities = (new CashierV3CardRuleEntitlementAuthorityServices())
@@ -476,7 +531,7 @@ final class CashierV3UnifiedRefundServices
         $cancelledCents = self::moneyCents((new CashierV3CardOriginDebtResolver())
             ->cancelledCardDebt($order, $memberId, $tenantId, $lock), true);
         $usableSum = 0;
-        if ($sharedCount) {
+        if ($sharedCount || $combination) {
             $usableSum = max(0, $sum - $debtCents - $cancelledCents);
             foreach ($components as &$component) {
                 $component['usableRemainingAmountCents'] = max(0,
@@ -572,10 +627,17 @@ final class CashierV3UnifiedRefundServices
             ->where('card_holder_id', $holderId)->field('id,status,shared_remaining_times,valid_through,selected_kind_count,state_version')->lock(true)->find();
         $components = Db::name('cashier_v3_card_rule_component')->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->field('id,status,remaining_times,selection_status,state_version')->order('id asc')->lock(true)->select()->toArray();
+        $groups = (string)($rule['status'] ?? '') !== ''
+            && (string)Db::name('cashier_v3_card_rule_state')->where('tenant_id', $tenantId)
+                ->where('card_holder_id', $holderId)->value('rule_type') === 'combination'
+            ? Db::name('cashier_v3_card_rule_group_state')->where('tenant_id', $tenantId)
+                ->where('card_holder_id', $holderId)
+                ->field('id,status,shared_remaining_times,selected_kind_count,state_version')
+                ->order('group_no asc')->lock(true)->select()->toArray() : [];
         $carts = Db::name('store_order_cart_info')->where('oid', (int)$holder['oid'])
             ->where('cart_type', 2)->where('product_type', 6)
             ->field('id,cart_info,write_times,write_surplus_times,write_end')->order('id asc')->lock(true)->select()->toArray();
-        return compact('holder', 'state', 'rule', 'components', 'carts');
+        return compact('holder', 'state', 'rule', 'components', 'groups', 'carts');
     }
 
     private function lineSnapshot(string $lineId, int $memberId, string $tenantId, bool $lock, ?array $line = null): array
@@ -648,6 +710,14 @@ final class CashierV3UnifiedRefundServices
 
     private function adjustCard(array $card, array $target, int $refund, bool $void, int $newEnd, string $tenantId, int $now): array
     {
+        if ($card['ruleType'] === 'combination') {
+            if (!$void) throw self::fail('组合卡只能整卡退款。', 'refund_combination_whole_card_required');
+            $this->voidCard($card['holderId'], $tenantId, $now);
+            return ['remainingAmountCents' => 0,
+                'closedRemainingCents' => max(0, (int)$card['remainingAmountCents'] - $refund),
+                'remainingTimes' => 0, 'timesRemoved' => 0,
+                'timesClosed' => (int)$card['remainingTimes']];
+        }
         if ($card['ruleType'] === 'choice_count') {
             return $this->adjustSharedCard($card, $target, $refund, $void, $tenantId, $now);
         }
@@ -743,6 +813,13 @@ final class CashierV3UnifiedRefundServices
         Db::name('cashier_v3_card_rule_component')->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->whereIn('status', ['active', 'exhausted'])
             ->update(['status' => 'revoked', 'state_version' => Db::raw('state_version+1'), 'update_time' => $now]);
+        // 组合组状态跟随整卡终止，作废退款时可按前后快照安全恢复。
+        if ((string)Db::name('cashier_v3_card_rule_state')->where('tenant_id', $tenantId)
+            ->where('card_holder_id', $holderId)->value('rule_type') === 'combination') {
+            Db::name('cashier_v3_card_rule_group_state')->where('tenant_id', $tenantId)
+                ->where('card_holder_id', $holderId)->whereIn('status', ['active', 'exhausted'])
+                ->update(['status' => 'revoked', 'state_version' => Db::raw('state_version+1'), 'update_time' => $now]);
+        }
     }
 
     private function creditBalance(int $memberId, int $amount, string $key, int $adjustmentRowId,

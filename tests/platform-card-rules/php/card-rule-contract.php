@@ -72,6 +72,34 @@ $choiceCount = $service->normalizeForSave($choiceCountInput);
 $assert($choiceCount['card_num'] === 10 && $choiceCount['card_num_type'] === 1, 'choice-count legacy projection');
 $assert($choiceCount['related'][0]['write_times'] === 0, 'choice-count project times cleared');
 
+$combinationInput = $base(StoreCardRuleServices::COMBINATION);
+$combinationInput['related'][0] += [
+    'combination_group_no' => 1, 'combination_group_name' => '组合1',
+    'combination_group_rule' => 'choice_kind', 'combination_choice_limit' => 1,
+    'combination_shared_times' => 0,
+];
+$combinationInput['related'][] = [
+    'product_id' => 102, 'unique' => 'sku-102', 'write_times' => 9,
+    'writeoff_amount' => 0, 'labor_fee' => 6,
+    'combination_group_no' => 2, 'combination_group_name' => '组合2',
+    'combination_group_rule' => 'choice_count', 'combination_choice_limit' => 0,
+    'combination_shared_times' => 4,
+];
+$combination = $service->normalizeForSave($combinationInput);
+$assert($combination['card_rule_version'] === 2 && $combination['card_num'] === 0,
+    'combination has isolated issued-card definition');
+$assert($combination['related'][0]['write_times'] === 3
+    && $combination['related'][1]['write_times'] === 0,
+    'combination kind keeps independent times while count group owns shared pool');
+$invalidCombination = $combinationInput;
+$invalidCombination['related'][1]['combination_group_no'] = 1;
+$expectFailure(static fn() => $service->normalizeForSave($invalidCombination),
+    '同一组合的规则配置必须一致', 'combination rejects mixed group definitions');
+$invalidCombination = $combinationInput;
+$invalidCombination['related'][1]['product_id'] = 101;
+$expectFailure(static fn() => $service->normalizeForSave($invalidCombination),
+    '同一项目不能放进多个组合', 'combination rejects project across groups');
+
 $time = $service->normalizeForSave($base(StoreCardRuleServices::TIME));
 $assert($time['related'][0]['write_times'] === 0, 'time card project times cleared');
 $assert($time['related'][0]['writeoff_amount'] === '88', 'time card writeoff amount retained as whole yuan');
@@ -119,7 +147,7 @@ $expectFailure(
 $assert(strpos($controllerSource, "['card_rule_type', '']") !== false, 'list controller accepts card-rule filter');
 $assert(strpos($modelSource, 'searchCardRuleTypeAttr') !== false, 'model exposes card-rule searcher');
 $assert(
-    strpos($modelSource, "['normal', 'choice_kind', 'choice_count', 'time']") !== false,
+    strpos($modelSource, "['normal', 'choice_kind', 'choice_count', 'time', 'combination']") !== false,
     'card-rule searcher restricts values to confirmed rules'
 );
 $assert(

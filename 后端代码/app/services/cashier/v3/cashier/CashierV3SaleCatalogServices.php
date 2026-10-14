@@ -1534,6 +1534,7 @@ final class CashierV3SaleCatalogServices
         $this->assertCardRuleHeader($kindCode, $ruleType, $ruleVersion, $choiceLimit, $sharedTimes);
         $validity = self::validitySnapshot($row, $kindCode, $ruleType);
         $components = [];
+        $combinationGroups = [];
         $resources = [];
         if ($withComponents && $kindCode === 'card_package') {
             foreach ((array)($row['card_components'] ?? []) as $wrapper) {
@@ -1567,11 +1568,32 @@ final class CashierV3SaleCatalogServices
                     );
                 }
                 $writeTimes = (int)($relation['write_times'] ?? 0);
+                $groupNo = (int)($relation['combination_group_no'] ?? 0);
+                $groupRule = (string)($relation['combination_group_rule'] ?? '');
+                if ($ruleType === 'combination') {
+                    $group = [
+                        'groupNo' => $groupNo,
+                        'nameSnapshot' => trim((string)($relation['combination_group_name'] ?? '')),
+                        'ruleType' => $groupRule,
+                        'choiceLimit' => (int)($relation['combination_choice_limit'] ?? 0),
+                        'sharedTimes' => (int)($relation['combination_shared_times'] ?? 0),
+                    ];
+                    if ($groupNo <= 0 || $groupNo > 20 || $group['nameSnapshot'] === ''
+                        || !in_array($groupRule, ['choice_kind', 'choice_count'], true)
+                        || ($groupRule === 'choice_kind' ? ($group['choiceLimit'] <= 0 || $group['sharedTimes'] !== 0)
+                            : ($group['sharedTimes'] <= 0 || $group['choiceLimit'] !== 0))
+                        || (isset($combinationGroups[$groupNo]) && $combinationGroups[$groupNo] !== $group)) {
+                        throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                            '组合卡分组配置不一致，请联系管理员核对。', 'card_combination_group_invalid');
+                    }
+                    $combinationGroups[$groupNo] = $group;
+                }
                 $writeoffAmountCents = self::moneyToCents(
                     $relation['writeoff_amount'] ?? '0.00',
                     'card_component_writeoff_amount'
                 );
-                if (($ruleType === '' || in_array($ruleType, ['normal', 'choice_kind'], true))
+                if (($ruleType === '' || in_array($ruleType, ['normal', 'choice_kind'], true)
+                    || ($ruleType === 'combination' && $groupRule === 'choice_kind'))
                     && $writeTimes <= 0) {
                     throw self::failure(
                         CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
@@ -1580,7 +1602,8 @@ final class CashierV3SaleCatalogServices
                         ['relation_id' => (int)($relation['id'] ?? 0)]
                     );
                 }
-                if (in_array($ruleType, ['choice_count', 'time'], true) && $writeTimes !== 0) {
+                if ((in_array($ruleType, ['choice_count', 'time'], true)
+                    || ($ruleType === 'combination' && $groupRule === 'choice_count')) && $writeTimes !== 0) {
                     throw self::failure(
                         CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
                         '卡内项目次数与卡项规则不一致，请联系管理员核对。',
@@ -1607,6 +1630,9 @@ final class CashierV3SaleCatalogServices
                     'categoryIdSnapshot' => $component['categoryId'],
                     'categoryNameSnapshot' => $component['categoryName'],
                     'writeTimes' => $writeTimes,
+                    // 项目到组的映射在签发时冻结；核销无需结账页再次选择组合。
+                    'combinationGroupNo' => $ruleType === 'combination' ? $groupNo : 0,
+                    'combinationGroupRule' => $ruleType === 'combination' ? $groupRule : '',
                     'writeoffAmountCents' => $writeoffAmountCents,
                     'configuredPriceCents' => self::moneyToCents($relation['price'] ?? null, 'card_component_price'),
                     'configuredCostCents' => self::moneyToCents($relation['cost'] ?? null, 'card_component_cost'),
@@ -1625,6 +1651,22 @@ final class CashierV3SaleCatalogServices
                 'card_choice_limit_exceeds_components'
             );
         }
+        if ($withComponents && $ruleType === 'combination') {
+            ksort($combinationGroups, SORT_NUMERIC);
+            if (!$combinationGroups || array_keys($combinationGroups) !== range(1, count($combinationGroups))) {
+                throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                    '组合卡分组必须连续且含有项目。', 'card_combination_group_sequence_invalid');
+            }
+            foreach ($combinationGroups as $no => $group) {
+                $count = count(array_filter($components, static function (array $component) use ($no): bool {
+                    return (int)$component['combinationGroupNo'] === $no;
+                }));
+                if ($group['ruleType'] === 'choice_kind' && $group['choiceLimit'] > $count) {
+                    throw self::failure(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '组合卡可选种数超过组内项目数。', 'card_combination_choice_limit_invalid');
+                }
+            }
+        }
         // Validity is SKU authority and already participates in skuVersion.
         // The product-level definition guard must have one stable version even
         // when a card product has multiple sale SKUs.
@@ -1634,6 +1676,7 @@ final class CashierV3SaleCatalogServices
             'ruleVersion' => $ruleVersion,
             'choiceLimit' => $choiceLimit,
             'sharedTimes' => $sharedTimes,
+            'combinationGroups' => array_values($combinationGroups),
             // The sale definition freezes this setting for the issued card.
             'blockWriteoffOnDebt' => $blockWriteoffOnDebt,
             'components' => $components,
@@ -1652,6 +1695,7 @@ final class CashierV3SaleCatalogServices
             'ruleVersion' => $ruleVersion,
             'choiceLimit' => $choiceLimit,
             'sharedTimes' => $sharedTimes,
+            'combinationGroups' => array_values($combinationGroups),
             'blockWriteoffOnDebt' => $blockWriteoffOnDebt,
             'validity' => $validity,
             'components' => $components,
@@ -1670,7 +1714,7 @@ final class CashierV3SaleCatalogServices
         if ($kindCode !== 'card_package' || $ruleType === '') {
             return;
         }
-        if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time'], true)
+        if (!in_array($ruleType, ['normal', 'choice_kind', 'choice_count', 'time', 'combination'], true)
             || $ruleVersion <= 0
             || ($ruleType === 'choice_kind' ? $choiceLimit <= 0 : $choiceLimit !== 0)
             || ($ruleType === 'choice_count' ? $sharedTimes <= 0 : $sharedTimes !== 0)) {
@@ -1895,7 +1939,7 @@ final class CashierV3SaleCatalogServices
     private static function publicCardPreview(array $item): ?array
     {
         if (($item['kindCode'] ?? '') !== 'card_package'
-            || !in_array($item['cardRuleType'] ?? '', ['normal', 'choice_kind', 'choice_count', 'time'], true)) {
+            || !in_array($item['cardRuleType'] ?? '', ['normal', 'choice_kind', 'choice_count', 'time', 'combination'], true)) {
             return null;
         }
 
@@ -1907,6 +1951,7 @@ final class CashierV3SaleCatalogServices
                 'name' => (string)($component['nameSnapshot'] ?? ''),
                 'specification' => (string)($component['skuNameSnapshot'] ?? ''),
                 'writeTimes' => (int)($component['writeTimes'] ?? 0),
+                'combinationGroupNo' => (int)($component['combinationGroupNo'] ?? 0),
                 'writeoffAmountCents' => (int)($component['writeoffAmountCents'] ?? 0),
             ];
         }
@@ -1916,6 +1961,7 @@ final class CashierV3SaleCatalogServices
             'ruleVersion' => (int)($purchase['ruleVersion'] ?? 0),
             'choiceLimit' => (int)($purchase['choiceLimit'] ?? 0),
             'sharedTimes' => (int)($purchase['sharedTimes'] ?? 0),
+            'combinationGroups' => (array)($purchase['combinationGroups'] ?? []),
             'validity' => [
                 'writeValid' => (int)($validity['writeValid'] ?? 0),
                 'writeDays' => (int)($validity['writeDays'] ?? 0),
@@ -1933,6 +1979,7 @@ final class CashierV3SaleCatalogServices
             'choice_kind' => '任选种数卡',
             'choice_count' => '任选次数卡',
             'time' => '时间卡',
+            'combination' => '组合卡',
         ];
         return $labels[$ruleType] ?? '';
     }

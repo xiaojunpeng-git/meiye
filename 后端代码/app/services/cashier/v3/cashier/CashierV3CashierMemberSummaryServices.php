@@ -72,7 +72,7 @@ final class CashierV3CashierMemberSummaryServices
             ->where('is_del', 0)
             ->where('store_id', '>', 0)
             ->where('write_surplus_times', '>', 0)
-            ->field('id,oid,write_start,write_end')
+            ->field('id,oid,write_start,write_end,write_surplus_times')
             ->order('id asc')
             ->select());
         $holderIds = array_values(array_unique(array_filter(array_map('intval', array_column($holders, 'id')))));
@@ -123,6 +123,13 @@ final class CashierV3CashierMemberSummaryServices
         $activeOrders = [];
         $sharedRules = [];
         $sharedTenants = [];
+        $combinationTenants = [];
+        foreach ($this->rows(Db::name('cashier_v3_card_rule_state')
+            ->whereIn('card_holder_id', array_values($holderIdByOrder))
+            ->where('member_id', $memberId)->where('rule_type', 'combination')
+            ->field('card_holder_id,tenant_id')->select()) as $state) {
+            $combinationTenants[(int)$state['card_holder_id']] = (string)$state['tenant_id'];
+        }
         foreach ($this->rows(Db::name('cashier_v3_card_rule_state')
             ->whereIn('card_holder_id', array_values($holderIdByOrder))
             ->where('member_id', $memberId)
@@ -176,6 +183,7 @@ final class CashierV3CashierMemberSummaryServices
                 continue;
             }
             $holderId = (int)($holderIdByOrder[(int)$cart['oid']] ?? 0);
+            if (isset($combinationTenants[$holderId])) continue;
             $snapshot = is_string($cart['cart_info'] ?? null)
                 ? json_decode((string)$cart['cart_info'], true)
                 : ($cart['cart_info'] ?? []);
@@ -232,6 +240,68 @@ final class CashierV3CashierMemberSummaryServices
                 );
             }
             $activeOrders[(int)$cart['oid']] = true;
+        }
+        // 组合卡逐组计算共享金额，任一种数组合项目仍按项目金额计算；
+        // 父卡总次数从持卡权威只取一次，欠款从整卡余额只扣一次。
+        $holdersById = array_column($holders, null, 'id');
+        foreach ($combinationTenants as $holderId => $tenantId) {
+            $holder = $holdersById[$holderId] ?? null;
+            if (!$holder) continue;
+            $orderId = (int)$holder['oid'];
+            $order = $orderMap[$orderId] ?? null;
+            if (!$order) continue;
+            $comboCarts = $this->rows(Db::name('store_order_cart_info')
+                ->where('oid', $orderId)->where('cart_type', 2)->where('product_type', 6)
+                ->field('id,oid,product_id,write_times,write_surplus_times,pay_price,cart_info')
+                ->order('id asc')->select());
+            $authorities = (new \app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices())
+                ->authoritiesForHolder($tenantId, $holderId);
+            $allocations = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], $comboCarts);
+            $groupsCounted = [];
+            $cardAmount = '0.00';
+            foreach ($comboCarts as $cart) {
+                $authority = $authorities[(int)$cart['id']] ?? null;
+                if (!is_array($authority) || (string)($authority['cardRuleType'] ?? '') !== 'combination') {
+                    throw new CashierV3CommandException(CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '组合卡权益资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_combination_authority_invalid']);
+                }
+                $snapshot = json_decode((string)($cart['cart_info'] ?? ''), true);
+                $snapshot = is_array($snapshot) ? $snapshot : [];
+                if ((string)$authority['ruleType'] === 'choice_count') {
+                    $groupNo = (int)$authority['combinationGroupNo'];
+                    if (isset($groupsCounted[$groupNo])) continue;
+                    $groupsCounted[$groupNo] = true;
+                    $amounts = CashierV3SharedCardPurchaseAmount::project($order, $authority, $snapshot);
+                    if ($amounts === null) throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '组合卡共享金额资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_combination_amount_invalid']);
+                    $cardAmount = bcadd($cardAmount, $amounts['remainingAmount'], 2);
+                } else {
+                    $amount = (int)($allocations[(int)$cart['id']] ?? -1);
+                    if ($amount < 0) throw new CashierV3CommandException(
+                        CashierV3ResultCode::COMMAND_RESULT_INCOMPLETE,
+                        '组合卡项目金额资料异常，请联系管理员核对。', CashierV3ResultCode::STATUS_FAILED,
+                        ['reason' => 'cashier_member_combination_project_amount_missing']);
+                    $version = $amount % 100 === 0
+                        ? CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION
+                        : 'operation-cent-combination-project-v1';
+                    $snapshot['amountCalculationVersion'] = $version;
+                    $cardAmount = bcadd($cardAmount,
+                        CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
+                            bcdiv((string)$amount, '100', 2), (int)$authority['totalTimes'],
+                            (int)$authority['totalTimes'] - (int)$authority['remainingTimes'], $snapshot), 2);
+                }
+            }
+            $blocked = (new CashierV3CardOriginDebtResolver())->unavailableCardDebt(
+                $order, $memberId, $tenantId, false);
+            $usable = bcsub($cardAmount, $blocked, 2);
+            $remainingAmount = bcadd($remainingAmount,
+                bccomp($usable, '0', 2) > 0 ? $usable : '0.00', 2);
+            // 老 holder 累加所有候选项目，可能把已封锁的任选种数也算作余次。
+            $remainingTimes += CashierV3CombinationRemainingTimes::fromAuthorities($authorities);
+            $activeOrders[$orderId] = true;
         }
         return [
             'activeCardCount' => count($activeOrders),

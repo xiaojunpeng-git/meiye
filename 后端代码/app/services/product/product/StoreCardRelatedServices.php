@@ -382,6 +382,12 @@ class StoreCardRelatedServices extends BaseServices
                 'writeoff_amount' => $item['writeoff_amount'] ?? $item['writeoffAmount'] ?? 0,
                 // 每张卡独立配置手工费；关联重建、门店同步均沿用同一金额（分）。
                 'labor_fee_cents' => max(0, $laborFeeCents),
+                // 组合归属随卡项目关系保存；旧规则统一为 0，不参与组合扣次。
+                'combination_group_no' => (int)($item['combination_group_no'] ?? 0),
+                'combination_group_name' => (string)($item['combination_group_name'] ?? ''),
+                'combination_group_rule' => (string)($item['combination_group_rule'] ?? ''),
+                'combination_choice_limit' => (int)($item['combination_choice_limit'] ?? 0),
+                'combination_shared_times' => (int)($item['combination_shared_times'] ?? 0),
                 'status' => (int)($item['status'] ?? 1),
                 'add_time' => (int)($item['add_time'] ?? time()),
             ];
