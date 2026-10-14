@@ -92,10 +92,16 @@ exportOk('八类订单记录 provider 已登记', substr_count($config, 'Cashier
     && strpos($config, 'CashierV3CardOperationUnifiedQueryProvider::class') !== false);
 exportOk('异步导出 worker 会重建订单中心权限上下文', strpos($config, 'CashierV3OrderCenterUnifiedQueryWorkerContextResolver::class') !== false
     && strpos($provider, 'authoritativeScopes') !== false
-    && strpos($provider, 'CashierV3Bootstrap::dispatcher()') !== false
-    && strpos($workerResolver, "['pageCode' => (string)(\$task['page_code'] ?? '')]") !== false
+    && strpos($provider, 'scopesForContext($context)') !== false
+    && strpos($workerResolver, "['pageCode' => \$pageCode]") !== false
     && strpos($exportWorker, "method_exists(\$resolver, 'pageCodes')") !== false
     && strpos($exportWorker, 'in_array($pageCode, $resolvedPageCodes, true)') !== false);
+exportOk('异步导出会校验选店会话及原权限版本，身份 ID 冲突不能切换到另一账号',
+    strpos($workerResolver, "Db::name('cashier_v3_store_session')") !== false
+    && strpos($workerResolver, 'resolveEffectiveStoreIds(') !== false
+    && strpos($workerResolver, "'auth_version'") !== false
+    && strpos($workerResolver, "\$task['permission_version']") !== false
+    && strpos($workerResolver, 'count($matched) !== 1') !== false);
 exportOk('导出只读取现有 V3 订单中心权威投影', strpos($provider, 'querySalesOrders') !== false
     && strpos($provider, 'queryRecords') !== false
     && strpos($provider, 'store_order_refund') === false);

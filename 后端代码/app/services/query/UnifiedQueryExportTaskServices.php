@@ -339,11 +339,12 @@ class UnifiedQueryExportTaskServices
         }
         $fileName = $this->fileName((string)($payload['fileName'] ?? ($payload['file_name'] ?? '')));
         $includeSummary = !empty($payload['includeSummary']);
-        // 创建期不读取或计算业务数据：按已冻结 scope 的理论最大行数预留，避免排队
-        // 后才发现 Xlsx 需要建立不可控工作簿。页面导出只预留已验证的分页上限。
+        // 创建期没有权威命中数。查询范围可能只有几十行，不能拿执行器的 1 万行
+        // 理论上限乘字段数拒绝它；实际行数由 worker 在建立工作簿前再次按同一
+        // 字段快照检查。当前页有已验证的分页上限，可以在创建期直接预检。
         $maximumRows = $scope === 'page'
             ? (int)($queryPlan['pagination']['limit'] ?? 0)
-            : self::MAX_EXPORT_ROWS;
+            : 0;
         $reservedCellCount = self::assertCellBudget(
             count($fieldSnapshot),
             $maximumRows,
