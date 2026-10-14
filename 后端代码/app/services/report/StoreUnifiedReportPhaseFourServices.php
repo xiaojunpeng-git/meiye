@@ -208,7 +208,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
         unset($row);
         // 这里的说明直接展示给门店用户：明确新老客只看六维购买历史、
-        // 1,000 元门槛只限制成交列，以及欠款是当前余额而非所选期间收款。
+        // 1,000 元门槛只限制成交列；“历史总欠款”是当前未还余额，不随所选期间重算。
         $columns = [
             $this->pathColumn('company_name', '分公司', '按业务门店所属分公司展示；没有配置分公司时显示“未配置分公司”。', ['分公司'], false, true, 130),
             $this->pathColumn('store_name', '门店', '显示发生六维服务、收款或欠款的门店名称。', ['门店'], false, true, 140),
@@ -223,7 +223,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->pathColumn('total_deal_performance', '合计成交业绩', '新客业绩加老客业绩。未达到1,000元成交条件的收款不计入此列，但仍计入实收业绩。', ['合计成交业绩'], true, false, 130, $this->drill('六维')),
             $this->pathColumn('new_deal_rate', '新客成交率', '新客成交人数除以新客见诊人数；新客见诊人数为0时显示“-”。', ['成交率', '新客成交率'], false, false, 120, [], '成交率'),
             $this->pathColumn('old_deal_rate', '老客成交率', '老客成交人数除以老客见诊人数；老客见诊人数为0时显示“-”。', ['成交率', '老客成交率'], false, false, 120, [], '成交率'),
-            $this->pathColumn('debt', '欠款', '当前仍未还清的六维销售欠款余额，不是所选期间新产生的欠款；还款成功后余额减少。', ['欠款'], true),
+            $this->pathColumn('debt', '历史总欠款', '历史六维销售订单截至当前仍未还清的欠款余额合计，不受所选日期限制；还款成功后余额减少。', ['历史总欠款'], true),
             $this->pathColumn('self_received_performance', '自营实收业绩', '所选期间六维中非合作分类的实际收款，扣除退款；卡项按卡内六维项目计入，不受1,000元成交条件限制。', ['自营实收业绩'], true, false, 130, $this->drill('六维 / 自营')),
             $this->pathColumn('self_to_date_performance', '自营截止今日合计业绩', '当前与本表“自营实收业绩”相同，只统计所选期间，不额外累加之前月份。', ['自营截止今日合计业绩'], true, false, 150, $this->drill('六维 / 自营')),
             $this->pathColumn('new_unit_output', '新客单产', '新客业绩除以新客成交人数；没有新客成交时显示“-”。', ['成交单产', '新客单产'], false, false, 110, [], '成交单产'),
