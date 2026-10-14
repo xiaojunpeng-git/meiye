@@ -491,14 +491,18 @@ final class CashierV3CashierWorkspaceServices
             $craftsmen = $this->authoritativeCraftsmenInTx(
                 array_values($settings['craftsmen']),
                 $operatorScope,
-                $this->laborProjectIdFromLine($line)
+                $this->laborProjectIdFromLine($line),
+                (int)($line['holder_id'] ?? 0),
+                (int)($line['source_detail_id'] ?? 0)
             );
         } else {
             // partial 更新也重验已保存人员，避免手艺人离职后通过切换其它字段继续保留。
             $craftsmen = $this->authoritativeCraftsmenInTx(
                 $this->craftsmanSelectionsFromSnapshot($craftsmen, $lineKey),
                 $operatorScope,
-                $this->laborProjectIdFromLine($line)
+                $this->laborProjectIdFromLine($line),
+                (int)($line['holder_id'] ?? 0),
+                (int)($line['source_detail_id'] ?? 0)
             );
         }
 
@@ -2082,7 +2086,9 @@ final class CashierV3CashierWorkspaceServices
     private function authoritativeCraftsmenInTx(
         array $selections,
         CashierV3OperatorScope $operatorScope,
-        int $projectId = 0
+        int $projectId = 0,
+        int $holderId = 0,
+        int $detailId = 0
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceResolveCraftsmen');
         if (!$selections) {
@@ -2237,7 +2243,11 @@ final class CashierV3CashierWorkspaceServices
         }
 
         $craftsmen = [];
-        $defaultLaborFeeCents = $projectId > 0 ? $this->projectLaborDefaultCents($projectId) : 0;
+        // 新增服务才读取卡内当前设置；显式填入的手艺人金额继续作为本次草稿快照。
+        $defaultLaborFeeCents = $projectId > 0
+            ? CashierV3ProjectLaborDefault::entitlementCents(
+                $projectId, $holderId, $detailId, CashierV3ScopeResolver::TENANT_SCOPE_ID
+            ) : 0;
         foreach ($selections as $index => $selection) {
             $staffId = (int)$selection['staffId'];
             $row = $byId[$staffId] ?? null;
@@ -3028,11 +3038,15 @@ final class CashierV3CashierWorkspaceServices
             $manualLaborFeeCents = ($row['manual_labor_fee_cents'] ?? null) === null
                 ? null
                 : $this->storedNonnegativeInteger($row['manual_labor_fee_cents'], $lineKey, 'manual_labor_fee_cents');
-            // 项目固定手工费属于当前租户的项目配置。工作台行同时保留
-            // catalog_product_id 作为旧快照兜底，避免历史行只保存产品 ID
-            // 时把固定手工费误读成 0。
+            // 销售项目沿用平台主项目配置；已售卡权益则实时读取当前卡内关联设置。
+            // catalog_product_id 仅为旧销售行项目身份兜底，不能替代权益来源身份。
             $projectIdForLabor = $this->laborProjectIdFromLine($row);
-            $laborDefaultFeeCents = $this->projectLaborDefaultCents($projectIdForLabor);
+            $laborDefaultFeeCents = $lineRole === self::ROLE_ENTITLEMENT
+                ? CashierV3ProjectLaborDefault::entitlementCents(
+                    $projectIdForLabor, (int)$row['holder_id'], (int)$row['source_detail_id'],
+                    CashierV3ScopeResolver::TENANT_SCOPE_ID
+                )
+                : $this->projectLaborDefaultCents($projectIdForLabor);
             // 损坏的手艺人快照不能被静默显示为“待分配”。
             $this->craftsmanIdsFromSnapshot($craftsmen, $lineKey);
             $storedServiceObject = (string)($row['service_object'] ?? '');

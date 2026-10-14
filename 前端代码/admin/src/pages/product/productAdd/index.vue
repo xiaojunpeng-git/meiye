@@ -1205,6 +1205,9 @@
                 <template slot-scope="{ row }" slot="price">
                   {{ formatWholeYuan(row.price) }}
                 </template>
+                <template slot-scope="{ index }" slot="labor_fee">
+                  <InputNumber v-model="cardData[index].labor_fee" :min="0" :max="999999999" :precision="0"></InputNumber>
+                </template>
                 <template slot-scope="{ row, index }" slot="write_times">
                   <InputNumber v-model="cardData[index].write_times" :max="99999999" :min="1" :precision="0"></InputNumber>
                 </template>
@@ -2217,6 +2220,7 @@ export default {
           render: (h, params) => h('div', Number(params.row.product_type) === 6 ? '项目' : '产品'),
         },
         { title: '项目原价', slot: 'price', minWidth: 100 },
+        { title: '手工', slot: 'labor_fee', minWidth: 120 },
       ];
       if (['normal', 'choice_kind'].includes(this.formData.card_rule_type)) {
         columns.push({
@@ -3357,6 +3361,8 @@ export default {
             store_name: item.productInfo.store_name,
             write_times: item.write_times,
             writeoff_amount: Number(item.writeoff_amount || 0),
+            // 卡内手工是卡与项目的独立设置；编辑时回显已保存值，不能重取项目默认值覆盖人工修改。
+            labor_fee: Number(item.labor_fee_cents || 0) / 100,
           };
         });
         this.cardData = related;
@@ -4134,6 +4140,8 @@ export default {
       newCardData.forEach((item) => {
         item.write_times = 1;
         item.writeoff_amount = 0;
+        // 新增项目才继承项目手工费，后续在卡内可独立调整。
+        this.$set(item, 'labor_fee', Number(item.labor_fee || 0));
       });
       this.cardData = [...this.cardData, ...newCardData];
     },

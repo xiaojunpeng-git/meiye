@@ -118,8 +118,14 @@ final class CashierV3QueryEntitySelectorServices
             : 0;
         $laborDefaultFeeCents = 0;
         if ($selectorScope === 'service_actual_craftsmen' && $projectId > 0) {
-            // 与购物车使用同一配置来源，避免旧门店零值规则使人员候选默认值漂移。
-            $laborDefaultFeeCents = CashierV3ProjectLaborDefault::cents($projectId, $dataScope->tenantId());
+            // 与购物车使用同一读模型；权益来源身份由后端重新核对，
+            // 不能凭客户端传入的 holder ID 读取另一张卡的手工费。
+            $laborDefaultFeeCents = CashierV3ProjectLaborDefault::entitlementCents(
+                $projectId,
+                (int)($selectorContext['entitlementInstanceId'] ?? 0),
+                (int)($selectorContext['entitlementSourceDetailId'] ?? 0),
+                $dataScope->tenantId()
+            );
         }
         $eligibilityColumn = $requiresEmploymentType
             ? 'ss.cashier_salesperson_enabled'

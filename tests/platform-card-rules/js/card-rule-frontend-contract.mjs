@@ -30,6 +30,8 @@ const checks = [
   ['time-card writeoff is restricted to whole yuan', form.includes(':max="9999999999"') && form.includes(':precision="0"') && form.includes('整数核销金额')],
   ['card and project suppress generic stock input', form.includes('formData.product_type != 5 && formData.product_type != 6')],
   ['card project prices display as whole yuan', form.includes('slot="price"') && form.includes('formatWholeYuan(row.price)') && form.includes('String(Math.trunc(amount))')],
+  ['card project labor has an editable column after project price', form.includes("{ title: '项目原价', slot: 'price', minWidth: 100 },\n        { title: '手工', slot: 'labor_fee'") && form.includes('v-model="cardData[index].labor_fee"')],
+  ['existing card labor is restored from saved cents while new projects take the project default', form.includes('labor_fee: Number(item.labor_fee_cents || 0) / 100') && form.includes("this.$set(item, 'labor_fee', Number(item.labor_fee || 0))")],
   ['only retail products expose stock synchronization', form.includes('Number(formData.product_type) === 0 && formData.applicable_type')],
   ['retail products default to single specification and hide the selector', model.includes('spec_type: 0') && form.includes('formData.product_type != 0 && formData.product_type != 4')],
   ['retail single-specification name is editable and submitted', form.includes('v-model.trim="formData.single_spec_name"') && form.includes("'single_spec_name', this.formData.single_spec_name")],
