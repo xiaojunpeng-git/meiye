@@ -297,16 +297,17 @@ const currentFieldExplanations = computed(() => columns.value.map((column) => ({
 })))
 // 弹窗导语只解释列的阅读方式；每列实际取值仍以服务端返回的说明为准。
 const fieldGuideIntro = computed(() => {
-  if (['new_customer_analysis', 'new_customer_analysis_summary'].includes(activeReport.value)) {
-    return '顾客首次办理疗程卡即计入新客，未付清也计入；后续补清不重复记人次。首次办卡或补交来源为 A 的数据不计入，已作废订单也不计入；其他补交按自身来源统计。下方说明各列的数据从哪里来。'
   if (activeReport.value === 'field_acquisition_summary') {
-    return '本表按会员汇总 E 地推销售的有效现金收款。几月实际收款就记在几月，其他来源的收款不计；点击月金额可查看对应的 E 销售明细。'
+    // 汇总与明细都按补交自己的 E 来源和业务日归属，原销售来源保持历史快照。
+    return '本表按会员汇总 E 地推销售普通收款和 E 来源补交。补交按自己的业务日计入对应月份，原销售来源不变；点击月金额可查看对应明细。'
   }
   if (activeReport.value === 'field_acquisition_detail') {
     return String(dynamicFilters.value.receipt_period || '') === '1'
-      ? '当前从汇总表按收款月份查看：只显示该月实际收到现金的 E 地推销售明细，金额为该月分摊收款，不是原销售日期的全部收款。'
-      : '本表显示当次来源为 E 地推拓客的销售和纯权益护理；现金按原 E 销售明细分摊，护理按实际选择的导购轮次归列。'
+      ? '当前从汇总表按收款月份查看：显示该月 E 地推销售普通收款和 E 来源补交；补交按本笔业务日独立成行，不改变原销售来源。'
+      : '本表显示当次 E 来源销售、纯权益护理及 E 来源补交。补交按本笔业务日独立成行，现金按有效收款分摊，护理按当次导购轮次归列。'
   }
+  if (['new_customer_analysis', 'new_customer_analysis_summary'].includes(activeReport.value)) {
+    return '顾客首次办理疗程卡即计入新客，未付清也计入；后续补清不重复记人次。首次办卡或补交来源为 A 的数据不计入，已作废订单也不计入；其他补交按自身来源统计。下方说明各列的数据从哪里来。'
   }
   if (activeReport.value === 'store_item_analysis') {
     return '分类列按当前可见的商品分类显示；每笔金额仍按发生业务时记录的分类归入。旧记录没有可用分类时显示在“未分类”，以后修改项目分类不会改变旧记录。'

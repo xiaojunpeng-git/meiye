@@ -29,12 +29,13 @@ foreach ([
 if (strpos($service, 'if(!$records||!$columns)return[]') !== false) {
     throw new RuntimeException('phase-two reports must keep a summary row when the result set is empty');
 }
-// 地推现金的导购轮次必须来自本销售明细的权威归属事实，不能按查询结果的全局订单序号代替。
+// 地推销售现金按原明细轮次，独立补交按本笔最新归属轮次；都不能按全局订单序号推算。
 foreach ([
     'sale_line.order_line_id=s.source_line_id',
     'guide_round.source_line_id=sale_line.checkout_line_id',
     'MAX(guide_round.guide_round_no) guide_round_no',
-    '$cashSlot = (int)($row[\'guide_round_no\'] ?? 0)',
+    '$cashSlot=$repaymentOnly?(int)($repaymentRounds[(string)$row[\'repayment_id\']]??0):(int)($row[\'guide_round_no\']??0)',
+    '$cashAmount=$repaymentOnly?(int)$row[\'amount_cents\']',
     '$row[\'cash_none\'] = $this->money($cashSlot === 0',
     '$row[\'cash_\'.$round]=$this->money($cashSlot===$round',
     "'cash_none'=>'无轮次现金业绩','cash_1'=>'第一次现金业绩'",
@@ -45,9 +46,9 @@ foreach ([
 if (strpos($service, '$saleSlots[') !== false) {
     throw new RuntimeException('field acquisition cash must not fall back to sale order position without a guide round');
 }
-if (strpos($service, "'本笔地推销售选择导购第'") === false
-    || strpos($service, '补交只计入补交发生的月份') === false
-    || strpos($service, "field-acquisition-service-only-v5") === false) {
+if (strpos($service, "'本笔 E 地推销售或 E 来源补交选择导购第'") === false
+    || strpos($service, '补交按自身业务日独立成行') === false
+    || strpos($service, "field-acquisition-repayment-v6") === false) {
     throw new RuntimeException('field acquisition round explanation and metric version must come from the backend');
 }
 // 护理来源与轮次以服务当次结账为准，不能把同会员的其他来源护理顺排进前三轮。

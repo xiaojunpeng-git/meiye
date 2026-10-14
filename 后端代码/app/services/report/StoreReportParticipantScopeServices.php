@@ -27,6 +27,14 @@ final class StoreReportParticipantScopeServices
                 ->where('store_id', '>', 0)->column('store_id');
             $storeIds = array_merge($storeIds, array_map('intval', $ids));
         }
+        // 补交归属没有 status，且旧版本不能继续授予报表门店范围。
+        $revisionTable = Db::name('cashier_v3_supplement_attribution_revision')->getTable();
+        $supplementStores = Db::name('cashier_v3_supplement_attribution_person')->alias('supplement_person')
+            ->where('supplement_person.tenant_id', $tenantId)
+            ->where('supplement_person.employee_id', $employeeId)
+            ->whereRaw('supplement_person.revision_no=(SELECT MAX(supplement_revision.revision_no) FROM ' . $revisionTable . ' supplement_revision WHERE supplement_revision.tenant_id=supplement_person.tenant_id AND supplement_revision.repayment_id=supplement_person.repayment_id)')
+            ->column('supplement_person.store_id');
+        $storeIds = array_merge($storeIds, array_map('intval', $supplementStores));
         return array_values(array_unique(array_filter($storeIds)));
     }
 
@@ -53,6 +61,30 @@ final class StoreReportParticipantScopeServices
                     ->whereRaw('report_participant_mf.tenant_id=' . $tenantField)
                     ->where('report_participant_mf.sales_manager_employee_id', $employeeId)
                     ->where('report_participant_mf.status', 'effective');
+            }, 'OR');
+        });
+    }
+
+    /** 补交只按本笔有效销售人或最新归属版本授权，不借原销售的参与人员扩大可见范围。 */
+    public function applySupplement($query, string $repaymentField, int $employeeId)
+    {
+        $this->assertEmployee($employeeId);
+        $tenantField = $this->tenantFieldFor($repaymentField);
+        $revisionTable = Db::name('cashier_v3_supplement_attribution_revision')->getTable();
+        return $query->where(function ($participant) use ($repaymentField, $tenantField, $employeeId, $revisionTable) {
+            $participant->whereExists(function ($fact) use ($repaymentField, $tenantField, $employeeId) {
+                $fact->name('cashier_v3_performance_fact')->alias('report_supplement_pf')
+                    ->whereRaw('report_supplement_pf.order_id=' . $repaymentField)
+                    ->whereRaw('report_supplement_pf.tenant_id=' . $tenantField)
+                    ->where('report_supplement_pf.employee_id', $employeeId)
+                    ->where('report_supplement_pf.status', 'effective')
+                    ->where('report_supplement_pf.fact_direction', 'forward');
+            })->whereExists(function ($person) use ($repaymentField, $tenantField, $employeeId, $revisionTable) {
+                $person->name('cashier_v3_supplement_attribution_person')->alias('report_supplement_person')
+                    ->whereRaw('report_supplement_person.repayment_id=' . $repaymentField)
+                    ->whereRaw('report_supplement_person.tenant_id=' . $tenantField)
+                    ->where('report_supplement_person.employee_id', $employeeId)
+                    ->whereRaw('report_supplement_person.revision_no=(SELECT MAX(report_supplement_revision.revision_no) FROM ' . $revisionTable . ' report_supplement_revision WHERE report_supplement_revision.tenant_id=report_supplement_person.tenant_id AND report_supplement_revision.repayment_id=report_supplement_person.repayment_id)');
             }, 'OR');
         });
     }
@@ -98,6 +130,49 @@ final class StoreReportParticipantScopeServices
      */
     public function resolveSubject(string $tenantId, string $subjectType, string $subjectKey, int $employeeId = 0): ?array
     {
+        if ($subjectType === 'field_acquisition_repayment') {
+            // 地推补交手动值绑定一条真实收款分摊；仅 E 来源补交可编辑，个人视图只认本笔最新归属。
+            if (strpos($subjectKey, 'field-repayment:') !== 0) return null;
+            $allocationId = substr($subjectKey, strlen('field-repayment:'));
+            if ($allocationId === '') return null;
+            $allocation = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('field_subject_allocation')
+                ->join('cashier_v3_payment_fact field_subject_payment',
+                    'field_subject_payment.tenant_id=field_subject_allocation.tenant_id'
+                    . ' AND field_subject_payment.store_id=field_subject_allocation.store_id'
+                    . ' AND field_subject_payment.fact_id=field_subject_allocation.payment_fact_id')
+                ->join('cashier_v3_sale_fact field_subject_sale',
+                    'field_subject_sale.tenant_id=field_subject_allocation.tenant_id'
+                    . ' AND field_subject_sale.store_id=field_subject_allocation.store_id'
+                    . ' AND field_subject_sale.fact_id=field_subject_allocation.sale_fact_id')
+                ->leftJoin('cashier_v3_business_source field_subject_source',
+                    'field_subject_source.id=field_subject_payment.business_source_primary_id'
+                    . ' AND field_subject_source.parent_id=0')
+                ->where('field_subject_allocation.tenant_id', $tenantId)
+                ->where('field_subject_allocation.allocation_fact_id', $allocationId)
+                ->where('field_subject_allocation.status', 'effective')
+                ->where('field_subject_payment.status', 'effective')
+                ->where('field_subject_payment.fact_direction', 'forward')
+                ->where('field_subject_payment.source_document_type', 'debt_repayment')
+                ->where('field_subject_payment.member_id', '>', 0)
+                ->where('field_subject_payment.amount_cents', '>', 0)
+                ->where('field_subject_sale.status', 'effective')
+                ->where('field_subject_sale.fact_direction', 'forward')
+                ->where(function ($source): void {
+                    $source->where('field_subject_payment.business_source_primary_name_snapshot', 'like', 'E%')
+                        ->whereOr('field_subject_source.name', 'like', 'E%');
+                });
+            $normal = new StoreReportNormalDataScopeServices();
+            $normal->excludeVoidedSupplementPaymentFacts($allocation, 'field_subject_payment.tenant_id',
+                'field_subject_payment.store_id', 'field_subject_payment.order_id');
+            $normal->excludeVoidedSalesOrderFacts($allocation, 'field_subject_sale.tenant_id', 'field_subject_sale.order_id');
+            if ($employeeId > 0) $this->applySupplement($allocation, 'field_subject_payment.order_id', $employeeId);
+            $row = $allocation->field('field_subject_allocation.id,field_subject_allocation.store_id,'
+                . 'field_subject_payment.order_id,field_subject_sale.source_line_id')->find();
+            return is_array($row) ? [
+                'store_id' => (int)$row['store_id'], 'source_fact_id' => (int)$row['id'],
+                'source_order_id' => (string)$row['order_id'], 'source_line_id' => (string)$row['source_line_id'],
+            ] : null;
+        }
         if ($subjectType === 'cross_industry_repayment') {
             // 补交独立成为异业汇总会员时，以真实 G 来源收款事实为手动字段主题；不能伪造门店或借用其他来源。
             $payment = Db::name('cashier_v3_payment_fact')->alias('subject_repayment')

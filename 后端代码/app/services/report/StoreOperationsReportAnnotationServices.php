@@ -173,6 +173,17 @@ final class StoreOperationsReportAnnotationServices
             $sourceFactId = 0;
             $sourceOrderId = (string)$resolved['source_order_id'];
             $sourceLineId = '';
+        } elseif ($reportCode === 'field_acquisition_detail' && $subjectType === 'field_acquisition_repayment') {
+            // 独立补交行有自己的稳定分摊键，不能复用原销售手动值或信任客户端自报的门店。
+            $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
+                $scope['tenant_id'], $subjectType, $subjectKey,
+                $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
+            );
+            if ($resolved === null) throw new \InvalidArgumentException('地推补交记录不存在或无权编辑');
+            $storeId = (int)$resolved['store_id'];
+            $sourceFactId = (int)$resolved['source_fact_id'];
+            $sourceOrderId = (string)$resolved['source_order_id'];
+            $sourceLineId = (string)$resolved['source_line_id'];
         } elseif ($reportCode === 'field_acquisition_detail' && $subjectType === 'business_event_line') {
             // 纯权益护理行不能借用销售行键；保存手动字段前反查真实服务与参与权限。
             if (strpos($subjectKey, 'service:') !== 0) throw new \InvalidArgumentException('地推护理行键无效');

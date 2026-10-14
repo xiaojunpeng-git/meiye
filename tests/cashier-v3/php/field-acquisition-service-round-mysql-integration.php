@@ -26,7 +26,7 @@ $groups = array_column($detail['column_groups'] ?? [], 'label');
 if ($groups !== ['无轮次', '第一次', '第二次', '第三次']) {
     throw new RuntimeException('Service group order is incorrect');
 }
-if (($detail['metric_version'] ?? '') !== 'field-acquisition-service-only-v5') {
+if (($detail['metric_version'] ?? '') !== 'field-acquisition-repayment-v6') {
     throw new RuntimeException('Service round metric version is incorrect');
 }
 $rows = $detail['records'] ?? [];

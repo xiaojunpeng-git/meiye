@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-// 仅在本地瑞昊副本读取已确认的两笔 E 地推收款；不新增、修改或作废业务事实。
+// 仅在本地瑞昊副本读取 E 地推原销售收款和独立补交；不新增、修改或作废业务事实。
 if (getenv('FIELD_ACQUISITION_CASH_MONTH_TEST') !== '1') {
     throw new RuntimeException('Explicit local read-only test flag required');
 }
@@ -41,9 +41,9 @@ foreach ($ordinaryDetail['records'] as $row) {
 $rows = array_values(array_filter($summary['records'], static function (array $row): bool {
     return (int)($row['member_id'] ?? 0) === 1136097;
 }));
-if (count($rows) !== 1 || (string)$rows[0]['month_10'] !== '2000'
-    || (string)$rows[0]['annual_total'] !== '2000') {
-    throw new RuntimeException('October E-source receipts did not reconcile to 2000');
+if (count($rows) !== 1 || (string)$rows[0]['month_10'] !== '2186'
+    || (string)$rows[0]['annual_total'] !== '2186') {
+    throw new RuntimeException('October E-source sales and repayments did not reconcile to 2186');
 }
 $drilldown = $rows[0]['_drilldown']['month_10'] ?? [];
 if (($drilldown['params']['receipt_period'] ?? null) !== 1
@@ -63,18 +63,25 @@ $input = $scope + [
 ];
 $detail = $report->query([18], $input);
 $export = $report->export([18], $input);
-if (count($detail['records']) !== 2 || $export['records'] !== $detail['records']) {
-    throw new RuntimeException('October query and export must show the same two E-sale lines');
+if (count($detail['records']) !== 4 || $export['records'] !== $detail['records']) {
+    throw new RuntimeException('October query and export must show two E-sale lines and two E-repayment lines');
 }
 $byDay = [];
+$repayments = [];
 foreach ($detail['records'] as $row) {
     $amount = (float)($row['cash_none'] ?? 0) + (float)($row['cash_1'] ?? 0)
         + (float)($row['cash_2'] ?? 0) + (float)($row['cash_3'] ?? 0);
-    $byDay[(string)$row['business_date']] = $amount;
+    $day = (string)$row['business_date'];
+    $byDay[$day] = ($byDay[$day] ?? 0) + $amount;
+    if ((string)($row['repayment_no'] ?? '') !== '') {
+        $repayments[(string)$row['repayment_no']] = $amount;
+    }
 }
 if (($byDay['2026-10-01'] ?? null) !== 1000.0
-    || ($byDay['2026-10-13'] ?? null) !== 1000.0) {
-    throw new RuntimeException('October drilldown did not explain both actual E receipts');
+    || ($byDay['2026-10-13'] ?? null) !== 1186.0
+    || ($repayments['BJ26101300002'] ?? null) !== 98.0
+    || ($repayments['BJ26101300003'] ?? null) !== 88.0) {
+    throw new RuntimeException('October drilldown did not explain each sale and independent E repayment');
 }
 
-echo "PASS member-only detail and summary; October 2000 = October 1 receipt 1000 + October 13 receipt 1000; query/export agree\n";
+echo "PASS member-only detail and summary; October 2186 = sales 2000 + E repayments 186; query/export agree\n";

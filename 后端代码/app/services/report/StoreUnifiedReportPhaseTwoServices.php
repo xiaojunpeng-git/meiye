@@ -6,6 +6,7 @@ use app\services\query\metric\StoreCustomerVisitEligibility;
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\order\CashierV3RefundAttributionServices;
+use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use think\facade\Db;
 
 /**
@@ -607,9 +608,29 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->join('cashier_v3_payment_sale_allocation_fact allocation',"allocation.tenant_id=field_sale_payment.tenant_id AND allocation.payment_fact_id=field_sale_payment.fact_id AND allocation.status='effective'")
             ->join('cashier_v3_sale_fact field_sale',"field_sale.tenant_id=allocation.tenant_id AND field_sale.store_id=allocation.store_id AND field_sale.fact_id=allocation.sale_fact_id")
             ->where('field_sale_payment.status','effective')->where('field_sale.status','effective')
-            ->where('field_sale_payment.source_document_type','<>','recharge_debt_repayment')
+            ->whereNotIn('field_sale_payment.source_document_type',['debt_repayment','recharge_debt_repayment'])
             ->whereIn('field_sale.business_source_primary_id',$this->sourceIds('E')?:[-1]);
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($query,'field_sale.tenant_id','field_sale.order_id');
+        return $query;
+    }
+
+    /** 每条 E 来源补交按成功收款与原销售明细的有效分摊入表，不改写原销售来源。 */
+    private function fieldMarketingRepaymentAllocations(array $stores,array $range,array $input)
+    {
+        $sourceIds=$this->sourceIds('E');
+        $query=$this->applyOrganizationFilters($this->scope(Db::name('cashier_v3_payment_fact')->alias('field_repayment'),$stores,'field_repayment'),'field_repayment',$input,$range)
+            ->join('cashier_v3_payment_sale_allocation_fact field_allocation',"field_allocation.tenant_id=field_repayment.tenant_id AND field_allocation.store_id=field_repayment.store_id AND field_allocation.payment_fact_id=field_repayment.fact_id AND field_allocation.status='effective'")
+            ->join('cashier_v3_sale_fact field_origin',"field_origin.tenant_id=field_allocation.tenant_id AND field_origin.store_id=field_allocation.store_id AND field_origin.fact_id=field_allocation.sale_fact_id AND field_origin.status='effective' AND field_origin.fact_direction='forward'")
+            ->where('field_repayment.status','effective')->where('field_repayment.fact_direction','forward')
+            ->where('field_repayment.source_document_type','debt_repayment')
+            ->where('field_repayment.member_id','>',0)->where('field_repayment.amount_cents','>',0)
+            ->where(function($source)use($sourceIds):void{
+                $source->whereIn('field_repayment.business_source_primary_id',$sourceIds?:[-1])
+                    ->whereOr('field_repayment.business_source_primary_name_snapshot','like','E%');
+            });
+        $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query,'field_repayment.tenant_id','field_repayment.store_id','field_repayment.order_id');
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query,'field_origin.tenant_id','field_origin.order_id');
+        if($this->participantEmployeeId>0)(new StoreReportParticipantScopeServices())->applySupplement($query,'field_repayment.order_id',$this->participantEmployeeId);
         return $query;
     }
 
@@ -637,6 +658,30 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if($memberId>0)$base->where('s.member_id',$memberId);
         $base=$base->fieldRaw('s.fact_id,s.store_id,s.organization_id,s.organization_path_snapshot,s.organization_name_snapshot,s.store_name_snapshot,s.member_id,s.member_name_snapshot,s.business_source_secondary_name_snapshot,s.order_id,s.source_line_id,s.business_date,s.occurred_at,MAX(o.order_note) remark,MAX(guide_round.guide_round_no) guide_round_no')
             ->group('s.store_id,s.member_id,s.order_id,s.source_line_id')->order('s.business_date','desc')->select()->toArray();
+        // 补交按自己的 E 来源和业务日成行；金额取分摊事实，原 A 销售行不转成 E 销售。
+        $repayments=$this->fieldMarketingRepaymentAllocations($stores,$range,$input)
+            ->whereBetween('field_repayment.business_date',[$range['start'],$range['end']]);
+        if($memberId>0)$repayments->where('field_repayment.member_id',$memberId);
+        $repaymentIds=[];
+        foreach($repayments->fieldRaw('field_allocation.allocation_fact_id,field_allocation.amount_cents,field_repayment.tenant_id,field_repayment.fact_id payment_fact_id,field_repayment.order_id repayment_id,field_repayment.order_no_snapshot repayment_no,field_repayment.store_id,field_repayment.organization_id,field_repayment.organization_path_snapshot,field_repayment.organization_name_snapshot,field_repayment.store_name_snapshot,field_repayment.member_id,field_repayment.member_name_snapshot,field_repayment.business_source_primary_name_snapshot,field_repayment.business_source_secondary_name_snapshot,field_repayment.business_date,field_repayment.occurred_at,field_origin.source_line_id')->select()->toArray() as $payment){
+            $payment['_repayment_only']=true;
+            $payment['fact_id']='field-repayment:'.(string)$payment['allocation_fact_id'];
+            $payment['order_id']=(string)$payment['repayment_id'];
+            $payment['remark']='';
+            $payment['guide_round_no']=0;
+            $repaymentIds[(string)$payment['repayment_id']]=true;
+            $base[]=$payment;
+        }
+        $repaymentRounds=[];
+        if($repaymentIds){
+            $revisionTable=Db::name('cashier_v3_supplement_attribution_revision')->getTable();
+            foreach(Db::name('cashier_v3_supplement_attribution_person')->alias('field_guide')
+                ->whereIn('field_guide.repayment_id',array_keys($repaymentIds))->where('field_guide.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('field_guide.role','guide')
+                ->whereRaw('field_guide.revision_no=(SELECT MAX(field_revision.revision_no) FROM '.$revisionTable.' field_revision WHERE field_revision.tenant_id=field_guide.tenant_id AND field_revision.repayment_id=field_guide.repayment_id)')
+                ->field('field_guide.repayment_id,field_guide.guide_round_no')->select()->toArray() as $guide){
+                $repaymentRounds[(string)$guide['repayment_id']]=(int)($guide['guide_round_no']??0);
+            }
+        }
         // 纯权益结账没有销售事实；以已完成且未作废的服务行补足报表行，
         // 仅取 E 来源及 entitlement_only，混合结账仍由销售行承载，避免重复展示。
         $standalone=$this->completedUnvoidedServiceFacts(
@@ -704,7 +749,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }
         }
         // 服务与现金分别按各自结账保存的导购轮次落列；没有轮次的业务不能占用前三轮。
-        $saleFacts=array_values(array_unique(array_filter(array_column($base,'fact_id'))));$saleCash=[];
+        $saleFacts=array_values(array_unique(array_filter(array_map(static function(array $row):string{
+            return !empty($row['_repayment_only'])?'':(string)($row['fact_id']??'');
+        },$base))));$saleCash=[];
         if($saleFacts){
             $paymentQuery=$this->fieldMarketingPaymentAllocations($stores)->whereIn('allocation.sale_fact_id',$saleFacts);
             if($receiptPeriod)$paymentQuery->whereBetween('field_sale_payment.business_date',[$range['start'],$range['end']]);
@@ -714,21 +761,25 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }
         }
         $keys=array_values(array_unique(array_map(static function(array $row):string{
-            return !empty($row['_service_only'])?'service:'.(string)$row['service_fact_id']:(string)$row['source_line_id'];
+            return !empty($row['_repayment_only'])?'field-repayment:'.(string)$row['allocation_fact_id']:
+                (!empty($row['_service_only'])?'service:'.(string)$row['service_fact_id']:(string)$row['source_line_id']);
         },$base)));$manual=$this->annotations('field_acquisition_detail',$stores,$keys);
         foreach ($base as &$row) {
-            $member = (int)$row['member_id']; $serviceOnly=!empty($row['_service_only']);
-            $subject=$serviceOnly?'service:'.(string)$row['service_fact_id']:(string)$row['source_line_id'];
+            $member = (int)$row['member_id']; $serviceOnly=!empty($row['_service_only']);$repaymentOnly=!empty($row['_repayment_only']);
+            $subject=$repaymentOnly?'field-repayment:'.(string)$row['allocation_fact_id']:
+                ($serviceOnly?'service:'.(string)$row['service_fact_id']:(string)$row['source_line_id']);
             $row['division_name'] = (string)$row['organization_name_snapshot'];
             $row['source'] = (string)$row['business_source_secondary_name_snapshot'];
             if($serviceOnly&&$row['source']==='')$row['source']=(string)($row['business_source_primary_name_snapshot']?:$row['selected_primary_name']?:'E地推拓客');
+            if($repaymentOnly&&$row['source']==='')$row['source']=(string)$row['business_source_primary_name_snapshot'];
+            $row['repayment_no']=$repaymentOnly?(string)$row['repayment_no']:'';
             $row['phone'] = $phones[$member] ?? '';
             $row['card_sale_date'] = $manual[$subject]['card_sale_date']['value'] ?? '';
             $row['card_sale_date_version'] = (int)($manual[$subject]['card_sale_date']['version'] ?? 0);
             $row['visit_over_one_hour'] = $manual[$subject]['visit_over_one_hour']['value'] ?? '';
             $row['visit_over_one_hour_version'] = (int)($manual[$subject]['visit_over_one_hour']['version'] ?? 0);
             $allServices=[];
-            foreach($services[(int)$row['store_id'].'|'.$member]??[] as $service){
+            foreach($repaymentOnly?[]:($services[(int)$row['store_id'].'|'.$member]??[]) as $service){
                 if(!$serviceOnly&&isset($standaloneServiceIds[(string)$service['service_fact_id']]))continue;
                 if($serviceOnly&&(string)$service['service_fact_id']!==(string)$row['service_fact_id'])continue;
                 $checkoutKey=(string)$service['tenant_id'].'|'.(int)$service['store_id'].'|'.(string)$service['checkout_request_id'];
@@ -748,8 +799,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                     ($serviceRounds[$serviceKey]??(isset($conflictingCheckoutRounds[$checkoutKey])?0:($checkoutRounds[$checkoutKey]??0)));
                 $allServices[]=$service;
             }
-            $cashSlot = (int)($row['guide_round_no'] ?? 0);
-            $row['cash_none'] = $this->money($cashSlot === 0 ? (int)($saleCash[(string)$row['fact_id']] ?? 0) : 0);
+            $cashSlot=$repaymentOnly?(int)($repaymentRounds[(string)$row['repayment_id']]??0):(int)($row['guide_round_no']??0);
+            $cashAmount=$repaymentOnly?(int)$row['amount_cents']:(int)($saleCash[(string)$row['fact_id']]??0);
+            $row['cash_none'] = $this->money($cashSlot === 0 ? $cashAmount : 0);
             // 护理列只接纳 E 来源的非体验服务；轮次从该护理结账的导购事实读取，
             // NULL/缺失均明确留在无轮次，不能按业务日期把它顺推到第一至三次。
             $visits = StoreCustomerVisitEligibility::filter($allServices);
@@ -765,7 +817,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                     },$roundVisits),static function(string $value):bool{return $value!=='';}));
                     $row['visit_'.$slot.'_'.$suffix]=implode('、',$values);
                 }
-                if($round>0)$row['cash_'.$round]=$this->money($cashSlot===$round?(int)($saleCash[(string)$row['fact_id']]??0):0);
+                if($round>0)$row['cash_'.$round]=$this->money($cashSlot===$round?$cashAmount:0);
             }
             // 手工费沿用前三条实际服务、至少三条才显示的原口径，但只在 E 来源护理中计算。
             $fee = array_sum(array_map(static function (array $service): int {
@@ -773,10 +825,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             }, array_slice($allServices, 0, 3)));
             $row['labor_fee'] = $this->money(count($allServices) >= 3 ? $fee : 0);
             $row['fourth_and_above'] = max(0, count($visits) - 3);
-            $row['annotation_subject_key'] = $subject; $row['annotation_subject_type'] = $serviceOnly?'business_event_line':'sale_line';
+            $row['annotation_subject_key'] = $subject; $row['annotation_subject_type'] = $repaymentOnly?'field_acquisition_repayment':($serviceOnly?'business_event_line':'sale_line');
         }
         unset($row);
-        $columns=$this->columns(['division_name'=>'分公司','store_name_snapshot'=>'门店','source'=>'来源','member_name_snapshot'=>'会员','card_sale_date'=>'卖卡日期','phone'=>'手机号码','visit_over_one_hour'=>'进店满1小时']);$groups=[];
+        $columns=$this->columns(['division_name'=>'分公司','store_name_snapshot'=>'门店','source'=>'来源','repayment_no'=>'补交单号','member_name_snapshot'=>'会员','card_sale_date'=>'卖卡日期','phone'=>'手机号码','visit_over_one_hour'=>'进店满1小时']);$groups=[];
         foreach(['none'=>'无轮次',1=>'第一次',2=>'第二次',3=>'第三次'] as $slot=>$label){
             $keys=['visit_'.$slot.'_craftsman','visit_'.$slot.'_date','visit_'.$slot.'_project'];
             // 每列分别说明用户看到的人、日期和项目；轮次取当次护理，不按日期推算。
@@ -791,27 +843,28 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $column=['key'=>$key,'label'=>$label];
             if($key==='cash_none'){
                 $column['source_explanation']=$receiptPeriod
-                    ? '本次选中的收款月份内，未选择导购轮次的 E 地推销售明细实际收到的现金；补交只计入补交发生的月份。'
-                    : '本笔地推销售未选择导购轮次时分摊到该销售明细的成功记账收款；后续补交仍归原销售明细，不占第1～3轮。';
+                    ? '本次选中的收款月份内，未选择导购轮次的 E 地推销售收款或 E 来源补交实际分摊的现金；补交按自身业务日独立成行。'
+                    : '本笔 E 地推销售或 E 来源补交未选择导购轮次时实际分摊的现金；补交按自身来源、业务日独立成行。';
             }elseif(in_array($key,['cash_1','cash_2','cash_3'],true)){
                 $round=(int)substr($key,-1);
                 $column['source_explanation']=$receiptPeriod
-                    ? '本次选中的收款月份内，选择导购第'.$round.'轮的 E 地推销售明细实际收到的现金；补交只计入补交发生的月份。'
-                    : '本笔地推销售选择导购第'.$round.'轮时分摊到该销售明细的成功记账收款；后续补交仍归原销售明细。';
+                    ? '本次选中的收款月份内，选择导购第'.$round.'轮的 E 地推销售收款或 E 来源补交实际分摊的现金；补交按自身业务日独立成行。'
+                    : '本笔 E 地推销售或 E 来源补交选择导购第'.$round.'轮时实际分摊的现金；补交轮次取本笔最新归属。';
             }
             $columns[]=$column;
         }
         $detailExplanations=[
             'division_name'=>'这笔地推销售或护理发生时所属的分公司，后续改名不追改历史记录。',
             'store_name_snapshot'=>'这笔地推销售或护理发生的门店，只显示当前账号可查看的门店。',
-            'source'=>'本表只收录当次来源为 E 地推拓客的销售或纯权益护理。销售时填写了二级来源就显示该名称，未填写显示“-”；纯权益护理未填二级来源时显示当次 E 来源。',
-            'member_name_snapshot'=>'这笔销售或护理当时记录的会员姓名，后续改名不追改历史记录。',
-            'card_sale_date'=>'由员工为这一笔销售或纯权益护理手动填写的卖卡日期；未填写显示“-”，不拿护理日期代替。',
+            'source'=>'本表收录当次 E 来源销售、纯权益护理及 E 来源补交。补交显示本笔补交选择的二级来源，不改写原销售来源。',
+            'repayment_no'=>'E 来源补交显示补交单号；销售和纯权益护理不是补交，显示“-”。',
+            'member_name_snapshot'=>'这笔销售、护理或补交当时记录的会员姓名，后续改名不追改历史记录。',
+            'card_sale_date'=>'由员工为这一笔销售、纯权益护理或补交单独填写的卖卡日期；未填写显示“-”，不拿业务日期代替。',
             'phone'=>'会员资料中当前登记的手机号码；没有登记时显示“-”。',
-            'visit_over_one_hour'=>'由员工为本行手动填写的进店满 1 小时次数；未填写显示 0。',
-            'labor_fee'=>'该会员本门店前 3 条已完成、未作废的 E 来源护理所记手工费合计；不足 3 条时显示 0。',
-            'fourth_and_above'=>'该会员本门店已完成、未作废、非体验的 E 来源护理超过 3 次的次数；不足 4 次显示 0。',
-            'remark'=>'地推销售单上填写的备注；纯权益护理没有销售单备注时显示“-”。',
+            'visit_over_one_hour'=>'由员工为本行单独填写的进店满 1 小时次数；未填写显示 0，补交本身不算一次进店。',
+            'labor_fee'=>'销售或护理行显示该会员本门店前 3 条已完成、未作废的 E 来源护理手工费；不足 3 条及独立补交行显示 0。',
+            'fourth_and_above'=>'销售或护理行显示该会员本门店已完成、未作废的 E 来源护理超过 3 次的次数；独立补交行显示 0。',
+            'remark'=>'地推销售单上填写的备注；纯权益护理或独立补交行显示“-”。',
         ];
         foreach($columns as &$column)if(isset($detailExplanations[$column['key']]))$column['source_explanation']=$detailExplanations[$column['key']];unset($column);
         return $this->result('地推拓客明细表',$columns,$base,$input,$groups);
@@ -827,29 +880,37 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }$records[$member]=['member_id'=>$member,'card_sale_date'=>$row['card_sale_date'],'member_name_snapshot'=>$row['member_name_snapshot'],'phone'=>$row['phone'],'source'=>$row['source'],'first_visit_date'=>$row['first_e_visit_date'],'remark'=>$row['remark'],'annotation_subject_key'=>$row['annotation_subject_key']];}
         $memberIds=array_keys($records);$cash=[];
         if($memberIds){
-            // 只汇总报表中 E 来源销售明细的有效分摊；按实际收款业务日落月，不能按会员全部来源收款凑数。
+            // 普通 E 销售收款与 E 来源补交分开读，按各自收款日合并；原 A 销售不会被改成 E 销售。
             $payments=$this->fieldMarketingPaymentAllocations($stores)
                 ->whereIn('field_sale.member_id',$memberIds)
                 ->whereBetween('field_sale_payment.business_date',[$year.'-01-01',$year.'-12-31'])
                 ->fieldRaw('field_sale.member_id,MONTH(field_sale_payment.business_date) month_no,SUM(allocation.amount_cents) amount_cents')
                 ->group('field_sale.member_id,MONTH(field_sale_payment.business_date)')->select()->toArray();
-            foreach($payments as $payment)$cash[(int)$payment['member_id']][(int)$payment['month_no']]=(int)$payment['amount_cents'];
+            $repayments=$this->fieldMarketingRepaymentAllocations($stores,['start'=>$year.'-01-01','end'=>$year.'-12-31'],$input)
+                ->whereIn('field_repayment.member_id',$memberIds)
+                ->whereBetween('field_repayment.business_date',[$year.'-01-01',$year.'-12-31'])
+                ->fieldRaw('field_repayment.member_id,MONTH(field_repayment.business_date) month_no,SUM(field_allocation.amount_cents) amount_cents')
+                ->group('field_repayment.member_id,MONTH(field_repayment.business_date)')->select()->toArray();
+            foreach(array_merge($payments,$repayments) as $payment){
+                $member=(int)$payment['member_id'];$month=(int)$payment['month_no'];
+                $cash[$member][$month]=(int)($cash[$member][$month]??0)+(int)$payment['amount_cents'];
+            }
         }
         foreach($records as &$row){$row['annual_total_cents']=0;$row['_drilldown']=[];foreach(range(1,12)as$m){$c=(int)($cash[(int)$row['member_id']][$m]??0);$monthKey='month_'.$m;$row[$monthKey]=$this->money($c);$row['annual_total_cents']+=$c;if($c!==0)$row['_drilldown'][$monthKey]=['report'=>'field_acquisition_detail','params'=>['start_date'=>sprintf('%04d-%02d-01',$year,$m),'end_date'=>date('Y-m-t',strtotime(sprintf('%04d-%02d-01',$year,$m))),'receipt_period'=>1],'param_map'=>['member_id'=>'member_id']];}$row['annual_total']=$this->money($row['annual_total_cents']);if((int)$row['annual_total_cents']!==0)$row['_drilldown']['annual_total']=['report'=>'field_acquisition_detail','params'=>['start_date'=>$year.'-01-01','end_date'=>$year.'-12-31','receipt_period'=>1],'param_map'=>['member_id'=>'member_id']];}unset($row);
         $columns=$this->columns(['card_sale_date'=>'卖卡日期','member_name_snapshot'=>'会员','phone'=>'手机号码','source'=>'来源','first_visit_date'=>'首次护理日期','annual_total'=>'首年业绩合计']);foreach(range(1,12)as$m)$columns[]=['key'=>'month_'.$m,'label'=>$m.'月'];$columns[]=['key'=>'remark','label'=>'备注'];
         $explanations=[
-            'card_sale_date'=>'本会员最近一笔入表地推销售或纯权益护理上手动填写的卖卡日期；未填显示“-”，不拿护理日期代替。',
+            'card_sale_date'=>'本会员最近一笔入表地推销售、纯权益护理或独立补交行上手动填写的卖卡日期；未填显示“-”，不拿业务日期代替。',
             'member_name_snapshot'=>'本会员最近一笔入表地推业务当时记录的姓名；同会员合并为一行。',
             'phone'=>'会员资料中当前登记的手机号码；未登记显示“-”。',
-            'source'=>'最近一笔入表地推业务填写的二级来源；销售未填二级来源显示“-”，纯权益护理未填时显示当次 E 地推来源。',
+            'source'=>'最近一笔入表的 E 地推销售、护理或补交的二级来源；补交使用本笔来源快照，不追改原销售来源。',
             'first_visit_date'=>'本会员在本表 E 来源业务中，最早一笔已完成、未作废、非体验护理的日期；不按导购轮次推算。',
-            'annual_total'=>'本自然年 1～12 月 E 地推销售明细实际分摊到的有效现金收款合计；按收款业务日期计入，其他来源收款不计。',
+            'annual_total'=>'本自然年 1～12 月 E 地推销售普通收款与 E 来源补交的有效分摊现金合计；每笔按自身收款业务日期计入一次。',
             'remark'=>'最近一笔入表地推销售单填写的备注；未填写显示“-”。',
         ];
         foreach($columns as &$column){
             $key=(string)$column['key'];
             $column['source_explanation']=isset($explanations[$key])?$explanations[$key]:
-                (preg_match('/^month_(\d{1,2})$/',$key,$match)?$match[1].'月实际收到、分摊给 E 地推销售明细的有效现金；后续补交按补交的收款月份计入，其他来源收款不计。':'');
+                (preg_match('/^month_(\d{1,2})$/',$key,$match)?$match[1].'月 E 地推销售普通收款与 E 来源补交实际分摊的有效现金；补交按自身收款月份独立计入，其他来源补交不计。':'');
         }unset($column);
         return $this->result('地推拓客汇总表',$columns,array_values($records),$input,[],['natural_year'=>$year,'annual_total_cents'=>$this->sumField($records,'annual_total_cents')]);
     }
@@ -1214,7 +1275,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         unset($managerFact);
         $refundFacts = $this->salespersonBeautyRefundFacts($stores, $calculationRange, $input);
         $managerRefundFacts = $this->managerBeautyRefundFacts($stores, $calculationRange, $input);
-        $facts = $this->currentBeautyLargeOrderFacts(array_merge($facts, $managerFacts, $refundFacts, $managerRefundFacts));
+        $repaymentFacts = $this->salespersonBeautyRepaymentFacts($stores, $calculationRange, $input);
+        $facts = $this->currentBeautyLargeOrderFacts(array_merge($facts, $managerFacts, $refundFacts, $managerRefundFacts, $repaymentFacts));
         usort($facts, static function (array $a, array $b): int {
             return strcmp((string)$a['business_date'], (string)$b['business_date'])
                 ?: strcmp((string)$a['source_line_id'], (string)$b['source_line_id']);
@@ -1232,7 +1294,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $row['share_30000_after'] = '';
             $row['share_50000_before'] = '';
             foreach (range(1, 5) as $i) $row['share_50000_after_' . $i] = '';
-            $row['remark'] = !empty($row['refund_no']) ? '退款单号：' . (string)$row['refund_no'] : '';
+            $row['remark'] = !empty($row['refund_no']) ? '退款单号：' . (string)$row['refund_no']
+                : (!empty($row['repayment_no']) ? '补交单号：' . (string)$row['repayment_no'] : '');
             if (isset($awards[$index])) {
                 $award = $awards[$index];
                 if ((int)$award['threshold_cents'] === 5000000) $row['share_50000_before'] = $this->money((int)$award['amount_cents']);
@@ -1254,10 +1317,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $explanations = [
             'division_name' => '显示该笔业务所属门店的分公司，只包含当前账号有权查看的门店。',
             'store_name' => '显示该笔业务实际发生的门店。',
-            'business_date' => '销售按成交日期显示；退款按退款成功日期显示，不改写原成交日期。',
-            'salesperson' => '显示这笔业绩归属的销售人或销售经理；退款按当前选定人员归属，经理与销售人各按自己的业绩分别统计，不合并为门店现金总额。',
+            'business_date' => '销售按成交日期、补交按实际补交业务日期、退款按退款成功日期显示，不改写原成交日期。',
+            'salesperson' => '显示本笔销售、补交或退款业绩当前归属的销售人或销售经理；经理与销售人各按自己的业绩分别统计，不合并为门店现金总额。',
             'beauty_category' => '卡项按卡内项目关联的平台商品当前“生美”二级分类归组，不按卡项外层分类。退款只能归入可核对的原卡内项目分类，无法核对的退款不猜算。分类调整后历史月份会重新归组，原成交金额不变。',
-            'daily_cash' => '显示本行人员在该日期、该生美二级分类分配到的现金业绩；退款在成功日记负数。销售人与销售经理分别记账，不可把两类人员金额相加当作门店收款。',
+            'daily_cash' => '显示本行人员在该日期、该生美二级分类分配到的现金业绩；补交按本次收款及原卡项商品分摊，退款在成功日记负数。销售人与销售经理分别记账，不可把两类人员金额相加当作门店收款。',
             'cumulative_cash' => '从本月1日到本行日期，累计该人员在同一生美二级分类的销售业绩并扣除已完成的现金退款；不同二级分类不合并凑门槛。',
             'share_30000_before' => '该人员本月有生美二级分类累计达到3万元、且没有分类达到5万元时，只在达标分类本月最后一笔业务上显示该分类金额；同月只选金额最高的一类。此列不是已发放的分成。',
             'share_30000_after' => '分成后金额尚无已确认的计算和兑现记录，暂不显示；空白不代表已发放或金额为零。',
@@ -1274,7 +1337,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $result=$this->result('销售人生美大单统计表',$columns,$facts,$input);
         // v4 admits an exact completed card-purchase receipt when an older sale
         // has no category-allocation fact; cash, person, and refund day are unchanged.
-        $result['metric_version']='beauty-large-order-refund-net-v4';
+        $result['metric_version']='beauty-large-order-repayment-v5';
         return $result;
     }
 
@@ -1326,6 +1389,105 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach ($rows as &$row) $row['role_snapshot'] = 'salesperson';
         unset($row);
         return $rows;
+    }
+
+    /**
+     * 补交按支付分摊事实回到原卡内商品，再按本笔有效人员分配归类。
+     * 原销售商品比例只决定分类，不能把原销售现金或原经理重复记一次。
+     */
+    private function salespersonBeautyRepaymentFacts(array $stores, array $range, array $input): array
+    {
+        $saleTotalSql = Db::name('cashier_v3_card_sale_category_allocation_fact')->alias('card_total')
+            ->where('card_total.status', 'effective')
+            ->fieldRaw('card_total.tenant_id,card_total.sale_fact_id,SUM(card_total.sale_amount_cents) sale_total_cents')
+            ->group('card_total.tenant_id,card_total.sale_fact_id')->buildSql();
+        $componentSql = Db::name('cashier_v3_card_sale_category_allocation_fact')->alias('card_component')
+            ->where('card_component.status', 'effective')
+            ->fieldRaw('card_component.tenant_id,card_component.sale_fact_id,card_component.component_product_id,SUM(card_component.sale_amount_cents) component_sale_cents')
+            ->group('card_component.tenant_id,card_component.sale_fact_id,card_component.component_product_id')->buildSql();
+        $query = $this->applyOrganizationFilters($this->scope(
+            Db::name('cashier_v3_payment_fact')->alias('repayment_payment'), $stores, 'repayment_payment'),
+            'repayment_payment', $input, $range)
+            ->join('cashier_v3_debt_repayment repayment',
+                "repayment.tenant_id=repayment_payment.tenant_id AND repayment.repayment_id=repayment_payment.order_id AND repayment.status='succeeded'")
+            ->join('cashier_v3_payment_sale_allocation_fact allocation',
+                "allocation.tenant_id=repayment_payment.tenant_id AND allocation.payment_fact_id=repayment_payment.fact_id AND allocation.status='effective' AND allocation.fact_direction='forward'")
+            ->join('cashier_v3_sale_fact sale',
+                "sale.tenant_id=allocation.tenant_id AND sale.fact_id=allocation.sale_fact_id AND sale.status='effective' AND sale.fact_direction='forward' AND sale.source_type='card'")
+            ->join([$saleTotalSql => 'card_total'],
+                'card_total.tenant_id=sale.tenant_id AND card_total.sale_fact_id=sale.fact_id')
+            ->join([$componentSql => 'card_component'],
+                'card_component.tenant_id=sale.tenant_id AND card_component.sale_fact_id=sale.fact_id')
+            ->where('repayment_payment.source_document_type', 'debt_repayment')
+            ->where('repayment_payment.fact_direction', 'forward')
+            ->where('repayment_payment.status', 'effective')
+            ->whereBetween('repayment_payment.business_date', [$range['start'], $range['end']])
+            ->where('card_total.sale_total_cents', '>', 0)
+            ->where('card_component.component_sale_cents', '>', 0);
+        $this->normalDataScope()->excludeVoidedSupplementAllocations($query, 'allocation');
+        // 原销售已作废时，补交不能再回挂到该卡项形成新的生美业绩。
+        $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 'sale.tenant_id', 'sale.order_id');
+        $components = $query->fieldRaw('repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot division_name,repayment_payment.store_name_snapshot store_name,repayment_payment.business_date,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.order_id repayment_id,repayment.repayment_no,repayment.repayment_amount_cents,allocation.sale_fact_id,card_component.component_product_id,MAX(card_total.sale_total_cents) sale_total_cents,MAX(card_component.component_sale_cents) component_sale_cents,SUM(allocation.amount_cents) allocated_payment_cents')
+            ->group('repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.organization_name_snapshot,repayment_payment.store_name_snapshot,repayment_payment.business_date,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.order_id,repayment.repayment_no,repayment.repayment_amount_cents,allocation.sale_fact_id,card_component.component_product_id')
+            ->select()->toArray();
+        $repaymentIds = array_values(array_unique(array_filter(array_column($components, 'repayment_id'))));
+        if ($repaymentIds === []) return [];
+        $salesRows = $this->participantEmployeeFact($this->scope(
+            Db::name('cashier_v3_performance_fact')->alias('repayment_person'), $stores, 'repayment_person'),
+            'repayment_person.employee_id')
+            ->whereIn('repayment_person.order_id', $repaymentIds)
+            ->where('repayment_person.source_document_type', 'debt_repayment')
+            ->where('repayment_person.performance_type', 'sales_performance_allocated')
+            ->where('repayment_person.fact_direction', 'forward')->where('repayment_person.status', 'effective')
+            ->whereNotExists(function ($reverse) {
+                $reverse->name('cashier_v3_performance_fact')->alias('repayment_reverse')
+                    ->whereRaw('repayment_reverse.tenant_id=repayment_person.tenant_id')
+                    ->whereRaw('repayment_reverse.reversal_of=repayment_person.fact_id')
+                    ->where('repayment_reverse.fact_direction', 'reversal');
+            })->field('repayment_person.order_id,repayment_person.employee_id,repayment_person.employee_name_snapshot,repayment_person.amount_cents')
+            ->select()->toArray();
+        $people = [];
+        foreach ($salesRows as $person) $people[(string)$person['order_id']][] = [
+            'role' => 'salesperson', 'employee_id' => (int)$person['employee_id'],
+            'name' => (string)$person['employee_name_snapshot'], 'amount_cents' => (int)$person['amount_cents']];
+        $attributions = (new CashierV3SupplementAttributionServices())->currentRows(
+            CashierV3ScopeResolver::TENANT_SCOPE_ID, $repaymentIds);
+        foreach ($attributions as $id => $rows) foreach ($rows as $person) {
+            if ((string)$person['role'] !== 'sales_manager') continue;
+            if ($this->participantEmployeeId > 0 && (int)$person['employee_id'] !== $this->participantEmployeeId) continue;
+            $people[$id][] = ['role' => 'sales_manager', 'employee_id' => (int)$person['employee_id'],
+                'name' => (string)$person['employee_name_snapshot'], 'amount_cents' => (int)$person['amount_cents']];
+        }
+        $out = [];
+        foreach ($components as $component) {
+            $id = (string)$component['repayment_id'];
+            $repaymentAmount = (int)$component['repayment_amount_cents'];
+            $saleTotal = (int)$component['sale_total_cents'];
+            if ($repaymentAmount <= 0 || $saleTotal <= 0) continue;
+            foreach ($people[$id] ?? [] as $person) {
+                $amount = (int)round((int)$person['amount_cents']
+                    * (int)$component['allocated_payment_cents'] / $repaymentAmount
+                    * (int)$component['component_sale_cents'] / $saleTotal);
+                if ($amount <= 0) continue;
+                $out[] = [
+                    'tenant_id' => (string)$component['tenant_id'], 'store_id' => (int)$component['store_id'],
+                    'organization_id' => (string)$component['organization_id'],
+                    'organization_path_snapshot' => (string)$component['organization_path_snapshot'],
+                    'division_name' => (string)$component['division_name'], 'store_name' => (string)$component['store_name'],
+                    'business_date' => (string)$component['business_date'], 'member_id' => (int)$component['member_id'],
+                    'member_name_snapshot' => (string)$component['member_name_snapshot'],
+                    'employee_id' => $person['employee_id'], 'salesperson' => $person['name'],
+                    'role_snapshot' => $person['role'], 'order_id' => $id,
+                    'repayment_no' => (string)$component['repayment_no'],
+                    'source_line_id' => $id . ':' . (string)$component['sale_fact_id'],
+                    'sale_fact_id' => (string)$component['sale_fact_id'],
+                    'component_product_id' => (int)$component['component_product_id'],
+                    'direct_amount_cents' => $amount, 'base_amount_cents' => $amount,
+                    'allocated_cash_total_cents' => $saleTotal,
+                ];
+            }
+        }
+        return $out;
     }
 
     /**
@@ -2205,9 +2367,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
             $metricVersion = 'store-customer-service-events-v2';
         }
-        // 纯权益 E 来源护理也独立成行；汇总纳入该会员，年度收款仍取原权威收款事实。
-        if ($title === '地推拓客明细表') $metricVersion = 'field-acquisition-service-only-v5';
-        if ($title === '地推拓客汇总表') $metricVersion = 'field-acquisition-summary-service-only-v3';
+        // E 来源补交按收款日独立成行并进入月汇总；原销售来源保持发生时快照。
+        if ($title === '地推拓客明细表') $metricVersion = 'field-acquisition-repayment-v6';
+        if ($title === '地推拓客汇总表') $metricVersion = 'field-acquisition-summary-repayment-v4';
         // 本表展示本次收款业务日，不再展示首次护理日；其他到店报表仍沿用服务口径。
         if ($title === '异业收客明细表') $metricVersion = 'cross-industry-cash-business-date-v3';
         // 汇总名单新增本年 G 来源补交会员；月度/年度金额仍为这些会员在相应门店的全部有效收款。
@@ -2402,7 +2564,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '市场明细表'=>['business_date'=>112,'store_name_snapshot'=>112,'member_name_snapshot'=>82,'member_phone'=>116,'dimension'=>108],
             '会员进店分析表'=>['member_name'=>100,'phone'=>116],
             '会员进店年度汇总表'=>['row_label'=>82,'year'=>76],
-            '地推拓客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'source'=>110,'member_name_snapshot'=>90,'phone'=>116],
+            '地推拓客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'source'=>110,'repayment_no'=>130,'member_name_snapshot'=>90,'phone'=>116],
             '地推拓客汇总表'=>['card_sale_date'=>106,'member_name_snapshot'=>90,'phone'=>116,'source'=>110],
             '异业收客明细表'=>['source'=>110,'receipt_business_date'=>106,'store_name'=>120,'document_no'=>160,'member_name'=>90,'phone'=>116],
             '异业收客汇总表'=>['customer_acquired_at'=>106,'partner_store_name'=>120,'member_name'=>90,'phone'=>116],
