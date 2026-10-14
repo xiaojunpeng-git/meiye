@@ -34,6 +34,13 @@ foreach ($expected as $pageCode) {
 
 $source = file_get_contents(dirname(__DIR__, 3) . '/后端代码/app/services/product/inventory/query/InventoryOperationalUnifiedQueryProvider.php');
 $requestDefinition = InventoryOperationalUnifiedQueryContract::definition('inventory_request');
+$transferField = $registry->page('inventory_transfer')['fields']['can_receive'] ?? [];
+operationalUqAssert('store transfer unreceived shortcut filters only by server-projected receive permission',
+    ($transferField['type'] ?? '') === 'boolean'
+    && ($transferField['allowedOperations'] ?? []) === ['filter']
+    && ($transferField['defaultVisible'] ?? true) === false
+    && strpos($source, "\$row['can_receive'] = (string)\$row['document_status'] === 'DISPATCHED' && \$toCurrentStore;") !== false
+);
 operationalUqAssert('operational provider keeps a bounded full source window instead of reusing a 100-row list page',
     strpos($source, 'UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1') !== false
     && strpos($source, 'list($storeId, $operatorId') === false

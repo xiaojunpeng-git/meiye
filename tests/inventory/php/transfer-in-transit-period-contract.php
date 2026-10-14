@@ -18,9 +18,10 @@ if (PHP_VERSION_ID < 80100) $method->setAccessible(true);
 $date = ['field_key' => 'business_date', 'operator' => 'between', 'value' => ['2026-10-14', '2026-10-14']];
 $status = ['field_key' => 'status_name', 'operator' => 'equal', 'value' => '在途'];
 $keyword = ['field_key' => 'order_sn', 'operator' => 'contains', 'value' => 'DB'];
-$payload = ['filterRelation' => 'all', 'topFilterConditions' => [$date, $status, $keyword]];
+$canReceive = ['field_key' => 'can_receive', 'operator' => 'equal', 'value' => true];
+$payload = ['filterRelation' => 'all', 'topFilterConditions' => [$date, $status, $keyword, $canReceive]];
 $inTransit = $method->invoke($provider, $payload);
-transitPeriodAssert($inTransit['topFilterConditions'] === [$status, $keyword], 'in-transit removes only the date, retaining status and other filters');
+transitPeriodAssert($inTransit['topFilterConditions'] === [$status, $keyword, $canReceive], 'in-transit removes only the date, retaining status and incoming-store filters');
 transitPeriodAssert($payload['topFilterConditions'][0] === $date, 'the submitted query is not mutated');
 
 $otherStatus = $payload;

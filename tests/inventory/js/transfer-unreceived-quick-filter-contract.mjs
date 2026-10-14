@@ -18,4 +18,13 @@ assert.match(app, /platformTransferStatus\.value === 'DISPATCHED'/)
 assert.match(app, /mode === 'platform' && active === 'transfer' && cellIndex === 5 \? transferStatusDisplay\(/)
 assert.match(modal, /props\.pageKey === 'transfer' && isPlatformHeadquarters\.value/)
 
+// 门店快捷入口必须从同一库存源码构建，且只提交后端权威的收货权限过滤。
+const storeQuickFilter = app.match(/async function showStoreUnreceivedTransfers\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
+assert.match(storeQuickFilter, /storeTransferUnreceivedOnly\.value = !storeTransferUnreceivedOnly\.value/)
+assert.match(storeQuickFilter, /storeOperationalStatus\.value = storeTransferUnreceivedOnly\.value \? '在途' : ''/)
+assert.match(storeQuickFilter, /await queryStoreOperationalPage\(\)/)
+assert.match(app, /active === 'transfer'[^>]*@click="showStoreUnreceivedTransfers">未到货<\/button>/)
+assert.match(app, /field: 'can_receive', operator: 'eq', value: true/)
+assert.match(app, /if \(active\.value === 'transfer'\) storeTransferUnreceivedOnly\.value = false/)
+
 console.log('TRANSFER_UNRECEIVED_QUICK_FILTER_CONTRACT_OK')

@@ -36,6 +36,10 @@ final class InventoryOperationalUnifiedQueryContract
             // Retain warehouse identity for existing frozen plans without presenting it as a store.
             $common[] = UnifiedQueryPageRegistry::field('location_name', '出库仓库', 'text', false, false);
         }
+        if ($pageCode === 'inventory_transfer') {
+            // 仅允许按服务端计算的当前门店收货权限缩小结果，不把此内部布尔值展示或导出。
+            $common[] = UnifiedQueryPageRegistry::field('can_receive', '待当前门店收货', 'boolean', false, false, ['filter']);
+        }
         $specific = [
             'inventory_inbound' => [
                 ['order_type_name', '入库类型', 'text', ''], ['location_name', '入库仓/门店', 'text', ''],

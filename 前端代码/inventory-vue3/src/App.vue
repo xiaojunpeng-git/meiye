@@ -97,6 +97,7 @@ const statisticsExecutedQuery = ref({})
 const businessDatePages = new Set(['request', 'transfer', 'inbound', 'outbound', 'usage', 'import'])
 const usesBusinessDatePeriod = (page = active.value) => businessDatePages.has(page) && (page !== 'import' || mode.value === 'store')
 const storeOperationalStatus = ref('')
+const storeTransferUnreceivedOnly = ref(false)
 // 在途调拨是当前待收货清单，不能被历史调拨日期挡住；其他状态仍沿用已选周期。
 const filtersBusinessDatePeriod = (page = active.value) => usesBusinessDatePeriod(page)
   && !(page === 'transfer' && (mode.value === 'store'
@@ -115,6 +116,13 @@ async function showAllUnreceivedTransfers() {
   platformTransferToParty.value = 'ALL:0'
   platformTransferStatus.value = 'DISPATCHED'
   await loadCurrentList()
+}
+// 门店“未到货”仅查已发货且当前门店可收货的单据；再次点击恢复普通列表筛选。
+async function showStoreUnreceivedTransfers() {
+  storeTransferUnreceivedOnly.value = !storeTransferUnreceivedOnly.value
+  storeOperationalStatus.value = storeTransferUnreceivedOnly.value ? '在途' : ''
+  if (storeTransferUnreceivedOnly.value) keyword.value = ''
+  await queryStoreOperationalPage()
 }
 const outboundTypeFilter = ref('')
 const outboundFilterTypes = ['过期退货', '试用出库', '报废出库', '其他出库', '对内出库', '对外出库', '手工出库', '预售领用出库']
@@ -606,6 +614,7 @@ function selectPage(key, options = {}) {
   listDateRange.value = null
   statusFocus.value = options.focus || ''
   storeOperationalStatus.value = ''
+  storeTransferUnreceivedOnly.value = false
   outboundTypeFilter.value = ''
   outboundExecutedQuery.value = null
   if (key === 'stock') {
@@ -620,7 +629,7 @@ function selectPage(key, options = {}) {
   sidebarOpen.value = false
   editor.value = ''
   if (key !== 'statistics' && key !== 'overview') {
-    if (ensurePlatformUsageStoreSelection()) return
+    // 仓库选择已由列表查询校验；菜单切换不能调用废弃的领用仓初始化逻辑。
     // 在同一应用内切到调拨页也需加载接收目录，不依赖宿主重建 iframe。
     if (mode.value === 'platform' && key === 'transfer') loadPlatformTransferTargets()
     if (key === 'stock') stockUnifiedQuery.load()
@@ -1174,6 +1183,7 @@ function operationalStatusFilterValue() {
 
 /** 草稿没有完成日期；只在选择草稿时清空周期，退出草稿筛选恢复当天默认值。 */
 function onStoreOperationalStatusChanged() {
+  if (active.value === 'transfer') storeTransferUnreceivedOnly.value = false
   if (active.value === 'count') {
     countDateRange.value = storeOperationalStatus.value === '草稿' ? { min: '', max: '' } : todayRange()
   }
@@ -1327,6 +1337,8 @@ async function loadCurrentList(unifiedQuery = null) {
       topFilterConditions: [
         ...(Array.isArray(query.topFilterConditions) ? query.topFilterConditions : []),
         ...(operationalStatusFilterValue() ? [{ field: 'status_name', operator: 'eq', value: operationalStatusFilterValue() }] : []),
+        ...(active.value === 'transfer' && mode.value === 'store' && storeTransferUnreceivedOnly.value
+          ? [{ field: 'can_receive', operator: 'eq', value: true }] : []),
         ...(active.value === 'outbound' && outboundTypeFilter.value ? [{ field: 'order_type_name', operator: 'eq', value: outboundTypeFilter.value }] : []),
         ...countDateConditions,
         ...(filtersBusinessDatePeriod() && businessPeriod.min && businessPeriod.max
@@ -1912,6 +1924,7 @@ onBeforeUnmount(() => {
             <div class="filter-search"><Search :size="17" /><input v-model="keyword" :placeholder="`搜索${currentPage.title}记录`" @keyup.enter="queryStoreOperationalPage" /></div>
             <label v-if="active === 'outbound'">出库类型<select v-model="outboundTypeFilter" aria-label="出库类型"><option value="">全部</option><option v-for="type in outboundFilterTypes" :key="type" :value="type">{{ type }}</option></select></label>
             <label>状态<select v-model="storeOperationalStatus" @change="onStoreOperationalStatusChanged"><option value="">全部</option><option v-for="status in storeOperationalStatusOptions" :key="status" :value="status">{{ status }}</option></select></label>
+            <button v-if="active === 'transfer'" class="secondary-button" :class="{ 'secondary-button--active': storeTransferUnreceivedOnly }" type="button" :aria-pressed="storeTransferUnreceivedOnly" :disabled="listLoading" @click="showStoreUnreceivedTransfers">未到货</button>
             <div v-if="filtersBusinessDatePeriod()" class="inventory-period-filter"><UnifiedQueryDateRange :model-value="businessDateRange" :label="businessDatePeriodLabel(active)" @change="applyBusinessDateRange" /></div>
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading" @click="queryStoreOperationalPage">{{ listLoading ? '查询中' : '查询' }}</button>

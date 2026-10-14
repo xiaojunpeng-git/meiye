@@ -41,6 +41,8 @@ class InventoryStoreCatalog extends AuthController
                 // 普通导入与清零共用本仓现存批次入口；旧清零参数保留给既有调用。
                 (int)$this->request->get('for_existing_stock', 0) === 1
                     || (int)$this->request->get('for_zero_count', 0) === 1,
+                // 出库选品始终限定实物库存；保持与服务签名的 inventoryOnly 参数对齐。
+                true,
                 (int)$this->request->get('for_outbound_stock', 0) === 1
             );
         } catch (\RuntimeException $exception) {
