@@ -717,9 +717,17 @@ class StoreUnifiedReportServices extends BaseServices
         // Header categories come from every existing platform category,
         // never from whichever facts happened to occur in the selected period.
         $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
-        $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
-        $daily = $this->itemAnalysisMetricRows($storeId, $today, $input, $definitions);
-        $total = $this->itemAnalysisMetricRows($storeId, $cumulative, $input, $definitions);
+        $dimensions = $this->organizationDimensions();
+        // Period, day and cumulative values must use one current organization
+        // assignment snapshot; a later request starts fresh after this read.
+        $dimensions->beginCurrentDimensionSnapshot();
+        try {
+            $period = $this->itemAnalysisMetricRows($storeId, $range, $input, $definitions);
+            $daily = $this->itemAnalysisMetricRows($storeId, $today, $input, $definitions);
+            $total = $this->itemAnalysisMetricRows($storeId, $cumulative, $input, $definitions);
+        } finally {
+            $dimensions->endCurrentDimensionSnapshot();
+        }
         $rows = [];
         foreach ([$period, $daily, $total] as $metrics) {
             foreach ($metrics['stores'] as $storeIdKey => $store) {

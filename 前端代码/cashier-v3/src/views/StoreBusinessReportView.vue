@@ -585,12 +585,11 @@ function fixedColumnStyle(column) {
   return { left: `${left}px`, minWidth: `${width}px`, width: `${width}px` }
 }
 
-// 列和列分组由统一报表服务返回。支付方式、合作方、门店、康美单和系统
-// 操作等动态列只负责展示，不在浏览器端重新计算或拼接金额。
-const columnGroups = computed(() => {
-  const rawGroups = result.value.column_groups || result.value.columnGroups
+// 页面与导出使用各自响应中的列和分组，避免动态分类变化后导出表头错位。
+// 浏览器只投影服务端元数据，不重新计算经营指标。
+function resolveColumnGroups(reportColumns, rawGroups) {
   if (Array.isArray(rawGroups) && rawGroups.length) {
-    const byKey = new Map(columns.value.map((column) => [String(column.key), column]))
+    const byKey = new Map(reportColumns.map((column) => [String(column.key), column]))
     const groupMetaByKey = new Map()
     rawGroups.forEach((group) => {
       const keys = Array.isArray(group?.column_keys)
@@ -609,7 +608,7 @@ const columnGroups = computed(() => {
       keys.forEach((key) => { if (byKey.has(String(key))) groupMetaByKey.set(String(key), meta) })
     })
     const groups = []
-    columns.value.forEach((column) => {
+    reportColumns.forEach((column) => {
       const declaredRowspan = Number(column?.header_rowspan || column?.headerRowspan || 0)
       const meta = groupMetaByKey.get(String(column.key)) || (declaredRowspan > 1
         ? { label: String(column.label || ''), tone: String(column?.tone || ''), rowspan: declaredRowspan, colspan: 1 }
@@ -626,7 +625,7 @@ const columnGroups = computed(() => {
   const groups = []
   let groupedCount = 0
   let current = null
-  columns.value.forEach((column) => {
+  reportColumns.forEach((column) => {
     const label = String(column?.group_label || column?.groupLabel || column?.group || '').trim()
     if (!label) {
       current = null
@@ -639,7 +638,10 @@ const columnGroups = computed(() => {
     }
     current.columns.push(column)
   })
-  return groupedCount === columns.value.length && groups.length ? groups : []
+  return groupedCount === reportColumns.length && groups.length ? groups : []
+}
+const columnGroups = computed(() => {
+  return resolveColumnGroups(columns.value, result.value.column_groups || result.value.columnGroups)
 })
 function declaredHeaderPath(column) {
   const raw = column?.header_path || column?.headerPath || column?.header_levels || column?.headerLevels
@@ -966,8 +968,14 @@ function csvValue(value) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-function exportHeaderRows(exportColumns) {
-  return buildHeaderRows(exportColumns).map((headerRow) => {
+function exportHeaderRows(exportColumns, exported) {
+  // 门店品项分析导出与可见表头使用同一份 column_groups；其他报表沿用既有导出结构。
+  const groups = activeReport.value === 'store_item_analysis'
+    ? resolveColumnGroups(exportColumns, exported.column_groups || exported.columnGroups)
+    : []
+  const groupedRows = buildColumnGroupHeaderRows(exportColumns, groups)
+  const headerRows = groupedRows.length ? groupedRows : buildHeaderRows(exportColumns)
+  return headerRows.map((headerRow) => {
     const values = Array.from({ length: exportColumns.length }, () => '')
     headerRow.forEach((cell) => {
       values[cell.startIndex] = cell.label
@@ -985,7 +993,7 @@ async function exportReport() {
     const exportColumns = Array.isArray(exported.columns) ? exported.columns : []
     const exportRecords = Array.isArray(exported.records) ? exported.records : []
     const summaryRow = exported.summary_row || exported.summaryRow
-    const headers = exportHeaderRows(exportColumns)
+    const headers = exportHeaderRows(exportColumns, exported)
     const lines = []
     headers.forEach((header) => lines.push(header.map(csvValue).join(',')))
     if (summaryRow && typeof summaryRow === 'object' && Object.keys(summaryRow).length) {

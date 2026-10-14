@@ -1303,42 +1303,50 @@ final class RegisteredMetricReadServices
         $buckets = [];
         $storeTotals = [];
         $dimensions = new StoreUnifiedReportOrganizationDimensionServices();
-        foreach ($this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId, $excludeStandaloneRefunds) as $row) {
-            $storeId = $this->integer($row['store_id'] ?? null);
-            $day = (string)($row['business_date'] ?? '');
-            if (!in_array($storeId, $stores, true) || $day < $range['start'] || $day > $range['end']) $this->fail('METRIC_SOURCE_RESULT_INVALID');
-            $categoryId = $this->integer($row['category_id'] ?? $row['project_category_id_snapshot'] ?? 0);
-            $categoryPath = (string)($row['category_path'] ?? $row['category_path_snapshot'] ?? $row['project_category_path_snapshot'] ?? '');
-            // Organization dimensions are a server-owned report projection.
-            // Resolve them before grouping so consumers receive one final
-            // display bucket instead of re-adding business metric values.
-            $dimensions->project(
-                $row,
-                (string)($row['organization_id'] ?? ''),
-                (string)($row['organization_path_snapshot'] ?? ''),
-                $day
-            );
-            $companyId = (string)($row['company_dimension_id'] ?? '');
-            $managerId = (string)($row['city_manager_dimension_id'] ?? '');
-            $storeKey = implode('|', [$storeId, $companyId, $managerId]);
-            $key = implode('|', [$storeKey, $categoryId, $categoryPath]);
-            if (!isset($buckets[$key])) {
-                $buckets[$key] = [
-                    'store_id' => $storeId, 'business_date' => $day,
-                    'store_name_snapshot' => (string)($row['store_name_snapshot'] ?? $row['store_name'] ?? ''),
-                    'organization_id' => (int)($row['organization_id'] ?? 0),
-                    'organization_path_snapshot' => (string)($row['organization_path_snapshot'] ?? ''),
-                    'company_dimension_id' => $companyId,
-                    'company' => (string)($row['company'] ?? ''),
-                    'city_manager_dimension_id' => $managerId,
-                    'city_manager' => (string)($row['city_manager'] ?? ''),
-                    'category_id' => $categoryId, 'category_path' => $categoryPath,
-                    'metric_value' => 0,
-                ];
+        // Resolve all fact rows against one current dimension snapshot. Without
+        // this boundary each business date re-queries the same organization map.
+        $dimensions->beginCurrentDimensionSnapshot();
+        try {
+            $rows = $this->categoryRowsWithParticipant($metricCode, $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId, $excludeStandaloneRefunds);
+            foreach ($rows as $row) {
+                $storeId = $this->integer($row['store_id'] ?? null);
+                $day = (string)($row['business_date'] ?? '');
+                if (!in_array($storeId, $stores, true) || $day < $range['start'] || $day > $range['end']) $this->fail('METRIC_SOURCE_RESULT_INVALID');
+                $categoryId = $this->integer($row['category_id'] ?? $row['project_category_id_snapshot'] ?? 0);
+                $categoryPath = (string)($row['category_path'] ?? $row['category_path_snapshot'] ?? $row['project_category_path_snapshot'] ?? '');
+                // Organization dimensions are a server-owned report projection.
+                // Resolve them before grouping so consumers receive one final
+                // display bucket instead of re-adding business metric values.
+                $dimensions->project(
+                    $row,
+                    (string)($row['organization_id'] ?? ''),
+                    (string)($row['organization_path_snapshot'] ?? ''),
+                    $day
+                );
+                $companyId = (string)($row['company_dimension_id'] ?? '');
+                $managerId = (string)($row['city_manager_dimension_id'] ?? '');
+                $storeKey = implode('|', [$storeId, $companyId, $managerId]);
+                $key = implode('|', [$storeKey, $categoryId, $categoryPath]);
+                if (!isset($buckets[$key])) {
+                    $buckets[$key] = [
+                        'store_id' => $storeId, 'business_date' => $day,
+                        'store_name_snapshot' => (string)($row['store_name_snapshot'] ?? $row['store_name'] ?? ''),
+                        'organization_id' => (int)($row['organization_id'] ?? 0),
+                        'organization_path_snapshot' => (string)($row['organization_path_snapshot'] ?? ''),
+                        'company_dimension_id' => $companyId,
+                        'company' => (string)($row['company'] ?? ''),
+                        'city_manager_dimension_id' => $managerId,
+                        'city_manager' => (string)($row['city_manager'] ?? ''),
+                        'category_id' => $categoryId, 'category_path' => $categoryPath,
+                        'metric_value' => 0,
+                    ];
+                }
+                $amount = $this->integer($row[$field] ?? null);
+                $buckets[$key]['metric_value'] = $this->add($buckets[$key]['metric_value'], $amount);
+                $storeTotals[$storeKey] = $this->add((int)($storeTotals[$storeKey] ?? 0), $amount);
             }
-            $amount = $this->integer($row[$field] ?? null);
-            $buckets[$key]['metric_value'] = $this->add($buckets[$key]['metric_value'], $amount);
-            $storeTotals[$storeKey] = $this->add((int)($storeTotals[$storeKey] ?? 0), $amount);
+        } finally {
+            $dimensions->endCurrentDimensionSnapshot();
         }
         foreach ($buckets as &$bucket) {
             $storeKey = implode('|', [(int)$bucket['store_id'], (string)$bucket['company_dimension_id'], (string)$bucket['city_manager_dimension_id']]);

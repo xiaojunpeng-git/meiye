@@ -26,6 +26,27 @@ final class StoreUnifiedReportOrganizationDimensionServices
     /** @var array<int,array<int,string>>|null */
     private $storePaths = null;
 
+    /** @var array<string,array<string,array<string,mixed>>>|null */
+    private $currentDimensions = null;
+
+    /** Cache current assignments only for one explicit multi-store projection. */
+    public function beginCurrentDimensionSnapshot(): void
+    {
+        // A new report read must see current assignments, including changes made
+        // since a long-lived worker's previous request.
+        $this->resolved = [];
+        $this->storePaths = null;
+        $this->currentDimensions = [];
+    }
+
+    /** Release the snapshot so long-lived report services see later edits. */
+    public function endCurrentDimensionSnapshot(): void
+    {
+        $this->currentDimensions = null;
+        $this->resolved = [];
+        $this->storePaths = null;
+    }
+
     public function __construct(?StoreUnifiedReportPhaseThreeFoundationServices $foundation = null)
     {
         $this->foundation = $foundation ?: new StoreUnifiedReportPhaseThreeFoundationServices();
@@ -229,15 +250,22 @@ final class StoreUnifiedReportOrganizationDimensionServices
     /** @param array<int,string> $path @return array<string,mixed>|null */
     private function resolveCurrentDimension(string $type, array $path): ?array
     {
-        $byOrganization = [];
-        foreach (Db::name(StoreUnifiedReportPhaseThreeFoundationServices::ORGANIZATION_DIMENSION_TABLE)
-            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->where('dimension_code', $type)->where('enabled', 1)
-            ->order('valid_from', 'desc')->order('id', 'desc')->select()->toArray() as $row) {
-            $organizationId = (string)$row['organization_id'];
-            if ($organizationId !== '' && !isset($byOrganization[$organizationId])) {
-                $byOrganization[$organizationId] = $row;
+        // A caller may opt into a bounded snapshot for a multi-store read.
+        // Other, possibly long-lived services continue to query current data.
+        if ($this->currentDimensions === null || !isset($this->currentDimensions[$type])) {
+            $byOrganization = [];
+            foreach (Db::name(StoreUnifiedReportPhaseThreeFoundationServices::ORGANIZATION_DIMENSION_TABLE)
+                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->where('dimension_code', $type)->where('enabled', 1)
+                ->order('valid_from', 'desc')->order('id', 'desc')->select()->toArray() as $row) {
+                $organizationId = (string)$row['organization_id'];
+                if ($organizationId !== '' && !isset($byOrganization[$organizationId])) {
+                    $byOrganization[$organizationId] = $row;
+                }
             }
+            if ($this->currentDimensions !== null) $this->currentDimensions[$type] = $byOrganization;
+        } else {
+            $byOrganization = $this->currentDimensions[$type];
         }
         foreach (array_reverse($path) as $organizationId) {
             if (isset($byOrganization[$organizationId])) return $byOrganization[$organizationId];
