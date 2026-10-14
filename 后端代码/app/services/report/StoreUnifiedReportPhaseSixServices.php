@@ -375,7 +375,7 @@ final class StoreUnifiedReportPhaseSixServices
         // Service visits and people were removed from the ordinary detail view;
         // reveal only the clicked metric so its period total can be audited.
         if($metricKey==='service_visit_count')$columns[]=$this->column('service_visit_count','服务人次','会员本人在同一门店同一天服务多项目只计一次；朋友和无会员顾客按每笔有效服务计算。同员工服务该会员的其他项目即使跨单也显示，未分得人次的项目为 0。',true);
-        if($metricKey==='service_people_count')$columns[]=$this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店服务多天只计一次；分得的人数只在其中一条明细显示。',true);
+        if($metricKey==='service_people_count')$columns[]=$this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店的合格服务多天只计一次；原权益或项目结账含其他收款的服务不计人数，分得的人数只在一条合格明细显示。',true);
         $columns=array_merge($columns,[
             $this->column('consumption_amount','消耗业绩','服务完成或卡项核销后分配给该员工的消耗金额；后来作废的记录不再统计。',true),
             $this->column('cash_amount','现金业绩','销售分配金额减去退款日分配给该员工的退款业绩；售前分配单独归入售前，其他分配按商品分类。原销售分配不回写。',true),
@@ -510,7 +510,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('position_name','岗位','显示该员工目前在这家门店的有效岗位；已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
             $this->column('project_count','项目数','所选日期内该员工分得的服务项目数之和；多人服务及人工调整可产生小数，点击可查看对应明细。',true,false,120,$this->salaryMetricDrilldown('project_count')),
             $this->column('service_visit_count','服务人次','会员本人在同一门店同一天服务多项目只计一次，朋友和无会员顾客按每笔有效服务计算；普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_visit_count')),
-            $this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店服务多天只计一次；朋友及无会员的顾客按每次有效服务计算。不计人数人次的服务排除，普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_people_count')),
+            $this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店的合格服务多天只计一次；朋友及无会员的顾客按每次合格服务计算。原权益或项目结账含其他收款、不计人数人次的服务均排除；普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_people_count')),
             $this->column('consumption_amount','消耗','所选日期内服务完成或卡项核销后分配给该员工的消耗金额之和；作废后不再统计，点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('consumption_amount')),
             $this->column('labor_fee','手工','所选日期内最终分配给该员工的手工费之和；后续人员调整按有效结果显示，作废后不再统计。',true),
             $this->column(self::SALARY_PRESALE_KEY,'售前业绩','结账、补交或退款时，该员工被选为售前销售人的业绩净额；只计该员工分得的金额，退款按退款业务日扣减，不再重复计入商品分类。',true,false,140,[
@@ -624,8 +624,8 @@ final class StoreUnifiedReportPhaseSixServices
             'key'=>'document_no','label'=>'单据号','show_label'=>false,'aria_label'=>'单据号',
             'type'=>'text','placeholder'=>'输入单据号',
         ];
-        // 售前只重排薪资报表的人员现金分配；现行商品分类、原始事实和其他报表版本不变。
-        $result['metric_version']=self::METRIC_VERSION.':salary-presale-allocation-v1';
+        // 薪资汇总和下钻共享版本；服务人数资格变化不回写原服务、消耗或收款事实。
+        $result['metric_version']=self::METRIC_VERSION.':salary-presale-allocation-v1:other-collection-people-v1';
         $result['filters']['employee_name']=$employeeName;
         if($documentFilter)$result['filters']['document_no']=$documentNo;
         return $result;
