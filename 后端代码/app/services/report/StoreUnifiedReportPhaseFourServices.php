@@ -689,12 +689,20 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->monthlySpec('first_year_amount', '首年业绩', '本年度首次成为本表来源会员的会员，自首次成交起至所选月份末的累计净现金业绩。', false, ['首年业绩']),
         ] : [
             $this->monthlySpec('experience_people', '体验人数', '手动输入当月体验人数，保存为独立报表补充记录。', true, ['体验人数']),
-            $this->monthlySpec('deal_people', '成交人数', '当月来源符合本表规则且第一次现金业绩达到500元的不同会员数。', false, ['成交人数']),
-            $this->monthlySpec('deal_amount', '成交金额', '当月来源符合本表规则的第一次成功现金业绩，按销售明细和卡内项目分摊。', false, ['成交金额']),
+            $this->monthlySpec('deal_people', '成交人数', $report === 'operations_pre_sale_bdegh'
+                ? '同一会员同一业务日的收款合并为一次；首次现金业绩达到500元且来源符合本表规则的不同会员数。'
+                : '当月来源符合本表规则且第一次现金业绩达到500元的不同会员数。', false, ['成交人数']),
+            $this->monthlySpec('deal_amount', '成交金额', $report === 'operations_pre_sale_bdegh'
+                ? '来源符合本表规则的会员首次业务日净现金业绩；同日多单合并，跨日分别计次。'
+                : '当月来源符合本表规则的第一次成功现金业绩，按销售明细和卡内项目分摊。', false, ['成交金额']),
             $this->monthlySpec('deal_rate', '成交率', '成交人数除以体验人数；分母为零或未填写显示“-”。', false, ['成交率']),
             $this->monthlySpec('deal_unit_output', '成交单产', '成交金额除以成交人数；分母为零显示“-”。', false, ['成交单产']),
-            $this->monthlySpec('transition_people', '售中转换人数', '来源符合本表规则且第二次产生现金业绩的不同会员数。', false, ['售中转换人数']),
-            $this->monthlySpec('transition_amount', '售中转换业绩', '售中转换会员第二次成功现金业绩，按销售明细和卡内项目分摊。', false, ['售中转换业绩']),
+            $this->monthlySpec('transition_people', '售中转换人数', $report === 'operations_pre_sale_bdegh'
+                ? '来源符合本表规则且在第二个正向收款业务日产生现金业绩的不同会员数；同日多单只算一次。'
+                : '来源符合本表规则且第二次产生现金业绩的不同会员数。', false, ['售中转换人数']),
+            $this->monthlySpec('transition_amount', '售中转换业绩', $report === 'operations_pre_sale_bdegh'
+                ? '售中转换会员第二个正向收款业务日的净现金业绩；同日多单合并，跨日分别计次。'
+                : '售中转换会员第二次成功现金业绩，按销售明细和卡内项目分摊。', false, ['售中转换业绩']),
             $this->monthlySpec('transition_rate', '售中转换率', '售中转换人数除以成交人数；分母为零显示“-”。', false, ['售中转换率']),
             $this->monthlySpec('first_year_amount', '首年业绩', $report === 'operations_pre_sale_bdegh'
                 ? '首次 B/D/E/G/H 现金成交发生在本年且归属本月的会员，汇总其本年度所有来源的净现金业绩；全年仅归属一次。'
@@ -1292,9 +1300,10 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     }
 
     /**
-     * Group payment allocations into purchases before choosing the first and
-     * second positive BDEGH events. A member enters the annual cohort only in
-     * their first BDEGH month; all their annual cash, including other sources
+     * Group a member's payment allocations by business day, including distinct
+     * orders on that day, before choosing the first and second positive BDEGH days.
+     * A member enters the annual cohort only in their first BDEGH month;
+     * all their annual cash, including other sources
      * and refunds, is then counted once in that month's first-year amount.
      */
     private function aggregateBdeghMonthlyMetrics(array $facts, array $range, array $rule): array
@@ -1315,18 +1324,14 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $memberId = (int)($fact['member_id'] ?? 0);
             $date = (string)($fact['business_date'] ?? '');
             if ($memberId <= 0 || $date === '') continue;
-            // One checkout may contain several sale lines and payment methods.
-            // It contributes one event per cash date; later payments remain distinct.
-            $orderId = trim((string)($fact['order_id'] ?? ''));
-            $line = trim((string)($fact['source_line_id'] ?? ''));
-            $eventKey = ($orderId !== '' ? 'order:' . $orderId : 'line:' . ($line !== '' ? $line : (string)($fact['id'] ?? ''))) . '|' . $date;
-            $eventsByMember[$memberId][$eventKey]['date'] = $date;
-            $eventsByMember[$memberId][$eventKey]['key'] = $eventKey;
-            $eventsByMember[$memberId][$eventKey]['amount_cents'] = (int)($eventsByMember[$memberId][$eventKey]['amount_cents'] ?? 0) + (int)($fact['amount_cents'] ?? 0);
+            // Different orders on one business day are one cash event for this
+            // member; payment allocations on a later day remain a separate event.
+            $eventsByMember[$memberId][$date]['date'] = $date;
+            $eventsByMember[$memberId][$date]['amount_cents'] = (int)($eventsByMember[$memberId][$date]['amount_cents'] ?? 0) + (int)($fact['amount_cents'] ?? 0);
         }
         foreach ($eventsByMember as $memberId => $events) {
             $positive = array_values(array_filter($events, static fn(array $event): bool => (int)$event['amount_cents'] > 0));
-            usort($positive, static fn(array $a, array $b): int => strcmp((string)$a['date'], (string)$b['date']) ?: strcmp((string)$a['key'], (string)$b['key']));
+            usort($positive, static fn(array $a, array $b): int => strcmp((string)$a['date'], (string)$b['date']));
             if ($positive === []) continue;
             $first = $positive[0];
             $firstMonth = substr((string)$first['date'], 0, 7);
