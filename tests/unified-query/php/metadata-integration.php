@@ -912,15 +912,11 @@ try {
         $widePreferences,
         $access
     );
-    $wideTaskCountBefore = (int)Db::name('unified_query_export_task')->count();
     $wideFieldKeys = array_column($wideFields, 'key');
     $wideContext = array_merge($manager, ['page_code' => 'wide_export_test']);
-    $wideExportCode = uqMetaCode(function () use (
-        $wideExports,
-        $wideContext,
-        $wideFieldKeys
-    ): void {
-        $wideExports->create($wideContext, [
+    $wideTaskNo = '';
+    try {
+        $wideTask = $wideExports->create($wideContext, [
             'pageCode' => 'wide_export_test',
             'scope' => 'query',
             'queryCutoffDate' => '2026-07-28',
@@ -934,21 +930,29 @@ try {
             'includeSummary' => true,
             'fileName' => '创建期单元格上限.xlsx',
         ]);
-    });
-    ok(
-        '创建导出按冻结 scope 最大行数、字段快照、表头和合计行预检单元格预算',
-        $wideExportCode === 'UNIFIED_QUERY_EXPORT_CELL_LIMIT_EXCEEDED'
-            && count($wideFieldKeys)
-                * (UnifiedQueryExportTaskServices::MAX_EXPORT_ROWS + 2)
-                > UnifiedQueryExportTaskServices::MAX_EXPORT_CELLS
-            && (int)Db::name('unified_query_export_task')->count() === $wideTaskCountBefore,
-        json_encode(compact(
-            'wideExportCode',
-            'wideTaskCountBefore',
-            'wideFieldKeys'
-        ), JSON_UNESCAPED_UNICODE),
-        'UQ-EXP-05'
-    );
+        $wideTaskNo = (string)($wideTask['taskId'] ?? '');
+        $actualSmallCells = UnifiedQueryExportTaskServices::assertCellBudget(
+            count($wideFieldKeys), 78, true
+        );
+        $actualLargeCode = uqMetaCode(function () use ($wideFieldKeys): void {
+            UnifiedQueryExportTaskServices::assertCellBudget(
+                count($wideFieldKeys), UnifiedQueryExportTaskServices::MAX_EXPORT_ROWS, true
+            );
+        });
+        ok(
+            '宽字段的小结果可以创建全量导出，worker 仍按实际行数拒绝超预算工作簿',
+            ($wideTask['status'] ?? '') === 'pending'
+                && (int)($wideTask['reservedCellCount'] ?? 0) === count($wideFieldKeys) * 2
+                && $actualSmallCells === count($wideFieldKeys) * 80
+                && $actualLargeCode === 'UNIFIED_QUERY_EXPORT_CELL_LIMIT_EXCEEDED',
+            json_encode(compact('wideTask', 'actualSmallCells', 'actualLargeCode'), JSON_UNESCAPED_UNICODE),
+            'UQ-EXP-05'
+        );
+    } finally {
+        if ($wideTaskNo !== '') {
+            Db::name('unified_query_export_task')->where('task_no', $wideTaskNo)->delete();
+        }
+    }
 
     $claimedFirst = $exports->claim($manager, $taskNo);
     $firstLease = (string)$claimedFirst['workerToken'];

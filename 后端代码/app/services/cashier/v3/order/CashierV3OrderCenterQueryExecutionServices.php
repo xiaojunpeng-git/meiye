@@ -30,14 +30,23 @@ final class CashierV3OrderCenterQueryExecutionServices extends UnifiedQueryExecu
         return $negative;
     }
 
-    /** 一单多明细仍导出一行；按原顺序列出各明细值，不能转成一个虚构金额或数组字符串。 */
+    /** 先按统一查询筛出订单，再把销售单展开为页面上的商品明细；其他页签保持原粒度。 */
     protected function exportRows(array $allRows, array $pageRows, array $export, array $fieldIndex): array
     {
-        $rows = parent::exportRows($allRows, $pageRows, $export, $fieldIndex);
-        foreach ($rows as &$row) foreach ($row as &$value) {
-            if (is_array($value)) $value = implode('、', array_map('strval', $value));
+        $selectedRows = parent::exportRows($allRows, $pageRows, $export, $fieldIndex);
+        $sourceRows = array_values(($export['scope'] ?? 'query') === 'page' ? $pageRows : $allRows);
+        $result = [];
+        foreach ($selectedRows as $index => $row) {
+            $source = $sourceRows[$index];
+            if (strpos((string)($source['record_id'] ?? ''), 'sales:') === 0) {
+                foreach (CashierV3SalesOrderExportRows::project($source, $row) as $line) $result[] = $line;
+                continue;
+            }
+            // 其余页签仍是一条业务记录一行，兼容其已有多值文本字段。
+            foreach ($row as &$value) if (is_array($value)) $value = implode('、', array_map('strval', $value));
+            unset($value);
+            $result[] = $row;
         }
-        unset($row, $value);
-        return $rows;
+        return $result;
     }
 }

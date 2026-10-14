@@ -2,8 +2,6 @@
 
 namespace app\services\cashier\v3\order;
 
-use app\model\store\SystemStoreStaff;
-use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
 use app\services\query\UnifiedQueryCustomFieldKeyCollector;
 use app\services\query\UnifiedQueryCustomFieldServices;
 use app\services\query\UnifiedQueryException;
@@ -432,19 +430,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
 
     protected function authoritativeScopes(array $context): array
     {
-        $operatorId = (int)($context['operator_id'] ?? 0);
-        $storeId = (int)($context['store_id'] ?? 0);
-        $tenantId = trim((string)($context['tenant_id'] ?? ''));
-        $staff = SystemStoreStaff::where('id', $operatorId)->where('status', 1)->where('is_del', 0)->find();
-        if (!$staff || $storeId <= 0 || $tenantId === '') throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '导出账号或门店已失效，任务已停止。', []);
-        $profile = $staff->toArray();
-        $employeeId = (int)($profile['employee_id'] ?? 0);
-        if ($employeeId > 0 && !Db::name('employee')->where('id', $employeeId)->where('status', 1)->where('is_del', 0)->find()) {
-            throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '导出员工档案已停用，任务已停止。', []);
-        }
-        $dispatcher = CashierV3Bootstrap::dispatcher();
-        $operatorScope = $dispatcher->scopeResolver()->operatorScope($storeId, $operatorId);
-        if (!hash_equals($operatorScope->tenantId(), $tenantId)) throw new UnifiedQueryException('UNIFIED_QUERY_EXPORT_PERMISSION_REVOKED', '导出任务所属商户与当前账号不一致，任务已停止。', []);
-        return [$operatorScope, $dispatcher->dataScopeFactory()->build($storeId, $operatorId, $profile, $tenantId, $operatorScope->organizationId())];
+        // 列表使用请求内的可信 scope；后台任务必须按领取任务时识别出的同一
+        // 员工/选店会话再构建 Reader scope，避免数字 ID 碰撞导致空文件。
+        return (new CashierV3OrderCenterUnifiedQueryWorkerContextResolver())->scopesForContext($context);
     }
 }

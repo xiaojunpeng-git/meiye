@@ -92,12 +92,16 @@ $plan=$runtime['execution']->validatedPlan(Contract::PAGE_BY_TYPE['sales'],[],[
         ['field'=>'payment_completed_at','operator'=>'eq','value'=>'2026-09-26']]),'dataScope'=>'all'
 ],$context);
 $frozen=$provider->executeFrozenPlan($context,$plan,'query',['sales_order_no','salesperson']);
-check(count($frozen['exportRows'])===1 && $frozen['exportRows'][0]['sales_order_no']==='XS26092600006','frozen export differs from selected person/date');
+check(count($frozen['exportRows'])===count($selected['records'][0]['items'])
+    && count(array_unique(array_column($frozen['exportRows'],'sales_order_no')))===1
+    && $frozen['exportRows'][0]['sales_order_no']==='XS26092600006',
+    'frozen export differs from selected person/date');
 $linePlan=$runtime['execution']->validatedPlan(Contract::PAGE_BY_TYPE['sales'],[],[
     'topFilters'=>[['field'=>'craftsman','operator'=>'eq','value'=>$craftStaff],['field'=>'business_date','operator'=>'eq','value'=>'2026-09-26']], 'dataScope'=>'all'
 ],$context);
 $lineExport=$provider->executeFrozenPlan($context,$linePlan,'query',['sales_order_no','craftsman','unit_price','line_amount']);
-check(count($lineExport['exportRows'])===1 && $lineExport['exportRows'][0]['line_amount']==='2980、100、1000','line export lost amounts');
+check(array_map('floatval',array_column($lineExport['exportRows'],'line_amount'))===[2980.0,100.0,1000.0],
+    'line export did not retain each displayed item amount');
 foreach(['2026-09-26','2026-09-26T17:08'] as $time) {
     $dateResult=$execution->execute(Contract::PAGE_BY_TYPE['sales'],[['record_id'=>'a','payment_completed_at'=>'2026-09-26 17:08:00']],[],
         ['topFilters'=>[['field'=>'payment_completed_at','operator'=>'eq','value'=>$time]]],$context,static fn()=>true);
