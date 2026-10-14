@@ -37,9 +37,12 @@ reportPermissionCheck(
 );
 reportPermissionCheck(
     str_contains($permissionEditor, 'check-directly')
+    && str_contains($permissionEditor, 'check-strictly')
     && str_contains($permissionEditor, '@on-toggle-expand="onToggleExpand"')
     && str_contains($permissionEditor, 'expandedIds')
-    && str_contains($permissionEditor, 'syncFromTreeRef(checkedNodes)')
+    // Explicit node changes cascade; hydration must not grant new descendants.
+    && str_contains($permissionEditor, 'syncFromTreeRef(changedNode)')
+    && str_contains($permissionEditor, 'togglePermissionNode(this.trees[this.current], changedNode.id, changedNode.checked)')
     && str_contains($permissionEditor, 'mergeExpandState'),
     'permission tree keeps independent checkbox state and expansion state'
 );
