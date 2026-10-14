@@ -12,7 +12,9 @@ use think\facade\Db;
  * effective labour-performance fact owns the actual serving employee.  A
  * zero-price service has no performance amount and therefore no labour fact;
  * its immutable craftsmen snapshot is the narrowly-scoped fallback.  The
- * reader never reopens carts, sales orders or historical operational tables.
+ * Customer allocation never reopens carts or historical operational tables;
+ * only the original settled sales order and committed tender are read to
+ * determine whether the service contributes a period person.
  *
  * All returned customer values use tenths.  Ten units represent one customer,
  * allowing a stable 0.3 / 0.3 / 0.4 allocation without floating point math.
@@ -137,6 +139,7 @@ final class ServiceCustomerMetricReadServices
                     'item_name' => trim((string)($row['item_name'] ?? '')),
                     'category_path' => trim((string)($row['category_path'] ?? '')),
                     'source_type' => trim((string)($row['source_type'] ?? '')),
+                    'origin_other_collection' => (int)($row['origin_other_collection'] ?? 0) === 1,
                     'craftsmen_snapshot_json' => (string)($row['craftsmen_snapshot_json'] ?? ''),
                     'allocation_groups' => $this->snapshotAllocationGroups((string)($row['craftsmen_snapshot_json'] ?? ''), $storeId),
                     'labor_amount_cents' => $this->integer($row['labor_amount_cents'] ?? 0),
@@ -185,6 +188,7 @@ final class ServiceCustomerMetricReadServices
                     // the checkout snapshot is only authoritative before an adjustment.
                     'allocation_group' => $this->factAllocationGroup($row)
                         ?? ($services[$serviceLineKey]['allocation_groups'][$employeeId] ?? 'normal'),
+                    'people_eligible' => !$services[$serviceLineKey]['origin_other_collection'],
                     'service_line_key' => $serviceLineKey,
                 ];
                 if ($details) { $lines[$lineKey]['service'] = $services[$serviceLineKey]; unset($lines[$lineKey]['service']['first_row_order']); }
@@ -208,6 +212,7 @@ final class ServiceCustomerMetricReadServices
                     'subject' => $service['subject'], 'employee_id' => $employeeId,
                     'employee_name' => $employeeName, 'point' => isset($pointEmployees[$employeeId]),
                     'allocation_group' => $service['allocation_groups'][$employeeId] ?? 'normal',
+                    'people_eligible' => !$service['origin_other_collection'],
                     'service_line_key' => $serviceLineKey,
                 ];
                 if ($details) { $lines[$lineKey]['service'] = $service; unset($lines[$lineKey]['service']['first_row_order']); }
@@ -230,7 +235,9 @@ final class ServiceCustomerMetricReadServices
             $dailyKey = $storeId . '|' . (string)$line['business_date'] . '|' . (string)$line['subject'];
             $periodKey = $storeId . '|' . (string)$line['subject'];
             if (!isset($daily[$dailyKey])) $daily[$dailyKey] = ['employees' => [], 'lines' => [], 'point_employees' => [], 'allocation_groups' => []];
-            if (!isset($period[$periodKey])) $period[$periodKey] = ['employees' => [], 'allocation_groups' => [], 'lines' => []];
+            // Other-collection funding removes only period people. The same
+            // completed service still contributes visits, labor and consumption.
+            if (!empty($line['people_eligible']) && !isset($period[$periodKey])) $period[$periodKey] = ['employees' => [], 'allocation_groups' => [], 'lines' => []];
             if ($details) $daily[$dailyKey]['employees'][$employeeId] = $this->name($daily[$dailyKey]['employees'][$employeeId] ?? '', $employeeName);
             else {
                 // Global p.id order selected legacy snapshot names. Preserve
@@ -246,15 +253,15 @@ final class ServiceCustomerMetricReadServices
             }
             if ($details) {
                 $daily[$dailyKey]['lines'][$employeeId][] = $lineKey;
-                $period[$periodKey]['lines'][$employeeId][$lineKey] = (string)$line['business_date'];
+                if (!empty($line['people_eligible'])) $period[$periodKey]['lines'][$employeeId][$lineKey] = (string)$line['business_date'];
             }
             if (!empty($line['point'])) $daily[$dailyKey]['point_employees'][$employeeId] = true;
-            $period[$periodKey]['employees'][$employeeId] = $this->name($period[$periodKey]['employees'][$employeeId] ?? '', $employeeName);
+            if (!empty($line['people_eligible'])) $period[$periodKey]['employees'][$employeeId] = $this->name($period[$periodKey]['employees'][$employeeId] ?? '', $employeeName);
             // A member may have several service lines in one day or period.
             // Keep one employee visit, with an independently settled role taking precedence over a normal role.
             $allocationGroup = (string)$line['allocation_group'];
             $daily[$dailyKey]['allocation_groups'][$employeeId] = $this->preferredAllocationGroup($daily[$dailyKey]['allocation_groups'][$employeeId] ?? null, $allocationGroup);
-            $period[$periodKey]['allocation_groups'][$employeeId] = $this->preferredAllocationGroup($period[$periodKey]['allocation_groups'][$employeeId] ?? null, $allocationGroup);
+            if (!empty($line['people_eligible'])) $period[$periodKey]['allocation_groups'][$employeeId] = $this->preferredAllocationGroup($period[$periodKey]['allocation_groups'][$employeeId] ?? null, $allocationGroup);
         }
 
     }
@@ -383,7 +390,82 @@ final class ServiceCustomerMetricReadServices
             ->whereBetween('sv.business_date', [$range['start'], $range['end']])
             ->where('sv.service_status', 'completed');
         call_user_func($this->normalServices, $query, 'sv');
-        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,cg.allocation_group_key fact_allocation_group,cg.position_id fact_position_id,cg.performance_independent fact_performance_independent,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type');
+        return $query->field('p.id,p.fact_id,p.fact_direction,p.reversal_of,p.store_id,p.employee_id,p.employee_name_snapshot employee_name,p.role_snapshot,cg.allocation_group_key fact_allocation_group,cg.position_id fact_position_id,cg.performance_independent fact_performance_independent,sv.checkout_request_id,sv.source_line_id,sv.service_fact_id,sv.store_id service_store_id,sv.business_date,sv.member_id,sv.member_name_snapshot member_name,sv.service_object,sv.friend_counts_as_customer,sv.craftsmen_snapshot_json,sv.labor_amount_cents,sv.labor_fee_amount_cents,sv.store_name_snapshot store_name,sv.organization_name_snapshot company_name,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.source_document_type source_type,' . $this->originOtherCollectionSql() . ' origin_other_collection');
+    }
+
+    /**
+     * Resolve the settled purchase that created the consumed project/card.
+     * A mixed tender still excludes salary people when its committed other
+     * collection amount is positive; never infer funding from product names
+     * or from the later service checkout's payment selection.
+     */
+    private function originOtherCollectionSql(): string
+    {
+        return <<<'SQL'
+CASE WHEN sv.source_document_type='sales_order' THEN EXISTS (
+    SELECT 1 FROM eb_cashier_v3_sales_order origin_order
+    JOIN eb_cashier_v3_checkout_payment_draft origin_payment
+      ON origin_payment.tenant_id=origin_order.tenant_id
+     AND origin_payment.store_id=origin_order.store_id
+     AND origin_payment.request_id=origin_order.checkout_request_id
+     AND origin_payment.draft_version=origin_order.checkout_request_version
+     AND origin_payment.payment_method='other_collection'
+     AND origin_payment.draft_status='committed'
+     AND origin_payment.amount_cents>0
+    WHERE origin_order.tenant_id=sv.tenant_id
+      AND origin_order.id=sv.source_document_id
+      AND origin_order.order_status='settled'
+      AND origin_order.order_direction='forward'
+) ELSE EXISTS (
+    SELECT 1 FROM eb_cashier_v3_entitlement_writeoff_fact source_writeoff
+    JOIN eb_cashier_v3_card_purchase_receipt issued
+      ON issued.tenant_id=source_writeoff.tenant_id
+     AND issued.card_holder_id=source_writeoff.holder_id
+     AND issued.legacy_order_id=source_writeoff.origin_order_id
+     AND issued.status='completed'
+    JOIN eb_cashier_v3_sales_order origin_order
+      ON origin_order.tenant_id=issued.tenant_id
+     AND origin_order.order_id=issued.sales_order_id
+     AND origin_order.order_status='settled'
+     AND origin_order.order_direction='forward'
+    JOIN eb_cashier_v3_checkout_payment_draft origin_payment
+      ON origin_payment.tenant_id=origin_order.tenant_id
+     AND origin_payment.store_id=origin_order.store_id
+     AND origin_payment.request_id=origin_order.checkout_request_id
+     AND origin_payment.draft_version=origin_order.checkout_request_version
+     AND origin_payment.payment_method='other_collection'
+     AND origin_payment.draft_status='committed'
+     AND origin_payment.amount_cents>0
+    WHERE source_writeoff.tenant_id=sv.tenant_id
+      AND source_writeoff.checkout_request_id=sv.checkout_request_id
+      AND source_writeoff.source_line_id=sv.source_line_id
+      AND source_writeoff.status='effective'
+) OR EXISTS (
+    SELECT 1 FROM eb_cashier_v3_entitlement_writeoff_fact source_writeoff
+    JOIN eb_cashier_v3_card_operation_settlement upgraded
+      ON upgraded.tenant_id=source_writeoff.tenant_id
+     AND upgraded.target_card_holder_id=source_writeoff.holder_id
+     AND upgraded.target_legacy_order_id=source_writeoff.origin_order_id
+     AND upgraded.settlement_status='settled'
+    JOIN eb_cashier_v3_sales_order origin_order
+      ON origin_order.tenant_id=upgraded.tenant_id
+     AND origin_order.order_id=upgraded.sales_order_id
+     AND origin_order.order_status='settled'
+     AND origin_order.order_direction='forward'
+    JOIN eb_cashier_v3_checkout_payment_draft origin_payment
+      ON origin_payment.tenant_id=origin_order.tenant_id
+     AND origin_payment.store_id=origin_order.store_id
+     AND origin_payment.request_id=origin_order.checkout_request_id
+     AND origin_payment.draft_version=origin_order.checkout_request_version
+     AND origin_payment.payment_method='other_collection'
+     AND origin_payment.draft_status='committed'
+     AND origin_payment.amount_cents>0
+    WHERE source_writeoff.tenant_id=sv.tenant_id
+      AND source_writeoff.checkout_request_id=sv.checkout_request_id
+      AND source_writeoff.source_line_id=sv.source_line_id
+      AND source_writeoff.status='effective'
+) END
+SQL;
     }
 
     /** An adjustment group must be internally consistent; never infer it from today's position. */

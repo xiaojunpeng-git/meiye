@@ -275,8 +275,8 @@ final class MetricDefinitionRegistry
                 'default_ranking_dimension' => 'employee',
                 'analysis_default_selection_ref' => self::PERSONNEL_FACT_PARTICIPANT_REF,
             ],
-            'service_people' => self::tenthCount('service_customer_personnel', 'v3-service-customer-period-people-person-v1', ['summary', 'ranking', 'condition_count', 'condition_list'], [
-                'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact',
+            'service_people' => self::tenthCount('service_customer_personnel', 'v3-service-customer-period-people-person-v2', ['summary', 'ranking', 'condition_count', 'condition_list'], [
+                'table' => 'cashier_v3_entitlement_service_fact + cashier_v3_performance_fact + origin checkout payment draft',
                 'filters' => ['service_status' => 'completed', 'performance_type' => 'labor_performance_allocated', 'performance_status' => 'effective'],
                 'normal_scope' => 'services',
                 'dimensions' => ['employee' => [
