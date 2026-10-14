@@ -3,6 +3,7 @@
 namespace app\services\report;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\order\CashierV3RefundAttributionServices;
 use think\facade\Db;
 
 /**
@@ -205,6 +206,78 @@ final class StoreMemberConsumptionRefundReadServices
         }
         unset($row);
         return $rows;
+    }
+
+    /**
+     * Refund guides and managers belong to the refund, not its original sale.
+     * Each revision replaces both roles in full; an empty revision clears the original choice.
+     *
+     * @param array<int,array<string,mixed>> $refundRows Already scoped refund rows on the visible page
+     * @return array<string,array<string,string>> Store ID and operation ID => role => names
+     */
+    public function attributionNamesForRefunds(array $refundRows): array
+    {
+        $result = [];
+        foreach (array_chunk($refundRows, 200) as $chunk) {
+            $requested = $storeIds = $operationIds = [];
+            foreach ($chunk as $refund) {
+                $storeId = (int)($refund['store_id'] ?? 0);
+                $operationId = trim((string)($refund['order_id'] ?? ''));
+                if ($storeId <= 0 || $operationId === '') continue;
+                $requested[$storeId . '|' . $operationId] = ['guide' => [], 'sales_manager' => []];
+                $storeIds[$storeId] = $storeId;
+                $operationIds[$operationId] = $operationId;
+            }
+            if ($requested === []) continue;
+            $scope = static function ($query) use ($storeIds, $operationIds) {
+                return $query->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->whereIn('store_id', array_values($storeIds))
+                    ->whereIn('operation_id', array_values($operationIds));
+            };
+            $names = $requested;
+            $original = $scope(Db::name(CashierV3RefundAttributionServices::TABLE))
+                ->whereIn('role', ['guide', 'sales_manager'])
+                ->field('store_id,operation_id,role,employee_id,employee_name_snapshot')
+                ->order('id', 'asc')->select()->toArray();
+            foreach ($original as $person) {
+                $key = (int)$person['store_id'] . '|' . (string)$person['operation_id'];
+                $name = trim((string)$person['employee_name_snapshot']);
+                if (isset($names[$key]) && $name !== '') {
+                    $names[$key][(string)$person['role']][(int)$person['employee_id']] = $name;
+                }
+            }
+            $latest = $scope(Db::name(CashierV3RefundAttributionServices::REVISION_TABLE))
+                ->field('store_id,operation_id,MAX(id) revision_id')
+                ->group('store_id,operation_id')->select()->toArray();
+            $revisionIds = [];
+            foreach ($latest as $revision) {
+                $key = (int)$revision['store_id'] . '|' . (string)$revision['operation_id'];
+                if (!isset($names[$key])) continue;
+                $names[$key] = ['guide' => [], 'sales_manager' => []];
+                $revisionIds[] = (int)$revision['revision_id'];
+            }
+            if ($revisionIds !== []) {
+                $current = Db::name(CashierV3RefundAttributionServices::REVISION_PERSON_TABLE)->alias('person')
+                    ->join(CashierV3RefundAttributionServices::REVISION_TABLE . ' revision',
+                        'revision.tenant_id=person.tenant_id AND revision.store_id=person.store_id'
+                        . ' AND revision.operation_id=person.operation_id AND revision.revision_no=person.revision_no')
+                    ->where('person.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->whereIn('revision.id', $revisionIds)->whereIn('person.role', ['guide', 'sales_manager'])
+                    ->field('person.store_id,person.operation_id,person.role,person.employee_id,person.employee_name_snapshot')
+                    ->order('person.id', 'asc')->select()->toArray();
+                foreach ($current as $person) {
+                    $key = (int)$person['store_id'] . '|' . (string)$person['operation_id'];
+                    $name = trim((string)$person['employee_name_snapshot']);
+                    if (isset($names[$key]) && $name !== '') {
+                        $names[$key][(string)$person['role']][(int)$person['employee_id']] = $name;
+                    }
+                }
+            }
+            foreach ($names as $key => $roles) {
+                foreach ($roles as $role => $people) $result[$key][$role] = implode('、', array_values($people));
+            }
+        }
+        return $result;
     }
 
     /** Keep the full filtered refund total in cents, independent of the page. */

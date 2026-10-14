@@ -472,8 +472,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function memberVisitAnalysis(array $stores, array $range, array $input): array
     {
         $year = (int)substr($range['end'], 0, 4);
-        // 先从所选期间的有效正向记账收款确定会员名单。退款只冲减金额，
-        // 不会凭一笔退款把从未在本期消费的会员加入本表；仅服务未收款者也不入表。
+        // 有效收款或现金退款均能让会员进入所选期间的报表；退款不产生到店，
+        // 仅完成服务但没有本期现金业务的会员仍不入表。
         $payingMembers = $this->cashFacts($stores)
             ->whereBetween('business_date', [$range['start'], $range['end']])
             ->where('status', 'effective')
@@ -487,9 +487,30 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $id = (int)$fact['member_id'];
             $records[$id] = ['member_id'=>$id,'member_name'=>(string)$fact['member_name'],'total_visits'=>0,'annual_cash_cents'=>0];
         }
+        // 常规退款的负向收款事实已在 cashFacts 中；单独退款调整是 adjustment，
+        // 必须从已成功退款单读取，不能把任意负数或未完成退款当作现金退款。
+        $reversalMembers = $this->cashFacts($stores)
+            ->whereBetween('business_date', [$range['start'], $range['end']])
+            ->where('status', 'effective')->where('fact_direction', 'reversal')
+            ->where('amount_cents', '<', 0)->where('member_id', '>', 0)
+            ->fieldRaw('member_id,MAX(member_name_snapshot) member_name')
+            ->group('member_id')->select()->toArray();
+        $refundReader = new StoreMemberConsumptionRefundReadServices();
+        $refundStores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $periodRefunds = $refundReader->query($refundStores, $range, $input, $this->participantEmployeeId);
+        $adjustmentMembers = (clone $periodRefunds)->where('payment.member_id', '>', 0)
+            ->fieldRaw('payment.member_id member_id,MAX(payment.member_name_snapshot) member_name')
+            ->group('payment.member_id')->select()->toArray();
+        foreach (array_merge($reversalMembers, $adjustmentMembers) as $fact) {
+            $id = (int)$fact['member_id'];
+            if (!isset($records[$id])) {
+                $records[$id] = ['member_id'=>$id,'member_name'=>(string)$fact['member_name'],
+                    'total_visits'=>0,'annual_cash_cents'=>0];
+            }
+        }
         $memberIds = array_keys($records);
         if ($memberIds) {
-            // 到店只补充现金会员在所选期间已完成、未作废且非体验的服务；
+            // 到店只补充入表会员在所选期间已完成、未作废且非体验的服务；
             // 人员不计数开关不参与门店到店资格。
             // 粒度为“会员 + 业务日”，同日多个服务项目或订单只算一次。
             $services = $this->completedUnvoidedServiceFacts(
@@ -515,8 +536,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $records[$id]['month_'.$month.'_visits'] = (int)$fact['month_visits'];
                 $records[$id]['total_visits'] += (int)$fact['month_visits'];
             }
-            // 会员名单与到店次数只受所选日期影响；金额仍取所选自然年
-            // 的有效收款净额（含退款反向事实），绝不把历史权益迁入当作现金。
+            // 会员名单与到店次数只受所选日期影响；金额取所选自然年
+            // 的有效收款净额及单独退款调整，绝不把历史权益迁入当作现金。
             $payments = $this->cashFacts($stores)
                 ->whereIn('member_id', $memberIds)
                 ->whereBetween('business_date', [sprintf('%04d-01-01', $year), sprintf('%04d-12-31', $year)])
@@ -526,6 +547,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach ($payments as $fact) {
                 $id=(int)$fact['member_id'];$month=(int)$fact['month_no'];
                 $records[$id]['month_'.$month.'_cash_cents']=(int)$fact['amount_cents'];
+                $records[$id]['annual_cash_cents']+=(int)$fact['amount_cents'];
+            }
+            $annualRange = ['start'=>sprintf('%04d-01-01', $year), 'end'=>sprintf('%04d-12-31', $year)];
+            $annualAdjustments = $refundReader->query($refundStores, $annualRange, $input, $this->participantEmployeeId)
+                ->whereIn('payment.member_id', $memberIds)
+                ->fieldRaw('payment.member_id member_id,MONTH(refund_operation.business_date) month_no,SUM(payment.amount_cents) amount_cents')
+                ->group('payment.member_id,MONTH(refund_operation.business_date)')->select()->toArray();
+            foreach ($annualAdjustments as $fact) {
+                $id=(int)$fact['member_id'];$month=(int)$fact['month_no'];
+                $records[$id]['month_'.$month.'_cash_cents']=(int)($records[$id]['month_'.$month.'_cash_cents']??0)+(int)$fact['amount_cents'];
                 $records[$id]['annual_cash_cents']+=(int)$fact['amount_cents'];
             }
         }
@@ -538,21 +569,21 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $columns = $this->columns(['member_name'=>'会员姓名','phone'=>'手机号码','total_visits'=>'总进店数','annual_cash'=>'全年现金业绩','source'=>'来源']);
         foreach ($columns as &$column) {
             if ($column['key'] === 'member_name') {
-                $column['source_explanation'] = '所选日期内有成功记账收款的会员；仅完成服务但没有本期现金消费的会员不列入。';
+                $column['source_explanation'] = '所选日期内有成功记账收款或已完成现金退款的会员；只有服务、没有本期现金业务的会员不列入。';
             }
             if ($column['key'] === 'total_visits') {
                 $column['source_explanation'] = '本行会员在所选日期内完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多个项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计。';
             }
             if ($column['key'] === 'annual_cash') {
-                $column['source_explanation'] = '所选日期内有成功记账收款的会员，在所选年份内的记账收款扣除该年现金退款；没有完成服务的会员进店次数为 0，历史权益迁入不计入。';
+                $column['source_explanation'] = '所选日期内有记账收款或现金退款的会员，在所选年份内的记账收款扣除退款实际发生月份的现金退款；退款不增加进店次数，历史权益迁入不计入。';
             }
         }
         unset($column);
         $groups=[];
         foreach (range(1,12) as $month) {
             $keys=['month_'.$month.'_visits','month_'.$month.'_cash'];
-            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月','source_explanation'=>'本行现金消费会员在所选日期范围内、该月份完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计。'];
-            $columns[]=['key'=>$keys[1],'label'=>'现金业绩','group_label'=>$month.'月','source_explanation'=>'本行现金消费会员在所选年份该月的成功记账收款，扣除当月实际发生的现金退款；历史权益迁入不计入。'];
+            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月','source_explanation'=>'本行会员在所选日期范围内、该月份完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计；退款本身不增加进店次数。'];
+            $columns[]=['key'=>$keys[1],'label'=>'现金业绩','group_label'=>$month.'月','source_explanation'=>'本行会员在所选年份该月的成功记账收款，扣除当月已完成的现金退款；退款只影响金额，不增加进店次数，历史权益迁入不计入。'];
             $groups[]=['label'=>$month.'月','column_keys'=>$keys];
         }
         foreach ($records as &$row) {
@@ -560,8 +591,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach(range(1,12) as $month){$row['month_'.$month.'_visits']=(int)($row['month_'.$month.'_visits']??0);$row['month_'.$month.'_cash']=$this->money((int)($row['month_'.$month.'_cash_cents']??0));}
         } unset($row);
         $result = $this->result('会员进店分析表',$columns,array_values($records),$input,$groups,['natural_year'=>$year]);
-        // 会员到店恢复全部已完成服务，现金会员入表门槛和日期范围保持不变。
-        $result['metric_version'] = 'store-member-visit-analysis-v4';
+        // 到店仍只认已完成服务；现金退款现在也能让会员在退款日入表。
+        $result['metric_version'] = 'store-member-visit-analysis-v5';
         return $result;
     }
 

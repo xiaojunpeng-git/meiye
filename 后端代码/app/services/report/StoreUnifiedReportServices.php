@@ -633,6 +633,13 @@ class StoreUnifiedReportServices extends BaseServices
         $rows = $this->attachAnnotations($rows, 'member_consumption_detail', $storeId, !empty($input['_internal_all']));
         $byEntry = [];
         foreach ($rows as $row) $byEntry['sale:' . (int)$row['id']] = $row;
+        // Refund personnel belongs to the refund operation and its latest revision;
+        // only visible rows need this projection, while full totals still use all facts.
+        $refundPageRows = [];
+        foreach ($refundIds as $refundId) {
+            if (isset($refundById[$refundId])) $refundPageRows[] = $refundById[$refundId];
+        }
+        $refundAttributionNames = $refundReader->attributionNamesForRefunds($refundPageRows);
         foreach ($refundIds as $refundId) {
             if (!isset($refundById[$refundId])) continue;
             $refund = $refundById[$refundId];
@@ -641,6 +648,9 @@ class StoreUnifiedReportServices extends BaseServices
             $amount = (int)$refund['amount_cents'];
             $refund['consume_type'] = '退款';
             $refund['member_name'] = (string)$refund['member_name_snapshot'];
+            $refundRoles = $refundAttributionNames[(int)$refund['store_id'] . '|' . (string)$refund['order_id']] ?? [];
+            $refund['sales_manager_name'] = $refundRoles['sales_manager'] ?? '';
+            $refund['guide_names'] = $refundRoles['guide'] ?? '';
             $refund['consumption_detail'] = (string)$refund['item_name_snapshot'];
             $refund['category'] = (string)$refund['category_path_snapshot'];
             $refund['sale_amount'] = $this->money($amount);
@@ -670,8 +680,8 @@ class StoreUnifiedReportServices extends BaseServices
         }
         $columns = array_merge($this->organizationDimensionColumns(), [
             ['key'=>'business_date','label'=>'日期'], ['key'=>'order_no_snapshot','label'=>'业务单号','source_explanation'=>'成交显示原销售单号；退款显示退款单号，按各自业务日期入表。'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
-            ['key'=>'consumption_detail','label'=>'消费明细'], ['key'=>'category','label'=>'分类','source_explanation'=>'按本行商品关联的平台商品当前分类显示；平台改分类后，历史明细分类同步更新，金额不变。'], ['key'=>'sales_manager_name','label'=>'销售经理'],
-            ['key'=>'guide_round_no','label'=>'导购业绩次数'], ['key'=>'guide_names','label'=>'导购人员'], ['key'=>'salesperson_names','label'=>'销售'],
+            ['key'=>'consumption_detail','label'=>'消费明细'], ['key'=>'category','label'=>'分类','source_explanation'=>'按本行商品关联的平台商品当前分类显示；平台改分类后，历史明细分类同步更新，金额不变。'], ['key'=>'sales_manager_name','label'=>'销售经理','source_explanation'=>'成交显示原单确认的销售经理；退款显示本笔退款当前保存的销售经理，改派后按最新版本显示，未保存或已清空时留空。'],
+            ['key'=>'guide_round_no','label'=>'导购业绩次数'], ['key'=>'guide_names','label'=>'导购人员','source_explanation'=>'成交显示原单确认的导购；退款显示本笔退款当前保存的导购，改派后按最新版本显示，未保存或已清空时留空。退款导购不计轮次。'], ['key'=>'salesperson_names','label'=>'销售'],
             ['key'=>'member_source','label'=>'会员来源'],
         ]);
         foreach ($this->memberConsumptionPaymentMethods() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
