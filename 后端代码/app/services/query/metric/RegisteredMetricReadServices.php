@@ -1728,6 +1728,8 @@ final class RegisteredMetricReadServices
      * Registered category-card projection.  The dashboard provides only its
      * active taxonomy labels; category membership, cash amount and item
      * ranking are all calculated from one registered category population.
+     * Non-merchandise cash stays in category totals but has no product name
+     * and therefore cannot enter the item rankings.
      *
      * @return array<int,array<string,mixed>>
      */
@@ -1754,11 +1756,13 @@ final class RegisteredMetricReadServices
                 'category_id' => $rootId, 'name' => $name, 'cash_performance_cents' => $amount,
                 'share' => $total === 0 ? null : round($amount / $total * 100, 1),
                 'drilldown' => ['metric_code' => $metricCode, 'category_id' => $rootId],
-                'project_rankings' => $this->categoryTop($matched, 'item_name', '项目'),
+                'project_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
+                    return in_array((string)($row['product_type_snapshot'] ?? ''), ['project', 'card_component'], true);
+                })), 'item_name', '项目'),
                 'product_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
-                    return (string)($row['product_type_snapshot'] ?? '') !== 'project';
+                    return (string)($row['product_type_snapshot'] ?? '') === 'product';
                 })), 'item_name', '产品'),
-                'source_explanation' => '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入。',
+                'source_explanation' => '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入，排行榜按卡内项目商品名称展示。',
             ];
         }
         $unclassified = $this->add($total, -$categorized);
@@ -1773,11 +1777,13 @@ final class RegisteredMetricReadServices
                 'category_id' => 0, 'name' => '未分类', 'cash_performance_cents' => $unclassified,
                 'share' => $total === 0 ? null : round($unclassified / $total * 100, 1),
                 'drilldown' => ['metric_code' => $metricCode],
-                'project_rankings' => $this->categoryTop($matched, 'item_name', '项目'),
+                'project_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
+                    return in_array((string)($row['product_type_snapshot'] ?? ''), ['project', 'card_component'], true);
+                })), 'item_name', '项目'),
                 'product_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
-                    return (string)($row['product_type_snapshot'] ?? '') !== 'project';
+                    return (string)($row['product_type_snapshot'] ?? '') === 'product';
                 })), 'item_name', '产品'),
-                'source_explanation' => '未能匹配当前启用一级商品分类的现金业绩；保留在独立未分类卡中，确保分类合计与现金业绩一致。',
+                'source_explanation' => '未能匹配当前启用一级商品分类的现金业绩；保留在独立未分类卡中，确保分类合计与现金业绩一致。排行榜仅展示可核实商品名称的项目或产品。',
             ];
         }
         return $cards;
@@ -2069,11 +2075,25 @@ final class RegisteredMetricReadServices
         $saleIds = array_values(array_unique(array_filter(array_column($cards, 'sale_fact_id'))));
         $itemsBySale = [];
         if ($saleIds !== []) {
+            $categoryFields = 'id,sale_fact_id,component_product_id,category_name_snapshot,category_id_snapshot,category_path_snapshot,partner_name_snapshot,product_type_snapshot,component_count,sale_amount_cents,configured_amount_cents';
+            if ($this->currentReportProductCategory) $categoryFields .= ',card_receipt_id';
             foreach (call_user_func($this->queryFactory, 'cashier_v3_card_sale_category_allocation_fact')
                 ->where('tenant_id', $tenantId)->whereIn('sale_fact_id', $saleIds)->where('status', 'effective')
-                ->field('id,sale_fact_id,component_product_id,category_name_snapshot,category_id_snapshot,category_path_snapshot,partner_name_snapshot,product_type_snapshot,component_count,sale_amount_cents,configured_amount_cents')
+                ->field($categoryFields)
                 ->order('id', 'asc')->select()->toArray() as $item) {
                 $itemsBySale[(string)$item['sale_fact_id']][] = $item;
+            }
+        }
+        // The category fact owns each payment's category amount. For current-category
+        // reports, split that exact amount among immutable receipt items so the
+        // dashboard ranks real product names without changing cash totals.
+        $projectsByCategory = [];
+        if ($this->currentReportProductCategory && $saleIds !== []) {
+            foreach (call_user_func($this->queryFactory, 'cashier_v3_card_sale_item_allocation_fact')
+                ->where('tenant_id', $tenantId)->whereIn('sale_fact_id', $saleIds)->where('status', 'effective')
+                ->field('id,sale_fact_id,card_receipt_id,category_id_snapshot,component_product_id,item_name_snapshot,configured_amount_cents,sale_amount_cents')
+                ->order('id', 'asc')->select()->toArray() as $project) {
+                $projectsByCategory[(string)$project['sale_fact_id']][(string)$project['card_receipt_id']][(int)$project['category_id_snapshot']][] = $project;
             }
         }
         $allowed = array_fill_keys($categoryIds, true);
@@ -2091,6 +2111,32 @@ final class RegisteredMetricReadServices
                 $categoryId = (int)($item['category_id_snapshot'] ?? 0);
                 if ($allowed !== [] && !isset($allowed[$categoryId])) continue;
                 if (!$this->categorySnapshotMatches($item, $filters)) continue;
+                if ($this->currentReportProductCategory) {
+                    $projects = $projectsByCategory[(string)$payment['sale_fact_id']][(string)$item['card_receipt_id']][$categoryId] ?? [];
+                    if ($projects !== []) {
+                        foreach ($this->allocate((int)$allocation['amount_cents'], $projects) as $projectAllocation) {
+                            $project = $projectAllocation['item'];
+                            $rows[] = array_merge($payment, [
+                                'amount_cents' => $projectAllocation['amount_cents'],
+                                'item_id' => (int)$project['component_product_id'],
+                                'item_name' => (string)$project['item_name_snapshot'],
+                                'product_type_snapshot' => (string)$item['product_type_snapshot'],
+                                'category_id' => $categoryId, 'category_path' => (string)$item['category_path_snapshot'],
+                                'partner_name_snapshot' => (string)$item['partner_name_snapshot'],
+                            ]);
+                        }
+                        continue;
+                    }
+                    // Missing item facts must remain visible for reconciliation,
+                    // but the category label must never masquerade as a product.
+                    $rows[] = array_merge($payment, [
+                        'amount_cents' => $allocation['amount_cents'], 'item_id' => 0,
+                        'item_name' => '卡项（项目明细待补齐）', 'product_type_snapshot' => 'card_unclassified',
+                        'category_id' => 0, 'category_path' => '',
+                        'classification_coverage' => 'missing_card_item_components',
+                    ]);
+                    continue;
+                }
                 $rows[] = array_merge($payment, [
                     'amount_cents' => $allocation['amount_cents'], 'item_id' => (string)$item['component_product_id'],
                     'item_name' => (string)$item['category_name_snapshot'], 'product_type_snapshot' => 'card_component',
@@ -2340,7 +2386,7 @@ final class RegisteredMetricReadServices
             }, $singleCard)));
             $lines = Db::name('store_order_cart_info')->whereIn('oid', $orderIds)
                 ->whereIn('product_type', [5, 6])
-                ->fieldRaw('id,oid,product_id,product_type,source_type,ROUND(total_price*100) sale_amount_cents')
+                ->fieldRaw('id,oid,product_id,product_type,source_type,cart_info,ROUND(total_price*100) sale_amount_cents')
                 ->order('id', 'asc')->select()->toArray();
             $byOrder = []; $cardCounts = [];
             foreach ($lines as $line) {
@@ -2348,6 +2394,21 @@ final class RegisteredMetricReadServices
                 if ((int)$line['product_type'] === 5) $cardCounts[$orderId] = (int)($cardCounts[$orderId] ?? 0) + 1;
                 else $byOrder[$orderId][] = $line;
             }
+            $projectIds = array_values(array_unique(array_map('intval', array_column($lines, 'product_id'))));
+            $currentNames = $projectIds === [] ? [] : Db::name('store_product')->whereIn('id', $projectIds)->column('store_name', 'id');
+            foreach ($byOrder as &$components) {
+                foreach ($components as &$component) {
+                    // Imported receipts retain the original project name. Only
+                    // incomplete snapshots fall back to the linked catalog.
+                    $snapshot = json_decode((string)($component['cart_info'] ?? ''), true);
+                    $name = trim((string)($snapshot['project_name'] ?? ''));
+                    if ($name === '') $name = trim((string)($snapshot['productInfo']['store_name'] ?? ''));
+                    if ($name === '') $name = trim((string)($currentNames[(int)$component['product_id']] ?? ''));
+                    $component['item_name'] = $name;
+                }
+                unset($component);
+            }
+            unset($components);
             $allocated = Db::name('cashier_v3_payment_fact')->alias('payment')
                 ->join('cashier_v3_payment_sale_allocation_fact allocation', 'allocation.tenant_id=payment.tenant_id AND allocation.payment_fact_id=payment.fact_id')
                 ->where('payment.tenant_id', $tenantId)->whereIn('payment.order_id', $batch)
@@ -2387,8 +2448,8 @@ final class RegisteredMetricReadServices
                 $rows[] = array_merge($payment, [
                     'amount_cents' => $allocation['amount_cents'],
                     'item_id' => (int)$component['product_id'],
-                    'item_name' => '历史卡欠款补交项目',
-                    'product_type_snapshot' => 'card_component',
+                    'item_name' => (string)$component['item_name'] !== '' ? (string)$component['item_name'] : '历史卡项目名称待补齐',
+                    'product_type_snapshot' => (string)$component['item_name'] !== '' ? 'card_component' : 'card_component_unnamed',
                 ]);
             }
         }
