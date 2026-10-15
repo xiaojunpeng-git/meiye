@@ -13,14 +13,17 @@ require __DIR__ . '/../../../scripts/import/customer_008_morestore_catalog_apply
 $dsn = (string)(getenv('CATALOG_TEST_DSN') ?: '');
 $user = (string)(getenv('CATALOG_TEST_USER') ?: '');
 $password = (string)(getenv('CATALOG_TEST_PASSWORD') ?: '');
-if ($dsn === '' || strpos($dsn, 'dbname=catalog_test') === false) {
+$testDatabase = (string)(getenv('CATALOG_TEST_DATABASE') ?: 'catalog_test');
+// 独立测试库须显式命名；禁止复用真实客户库或通过 DSN 子串误认测试库。
+if (!preg_match('/^catalog_test(?:_[a-z0-9_]+)?$/D', $testDatabase)
+    || !preg_match('/(?:^|;)dbname=' . preg_quote($testDatabase, '/') . '(?:;|$)/', $dsn)) {
     throw new RuntimeException('Disposable catalog_test DSN required');
 }
 $db = new PDO($dsn, $user, $password, [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
-if ((string)$db->query('SELECT DATABASE()')->fetchColumn() !== 'catalog_test') {
+if ((string)$db->query('SELECT DATABASE()')->fetchColumn() !== $testDatabase) {
     throw new RuntimeException('Refusing non-test database');
 }
 
@@ -45,14 +48,15 @@ function catalogFixture(): array
     $details = [];
     foreach ($roots as $root) {
         $id = $root['old_id'];
-        foreach ([0, 1] as $child) {
+        // 第三个卡副本没有现成门店项目，必须覆盖 catalogProjectForStore 的创建分支。
+        foreach ($id === 20 ? [0, 1, 2] : [0, 1] as $child) {
             $productId = $id + $child;
             $oldType = $root['kind'] === 'product' ? 0 : 4;
             $times = $root['kind'] === 'product' ? 0 : 10;
             $type = $child ? 1 : 0;
             $products[] = [
                 'id' => $productId, 'pid' => $child ? $id : 0,
-                'type' => $type, 'relation_id' => $child ? 17 : 0,
+                'type' => $type, 'relation_id' => $child === 2 ? 18 : ($child ? 17 : 0),
                 'product_type' => $oldType, 'store_name' => '商品' . $id,
                 'store_info' => '保留简介', 'image' => 'https://myqiniu.cc3798.com/main.jpg',
                 'slider_image' => '["https://myqiniu.cc3798.com/slide.jpg"]',
@@ -60,8 +64,9 @@ function catalogFixture(): array
                 'ficti' => 8, 'browse' => 7, 'is_show' => 1, 'is_del' => 0,
             ];
             $attrs[] = ['id' => $productId, 'product_id' => $productId,
-                'attr_name' => '规格', 'attr_values' => '默认', 'type' => $type];
-            $skus[] = ['id' => $productId, 'type' => $type,
+                'attr_name' => '规格', 'attr_values' => '默认', 'type' => 0];
+            // 与真实旧目录一致：普通 SKU 的 type 与主商品门店归属无关。
+            $skus[] = ['id' => $productId, 'type' => 0,
                 'product_id' => $productId, 'product_type' => $oldType,
                 'suk' => '默认', 'unique' => str_pad((string)$productId, 8, '0', STR_PAD_LEFT),
                 'stock' => 1000, 'sum_stock' => 1000, 'sales' => 9,
@@ -74,13 +79,13 @@ function catalogFixture(): array
             ]]];
             $results[] = ['id' => $productId, 'product_id' => $productId,
                 'result' => json_encode($editor, JSON_UNESCAPED_SLASHES),
-                'change_time' => 0, 'type' => $type];
-            $details[] = ['product_id' => $productId, 'type' => $type,
+                'change_time' => 0, 'type' => 0];
+            $details[] = ['product_id' => $productId, 'type' => 0,
                 'description' => '&lt;img src=&quot;https://myqiniu.cc3798.com/detail.jpg&quot;&gt;'];
         }
     }
     return [
-        'plan' => ['roots' => $roots, 'store_map' => ['17' => 101]],
+        'plan' => ['roots' => $roots, 'store_map' => ['17' => 101, '18' => 102]],
         'bundle' => [
             'category' => [['id' => 1, 'pid' => 0, 'type' => 0,
                 'relation_id' => 0, 'cate_name' => '美容项目'],
@@ -140,7 +145,7 @@ try {
         && (int)$shell['product_type'] === 5 && (int)$shell['is_show'] === 0
         && $shell['card_rule_type'] === '', 'Card rule or shell state failed');
     $relations = $db->query('SELECT card_product_id,product_id,write_times FROM eb_store_card_related ORDER BY card_product_id,product_id')->fetchAll();
-    catalogAssert(count($relations) === 6 && (int)$relations[0]['write_times'] === 10,
+    catalogAssert(count($relations) === 7 && (int)$relations[0]['write_times'] === 10,
         'Card relation count or normal times failed');
     foreach ($relations as $relation) {
         if (in_array((int)$relation['card_product_id'], [50, 51], true)) {
@@ -152,8 +157,18 @@ try {
         'Missing hidden parent/store tag project');
     catalogAssert((int)$db->query('SELECT level FROM eb_store_product_category WHERE id=2')->fetchColumn() === 1,
         'Imported category level is wrong');
-    catalogAssert($counts['original_products'] === 10 && $counts['card_relations'] === 6,
+    catalogAssert($counts['original_products'] === 11 && $counts['card_relations'] === 7,
         'Business object counts do not reconcile');
+    foreach (['store_product_attr', 'store_product_attr_value', 'store_product_attr_result', 'store_product_description'] as $table) {
+        catalogAssert((int)$db->query('SELECT COUNT(*) FROM eb_' . $table . ' WHERE type<>0')->fetchColumn() === 0,
+            'Normal store catalogue has activity-typed rows: ' . $table);
+    }
+    catalogAssert((int)$db->query('SELECT COUNT(*) FROM eb_store_card_related r LEFT JOIN eb_store_product_attr_value s ON s.product_id=r.product_id AND s.`unique`=r.product_attr_unique AND s.type=0 WHERE s.id IS NULL')->fetchColumn() === 0,
+        'Card reference cannot resolve in the normal SKU lock namespace');
+    $generated = $db->query('SELECT p.type,p.relation_id,s.type sku_type,s.`unique` FROM eb_store_product p JOIN eb_store_product_attr_value s ON s.product_id=p.id WHERE p.pid=10 AND p.relation_id=102')->fetch();
+    catalogAssert($generated && (int)$generated['type'] === 1 && (int)$generated['sku_type'] === 0
+        && $generated['unique'] === substr(hash('sha256', '008-source-project|10|102'), 0, 8),
+        'Generated store project changed scope or SKU identity');
     echo json_encode(['ok' => true, 'counts' => $counts], JSON_UNESCAPED_UNICODE) . PHP_EOL;
 } finally {
     $db->rollBack();

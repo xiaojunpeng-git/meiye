@@ -346,10 +346,11 @@ function catalogTagProject(PDO $target, string $name, int $storeId, array &$crea
     $productId = catalogInsert($target, 'eb_store_product', $product);
     catalogInsert($target, 'eb_store_product_attr', [
         'product_id' => $productId, 'attr_name' => '规格',
-        'attr_values' => '默认', 'type' => $storeId === 0 ? 0 : 1,
+        // SKU 附属表的 type 表示活动目录，不表示门店归属；普通门店商品仍为 0。
+        'attr_values' => '默认', 'type' => 0,
     ]);
     $sku = [
-        'type' => $storeId === 0 ? 0 : 1, 'product_id' => $productId,
+        'type' => 0, 'product_id' => $productId,
         'product_type' => 6, 'suk' => '默认', 'stock' => 0,
         'sum_stock' => 0, 'sales' => 0, 'price' => 0, 'cost' => 0,
         'image' => '', 'unique' => $unique, 'write_times' => 1,
@@ -363,11 +364,11 @@ function catalogTagProject(PDO $target, string $name, int $storeId, array &$crea
     catalogInsert($target, 'eb_store_product_attr_result', [
         'product_id' => $productId,
         'result' => json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        'change_time' => time(), 'type' => $storeId === 0 ? 0 : 1,
+        'change_time' => time(), 'type' => 0,
     ]);
     catalogInsert($target, 'eb_store_product_description', [
         'product_id' => $productId, 'description' => '',
-        'type' => $storeId === 0 ? 0 : 1,
+        'type' => 0,
     ]);
     return $created[$key] = ['product_id' => $productId, 'sku_id' => $skuId, 'unique' => $unique];
 }
@@ -402,14 +403,16 @@ function catalogProjectForStore(PDO $target, int $oldRootId, int $storeId,
                 }
                 unset($sourceSku['id'], $sourceAttr['id'], $sourceResult['id']);
                 $sourceSku['product_id'] = $id;
-                $sourceSku['type'] = 1;
+                // 仅商品主表使用 type=1 表示门店；规格及详情仍属于 type=0 普通目录。
+                // 保留确定性 unique，避免卡项关联与后续目录写锁使用不同身份。
+                $sourceSku['type'] = 0;
                 $sourceSku['unique'] = substr(hash('sha256', '008-source-project|' . $oldRootId . '|' . $storeId), 0, 8);
                 $sourceAttr['product_id'] = $id;
-                $sourceAttr['type'] = 1;
+                $sourceAttr['type'] = 0;
                 $sourceResult['product_id'] = $id;
-                $sourceResult['type'] = 1;
+                $sourceResult['type'] = 0;
                 $sourceDetail['product_id'] = $id;
-                $sourceDetail['type'] = 1;
+                $sourceDetail['type'] = 0;
                 catalogInsert($target, 'eb_store_product_attr', $sourceAttr);
                 catalogInsert($target, 'eb_store_product_attr_value', $sourceSku);
                 catalogInsert($target, 'eb_store_product_attr_result', $sourceResult);
