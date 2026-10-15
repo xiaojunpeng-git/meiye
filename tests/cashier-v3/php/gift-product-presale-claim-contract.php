@@ -17,7 +17,7 @@ $check = static function (bool $ok, string $label) use (&$failed): void {
 $check(strpos($gift, 'registerIssuedGiftProductInTx') !== false && strpos($gift, "if (\$item['kind'] === 'product')") !== false, '产品赠送签发时注册待领用事实');
 $check(strpos($projection, 'Direct product gifts are an issuance record') !== false && strpos($projection, "'legacyOrderId' => 0") !== false, '产品赠送不创建零金额兼容销售订单');
 $check(strpos($service, "private const SOURCE_GIFT = 'GIFT'") !== false && strpos($service, 'gift_product_claim_outbound') !== false, '赠送领用复用预售事务并生成独立出库来源');
-$check(strpos($service, "where('source_kind', \$sourceKind)") !== false && strpos($service, "source_kind' => self::SOURCE_GIFT") !== false, '领用列表按来源类型隔离且支持赠送');
+$check(strpos($service, "where('claimable.source_kind', \$sourceKind)") !== false && strpos($service, "source_kind' => self::SOURCE_GIFT") !== false, '领用列表按来源类型隔离且支持赠送');
 $check(strpos($service, 'CashierV3TransactionGuard::assertInTransaction') !== false && strpos($service, 'lockStock') !== false && strpos($service, 'decreaseBalances') !== false, '库存只在领用事务内加锁和扣减');
 $check(strpos($service, "gift_product_claim_void") !== false && strpos($service, 'reversalOf') !== false, '赠送领用作废写库存反向事实');
 $check(strpos($number, "GIFT_PRODUCT_CLAIM = 'GIFT_PRODUCT_CLAIM'") !== false && strpos($number, "GIFT_PRODUCT_CLAIM => 'ZPLY'") !== false, '赠送产品出库单使用独立单号前缀');

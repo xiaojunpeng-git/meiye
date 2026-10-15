@@ -611,6 +611,7 @@ Route::group('storeapi', function () {
 		Route::post('v3/presale-claims/claim', 'product.inventory.PresaleClaim/claim')->option(['real_name' => '门店预售领用出库']);
 		Route::post('v3/presale-claims/:id/remark', 'product.inventory.PresaleClaim/remark')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '门店预售领用备注修改']);
 		Route::post('v3/presale-claims/:id/void', 'product.inventory.PresaleClaim/void')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '门店预售领用作废']);
+		Route::post('v3/presale-claims/:id/void-claimable', 'product.inventory.PresaleClaim/voidClaimable')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '门店预售赠送剩余领用资格作废']);
 		Route::get('v3/unified-query/batch-stock', 'product.inventory.InventoryUnifiedQuery/batchStock')->option(['real_name' => '统一查询批次库存']);
 		Route::get('v3/unified-query/operational', 'product.inventory.InventoryUnifiedQuery/operational')->option(['real_name' => '统一查询库存业务单据']);
 		Route::get('v3/unified-query/capabilities', 'product.inventory.InventoryUnifiedQuery/capabilities')->option(['real_name' => '库存统一查询能力']);

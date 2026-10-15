@@ -58,3 +58,11 @@ export function voidStorePresaleClaim(claimId, input = {}) {
     body: { ...input, idempotency_key: input.idempotency_key || requestId('presale-claim-void') }
   })
 }
+
+/** Close a source line's remaining entitlement without reversing its delivered outbound records. */
+export function voidStorePresaleClaimable(claimableLineId, input = {}) {
+  return request(`/storeapi/product/inventory/v3/presale-claims/${encodeURIComponent(String(claimableLineId || ''))}/void-claimable`, {
+    method: 'POST',
+    body: { ...input, idempotency_key: input.idempotency_key || requestId('presale-claimable-void') }
+  })
+}

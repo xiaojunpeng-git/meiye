@@ -21,7 +21,7 @@ $giftReader = $start === false ? '' : substr($source, $start, ($end === false ? 
 $check($giftReader !== '', '会员详情赠送记录读取器存在');
 $check(strpos($giftReader, "->leftJoin(\n                    'cashier_v3_direct_gift_item gi'") !== false,
     '会员详情直接赠送按明细关联，不因历史缺失明细而丢失记录');
-$check(strpos($giftReader, "'gi.content_snapshot_json AS item_content_snapshot_json,ga.validity_end AS authority_validity_end'") !== false,
+$check(strpos($giftReader, 'gi.content_snapshot_json AS item_content_snapshot_json,ga.validity_end AS authority_validity_end') !== false,
     '会员详情读取每项有效期快照并保留旧主记录回退');
 $check(strpos($giftReader, "['validityEnd'] ?? \$snapshot['validity_end'] ?? 0") !== false,
     '会员详情兼容有效期快照字段命名');

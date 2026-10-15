@@ -741,6 +741,12 @@ final class CashierV3MemberDetailQueryServices
                     'cashier_v3_direct_gift_item gi',
                     'gi.gift_id=gf.source_id AND gi.item_id=gf.source_detail_id'
                 );
+                // Product-gift claim eligibility may be manually voided after partial
+                // delivery. Hide that closed right from active assets without erasing
+                // the original issuance or delivered inventory history.
+                $query->leftJoin('cashier_v3_presale_claimable_line pc',
+                    "pc.tenant_id=gf.tenant_id AND pc.source_kind='GIFT' AND pc.gift_id=gf.source_id AND pc.gift_item_id=gf.source_detail_id");
+                if ($status === 'active') $query->whereRaw("(pc.id IS NULL OR pc.claim_status <> 'VOIDED')");
             }
             // 已授权打开会员详情后，展示该会员所有门店的赠送事实。
             $this->applyDetailKeyword($query, $keyword, ['gf.content_name_snapshot', 'ga.gift_no', 'ga.' . $source['reason']]);
@@ -750,7 +756,7 @@ final class CashierV3MemberDetailQueryServices
                 'ga.gift_no,ga.' . $source['reason'] . ' AS reason_snapshot',
             ];
             if ($isDirectGift) {
-                $fields[] = 'gi.content_snapshot_json AS item_content_snapshot_json,ga.validity_end AS authority_validity_end';
+                $fields[] = 'gi.content_snapshot_json AS item_content_snapshot_json,ga.validity_end AS authority_validity_end,pc.claim_status AS claimable_status';
             }
             $rows = $query
                 ->field(implode(',', $fields))
@@ -769,6 +775,8 @@ final class CashierV3MemberDetailQueryServices
                 if ($validityEnd <= 0 && $isDirectGift) {
                     $validityEnd = (int)($row['authority_validity_end'] ?? 0);
                 }
+                $giftLabel = $isDirectGift && (string)($row['claimable_status'] ?? '') === 'VOIDED'
+                    ? '已作废' : $this->giftStatusLabel((string)($row['status'] ?? 'effective'));
                 $result[] = [
                     'id' => 'gift:' . (string)$row['id'],
                     'giftNo' => (string)$row['gift_no'],
@@ -776,7 +784,7 @@ final class CashierV3MemberDetailQueryServices
                     'sourceLabel' => $source['source'] === 'direct_gift' ? '直接赠送' : '充值赠送',
                     'storeName' => (string)($row['store_name'] ?? ''),
                     'reason' => (string)($row['reason_snapshot'] ?? ''),
-                    'statusLabel' => $this->giftStatusLabel((string)($row['status'] ?? 'effective')),
+                    'statusLabel' => $giftLabel,
                     'createdAt' => $this->dateTime((int)$row['recorded_at']),
                     'contents' => [[
                         'typeLabel' => $this->giftKindLabel((string)$row['gift_kind']),
@@ -784,7 +792,7 @@ final class CashierV3MemberDetailQueryServices
                         'quantity' => (int)$row['quantity'],
                         'effectiveAt' => $this->dateTime((int)$row['settled_at']),
                         'expiresAt' => $validityEnd > 0 ? $this->dateTime($validityEnd) : null,
-                        'statusLabel' => $this->giftStatusLabel((string)($row['status'] ?? 'effective')),
+                        'statusLabel' => $giftLabel,
                     ]],
                     '_issuedAt' => (int)$row['settled_at'],
                 ];
@@ -880,7 +888,7 @@ final class CashierV3MemberDetailQueryServices
             $remaining = max(0, (int)$row['quantity'] - (int)$row['claimed_quantity']);
             $state = strtoupper((string)$row['claim_status']);
             $label = in_array($state, ['OPEN', 'AVAILABLE'], true) && $remaining > 0
-                ? '有效' : ($state === 'CLOSED_AFTER_SALE_REVERSAL' ? '已作废' : '已领完');
+                ? '有效' : (in_array($state, ['CLOSED_AFTER_SALE_REVERSAL', 'VOIDED'], true) ? '已作废' : '已领完');
             $isGift = (string)$row['source_kind'] === 'GIFT';
             // 旧寄存与预售共用可领用表，历史来源单号明确标注 STORED 时
             // 保留“寄存”名称；不把它错误宣称为预售或再制造一笔赠送事实。
@@ -1559,6 +1567,7 @@ final class CashierV3MemberDetailQueryServices
             'effective' => '已生效',
             'issued' => '已生效',
             'revoked' => '已作废',
+            'voided' => '已作废',
             'cancelled' => '已取消',
             'expired' => '已过期',
         ][$normalized] ?? (trim($value) !== '' ? $value : '—');

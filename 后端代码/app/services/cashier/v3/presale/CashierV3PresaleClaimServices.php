@@ -8,11 +8,13 @@ use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\permission\CashierV3FeatureResolver;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
+use app\services\organization\EmployeeDataScopeServices;
 use app\services\organization\OrganizationScopeService;
 use app\services\product\inventory\InventoryBusinessDocumentNumberServices;
 use app\services\product\inventory\InventoryPlatformAccessPolicy;
 use app\services\product\inventory\completion\InventoryBatchMovementFactServices;
 use app\services\product\inventory\completion\InventoryEntitlementCompletionContract;
+use think\Container;
 use think\facade\Db;
 
 /**
@@ -26,11 +28,13 @@ final class CashierV3PresaleClaimServices
     public const CLAIM_TABLE = 'cashier_v3_presale_claim';
     public const CLAIM_BATCH_TABLE = 'cashier_v3_presale_claim_batch';
     public const CLAIM_REMARK_HISTORY_TABLE = 'cashier_v3_presale_claim_remark_history';
+    public const CLAIMABLE_VOID_TABLE = 'cashier_v3_presale_claimable_void';
 
     private const STATUS_AVAILABLE = 'AVAILABLE';
     private const STATUS_LEGACY_OPEN = 'OPEN';
     private const STATUS_FULLY_CLAIMED = 'FULLY_CLAIMED';
     private const STATUS_CLOSED = 'CLOSED_AFTER_SALE_REVERSAL';
+    private const STATUS_VOIDED = 'VOIDED';
     private const CLAIM_SETTLED = 'SETTLED';
     private const CLAIM_VOIDED = 'VOIDED';
     private const SOURCE_PRESALE = 'PRESALE';
@@ -285,6 +289,8 @@ final class CashierV3PresaleClaimServices
             $version = $this->positiveInt($input['expected_version'] ?? 0, 'presale_claim_remark_version_changed');
             $claim = Db::name(self::CLAIM_TABLE)->where('tenant_id', $scope['tenantId'])->where('claim_id', $claimId)->lock(true)->find();
             if (!$claim || (int)$claim['store_id'] !== $scope['storeId']) throw new \RuntimeException('presale_claim_not_found');
+            $source = $this->authorizedClaimable($scope, (string)$claim['claimable_line_id'], true);
+            if ((string)$source['claim_status'] === self::STATUS_VOIDED) throw new \RuntimeException('presale_claimable_already_voided');
             if ((int)$claim['remark_version'] !== $version) throw new \RuntimeException('presale_claim_remark_version_changed');
             $previous = (string)$claim['remark'];
             if ($previous === $remark) return ['claim_id' => $claimId, 'remark' => $remark, 'remark_version' => $version];
@@ -311,7 +317,47 @@ final class CashierV3PresaleClaimServices
     {
         return Db::transaction(function () use ($storeId, $operatorId, $claimId, $input, $sessionInfo): array {
             return $this->voidInTx($this->storeScope($storeId, $operatorId, true, $sessionInfo,
-                'cashier.v3.inventory.presale_claim.void'), $claimId, $input);
+                'cashier.v3.inventory.presale_claim.void'), $claimId, $input, false);
+        });
+    }
+
+    /** Close one store-owned source line while preserving delivered claims and their stock facts. */
+    public function voidClaimableForStore(int $storeId, int $operatorId, string $claimableId, array $input, array $sessionInfo = []): array
+    {
+        return Db::transaction(function () use ($storeId, $operatorId, $claimableId, $input, $sessionInfo): array {
+            $scope = $this->storeScope($storeId, $operatorId, true, $sessionInfo,
+                'cashier.v3.inventory.presale_claim.void', false);
+            $scope['storeIds'] = $this->sourceVoidStoreIds($scope, $sessionInfo);
+            $key = trim((string)($input['idempotency_key'] ?? ''));
+            $reason = $this->remark($input['reason'] ?? '');
+            if (preg_match('/^[A-Za-z0-9:._-]{8,96}$/D', $key) !== 1) {
+                throw new \InvalidArgumentException('presale_claim_idempotency_invalid');
+            }
+            $line = $this->authorizedClaimable($scope, $claimableId, true);
+            $existing = Db::name(self::CLAIMABLE_VOID_TABLE)->where('tenant_id', $scope['tenantId'])
+                ->where('claimable_line_id', (string)$line['claimable_line_id'])->lock(true)->find();
+            if ($existing) {
+                if ((string)$existing['idempotency_key'] !== $key) throw new \RuntimeException('presale_claimable_already_voided');
+                return ['claimable_line_id' => (string)$line['claimable_line_id'], 'status' => self::STATUS_VOIDED, 'idempotent' => true];
+            }
+            if ((string)$line['claim_status'] === self::STATUS_VOIDED) throw new \RuntimeException('presale_claimable_already_voided');
+            // A source row may already be fully claimed or closed by its sale. This action
+            // only cancels any remaining right; it never reverses a delivered outbound.
+            $now = time();
+            $operationId = 'PCV-' . strtoupper(substr(hash('sha256', $scope['tenantId'] . '|' . $line['claimable_line_id'] . '|' . $key), 0, 40));
+            if (Db::name(self::CLAIMABLE_VOID_TABLE)->insert([
+                'operation_id' => $operationId, 'tenant_id' => $scope['tenantId'], 'claimable_line_id' => (string)$line['claimable_line_id'],
+                'store_id' => (int)$line['store_id'], 'source_kind' => (string)$line['source_kind'],
+                'previous_status' => (string)$line['claim_status'], 'previous_close_operation_id' => (string)$line['close_operation_id'],
+                'remaining_quantity' => max(0, (int)$line['quantity'] - (int)$line['claimed_quantity']),
+                'reason_snapshot' => $reason, 'operator_type' => $scope['operatorType'], 'operator_id' => $scope['operatorId'],
+                'operator_name_snapshot' => $scope['operatorName'], 'idempotency_key' => $key, 'created_at' => $now,
+            ]) !== 1) throw new \RuntimeException('presale_claimable_void_audit_failed');
+            if (Db::name(self::CLAIMABLE_TABLE)->where('id', (int)$line['id'])->where('version', (int)$line['version'])->update([
+                'claim_status' => self::STATUS_VOIDED, 'close_operation_id' => $operationId, 'closed_at' => $now,
+                'version' => (int)$line['version'] + 1, 'updated_at' => $now,
+            ]) !== 1) throw new \RuntimeException('presale_claimable_void_changed');
+            return ['claimable_line_id' => (string)$line['claimable_line_id'], 'status' => self::STATUS_VOIDED, 'idempotent' => false];
         });
     }
 
@@ -319,14 +365,14 @@ final class CashierV3PresaleClaimServices
     public function voidInExistingTransaction(array $scope, string $claimId, array $input): array
     {
         CashierV3TransactionGuard::assertInTransaction('presaleClaim.voidInExistingTransaction');
-        return $this->voidInTx($scope, $claimId, $input);
+        return $this->voidInTx($scope, $claimId, $input, true);
     }
 
     public function voidForPlatform(array $adminInfo, string $claimId, array $input): array
     {
         return Db::transaction(function () use ($adminInfo, $claimId, $input): array {
             $storeId = $this->positiveInt($input['store_id'] ?? 0, 'presale_claim_store_invalid');
-            return $this->voidInTx($this->platformScope($adminInfo, $storeId), $claimId, $input);
+            return $this->voidInTx($this->platformScope($adminInfo, $storeId), $claimId, $input, false);
         });
     }
 
@@ -339,7 +385,7 @@ final class CashierV3PresaleClaimServices
         $sourceKind = strtoupper(trim((string)($criteria['source_kind'] ?? self::SOURCE_PRESALE)));
         $startDate = $this->optionalDate((string)($criteria['start_date'] ?? ''), 'presale_claim_sales_date_invalid');
         $endDate = $this->optionalDate((string)($criteria['end_date'] ?? ''), 'presale_claim_sales_date_invalid');
-        if ($status !== '' && !in_array($status, [self::STATUS_AVAILABLE, self::STATUS_FULLY_CLAIMED, self::STATUS_CLOSED], true)) {
+        if ($status !== '' && !in_array($status, [self::STATUS_AVAILABLE, self::STATUS_FULLY_CLAIMED, self::STATUS_CLOSED, self::STATUS_VOIDED], true)) {
             throw new \InvalidArgumentException('presale_claim_status_invalid');
         }
         if (!in_array($sourceKind, [self::SOURCE_PRESALE, self::SOURCE_GIFT], true)) {
@@ -421,7 +467,9 @@ final class CashierV3PresaleClaimServices
 
         $claimable = $this->authorizedClaimable($scope, $command['claimableLineId'], true);
         if (!$this->isClaimable($claimable)) {
-            throw new \RuntimeException((string)$claimable['claim_status'] === self::STATUS_CLOSED ? 'presale_claim_closed_after_sale_reversal' : 'presale_claim_fully_claimed');
+            $state = (string)$claimable['claim_status'];
+            throw new \RuntimeException($state === self::STATUS_VOIDED ? 'presale_claimable_already_voided'
+                : ($state === self::STATUS_CLOSED ? 'presale_claim_closed_after_sale_reversal' : 'presale_claim_fully_claimed'));
         }
         $remaining = (int)$claimable['quantity'] - (int)$claimable['claimed_quantity'];
         if ($command['quantity'] > $remaining) throw new \RuntimeException('presale_claim_exceeds_remaining');
@@ -478,7 +526,7 @@ final class CashierV3PresaleClaimServices
         return ['claim_id' => $claimId, 'claim_no' => $claimNo, 'quantity' => $command['quantity'], 'status' => self::CLAIM_SETTLED, 'idempotent' => false];
     }
 
-    private function voidInTx(array $scope, string $claimId, array $input): array
+    private function voidInTx(array $scope, string $claimId, array $input, bool $sourceLifecycleReversal): array
     {
         $claimId = $this->token($claimId, 64, 'presale_claim_id_invalid');
         $command = $this->voidCommand($input);
@@ -490,6 +538,11 @@ final class CashierV3PresaleClaimServices
         }
         if ((string)$claim['claim_status'] !== self::CLAIM_SETTLED) throw new \RuntimeException('presale_claim_status_invalid');
         $claimable = $this->authorizedClaimable($scope, (string)$claim['claimable_line_id'], true);
+        // The source row is frozen for direct actions after manual void. A separate
+        // source lifecycle reversal may still reconcile its already delivered stock.
+        if (!$sourceLifecycleReversal && (string)$claimable['claim_status'] === self::STATUS_VOIDED) {
+            throw new \RuntimeException('presale_claimable_already_voided');
+        }
         $batches = Db::name(self::CLAIM_BATCH_TABLE)->where('tenant_id', $scope['tenantId'])->where('claim_id', $claimId)->order('stock_id', 'asc')->order('batch_id', 'asc')->lock(true)->select()->toArray();
         if (!$batches) throw new \RuntimeException('presale_claim_batch_missing');
         $now = $command['now'];
@@ -520,8 +573,8 @@ final class CashierV3PresaleClaimServices
         ]) !== 1) throw new \RuntimeException('presale_claim_void_changed');
         $newClaimed = (int)$claimable['claimed_quantity'] - (int)$claim['quantity'];
         if ($newClaimed < 0) throw new \RuntimeException('presale_claim_void_quantity_invalid');
-        $status = (string)$claimable['claim_status'] === self::STATUS_CLOSED
-            ? self::STATUS_CLOSED
+        $status = in_array((string)$claimable['claim_status'], [self::STATUS_CLOSED, self::STATUS_VOIDED], true)
+            ? (string)$claimable['claim_status']
             : ($newClaimed === (int)$claimable['quantity'] ? self::STATUS_FULLY_CLAIMED : self::STATUS_AVAILABLE);
         if (Db::name(self::CLAIMABLE_TABLE)->where('id', (int)$claimable['id'])->where('version', (int)$claimable['version'])->update([
             'claimed_quantity' => $newClaimed, 'claim_status' => $status, 'version' => (int)$claimable['version'] + 1, 'updated_at' => $now,
@@ -530,14 +583,19 @@ final class CashierV3PresaleClaimServices
     }
 
     /** 功能已授权的选店会话只读取当前店；写入仍逐项核对岗位权限并记录真实员工。 */
-    private function storeScope(int $storeId, int $operatorId, bool $lock, array $sessionInfo = [], string $writeFeature = ''): array
+    private function storeScope(int $storeId, int $operatorId, bool $lock, array $sessionInfo = [], string $writeFeature = '', bool $requireLocation = true): array
     {
         if ($storeId <= 0 || $operatorId <= 0) throw new \RuntimeException('presale_claim_scope_invalid');
-        $query = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('store_id', $storeId)
-            ->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')->order('id', 'asc')->limit(2);
-        if ($lock) $query->lock(true);
-        $locations = $query->select()->toArray();
-        if (count($locations) !== 1) throw new \RuntimeException('presale_claim_scope_denied');
+        // Closing future eligibility does not use inventory. Keep authentication and
+        // selected-store checks, but do not require an active stock location to void.
+        $locations = [];
+        if ($requireLocation) {
+            $query = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->where('store_id', $storeId)
+                ->where('location_type', 'STORE')->where('is_default', 1)->where('location_status', 'ACTIVE')->order('id', 'asc')->limit(2);
+            if ($lock) $query->lock(true);
+            $locations = $query->select()->toArray();
+            if (count($locations) !== 1) throw new \RuntimeException('presale_claim_scope_denied');
+        }
         $organizationSession = !empty($sessionInfo['_cashier_v3_organization']) || !empty($sessionInfo['_cashier_v3_delegated']);
         if ($organizationSession) {
             $sessionType = (string)($sessionInfo['type'] ?? '');
@@ -569,16 +627,48 @@ final class CashierV3PresaleClaimServices
             $staff = Db::name('system_store_staff')->where('id', $operatorId)->where('store_id', $storeId)
                 ->where('status', 1)->where('is_del', 0);
             if ($lock) $staff->lock(true);
-            $staff = $staff->field('id,staff_name')->find();
+            $staff = $staff->field('id,staff_name,employee_id')->find();
             if (!$staff) throw new \RuntimeException('presale_claim_scope_denied');
             $actorType = 'STORE_STAFF';
             $actorId = $operatorId;
             $actorName = (string)$staff['staff_name'];
+            $employeeId = (int)$staff['employee_id'];
         }
-        $location = (array)$locations[0];
-        return ['tenantId' => (string)$location['tenant_id'], 'organizationId' => (string)$location['organization_id'], 'organizationPath' => (string)$location['organization_path'],
-            'storeId' => $storeId, 'storeIds' => [$storeId], 'operatorId' => $actorId, 'operatorType' => $actorType,
+        $location = (array)($locations[0] ?? []);
+        return ['tenantId' => (string)($location['tenant_id'] ?? CashierV3ScopeResolver::TENANT_SCOPE_ID), 'organizationId' => (string)($location['organization_id'] ?? ''), 'organizationPath' => (string)($location['organization_path'] ?? ''),
+            'storeId' => $storeId, 'storeIds' => [$storeId], 'employeeId' => $employeeId, 'operatorId' => $actorId, 'operatorType' => $actorType,
             'operatorName' => $this->text($actorName, 128), 'location' => $location];
+    }
+
+    /** Source void alone may span an employee's effective data-authorized stores.
+     * Current-store identity and the live position feature still come from the
+     * authenticated session; a client-supplied store ID never expands this set.
+     */
+    private function sourceVoidStoreIds(array $scope, array $sessionInfo): array
+    {
+        $employeeId = (int)($scope['employeeId'] ?? 0);
+        if ($employeeId <= 0) throw new \RuntimeException('presale_claim_scope_denied');
+        $profile = array_merge($sessionInfo, [
+            'id' => (int)($sessionInfo['id'] ?? $sessionInfo['staff_id'] ?? $scope['operatorId']),
+            'employee_id' => $employeeId, 'store_id' => (int)$scope['storeId'], 'admin_type' => 3,
+        ]);
+        if (!in_array('cashier.v3.inventory.presale_claim.void',
+            Container::getInstance()->make(CashierV3FeatureResolver::class)->resolveGrantedFeatures($profile), true)) {
+            throw new \RuntimeException('presale_claim_scope_denied');
+        }
+        // The employee data-scope resolver normally intersects with the chosen
+        // store for store-page reads. This approved command alone uses the full
+        // current position-authorized set; isolation and revoked grants still apply.
+        $allowed = Container::getInstance()->make(EmployeeDataScopeServices::class)
+            ->resolveEffectiveStoreIds($employeeId, 0, $profile);
+        // An active appointment grants this signed-in store even when the HQ
+        // data scope is personal; an explicit isolation row must still win.
+        $isolatedHere = Db::name('employee_store_isolation')->where('employee_id', $employeeId)
+            ->where('store_id', (int)$scope['storeId'])->where('status', 1)->where('is_del', 0)->count() > 0;
+        $ids = $isolatedHere ? [] : [(int)$scope['storeId']];
+        if (is_array($allowed)) $ids = array_merge($ids, $allowed);
+        if ($isolatedHere) $ids = array_diff($ids, [(int)$scope['storeId']]);
+        return array_values(array_unique(array_filter(array_map('intval', $ids))));
     }
 
     private function platformScope(array $adminInfo, int $storeId): array

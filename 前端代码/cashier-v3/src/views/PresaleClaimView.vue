@@ -10,7 +10,8 @@ import {
   listStorePresaleClaims,
   readStorePresaleClaim,
   updateStorePresaleClaimRemark,
-  voidStorePresaleClaim
+  voidStorePresaleClaim,
+  voidStorePresaleClaimable
 } from '@/services/presaleClaimApi'
 import { canUseCashierV3Operation } from '@/services/cashierV3Bridge'
 
@@ -43,13 +44,19 @@ const voidOpen = ref(false)
 const voidTarget = ref(null)
 const voidReason = ref('')
 const voidSubmitting = ref(false)
+const sourceVoidOpen = ref(false)
+const sourceVoidTarget = ref(null)
+const sourceVoidReason = ref('')
+const sourceVoidSubmitting = ref(false)
+const sourceVoidError = ref('')
 
 const pageSize = 20
 const statusOptions = Object.freeze([
   { value: '', label: '全部状态' },
   { value: 'AVAILABLE', label: '可领用' },
   { value: 'FULLY_CLAIMED', label: '已全部领用' },
-  { value: 'CLOSED_AFTER_SALE_REVERSAL', label: '已关闭' }
+  { value: 'CLOSED_AFTER_SALE_REVERSAL', label: '已关闭' },
+  { value: 'VOIDED', label: '已作废' }
 ])
 const shouldShowSalesDateFilter = computed(() => status.value !== 'AVAILABLE')
 const canPreviousPage = computed(() => page.value > 1)
@@ -235,6 +242,35 @@ function closeVoid() {
   if (!voidSubmitting.value) voidOpen.value = false
 }
 
+/** Main-row void closes only future eligibility; settled outbound claims remain auditable. */
+function openSourceVoid(row) {
+  if (!canVoidClaim.value || row.claim_status === 'VOIDED') return
+  sourceVoidTarget.value = row
+  sourceVoidReason.value = ''
+  sourceVoidError.value = ''
+  sourceVoidOpen.value = true
+}
+function closeSourceVoid() {
+  if (!sourceVoidSubmitting.value) sourceVoidOpen.value = false
+}
+async function submitSourceVoid() {
+  if (!sourceVoidTarget.value || sourceVoidSubmitting.value) return
+  sourceVoidSubmitting.value = true
+  sourceVoidError.value = ''
+  try {
+    await voidStorePresaleClaimable(sourceVoidTarget.value.claimable_line_id, { reason: sourceVoidReason.value.trim() })
+    sourceVoidOpen.value = false
+    showFeedback('记录已作废；此前领用与出库保留，剩余数量不可再领用。')
+    await load()
+  } catch (error) {
+    // Keep a failed confirmation visible in this modal; page-level feedback is
+    // hidden behind its backdrop and would make the button look unresponsive.
+    sourceVoidError.value = error?.message || '作废失败，请稍后重试。'
+  } finally {
+    sourceVoidSubmitting.value = false
+  }
+}
+
 async function submitVoid() {
   const reason = voidReason.value.trim()
   if (!voidTarget.value || reason.length < 2) {
@@ -305,8 +341,9 @@ onMounted(() => load(1))
             <td><span class="presale-status" :class="`presale-status--${String(row.claim_status || '').toLowerCase()}`">{{ statusLabel(row.claim_status) }}</span></td>
             <td class="presale-claim-table__actions">
               <button v-if="row.can_claim && canClaim" class="button button--text" type="button" @click="openClaim(row)">领用</button>
-              <span v-else class="muted">不可领用</span>
+              <span v-else-if="row.claim_status !== 'VOIDED'" class="muted">不可领用</span>
               <button v-if="canViewClaimDetail" class="button button--text" type="button" @click="openDetail(row)">明细</button>
+              <button v-if="row.claim_status !== 'VOIDED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openSourceVoid(row)">作废</button>
             </td>
           </tr>
           <tr v-if="!loading && !rows.length"><td colspan="9" class="presale-empty">暂无{{ sourceLabel }}</td></tr>
@@ -346,8 +383,9 @@ onMounted(() => load(1))
         <div v-if="detailLoading" class="presale-loading"><FileClock :size="22" />加载中...</div>
         <template v-else>
           <p v-if="detail.claimable" class="presale-detail-summary">{{ detail.claimable.product_name }}：{{ sourceQuantityLabel }} {{ detail.claimable.quantity }}，已领用 {{ detail.claimable.claimed_quantity }}，未领用 {{ detail.claimable.unclaimed_quantity }}</p>
+          <p v-if="detail.claimable?.claim_status === 'VOIDED'" class="presale-void-note">该记录已作废，剩余未领用数量不可再操作；已领用出库保留。</p>
           <table class="presale-detail-table"><thead><tr><th>{{ outboundDocumentLabel }}</th><th class="align-right">数量</th><th>状态</th><th>操作人</th><th>领用时间</th><th>备注</th><th>作废时间</th><th>作废原因</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td class="presale-detail-table__remark">{{ row.remark || '-' }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td class="presale-detail-table__actions"><button v-if="canClaim" class="button button--text" type="button" @click="openRemark(row)">修改备注</button><button v-if="row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-if="row.status !== 'SETTLED'" class="muted">已作废</span></td></tr>
+            <tr v-for="row in detail.claims || []" :key="row.claim_id"><td>{{ row.claim_no }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ statusLabel(row.status) }}</td><td>{{ row.operator_name }}</td><td>{{ timestamp(row.occurred_at) }}</td><td class="presale-detail-table__remark">{{ row.remark || '-' }}</td><td>{{ timestamp(row.voided_at) }}</td><td>{{ row.void_reason || '-' }}</td><td class="presale-detail-table__actions"><button v-if="detail.claimable?.claim_status !== 'VOIDED' && canClaim" class="button button--text" type="button" @click="openRemark(row)">修改备注</button><button v-if="detail.claimable?.claim_status !== 'VOIDED' && row.status === 'SETTLED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废领用</button><span v-if="detail.claimable?.claim_status === 'VOIDED' || row.status !== 'SETTLED'" class="muted">{{ detail.claimable?.claim_status === 'VOIDED' ? '记录已作废' : '已作废' }}</span></td></tr>
             <tr v-if="!(detail.claims || []).length"><td colspan="9" class="presale-empty">暂无领用记录</td></tr>
           </tbody></table>
         </template>
@@ -373,6 +411,16 @@ onMounted(() => load(1))
         <footer><button class="button button--secondary" type="button" @click="closeVoid">取消</button><button class="button button--danger" type="button" :disabled="voidSubmitting" @click="submitVoid">确认作废</button></footer>
       </div>
     </section>
+
+    <section v-if="sourceVoidOpen" class="presale-modal-backdrop" role="presentation" @click.self="closeSourceVoid">
+      <div class="presale-modal" role="dialog" aria-modal="true" aria-labelledby="presale-source-void-title">
+        <header><div><p>{{ sourceLabel }}</p><h2 id="presale-source-void-title">作废记录</h2></div><button class="icon-button" title="关闭" type="button" @click="closeSourceVoid"><X :size="18" /></button></header>
+        <p class="presale-void-note">{{ sourceVoidTarget?.presale_order_no }} · {{ sourceVoidTarget?.product_name }}。作废后不再领用，已领用出库保持原状。</p>
+        <label class="presale-modal__field">作废说明（选填）<textarea v-model="sourceVoidReason" rows="3" maxlength="500" placeholder="选填" /></label>
+        <p v-if="sourceVoidError" class="presale-alert-message" role="alert">{{ sourceVoidError }}</p>
+        <footer><button class="button button--secondary" type="button" @click="closeSourceVoid">取消</button><button class="button button--danger" type="button" :disabled="sourceVoidSubmitting" @click="submitSourceVoid">确认作废</button></footer>
+      </div>
+    </section>
   </section>
 </template>
 
@@ -385,6 +433,7 @@ onMounted(() => load(1))
 .presale-claim-filter__period { width: min(290px, 100%); }
 .presale-modal header p { margin: 0 0 4px; color: #6b7785; font-size: 12px; }.presale-modal h2 { margin: 0; font-size: 22px; font-weight: 650; }.presale-claim-filter { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }.presale-claim-source-switch { position: relative; display: grid; grid-template-columns: repeat(2, 72px); isolation: isolate; min-height: 36px; padding: 2px; border: 1px solid #d7dee5; border-radius: 4px; background: #fff; }.presale-claim-source-switch__thumb { position: absolute; z-index: -1; inset: 2px auto 2px 2px; width: 72px; border-radius: 3px; background: #e8f3ee; transition: transform .18s ease; }.presale-claim-source-switch__thumb.is-gift { transform: translateX(72px); }.presale-claim-source-switch button { min-height: 30px; border: 0; border-radius: 3px; background: transparent; color: #687481; cursor: pointer; }.presale-claim-source-switch button.is-active { color: #155d50; font-weight: 600; }.presale-claim-filter input, .presale-claim-filter select, .presale-modal__field input, .presale-modal__field textarea { box-sizing: border-box; width: 100%; min-height: 36px; border: 1px solid #d7dee5; border-radius: 4px; padding: 7px 10px; background: #fff; color: inherit; }.presale-claim-filter input { width: 260px; }.presale-claim-filter select { width: 130px; }.presale-claim-filter__date { display: flex; align-items: center; gap: 6px; color: #53606d; font-size: 12px; white-space: nowrap; }.presale-claim-filter__date input { width: 142px; }.presale-feedback { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid #167d68; background: #edf8f4; color: #155d50; }.presale-claim-table-wrap { overflow: auto; background: #fff; border: 1px solid #e1e7ec; }.presale-claim-table, .presale-detail-table { width: 100%; min-width: 1000px; border-collapse: collapse; font-size: 13px; }.presale-claim-table th, .presale-claim-table td, .presale-detail-table th, .presale-detail-table td { padding: 12px; border-bottom: 1px solid #edf0f2; text-align: left; vertical-align: middle; }.presale-claim-table th, .presale-detail-table th { background: #f7f9fa; color: #53606d; font-weight: 600; white-space: nowrap; }.presale-claim-table small { display: block; margin-top: 3px; color: #768391; }.align-right { text-align: right !important; }.presale-claim-table__actions { white-space: nowrap; }.button--text { padding: 0; min-height: auto; border: 0; background: transparent; color: #167d68; cursor: pointer; }.button--text + .button--text { margin-left: 12px; }.button--danger { border-color: #c83c3c; background: #c83c3c; color: #fff; }.button--text.button--danger { color: #c83c3c; background: transparent; }.muted { color: #9aa5af; }.presale-status { display: inline-block; padding: 3px 7px; border-radius: 3px; background: #eff3f5; color: #687481; white-space: nowrap; }.presale-status--available { background: #e9f7f0; color: #167d68; }.presale-status--fully_claimed { background: #eaf2fb; color: #276ba7; }.presale-status--closed_after_sale_reversal { background: #f8eded; color: #9d3a3a; }.presale-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 12px; color: #65727e; }.presale-empty { padding: 32px !important; text-align: center !important; color: #7d8994; }.presale-modal-backdrop { position: fixed; z-index: 2000; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(23, 33, 43, .46); }.presale-modal-backdrop--alert { z-index: 2100; }.presale-modal { width: min(440px, 100%); max-height: calc(100vh - 48px); overflow: auto; padding: 20px; border-radius: 6px; background: #fff; box-shadow: 0 18px 56px rgba(10, 20, 30, .28); }.presale-modal--wide { width: min(1040px, 100%); }.presale-modal--alert { width: min(380px, 100%); }.presale-modal header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 20px; }.icon-button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #5a6875; cursor: pointer; }.icon-button:hover { background: #eef2f4; }.presale-modal__summary { display: grid; grid-template-columns: 84px 1fr; gap: 8px 12px; margin: 0 0 18px; }.presale-modal__summary dt { color: #71808d; }.presale-modal__summary dd { margin: 0; }.presale-modal__field { display: grid; gap: 7px; margin-bottom: 16px; color: #46535f; font-size: 13px; }.presale-modal footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }.presale-detail-summary, .presale-void-note, .presale-alert-message { margin: 0 0 14px; padding: 10px; background: #f4f7f8; color: #475561; font-size: 13px; }.presale-alert-message { border-left: 3px solid #c83c3c; background: #fff4f4; color: #8a3030; }.presale-loading { display: grid; min-height: 160px; place-content: center; gap: 10px; color: #71808d; text-align: center; }@media (max-width: 760px) { .presale-claim-view { padding: 16px; }.presale-claim-filter { align-items: stretch; flex-wrap: wrap; }.presale-claim-source-switch { width: 148px; }.presale-claim-filter input { width: 100%; }.presale-claim-filter label:first-child { width: 100%; }.presale-claim-filter__date { flex: 1 1 100%; }.presale-claim-filter__date input { width: auto; flex: 1; }.presale-modal-backdrop { padding: 12px; }.presale-modal { padding: 16px; } }
 .presale-claim-filter, .presale-feedback { flex: 0 0 auto; }
+.presale-status--voided { background: #f8eded; color: #9d3a3a; }
 .presale-claim-table-wrap { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 .presale-claim-table-scroll { min-height: 0; flex: 1; overflow: auto; }
 .presale-pagination { flex: 0 0 auto; border-top: 1px solid #e1e7ec; background: #fff; }

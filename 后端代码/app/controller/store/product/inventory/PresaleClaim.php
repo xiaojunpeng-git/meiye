@@ -60,6 +60,16 @@ final class PresaleClaim extends AuthController
         } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
     }
 
+    /** 作废列表来源记录的剩余领用资格；已出库的领用事实保留。 */
+    public function voidClaimable(string $id)
+    {
+        try {
+            $input = $this->request->postMore([['idempotency_key', ''], ['reason', '']]);
+            return $this->success('该记录已作废，剩余领用额度已关闭。', $this->services->voidClaimableForStore(
+                (int)$this->storeId, (int)$this->storeStaffId, $id, $input, (array)$this->storeStaffInfo));
+        } catch (\Throwable $exception) { return $this->fail($this->message($exception), ['code' => $exception->getMessage()]); }
+    }
+
     private function message(\Throwable $exception): string
     {
         return [
@@ -71,7 +81,9 @@ final class PresaleClaim extends AuthController
             'presale_claim_sales_date_invalid' => '销售日期格式不正确。',
             'presale_claim_sales_date_range_invalid' => '销售开始日期不能晚于结束日期。',
             'presale_claim_already_voided' => '该领用记录已经作废。',
-            'presale_claimable_line_not_found' => '预售明细不存在或不属于当前门店。',
+            'presale_claimable_already_voided' => '该预售或赠送记录已经作废。',
+            'presale_claim_scope_denied' => '当前岗位无权操作该门店记录。',
+            'presale_claimable_line_not_found' => '记录不存在或不在当前岗位授权门店范围内。',
             'presale_claim_remark_invalid' => '备注不能超过500字。',
             'presale_claim_remark_version_changed' => '备注已被其他人修改，请刷新明细后重试。',
             'presale_claim_not_found' => '领用记录不存在或不属于当前门店。',
