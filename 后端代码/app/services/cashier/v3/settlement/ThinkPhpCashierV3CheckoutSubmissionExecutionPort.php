@@ -25,6 +25,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactContractException;
 use app\services\cashier\v3\fact\CashierV3SaleOnlyFactAssembler;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\cashier\v3\hang\CashierV3HangCheckoutBindingServices;
 use app\services\cashier\v3\report\CashierV3GuideRoundFactServices;
 use app\services\cashier\v3\report\CashierV3SalesManagerFactServices;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderAuthorityException;
@@ -93,6 +94,9 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
     /** @var CashierV3CheckoutCouponSettlementServices */
     private $coupons;
 
+    /** @var CashierV3HangCheckoutBindingServices */
+    private $hangBindings;
+
     /** @var string */
     private $serverNamespaceSecret;
 
@@ -123,6 +127,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         $this->balances = $balances ?: new CashierV3MemberBalanceWriterAdapter();
         $this->businessSources = $businessSources ?: new CashierV3CheckoutBusinessSourceSelectionServices();
         $this->coupons = $coupons ?: new CashierV3CheckoutCouponSettlementServices();
+        $this->hangBindings = new CashierV3HangCheckoutBindingServices();
         $this->directSnapshotEntitlements = $directSnapshotEntitlements;
         $this->serverNamespaceSecret = $serverNamespaceSecret;
         $this->saleOnly = $saleOnly ?: new CashierV3SaleOnlyCheckoutSubmissionServices(
@@ -928,6 +933,14 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
         return $this->domainCall(function () use ($authority): array {
             $context = $this->context($authority);
             $request = (array)($context->aggregate()['request'] ?? []);
+            // Entitlement-only and mixed checkouts bypass the sale-only cleanup;
+            // consume their resumed draft in this same successful transaction.
+            $this->hangBindings->completeFromCheckoutInTx(
+                $context->aggregate(),
+                $authority['checkoutRequestId'],
+                $context->operatorScope(),
+                $context->dataScope()
+            );
             $isSnapshot = (string)($request['source_document_type'] ?? '') === 'cashier_snapshot';
             $draft = $isSnapshot
                 ? $this->workspace->completeSnapshotCheckoutInTx(

@@ -7,10 +7,9 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
-use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
-use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\hang\authority\CashierV3HangOrderPlanV1;
 use app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository;
+use app\services\cashier\v3\settlement\ThinkPhpCashierV3CheckoutRequestRepository;
 use think\facade\Db;
 
 /**
@@ -81,12 +80,8 @@ final class CashierV3HangCheckoutBindingServices
     public function completeFromCheckoutInTx(
         array $aggregate,
         string $checkoutRequestId,
-        array $salesOrder,
         CashierV3OperatorScope $operator,
-        CashierV3DataScopeContext $dataScope,
-        CashierV3BusinessEventRecorder $eventRecorder,
-        CashierV3BusinessEventExecution $eventExecution,
-        array $eventContract
+        CashierV3DataScopeContext $dataScope
     ) {
         CashierV3TransactionGuard::assertInTransaction('hangCheckoutCompletion');
         $request = is_array($aggregate['request'] ?? null) ? $aggregate['request'] : [];
@@ -94,19 +89,67 @@ final class CashierV3HangCheckoutBindingServices
         if ($hangOrderId === '') {
             return null;
         }
-        // A normal resumed hang is only a saved cart.  It never participates
-        // in checkout validation, resource locks or payment facts.  Once the
-        // sales/payment transaction succeeds, remove that draft directly.
+        // A resumed hang is a saved cart, not a second sale. Only the matching
+        // successful checkout may consume it; a changed or missing source must
+        // roll back the whole transaction instead of leaving a stale list row.
+        $this->assertScope($operator, $dataScope);
+        if (preg_match('/^HGO[0-9a-f]{40}$/D', $hangOrderId) !== 1
+            || (string)($request['request_id'] ?? '') !== $checkoutRequestId) {
+            throw self::failure('hang_checkout_cleanup_identity_invalid');
+        }
+        $header = Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->where('member_id', (int)($request['member_id'] ?? -1))
+            ->where('hang_order_id', $hangOrderId)
+            ->lock(true)
+            ->find();
+        if (!is_array($header)
+            || !in_array((string)($header['hang_status'] ?? ''), [
+                CashierV3HangOrderPlanV1::STATUS_PENDING_CHECKOUT,
+                CashierV3HangOrderPlanV1::STATUS_SERVICE_IN_PROGRESS,
+                'resumed_checkout',
+            ], true)
+            || (int)($header['settled_at'] ?? 0) !== 0
+            || !in_array((string)($header['checkout_request_id'] ?? ''), ['', $checkoutRequestId], true)) {
+            throw self::failure('hang_checkout_cleanup_source_changed');
+        }
+        // A restored cart prepared before this guard was installed must also
+        // fail closed if an earlier request already consumed the same hang.
+        $previousCheckout = Db::name(ThinkPhpCashierV3CheckoutRequestRepository::REQUEST_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->where('member_id', (int)$header['member_id'])
+            ->where('resumed_hang_order_id', $hangOrderId)
+            ->where('request_status', 'succeeded')
+            ->where('request_id', '<>', $checkoutRequestId)
+            ->field('request_id')
+            ->find();
+        if (is_array($previousCheckout)) {
+            throw self::failure('hang_checkout_cleanup_already_completed');
+        }
         $deletedLines = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::LINE_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operator->storeId())
             ->where('hang_order_id', $hangOrderId)
             ->delete();
+        // Local-draft hangs keep their lines inside one frozen JSON snapshot;
+        // authority hangs persist one row per line in the separate table.
+        $expectedLineRows = (string)($header['hang_mode'] ?? '') === 'local_draft'
+            ? 0
+            : (int)$header['line_count'];
+        if ($deletedLines !== $expectedLineRows) {
+            throw self::failure('hang_checkout_cleanup_line_count_changed');
+        }
         $deletedHeader = (int)Db::name(ThinkPhpCashierV3HangOrderRepository::HEADER_TABLE)
             ->where('tenant_id', $dataScope->tenantId())
             ->where('store_id', $operator->storeId())
+            ->where('member_id', (int)$header['member_id'])
             ->where('hang_order_id', $hangOrderId)
             ->delete();
+        if ($deletedHeader !== 1) {
+            throw self::failure('hang_checkout_cleanup_header_changed');
+        }
         return [
             'hangOrderId' => $hangOrderId,
             'deleted' => $deletedHeader === 1,

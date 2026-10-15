@@ -21,6 +21,8 @@ $preparation = $read($root . '/后端代码/app/services/cashier/v3/settlement/C
 $workspace = $read($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php');
 $repository = $read($root . '/后端代码/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutRequestRepository.php');
 $binding = $read($root . '/后端代码/app/services/cashier/v3/hang/CashierV3HangCheckoutBindingServices.php');
+$resume = $read($root . '/后端代码/app/services/cashier/v3/hang/CashierV3HangResumeServices.php');
+$executionPort = $read($root . '/后端代码/app/services/cashier/v3/settlement/ThinkPhpCashierV3CheckoutSubmissionExecutionPort.php');
 $module = $read($root . '/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php');
 $salesPlan = $read($root . '/后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php');
 $factAssembler = $read($root . '/后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php');
@@ -41,8 +43,20 @@ $assert('request repository binds the reference only while editing', strpos($rep
 $assert('completion reads the request-local internal reference', strpos($binding, "resumed_hang_order_id") !== false);
 $assert('completion no longer scans generic checkout sources for the hang', strpos($binding, 'function hangSource') === false);
 $assert('submission preparation does not lock or rediscover the resumed draft', strpos($preparation, 'discoverSettlementCleanupResource') === false);
-$assert('completion physically deletes the request-local draft without re-reading it', strpos($binding, 'readResumedHeader(') !== false
-    && strpos($binding, "->where('hang_order_id', \$hangOrderId)\n            ->delete();") !== false);
+$assert('completion locks and validates the matching source before deleting it', strpos($binding, "->where('member_id', (int)(\$request['member_id'] ?? -1))") !== false
+    && strpos($binding, '->lock(true)') !== false
+    && strpos($binding, "=== 'local_draft'\n            ? 0") !== false
+    && strpos($binding, 'hang_checkout_cleanup_line_count_changed') !== false
+    && strpos($binding, 'hang_checkout_cleanup_header_changed') !== false);
+$assert('stale completed hangs cannot be resumed or settled twice', strpos($resume, "->where('resumed_hang_order_id', (string)\$header['hang_order_id'])") !== false
+    && strpos($resume, 'hang_resume_already_checked_out') !== false
+    && substr_count($resume, '$this->assertNotPreviouslyCheckedOut($header, $operator, $dataScope);') === 2
+    && strpos($binding, 'hang_checkout_cleanup_already_completed') !== false);
+$completionOffset = strpos($executionPort, 'public function completeWorkspaceInTx(');
+$completionBody = $completionOffset === false ? '' : substr($executionPort, $completionOffset, 2200);
+$assert('entitlement and mixed completion consumes resumed hang before clearing workspace', $completionBody !== ''
+    && strpos($completionBody, 'completeFromCheckoutInTx(') !== false
+    && strpos($completionBody, 'completeFromCheckoutInTx(') < strpos($completionBody, 'completeSnapshotCheckoutInTx('));
 $submissionPolicyOffset = strpos($module, 'private static function registerSubmitCheckoutPolicy');
 $submissionPolicyEnd = $submissionPolicyOffset === false
     ? false

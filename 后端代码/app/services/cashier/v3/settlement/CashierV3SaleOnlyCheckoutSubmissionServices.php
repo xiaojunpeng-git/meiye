@@ -610,12 +610,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             $hangResult = $this->hangBindings->completeFromCheckoutInTx(
                 $aggregate,
                 $requestId,
-                $salesResult,
                 $operatorScope,
-                $dataScope,
-                $eventRecorder,
-                $eventExecution,
-                $eventContract
+                $dataScope
             );
             // The checkout request is the authority for snapshot submissions.
             // Do not require its lines to exist in cashier_workspace; that

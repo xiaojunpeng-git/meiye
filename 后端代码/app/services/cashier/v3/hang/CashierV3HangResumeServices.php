@@ -12,6 +12,7 @@ use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\hang\authority\CashierV3HangOrderPlanV1;
 use app\services\cashier\v3\hang\authority\ThinkPhpCashierV3HangOrderRepository;
+use app\services\cashier\v3\settlement\ThinkPhpCashierV3CheckoutRequestRepository;
 use app\services\room\guard\RoomOpenServiceGuardAuthority;
 use app\services\room\guard\RoomOpenServiceGuardException;
 use app\services\room\guard\RoomOpenServiceGuardVersionProvider;
@@ -163,6 +164,7 @@ final class CashierV3HangResumeServices
         if (!is_array($header)) {
             throw CashierV3CommandException::versionConflict('该挂单不存在，请刷新列表后重试。');
         }
+        $this->assertNotPreviouslyCheckedOut($header, $operator, $dataScope);
         if ((string)($header['hang_mode'] ?? '') === 'local_draft'
             && (string)($header['resume_contract_version'] ?? '') === 'cashier-v3-hang-resume-local-draft-v1') {
             $localDraft = json_decode((string)($header['local_draft_snapshot_json'] ?? ''), true);
@@ -308,7 +310,30 @@ final class CashierV3HangResumeServices
                 ['reason' => 'hang_resume_contract_not_supported']
             );
         }
+        $this->assertNotPreviouslyCheckedOut($header, $operator, $dataScope);
         return $header;
+    }
+
+    /** Prevent historical completed-but-unconsumed drafts from reopening checkout. */
+    private function assertNotPreviouslyCheckedOut(
+        array $header,
+        CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $dataScope
+    ): void {
+        $completedRequest = Db::name(ThinkPhpCashierV3CheckoutRequestRepository::REQUEST_TABLE)
+            ->where('tenant_id', $dataScope->tenantId())
+            ->where('store_id', $operator->storeId())
+            ->where('member_id', (int)$header['member_id'])
+            ->where('resumed_hang_order_id', (string)$header['hang_order_id'])
+            ->where('request_status', 'succeeded')
+            ->field('request_id')
+            ->find();
+        if (is_array($completedRequest)) {
+            throw CashierV3CommandException::versionConflict(
+                '该挂单已结账，请勿重复提单。',
+                ['reason' => 'hang_resume_already_checked_out']
+            );
+        }
     }
 
     /** @return array<int,array{workspaceSnapshot:array,line:array}> */
