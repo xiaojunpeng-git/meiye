@@ -990,8 +990,8 @@ async function submitImportedCardRefund() {
   if (mode === 'catalog' && !catalogItem?.skuId) {
     importedCardRefundError.value = '请选择退款商品。'; return
   }
-  // All entered amounts are whole yuan; unlinked refunds prohibit balance grants and rights changes.
-  if (!/^(?:0|[1-9][0-9]{0,7})$/.test(amount) || Number(amount) <= 0
+  // Card refunds may record zero cash without changing rights; other modes still require positive cash.
+  if (!/^(?:0|[1-9][0-9]{0,7})$/.test(amount) || (mode !== 'card' && Number(amount) <= 0)
     || !/^(?:0|[1-9][0-9]{0,7})$/.test(balanceAmount)) {
     importedCardRefundError.value = '本次退款金额和转入余额只能填写整数元。'; return
   }
@@ -1002,7 +1002,10 @@ async function submitImportedCardRefund() {
   const targetRemaining = mode === 'card'
     ? Number(card?.components?.find((item) => String(item.id) === unifiedRefundComponentId.value)?.usableRemainingAmountCents || 0) / 100
     : remaining
-  if (mode !== 'catalog' && (Number(amount) > targetRemaining || Number(balanceAmount) > remaining)) {
+  // Only a zero-price card with zero cash refund may grant extra bonus credit;
+  // all cash refunds and paid-card bonus transfers retain their source cap.
+  const zeroPriceBonusGrant = mode === 'card' && Number(card?.purchaseAmountCents || 0) === 0 && Number(amount) === 0
+  if (mode !== 'catalog' && (Number(amount) > targetRemaining || (!zeroPriceBonusGrant && Number(balanceAmount) > remaining))) {
     importedCardRefundError.value = '本次退款金额或转入余额超过实际剩余金额。'; return
   }
   if (!reason || reason.length > 255) { importedCardRefundError.value = '请填写退款原因（不超过 255 字）。'; return }
@@ -4025,8 +4028,8 @@ onBeforeUnmount(() => {
               <div class="unified-refund-dialog__column-head"><h3>{{ selectedUnifiedRefundCard?.ruleType === 'choice_count' ? '整卡共享次数' : '卡内项目' }}</h3><span v-if="selectedUnifiedRefundCard">共 {{ selectedUnifiedRefundCard.components.length }} 项</span></div>
               <template v-if="selectedUnifiedRefundCard">
                 <div class="unified-refund-dialog__component-list" role="radiogroup" aria-label="卡内项目">
-                  <label v-for="component in selectedUnifiedRefundCard.components" :key="component.id" class="unified-refund-dialog__component" :class="{ 'unified-refund-dialog__component--disabled': component.usableRemainingAmountCents <= 0 }">
-                    <input v-model="unifiedRefundComponentId" type="radio" name="unified-refund-component" :value="String(component.id)" :disabled="component.usableRemainingAmountCents <= 0 || importedCardRefundUncertain" />
+                  <label v-for="component in selectedUnifiedRefundCard.components" :key="component.id" class="unified-refund-dialog__component" :class="{ 'unified-refund-dialog__component--disabled': component.usableRemainingAmountCents <= 0 && !(selectedUnifiedRefundCard.purchaseAmountCents === 0 && component.remainingTimes > 0) }">
+                    <input v-model="unifiedRefundComponentId" type="radio" name="unified-refund-component" :value="String(component.id)" :disabled="(component.usableRemainingAmountCents <= 0 && !(selectedUnifiedRefundCard.purchaseAmountCents === 0 && component.remainingTimes > 0)) || importedCardRefundUncertain" />
                     <span class="unified-refund-dialog__component-name">{{ component.name }}</span>
                     <span class="unified-refund-dialog__component-remaining"><strong>{{ importedCardRefundMoney(component.usableRemainingAmountCents) }}</strong><small>剩余 {{ component.remainingTimes }} 次</small></span>
                   </label>
@@ -4063,7 +4066,7 @@ onBeforeUnmount(() => {
         <div class="unified-refund-dialog__field-row">
           <div class="unified-refund-dialog__field">
             <label class="service-void-modal__label" for="imported-card-refund-amount">本次退款金额</label>
-            <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="整数元" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
+            <input id="imported-card-refund-amount" :value="importedCardRefundAmount" class="service-void-modal__textarea" inputmode="numeric" :pattern="effectiveRefundMode === 'card' ? '(?:0|[1-9][0-9]*)' : '[1-9][0-9]*'" placeholder="整数元" :readonly="importedCardRefundUncertain" required @beforeinput="blockNonDigitRefundInput" @input="updateWholeYuanRefundInput($event, 'refund')" />
           </div>
           <div v-if="effectiveRefundMode !== 'catalog'" class="unified-refund-dialog__field">
             <label class="service-void-modal__label" for="unified-refund-balance">转入余额</label>

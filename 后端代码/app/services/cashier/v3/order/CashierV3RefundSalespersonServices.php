@@ -276,7 +276,10 @@ final class CashierV3RefundSalespersonServices
     /** 手填最终金额不改他人金额；自动组用最后一人承接整元尾差。 */
     private function allocate(array $people, int $baseCents): array
     {
-        if ($baseCents <= 0 || $baseCents % 100 !== 0) throw self::fail('本次退款金额必须是整数元。');
+        if ($baseCents < 0 || $baseCents % 100 !== 0) throw self::fail('本次退款金额必须是整数元。');
+        // A zero-cash card refund may retain personnel attribution, but it cannot
+        // allocate a negative salary fact or invent a one-yuan deduction.
+        if ($baseCents === 0) return array_fill(0, count($people), 0);
         $groups = [];
         foreach ($people as $index => $person) $groups[(string)$person['allocationGroupKey']][] = $index;
         $shares = array_fill(0, count($people), 0);
@@ -306,6 +309,7 @@ final class CashierV3RefundSalespersonServices
     private function writeFacts(array $operation, array $people, string $eventNo, string $key,
         CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, string $revision): void
     {
+        if ((int)$operation['cash_refund_cents'] === 0) return;
         $now = time();
         $storeName = (string)Db::name('system_store')->where('id', $operator->storeId())->value('name');
         $member = (array)Db::name('user')->where('uid', (int)$operation['member_id'])->field('real_name,nickname')->find();

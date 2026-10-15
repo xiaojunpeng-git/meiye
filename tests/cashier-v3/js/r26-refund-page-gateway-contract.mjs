@@ -56,7 +56,7 @@ for (const column of ['h.card_no', 'h.card_name', 'o.order_id']) {
 }
 
 // Both modes use integer-yuan inputs and the same server-side validation; old rows keep their numbers.
-assert.match(orderCenter, /id="imported-card-refund-amount"[^>]*inputmode="numeric"[^>]*pattern="\[1-9\]\[0-9\]\*"/)
+assert.match(orderCenter, /id="imported-card-refund-amount"[^>]*inputmode="numeric"[^>]*effectiveRefundMode === 'card' \? '\(\?:0\|\[1-9\]\[0-9\]\*\)'/)
 assert.match(orderCenter, /id="unified-refund-balance"[^>]*inputmode="numeric"/)
 for (const id of ['imported-card-refund-amount', 'unified-refund-balance']) {
   assert.match(orderCenter, new RegExp(`id="${id}"[^>]*@beforeinput="blockNonDigitRefundInput"[^>]*@input="updateWholeYuanRefundInput`))
@@ -94,7 +94,13 @@ assert.match(refundService, /'sourceOrderNo' => \$salesOrderNo !== '' \? \$sales
 // the immutable gross remainder stays available for refund history updates.
 assert.match(orderCenter, /实际剩余金额 <strong>\{\{ importedCardRefundMoney\(card\.usableRemainingAmountCents\) \}\}<\/strong>/)
 assert.match(orderCenter, /component\.usableRemainingAmountCents <= 0/)
-assert.match(refundService, /\$refundCents > \$remaining \|\| \$balanceCents > \(int\)\$snapshot\['usableRemainingAmountCents'\]/)
+assert.match(orderCenter, /selectedUnifiedRefundCard\.purchaseAmountCents === 0 && component\.remainingTimes > 0/)
+assert.match(orderCenter, /mode !== 'card' && Number\(amount\) <= 0/)
+assert.match(refundService, /enteredWholeYuanCents\(\$payload\['refundAmount'\] \?\? null, \$mode === 'card'\)/)
+assert.match(orderCenter, /zeroPriceBonusGrant = mode === 'card' && Number\(card\?\.purchaseAmountCents \|\| 0\) === 0 && Number\(amount\) === 0/)
+assert.match(refundService, /\$zeroPriceBonusGrant = \$mode === 'card' && \(int\)\$snapshot\['purchaseAmountCents'\] === 0/)
+assert.match(refundService, /'zeroPriceBonusGrantCents' => \$zeroPriceBonusGrant \? \$balanceCents : 0/)
+assert.match(refundService, /\$refundCents > \$remaining[\s\S]*?!\$zeroPriceBonusGrant && \$balanceCents > \(int\)\$snapshot\['usableRemainingAmountCents'\]/)
 assert.match(refundService, /\$cashRefundRemainingCents = \$otherCollection \? 0 : min\(\$cashRefundRemainingCents, \$usableSum\)/)
 const refundRecords = recordQuery.match(/private function readRefund\(array \$criteria\): array\s*\{[\s\S]*?private function /)?.[0] || ''
 assert.match(refundRecords, /cpr\.tenant_id = rlo\.tenant_id AND cpr\.card_holder_id = ra\.card_holder_id AND cpr\.legacy_order_id = rlo\.source_order_id/)

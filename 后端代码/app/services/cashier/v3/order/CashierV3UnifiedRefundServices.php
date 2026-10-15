@@ -130,7 +130,9 @@ final class CashierV3UnifiedRefundServices
         $memberId = (int)($payload['memberId'] ?? 0);
         $void = $payload['voidTarget'] ?? false;
         if (!is_bool($void) || $memberId <= 0) throw self::fail('退款对象无效，请重新选择。', 'refund_target_invalid');
-        $refundCents = self::enteredWholeYuanCents($payload['refundAmount'] ?? null, false);
+        // A zero-yuan card refund is an auditable manual record, not a cash reversal;
+        // document and unlinked refunds still require a positive payment amount.
+        $refundCents = self::enteredWholeYuanCents($payload['refundAmount'] ?? null, $mode === 'card');
         $balanceCents = self::enteredWholeYuanCents($payload['balanceAmount'] ?? null, true);
         $balanceKind = (string)($payload['balanceKind'] ?? 'bonus');
         // 两类退款的余额去向均固定为赠金；拒绝旧客户端提交本金，避免页面口径与账务事实分叉。
@@ -176,12 +178,17 @@ final class CashierV3UnifiedRefundServices
                 : $this->selectedCardComponent($snapshot, $componentId))
             : $snapshot;
         $remaining = (int)$target['usableRemainingAmountCents'];
-        if ($mode !== 'catalog' && ($refundCents > $remaining || $balanceCents > (int)$snapshot['usableRemainingAmountCents'])) {
+        // PM-approved exception: a zero-price imported card may grant bonus credit
+        // without original cash. Never use it to lift cash refunds or paid-card caps.
+        $zeroPriceBonusGrant = $mode === 'card' && (int)$snapshot['purchaseAmountCents'] === 0
+            && $refundCents === 0;
+        if ($mode !== 'catalog' && ($refundCents > $remaining
+            || (!$zeroPriceBonusGrant && $balanceCents > (int)$snapshot['usableRemainingAmountCents']))) {
             throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
         }
         // Rights keep their voucher-funded face value, but a partial refund
         // cannot turn the non-cash voucher into refundable cash.
-        if ($mode !== 'catalog' && $refundCents + $balanceCents
+        if ($mode !== 'catalog' && !$zeroPriceBonusGrant && $refundCents + $balanceCents
             > (int)($snapshot['cashRefundRemainingCents'] ?? $remaining)) {
             throw self::fail('本次退款超过原单实际支付的可退金额，抵用券不参与退款。', 'refund_coupon_tender_exceeds_cash');
         }
@@ -217,7 +224,8 @@ final class CashierV3UnifiedRefundServices
                 'aggregate_name_snapshot' => (string)$target['name'],
                 'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'),
                 'payload' => ['mode' => $mode, 'refundAmountCents' => $refundCents,
-                    'balanceCreditCents' => $balanceCents, 'voidTarget' => $void],
+                    'balanceCreditCents' => $balanceCents, 'voidTarget' => $void,
+                    'zeroPriceBonusGrantCents' => $zeroPriceBonusGrant ? $balanceCents : 0],
             ]);
         // 卡项作废必须能精确恢复整张卡的既有状态；请求事实同时保存前后快照，
         // 不用当前卡规则猜测退款前哪些项目原本已停用。
@@ -230,6 +238,9 @@ final class CashierV3UnifiedRefundServices
         $sourceOrderId = (string)$snapshot['sourceOrderId'];
         $sourceOrderNo = (string)$snapshot['sourceOrderNo'];
         $requestSnapshot = $payload;
+        if ($zeroPriceBonusGrant && $balanceCents > 0) {
+            $requestSnapshot['_zeroPriceBonusGrantCents'] = $balanceCents;
+        }
         // 无原单没有原销售明细；退款落账时冻结目录分类，避免历史列表回读可变档案。
         if ($mode === 'catalog') $requestSnapshot['_productCategoryNameSnapshot'] = (string)($target['categoryName'] ?? '');
         if ($rightsBefore !== null) $requestSnapshot['_reversal'] = [
@@ -339,7 +350,9 @@ final class CashierV3UnifiedRefundServices
     private function selectedCardComponent(array $card, int $componentId): array
     {
         foreach ($card['components'] as $component) {
-            if ((int)$component['id'] === $componentId && (int)$component['usableRemainingAmountCents'] > 0) return $component;
+            if ((int)$component['id'] === $componentId &&
+                ((int)$component['usableRemainingAmountCents'] > 0
+                    || ((int)$card['purchaseAmountCents'] === 0 && (int)$component['remainingTimes'] > 0))) return $component;
         }
         throw self::fail('所选卡项目没有可退金额，请重新选择。', 'refund_component_unavailable');
     }
@@ -403,7 +416,7 @@ final class CashierV3UnifiedRefundServices
         if ($sharedCount) {
             // A choice-count card has one monetary value and one usage pool. Legacy
             // project carts are selectable services, not independent refundable balances.
-            $purchase = self::moneyCents((string)$candidate['pay_price'], false);
+            $purchase = self::moneyCents((string)$candidate['pay_price'], true);
             $total = (int)($rule['shared_total_times'] ?? 0);
             $left = (int)($rule['shared_remaining_times'] ?? -1);
             $history = Db::name(self::TABLE)->where('tenant_id', $tenantId)
@@ -417,17 +430,22 @@ final class CashierV3UnifiedRefundServices
                 || (int)$candidate['write_surplus_times'] !== $left || $carts === []) {
                 throw self::fail('本卡共享次数资料不一致，请联系管理员核对。', 'refund_shared_state_invalid');
             }
-            try {
-                $quota = CashierV3CardRefundQuotaPolicy::afterReturn(
-                    $purchase, $total, $used, $refunded, $purchase % 100 === 0
-                );
-            } catch (\InvalidArgumentException $error) {
-                throw self::fail('本卡共享次数与成交金额无法核对，请联系管理员。', 'refund_shared_amount_invalid');
+            if ($purchase === 0) {
+                // Zero-price rights have no monetary quota; only a positive sale can infer removed uses from money.
+                if ($refunded !== 0 || $removed !== 0) throw self::fail('本卡共享次数资料不一致，请联系管理员核对。', 'refund_shared_state_invalid');
+            } else {
+                try {
+                    $quota = CashierV3CardRefundQuotaPolicy::afterReturn(
+                        $purchase, $total, $used, $refunded, $purchase % 100 === 0
+                    );
+                } catch (\InvalidArgumentException $error) {
+                    throw self::fail('本卡共享次数与成交金额无法核对，请联系管理员。', 'refund_shared_amount_invalid');
+                }
+                if ((int)$quota['usableTimes'] !== $left) {
+                    throw self::fail('本卡共享次数与剩余金额不一致，请联系管理员核对。', 'refund_shared_quota_mismatch');
+                }
+                $sum = (int)$quota['remainingValueCents'];
             }
-            if ((int)$quota['usableTimes'] !== $left) {
-                throw self::fail('本卡共享次数与剩余金额不一致，请联系管理员核对。', 'refund_shared_quota_mismatch');
-            }
-            $sum = (int)$quota['remainingValueCents'];
             $components[] = ['id' => 0, 'name' => (string)$candidate['card_name'] . '（共享次数）',
                 'purchaseAmountCents' => $purchase, 'remainingAmountCents' => $sum,
                 'totalTimes' => $total, 'remainingTimes' => $left, 'refundedCents' => $refunded,
@@ -472,7 +490,7 @@ final class CashierV3UnifiedRefundServices
                             : 'operation-cent-combination-project-v1']), true);
                 }
             }
-            if ($purchaseSum !== self::moneyCents((string)$candidate['pay_price'], false)) {
+            if ($purchaseSum !== self::moneyCents((string)$candidate['pay_price'], true)) {
                 throw self::fail('组合卡已售金额与项目分摊不一致。', 'refund_combination_sale_mismatch');
             }
             $components[] = ['id' => 0, 'name' => (string)$candidate['card_name'] . '（整卡）',
@@ -551,7 +569,9 @@ final class CashierV3UnifiedRefundServices
             }
             unset($component);
         }
-        $cardPurchaseCents = self::moneyCents((string)$candidate['pay_price'], false);
+        // Imported zero-price cards still have real remaining rights. They must not
+        // abort the entire picker merely because their refundable cash value is zero.
+        $cardPurchaseCents = self::moneyCents((string)$candidate['pay_price'], true);
         $cardCouponCents = 0;
         $salesOrderId = trim((string)($candidate['sales_order_id'] ?? ''));
         $receipt = [];
@@ -585,7 +605,8 @@ final class CashierV3UnifiedRefundServices
             - $priorRefundCents - $priorBalanceCreditCents);
         $otherCollection = $this->usesOtherCollection($tenantId, $salesOrderId);
         $cashRefundRemainingCents = $otherCollection ? 0 : min($cashRefundRemainingCents, $usableSum);
-        $canRefund = !$voided && $usableSum > 0 && $components !== [] && $debtCents === 0
+        $hasZeroPriceRights = $cardPurchaseCents === 0 && (int)$candidate['write_surplus_times'] > 0;
+        $canRefund = !$voided && ($usableSum > 0 || $hasZeroPriceRights) && $components !== [] && $debtCents === 0
             && (int)$candidate['origin_uid'] === $memberId && !$otherCollection;
         $reason = $otherCollection ? '原单使用了其他收款，只能整单作废，不能办理退款。'
             : ($debtCents > 0 ? '本卡存在未结清欠款，请先补交或取消欠款后再办理退款。'
@@ -724,7 +745,7 @@ final class CashierV3UnifiedRefundServices
         $targetLeft = (int)$target['remainingAmountCents'] - $refund;
         $removed = 0;
         $newTimes = (int)$target['remainingTimes'];
-        if (!$card['isTimeCard']) {
+        if (!$card['isTimeCard'] && (int)$target['purchaseAmountCents'] > 0) {
             $used = (int)$target['totalTimes'] - (int)$target['remainingTimes'] - (int)$target['removedTimes'];
             $quota = CashierV3CardRefundQuotaPolicy::afterReturn(
                 (int)$target['purchaseAmountCents'], (int)$target['totalTimes'], $used,
@@ -773,10 +794,16 @@ final class CashierV3UnifiedRefundServices
         $left = (int)$target['remainingTimes'];
         $used = $total - $left - (int)$target['removedTimes'];
         $purchase = (int)$target['purchaseAmountCents'];
-        $quota = CashierV3CardRefundQuotaPolicy::afterReturn(
-            $purchase, $total, $used, (int)$target['refundedCents'] + $refund, $purchase % 100 === 0
-        );
-        $newTimes = (int)$quota['usableTimes'];
+        // A zero-price shared card has no cash-based quota to recompute; a zero refund
+        // leaves its uses intact unless the operator explicitly voids the whole card.
+        if ($purchase === 0 && $refund === 0) {
+            $newTimes = $left;
+        } else {
+            $quota = CashierV3CardRefundQuotaPolicy::afterReturn(
+                $purchase, $total, $used, (int)$target['refundedCents'] + $refund, $purchase % 100 === 0
+            );
+            $newTimes = (int)$quota['usableTimes'];
+        }
         $removed = $left - $newTimes;
         if ($removed < 0) throw self::fail('本卡共享次数已变化，请重新查询。', 'refund_shared_quota_changed');
         if ($void) {
