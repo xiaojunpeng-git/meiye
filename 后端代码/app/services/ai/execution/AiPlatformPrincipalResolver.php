@@ -39,7 +39,11 @@ final class AiPlatformPrincipalResolver
             'employee_id'=>$employeeId,'personnel_data_authorized'=>!empty($stores),'member_data_authorized'=>!empty($stores),'store_report_authorized'=>true,
             'can_configure'=>$configure,'report_capability_code'=>'group_management_dashboard',
             'tenant_id'=>'0','origin_store_id'=>0,'origin_organization_id'=>'0','export_principal_ready'=>true,'principal_kind'=>'platform_admin'];
-        $context['can_use']=AiAuthority::canUseDataScope($context);
+        // A platform role may expose the AI entry, but every query still needs
+        // the separately resolved employee/store scope above. Both checks are
+        // repeated for background continuation after a grant is revoked.
+        $context['can_use']=AiAuthority::canUseDataScope($context)
+            && (new AiPlatformUsePermission())->allows($admin);
         return $context;
     }
 

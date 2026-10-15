@@ -257,6 +257,12 @@ class SystemMenusServices extends BaseServices
     {
         $menusList = $this->dao->getMenusList($where);
         $menusList = $this->getMenusData($menusList);
+        // A keyword can match a child rule without matching its parent.
+        // Return those exact matches as rows instead of dropping them while
+        // rebuilding the full tree; the unfiltered list keeps its hierarchy.
+        if (trim((string)($where['keyword'] ?? '')) !== '') {
+            return $menusList;
+        }
         return get_tree_children($menusList);
     }
 

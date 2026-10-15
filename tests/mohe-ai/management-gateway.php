@@ -40,6 +40,11 @@ try {
     mgdeny(function()use($h){mgcall($h,'config_get');},'AI_PERMISSION_DENIED');
     $h->auth['can_configure']=true;
     mgcheck($h->models===$beforeModels&&$h->queries===$beforeQueries,'management denials never call model/facts');
+    $h->context['can_use']=false;
+    $deniedBoot=mgboot($h);
+    mgcheck($deniedBoot['enabled']===false && $deniedBoot['disabled_reason']==='AI_PERMISSION_DENIED'
+        && $deniedBoot['capabilities']===[],'revoked platform use hides AI capability catalogue');
+    $h->context['can_use']=true;
 
     // A running clarification retains its exact version across draft and
     // publish. An explicit period leaves only the registered metric choice

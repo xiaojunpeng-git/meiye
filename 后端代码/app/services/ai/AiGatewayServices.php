@@ -157,7 +157,10 @@ final class AiGatewayServices
                 'server_time'=>time()*1000,'retention_seconds'=>86400,'history_round_limit'=>20,'can_configure'=>!empty($context['can_configure']),
                 'guidance_schema_version'=>'mohe-clarification-v2','max_clarification_rounds'=>$this->limits()['max_clarification_rounds'],
                 'async_execution'=>$this->asyncExecutionReady(),
-                'capabilities'=>$this->capabilities($context), 'disabled_reason'=>$configuration['enabled']?'':'AI_NOT_CONFIGURED'];
+                // A denied AI function must not disclose the account's store
+                // and metric catalogue through the otherwise read-only bootstrap.
+                'capabilities'=>!empty($context['can_use'])?$this->capabilities($context):[],
+                'disabled_reason'=>empty($context['can_use'])?'AI_PERMISSION_DENIED':($configuration['enabled']?'':'AI_NOT_CONFIGURED')];
         }
         // Revocation must never prevent this authenticated owner from stopping their old task.
         if ($operation!=='cancel' && empty($context['can_use'])) throw new RuntimeException('AI_PERMISSION_DENIED');
