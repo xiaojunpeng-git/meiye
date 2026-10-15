@@ -38,7 +38,9 @@ final class GroupManagementDashboardServices
         $categoryTree = $this->categories();
         $selectedCategory = max(0, (int)($input['category_id'] ?? 0));
         $categoryIds = $selectedCategory > 0 ? $this->descendants($selectedCategory, $categoryTree['children']) : [];
-        if ($selectedCategory > 0 && $categoryIds === []) throw new \InvalidArgumentException('商品分类不存在或已停用');
+        if ($selectedCategory > 0 && !isset($categoryTree['visible_ids'][$selectedCategory])) {
+            throw new \InvalidArgumentException('商品分类不存在或已关闭统计，请重新选择');
+        }
         // The old daily read model summed a retired fact. Its canonical
         // rebuild still lacks reliable online invalidation, so every displayed
         // metric comes from the registered Reader and no aggregate is marked fresh.
@@ -161,7 +163,13 @@ final class GroupManagementDashboardServices
         $range = $this->range($input);
         $categoryIds = [];
         $categoryId = max(0, (int)($input['category_id'] ?? 0));
-        if ($categoryId > 0) $categoryIds = $this->descendants($categoryId, $this->categories()['children']);
+        if ($categoryId > 0) {
+            $categoryTree = $this->categories();
+            if (!isset($categoryTree['visible_ids'][$categoryId])) {
+                throw new \InvalidArgumentException('商品分类不存在或已关闭统计，请重新选择');
+            }
+            $categoryIds = $this->descendants($categoryId, $categoryTree['children']);
+        }
         $metric = trim((string)($input['metric_code'] ?? 'cash_performance'));
         if (!in_array($metric, ['cash_performance', 'actual_performance', 'consumption_performance', 'refund_performance'], true)) {
             throw new \InvalidArgumentException('下钻指标无效');
@@ -208,23 +216,38 @@ final class GroupManagementDashboardServices
         return $parsed !== false && $parsed->format('Y-m-d') === $date;
     }
 
-    /** @return array{roots:array<int,array<string,mixed>>,children:array<int,array<int,int>>} */
+    /**
+     * Only first-level categories with statistics enabled appear in the group
+     * dashboard cards and filter. Keep the full tree for authorized category
+     * drilldown and attribution; hiding a card never rewrites cash facts or
+     * removes its amount from the overall operating metrics.
+     * @return array{roots:array<int,array<string,mixed>>,children:array<int,array<int,int>>,visible_ids:array<int,bool>}
+     */
     private function categories(): array
     {
         // 商品分类表同时保存平台配置和按门店同步的副本。看板只使用平台
         // 分类正本，但不因目录隐藏状态抹掉已有商品的报表分类。
         $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
-            ->field('id,pid,cate_name')->order('pid', 'asc')->order('id', 'asc')->select()->toArray();
+            ->field('id,pid,cate_name,statistics_enabled')->order('pid', 'asc')->order('id', 'asc')->select()->toArray();
         $ids = [];
         $children = [];
         foreach ($rows as $row) {
             $id = (int)$row['id']; $pid = (int)$row['pid'];
-            $ids[$id] = ['id' => $id, 'pid' => $pid, 'name' => (string)$row['cate_name']];
+            $ids[$id] = ['id' => $id, 'pid' => $pid, 'name' => (string)$row['cate_name'],
+                'statistics_enabled' => (int)$row['statistics_enabled']];
             $children[$pid][] = $id;
         }
         $roots = [];
-        foreach ($ids as $id => $row) if (!isset($ids[(int)$row['pid']]) || (int)$row['pid'] <= 0) $roots[] = $row;
-        return ['roots' => $roots, 'children' => $children];
+        $visibleIds = [];
+        foreach ($ids as $id => $row) {
+            if (isset($ids[(int)$row['pid']]) && (int)$row['pid'] > 0) continue;
+            if ($row['statistics_enabled'] !== 1) continue;
+            $roots[] = $row;
+            // A child switch does not erase its historical amount from an
+            // enabled parent: this dashboard displays first-level cards only.
+            foreach ($this->descendants($id, $children) as $visibleId) $visibleIds[$visibleId] = true;
+        }
+        return ['roots' => $roots, 'children' => $children, 'visible_ids' => $visibleIds];
     }
 
     /** @return array<int,int> */
@@ -383,7 +406,7 @@ final class GroupManagementDashboardServices
     private function metric(string $code,string $name,$value,string $type,string $explanation):array{return['metric_code'=>$code,'name'=>$name,'value_cents'=>$type==='money'?$value:null,'value'=>$type==='count'?$value:null,'value_type'=>$type,'drilldown'=>in_array($code,['cash_performance','refund_performance','actual_performance','consumption_performance'],true)?['metric_code'=>$code]:null,'source_explanation'=>$explanation];}
     private function sum(array $rows,string $key):int{$sum=0;foreach($rows as$row)$sum+=(int)($row[$key]??0);return$sum;}
     private function goalProjection(string $title,int $target,int $actual,string $explanation):array{$rate=$target>0?round($actual/$target*100,1):null;return['title'=>$title,'target_amount_cents'=>$target,'actual_performance_cents'=>$actual,'remaining_amount_cents'=>max(0,$target-$actual),'achievement_rate'=>$rate,'source_explanation'=>$explanation];}
-    private function filterSchema(array $roots):array{$options=[['value'=>0,'label'=>'全部商品']];foreach($roots as$row)$options[]=['value'=>(int)$row['id'],'label'=>(string)$row['name']];return[['key'=>'start_date','label'=>'开始日期','type'=>'date','source_explanation'=>'包含开始当天。'],['key'=>'end_date','label'=>'截止日期','type'=>'date','source_explanation'=>'包含截止当天。'],['key'=>'category_id','label'=>'商品分类','type'=>'select','options'=>$options,'source_explanation'=>'只显示当前启用一级商品分类；选择后包含全部下级分类。'],['key'=>'store_ids','label'=>'组织 / 门店','type'=>'scope_picker','source_explanation'=>'当前账号权限范围由后端强制，选择只能缩小范围。']];}
+    private function filterSchema(array $roots):array{$options=[['value'=>0,'label'=>'全部商品']];foreach($roots as$row)$options[]=['value'=>(int)$row['id'],'label'=>(string)$row['name']];return[['key'=>'start_date','label'=>'开始日期','type'=>'date','source_explanation'=>'包含开始当天。'],['key'=>'end_date','label'=>'截止日期','type'=>'date','source_explanation'=>'包含截止当天。'],['key'=>'category_id','label'=>'商品分类','type'=>'select','options'=>$options,'source_explanation'=>'只显示已开启统计的一级商品分类；选择后包含全部下级分类。'],['key'=>'store_ids','label'=>'组织 / 门店','type'=>'scope_picker','source_explanation'=>'当前账号权限范围由后端强制，选择只能缩小范围。']];}
     private function fieldExplanations(): array
     {
         $dictionary = new \app\services\metric\MetricDictionaryServices();
