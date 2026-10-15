@@ -8,10 +8,11 @@ import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import ChevronUp from '@lucide/vue/dist/esm/icons/chevron-up.mjs'
 import ChevronRight from '@lucide/vue/dist/esm/icons/chevron-right.mjs'
 import ArrowLeft from '@lucide/vue/dist/esm/icons/arrow-left.mjs'
+import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
-import { requestCashierV3Action } from '@/services/cashierV3Bridge'
+import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
 import {
   PHASE_FOUR_ANNUAL_REPORT_CODES,
   PHASE_FOUR_CROSS_END_REPORT_TABS,
@@ -94,6 +95,10 @@ const result = ref({})
 const loading = ref(false)
 const exporting = ref(false)
 const errorMessage = ref('')
+// 会员进店下钻保留分析表筛选上下文，关闭后仍停留在原报表和页码。
+const memberVisitDetail = ref({ open: false, loading: false, memberId: 0, memberName: '', month: 0, metric: 'visits', page: 1, total: 0, records: [], amount: 0, error: '' })
+let memberVisitDetailRequestId = 0
+
 const initialDateRange = defaultReportDateRange()
 const startDate = ref(initialDateRange.start)
 const endDate = ref(initialDateRange.end)
@@ -419,10 +424,11 @@ const filterSchema = computed(() => {
   })
 })
 const isAnnualAcquisitionSummary = computed(() => ['field_acquisition_summary', 'cross_industry_customer_summary'].includes(activeReport.value))
-const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
+const isMemberVisitAnalysis = computed(() => activeReport.value === 'member_visit_analysis')
+const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
-// 两张获客汇总按完整自然年筛选；明细仍按业务日期区间，避免切换报表时串用筛选口径。
-const reportPeriodMode = computed(() => isAnnualAcquisitionSummary.value ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+// 会员进店分析与获客汇总按完整自然年筛选；其他明细仍用各自周期。
+const reportPeriodMode = computed(() => (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
   if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
@@ -837,8 +843,8 @@ function monthBounds(month) {
 
 function yearBounds(year) {
   let normalized = /^\d{4}$/.test(String(year || '')) ? String(year) : today().slice(0, 4)
-  // 年度汇总只能查询 V3 事实覆盖期内的年份；旧链接或手输越界值不能变成报表错误。
-  if (isAnnualAcquisitionSummary.value) {
+  // 年度获客与会员进店只能查询 V3 事实覆盖期内的年份。
+  if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) {
     const minYear = LEGACY_COVERAGE_START.slice(0, 4)
     normalized = normalized < minYear ? minYear : normalized > today().slice(0, 4) ? today().slice(0, 4) : normalized
     if (selectedYear.value !== normalized) selectedYear.value = normalized
@@ -948,6 +954,15 @@ function syncCurrentFiltersToRoute() {
   return router.replace(target)
 }
 
+function needsMemberVisitYearRoute() {
+  if (!isMemberVisitAnalysis.value) return false
+  const dates = yearBounds(selectedYear.value)
+  // 旧日期链接和越界年份统一收敛成自然年，防止地址显示 10 月而页面查询全年。
+  return String(route.query?.year || '') !== String(selectedYear.value)
+    || String(route.query?.start_date || '') !== dates.start
+    || String(route.query?.end_date || '') !== dates.end
+}
+
 function previousPage() {
   if (!canPageBack.value) return
   page.value -= 1
@@ -1026,7 +1041,7 @@ function syncActiveReportFromRoute() {
   startDate.value = String(route.query?.start_date || route.query?.end_date || defaults.start)
   endDate.value = String(route.query?.end_date || route.query?.start_date || defaults.end)
   // 无年份的新入口回到今年；不能把上一张汇总的历史年份带入默认页。
-  if (isAnnualAcquisitionSummary.value) selectedYear.value = today().slice(0, 4)
+  if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) selectedYear.value = today().slice(0, 4)
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 
@@ -1038,7 +1053,7 @@ function syncFiltersFromRoute() {
   else if (usesNaturalMonthFilter.value && query.start_date) selectedMonth.value = String(query.start_date).slice(0, 7)
   if (query.year && /^\d{4}$/.test(String(query.year))) selectedYear.value = String(query.year)
   // 兼容旧日期链接：原后端使用结束日所在年份，改控件不能让旧链接换成另一个年度。
-  else if (isAnnualAcquisitionSummary.value) selectedYear.value = String(query.end_date || query.start_date || today()).slice(0, 4)
+  else if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) selectedYear.value = String(query.end_date || query.start_date || today()).slice(0, 4)
   else if (usesAnnualYearFilter.value && query.start_date) selectedYear.value = String(query.start_date).slice(0, 4)
   const storeIds = String(query.store_ids || '').split(',').map(Number).filter(Boolean)
   if (storeIds.length) {
@@ -1349,9 +1364,51 @@ function drilldownConfig(row, column) {
 function canDrilldown(row, column) {
   const config = drilldownConfig(row, column)
   const target = String(config?.report || config?.report_code || '')
+  if (Array.isArray(config?.required_row_keys) && config.required_row_keys.some((key) => !String(row?.[key] ?? '').trim())) return false
   // Only an order-center identity returned for this scoped salary row can open details.
   if (target === 'order_center_order_detail') return !isPlatformReport.value && Boolean(String(row?.document_order_id || '').trim())
   return Boolean(target)
+}
+
+const memberVisitDetailPageCount = computed(() => Math.max(1, Math.ceil(memberVisitDetail.value.total / DEFAULT_LIMIT)))
+
+/** 会员进店金额始终按元整数显示，与其他经营弹窗的指标类型无关。 */
+function memberVisitAmountText(value) {
+  return formatMoney(Math.round(Number(value) || 0))
+}
+
+function closeMemberVisitDetail() {
+  memberVisitDetailRequestId += 1
+  memberVisitDetail.value = { ...memberVisitDetail.value, open: false, loading: false }
+}
+
+/** 后端按会员、月份、所点指标和授权范围返回明细；弹窗不把现金业绩混成服务消耗业绩。 */
+async function loadMemberVisitDetail(pageNumber = 1) {
+  const requestId = ++memberVisitDetailRequestId
+  memberVisitDetail.value = { ...memberVisitDetail.value, loading: true, error: '', page: pageNumber }
+  try {
+    const data = await queryStoreBusinessReport(reportParams({
+      report: 'member_visit_detail',
+      member_id: memberVisitDetail.value.memberId,
+      visit_month: memberVisitDetail.value.month,
+      visit_metric: memberVisitDetail.value.metric,
+      page: pageNumber,
+      limit: DEFAULT_LIMIT
+    }), reportRuntime.value)
+    if (requestId !== memberVisitDetailRequestId || !memberVisitDetail.value.open) return
+    memberVisitDetail.value = { ...memberVisitDetail.value, loading: false, total: Number(data?.total || 0), records: Array.isArray(data?.records) ? data.records : [], amount: data?.summary_row?.amount ?? 0 }
+  } catch (error) {
+    if (requestId !== memberVisitDetailRequestId || !memberVisitDetail.value.open) return
+    memberVisitDetail.value = { ...memberVisitDetail.value, loading: false, records: [], error: error?.message || '会员明细读取失败，请稍后重试。' }
+  }
+}
+
+function openMemberVisitDetail(row, column) {
+  const config = drilldownConfig(row, column)
+  const memberId = Number(row?.[config?.param_map?.member_id || 'member_id'] || 0)
+  if (config?.report !== 'member_visit_detail' || !Number.isInteger(memberId) || memberId <= 0) return
+  memberVisitDetail.value = { open: true, loading: false, memberId, memberName: String(row?.member_name || ''), month: Number(config?.params?.visit_month || 0), metric: config?.params?.visit_metric === 'cash' ? 'cash' : 'visits', page: 1, total: 0, records: [], amount: 0, error: '' }
+  loadMemberVisitDetail(1)
 }
 
 function drilldownRequest(row, column) {
@@ -1366,6 +1423,10 @@ function drilldownRequest(row, column) {
 }
 
 function openDrilldown(row, column) {
+  if (String(drilldownConfig(row, column)?.report || '') === 'member_visit_detail') {
+    openMemberVisitDetail(row, column)
+    return
+  }
   const request = drilldownRequest(row, column)
   if (!request) return
   if (request.report === 'order_center_order_detail') {
@@ -1449,10 +1510,12 @@ function openDrilldown(row, column) {
 }
 
 watch(() => route.fullPath, () => {
+  closeMemberVisitDetail()
   syncActiveReportFromRoute()
   syncFiltersFromRoute()
   page.value = 1
   cancelEdit()
+  if (needsMemberVisitYearRoute()) return syncCurrentFiltersToRoute()
   loadReport()
   nextTick(updateTabsLayout)
 })
@@ -1469,7 +1532,8 @@ onMounted(async () => {
     // the first query cannot fall back to the legacy partner report.
     syncActiveReportFromRoute()
     syncFiltersFromRoute()
-    await loadReport()
+    if (needsMemberVisitYearRoute()) await syncCurrentFiltersToRoute()
+    else await loadReport()
     if (filterSchema.value.some((field) => String(field?.type || '') === 'category_tree')) {
       await loadCategoryOptions().catch((error) => {
         errorMessage.value = error?.message || '商品分类读取失败，请稍后重试。'
@@ -1558,7 +1622,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <label v-if="isAnnualAcquisitionSummary || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" :min="isAnnualAcquisitionSummary ? LEGACY_COVERAGE_START.slice(0, 4) : 2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
+      <label v-if="isAnnualAcquisitionSummary || isMemberVisitAnalysis || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" :min="isAnnualAcquisitionSummary || isMemberVisitAnalysis ? LEGACY_COVERAGE_START.slice(0, 4) : 2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
       <div v-else-if="!isPlatformReport" class="store-business-report__period-picker">
         <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
       </div>
@@ -1694,6 +1758,38 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <button type="button" :disabled="!canPageForward" @click="nextPage">下一页</button>
       </footer>
     </section>
+    <div v-if="memberVisitDetail.open" class="store-business-report__modal" role="dialog" aria-modal="true" :aria-label="`${memberVisitDetail.memberName}${memberVisitDetail.metric === 'cash' ? '现金业绩' : '进店'}明细`">
+      <section class="store-business-report__modal-card store-business-report__visit-detail">
+        <header>
+          <strong>{{ memberVisitDetail.memberName || '会员' }} · {{ memberVisitDetail.month ? `${memberVisitDetail.month}月` : '全年' }}{{ memberVisitDetail.metric === 'cash' ? '现金业绩' : '进店' }}明细</strong>
+          <button type="button" class="store-business-report__modal-close" aria-label="关闭会员明细" title="关闭会员明细" @click="closeMemberVisitDetail"><X :size="20" aria-hidden="true" /></button>
+        </header>
+        <p v-if="memberVisitDetail.error" class="store-business-report__error" role="alert">{{ memberVisitDetail.error }}</p>
+        <div class="store-business-report__visit-detail-scroll">
+          <table>
+            <thead><tr><th>会员</th><th>手机</th><th>单号</th><th>日期</th><th>金额</th></tr></thead>
+            <tbody>
+              <tr v-for="(record, index) in memberVisitDetail.records" :key="`${record.visit_date}-${index}`">
+                <td>{{ record.member_name || '-' }}</td>
+                <td>{{ record.phone || '-' }}</td>
+                <td>{{ record.order_no || '-' }}</td>
+                <td>{{ record.visit_date || '-' }}</td>
+                <td>{{ memberVisitAmountText(record.amount) }}</td>
+              </tr>
+              <tr v-if="!memberVisitDetail.loading && !memberVisitDetail.records.length"><td colspan="5">暂无{{ memberVisitDetail.metric === 'cash' ? '现金业绩' : '进店' }}明细</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <footer>
+          <span>{{ memberVisitDetail.loading ? '正在读取' : memberVisitDetail.metric === 'cash' ? `共 ${memberVisitDetail.total} 笔 · 现金业绩合计 ${memberVisitAmountText(memberVisitDetail.amount)}` : `共 ${memberVisitDetail.total} 次进店 · 消耗业绩合计 ${memberVisitAmountText(memberVisitDetail.amount)}` }}</span>
+          <div>
+            <button type="button" class="button button--secondary" :disabled="memberVisitDetail.loading || memberVisitDetail.page <= 1" @click="loadMemberVisitDetail(memberVisitDetail.page - 1)">上一页</button>
+            <span>{{ memberVisitDetail.page }} / {{ memberVisitDetailPageCount }}</span>
+            <button type="button" class="button button--secondary" :disabled="memberVisitDetail.loading || memberVisitDetail.page >= memberVisitDetailPageCount" @click="loadMemberVisitDetail(memberVisitDetail.page + 1)">下一页</button>
+          </div>
+        </footer>
+      </section>
+    </div>
     <div v-if="isFieldGuideOpen" class="store-business-report__modal" role="dialog" aria-modal="true" aria-label="列名取值来源">
       <section class="store-business-report__modal-card store-business-report__field-guide">
         <header>
@@ -1782,6 +1878,18 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__modal-card { width: min(520px, 100%); max-height: min(620px, 90vh); overflow: auto; border-radius: 10px; padding: 18px; background: #fff; box-shadow: 0 16px 50px rgba(24, 39, 58, .2); }
 .store-business-report__modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .store-business-report__modal-close { border: 0; background: transparent; color: #657386; font-size: 24px; cursor: pointer; }
+.store-business-report__visit-detail { display: flex; width: min(920px, 100%); max-height: min(680px, 90vh); flex-direction: column; overflow: hidden; }
+.store-business-report__visit-detail-scroll { min-height: 0; flex: 1; overflow: auto; }
+.store-business-report__visit-detail table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; }
+.store-business-report__visit-detail th, .store-business-report__visit-detail td { border-bottom: 1px solid #e5eaf0; padding: 10px 12px; text-align: left; overflow-wrap: anywhere; }
+.store-business-report__visit-detail th { position: sticky; top: 0; background: #f5f8fc; color: #526174; font-size: 12px; }
+.store-business-report__visit-detail th:nth-child(1) { width: 14%; }
+.store-business-report__visit-detail th:nth-child(2) { width: 17%; }
+.store-business-report__visit-detail th:nth-child(3) { width: 39%; }
+.store-business-report__visit-detail th:nth-child(4) { width: 16%; }
+.store-business-report__visit-detail th:nth-child(5) { width: 14%; }
+.store-business-report__visit-detail footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #e5eaf0; padding-top: 12px; font-size: 12px; color: #526174; }
+.store-business-report__visit-detail footer div { display: flex; align-items: center; gap: 8px; }
 .store-business-report__person-search { display: flex; gap: 8px; }
 .store-business-report__person-search input { flex: 1; min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; font: inherit; }
 .store-business-report__person-results { display: grid; gap: 6px; margin-top: 12px; }

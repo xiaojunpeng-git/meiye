@@ -173,7 +173,8 @@ class Report extends AuthController
             ['store_ids', ''],
             // 异业汇总下钻必须保留会员和后续收款条件；只缩小已授权门店范围，不能在入口丢失后变为全店明细。
             // 地推汇总下钻只对指定会员按收款业务日展示原 E 销售明细；不能把筛选参数丢成全店查询。
-            ['member_id', 0], ['include_followup_cash', 0], ['receipt_period', 0],
+            // 会员进店次数与现金金额按稳定会员 ID、月份和指标下钻，权限仍由服务端裁剪。
+            ['member_id', 0], ['visit_month', 0], ['visit_metric', 'visits'], ['include_followup_cash', 0], ['receipt_period', 0],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             ['unit_price_min', ''], ['unit_price_max', ''],
             // 薪资筛选和指标下钻保留原单号与稳定人员/门店 ID；权限范围仍由服务端裁剪。

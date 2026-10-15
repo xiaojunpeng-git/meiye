@@ -31,7 +31,7 @@ class UnifiedReport extends AuthController
     private const STORE_OPERATION_REPORTS = [
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
         'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail', 'store_salesperson_performance',
-        'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_annual_summary',
+        'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_detail', 'member_visit_annual_summary',
         'field_acquisition_detail', 'field_acquisition_summary', 'cross_industry_customer_detail',
         'cross_industry_customer_summary', 'new_customer_analysis', 'new_customer_analysis_summary',
         'salesperson_large_order_statistics', 'store_refund_ledger',
@@ -644,8 +644,10 @@ class UnifiedReport extends AuthController
         // A detail page is only reachable from its parent summary.  It must
         // inherit that exact menu permission rather than introducing a hidden
         // second permission that could be omitted from existing roles.
-        $permissionReport = $report === 'store_craftsman_consumption_detail'
-            ? 'store_craftsman_consumption' : $report;
+        $permissionReport = [
+            'store_craftsman_consumption_detail' => 'store_craftsman_consumption',
+            'member_visit_detail' => 'member_visit_analysis',
+        ][$report] ?? $report;
         $expected = 'admin-report-store-operations-' . $permissionReport;
         $menus = app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 1);
         foreach ($menus as $menu) {
@@ -791,7 +793,8 @@ class UnifiedReport extends AuthController
             ['org_id', 0], ['store_id', 0], ['store_ids', ''],
             // 平台与门店共用异业下钻口径；会员条件必须经查询/导出白名单透传，组织门店权限仍由服务端裁剪。
             // 平台与门店共用地推现金月份下钻，会员和时间范围仍由服务端权限收紧。
-            ['member_id', 0], ['include_followup_cash', 0], ['receipt_period', 0],
+            // 会员进店次数与现金金额下钻透传稳定会员 ID、月份和指标，沿用汇总报表权限。
+            ['member_id', 0], ['visit_month', 0], ['visit_metric', 'visits'], ['include_followup_cash', 0], ['receipt_period', 0],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
             ['company_dimension_id', ''], ['city_manager_dimension_id', ''],
             ['dimension_as_of', ''], ['drill_month', ''], ['six_dimension_only', 0],

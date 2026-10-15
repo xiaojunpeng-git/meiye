@@ -30,7 +30,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private $activeInput = [];
 
     private const REPORTS = [
-        'market_performance', 'market_detail', 'member_visit_analysis',
+        'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_detail',
         'member_visit_annual_summary', 'field_acquisition_detail',
         'field_acquisition_summary', 'cross_industry_customer_detail',
         'cross_industry_customer_summary', 'new_customer_analysis',
@@ -44,6 +44,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'market_performance' => '市场业绩表',
             'market_detail' => '市场明细表',
             'member_visit_analysis' => '会员进店分析表',
+            'member_visit_detail' => '会员进店明细',
             'member_visit_annual_summary' => '会员进店年度汇总表',
             'field_acquisition_detail' => '地推拓客明细表',
             'field_acquisition_summary' => '地推拓客汇总表',
@@ -55,7 +56,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'store_refund_ledger' => '院店退款台账',
         ];
         $rows = [];
-        foreach ($names as $code => $name) $rows[] = ['folder' => '门店运营', 'code' => $code, 'name' => $name];
+        foreach ($names as $code => $name) $rows[] = ['folder' => '门店运营', 'code' => $code, 'name' => $name, 'hidden' => $code === 'member_visit_detail'];
         return $rows;
     }
 
@@ -83,6 +84,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             case 'market_performance': return $this->marketPerformance($storeIds, $range, $input);
             case 'market_detail': return $this->marketDetail($storeIds, $range, $input);
             case 'member_visit_analysis': return $this->memberVisitAnalysis($storeIds, $range, $input);
+            case 'member_visit_detail': return $this->memberVisitDetail($storeIds, $range, $input);
             case 'member_visit_annual_summary': return $this->memberVisitAnnualSummary($storeIds, $range, $input);
             case 'field_acquisition_detail': return $this->fieldMarketingDetail($storeIds, $range, $input);
             case 'field_acquisition_summary': return $this->fieldMarketingSummary($storeIds, $range, $input);
@@ -473,8 +475,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function memberVisitAnalysis(array $stores, array $range, array $input): array
     {
         $year = (int)substr($range['end'], 0, 4);
-        // 先从所选期间的有效正向记账收款确定会员名单。退款只冲减金额，
-        // 不会凭一笔退款把从未在本期消费的会员加入本表；仅服务未收款者也不入表。
+        // 收款名单、退款与服务到店必须先收紧到同一组织筛选范围。
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        // 有效收款、现金退款或完成的非体验服务均能让会员进入所选期间的报表；
+        // 仅服务会员的现金业绩保留为 0，购买本身不产生进店次数。
         $payingMembers = $this->cashFacts($stores)
             ->whereBetween('business_date', [$range['start'], $range['end']])
             ->where('status', 'effective')
@@ -488,36 +492,43 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $id = (int)$fact['member_id'];
             $records[$id] = ['member_id'=>$id,'member_name'=>(string)$fact['member_name'],'total_visits'=>0,'annual_cash_cents'=>0];
         }
+        // 常规退款的负向收款事实已在 cashFacts 中；单独退款调整是 adjustment，
+        // 必须从已成功退款单读取，不能把任意负数或未完成退款当作现金退款。
+        $reversalMembers = $this->cashFacts($stores)
+            ->whereBetween('business_date', [$range['start'], $range['end']])
+            ->where('status', 'effective')->where('fact_direction', 'reversal')
+            ->where('amount_cents', '<', 0)->where('member_id', '>', 0)
+            ->fieldRaw('member_id,MAX(member_name_snapshot) member_name')
+            ->group('member_id')->select()->toArray();
+        $refundReader = new StoreMemberConsumptionRefundReadServices();
+        $refundStores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $periodRefunds = $refundReader->query($refundStores, $range, $input, $this->participantEmployeeId);
+        $adjustmentMembers = (clone $periodRefunds)->where('payment.member_id', '>', 0)
+            ->fieldRaw('payment.member_id member_id,MAX(payment.member_name_snapshot) member_name')
+            ->group('payment.member_id')->select()->toArray();
+        foreach (array_merge($reversalMembers, $adjustmentMembers) as $fact) {
+            $id = (int)$fact['member_id'];
+            if (!isset($records[$id])) {
+                $records[$id] = ['member_id'=>$id,'member_name'=>(string)$fact['member_name'],
+                    'total_visits'=>0,'annual_cash_cents'=>0];
+            }
+        }
+        // 到店按会员+业务日去重，先补齐纯服务会员，再按完整名单读取年度现金。
+        // 汇总和明细共用同一个服务资格查询，避免点开后无法解释被点击次数。
+        $services = $this->memberVisitServiceFacts($stores, $range, $input)
+            ->fieldRaw('member_visit_service.member_id,MAX(member_visit_service.member_name_snapshot) member_name,MONTH(member_visit_service.business_date) month_no,COUNT(DISTINCT member_visit_service.business_date) month_visits')
+            ->group('member_visit_service.member_id,MONTH(member_visit_service.business_date)')->select()->toArray();
+        foreach ($services as $fact) {
+            $id = (int)$fact['member_id']; $month = (int)$fact['month_no'];
+            if (!isset($records[$id])) $records[$id] = ['member_id'=>$id,'member_name'=>(string)$fact['member_name'],
+                'total_visits'=>0,'annual_cash_cents'=>0];
+            $records[$id]['month_'.$month.'_visits'] = (int)$fact['month_visits'];
+            $records[$id]['total_visits'] += (int)$fact['month_visits'];
+        }
         $memberIds = array_keys($records);
         if ($memberIds) {
-            // 到店只补充现金会员在所选期间已完成、未作废且非体验的服务；
-            // 人员不计数开关不参与门店到店资格。
-            // 粒度为“会员 + 业务日”，同日多个服务项目或订单只算一次。
-            $services = $this->completedUnvoidedServiceFacts(
-                $this->participantCheckout(
-                    $this->applyOrganizationFilters(
-                        $this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_visit_service'), $stores, 'member_visit_service'),
-                        'member_visit_service',
-                        $input,
-                        $range
-                    ),
-                    'member_visit_service.checkout_request_id'
-                ),
-                'member_visit_service',
-                'member_visit_void'
-            )
-                ->whereIn('member_visit_service.member_id', $memberIds)
-                ->whereBetween('member_visit_service.business_date', [$range['start'], $range['end']])
-                ->whereRaw(StoreCustomerVisitEligibility::sqlPredicate('member_visit_service'))
-                ->fieldRaw('member_visit_service.member_id,MONTH(member_visit_service.business_date) month_no,COUNT(DISTINCT member_visit_service.business_date) month_visits')
-                ->group('member_visit_service.member_id,MONTH(member_visit_service.business_date)')->select()->toArray();
-            foreach ($services as $fact) {
-                $id = (int)$fact['member_id']; $month = (int)$fact['month_no'];
-                $records[$id]['month_'.$month.'_visits'] = (int)$fact['month_visits'];
-                $records[$id]['total_visits'] += (int)$fact['month_visits'];
-            }
-            // 会员名单与到店次数只受所选日期影响；金额仍取所选自然年
-            // 的有效收款净额（含退款反向事实），绝不把历史权益迁入当作现金。
+            // 会员名单与到店次数只受所选日期影响；金额取所选自然年
+            // 的有效收款净额及单独退款调整，绝不把历史权益迁入当作现金。
             $payments = $this->cashFacts($stores)
                 ->whereIn('member_id', $memberIds)
                 ->whereBetween('business_date', [sprintf('%04d-01-01', $year), sprintf('%04d-12-31', $year)])
@@ -529,31 +540,52 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 $records[$id]['month_'.$month.'_cash_cents']=(int)$fact['amount_cents'];
                 $records[$id]['annual_cash_cents']+=(int)$fact['amount_cents'];
             }
+            $annualRange = ['start'=>sprintf('%04d-01-01', $year), 'end'=>sprintf('%04d-12-31', $year)];
+            $annualAdjustments = $refundReader->query($refundStores, $annualRange, $input, $this->participantEmployeeId)
+                ->whereIn('payment.member_id', $memberIds)
+                ->fieldRaw('payment.member_id member_id,MONTH(refund_operation.business_date) month_no,SUM(payment.amount_cents) amount_cents')
+                ->group('payment.member_id,MONTH(refund_operation.business_date)')->select()->toArray();
+            foreach ($annualAdjustments as $fact) {
+                $id=(int)$fact['member_id'];$month=(int)$fact['month_no'];
+                $records[$id]['month_'.$month.'_cash_cents']=(int)($records[$id]['month_'.$month.'_cash_cents']??0)+(int)$fact['amount_cents'];
+                $records[$id]['annual_cash_cents']+=(int)$fact['amount_cents'];
+            }
         }
+        // 手机和首次办卡来源只用于展示，不参与总数与金额计算。列表只读取当前页，
+        // 导出仍读取全部会员，避免跨门店年度查询对上万名会员做无用的资料关联。
+        $displayMemberIds = !empty($input['_internal_all']) ? $memberIds : array_slice(
+            $memberIds,
+            (max(1, (int)($input['page'] ?? 1)) - 1) * min(100, max(10, (int)($input['limit'] ?? 20))),
+            min(100, max(10, (int)($input['limit'] ?? 20)))
+        );
         $phones = [];
         $annualCardSources = [];
-        if ($memberIds) {
-            $annualCardSources = $this->annualFirstCardSources($stores, $memberIds, $year);
-            foreach (Db::name('user')->whereIn('uid',$memberIds)->field('uid,phone')->select()->toArray() as $row) $phones[(int)$row['uid']] = (string)$row['phone'];
+        if ($displayMemberIds) {
+            $annualCardSources = $this->annualFirstCardSources($stores, $displayMemberIds, $year);
+            foreach (Db::name('user')->whereIn('uid',$displayMemberIds)->field('uid,phone')->select()->toArray() as $row) $phones[(int)$row['uid']] = (string)$row['phone'];
         }
         $columns = $this->columns(['member_name'=>'会员姓名','phone'=>'手机号码','total_visits'=>'总进店数','annual_cash'=>'全年现金业绩','source'=>'来源']);
         foreach ($columns as &$column) {
             if ($column['key'] === 'member_name') {
-                $column['source_explanation'] = '所选日期内有成功记账收款的会员；仅完成服务但没有本期现金消费的会员不列入。';
+                $column['source_explanation'] = '所选日期内有成功记账收款、已完成现金退款，或完成且未作废的非体验服务的会员；纯服务会员也列入。';
             }
             if ($column['key'] === 'total_visits') {
                 $column['source_explanation'] = '本行会员在所选日期内完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多个项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计。';
+                $column['drilldown'] = ['report'=>'member_visit_detail','param_map'=>['member_id'=>'member_id'],'required_row_keys'=>['member_id']];
             }
             if ($column['key'] === 'annual_cash') {
-                $column['source_explanation'] = '所选日期内有成功记账收款的会员，在所选年份内的记账收款扣除该年现金退款；没有完成服务的会员进店次数为 0，历史权益迁入不计入。';
+                $column['source_explanation'] = '本行会员在所选年份内的记账收款扣除退款实际发生月份的现金退款；纯服务会员没有收款时为 0，退款不增加进店次数，历史权益迁入不计入。';
+                // 现金列下钻必须解释现金本身，不能复用进店服务的消耗业绩。
+                $column['drilldown'] = ['report'=>'member_visit_detail','params'=>['visit_metric'=>'cash'],
+                    'param_map'=>['member_id'=>'member_id'],'required_row_keys'=>['member_id']];
             }
         }
         unset($column);
         $groups=[];
         foreach (range(1,12) as $month) {
             $keys=['month_'.$month.'_visits','month_'.$month.'_cash'];
-            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月','source_explanation'=>'本行现金消费会员在所选日期范围内、该月份完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计。'];
-            $columns[]=['key'=>$keys[1],'label'=>'现金业绩','group_label'=>$month.'月','source_explanation'=>'本行现金消费会员在所选年份该月的成功记账收款，扣除当月实际发生的现金退款；历史权益迁入不计入。'];
+            $columns[]=['key'=>$keys[0],'label'=>'进店次数','group_label'=>$month.'月','source_explanation'=>'本行会员在所选日期范围内、该月份完成且未作废的非体验服务到店天数；没有符合条件的服务为 0，同日多项目只算一次。“体验”不计门店到店次数，“不算人数人次”只影响人员统计；退款本身不增加进店次数。','drilldown'=>['report'=>'member_visit_detail','params'=>['visit_month'=>$month],'param_map'=>['member_id'=>'member_id'],'required_row_keys'=>['member_id']]];
+            $columns[]=['key'=>$keys[1],'label'=>'现金业绩','group_label'=>$month.'月','source_explanation'=>'本行会员在所选年份该月的成功记账收款，扣除当月已完成的现金退款；退款只影响金额，不增加进店次数，历史权益迁入不计入。','drilldown'=>['report'=>'member_visit_detail','params'=>['visit_month'=>$month,'visit_metric'=>'cash'],'param_map'=>['member_id'=>'member_id'],'required_row_keys'=>['member_id']]];
             $groups[]=['label'=>$month.'月','column_keys'=>$keys];
         }
         foreach ($records as &$row) {
@@ -561,8 +593,124 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach(range(1,12) as $month){$row['month_'.$month.'_visits']=(int)($row['month_'.$month.'_visits']??0);$row['month_'.$month.'_cash']=$this->money((int)($row['month_'.$month.'_cash_cents']??0));}
         } unset($row);
         $result = $this->result('会员进店分析表',$columns,array_values($records),$input,$groups,['natural_year'=>$year]);
-        // 会员到店恢复全部已完成服务，现金会员入表门槛和日期范围保持不变。
-        $result['metric_version'] = 'store-member-visit-analysis-v4';
+        // 纯服务会员进入报表，次数与服务日明细共用相同资格和去重粒度。
+        $result['metric_version'] = 'store-member-visit-analysis-v6';
+        return $result;
+    }
+
+    /** 汇总和下钻共用完成、未作废、非体验的服务事实及同一权限范围。 */
+    private function memberVisitServiceFacts(array $stores, array $range, array $input)
+    {
+        return $this->completedUnvoidedServiceFacts(
+            $this->participantCheckout(
+                $this->applyOrganizationFilters(
+                    $this->scope(Db::name('cashier_v3_entitlement_service_fact')->alias('member_visit_service'), $stores, 'member_visit_service'),
+                    'member_visit_service', $input, $range
+                ),
+                'member_visit_service.checkout_request_id'
+            ),
+            'member_visit_service', 'member_visit_void'
+        )->where('member_visit_service.member_id', '>', 0)
+            ->whereBetween('member_visit_service.business_date', [$range['start'], $range['end']])
+            ->whereRaw(StoreCustomerVisitEligibility::sqlPredicate('member_visit_service'));
+    }
+
+    /** 一行解释一个会员到店日；同日多项目的单号与消耗业绩聚合到这一行。 */
+    private function memberVisitDetail(array $stores, array $range, array $input): array
+    {
+        $memberId = (int)($input['member_id'] ?? 0);
+        $month = (int)($input['visit_month'] ?? 0);
+        $metric = (string)($input['visit_metric'] ?? 'visits');
+        if ($memberId <= 0 || $month < 0 || $month > 12) throw new \InvalidArgumentException('进店明细需要有效会员和月份');
+        if (!in_array($metric, ['visits', 'cash'], true)) throw new \InvalidArgumentException('会员进店明细指标无效');
+        if ($metric === 'cash') return $this->memberVisitCashDetail($stores, $range, $input, $memberId, $month);
+        $query = $this->memberVisitServiceFacts($stores, $range, $input)
+            ->where('member_visit_service.member_id', $memberId);
+        if ($month > 0) $query->whereRaw('MONTH(member_visit_service.business_date) = ' . $month);
+        // 消耗业绩从已生效的项目级业绩事实读取；不能用购买金额或手工费代替。
+        $facts = $query->fieldRaw("member_visit_service.business_date,member_visit_service.member_name_snapshot,"
+            . "COALESCE(NULLIF(member_visit_service.service_record_no,''),NULLIF(member_visit_service.document_no_snapshot,''),member_visit_service.service_fact_id) document_no,"
+            . "(SELECT COALESCE(SUM(performance.amount_cents),0) FROM eb_cashier_v3_performance_fact performance "
+            . "WHERE performance.tenant_id=member_visit_service.tenant_id AND performance.store_id=member_visit_service.store_id "
+            . "AND performance.checkout_request_id=member_visit_service.checkout_request_id "
+            . "AND performance.source_line_id=member_visit_service.source_line_id "
+            . "AND performance.performance_type='consumption_performance_recorded' AND performance.status='effective') amount_cents")
+            ->order('member_visit_service.business_date', 'desc')->order('member_visit_service.id', 'asc')
+            ->select()->toArray();
+        $phone = (string)(Db::name('user')->where('uid', $memberId)->value('phone') ?? '');
+        $days = [];
+        foreach ($facts as $fact) {
+            $date = (string)$fact['business_date'];
+            // 权限与组织筛选已在服务事实查询中完成；明细按会员日跨门店合并，
+            // 因此只暴露日期展示字段，不给聚合行虚构单一分公司归属。
+            if (!isset($days[$date])) $days[$date] = ['member_name'=>(string)$fact['member_name_snapshot'],
+                'phone'=>$phone,'order_no'=>'','visit_date'=>$date,'amount_cents'=>0,'_order_numbers'=>[]];
+            $number = trim((string)$fact['document_no']);
+            if ($number !== '') $days[$date]['_order_numbers'][$number] = true;
+            $days[$date]['amount_cents'] += (int)$fact['amount_cents'];
+        }
+        $rows = [];
+        foreach ($days as $day) {
+            $day['order_no'] = implode('、', array_keys($day['_order_numbers']));
+            unset($day['_order_numbers']);
+            $day['amount'] = $this->money($day['amount_cents']);
+            $rows[] = $day;
+        }
+        $columns = $this->columns(['member_name'=>'会员','phone'=>'手机','order_no'=>'单号','visit_date'=>'日期','amount'=>'金额']);
+        foreach ($columns as &$column) {
+            if ($column['key'] === 'member_name') $column['source_explanation'] = '当日完成服务时记录的会员姓名。';
+            if ($column['key'] === 'phone') $column['source_explanation'] = '该会员当前登记的手机号码。';
+            if ($column['key'] === 'order_no') $column['source_explanation'] = '同一次进店当天完成且未作废的非体验服务单号；同日多单并列显示，仍只算一次进店。';
+            if ($column['key'] === 'visit_date') $column['source_explanation'] = '完成非体验服务的业务日期，同一会员同日合并为一次进店。';
+            if ($column['key'] === 'amount') $column['source_explanation'] = '同一次进店当天这些服务项目已生效的消耗业绩合计；没有消耗业绩时显示 0，不使用购卡金额或手工费。';
+        }
+        unset($column);
+        $result = $this->result('会员进店明细', $columns, $rows, $input);
+        $result['metric_version'] = 'store-member-visit-analysis-v6';
+        return $result;
+    }
+
+    /** 现金业绩按同一收款事实和退款业务日列出签名金额，明细合计必须等于被点击的月／年金额。 */
+    private function memberVisitCashDetail(array $stores, array $range, array $input, int $memberId, int $month): array
+    {
+        $year = (int)substr($range['end'], 0, 4);
+        $annualRange = ['start'=>sprintf('%04d-01-01', $year), 'end'=>sprintf('%04d-12-31', $year)];
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $payments = $this->cashFacts($stores, 'visit_payment')
+            ->where('visit_payment.member_id', $memberId)
+            ->whereBetween('visit_payment.business_date', [$annualRange['start'], $annualRange['end']])
+            ->where('visit_payment.status', 'effective');
+        if ($month > 0) $payments->whereRaw('MONTH(visit_payment.business_date) = ' . $month);
+        $facts = $payments->fieldRaw('visit_payment.business_date visit_date,visit_payment.member_name_snapshot member_name,'
+            . 'visit_payment.order_no_snapshot order_no,visit_payment.amount_cents amount_cents')
+            ->select()->toArray();
+        // 独立退款调整并不在普通 cashFacts 内；此查询与上层年度/月度现金汇总复用同一成功退款资格。
+        $refunds = (new StoreMemberConsumptionRefundReadServices())
+            ->query($stores, $annualRange, $input, $this->participantEmployeeId)
+            ->where('payment.member_id', $memberId);
+        if ($month > 0) $refunds->whereRaw('MONTH(refund_operation.business_date) = ' . $month);
+        foreach ($refunds->fieldRaw('refund_operation.business_date visit_date,payment.member_name_snapshot member_name,'
+            . 'refund_operation.operation_no order_no,payment.amount_cents amount_cents')->select()->toArray() as $refund) {
+            $facts[] = $refund;
+        }
+        $phone = (string)(Db::name('user')->where('uid', $memberId)->value('phone') ?? '');
+        $rows = [];
+        foreach ($facts as $fact) {
+            $rows[] = ['member_name'=>(string)$fact['member_name'], 'phone'=>$phone,
+                'order_no'=>(string)($fact['order_no'] ?? ''), 'visit_date'=>(string)$fact['visit_date'],
+                'amount_cents'=>(int)$fact['amount_cents'], 'amount'=>$this->money((int)$fact['amount_cents'])];
+        }
+        usort($rows, static function (array $left, array $right): int {
+            return strcmp($right['visit_date'], $left['visit_date']) ?: strcmp($right['order_no'], $left['order_no']);
+        });
+        $columns = $this->columns(['member_name'=>'会员','phone'=>'手机','order_no'=>'单号','visit_date'=>'日期','amount'=>'金额']);
+        foreach ($columns as &$column) {
+            if ($column['key'] === 'amount') $column['source_explanation'] = '本会员该收款或退款单据在所选月份的有效现金金额；退款显示负数，合计与所点现金业绩一致。';
+            if ($column['key'] === 'visit_date') $column['source_explanation'] = '收款或退款实际发生的业务日期，不使用服务完成日期。';
+        }
+        unset($column);
+        $result = $this->result('会员进店明细', $columns, $rows, $input);
+        $result['metric_version'] = 'store-member-visit-analysis-v6';
         return $result;
     }
 
@@ -2621,6 +2769,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '市场业绩表'=>['division_name'=>130,'store_name'=>140],
             '市场明细表'=>['business_date'=>112,'store_name_snapshot'=>112,'member_name_snapshot'=>82,'member_phone'=>116,'dimension'=>108],
             '会员进店分析表'=>['member_name'=>100,'phone'=>116],
+            '会员进店明细'=>['member_name'=>100,'phone'=>116,'order_no'=>210,'visit_date'=>112],
             '会员进店年度汇总表'=>['row_label'=>82,'year'=>76],
             '地推拓客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'source'=>110,'repayment_no'=>130,'member_name_snapshot'=>90,'phone'=>116],
             '地推拓客汇总表'=>['card_sale_date'=>106,'member_name_snapshot'=>90,'phone'=>116,'source'=>110],
@@ -2646,6 +2795,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         if($title==='市场业绩表')return preg_match('/^(channel_\d+_(walk_in|visits|effective)|payment_.+|channel_\d+_amount|total_performance)$/',$key)?(preg_match('/_(walk_in|visits|effective)$/',$key)?'count':'money'):'';
         if($title==='市场明细表')return in_array($key,['walk_in','visits','amount'],true)?($key==='amount'?'money':'count'):'';
+        if($title==='会员进店明细')return $key==='amount'?'money':'';
         if($title==='会员进店分析表')return $key==='total_visits'||preg_match('/^month_\d+_visits$/',$key)?'count':($key==='annual_cash'||preg_match('/^month_\d+_cash$/',$key)?'money':'');
         if($title==='会员进店年度汇总表')return $key==='total'||strpos($key,'store_')===0?'count':'';
         if($title==='地推拓客明细表')return in_array($key,['visit_over_one_hour','fourth_and_above'],true)?'count':(in_array($key,['labor_fee','cash_none','cash_1','cash_2','cash_3'],true)?'money':'');
