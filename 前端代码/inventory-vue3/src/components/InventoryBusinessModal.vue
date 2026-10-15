@@ -149,9 +149,26 @@ const usageWarehouseScope = computed(() => {
   const [type, rawId] = String(usageWarehouseSelection.value || '').split(':', 2)
   return type === 'HQ' ? { hq_location_id: Number(rawId) || 0 } : { store_id: Number(rawId) || 0 }
 })
-const catalogApi = computed(() => isPlatformHeadquarters.value ? platformInventoryApi : inventoryApi)
+// 门店院装领用复用“库存查询”的商品汇总接口，保留事实中的旧 SKU 身份供提交时锁库；分类仅取目录元数据。
+const usageStockCatalogApi = {
+  async searchCatalog(query = {}) {
+    const [stock, directory] = await Promise.all([
+      inventoryApi.list('productSummary', query),
+      inventoryApi.searchCatalog({ keyword: '', category_id: 0, page: 1, limit: 1 }).catch(() => ({ categories: [] }))
+    ])
+    return { list: stock.list || [], total: Number(stock.count || 0), page: stock.page, limit: stock.limit, categories: directory.categories || [] }
+  },
+  async findCatalogByBarcode({ barcode }) {
+    const value = String(barcode || '').trim()
+    const stock = await inventoryApi.list('productSummary', { keyword: value, page: 1, limit: 100 })
+    const matches = (stock.list || []).filter((row) => [row.barcode, row.product_code, row.sku_unique].some((code) => String(code || '').trim() === value))
+    if (matches.length !== 1) throw new Error(matches.length ? '该条码对应多个库存规格，请通过商品选择确认。' : '当前仓没有该条码对应的可领用库存。')
+    return matches[0]
+  }
+}
+const catalogApi = computed(() => isPlatformHeadquarters.value ? platformInventoryApi : props.pageKey === 'usage' ? usageStockCatalogApi : inventoryApi)
 const catalogQuery = computed(() => {
-  // 盘点按当前账面数，出库按可扣减批次；其余选品仍沿用现行目录口径。
+  // 盘点按当前账面数，出库按可扣减批次；领用的库存数量由共用汇总接口读取。
   if (!isPlatformHeadquarters.value) return props.pageKey === 'count' ? { for_count: 1, include_count_batches: 1 } : props.pageKey === 'outbound' ? { for_outbound_stock: 1 } : {}
   // 请货明细仍按“请货方”目录保存，保证后端可校验请求商品；
   // “当前库存”则必须来自供货方库存主体，不能误展示请货方库存。

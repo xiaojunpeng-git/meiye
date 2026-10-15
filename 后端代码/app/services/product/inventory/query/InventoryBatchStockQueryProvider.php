@@ -57,6 +57,8 @@ final class InventoryBatchStockQueryProvider
                 'l.store_name_snapshot' => 'store_name',
                 's.consumable_product_id' => 'product_id',
                 's.sku_id',
+                // 领用选品必须沿用库存事实的 SKU 身份；已下架商品不能改用同名新目录 SKU。
+                's.product_unique' => 'sku_unique',
                 'b.product_name_snapshot' => 'product_name',
                 'b.sku_name_snapshot' => 'sku_name',
                 'b.product_code_snapshot' => 'product_code',
@@ -78,7 +80,7 @@ final class InventoryBatchStockQueryProvider
             ->group([
                 'b.id', 'f.tenant_id', 'l.organization_id', 'l.organization_path',
                 'l.organization_name_snapshot', 'l.id', 'l.location_name', 'l.store_id',
-                'l.store_name_snapshot', 's.consumable_product_id', 's.sku_id',
+                'l.store_name_snapshot', 's.consumable_product_id', 's.sku_id', 's.product_unique',
                 'b.product_name_snapshot', 'b.sku_name_snapshot', 'b.product_code_snapshot',
                 'b.barcode_snapshot', 'b.brand_name_snapshot', 'b.category_name_snapshot',
                 's.stock_unit', 's.quantity_scale', 's.stock_status', 'b.batch_no',
@@ -165,6 +167,7 @@ final class InventoryBatchStockQueryProvider
             'store_name' => (string)$row['store_name'],
             'product_id' => (int)$row['product_id'],
             'sku_id' => (int)$row['sku_id'],
+            'sku_unique' => (string)$row['sku_unique'],
             'product_name' => (string)$row['product_name'],
             'sku_name' => (string)$row['sku_name'],
             'product_code' => (string)$row['product_code'],

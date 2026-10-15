@@ -45,8 +45,10 @@ final class InventoryStoreReadModelServices
         ];
     }
 
-    public function productSummary(int $storeId, int $operatorId, string $keyword, int $page, int $limit, bool $canViewCost): array
+    /** 库存查询与院装领用选品共用事实汇总；分类只能缩小当前门店结果，历史 SKU 身份保留供扣库。 */
+    public function productSummary(int $storeId, int $operatorId, string $keyword, int $page, int $limit, bool $canViewCost, int $categoryId = 0): array
     {
+        if ($categoryId < 0) throw new \InvalidArgumentException('inventory_product_summary_category_invalid');
         $groups = [];
         foreach ($this->rows($storeId, $operatorId, $canViewCost) as $row) {
             $productId = (int)$row['product_id'];
@@ -54,6 +56,7 @@ final class InventoryStoreReadModelServices
             if (!isset($groups[$productId])) {
                 $groups[$productId] = [
                     'product_id' => $productId, 'sku_id' => (int)$row['sku_id'],
+                    'sku_unique' => (string)$row['sku_unique'],
                     'product_name' => (string)$row['product_name'], 'sku_name' => (string)$row['sku_name'],
                     'product_code' => (string)$row['product_code'], 'barcode' => (string)$row['barcode'],
                     'stock_unit' => (string)$row['stock_unit'], 'quantity_scale' => (int)$row['quantity_scale'],
@@ -65,9 +68,15 @@ final class InventoryStoreReadModelServices
             $groups[$productId]['batch_count']++;
             if ($canViewCost) $groups[$productId]['inventory_amount_cents'] += $this->amountCents($row['inventory_amount'] ?? null);
         }
+        if ($categoryId > 0 && $groups) {
+            $allowedProductIds = Db::name('store_product_relation')->where('type', 1)->where('status', 1)
+                ->where('relation_id', $categoryId)->whereIn('product_id', array_keys($groups))->column('product_id');
+            $allowed = array_fill_keys(array_map('intval', $allowedProductIds), true);
+            $groups = array_filter($groups, static fn(array $item): bool => isset($allowed[(int)$item['product_id']]));
+        }
         $keyword = mb_strtolower(trim($keyword));
         $items = array_values(array_filter($groups, static function (array $row) use ($keyword): bool {
-            return $keyword === '' || str_contains(mb_strtolower(implode(' ', [(string)$row['product_name'], (string)$row['product_code'], (string)$row['barcode']])), $keyword);
+            return $keyword === '' || str_contains(mb_strtolower(implode(' ', [(string)$row['product_name'], (string)$row['product_code'], (string)$row['barcode'], (string)$row['sku_unique']])), $keyword);
         }));
         usort($items, static fn(array $a, array $b): int => [$a['product_name'], $a['product_id']] <=> [$b['product_name'], $b['product_id']]);
         $count = count($items);

@@ -13,7 +13,15 @@ final class InventoryStoreReadModel extends AuthController
     public function __construct(App $app, InventoryStoreReadModelServices $services) { parent::__construct($app); $this->services = $services; }
     /** 首页和库存明细分别按自己的功能使用权限展示成本，不再默认放开首页金额。 */
     public function dashboard() { return $this->success($this->services->dashboard((int)$this->storeId, (int)$this->storeStaffId, $this->canViewCost('overview'))); }
-    public function productSummary() { $input = $this->request->getMore([['keyword', ''], ['page', 1], ['limit', 20]]); return $this->success($this->services->productSummary((int)$this->storeId, (int)$this->storeStaffId, (string)$input['keyword'], (int)$input['page'], (int)$input['limit'], $this->canViewCost('stock'))); }
+    /** 与库存查询共用汇总入口；分类只作用于当前门店已授权的库存商品。 */
+    public function productSummary()
+    {
+        $input = $this->request->getMore([['keyword', ''], ['page', 1], ['limit', 20], ['category_id', 0]]);
+        return $this->success($this->services->productSummary(
+            (int)$this->storeId, (int)$this->storeStaffId, (string)$input['keyword'],
+            (int)$input['page'], (int)$input['limit'], $this->canViewCost('stock'), (int)$input['category_id']
+        ));
+    }
     public function productDetail(int $productId) { return $this->success($this->services->productDetail((int)$this->storeId, (int)$this->storeStaffId, $productId, $this->canViewCost('stock'))); }
     private function canViewCost(string $feature): bool { return (new InventoryStoreAccessPolicy())->canViewCostForFeature((int)$this->storeId, (int)$this->storeStaffId, 'cashier.v3.inventory.' . $feature); }
 }
