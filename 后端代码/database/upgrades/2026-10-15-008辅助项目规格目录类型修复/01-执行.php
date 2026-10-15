@@ -86,6 +86,18 @@ function m008SkuTypeHash(array $plan): string
     return hash('sha256', json_encode($plan, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 }
 
+/** 线上审计列仅 varchar(500)：完整回执输出到终端，库内仅存对账及回滚必要摘要。 */
+function m008SkuTypeAuditNote(array $result): string
+{
+    $note = json_encode([
+        'projects' => $result['products'], 'rows' => array_sum($result['updated']),
+        'plan_sha256' => $result['plan_sha256'], 'backup' => $result['backup'],
+        'backup_sha256' => $result['backup_sha256'],
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    if (strlen($note) > 500) throw new RuntimeException('Repair audit summary exceeds schema limit');
+    return $note;
+}
+
 /** 只纠正 type；写前快照和写后逐字段对账保证不是重建 SKU 或重新导入商品。 */
 function m008SkuTypeWrite(PDO $db, array $plan): array
 {
@@ -207,7 +219,7 @@ function m008SkuTypeMain(): void
                 (upgrade_key,title,task_file,sql_checksum,code_version,executed_at,executed_by,result_note)
                 VALUES(?,?,?,?,?,NOW(),?,?)')->execute([M008_SKU_TYPE_KEY,
                     '008辅助项目普通目录规格类型修复', 'database/upgrades/2026-10-15-008辅助项目规格目录类型修复/01-执行.php',
-                    hash_file('sha256', __FILE__), $options['commit'], 'Codex', json_encode($result, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]);
+                    hash_file('sha256', __FILE__), $options['commit'], 'Codex', m008SkuTypeAuditNote($result)]);
             $db->commit();
         } else {
             $db->rollBack();
