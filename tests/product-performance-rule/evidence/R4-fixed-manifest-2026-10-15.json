@@ -1,0 +1,113 @@
+{
+  "round": "R4-20261015",
+  "base": "04384f451a7f9e8c47508137534db793dfef1e9a",
+  "tree": "4979c8c8ef5402464368bce7c2ee0bb7882fe9c4",
+  "files": [
+    {
+      "path": "tests/cashier-v3/php/project-labor-default-contract.php",
+      "sha256": "3c7859344d29242e8ebacea47883b1eebae1929ac0bbb203cc79a82d3ffba785",
+      "bytes": 4227
+    },
+    {
+      "path": "tests/cashier-v3/php/r44-paid-project-person-labor-fee-contract.php",
+      "sha256": "ad9b1c6d322bbb3928d5eeee9a0610b8c599d8bd32db635b2a8a8a07177113cf",
+      "bytes": 4600
+    },
+    {
+      "path": "tests/product-performance-rule/evidence/round4-sales-settings-single-save-local-2026-10-15.jpg",
+      "sha256": "10c5e3daf29d3b718b40e5256600a42eab0967c58d508468a9d183f9fb581b79",
+      "bytes": 51945
+    },
+    {
+      "path": "前端代码/admin/src/pages/product/productAdd/index.vue",
+      "sha256": "a5bb98bac6d6a2042111e8a63009910f226f2eab574a82e12f8cf26fbc823c4c",
+      "bytes": 183654
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+      "sha256": "8d87e9387926a2b0507208664141acf31f0cbbec1cd57cd0a48e88717106855f",
+      "bytes": 398738
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/CashierV3CraftsmanPerformanceDefault.php",
+      "sha256": "f387cbf710694d0b8177a35264d1926ebcdfbfc4c8bbf0755bdee6f42897d215",
+      "bytes": 1559
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/CashierV3ProjectLaborDefault.php",
+      "sha256": "22f38e869c033d8aef804366652bee71cfc021acd8817a8adfcca7b2131c4066",
+      "bytes": 1583
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/CashierV3ProjectPersonnelDefaults.php",
+      "sha256": "d737411531037eb5a543b8717b4ef19bb515614490de7aa73d40da5f77f83ef9",
+      "bytes": 3261
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php",
+      "sha256": "7e5682c2118908d6245710d84246ac84bbe5de7e8a68927bfd1c2e0235d5a967",
+      "bytes": 118371
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php",
+      "sha256": "0479b6ce5e62609c3f2eff85450883c28f3594381c7fa5601c877f564947ad6b",
+      "bytes": 24563
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php",
+      "sha256": "8d26053a0ba9d1235edaee1ef30ff8893d0bbdac0a8e70698293630b43644be4",
+      "bytes": 26322
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3PaidProjectCraftsmanPerformanceServices.php",
+      "sha256": "417150ac356273511a46a74b8b731e4872a9313533538b39beeabf902c87ca44",
+      "bytes": 9838
+    },
+    {
+      "path": "后端代码/app/services/product/CashierV3PerformanceRuleAdminServices.php",
+      "sha256": "3ec5bced49ddf8a80aa913aa2a9285d221e6bc4cc5d3813e4fbde1195d97ad46",
+      "bytes": 7293
+    },
+    {
+      "path": "后端代码/app/services/product/product/StoreCardRelatedServices.php",
+      "sha256": "1fe33820f82cd073533316085102b1fad93db7919fb37b34fbe7206d2c5d0251",
+      "bytes": 17577
+    },
+    {
+      "path": "后端代码/app/services/product/product/StoreCardRuleServices.php",
+      "sha256": "a1d0e1be5ced349ebb9d3bda23c594d349f0992fca4b1a38949cc37c784a0ab8",
+      "bytes": 12185
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-15-默认手艺人业绩/00-升级清单.md",
+      "sha256": "792c70ea29fa2b0703d0c2ef862cf0284166d89a92508df39acd311903acc4a1",
+      "bytes": 922
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-15-默认手艺人业绩/01-升级前检查.sql",
+      "sha256": "23157449fc33f30247af62d15fed2d7825d6439c7e1e25b6c54be21366aacfe3",
+      "bytes": 716
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-15-默认手艺人业绩/02-正式升级.sql",
+      "sha256": "a8aa5b1011166d58b02a018c035289cc8ad089af0ff7d997eb9ad0bcb198fa2d",
+      "bytes": 1670
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-15-默认手艺人业绩/03-升级后验证.sql",
+      "sha256": "d807a4236c80c646ac7a405701fc515d57dc0bbc23ac46bdb88c65aef6f2aeb8",
+      "bytes": 832
+    }
+  ],
+  "patch_sha256": "eab8cb37820625259c48b65987702253076f1764efe46a3ca456f2f655833a65",
+  "builds": {
+    "admin": "PASS",
+    "cashier": "PASS; prebuild 70 checks"
+  },
+  "tests": [
+    "project-labor-default-contract 10/10",
+    "r44-paid-project-person-labor-fee-contract PASS",
+    "card-rule-contract PASS",
+    "edit-load-guard-contract PASS"
+  ]
+}
