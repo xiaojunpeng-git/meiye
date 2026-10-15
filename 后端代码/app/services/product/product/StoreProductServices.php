@@ -1450,7 +1450,8 @@ class StoreProductServices extends BaseServices
         if ((int)$data['product_type'] === 0) {
             foreach ($detail as $idx => $row) {
                 $stockUnit = trim((string)($row['stock_unit'] ?? ''));
-                $detail[$idx]['stock_unit'] = mb_substr($stockUnit !== '' ? $stockUnit : $unitName, 0, 32);
+                // 普通商品隐藏了独立耗材单位，不能让旧 SKU 值覆盖当前资料包装单位。
+                $detail[$idx]['stock_unit'] = mb_substr(\app\services\product\inventory\InventoryProductUnitPolicy::resolve($unitName, $stockUnit, $salonEnabledEarly === 1), 0, 32);
                 $detail[$idx]['sale_unit'] = $unitName;
                 $detail[$idx]['decimal_scale'] = $decimalScale;
                 if ($salonEnabledEarly === 1) {

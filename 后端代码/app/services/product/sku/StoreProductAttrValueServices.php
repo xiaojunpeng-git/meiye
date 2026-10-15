@@ -22,6 +22,7 @@ use app\services\activity\seckill\StoreSeckillServices;
 use app\services\BaseServices;
 use app\services\product\branch\StoreBranchProductAttrValueServices;
 use app\services\product\inventory\StoreProductStockDetailServices;
+use app\services\product\inventory\InventoryProductUnitPolicy;
 use app\services\product\product\StoreCardRelatedServices;
 use app\services\product\product\StoreCatalogWriteLease;
 use app\services\product\product\StoreCatalogWriteLockGuard;
@@ -1128,7 +1129,7 @@ class StoreProductAttrValueServices extends BaseServices
 		}
 		$query = $this->dao->joinAttrSearch($where);
 		$count = $query->count();
-		$list = $query->field('a.*,p.store_name,p.type as owner_type,p.relation_id as owner_relation_id,IFNULL(p.salon_stock_enabled,0) as salon_stock_enabled')
+		$list = $query->field('a.*,p.store_name,p.unit_name,p.type as owner_type,p.relation_id as owner_relation_id,IFNULL(p.salon_stock_enabled,0) as salon_stock_enabled')
 			->page($page, $limit)
 			->order('p.sort desc,p.id desc')
 			->select()
@@ -1162,6 +1163,8 @@ class StoreProductAttrValueServices extends BaseServices
 		$base = $this->dao->joinAttrSearch($where);
 		$countSql = (clone $base)->field($platformPid . ' AS platform_pid, a.suk')->group($platformPid . ', a.suk')->buildSql();
 		$count = (int)\think\facade\Db::table([$countSql => 't'])->count();
+		// 全部门店先在各商品副本上求当前有效单位，再按同源 SKU 汇总；数量仍来自原库存字段。
+		$unitExpression = InventoryProductUnitPolicy::expression('p', 'a');
 		$list = $base->field([
 				$platformPid . ' AS product_id',
 				$platformPid . ' AS platform_product_id',
@@ -1170,7 +1173,7 @@ class StoreProductAttrValueServices extends BaseServices
 				'MIN(a.code) AS code',
 				'MIN(a.image) AS image',
 				'MIN(p.store_name) AS store_name',
-				'MIN(a.stock_unit) AS stock_unit',
+				'MAX(' . $unitExpression . ') AS stock_unit',
 				'MAX(IFNULL(p.salon_stock_enabled,0)) AS salon_stock_enabled',
 				'SUM(a.stock) AS stock',
 				'SUM(a.defective_stock) AS defective_stock',
@@ -1210,7 +1213,10 @@ class StoreProductAttrValueServices extends BaseServices
 	 */
 	protected function decorateInventoryAttrRow(array &$row): void
 	{
-		$unit = trim((string)($row['stock_unit'] ?? ''));
+		// 列表只投影当前单位，不回写 SKU 或既有库存；全部门店汇总已在 SQL 中按同口径求值。
+		$unit = array_key_exists('unit_name', $row)
+			? InventoryProductUnitPolicy::resolve((string)$row['unit_name'], (string)($row['stock_unit'] ?? ''), (int)($row['salon_stock_enabled'] ?? 0) === 1)
+			: trim((string)($row['stock_unit'] ?? ''));
 		$row['stock_unit'] = $unit;
 		$row['display_unit'] = $unit; // 空由前端显示为 -
 		$isSalon = (int)($row['salon_stock_enabled'] ?? 0) === 1;

@@ -33,7 +33,7 @@ final class InventoryStoreCatalogServices
                     ->whereOr('a.code', $barcode)
                     ->whereOr('p.code', $barcode);
             })
-            ->fieldRaw("p.id AS product_id,p.no_expiry_management,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,COALESCE(NULLIF(a.bar_code, ''), p.bar_code) AS barcode,a.code AS sku_code,a.stock_unit")
+            ->fieldRaw("p.id AS product_id,p.no_expiry_management,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,COALESCE(NULLIF(a.bar_code, ''), p.bar_code) AS barcode,a.code AS sku_code," . InventoryProductUnitPolicy::selectSql())
             ->group('a.id')->order('a.id asc')->limit(2)->select()->toArray();
         if (!$rows) throw new \RuntimeException('inventory_catalog_barcode_not_found');
         if (count($rows) !== 1) throw new \RuntimeException('inventory_catalog_barcode_ambiguous');
@@ -90,19 +90,9 @@ final class InventoryStoreCatalogServices
             });
 
         $total = (int)(clone $query)->count('DISTINCT a.id');
+        // 当前商品配置供共享编辑器展示；单位按普通/院装规则取值，写入仍重新锁定读取。
         $list = $query
-            ->field([
-                'p.id' => 'product_id',
-                'p.store_name' => 'product_name',
-                'p.code' => 'product_code',
-                'a.id' => 'sku_id',
-                'a.unique' => 'sku_unique',
-                'a.suk' => 'sku_name',
-                'a.bar_code' => 'barcode',
-                'a.code' => 'sku_code',
-                'a.stock_unit',
-                'p.no_expiry_management', // 当前商品配置供共享编辑器展示；写入时仍重新锁定读取。
-            ])
+            ->fieldRaw('p.id AS product_id,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,a.bar_code AS barcode,a.code AS sku_code,p.no_expiry_management,' . InventoryProductUnitPolicy::selectSql())
             ->group('a.id')
             ->order('p.sort desc,p.id desc,a.id asc')
             ->page($page, $limit)
@@ -200,6 +190,7 @@ final class InventoryStoreCatalogServices
                 ),
             ];
         }
+        $list = (new InventoryCurrentStockUnitProjection())->decorate($list);
         $categories = Db::name('store_product_category')->alias('c')
             ->join('store_product_relation r', 'r.relation_id=c.id AND r.type=1 AND r.status=1')
             ->join('store_product p', 'p.id=r.product_id')
@@ -230,6 +221,7 @@ final class InventoryStoreCatalogServices
         if ($total !== $positiveStocks) throw new \RuntimeException('inventory_stock_count_batch_balance_mismatch');
         $list = $query->fieldRaw('s.id AS stock_id,s.consumable_product_id AS product_id,s.sku_id,s.product_unique AS sku_unique,s.stock_unit,s.available_quantity_units,s.quantity_scale,b.product_name_snapshot AS product_name,b.sku_name_snapshot AS sku_name,b.barcode_snapshot AS barcode')
             ->group('s.id')->order('s.id asc')->page($page, $limit)->select()->toArray();
+        $list = (new InventoryCurrentStockUnitProjection())->decorate($list);
         // 历史批次可来自失效商品；只补当前配置，不因商品失效而漏掉已有库存。
         $expirySettings = $list ? Db::name('store_product')->whereIn('id', array_column($list, 'product_id'))->column('no_expiry_management', 'id') : [];
         // 失效目录仍只允许盘亏既有批次，不能因免录开关把历史批次转成可盘盈的 SKU 行。

@@ -25,9 +25,10 @@ final class InventoryMovementAnalyticsServices
         $from = $this->date($from); $to = $this->date($to);
         if ($from > $to) throw new \InvalidArgumentException('inventory_movement_statistics_date_range_invalid');
         // 旧列表仍按日分组；统一统计页传入已验证周期后，直接在事实层跨日合并，避免客户端相加造成单据数漂移。
-        $dimensions = 'f.source_type,s.consumable_product_id,s.sku_id,s.stock_unit,s.quantity_scale,b.product_name_snapshot,b.sku_name_snapshot';
+        // 库存主体可能留有不同的旧单位；统计维度不能按标签拆分同一商品和 SKU 的事实。
+        $dimensions = 'f.source_type,s.consumable_product_id,s.sku_id,s.quantity_scale,b.product_name_snapshot,b.sku_name_snapshot';
         $fields = [
-            'f.source_type', 's.consumable_product_id' => 'product_id', 's.sku_id', 's.stock_unit', 's.quantity_scale',
+            'f.source_type', 's.consumable_product_id' => 'product_id', 's.sku_id', 'MAX(s.stock_unit)' => 'stock_unit', 's.quantity_scale',
             'b.product_name_snapshot' => 'product_name', 'b.sku_name_snapshot' => 'sku_name',
             'COUNT(DISTINCT f.source_id)' => 'document_count', 'COUNT(f.id)' => 'movement_count',
             'SUM(f.quantity_units)' => 'quantity_units', 'SUM(f.cost_amount_cents)' => 'cost_amount_cents',
@@ -51,6 +52,8 @@ final class InventoryMovementAnalyticsServices
         (new InventoryNormalMovementScopeServices())->excludeCorrectedPresalePairs($query);
         $rows = $query->group(($groupByPeriod ? '' : 'f.business_date,') . $dimensions)
             ->order($groupByPeriod ? 'product_id asc,sku_id asc' : 'f.business_date desc,product_id asc,sku_id asc')->select()->toArray();
+        // 周期统计仍从已结算事实求数量；单位只按当前商品资料装饰展示和导出。
+        $rows = (new InventoryCurrentStockUnitProjection())->decorate($rows);
         foreach ($rows as &$row) {
             // 周期行只用终点日期供旧查询契约识别；真实业务日期已经在 SQL whereBetween 内精确筛选。
             if ($groupByPeriod) $row['business_date'] = $to;

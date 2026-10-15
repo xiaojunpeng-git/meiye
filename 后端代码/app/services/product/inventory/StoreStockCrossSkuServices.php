@@ -208,12 +208,14 @@ class StoreStockCrossSkuServices extends BaseServices
             return ['list' => [], 'count' => 0];
         }
 
+        // 共享 SKU 选品展示请求侧当前单位，避免历史 SKU 耗材单位覆盖普通商品包装单位。
+        $unitSql = InventoryProductUnitPolicy::expression('pa', 'sa');
         $listSql = '
             SELECT
                 pa.pid AS pid,
                 sa.suk AS suk,
                 pa.store_name AS product_name,
-                IFNULL(sa.stock_unit, IFNULL(sb.stock_unit, \'\')) AS stock_unit,
+                ' . $unitSql . ' AS stock_unit,
                 IF(IFNULL(sa.decimal_scale,0)>0 OR IFNULL(sb.decimal_scale,0)>0, 2, 0) AS decimal_scale,
                 IFNULL(sa.bar_code, \'\') AS bar_code,
                 IFNULL(sa.code, \'\') AS code,
@@ -269,12 +271,13 @@ class StoreStockCrossSkuServices extends BaseServices
         }
 
         if ($hqIsA) {
+            $unitSql = InventoryProductUnitPolicy::expression('ph', 'sh');
             $listSql = '
                 SELECT
                     ph.id AS pid,
                     sh.suk AS suk,
                     ph.store_name AS product_name,
-                    IFNULL(sh.stock_unit, IFNULL(ss.stock_unit, \'\')) AS stock_unit,
+                    ' . $unitSql . ' AS stock_unit,
                     IF(IFNULL(sh.decimal_scale,0)>0 OR IFNULL(ss.decimal_scale,0)>0, 2, 0) AS decimal_scale,
                     IFNULL(sh.bar_code, \'\') AS bar_code,
                     IFNULL(sh.code, \'\') AS code,
@@ -286,12 +289,13 @@ class StoreStockCrossSkuServices extends BaseServices
                     ss.stock AS store_b_stock
             ' . $baseSql . ' ORDER BY ph.id ASC, sh.suk ASC LIMIT ' . (int)$offset . ', ' . (int)$limit;
         } else {
+            $unitSql = InventoryProductUnitPolicy::expression('ps', 'ss');
             $listSql = '
                 SELECT
                     ph.id AS pid,
                     sh.suk AS suk,
                     ps.store_name AS product_name,
-                    IFNULL(ss.stock_unit, IFNULL(sh.stock_unit, \'\')) AS stock_unit,
+                    ' . $unitSql . ' AS stock_unit,
                     IF(IFNULL(sh.decimal_scale,0)>0 OR IFNULL(ss.decimal_scale,0)>0, 2, 0) AS decimal_scale,
                     IFNULL(ss.bar_code, \'\') AS bar_code,
                     IFNULL(ss.code, \'\') AS code,
@@ -433,7 +437,7 @@ class StoreStockCrossSkuServices extends BaseServices
                     'is_inventory' => 1,
                 ])
                 ->whereIn('id', $pidList)
-                ->field('id,pid,store_name,product_type,is_inventory')
+                ->field('id,pid,store_name,product_type,is_inventory,unit_name,salon_stock_enabled')
                 ->select()->toArray();
             $byPid = [];
             foreach ($products as $p) {
@@ -452,7 +456,7 @@ class StoreStockCrossSkuServices extends BaseServices
                     'is_inventory' => 1,
                 ])
                 ->whereIn('pid', $pidList)
-                ->field('id,pid,store_name,product_type,is_inventory')
+                ->field('id,pid,store_name,product_type,is_inventory,unit_name,salon_stock_enabled')
                 ->select()->toArray();
             $byPid = [];
             foreach ($products as $p) {
@@ -495,7 +499,7 @@ class StoreStockCrossSkuServices extends BaseServices
                 'product_id' => (int)$pa['id'],
                 'unique' => (string)$sku['unique'],
                 'product_name' => (string)$pa['store_name'],
-                'stock_unit' => (string)($sku['stock_unit'] ?? ''),
+                'stock_unit' => InventoryProductUnitPolicy::resolve((string)$pa['unit_name'], (string)($sku['stock_unit'] ?? ''), (int)$pa['salon_stock_enabled'] === 1),
                 'decimal_scale' => (int)($sku['decimal_scale'] ?? 0) > 0 ? 2 : 0,
                 'stock' => (string)$sku['stock'],
             ];

@@ -258,7 +258,8 @@ final class InventoryStockCountServices
             ->where('p.relation_id', (string)$location['location_type'] === 'HQ' ? 0 : (int)$scope['storeId'])
             ->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
             ->where('a.unique', $line['unique'])->where('a.type', 0)
-            ->field('a.stock_unit,p.salon_stock_enabled,p.no_expiry_management')->lock(true)->find();
+            // 盘盈首次建库存主体时，普通商品不能沿用旧 SKU 的金额单位。
+            ->fieldRaw('p.salon_stock_enabled,p.no_expiry_management,' . InventoryProductUnitPolicy::selectSql())->lock(true)->find();
         // 上游已做整单目录核验；这里再锁定失效商品的现有批次，防止确认途中转为盘盈。
         if (!$catalog && !$this->retiredBatchCanBeCountedWithoutGain($scope, $location, $line)) {
             throw new InventoryStockCountCatalogException([$this->invalidCatalogLine($line)]);

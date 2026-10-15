@@ -986,7 +986,8 @@ final class InventoryCrossSubjectTransferServices
     {
         $query = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
             ->where('p.id', $line['productId'])->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])->where('a.unique', $line['skuUnique'])->where('a.type', 0)
-            ->field('p.id product_id,p.pid source_pid,p.store_name,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.stock_unit,p.salon_stock_enabled')->lock(true);
+            // 新调拨单固化当前来源商品单位；历史调拨明细仍保留原快照。
+            ->fieldRaw('p.id AS product_id,p.pid AS source_pid,p.store_name,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,p.salon_stock_enabled,' . InventoryProductUnitPolicy::selectSql())->lock(true);
         if ($source['partyType'] === 'HQ') $query->where('p.type', 0)->where('p.relation_id', 0);
         else $query->where('p.type', 1)->where('p.relation_id', $source['storeId']);
         $from = $query->find();

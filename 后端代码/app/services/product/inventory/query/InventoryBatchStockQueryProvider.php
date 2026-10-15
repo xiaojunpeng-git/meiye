@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory\query;
 
+use app\services\product\inventory\InventoryCurrentStockUnitProjection;
 use think\facade\Db;
 
 /**
@@ -95,6 +96,8 @@ final class InventoryBatchStockQueryProvider
         $projected = array_map(function (array $row) use ($scope, $request): array {
             return $this->projectRow($row, $scope, $request['queryCutoffDate']);
         }, $rows);
+        // 当前批次库存及由其派生的首页、查询、临期统计共用当前商品单位；事实数量不变。
+        $projected = (new InventoryCurrentStockUnitProjection())->decorate($projected);
         $totals = [];
         foreach ($projected as $row) {
             $key = (int)$row['product_id'] . ':' . (int)$row['sku_id'];

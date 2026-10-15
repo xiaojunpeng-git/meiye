@@ -378,7 +378,7 @@ final class InventoryManualInboundServices
         $query = Db::name('store_product_attr_value')->alias('a')->join('store_product p', 'p.id=a.product_id')
             ->where('p.id', $line['productId'])->where('p.is_del', 0)->where('p.is_inventory', 1)->where('a.id', $line['skuId'])
             ->where('a.unique', $line['skuUnique'])->where('a.type', 0)->lock(true)
-            ->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,p.no_expiry_management,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit');
+            ->fieldRaw('p.id AS product_id,p.store_name AS product_name,p.code AS product_code,p.salon_stock_enabled,p.no_expiry_management,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,a.bar_code AS barcode,' . InventoryProductUnitPolicy::selectSql());
         if (($scope['partyType'] ?? 'STORE') === 'HQ') {
             $query->where('p.type', 0)->where('p.relation_id', 0);
         } else {

@@ -633,7 +633,8 @@ final class InventoryStockRequestServices
             ->where('a.id', $line['skuId'])->where('a.unique', $line['skuUnique'])->where('a.type', 0);
         if (($scope['requestPartyType'] ?? 'STORE') === 'HQ') $query->where('p.type', 0)->where('p.relation_id', 0);
         else $query->where('p.type', 1)->where('p.relation_id', (int)$scope['storeId']);
-        $catalog = $query->field('p.id product_id,p.store_name product_name,p.code product_code,p.salon_stock_enabled,a.id sku_id,a.unique sku_unique,a.suk sku_name,a.bar_code barcode,a.stock_unit')->lock(true)->find();
+        // 新请货单按当前商品资料固化单位；旧单据快照保持原值。
+        $catalog = $query->fieldRaw('p.id AS product_id,p.store_name AS product_name,p.code AS product_code,p.salon_stock_enabled,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,a.bar_code AS barcode,' . InventoryProductUnitPolicy::selectSql())->lock(true)->find();
         if (!$catalog) throw new \RuntimeException('inventory_stock_request_sku_not_found');
         $catalog['quantity_scale'] = (int)$catalog['salon_stock_enabled'] === 1 ? 2 : 0;
         return (array)$catalog;

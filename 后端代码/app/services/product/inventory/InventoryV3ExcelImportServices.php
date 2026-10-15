@@ -550,7 +550,8 @@ final class InventoryV3ExcelImportServices
         $rows = $query->order('p.id asc,a.id asc')->select()->toArray();
         foreach ($rows as &$row) {
             $row['quantity_scale'] = (int)($row['salon_stock_enabled'] ?? 0) === 1 ? 2 : 0;
-            $row['stock_unit'] = trim((string)($row['stock_unit'] ?: $row['unit_name']));
+            // Excel 模板和预校验与手工选品同口径；不信任历史 SKU 的旧单位标签。
+            $row['stock_unit'] = InventoryProductUnitPolicy::resolve((string)$row['unit_name'], (string)$row['stock_unit'], (int)$row['salon_stock_enabled'] === 1);
         }
         unset($row);
         return $rows;

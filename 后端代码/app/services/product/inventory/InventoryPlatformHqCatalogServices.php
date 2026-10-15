@@ -29,7 +29,7 @@ final class InventoryPlatformHqCatalogServices
                     ->whereOr('a.code', $barcode)
                     ->whereOr('p.code', $barcode);
             })
-            ->fieldRaw("p.id AS product_id,p.no_expiry_management,p.pid AS parent_product_id,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,COALESCE(NULLIF(a.bar_code, ''), p.bar_code) AS barcode,a.code AS sku_code,a.stock_unit")
+            ->fieldRaw("p.id AS product_id,p.no_expiry_management,p.pid AS parent_product_id,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,COALESCE(NULLIF(a.bar_code, ''), p.bar_code) AS barcode,a.code AS sku_code," . InventoryProductUnitPolicy::selectSql())
             ->group('a.id')->order('a.id asc')->limit(2)->select()->toArray();
         if (!$rows) throw new \RuntimeException('inventory_catalog_barcode_not_found');
         if (count($rows) !== 1) throw new \RuntimeException('inventory_catalog_barcode_ambiguous');
@@ -69,20 +69,9 @@ final class InventoryPlatformHqCatalogServices
             });
 
         $total = (int)(clone $query)->count('DISTINCT a.id');
+        // 总部与门店入库共用锁定写服务，选品单位也必须使用同一商品资料口径。
         $list = $query
-            ->field([
-                'p.id' => 'product_id',
-                'p.pid' => 'parent_product_id',
-                'p.store_name' => 'product_name',
-                'p.code' => 'product_code',
-                'a.id' => 'sku_id',
-                'a.unique' => 'sku_unique',
-                'a.suk' => 'sku_name',
-                'a.bar_code' => 'barcode',
-                'a.code' => 'sku_code',
-                'a.stock_unit',
-                'p.no_expiry_management', // 展示免录状态；正式入库和盘点不能信任客户端标志。
-            ])
+            ->fieldRaw('p.id AS product_id,p.pid AS parent_product_id,p.store_name AS product_name,p.code AS product_code,a.id AS sku_id,a.unique AS sku_unique,a.suk AS sku_name,a.bar_code AS barcode,a.code AS sku_code,p.no_expiry_management,' . InventoryProductUnitPolicy::selectSql())
             ->group('a.id')
             ->order('p.sort desc,p.id desc,a.id asc')
             ->page($page, $limit)
