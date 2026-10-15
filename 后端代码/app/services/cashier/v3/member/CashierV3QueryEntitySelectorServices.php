@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ProjectLaborDefault;
+use app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\checkout\provider\CashierV3EntitlementProviderContracts;
 use app\services\organization\OrganizationScopeService;
@@ -117,10 +118,18 @@ final class CashierV3QueryEntitySelectorServices
             ? $this->partnerDefaultRatioForProject($dataScope->tenantId(), $projectId)
             : 0;
         $laborDefaultFeeCents = 0;
+        $craftsmanDefaultUnitAmountCents = null;
         if ($selectorScope === 'service_actual_craftsmen' && $projectId > 0) {
             // 与购物车使用同一读模型；权益来源身份由后端重新核对，
             // 不能凭客户端传入的 holder ID 读取另一张卡的手工费。
             $laborDefaultFeeCents = CashierV3ProjectLaborDefault::entitlementCents(
+                $projectId,
+                (int)($selectorContext['entitlementInstanceId'] ?? 0),
+                (int)($selectorContext['entitlementSourceDetailId'] ?? 0),
+                $dataScope->tenantId()
+            );
+            // 候选只携带服务端核对后的单次默认值；null 让页面沿用本次实际金额。
+            $craftsmanDefaultUnitAmountCents = CashierV3CraftsmanPerformanceDefault::entitlementUnitCents(
                 $projectId,
                 (int)($selectorContext['entitlementInstanceId'] ?? 0),
                 (int)($selectorContext['entitlementSourceDetailId'] ?? 0),
@@ -237,6 +246,8 @@ final class CashierV3QueryEntitySelectorServices
                 // still re-reads this value under lock.
                 'craftsmanPerformanceType' => (string)($row['craftsman_performance_type'] ?? 'commission_labor'),
                 'laborDefaultFeeCents' => $selectorScope === 'service_actual_craftsmen' ? $laborDefaultFeeCents : 0,
+                'craftsmanDefaultUnitAmountCents' => $selectorScope === 'service_actual_craftsmen'
+                    ? $craftsmanDefaultUnitAmountCents : null,
                 'selectable' => true,
                 'groupScoped' => $isGroupAttribution,
                 'attributionRole' => $selectorScope === 'group_sales_managers'

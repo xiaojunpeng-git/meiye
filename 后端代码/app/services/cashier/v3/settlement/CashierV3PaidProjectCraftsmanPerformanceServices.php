@@ -3,8 +3,8 @@
 namespace app\services\cashier\v3\settlement;
 
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3ProjectPersonnelDefaults;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
-use think\facade\Db;
 
 /**
  * One locked paid-project line produces two independent craftsman amounts:
@@ -13,8 +13,6 @@ use think\facade\Db;
  */
 final class CashierV3PaidProjectCraftsmanPerformanceServices
 {
-    private const RULE_TABLE = 'cashier_v3_project_performance_rule';
-
     /**
      * @return array{laborAmountCents:int,laborFeeAmountCents:int,laborMode:string,ruleVersion:int,allocations:array<int,array<string,mixed>>}
      */
@@ -40,22 +38,16 @@ final class CashierV3PaidProjectCraftsmanPerformanceServices
             ];
         }
 
-        $rule = Db::name(self::RULE_TABLE)
-            ->where('tenant_id', $tenantId)
-            ->where('project_id', (int)$line['item_id'])
-            ->lock(true)
-            ->find();
-        $laborMode = (string)($rule['labor_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL);
-        if (!in_array($laborMode, [
-            CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL,
-            CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED,
-        ], true)) {
-            throw new \InvalidArgumentException('paid_project_performance_rule_invalid');
-        }
+        $rule = CashierV3ProjectPersonnelDefaults::projectRule((int)$line['item_id'], $tenantId, true);
+        // Hand fee and craftsman performance are separate business amounts.
+        // A blank default keeps the current paid amount; a configured zero is valid.
+        $craftsmanUnitCents = ($rule['craftsman_default_unit_amount_cents'] ?? null) === null
+            ? null : max(0, (int)$rule['craftsman_default_unit_amount_cents']);
+        $laborMode = $craftsmanUnitCents === null
+            ? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL
+            : CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED;
         $ruleVersion = max(1, (int)($rule['current_version'] ?? 1));
-        $laborAmountCents = $laborMode === CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED
-            ? max(0, (int)($rule['labor_configured_unit_amount_cents'] ?? 0)) * $quantity
-            : $saleAmountCents;
+        $laborAmountCents = $craftsmanUnitCents === null ? $saleAmountCents : $craftsmanUnitCents * $quantity;
 
         $performanceCraftsmen = [];
         $weights = [];

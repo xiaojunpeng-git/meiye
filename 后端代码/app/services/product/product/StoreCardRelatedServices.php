@@ -371,6 +371,14 @@ class StoreCardRelatedServices extends BaseServices
                 : ((int)($item['product_type'] ?? $item['productType'] ?? 0) === 6
                     ? CashierV3ProjectLaborDefault::cents($productId, CashierV3ScopeResolver::TENANT_SCOPE_ID)
                     : 0);
+            $craftsmanMode = (string)($item['craftsman_default_mode'] ?? 'default_unit_price');
+            if (!in_array($craftsmanMode, ['default_unit_price', 'manual_amount'], true)) {
+                throw new AdminException('卡内项目默认手艺人业绩设置无效');
+            }
+            $craftsmanAmountCents = (int)($item['craftsman_default_unit_amount_cents'] ?? 0);
+            if ($craftsmanAmountCents < 0 || $craftsmanAmountCents > 100000000000) {
+                throw new AdminException('卡内项目默认手艺人业绩金额无效');
+            }
             $rows[] = [
                 'card_product_id' => $cardProductId,
                 'product_id' => $productId,
@@ -382,6 +390,9 @@ class StoreCardRelatedServices extends BaseServices
                 'writeoff_amount' => $item['writeoff_amount'] ?? $item['writeoffAmount'] ?? 0,
                 // 每张卡独立配置手工费；关联重建、门店同步均沿用同一金额（分）。
                 'labor_fee_cents' => max(0, $laborFeeCents),
+                // 卡内配置仅用于后续选手艺人时的默认值，不重算已完成服务。
+                'craftsman_default_mode' => $craftsmanMode,
+                'craftsman_default_unit_amount_cents' => $craftsmanMode === 'manual_amount' ? $craftsmanAmountCents : 0,
                 // 组合归属随卡项目关系保存；旧规则统一为 0，不参与组合扣次。
                 'combination_group_no' => (int)($item['combination_group_no'] ?? 0),
                 'combination_group_name' => (string)($item['combination_group_name'] ?? ''),

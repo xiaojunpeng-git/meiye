@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\services\cashier\v3\reservation;
 
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
+use app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
@@ -79,9 +80,22 @@ final class CashierV3ReservationCompletionFactServices
             ? ($rule['consumptionMode'] === CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED
                 ? $rule['consumptionConfiguredUnitCents'] * $quantity : $amount['actualCents'])
             : 0;
+        // Reservation completion is another entitlement writeoff entry. Staff
+        // performance must use the current card-project default, never the
+        // retired labor rule; consumption performance keeps its own policy.
+        $craftsmanUnitCents = $occupation
+            ? CashierV3CraftsmanPerformanceDefault::entitlementUnitCents(
+                $projectId,
+                (int)$occupation['card_holder_id'],
+                (int)$occupation['entitlement_source_detail_id'],
+                $tenantId
+            )
+            : CashierV3CraftsmanPerformanceDefault::projectUnitCents($projectId, $tenantId);
+        $laborMode = $craftsmanUnitCents === null
+            ? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL
+            : CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED;
         $laborCents = $craftsmen
-            ? ($rule['laborMode'] === CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED
-                ? $rule['laborConfiguredUnitCents'] * $quantity : $amount['actualCents'])
+            ? ($craftsmanUnitCents === null ? $amount['actualCents'] : $craftsmanUnitCents * $quantity)
             : 0;
         $common = [
             'business_event_no' => $eventNo,
@@ -135,7 +149,7 @@ final class CashierV3ReservationCompletionFactServices
             'is_experience' => 0,
             'labor_amount_cents' => $laborCents,
             'labor_fee_amount_cents' => 0,
-            'labor_mode' => $rule['laborMode'],
+            'labor_mode' => $laborMode,
             'primary_craftsman_staff_id' => (int)($craftsmen[0]['staffId'] ?? 0),
             'craftsmen_snapshot_json' => $this->json($craftsmen),
             'service_status' => 'completed',
@@ -209,7 +223,7 @@ final class CashierV3ReservationCompletionFactServices
                     'labor_performance_allocated', (int)$craftsman['employeeId'], (string)$craftsman['name'],
                     (string)$craftsman['employeeType'], (int)$craftsman['employeeTypeVersion'],
                     (int)($amountByStaff[(int)$craftsman['staffId']] ?? 0), 1, $denominator, $projectCount,
-                    'reservation_labor_' . $rule['laborMode'], '项目劳动业绩', 'reservation-rule:' . $rule['version'],
+                    'reservation_labor_' . $laborMode, '项目劳动业绩', 'reservation-rule:' . $rule['version'],
                     !empty($craftsman['isPointCustomer']) ? 'craftsman:point' : 'craftsman:round');
                 $performanceCount++;
             }
@@ -296,8 +310,6 @@ final class CashierV3ReservationCompletionFactServices
         return [
             'consumptionMode' => (string)$row['consumption_mode'],
             'consumptionConfiguredUnitCents' => max(0, (int)$row['consumption_configured_unit_amount_cents']),
-            'laborMode' => (string)$row['labor_mode'],
-            'laborConfiguredUnitCents' => max(0, (int)$row['labor_configured_unit_amount_cents']),
             'version' => max(1, (int)$row['current_version']),
         ];
     }

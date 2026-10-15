@@ -2214,6 +2214,7 @@ async function defaultExclusivePersonnelForLine(line) {
   const craftsmen = chosen(craftResult, 'craftsmen')
   const salespeople = chosen(salesResult, 'salespeople')
   const amountCents = personnelPerformanceBaseAmountCents(line)
+  const craftsmanAmountCents = craftsmanPerformanceBaseAmountCents(line, craftResult.status === 'fulfilled' ? craftResult.value : [])
   if (craftsmen.length) {
     defaultCraftsmanWeights(craftsmen)
     defaultProjectCounts(craftsmen, Math.max(1, Number(line.quantity || 1)))
@@ -2225,7 +2226,8 @@ async function defaultExclusivePersonnelForLine(line) {
       ...record, id: Number(record.staffId || record.id),
       name: record.name || record.staffName || '',
       laborWeight: Number(record.performance || 0),
-      performanceAmountCents: record.craftsmanPerformanceType === 'labor' ? 0 : amountFor(record.performance),
+      performanceAmountCents: record.craftsmanPerformanceType === 'labor' ? 0
+        : Math.max(0, Math.round(craftsmanAmountCents * Number(record.performance || 0) / 10000) * 100),
       performanceAmountManual: false,
       laborFeeCents: record.craftsmanPerformanceType === 'commission' ? 0 : Number(record.laborDefaultFeeCents || 0),
       projectCount: record.projectCountText || '0',
@@ -3940,6 +3942,9 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
       ...personnelOverlay.value,
       craftsmenCandidates,
       salespersonCandidates,
+      performanceBaseAmountCents: showCraftsmen
+        ? craftsmanPerformanceBaseAmountCents(line, craftsmenCandidates)
+        : personnelOverlay.value.performanceBaseAmountCents,
       loading: false
     }
   } catch (error) {
@@ -4174,6 +4179,18 @@ function personnelPerformanceBaseAmountCents(line = {}) {
       ?? 0
   )
   return Number.isSafeInteger(amountCents) && amountCents >= 0 ? amountCents : 0
+}
+
+function craftsmanPerformanceBaseAmountCents(line = {}, candidates = []) {
+  // The server verifies project/card identities before returning a per-use
+  // override. Empty config retains the existing sale/writeoff amount; zero
+  // remains an explicit zero, and quantity applies only to configured units.
+  const configured = candidates[0]?.craftsmanDefaultUnitAmountCents
+  if (configured === null || configured === undefined) return personnelPerformanceBaseAmountCents(line)
+  const unit = Number(configured)
+  const quantity = Math.max(1, Number(line.quantity || 1))
+  return Number.isSafeInteger(unit) && unit >= 0 && Number.isSafeInteger(quantity)
+    ? unit * quantity : personnelPerformanceBaseAmountCents(line)
 }
 
 function checkoutSaleAmountCents() {

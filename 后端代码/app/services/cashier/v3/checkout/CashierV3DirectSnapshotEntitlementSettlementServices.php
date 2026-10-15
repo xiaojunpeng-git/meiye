@@ -548,17 +548,25 @@ final class CashierV3DirectSnapshotEntitlementSettlementServices
                 $performanceVersion,
                 $dataScope
             );
-            // A complete-mode labor fee is a checkout-scoped override.  It is
-            // already locked by the workspace aggregate; project configuration
-            // remains the default and is never mutated by this branch.
+            // Staff performance uses the current card-project default, while
+            // consumption performance remains on the independent project rule.
+            $craftsmanUnitCents = \app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault::entitlementUnitCents(
+                $projectId, $holderId, $detailId, $dataScope->tenantId()
+            );
+            $performance['laborMode'] = $craftsmanUnitCents === null
+                ? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL
+                : CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED;
+            // The kernel normalizes the decimal contract field into cents;
+            // updating only an auxiliary cents key would be discarded.
+            $performance['laborConfiguredUnitAmount'] = $this->centsToMoney($craftsmanUnitCents ?? 0);
+            // Checkout-scoped hand fee remains a separate personnel amount;
+            // it must not replace the staff-performance basis.
             $manualLaborFeeCents = $intent['laborManualFeeCents'] ?? null;
             if ($manualLaborFeeCents !== null) {
                 $manualLaborFeeCents = (int)$manualLaborFeeCents;
                 if ($manualLaborFeeCents < 0) {
                     throw self::failure('authority_manual_labor_fee_invalid', ['lineId' => $lineId]);
                 }
-                $performance['laborMode'] = CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED;
-                $performance['laborConfiguredUnitAmountCents'] = $manualLaborFeeCents;
             }
             $craftsmen = [];
             foreach ($intent['craftsmanIds'] as $sequence => $staffId) {

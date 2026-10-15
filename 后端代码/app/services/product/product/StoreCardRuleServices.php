@@ -117,6 +117,18 @@ class StoreCardRuleServices
                 '第' . ($index + 1) . '个项目的手工费'
             );
             $row['labor_fee_cents'] = (int)$row['labor_fee'] * 100;
+            // 卡内项目的人员业绩默认值独立于手工费和项目消耗业绩；
+            // 未选择手动设置的旧卡继续按现有单次实际金额初始化。
+            $craftsmanMode = (string)($row['craftsman_default_mode'] ?? 'default_unit_price');
+            if (!in_array($craftsmanMode, ['default_unit_price', 'manual_amount'], true)) {
+                throw new AdminException('第' . ($index + 1) . '个项目的默认手艺人业绩设置无效');
+            }
+            $row['craftsman_default_mode'] = $craftsmanMode;
+            $row['craftsman_default_unit_amount_cents'] = $craftsmanMode === 'manual_amount'
+                ? $this->nonNegativeMoney(
+                    $row['craftsman_default_unit_amount'] ?? null,
+                    '第' . ($index + 1) . '个项目的默认手艺人业绩'
+                ) * 100 : 0;
             $usesIndependentTimes = in_array($type, [self::NORMAL, self::CHOICE_KIND], true)
                 || ($type === self::COMBINATION
                     && $groups[(int)($row['combination_group_no'] ?? 0)]['rule'] === self::CHOICE_KIND);

@@ -44,6 +44,8 @@ namespace think\facade {
 
 namespace {
     require_once dirname(__DIR__, 3)
+        . '/后端代码/app/services/cashier/v3/CashierV3ProjectPersonnelDefaults.php';
+    require_once dirname(__DIR__, 3)
         . '/后端代码/app/services/cashier/v3/CashierV3ProjectLaborDefault.php';
 
     use app\services\cashier\v3\CashierV3ProjectLaborDefault;

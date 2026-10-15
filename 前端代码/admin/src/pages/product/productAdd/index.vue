@@ -62,22 +62,6 @@
             @modalPicTap="modalPicTap"
             @sourceChange="sourceChange"
           ></productBaseSet>
-          <div v-if="Number(formData.product_type) === 6" class="performance-rule-panel">
-            <FormItem label="手工费：">
-              <InputNumber
-                v-model="performanceRule.labor_configured_unit_amount"
-                :min="0"
-                :precision="0"
-                @on-change="normalizeLaborFeeInput"
-                style="width: 220px"
-              />
-            </FormItem>
-            <FormItem v-if="Number($route.params.id || 0) > 0" label="">
-              <Button type="primary" :loading="performanceRuleSaving" @click="savePerformanceRule">保存手工费</Button>
-              <span class="tips ml10">版本 {{ performanceRule.version || 1 }}</span>
-            </FormItem>
-            <div v-else class="tips performance-rule-tip">请先保存商品，再进入编辑页配置手工费。</div>
-          </div>
         </div>
         <div v-show="currentTab === '2'">
           <!-- 商品规格的设置 -->
@@ -1212,6 +1196,15 @@
                   <template slot-scope="{ row }" slot="labor_fee">
                     <InputNumber v-model="cardData[combinationCardIndex(row)].labor_fee" :min="0" :max="999999999" :precision="0" />
                   </template>
+                  <template slot-scope="{ row }" slot="craftsman_default">
+                    <Select v-model="cardData[combinationCardIndex(row)].craftsman_default_mode" transfer style="width: 112px">
+                      <Option value="default_unit_price">默认单价</Option>
+                      <Option value="manual_amount">手动设置</Option>
+                    </Select>
+                    <InputNumber v-if="cardData[combinationCardIndex(row)].craftsman_default_mode === 'manual_amount'"
+                      v-model="cardData[combinationCardIndex(row)].craftsman_default_unit_amount"
+                      :min="0" :max="999999999" :precision="0" style="width: 100px; margin-left: 8px" />
+                  </template>
                   <template slot-scope="{ row }" slot="write_times">
                     <InputNumber v-model="cardData[combinationCardIndex(row)].write_times" :min="1" :max="99999999" :precision="0" />
                   </template>
@@ -1240,6 +1233,15 @@
                 </template>
                 <template slot-scope="{ index }" slot="labor_fee">
                   <InputNumber v-model="cardData[index].labor_fee" :min="0" :max="999999999" :precision="0"></InputNumber>
+                </template>
+                <template slot-scope="{ index }" slot="craftsman_default">
+                  <Select v-model="cardData[index].craftsman_default_mode" transfer style="width: 112px">
+                    <Option value="default_unit_price">默认单价</Option>
+                    <Option value="manual_amount">手动设置</Option>
+                  </Select>
+                  <InputNumber v-if="cardData[index].craftsman_default_mode === 'manual_amount'"
+                    v-model="cardData[index].craftsman_default_unit_amount"
+                    :min="0" :max="999999999" :precision="0" style="width: 100px; margin-left: 8px" />
                 </template>
                 <template slot-scope="{ row, index }" slot="write_times">
                   <InputNumber v-model="cardData[index].write_times" :max="99999999" :min="1" :precision="0"></InputNumber>
@@ -1311,6 +1313,18 @@
 			    v-width="'50%'"
 			  ></InputNumber>
 			</FormItem>
+            <!-- 手工费与手艺人业绩分别作为人员默认值保存；项目消耗业绩保持独立。 -->
+            <div class="performance-rule-panel">
+              <FormItem label="手工费：">
+                <InputNumber v-model="performanceRule.labor_configured_unit_amount" :min="0" :precision="0"
+                  @on-change="normalizeLaborFeeInput" style="width: 220px" />
+              </FormItem>
+              <FormItem label="默认手艺人业绩：">
+                <InputNumber v-model="performanceRule.craftsman_default_unit_amount" :min="0" :precision="0"
+                  placeholder="未填写沿用当前金额" style="width: 220px" />
+                <span class="tips ml10">元/次；留空按本次成交或核销金额</span>
+              </FormItem>
+            </div>
 			<FormItem label="时段划分：" required prop="reservation_time_type" v-if="false">
 			  <RadioGroup v-model="formData.reservation_time_type" @on-change='timeDivide'>
 			    <Radio :label="1">
@@ -1856,9 +1870,9 @@ export default {
         labor_configured_unit_amount: 0,
         consumption_mode: 'actual_entitlement_amount',
         consumption_configured_unit_amount: 0,
+        craftsman_default_unit_amount: null,
         version: 1,
       },
-      performanceRuleSaving: false,
 	  timeoutId: null, //定时器
 	  reservationTime: [],//时间区域
 	  timeCheckAll:true, //自动划分控制全选
@@ -2168,7 +2182,7 @@ export default {
         // 预约商品
         headTab = [
           { title: '基础信息', name: '1' },
-          { title: '预约服务', name: '2' },
+          { title: '销售设置', name: '2' },
           { title: '预约设置', name: '8' },
           { title: '商品详情', name: '3' },
           { title: '会员价/佣金', name: '10' },
@@ -2261,6 +2275,7 @@ export default {
         },
         { title: '项目原价', slot: 'price', minWidth: 100 },
         { title: '手工', slot: 'labor_fee', minWidth: 120 },
+        { title: '默认手艺人业绩设置', slot: 'craftsman_default', minWidth: 245 },
       ];
       if (['normal', 'choice_kind'].includes(this.formData.card_rule_type)) {
         columns.push({
@@ -3204,6 +3219,9 @@ export default {
     normalizePerformanceRule(rule = {}) {
       const amount = Number(rule.labor_configured_unit_amount);
       const consumptionAmount = Number(rule.consumption_configured_unit_amount);
+      const rawCraftsmanAmount = rule.craftsman_default_unit_amount;
+      const craftsmanAmount = rawCraftsmanAmount === null || rawCraftsmanAmount === undefined || rawCraftsmanAmount === ''
+        ? null : Number(rawCraftsmanAmount);
       return {
         ...rule,
         labor_configured_unit_amount: Number.isFinite(amount)
@@ -3212,28 +3230,24 @@ export default {
         consumption_configured_unit_amount: Number.isFinite(consumptionAmount)
           ? Math.max(0, Math.trunc(consumptionAmount))
           : 0,
+        // null means the current sale/writeoff amount; numeric zero is an explicit default.
+        craftsman_default_unit_amount: craftsmanAmount === null ? null
+          : (Number.isFinite(craftsmanAmount) ? Math.max(0, Math.trunc(craftsmanAmount)) : null),
       };
     },
-    savePerformanceRule() {
-      const id = Number(this.$route.params.id || 0);
-      if (!id) return;
-      this.performanceRule = this.normalizePerformanceRule(this.performanceRule);
-      this.performanceRuleSaving = true;
-      savePerformanceRuleApi(id, {
+    async persistProjectSalesSettings(productId) {
+      // 商品先保存并取得正式 ID；新增与编辑共用同一条销售设置写入路径。
+      // 第二步失败时保留在编辑页，避免把商品成功误报为整页保存成功。
+      const res = await savePerformanceRuleApi(productId, {
         labor_mode: 'project_configured_amount',
         labor_configured_unit_amount: this.performanceRule.labor_configured_unit_amount,
         consumption_mode: this.performanceRule.consumption_mode,
         consumption_configured_unit_amount: this.performanceRule.consumption_configured_unit_amount,
-      }).then((res) => {
-        this.performanceRule = this.normalizePerformanceRule({
-          ...this.performanceRule,
-          ...(res.data || {}),
-        });
-        this.$Message.success(res.msg || '保存成功');
-      }).catch((res) => {
-        this.$Message.error(res.msg || '保存项目业绩配置失败');
-      }).finally(() => {
-        this.performanceRuleSaving = false;
+        craftsman_default_unit_amount: this.performanceRule.craftsman_default_unit_amount,
+      });
+      this.performanceRule = this.normalizePerformanceRule({
+        ...this.performanceRule,
+        ...(res.data || {}),
       });
     },
     infoData(data) {
@@ -3403,6 +3417,8 @@ export default {
             writeoff_amount: Number(item.writeoff_amount || 0),
             // 卡内手工是卡与项目的独立设置；编辑时回显已保存值，不能重取项目默认值覆盖人工修改。
             labor_fee: Number(item.labor_fee_cents || 0) / 100,
+            craftsman_default_mode: item.craftsman_default_mode || 'default_unit_price',
+            craftsman_default_unit_amount: Number(item.craftsman_default_unit_amount_cents || 0) / 100,
             combination_group_no: Number(item.combination_group_no || 0),
             combination_group_name: String(item.combination_group_name || ''),
             combination_group_rule: String(item.combination_group_rule || ''),
@@ -3875,27 +3891,28 @@ export default {
       formData.attr.level_price=vipPriceBrokerageData.attrData[0].level_price;
     }
     if (!this.validateWholeYuanMoney(formData)) return;
+      if (Number(formData.product_type) === 6) {
+        this.performanceRule = this.normalizePerformanceRule(this.performanceRule);
+      }
       this.saveSubmitting = true;
       productAddApi(formData)
         .then(async (res) => {
-          this.openSubimit = true;
-          this.$Message.success(res.msg);
-          const createdProductId = Number(res && res.data && res.data.product_id);
-          if (Number(formData.product_type) === 6 && !Number(this.$route.params.id || 0) && createdProductId > 0) {
+          const savedProductId = Number((res && res.data && res.data.product_id)
+            || (this.$route.query.copy ? 0 : this.$route.params.id) || 0);
+          if (Number(formData.product_type) === 6) {
             try {
-              await savePerformanceRuleApi(createdProductId, {
-                labor_mode: 'project_configured_amount',
-                labor_configured_unit_amount: this.performanceRule.labor_configured_unit_amount,
-                consumption_mode: this.performanceRule.consumption_mode,
-                consumption_configured_unit_amount: this.performanceRule.consumption_configured_unit_amount,
-              });
+              if (savedProductId <= 0) throw new Error('商品接口未返回项目 ID');
+              await this.persistProjectSalesSettings(savedProductId);
             } catch (ruleError) {
               this.openSubimit = false;
               this.saveSubmitting = false;
-              this.$Message.error((ruleError && ruleError.msg) || '商品已创建，但手工费保存失败，请重试');
+              this.$Message.error('商品已保存，但销售设置保存失败：'
+                + ((ruleError && (ruleError.msg || ruleError.message)) || '请重试底部“保存”'));
               return;
             }
           }
+          this.openSubimit = true;
+          this.$Message.success(res.msg || '保存成功');
           if (this.$route.params.id === '0') {
             cacheDelete().catch((err) => {
               this.$Message.error(err.msg);
@@ -4253,6 +4270,9 @@ export default {
         }
         // 新增项目才继承项目手工费，后续在卡内可独立调整。
         this.$set(item, 'labor_fee', Number(item.labor_fee || 0));
+        // New card rows preserve the existing unit-price default until explicitly changed.
+        this.$set(item, 'craftsman_default_mode', 'default_unit_price');
+        this.$set(item, 'craftsman_default_unit_amount', 0);
       });
       this.cardData = [...this.cardData, ...newCardData];
       this.combinationPickerGroupNo = 0;

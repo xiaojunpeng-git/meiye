@@ -7,10 +7,10 @@ use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
 use think\facade\Db;
 
 /**
- * 平台商品编辑使用的 V3 项目业绩规则配置。
+ * 平台商品编辑使用的 V3 项目业绩与人员默认值配置。
  *
- * 结账/核销继续只读取 cashier_v3_project_performance_rule 的版本快照；
- * 本服务只负责受控配置，不修改任何销售或服务事实。
+ * 项目手工费和手艺人业绩分别保存；已配置的手艺人默认值参与
+ * 本次人员分配与未手改金额的最终结算，不改变项目消耗业绩或历史事实。
  */
 final class CashierV3PerformanceRuleAdminServices
 {
@@ -29,6 +29,7 @@ final class CashierV3PerformanceRuleAdminServices
                 'consumption_configured_unit_amount_cents' => 0,
                 'labor_mode' => CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED,
                 'labor_configured_unit_amount_cents' => 0,
+                'craftsman_default_unit_amount_cents' => null,
                 'current_version' => 1,
             ]);
         }
@@ -39,12 +40,15 @@ final class CashierV3PerformanceRuleAdminServices
     {
         $this->assertProject($projectId);
         $consumptionMode = $this->mode($payload['consumption_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_ACTUAL);
-        // 平台端统一使用手工费模式，前端不再暴露业绩计算方式选择。
+        // 旧 labor 字段只供手工费读取；手艺人业绩改用独立的新字段。
         $laborMode = CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED;
         $consumptionAmount = $this->moneyToCents($payload['consumption_configured_unit_amount'] ?? 0);
         $laborAmount = $this->moneyToCents($payload['labor_configured_unit_amount'] ?? 0);
+        $hasCraftsmanDefault = array_key_exists('craftsman_default_unit_amount', $payload);
+        $craftsmanDefault = $hasCraftsmanDefault
+            ? $this->nullableCraftsmanDefaultCents($payload['craftsman_default_unit_amount']) : null;
         $now = time();
-        return Db::transaction(function () use ($projectId, $consumptionMode, $laborMode, $consumptionAmount, $laborAmount, $operatorId, $now): array {
+        return Db::transaction(function () use ($projectId, $consumptionMode, $laborMode, $consumptionAmount, $laborAmount, $hasCraftsmanDefault, $craftsmanDefault, $operatorId, $now): array {
             $query = Db::name(self::TABLE)->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                 ->where('project_id', $projectId)->lock(true);
             $row = $query->find();
@@ -55,6 +59,11 @@ final class CashierV3PerformanceRuleAdminServices
                 'labor_configured_unit_amount_cents' => $laborAmount,
                 'updated_at' => $now,
             ];
+            // Older admin clients omit this field; only an explicit new value
+            // (including 0) or an explicit clear changes the staff default.
+            if ($hasCraftsmanDefault) {
+                $data['craftsman_default_unit_amount_cents'] = $craftsmanDefault;
+            }
             if (is_array($row)) {
                 $data['current_version'] = (int)$row['current_version'] + 1;
                 Db::name(self::TABLE)->where('id', (int)$row['id'])->update($data);
@@ -66,6 +75,7 @@ final class CashierV3PerformanceRuleAdminServices
                     'current_version' => 1,
                     'created_at' => $now,
                 ];
+                $data['craftsman_default_unit_amount_cents'] = $craftsmanDefault;
                 Db::name(self::TABLE)->insert($data);
                 $row = $data;
             }
@@ -77,7 +87,7 @@ final class CashierV3PerformanceRuleAdminServices
     {
         $row = Db::name('store_product')->where('id', $projectId)->where('is_del', 0)
             ->where('product_type', 6)->field('id')->find();
-        if (!is_array($row)) throw new \InvalidArgumentException('仅预约项目支持业绩与固定手工费配置');
+        if (!is_array($row)) throw new \InvalidArgumentException('仅预约项目支持销售设置');
     }
 
     private function mode($value): string
@@ -103,6 +113,21 @@ final class CashierV3PerformanceRuleAdminServices
         return $cents;
     }
 
+    private function nullableCraftsmanDefaultCents($value): ?int
+    {
+        if ($value === null || trim((string)$value) === '') return null;
+        $text = trim((string)$value);
+        if (!preg_match('/^(?:0|[1-9]\d*)(?:\.0+)?$/D', $text)) {
+            throw new \InvalidArgumentException('默认手艺人业绩必须是非负整数');
+        }
+        $whole = explode('.', $text, 2)[0];
+        if (strlen($whole) > 10 || (strlen($whole) === 10 && strcmp($whole, '1000000000') > 0)) {
+            throw new \InvalidArgumentException('默认手艺人业绩超出允许范围');
+        }
+        $cents = (int)$whole * 100;
+        return $cents;
+    }
+
     private function projection(array $row): array
     {
         return [
@@ -111,6 +136,8 @@ final class CashierV3PerformanceRuleAdminServices
             'consumption_configured_unit_amount' => $this->centsToMoney((int)($row['consumption_configured_unit_amount_cents'] ?? 0)),
             'labor_mode' => (string)($row['labor_mode'] ?? CashierV3EntitlementCompletionKernel::PERFORMANCE_CONFIGURED),
             'labor_configured_unit_amount' => $this->centsToMoney((int)($row['labor_configured_unit_amount_cents'] ?? 0)),
+            'craftsman_default_unit_amount' => ($row['craftsman_default_unit_amount_cents'] ?? null) === null
+                ? null : $this->centsToMoney((int)$row['craftsman_default_unit_amount_cents']),
             'version' => (int)($row['current_version'] ?? 1),
         ];
     }
