@@ -19,10 +19,10 @@
 
 				<scroll-view scroll-x="true" :show-scrollbar="false" class="warehouse-page__ranking-tabs"><view class="warehouse-page__ranking-track"><view v-for="item in rankingCatalog" :key="item.code" class="warehouse-page__ranking-tab" :class="{ 'warehouse-page__ranking-tab--active': selectedRankingCode === item.code }" @tap="selectRanking(item)"><text>{{ item.name }}</text></view></view></scroll-view>
 				<view v-if="selectedRankingCode === 'organization' && selectedStoreRankingRoot && !rankingLoading" class="warehouse-page__ranking-scope-note"><text>按全部指定门店汇总 · 统计时间随上方筛选</text></view>
-				<view v-if="!rankingLoading && selectedRankingAvailable" class="warehouse-page__ranking-controls"><view class="warehouse-page__sort-toggle" @tap="toggleRankingOrder"><text>{{ rankingOrderLabel() }}</text></view></view>
+				<view v-if="!rankingLoading && selectedRankingAvailable" class="warehouse-page__ranking-controls"><view v-if="selectedRankingCode === 'project_count'" class="warehouse-page__project-sort"><view class="warehouse-page__project-sort-option" :class="{ 'warehouse-page__project-sort-option--active': projectSortMetric === 'cash' }" @tap="selectProjectSortMetric('cash')"><text>按现金业绩</text></view><view class="warehouse-page__project-sort-option" :class="{ 'warehouse-page__project-sort-option--active': projectSortMetric === 'quantity' }" @tap="selectProjectSortMetric('quantity')"><text>按服务数</text></view></view><view class="warehouse-page__sort-toggle" @tap="toggleRankingOrder"><text>{{ rankingOrderLabel() }}</text></view></view>
 				<view v-if="selectedRankingCode === 'organization' && visibleRankingRows().length > 0 && trendPoints().length > 0" class="warehouse-page__trend-card"><view class="warehouse-page__trend-head"><text class="warehouse-page__trend-title">{{ trendMetricName() }}趋势</text><text class="warehouse-page__trend-granularity">{{ trendGranularityLabel() }}</text></view><image v-if="platformUsesNativeCanvas && nativeTrendImage.length > 0" :src="nativeTrendImage" mode="scaleToFill" class="warehouse-page__trend-canvas"></image><canvas v-else canvas-id="warehouse-trend" id="warehouse-trend" width="720" height="228" class="warehouse-page__trend-canvas"></canvas><view class="warehouse-page__trend-periods"><view class="warehouse-page__trend-period warehouse-page__trend-period--current"><text>本期</text><text>{{ trendPeriodRange('current') }}</text></view><view class="warehouse-page__trend-period warehouse-page__trend-period--yoy"><text>同比</text><text>{{ trendPeriodRange('yoy') }}</text></view><view class="warehouse-page__trend-period warehouse-page__trend-period--mom"><text>环比</text><text>{{ trendPeriodRange('mom') }}</text></view></view></view>
 				<view v-if="selectedRankingCode === 'organization' && visibleRankingRows().length > 0" class="warehouse-page__ranking-head"><view class="warehouse-page__pie-row"><view class="warehouse-page__pie-card"><text class="warehouse-page__pie-title">现金业绩占比</text><view class="warehouse-page__pie warehouse-page__pie--cash"><image v-if="platformUsesNativeCanvas && nativeCashPieImage.length > 0" :src="nativeCashPieImage" mode="scaleToFill" class="warehouse-page__pie-canvas"></image><canvas v-else canvas-id="warehouse-pie-cash" id="warehouse-pie-cash" width="356" height="356" class="warehouse-page__pie-canvas"></canvas><view v-if="!platformUsesNativeCanvas" v-for="item in visiblePieLabels('cash_performance')" :key="'cash-pie-' + item.name" class="warehouse-page__pie-label-inside" :style="pieLabelStyle(item)"><text>{{ item.name }}</text><text>{{ item.value }}</text></view><view v-if="!platformUsesNativeCanvas && rankingPieSegments('cash_performance').length === 0" class="warehouse-page__pie-center warehouse-page__pie-center--empty"><text>暂无数据</text><text>0</text></view></view></view><view class="warehouse-page__pie-card"><text class="warehouse-page__pie-title">退款金额占比</text><view class="warehouse-page__pie warehouse-page__pie--refund"><image v-if="platformUsesNativeCanvas && nativeRefundPieImage.length > 0" :src="nativeRefundPieImage" mode="scaleToFill" class="warehouse-page__pie-canvas"></image><canvas v-else canvas-id="warehouse-pie-refund" id="warehouse-pie-refund" width="356" height="356" class="warehouse-page__pie-canvas"></canvas><view v-if="!platformUsesNativeCanvas" v-for="item in visiblePieLabels('refund_performance')" :key="'refund-pie-' + item.name" class="warehouse-page__pie-label-inside warehouse-page__pie-label-inside--refund" :style="pieLabelStyle(item)"><text>{{ item.name }}</text><text>{{ item.value }}</text></view><view v-if="!platformUsesNativeCanvas && rankingPieSegments('refund_performance').length === 0" class="warehouse-page__pie-center warehouse-page__pie-center--empty"><text>暂无数据</text><text>0</text></view></view></view></view></view>
-				<view v-if="visibleRankingRows().length > 0" class="warehouse-page__ranking-list"><view v-for="(row, index) in visibleRankingRows()" :key="row.entityType + '-' + row.entityId" class="warehouse-page__ranking-row" :class="{ 'warehouse-page__ranking-row--clickable': rowCanOpen(row) }" @tap="openRow(row)"><text class="warehouse-page__rank">{{ index + 1 }}</text><view class="warehouse-page__ranking-copy"><view class="warehouse-page__ranking-name-row"><text class="warehouse-page__ranking-name">{{ row.name }}</text><text class="warehouse-page__entity-tag">{{ rowTypeLabel(row) }}</text></view><text class="warehouse-page__ranking-meta">{{ rowMeta(row) }}</text></view><text class="warehouse-page__ranking-value">{{ rowValue(row) }}</text><text v-if="rowCanOpen(row)" class="warehouse-page__chevron">›</text></view></view>
+				<view v-if="visibleRankingRows().length > 0" class="warehouse-page__ranking-list"><view v-for="(row, index) in visibleRankingRows()" :key="row.entityType + '-' + row.entityId" class="warehouse-page__ranking-row" :class="{ 'warehouse-page__ranking-row--clickable': rowCanOpen(row) }" @tap="openRow(row)"><text class="warehouse-page__rank">{{ index + 1 }}</text><view class="warehouse-page__ranking-copy"><view class="warehouse-page__ranking-name-row"><text class="warehouse-page__ranking-name">{{ row.name }}</text><text class="warehouse-page__entity-tag">{{ rowTypeLabel(row) }}</text></view><text class="warehouse-page__ranking-meta">{{ rowMeta(row) }}</text></view><view v-if="selectedRankingCode === 'project_count'" class="warehouse-page__project-values"><text>服务数 {{ Number(row.quantity || 0) }}</text><text>现金业绩 ¥{{ plainMetricValue(String(row.cashDisplay || '0')) }}</text></view><text v-else class="warehouse-page__ranking-value">{{ rowValue(row) }}</text><text v-if="rowCanOpen(row)" class="warehouse-page__chevron">›</text></view></view>
 				<view v-else class="warehouse-page__ranking-empty"><text class="warehouse-page__ranking-empty-title">{{ rankingLoading ? '正在读取排行…' : '暂无排行数据' }}</text><text v-if="!rankingLoading" class="warehouse-page__ranking-empty-copy">切换其他指标或组织范围后再试</text></view>
 				<view v-if="selectedRankingCode !== 'organization' && !rankingLoading && visibleRankingRows().length > 0" class="warehouse-page__ranking-more" @tap="loadMoreRanking"><text>{{ rankingLoadingMore ? '正在加载下一批…' : rankingLoadError ? '加载失败，点击重试' : rankingHasMore ? '下滑加载更多' : '已展示全部' }}</text></view>
 				<view class="warehouse-page__freshness"><text>更新于 {{ dataAsOf }}</text></view>
@@ -87,6 +87,9 @@
 	// canvases globally like H5 does.
 	const canvasHost : any = getCurrentInstance().proxy
 	const rankingReversed = ref(false)
+	// 服务项目默认按现金业绩排序，切换后仍展示数量和业绩两个指标。
+	// 服务项目默认按现金业绩排；服务数来自已完成服务事实，两列均由服务端返回。
+	const projectSortMetric = ref('cash')
 	const metricVersion = ref('—')
 	const dataAsOf = ref('—')
 	const aggregationCaughtUp = ref(false)
@@ -142,6 +145,7 @@
 			rankingHasMore.value = payload.rankingHasMore === true
 			trend.value = payload.trend || trend.value
 			selectedRankingCode.value = String(payload.selectedRankingCode || selectedRankingCode.value)
+			projectSortMetric.value = String(payload.selectedProjectSortMetric || projectSortMetric.value)
 			selectedRankingAvailable.value = payload.selectedRankingAvailable !== false
 			selectedStoreRankingScope.value = entry != null && String(entry.entryType || '') === 'store' && entry.showOrganizationRanking === true
 			selectedStoreRankingRoot.value = selectedStoreRankingScope.value && nodeType === '' && nodeId === 0
@@ -154,7 +158,7 @@
 		})
 	}
 	function periodPayload(nodeType : string, nodeId : number) : any {
-		let payload : any = { month: month.value, periodMode: periodMode.value, nodeType: nodeType, nodeId: nodeId, rankingCode: selectedRankingCode.value, rankingOrder: rankingReversed.value ? 'asc' : 'desc', trendMetricCode: selectedMetricCode.value }
+		let payload : any = { month: month.value, periodMode: periodMode.value, nodeType: nodeType, nodeId: nodeId, rankingCode: selectedRankingCode.value, rankingOrder: rankingReversed.value ? 'asc' : 'desc', projectSortMetric: projectSortMetric.value, trendMetricCode: selectedMetricCode.value }
 		if (periodMode.value === 'custom') { payload.startDate = customStartDate.value; payload.endDate = customEndDate.value }
 		return payload
 	}
@@ -428,9 +432,12 @@
 	}
 	function rankingOrderLabel() : string { return rankingReversed.value ? '正序' : '反序' }
 	function toggleRankingOrder() : void { rankingReversed.value = !rankingReversed.value; requestRanking() }
+	// 切换指标重新读取服务端排行，旧页码和旧结果不能沿用到新顺序。
+	function selectProjectSortMetric(metric : string) : void { if (projectSortMetric.value === metric) return; projectSortMetric.value = metric; rankingReversed.value = false; requestRanking() }
 	function selectRanking(item : any) : void {
 		selectedRankingCode.value = String(item.code || 'organization')
 		rankingReversed.value = false
+		if (selectedRankingCode.value === 'project_count') projectSortMetric.value = 'cash'
 		requestRanking()
 	}
 	function requestRanking() : void {
@@ -449,7 +456,7 @@
 	function rowTypeLabel(row : any) : string { let type = String(row.entityType || ''); if (type === 'branch') return '分公司'; if (type === 'manager') return '经理'; if (type === 'organization') return '组织'; if (type === 'store') return '门店'; if (type === 'employee') return '员工'; return '项目' }
 	function orgOptionMeta(row : any) : string { return rowTypeLabel(row) + ' · ' + Number(row.storeCount || 0).toString() + ' 家门店' }
 	function organizationSelectorLabel() : string { let name = currentNode.value != null ? String(currentNode.value.name || '').trim() : ''; return name.length > 0 ? name : '集团' }
-	function rowMeta(row : any) : string { if (selectedRankingCode.value === 'organization') return Number(row.storeCount || 0).toString() + ' 家门店'; if (selectedRankingCode.value === 'store') return periodLabel.value + '现金业绩'; return selectedRankingCode.value === 'project_count' ? periodLabel.value + '完成服务' : String(currentNode.value.name || '') }
+	function rowMeta(row : any) : string { if (selectedRankingCode.value === 'organization') return Number(row.storeCount || 0).toString() + ' 家门店'; if (selectedRankingCode.value === 'store') return periodLabel.value + '现金业绩'; return selectedRankingCode.value === 'project_count' ? String(row.categoryPath || '未分类') : String(currentNode.value.name || '') }
 	function rowCanOpen(row : any) : boolean {
 		let type = String(row.entityType || '')
 		// 总部指定门店授权可逐级查看组织排行；服务端始终将节点限制在
@@ -749,8 +756,16 @@
 	.warehouse-page__pie-center-value { margin-top: 4px; overflow: hidden; max-width: 108px; font-size: 15px; font-weight: 800; line-height: 18px; color: #ffffff; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 	.warehouse-page__pie--refund .warehouse-page__pie-center-name, .warehouse-page__pie--refund .warehouse-page__pie-center-value { color: #748398; }
 
-	/* 排序入口与页签结果共用，避免在每种排行里重复放一张图表卡。 */
-	.warehouse-page__ranking-controls { display: flex; flex-direction: row; justify-content: flex-end; padding: 10px 4px 8px 4px; }
+	/* 服务项目在同一结果上切换排序指标；反序沿用全排行共用入口。 */
+	.warehouse-page__ranking-controls { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; padding: 10px 4px 8px 4px; }
+	.warehouse-page__project-sort { display: flex; flex-direction: row; margin-right: 10px; border: 1px solid #dce8f2; border-radius: 14px; background-color: #ffffff; }
+	.warehouse-page__project-sort-option { display: flex; min-width: 76px; height: 27px; align-items: center; justify-content: center; border-radius: 13px; }
+	.warehouse-page__project-sort-option text { font-size: 12px; color: #617389; }
+	.warehouse-page__project-sort-option--active { background-color: #dcecff; }
+	.warehouse-page__project-sort-option--active text { font-weight: 700; color: #1677cc; }
+	.warehouse-page__project-values { display: flex; flex-shrink: 0; flex-direction: column; align-items: flex-end; margin-left: 8px; }
+	.warehouse-page__project-values text:first-child { font-size: 11px; line-height: 17px; color: #357a72; }
+	.warehouse-page__project-values text:last-child { font-size: 14px; line-height: 21px; font-weight: 700; color: #1f5f8b; }
 	.warehouse-page__sort-toggle { display: flex; min-width: 56px; height: 28px; align-items: center; justify-content: center; border-radius: 14px; background-color: #edf6ff; }
 	.warehouse-page__sort-toggle text { font-size: 12px; font-weight: 700; color: #1677cc; }
 	.warehouse-page__sheet-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 80; display: flex; flex-direction: column; justify-content: flex-end; background-color: rgba(8, 22, 38, 0.28); }

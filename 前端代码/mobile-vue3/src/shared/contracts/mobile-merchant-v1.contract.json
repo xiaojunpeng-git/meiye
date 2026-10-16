@@ -176,6 +176,7 @@
         "nodeId",
         "rankingCode",
         "rankingOrder",
+        "projectSortMetric",
         "rankingPage",
         "storeRankingPage",
         "trendMetricCode"
@@ -462,6 +463,13 @@
       "desc",
       "asc"
     ],
+    "projectSortMetricEnum": [
+      "cash",
+      "quantity"
+    ],
+    "projectGrouping": "EXACT_CURRENT_CATEGORY_PATH_AND_PRODUCT_SNAPSHOT_NAME",
+    "projectCashMetric": "SIGNED_ALLOCATED_CASH_PERFORMANCE_CENTS",
+    "projectQuantityMetric": "COMPLETED_SERVICE_ITEM_QUANTITY",
     "rankingLimit": 10,
     "organizationRows": [
       "IMMEDIATE_CHILD_ORGANIZATIONS_WITH_AUTHORIZED_DESCENDANT_STORES",

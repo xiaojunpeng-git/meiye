@@ -10,6 +10,7 @@ use app\services\mobile\merchant\MobileMerchantAnalyticsEntryPolicy;
 use app\services\mobile\merchant\MobileMerchantAnalyticsEntryScopeServices;
 use app\services\mobile\protocol\MobileApiException;
 use app\services\report\StoreUnifiedReportOrganizationDimensionServices;
+use app\services\report\StoreUnifiedReportPhaseFourServices;
 use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
@@ -75,6 +76,8 @@ final class MobileWarehouseServices
         $showStoreRanking = (bool)($entry['showStoreRanking'] ?? false);
         $rankingCode = $this->rankingCode((string)($input['rankingCode'] ?? ''), $showOrganizationRanking, $showStoreRanking);
         $rankingOrder = $this->rankingOrder((string)($input['rankingOrder'] ?? 'desc'));
+        // 服务项目的默认排序是现金业绩；数量排序只改变同一组结果的顺序。
+        $projectSortMetric = $this->projectSortMetric((string)($input['projectSortMetric'] ?? 'cash'));
         // 旧小程序仍以 storeRankingPage 请求门店续页；新页签共用 rankingPage。
         $rankingPage = (int)($input['rankingPage'] ?? $input['storeRankingPage'] ?? 1);
         if ($rankingPage < 1 || $rankingPage > 10000) {
@@ -90,7 +93,7 @@ final class MobileWarehouseServices
             }
             return ['warehouse' => $rankingCode === 'store'
                 ? $this->storeRankingPage($rankingScopeStoreIds, $stores, $period, $rankingOrder, $rankingPage)
-                : $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, $rankingPage)];
+                : $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, $rankingPage, $projectSortMetric)];
         }
         $metrics = $this->summaryMetrics($scopeStoreIds, $period);
         // 指定门店的组织排行跨越全部授权门店，趋势必须使用相同范围；
@@ -144,7 +147,7 @@ final class MobileWarehouseServices
             $rankingTotal = $storePage['rankingTotal'];
             $rankingHasMore = $storePage['rankingHasMore'];
         } else {
-            $factPage = $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, 1);
+            $factPage = $this->factRankingPage($rankingCode, $rankingScopeStoreIds, $period, $rankingOrder, 1, $projectSortMetric);
             $rankingRows = $factPage['rankingRows'];
             $rankingRange = $factPage['rankingRange'];
             $rankingTotal = $factPage['rankingTotal'];
@@ -178,6 +181,7 @@ final class MobileWarehouseServices
                 'rankingCatalog' => $rankingCatalog,
                 'selectedRankingCode' => $rankingCode,
                 'selectedRankingOrder' => $rankingOrder,
+                'selectedProjectSortMetric' => $projectSortMetric,
                 'selectedRankingAvailable' => $selectedRankingAvailable,
                 'rankingRange' => $rankingRange,
                 'rankingPage' => 1,
@@ -499,7 +503,7 @@ final class MobileWarehouseServices
         ];
     }
 
-    /** Build the homepage ranking using the same scoped V3 fact projection. */
+    /** Build every authorized homepage ranking row from the scoped V3 fact projection. */
     public function dashboardRanking(array $storeIds, array $input, string $dimension): array
     {
         $storeIds = $this->positiveIds($storeIds);
@@ -514,7 +518,9 @@ final class MobileWarehouseServices
                 $rows[] = ['entityType' => 'store', 'entityId' => $storeId, 'entityName' => (string)($names[$storeId] ?? ('门店#' . $storeId)), 'rankingCents' => $cents, 'rankingValue' => (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($cents), 'storeCount' => 1];
             }
             usort($rows, [$this, 'compareDashboardRanking']);
-            return $this->formatDashboardRanking(array_slice($rows, 0, 5), 'store');
+            // The homepage list renders every matched store; truncating here
+            // makes its “查看全部” entry disagree with the visible query scope.
+            return $this->formatDashboardRanking($rows, 'store');
         }
         // Aggregate each authorized store into the configured reporting
         // dimension. The previous fallback always returned store rows even
@@ -551,19 +557,24 @@ final class MobileWarehouseServices
                 ];
             }
             usort($rows, [$this, 'compareDashboardRanking']);
-            return $this->formatDashboardRanking(array_slice($rows, 0, 5), $entityType);
+            // Preserve the complete authorized group result after sorting.
+            return $this->formatDashboardRanking($rows, $entityType);
         }
 
         // Keep the page usable while a reporting-dimension migration is not
         // configured yet; this is an explicit store-level fallback.
-        $fallback = (array)($this->dashboardProjection($storeIds, $input)['rankingRows'] ?? []);
-        return $this->formatDashboardRanking(array_slice($fallback, 0, 5), 'store');
+        // A partially configured hierarchy falls back to the same complete
+        // store ranking. dashboardProjection() carries a separate five-row
+        // preview and would silently reintroduce the homepage truncation.
+        return $this->dashboardRanking($storeIds, $input, 'store');
     }
 
     private function compareDashboardRanking(array $left, array $right): int
     {
-        if ((int)$left['rankingValue'] === (int)$right['rankingValue']) return (int)$left['entityId'] <=> (int)$right['entityId'];
-        return (int)$right['rankingValue'] <=> (int)$left['rankingValue'];
+        // Compare cents before whole-yuan display rounding so close amounts
+        // do not change rank when the complete result is shown.
+        if ((int)$left['rankingCents'] === (int)$right['rankingCents']) return (int)$left['entityId'] <=> (int)$right['entityId'];
+        return (int)$right['rankingCents'] <=> (int)$left['rankingCents'];
     }
 
     private function formatDashboardRanking(array $rows, string $entityType): array
@@ -946,7 +957,8 @@ final class MobileWarehouseServices
                 'available' => true,
                 'metricCode' => 'service_project_count',
                 'metricDictionaryReady' => true,
-                'groupDimension' => 'project',
+                'cashMetricCode' => 'cash_performance',
+                'groupDimension' => 'category_and_product_name',
             ],
         ];
         return array_values(array_filter($items, static function (array $item) use ($showOrganizationRanking, $showStoreRanking): bool {
@@ -981,6 +993,15 @@ final class MobileWarehouseServices
     private function rankingOrder(string $order): string
     {
         return strtolower(trim($order)) === 'asc' ? 'asc' : 'desc';
+    }
+
+    /** Only the two server-supported sort measures are accepted for service projects. */
+    private function projectSortMetric(string $metric): string
+    {
+        if (!in_array($metric, ['cash', 'quantity'], true)) {
+            throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '服务项目排序指标无效。', 'projectSortMetric');
+        }
+        return $metric;
     }
 
     private function organizationRanking(array $rows, string $rankingOrder): array
@@ -1065,11 +1086,8 @@ final class MobileWarehouseServices
         return 0;
     }
 
-    /**
-     * 员工与项目排行始终由统一指标 Reader 按原始精度排序并按页读取；
-     * 点客沿用已确认的百比分摊口径，在完整授权结果上取当前页。
-     */
-    private function factRankingPage(string $rankingCode, array $storeIds, array $period, string $rankingOrder, int $page): array
+    /** Employee rankings use the registered reader; projects reuse the report fact projection below. */
+    private function factRankingPage(string $rankingCode, array $storeIds, array $period, string $rankingOrder, int $page, string $projectSortMetric = 'cash'): array
     {
         $range = $period['startDate'] === $period['endDate']
             ? (string)$period['startDate']
@@ -1079,16 +1097,18 @@ final class MobileWarehouseServices
         if ($rankingCode === 'staff_designated_customer') {
             return self::paginateRankingRows($this->designatedCustomerRanking($storeIds, $period, $rankingOrder, 0), $page) + $base;
         }
-        $bindings = [
-            'project_count' => ['metric' => 'completed_service_item_count', 'dimension' => 'project', 'entity' => 'project', 'money' => false],
-            'staff_cash_performance' => ['metric' => 'staff_sales_yeji', 'dimension' => 'employee', 'entity' => 'employee', 'money' => true],
-            'staff_labor_performance' => ['metric' => 'staff_labor_yeji', 'dimension' => 'employee', 'entity' => 'employee', 'money' => true],
+        if ($rankingCode === 'project_count') {
+            return $this->serviceProjectRankingPage($storeIds, $period, $rankingOrder, $projectSortMetric, $page) + $base;
+        }
+        $staffMetrics = [
+            'staff_cash_performance' => 'staff_sales_yeji',
+            'staff_labor_performance' => 'staff_labor_yeji',
         ];
-        $binding = $bindings[$rankingCode] ?? null;
-        if (!is_array($binding)) return self::paginateRankingRows([], $page) + $base;
+        $metricCode = $staffMetrics[$rankingCode] ?? null;
+        if ($metricCode === null) return self::paginateRankingRows([], $page) + $base;
         // 多取一条只用于判断还有没有下一页，不向客户端暴露；不按展示整数元重新排序。
         $registered = (new \app\services\query\metric\RegisteredMetricReadServices())->dimensionRanking(
-            $binding['metric'], $binding['dimension'], '0', $storeIds,
+            $metricCode, 'employee', '0', $storeIds,
             ['start' => $period['startDate'], 'end' => $period['endDate']], 11, $rankingOrder, ($page - 1) * 10
         );
         $rows = [];
@@ -1096,12 +1116,83 @@ final class MobileWarehouseServices
             $rows[] = ['entity_id' => $row['entity_id'], 'entity_name' => $row['entity_name'], 'ranking_value' => $row['metric_value']];
         }
         return [
-            'rankingRows' => $this->rankingRows(array_slice($rows, 0, 10), $binding['entity'], $binding['money']),
+            'rankingRows' => $this->registeredStaffRankingRows(array_slice($rows, 0, 10)),
             'rankingPage' => $page,
             // 排行只展示续页，不展示总数；不能把当前页数量冒充完整命中量。
             'rankingTotal' => null,
             'rankingHasMore' => count($registered) > 10,
         ] + $base;
+    }
+
+    /**
+     * A project row combines completed-service quantity with signed cash
+     * collection allocated to sold projects. The two measures have different
+     * event dates; both obey the requested range and the same server-enforced
+     * store scope. Card components and refunds stay in the existing report
+     * cash allocator, rather than being reconstructed by the mobile page.
+     */
+    private function serviceProjectRankingPage(array $storeIds, array $period, string $order, string $sortMetric, int $page): array
+    {
+        $range = ['start' => (string)$period['startDate'], 'end' => (string)$period['endDate']];
+        $facts = new StoreUnifiedReportPhaseFourServices();
+        $rows = self::serviceProjectRankingRows(
+            $facts->customerCashRows($storeIds, $range),
+            $facts->customerServiceRows($storeIds, $range),
+            $sortMetric,
+            $order
+        );
+        return self::paginateRankingRows($rows, $page);
+    }
+
+    /**
+     * Merge store copies only when both current platform category path and
+     * event-time product name match. Amounts stay in cents for sorting; the
+     * API projects whole yuan only after the final order is known.
+     *
+     * @param array<int,array<string,mixed>> $cashFacts signed allocated cash facts
+     * @param array<int,array<string,mixed>> $serviceFacts completed service facts
+     */
+    private static function serviceProjectRankingRows(array $cashFacts, array $serviceFacts, string $sortMetric, string $order): array
+    {
+        $groups = [];
+        foreach ($cashFacts as $fact) {
+            // Product type 6 is a service project. A card is expanded into
+            // its components by the shared report reader before this point.
+            if ((int)($fact['product_type'] ?? -1) !== 6) continue;
+            $name = trim((string)($fact['item_name'] ?? ''));
+            if ($name === '') continue;
+            $category = trim((string)($fact['category_path'] ?? ''));
+            $key = hash('sha256', json_encode([$category, $name], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            if (!isset($groups[$key])) $groups[$key] = ['entityType' => 'project_group', 'entityId' => $key, 'name' => $name,
+                'categoryPath' => $category, 'quantity' => 0, 'cashCents' => 0, 'hasChildren' => false];
+            $groups[$key]['cashCents'] += (int)($fact['amount_cents'] ?? 0);
+        }
+        foreach ($serviceFacts as $fact) {
+            $name = trim((string)($fact['project_name_snapshot'] ?? ''));
+            if ($name === '') continue;
+            $category = trim((string)($fact['category_path'] ?? ''));
+            $key = hash('sha256', json_encode([$category, $name], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            if (!isset($groups[$key])) $groups[$key] = ['entityType' => 'project_group', 'entityId' => $key, 'name' => $name,
+                'categoryPath' => $category, 'quantity' => 0, 'cashCents' => 0, 'hasChildren' => false];
+            $groups[$key]['quantity'] += max(0, (int)($fact['quantity'] ?? 0));
+        }
+        $rows = array_values($groups);
+        usort($rows, static function (array $left, array $right) use ($sortMetric, $order): int {
+            $field = $sortMetric === 'quantity' ? 'quantity' : 'cashCents';
+            $comparison = (int)$left[$field] <=> (int)$right[$field];
+            if ($comparison !== 0) return $order === 'asc' ? $comparison : -$comparison;
+            return strcmp((string)$left['entityId'], (string)$right['entityId']);
+        });
+        foreach ($rows as &$row) {
+            $yuan = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan((int)$row['cashCents']);
+            $row['cashPerformance'] = $yuan;
+            $row['cashDisplay'] = number_format($yuan, 0, '.', ',');
+            $row['rankingValue'] = $sortMetric === 'quantity' ? (int)$row['quantity'] : $yuan;
+            $row['displayValue'] = $sortMetric === 'quantity' ? (string)$row['quantity'] : $row['cashDisplay'];
+            unset($row['cashCents']);
+        }
+        unset($row);
+        return $rows;
     }
 
     /**
@@ -1250,19 +1341,20 @@ final class MobileWarehouseServices
         return $result;
     }
 
-    private function rankingRows(array $rows, string $entityType, bool $money): array
+    /** Registered staff performance is stored in cents; project groups use the separate fact projection. */
+    private function registeredStaffRankingRows(array $rows): array
     {
         $result = [];
         foreach ($rows as $row) {
             $raw = (int)($row['ranking_value'] ?? 0);
-            $value = $money ? (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($raw) : $raw;
+            $value = (int)\app\services\query\metric\MetricMoneyFormatter::integerYuan($raw);
             $result[] = [
-                'entityType' => $entityType,
+                'entityType' => 'employee',
                 'entityId' => (int)($row['entity_id'] ?? 0),
-                'name' => trim((string)($row['entity_name'] ?? '')) ?: ($entityType === 'project' ? '未命名项目' : '未命名员工'),
+                'name' => trim((string)($row['entity_name'] ?? '')) ?: '未命名员工',
                 'rankingValue' => $value,
                 'displayValue' => number_format($value, 0, '.', ','),
-                'unit' => $money ? 'amount' : 'count',
+                'unit' => 'amount',
                 'hasChildren' => false,
             ];
         }
