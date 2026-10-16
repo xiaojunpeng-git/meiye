@@ -27,6 +27,7 @@ $assert(str_contains($route, "Route::get('product-dashboard', 'v1.report.Unified
 $assert(str_contains($controller, "hasMenuPermission('admin-report-product-dashboard')"), '商品看板必须使用独立菜单权限');
 $assert(str_contains($controller, 'scopedStoreIds('), '商品看板必须由服务端裁剪组织和门店范围');
 $assert(str_contains($service, "DASHBOARD_CODE = 'product_management_dashboard'"), '缺少商品看板契约编码');
+$assert(str_contains($service, "->order('pid', 'asc')->order('sort', 'desc')->order('id', 'desc')"), '商品看板分类必须按配置排序降序、同值按 ID 降序');
 $assert(str_contains($service, "\$card['metric_code']") && str_contains($service, "\$card['value_cents']"), '顶部汇总必须读取统一指标契约字段');
 $assert(str_contains($service, "'metric_version'"), '接口必须返回指标版本');
 $assert(str_contains($service, "'aggregation_caught_up'"), '接口必须返回聚合追平状态');

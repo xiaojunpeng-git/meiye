@@ -327,8 +327,9 @@ final class ProductManagementDashboardServices
     /** The statistics switch hides root cards and filters, not historical facts or catalog entries. */
     private function categories(): array
     {
+        // Keep dashboard filters and category cards in the configured category order.
         $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
-            ->field('id,pid,cate_name,statistics_enabled')->order('pid')->order('id')->select()->toArray();
+            ->field('id,pid,cate_name,statistics_enabled')->order('pid', 'asc')->order('sort', 'desc')->order('id', 'desc')->select()->toArray();
         return $this->categoryTree($rows);
     }
 
