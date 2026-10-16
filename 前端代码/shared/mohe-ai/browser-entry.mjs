@@ -117,9 +117,12 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       }, presentation.clarification_choices || {}, turn);
       return;
     }
-    // The platform uses live clarification fields for missing conditions.
-    // Retain legacy recovery actions only for the separately approved drawer.
-    if (host.dataset.moheAiPresentation === 'workspace') return;
+    // A provider timeout has no accepted meaning, but the failed question is
+    // safe to retry as a new Run with its original predecessor context. Show
+    // the recovery actions only when this terminal outcome supplied them;
+    // semantic uncertainty still uses live clarification fields instead.
+    if (host.dataset.moheAiPresentation === 'workspace'
+      && (!guidance || guidance.kind !== 'technical_error')) return;
     const options = guidance && guidance.options;
     if (!Array.isArray(options) || options.length !== 3 || options.some(item => !item || typeof item.label !== 'string'
       || !['retry_original', 'edit_original', 'new_conversation'].includes(item.value))) return;
@@ -174,7 +177,16 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       const retryAfterMs = typed && Number.isSafeInteger(value.retry_after_ms) ? value.retry_after_ms : detail.retry_after_ms;
       const retryHint = Number.isSafeInteger(retryAfterMs) && retryAfterMs > 0
         ? '\n预计 ' + Math.ceil(retryAfterMs / 1000) + ' 秒后可重试。' : '';
-      return { kind: typed ? value.kind : 'technical_error', question: explanation + retryHint };
+      // An unknown model result cannot produce metric suggestions. Give the
+      // customer the existing safe recovery choices without claiming that
+      // the question itself was unclear or reusing the failed Run as a fact.
+      const recovery = reason === 'AI_MODEL_RESULT_UNKNOWN' ? {
+        options: [{ value: 'retry_original', label: '按原问题再查一次' },
+          { value: 'edit_original', label: '修改原问题后查询' },
+          { value: 'new_conversation', label: '开启新对话' }],
+        supplement_label: '我来补充描述'
+      } : {};
+      return { kind: typed ? value.kind : 'technical_error', question: explanation + retryHint, ...recovery };
     }
     // A server-confirmed absence of business-query meaning needs a short
     // capability explanation, not three ways to repeat an unrelated question.
