@@ -174,6 +174,9 @@ const selectableTransferRows = computed(() => active.value === 'transfer'
   ? sourceRows.value.filter((row) => row.can_delete || row.can_dispatch || row.can_withdraw)
   : [])
 const selectedTransferRows = computed(() => selectableTransferRows.value.filter((row) => selectedTransferIds.value.includes(Number(row.id))))
+// "未收货" means stock was already dispatched; explain why another dispatch is unavailable.
+const selectedTransferAlreadyDispatched = computed(() => selectedTransferRows.value.some((row) =>
+  row.document_status === 'DISPATCHED' || (mode.value === 'platform' && ['DISPATCHED', '在途'].includes(row.status_name))))
 const transferBatchSourceKey = (row) => `${row.from_party_type}:${Number(row.from_party_id)}:${Number(row.from_location_id || 0)}`
 
 /** A batch uses one source and one legal lifecycle transition; the server repeats these checks under document locks. */
@@ -2071,6 +2074,7 @@ onBeforeUnmount(() => {
               <button class="secondary-button" :disabled="!canOperateTransferBatch('DISPATCH') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DISPATCH')"><Truck :size="14" />发货</button>
               <button class="secondary-button" :disabled="!canOperateTransferBatch('WITHDRAW') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('WITHDRAW')"><RotateCcw :size="14" />撤回</button>
               <span v-if="transferBatchPreparing">正在核对单据...</span>
+              <span v-else-if="selectedTransferAlreadyDispatched" class="transfer-batch-toolbar__notice" role="status">所选包含已发货的调拨单，无需重复发货</span>
               <span v-else-if="selectedTransferRows.length >= 2 && !['DELETE_DRAFT', 'DISPATCH', 'WITHDRAW'].some(canOperateTransferBatch)">请只选择同一调出方、同一操作状态的单据</span>
               <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
             </div>

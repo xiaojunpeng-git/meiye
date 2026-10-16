@@ -140,6 +140,7 @@ button { cursor: pointer; }
 .transfer-batch-toolbar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .transfer-batch-toolbar .secondary-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; }
 .transfer-batch-toolbar__error { color: #b63333; }
+.transfer-batch-toolbar__notice { color: #247454; }
 .inventory-save-notice { margin: 0 0 8px; padding: 9px 12px; border: 1px solid #cfe6d7; background: #f3fbf6; color: #277044; font-size: 12px; }
 .transfer-batch-documents { display: grid; gap: 5px; max-height: 170px; overflow: auto; padding: 8px 10px; border: 1px solid #e4eaf1; background: #f8fafc; color: #344f6c; font-size: 12px; }
 .table-scroll .inventory-detail-line > td { height: 39px; background: #fff; }
