@@ -834,12 +834,12 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
           if (typeof field.max === 'string') control.max = field.max;
           control.value = typeof initial[field.key] === 'string' ? initial[field.key] : '';
           form.appendChild(control); controls.push({ field, elements: [control], read: () => control.value });
-        } else if (c.schema_version === GUIDANCE_SCHEMA && fields.length === 1) {
+        } else if (c.schema_version === GUIDANCE_SCHEMA && fields.length === 1 && field.key === 'semantic_reply') {
           const group = el('div'); group.setAttribute('role', 'radiogroup'); group.setAttribute('aria-label', field.label);
           const name = 'guidance-' + newId(); const inputs = [];
-          // A recommendation must be one of the server's executable options.
-          // The fourth entry collects a corrected full question; it is never
-          // sent as a metric code or silently substituted into the old Run.
+          // Only semantic_reply offers a free-text correction. Server-owned
+          // period and object cards must expose exactly their signed options;
+          // adding a synthetic "other" choice would submit an invalid value.
           const executable = field.options.filter(option => option.action !== 'stop' && option.value !== '__supplement__');
           const recommended = (executable.length <= 3 ? executable : executable.filter(option => option.recommended === true)).slice(0, 3);
           const supplementOption = field.options.find(option => option.value === '__supplement__');

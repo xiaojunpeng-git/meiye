@@ -38,6 +38,7 @@ $stores=[
 ];
 foreach ([
     '扬州大润发店本月的业绩是多少?消耗多少?'=>['cash_performance','consume_amount'],
+    '扬州大润发本月的业绩是多少?消耗多少?'=>['cash_performance','consume_amount'],
     '扬州大润发店本月业绩和消耗多少？'=>['cash_performance','consume_amount'],
     '扬州大润发店本月现金业绩和消耗业绩分别是多少？'=>['cash_performance','consume_amount'],
     '扬州大润发店本月现金业绩、消耗业绩和退款业绩分别是多少？'=>['cash_performance','consume_amount','refund_performance'],
@@ -51,7 +52,7 @@ $assert(($compound['metric_codes']??[])===['actual_performance'],'longer actual 
 $labor=$gate->matchQuery('本月劳动业绩多少',$entries,[],12);
 $assert(($labor['metric_codes']??[])===['staff_labor_yeji'],'longer labor performance owns its complete title');
 foreach ([
-    '扬州大润发本月现金业绩和消耗业绩是多少？', // Fuzzy store names are not executable.
+    '扬州大润本月现金业绩和消耗业绩是多少？', // Arbitrary partial names are not executable.
     '无权门店本月现金业绩和消耗业绩是多少？', // Unknown stores stay unresolved.
     '扬州大润发店今天现金业绩和昨天消耗业绩是多少？', // Separate windows need semantic binding.
     '扬州大润发店本月现金业绩和消耗业绩环比是多少？', // Residual operators are not ignored.
@@ -59,6 +60,58 @@ foreach ([
 $duplicateStores=array_merge($stores,[['ref'=>'store:299','kind'=>'store','label'=>'扬州大润发店','aliases'=>[]]]);
 $assert($gate->matchQuery('扬州大润发店本月现金业绩多少',$entries,$duplicateStores,12)===null,
     'duplicate authorized store labels require clarification');
+$shortCollision=array_merge($stores,[['ref'=>'store:299','kind'=>'store','label'=>'扬州大润发门店','aliases'=>[]]]);
+$assert($gate->matchQuery('扬州大润发本月现金业绩多少',$entries,$shortCollision,12)===null,
+    'duplicate suffix-less store labels require clarification');
+$aliasCollision=array_merge($stores,[['ref'=>'store:299','kind'=>'store','label'=>'三号门店','aliases'=>['扬州大润发']]]);
+$assert($gate->matchQuery('扬州大润发本月现金业绩多少',$entries,$aliasCollision,12)===null,
+    'configured alias ambiguity outranks a derived suffix-less label');
+
+$missing=$gate->matchMissingPeriod('扬州大润发的业绩是多少？',$entries,$stores,12);
+$assert(($missing['metric_codes']??[])===['cash_performance'] && ($missing['store_id']??null)===179,
+    'unique authorized suffix-less store preserves metric while requesting period');
+foreach ([
+    '现金业绩是多少？',                 // A store is mandatory for this bounded card.
+    '扬州大润发今天的业绩是多少？',     // An explicit period belongs to the executable matcher.
+    '扬州大润的业绩是多少？',           // Arbitrary partial names remain model work.
+    '无权门店的业绩是多少？',           // Unknown stores never become executable identifiers.
+    '扬州大润发的业绩环比是多少？',     // A second missing business condition is not discarded.
+] as $question) $assert($gate->matchMissingPeriod($question,$entries,$stores,12)===null,
+    'missing-period admission fails closed '.$question);
+$assert($gate->matchMissingPeriod('扬州大润发的业绩是多少？',$entries,$shortCollision,12)===null,
+    'ambiguous suffix-less store cannot open a period card');
+$assert($gate->mayContainNamedObject('扬州大润发的业绩是多少？',$entries),
+    'leading suffix-less store opens an authorized catalogue proof');
+$assert($gate->mayContainNamedObject('扬州大润发本月业绩是多少？',$entries),
+    'leading store before an explicit period opens an authorized catalogue proof');
+foreach (['业绩怎么样','今天现金业绩多少','现金业绩是多少？'] as $question) {
+    $assert(!$gate->mayContainNamedObject($question,$entries),'ordinary metric question skips store catalogue '.$question);
+}
+$assert($gate->mayContainNamedObject('本月扬州大润发业绩是多少？',$entries),
+    'leading calendar still permits exact named-object proof');
+$assert($gate->mayContainNamedObject('本月业绩，扬州大润发是多少？',$entries),
+    'name after metric still permits exact authorized-object proof');
+
+$people=[
+    ['ref'=>'person:714','kind'=>'person','label'=>'管慧','aliases'=>[]],
+    ['ref'=>'person:922','kind'=>'person','label'=>'李红（甲店）','aliases'=>['李红']],
+    ['ref'=>'person:923','kind'=>'person','label'=>'李红（乙店）','aliases'=>['李红']],
+];
+foreach (['管慧的业绩是多少？'=>null,'本月管慧的业绩是多少？'=>'THIS_MONTH',
+    '管慧本月现金业绩是多少？'=>'THIS_MONTH','本月管慧销售业绩是多少？'=>'THIS_MONTH',
+    '本月业绩，管慧是多少？'=>'THIS_MONTH'] as $question=>$period) {
+    $named=$gate->matchNamedPerson($question,$entries,$people);
+    $assert(($named['metric_codes']??[])===['staff_sales_yeji']
+        && ($named['objects'][0]['ref']??null)==='person:714'
+        && ($named['date_term']['code']??null)===$period,'named employee cash performance '.$question);
+}
+$duplicate=$gate->matchNamedPerson('李红的业绩是多少？',$entries,$people);
+$assert(count($duplicate['objects']??[])===2,'duplicate authorized names require an employee choice');
+foreach (['管慧的业绩比昨天高多少？','管慧的劳动业绩是多少？','无权员工的业绩是多少？',
+    '管慧和李红的业绩是多少？'] as $question) {
+    $assert($gate->matchNamedPerson($question,$entries,$people)===null,
+        'named employee proof rejects additional meaning '.$question);
+}
 
 $synthetic=[
     'long'=>['terms'=>['完整销售额'],'ai_query_ready'=>true],

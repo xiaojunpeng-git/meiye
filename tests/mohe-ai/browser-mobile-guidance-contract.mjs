@@ -21,6 +21,9 @@ assert.ok(source.includes('.ai-result-table{min-width:100%'));
 // Approved tagline is shared visible brand copy, independent from the empty composer.
 assert.ok(source.includes('<text class="ai-brand-tagline">够智能、够准确、够便捷</text>'));
 assert.ok(browserEntry.includes("el('small', '够智能、够准确、够便捷', 'workspace-brand-tagline')"));
+// The native template must reserve free-text correction for semantic guidance;
+// signed person/period cards may submit only a server-provided choice.
+assert.ok(source.includes("currentGuidanceFields().length == 1 && field.key == 'semantic_reply'"));
 // Execute the production UVue controller after TS syntax lowering. This checks
 // its actual state functions, not a copied implementation, but is NOT a native
 // UTS compiler, picker, H5 layout or device lifecycle acceptance test.
@@ -96,6 +99,16 @@ for (const max of [3,4,5]) {
   eq(f.storage.get(f.api.state().runtimeKey).resolved_run.run_id, 'mobile-run');
   eq(f.calls.filter(call => call.path === '/runs').length, 1); eq(f.calls.filter(call => call.path.endsWith('/execute')).length, 0);
   eq(f.api.load()[0].rounds.length, 1); f.unmount();
+}
+{
+  const f = setup(); const period = { key: 'summary_period', label: '统计时间', type: 'select', options: [
+    { value: 'TODAY', label: '今天' }, { value: 'YESTERDAY', label: '昨天' },
+    { value: 'THIS_MONTH', label: '本月' }, { value: 'LAST_MONTH', label: '上月' },
+    { value: 'CUSTOM', label: '自定义' },
+  ] };
+  f.start([period]); f.api.chooseValue(period, period.options[2]); f.api.confirmChoices();
+  eq(f.calls.find(call => call.path.endsWith('/clarify')).body.choices, { summary_period: 'THIS_MONTH' });
+  f.unmount();
 }
 // A recovery action ends the paused Run locally; it cannot be submitted as a
 // metric value to the server, and the original wording remains editable.

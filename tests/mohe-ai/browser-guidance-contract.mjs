@@ -140,8 +140,8 @@ for (const rounds of [3, 4, 5]) {
   for (let i = 1; i <= rounds; i++) {
     eq(f.area().textContent.includes(`第 ${i} 步`), true);
     eq(f.area().classList.contains('guidance-card'), true);
-    eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1','2','3']);
-    eq(f.area().querySelectorAll('input[type=radio]').length, 3);
+    eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1','2']);
+    eq(f.area().querySelectorAll('input[type=radio]').length, 2);
     eq(f.area().querySelectorAll('input:checked').length, 0);
     eq(f.root().querySelectorAll('.value').length, 0);
     f.choose(); f.click('确认并继续'); await flush();
@@ -160,7 +160,7 @@ for (const rounds of [3, 4, 5]) {
 // An underspecified card keeps true metric alternatives, while its action
 // option cancels the paused Run and returns the original wording to edit.
 {
-  const actionField = { ...metric, options: [
+  const actionField = { ...metric, key: 'semantic_reply', options: [
     ...metric.options.map(option => ({ ...option, recommended: true })),
     { value: '__edit_original__', label: '修改原问题后查询', recommended: true, action: 'edit_original' },
   ] };
@@ -173,7 +173,7 @@ for (const rounds of [3, 4, 5]) {
   f.dispose();
 }
 {
-  const f = setup({ fields: [{ ...metric, options: [...metric.options.map(option => ({ ...option, recommended: true })),
+  const f = setup({ fields: [{ ...metric, key: 'semantic_reply', options: [...metric.options.map(option => ({ ...option, recommended: true })),
     { label: '退款业绩', value: 'refund_performance', recommended: true }, { label: '销售人业绩', value: 'staff_sales' }] }] });
   await f.start();
   eq([...f.area().querySelectorAll('.guidance-number')].map(n => n.textContent), ['1','2','3','4']);
@@ -187,15 +187,31 @@ for (const rounds of [3, 4, 5]) {
   const submitted = f.calls.filter(call => call.path === '/runs');
   eq(submitted.length, 1);
   eq(f.calls.find(call => call.path.endsWith('/clarify')).payload.choices,
-    {metric_code:'__supplement__',supplement_text:'我指的是本月门店退款金额'});
+    {semantic_reply:'__supplement__',supplement_text:'我指的是本月门店退款金额'});
   f.dispose();
 }
 {
-  const f = setup({ fields: [{ ...metric, options: [...metric.options,
+  const f = setup({ fields: [{ ...metric, key: 'semantic_reply', options: [...metric.options,
     { label: '退款业绩', value: 'refund_performance' }, { label: '销售人业绩', value: 'staff_sales' }] }] });
   await f.start();
   eq(f.area().querySelectorAll('select').length, 1);
   eq([...f.area().querySelectorAll('option')].some(option => option.value === '__supplement__'), true);
+  f.dispose();
+}
+// A signed period choice is not a semantic suggestion. The UI must display
+// only server-provided values and submit the selected date scope verbatim.
+{
+  const period = { key: 'summary_period', label: '统计时间', type: 'select', options: [
+    { value: 'TODAY', label: '今天' }, { value: 'YESTERDAY', label: '昨天' },
+    { value: 'THIS_MONTH', label: '本月' }, { value: 'LAST_MONTH', label: '上月' },
+    { value: 'CUSTOM', label: '自定义' },
+  ] };
+  const f = setup({ fields: [period] }); await f.start();
+  eq([...f.area().querySelectorAll('option')].map(option => option.value),
+    ['', 'TODAY', 'YESTERDAY', 'THIS_MONTH', 'LAST_MONTH', 'CUSTOM']);
+  eq(f.area().querySelector('[value=__supplement__]'), null);
+  f.area().querySelector('select').value = 'THIS_MONTH'; f.click('确认并继续'); await flush();
+  eq(f.calls.find(call => call.path.endsWith('/clarify')).payload.choices, { summary_period: 'THIS_MONTH' });
   f.dispose();
 }
 {

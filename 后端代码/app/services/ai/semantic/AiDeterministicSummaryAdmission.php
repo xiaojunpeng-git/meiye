@@ -2,9 +2,9 @@
 namespace app\services\ai\semantic;
 
 /**
- * Proves that an entire question is one registered store metric and one explicit
- * period in ordinary summary form. A partial phrase match is never executable:
- * every remaining business word sends the question to natural-language understanding.
+ * Proves that an entire question is one registered store summary. A partial
+ * phrase match is never executable: every remaining business word sends the
+ * question to natural-language understanding or a bounded missing-period card.
  */
 final class AiDeterministicSummaryAdmission
 {
@@ -104,6 +104,113 @@ final class AiDeterministicSummaryAdmission
         return $result;
     }
 
+    /**
+     * Proves a complete named-store summary whose only missing slot is time.
+     * The caller may ask for that slot without sending the incomplete request
+     * to a model. A store is mandatory so ordinary metric questions retain the
+     * established current-day default.
+     *
+     * @return array{metric_codes:array<int,string>,store_id:int,store_label:string}|null
+     */
+    public function matchMissingPeriod(string $question,array $entries,array $storeObjects,int $maxMetrics=12): ?array
+    {
+        if ($question==='' || preg_match('//u',$question)!==1 || $maxMetrics<1
+            || preg_match(self::DATE_PATTERN,$question)===1) return null;
+        $metricSpans=$this->metricSpans($question,$entries);
+        if ($metricSpans===[]) return null;
+        $metricCodes=[];
+        foreach ($metricSpans as $span) if (!in_array($span['code'],$metricCodes,true)) $metricCodes[]=$span['code'];
+        if (count($metricCodes)>$maxMetrics) return null;
+        $storeSpan=$this->storeSpan($question,$storeObjects);
+        if ($storeSpan===null) return null;
+        foreach ($metricSpans as $span) if ($this->overlaps($span,$storeSpan)) return null;
+
+        $spans=array_merge($metricSpans,[$storeSpan]);
+        usort($spans,static function(array $left,array $right):int {return $right['offset']<=>$left['offset'];});
+        $remainder=$question;
+        foreach ($spans as $span) $remainder=substr_replace($remainder,'',$span['offset'],$span['length']);
+        $remainder=(string)preg_replace('/[\s？?。，,！!：:;；、“”"()（）]/u','',$remainder);
+        // The missing period is the only tolerated omission. Any other noun,
+        // comparison, ranking or filter keeps the request out of this path.
+        $glue='(?:我想知道|我想了解|请问|请|帮我|麻烦|给我|查一下|查询|看一下|看看|看|查|告诉我|统计一下|统计|的|有|是|为|多少钱|多少|数值|金额|分别|各自|以及|还有|和|与|及|呢|呀|吗|么)*';
+        if (preg_match('/^'.$glue.'$/uD',$remainder)!==1) return null;
+        return ['metric_codes'=>$metricCodes,'store_id'=>$storeSpan['store_id'],'store_label'=>$storeSpan['label']];
+    }
+
+    /**
+     * Indicates that a failed closed summary may contain a named object on
+     * either side of the metric. This only guards a catalog read; the later
+     * exact authorized-name proof alone may bind an object.
+     */
+    public function mayContainNamedObject(string $question,array $entries): bool
+    {
+        if ($question==='' || preg_match('//u',$question)!==1) return false;
+        $metricSpans=$this->metricSpans($question,$entries);
+        if ($metricSpans===[]) return false;
+        $remainder=$question;
+        usort($metricSpans,static function(array $a,array $b):int {return $b['offset']<=>$a['offset'];});
+        foreach ($metricSpans as $span) $remainder=substr_replace($remainder,'',$span['offset'],$span['length']);
+        $remainder=(string)preg_replace(self::DATE_PATTERN,'',$remainder);
+        $remainder=(string)preg_replace('/[\s？?。，,！!：:;；、“”"()（）]/u','',$remainder);
+        $remainder=(string)preg_replace('/我想知道|我想了解|请问|帮我|麻烦|给我|查一下|查询|看一下|看看|告诉我|统计一下|统计|怎么样|多少钱|多少|数值|金额|请|看|查|的|有|是|为|呢|呀|吗|么/u','',$remainder);
+        return mb_strlen($remainder,'UTF-8')>=2;
+    }
+
+    /**
+     * Proves a named employee cash-performance question against the current
+     * authorized personnel catalog. The shared "业绩" wording is interpreted
+     * at person grain only after a unique person-name span is proved; the
+     * executable metric remains the registered personnel fact metric.
+     * Duplicate authorized names return candidates for a bounded choice.
+     */
+    public function matchNamedPerson(string $question,array $entries,array $people): ?array
+    {
+        if ($question==='' || preg_match('//u',$question)!==1 || !$people
+            || !isset($entries['staff_sales_yeji'],$entries['cash_performance'])) return null;
+        $terms=(array)($entries['staff_sales_yeji']['terms']??[]);
+        foreach (['现金业绩','业绩'] as $shared) {
+            if (in_array($shared,(array)($entries['cash_performance']['terms']??[]),true)) $terms[]=$shared;
+        }
+        $spans=$this->metricSpans($question,['staff_sales_yeji'=>['terms'=>array_values(array_unique($terms))]]);
+        if (count($spans)!==1) return null;
+        $metricSpan=$spans[0];
+        $dateMatches=[];$dateCount=preg_match_all(self::DATE_PATTERN,$question,$dateMatches,PREG_OFFSET_CAPTURE);
+        if ($dateCount===false || $dateCount>1) return null;
+        $dateSpan=$dateCount===1?['offset'=>$dateMatches[0][0][1],'length'=>strlen($dateMatches[0][0][0])]:null;
+        if ($dateSpan!==null && $this->overlaps($metricSpan,$dateSpan)) return null;
+
+        $candidates=[];
+        foreach ($people as $person) {
+            if (!is_array($person) || ($person['kind']??null)!=='person'
+                || !preg_match('/^person:[1-9][0-9]*$/D',(string)($person['ref']??''))) continue;
+            foreach (array_unique(array_merge([(string)($person['label']??'')],(array)($person['aliases']??[]))) as $name) {
+                if (!is_string($name) || $name==='' || mb_strlen($name,'UTF-8')<2) continue;
+                if (preg_match_all('/'.preg_quote($name,'/').'/u',$question,$hits,PREG_OFFSET_CAPTURE)===false) return null;
+                foreach ($hits[0] as [$hit,$offset]) $candidates[]=['offset'=>$offset,'length'=>strlen($hit),'person'=>$person];
+            }
+        }
+        if (!$candidates) return null;
+        $longest=max(array_column($candidates,'length'));
+        $candidates=array_values(array_filter($candidates,static function(array $candidate)use($longest):bool {
+            return $candidate['length']===$longest;
+        }));
+        $offsets=array_unique(array_column($candidates,'offset'));
+        if (count($offsets)!==1) return null;
+        $personSpan=['offset'=>$offsets[0],'length'=>$longest];
+        if ($this->overlaps($metricSpan,$personSpan) || ($dateSpan!==null && $this->overlaps($dateSpan,$personSpan))) return null;
+        $objects=[];
+        foreach ($candidates as $candidate) $objects[$candidate['person']['ref']]=$candidate['person'];
+        $remove=[$metricSpan,$personSpan];if ($dateSpan!==null) $remove[]=$dateSpan;
+        usort($remove,static function(array $a,array $b):int {return $b['offset']<=>$a['offset'];});
+        $remaining=$question;
+        foreach ($remove as $span) $remaining=substr_replace($remaining,'',$span['offset'],$span['length']);
+        $remaining=(string)preg_replace('/[\s？?。，,！!：:;；、“”"()（）]/u','',$remaining);
+        $glue='(?:我想知道|我想了解|请问|请|帮我|麻烦|给我|查一下|查询|看一下|看看|看|查|告诉我|统计一下|统计|的|有|是|为|多少钱|多少|数值|金额|呢|呀|吗|么)*';
+        if (preg_match('/^'.$glue.'$/uD',$remaining)!==1) return null;
+        return ['metric_codes'=>['staff_sales_yeji'],'objects'=>array_values($objects),
+            'date_term'=>$dateSpan===null?null:$this->dateTerm($dateMatches[0][0][0])];
+    }
+
     /** A closed calendar-only turn may change only the period of a signed query. */
     public function periodOnly(string $question): ?array
     {
@@ -164,7 +271,7 @@ final class AiDeterministicSummaryAdmission
     /** @return array{offset:int,length:int,store_id:int,label:string}|null */
     private function storeSpan(string $question,array $storeObjects): ?array
     {
-        $owners=[];$labels=[];
+        $owners=[];$labels=[];$shortOwners=[];$shortLabels=[];
         foreach ($storeObjects as $object) {
             if (!is_array($object) || !preg_match('/^store:([1-9][0-9]*)$/D',(string)($object['ref']??''),$match)) continue;
             $label=trim((string)($object['label']??''));
@@ -172,15 +279,23 @@ final class AiDeterministicSummaryAdmission
                 if (!is_string($term) || trim($term)==='') continue;
                 $term=trim($term);$owners[$term][(int)$match[1]]=true;$labels[$term]=$label;
             }
+            // A standard location suffix is display grammar rather than store
+            // identity. Admit the suffix-less label only when it still maps to
+            // one authorized store; arbitrary prefixes and substrings remain
+            // unsupported fuzzy matching.
+            $short=(string)preg_replace('/(?:门店|店)$/u','',$label);
+            if ($short!==$label && mb_strlen($short,'UTF-8')>=2) {
+                $shortOwners[$short][(int)$match[1]]=true;$shortLabels[$short]=$label;
+            }
         }
-        $candidates=[];
-        foreach ($owners as $term=>$ids) {
-            // Duplicate labels require a choice; never pick either store here.
-            if (count($ids)!==1) continue;
-            if (preg_match_all('/'.preg_quote($term,'/').'/u',$question,$matches,PREG_OFFSET_CAPTURE)===false) return null;
-            foreach ($matches[0] as [$matched,$offset]) $candidates[]=['offset'=>$offset,'length'=>strlen($matched),
-                'store_id'=>(int)array_key_first($ids),'label'=>$labels[$term]];
+        // A derived label may also be an explicit label or alias of another
+        // authorized store. Merge every owner before uniqueness is tested so
+        // omission of a suffix can never override a configured ambiguity.
+        foreach ($shortOwners as $term=>$ids) {
+            $owners[$term]=isset($owners[$term])?$owners[$term]+$ids:$ids;
+            if (!isset($labels[$term])) $labels[$term]=$shortLabels[$term];
         }
+        $candidates=$this->storeCandidates($question,$owners,$labels);
         if ($candidates===[]) return null;
         usort($candidates,static function(array $left,array $right):int {
             return [$right['length'],-$left['offset']]<=>[$left['length'],-$right['offset']];
@@ -194,6 +309,20 @@ final class AiDeterministicSummaryAdmission
         $stores=[];
         foreach ($selected as $span) $stores[$span['store_id']]=true;
         return count($stores)===1?$selected[0]:null;
+    }
+
+    /** @return array<int,array{offset:int,length:int,store_id:int,label:string}> */
+    private function storeCandidates(string $question,array $owners,array $labels): array
+    {
+        $candidates=[];
+        foreach ($owners as $term=>$ids) {
+            // Duplicate labels require a choice; never pick either store here.
+            if (count($ids)!==1) continue;
+            if (preg_match_all('/'.preg_quote($term,'/').'/u',$question,$matches,PREG_OFFSET_CAPTURE)===false) return [];
+            foreach ($matches[0] as [$matched,$offset]) $candidates[]=['offset'=>$offset,'length'=>strlen($matched),
+                'store_id'=>(int)array_key_first($ids),'label'=>$labels[$term]];
+        }
+        return $candidates;
     }
 
     private function overlaps(array $left,array $right): bool
