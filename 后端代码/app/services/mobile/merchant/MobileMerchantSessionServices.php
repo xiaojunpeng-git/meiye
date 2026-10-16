@@ -59,6 +59,30 @@ final class MobileMerchantSessionServices
         return $root;
     }
 
+    /** Redeem a WeChat-authorized phone, then issue the ordinary employee session. */
+    public function wechatPhoneLogin(array $input, array $meta): array
+    {
+        if ((string)($meta['platform'] ?? '') !== 'MP_WEIXIN') {
+            throw MobileApiException::business('WECHAT_PHONE_REQUIRED', '请在微信小程序中授权手机号，或使用账号密码登录。');
+        }
+        $code = trim((string)($input['phoneCode'] ?? ''));
+        $installationId = $this->opaque($input['installationId'] ?? null, 'installationId');
+        $idempotencyKey = $this->opaque($input['idempotencyKey'] ?? null, 'idempotencyKey');
+        /** @var MobileMerchantWechatPhoneServices $wechat */
+        $wechat = app()->make(MobileMerchantWechatPhoneServices::class);
+        $phone = $wechat->verifiedPhone($code);
+        $employeeId = $wechat->employeeIdForPhone($phone);
+        return $this->issueMerchantSession(
+            $employeeId,
+            ['app_session_id' => $this->uuid(), 'installation_digest' => hash('sha256', $installationId)],
+            null,
+            $meta,
+            $idempotencyKey,
+            'WECHAT_PHONE',
+            $phone
+        );
+    }
+
     public function create(array $input, array $meta): array
     {
         $key = $this->opaque($input['idempotencyKey'] ?? null, 'idempotencyKey');
@@ -74,13 +98,18 @@ final class MobileMerchantSessionServices
 
     /**
      * Issue the employee-owned merchant session.  A nullable app session and
-     * verification are intentional for password login; SMS/member login still
-     * supplies both and keeps the legacy identity checks in place.
+     * verification are intentional for password and WeChat-phone login;
+     * SMS/member login still supplies both and keeps its identity checks.
      */
-    private function issueMerchantSession(int $employeeId, array $app, ?array $verification, array $meta, string $key): array
+    private function issueMerchantSession(int $employeeId, array $app, ?array $verification, array $meta, string $key, string $loginMethod = 'SMS', string $verifiedPhone = ''): array
     {
-        $requestHash = hash('sha256', ($verification ? 'create:' . (string)$app['app_session_id'] . ':' . (string)$verification['verification_id'] : 'password:') . $employeeId . ':' . (string)$meta['clientSessionId'] . ':' . (string)($app['installation_digest'] ?? ''));
-        return Db::transaction(function () use ($key, $app, $verification, $employeeId, $meta, $requestHash): array {
+        // Preserve the existing password/SMS receipt hash across deployments;
+        // the new phone channel has a separate digest and cannot replay one.
+        $receiptSubject = $loginMethod === 'WECHAT_PHONE'
+            ? 'wechat-phone:' . hash('sha256', $verifiedPhone) . ':'
+            : ($verification ? 'create:' . (string)$app['app_session_id'] . ':' . (string)$verification['verification_id'] : 'password:');
+        $requestHash = hash('sha256', $receiptSubject . $employeeId . ':' . (string)$meta['clientSessionId'] . ':' . (string)($app['installation_digest'] ?? ''));
+        return Db::transaction(function () use ($key, $app, $verification, $employeeId, $meta, $requestHash, $loginMethod, $verifiedPhone): array {
             $receipt = Db::name('mobile_merchant_idempotency')->where('employee_id', $employeeId)->where('command_code', 'CREATE_SESSION')
                 ->where('idempotency_key_hash', hash('sha256', $key))->lock(true)->find();
             if ($receipt) {
@@ -93,6 +122,17 @@ final class MobileMerchantSessionServices
             $employee = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->lock(true)->find();
             if (!$employee) throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '未找到员工身份。');
             if ((int)($employee['status'] ?? 0) !== 1) throw MobileApiException::business('EMPLOYEE_DISABLED', '员工已停用。');
+            if ($loginMethod === 'WECHAT_PHONE') {
+                // Recheck the principal under the session transaction. A phone
+                // edit or duplicate added during the external exchange cannot
+                // make the previously verified number log in as another staff.
+                $matching = Db::name('employee')->where('phone', $verifiedPhone)->where('is_del', 0)
+                    ->field('id')->limit(2)->lock(true)->select()->toArray() ?: [];
+                if (count($matching) !== 1 || (int)$matching[0]['id'] !== $employeeId
+                    || (string)($employee['phone'] ?? '') !== $verifiedPhone) {
+                    throw MobileApiException::business('EMPLOYEE_PHONE_NOT_UNIQUE', '员工手机号已变化或不唯一，请使用账号密码登录。');
+                }
+            }
             $auth = Db::name('employee_mobile_auth')->where('employee_id', $employeeId)
                 ->where('status', 1)->where('is_del', 0)->lock(true)->find();
             if (!$auth) {
@@ -157,7 +197,9 @@ final class MobileMerchantSessionServices
                 'session_id' => $sessionId, 'lease_epoch_before' => (int)$lease['current_epoch'], 'lease_epoch_after' => $epoch,
                 'auth_version_before' => (int)$state['auth_version'], 'auth_version_after' => (int)$state['auth_version'],
                 'installation_digest' => (string)$app['installation_digest'], 'request_id' => (string)$meta['requestId'],
-                'reason_code' => $oldSessionId === '' ? 'NONE' : 'REPLACED_BY_NEW_DEVICE', 'payload' => '{}', 'occurred_at' => $now, 'recorded_at' => $now,
+                'reason_code' => $oldSessionId === '' ? 'NONE' : 'REPLACED_BY_NEW_DEVICE',
+                'payload' => $loginMethod === 'WECHAT_PHONE' ? '{"loginMethod":"WECHAT_PHONE"}' : '{}',
+                'occurred_at' => $now, 'recorded_at' => $now,
             ]);
             $session = Db::name('mobile_merchant_session')->where('session_id', $sessionId)->find();
             $projectionRow = Db::name('mobile_merchant_session_projection')->where('session_id', $sessionId)->find();

@@ -28,6 +28,12 @@ final class MobileRequestMetadata
         return self::resolve($request, 'PUBLIC', MobileApiResponse::MERCHANT_CONTRACT);
     }
 
+    /** A phone code is a body credential, not an existing merchant session. */
+    public static function wechatPhone($request): array
+    {
+        return self::resolve($request, 'PUBLIC', MobileApiResponse::MERCHANT_CONTRACT);
+    }
+
     public static function merchant($request): array
     {
         return self::resolve($request, 'MERCHANT_SESSION', MobileApiResponse::MERCHANT_CONTRACT);

@@ -5,6 +5,7 @@ use app\http\middleware\InstallMiddleware;
 use app\http\middleware\StationOpenMiddleware;
 use app\http\middleware\mobile\MobileAppSessionMiddleware;
 use app\http\middleware\mobile\MobileMerchantPasswordMiddleware;
+use app\http\middleware\mobile\MobileMerchantWechatPhoneMiddleware;
 use app\http\middleware\mobile\MobileMerchantSessionMiddleware;
 use app\http\middleware\mobile\MobilePublicMiddleware;
 use app\http\middleware\mobile\MobileTransportEnvelopeMiddleware;
@@ -30,6 +31,9 @@ Route::group('api/mobile/auth', function () {
 Route::group('api/mobile/merchant', function () {
     Route::post('password-login', 'MerchantSession/passwordLogin')->option(['real_name' => '手机商家端员工账号登录'])
         ->middleware([MobileMerchantPasswordMiddleware::class]);
+    // 微信手机号凭证只在无商家会话的登录边界兑换，仍签发相同权限会话。
+    Route::post('wechat-phone-login', 'MerchantSession/wechatPhoneLogin')->option(['real_name' => '手机商家端微信手机号登录'])
+        ->middleware([MobileMerchantWechatPhoneMiddleware::class]);
     Route::group('', function () {
         Route::post('session', 'MerchantSession/create')->option(['real_name' => '手机商家端创建会话']);
     })->middleware([MobileAppSessionMiddleware::class]);

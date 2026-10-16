@@ -55,6 +55,19 @@ export function updateMobileApiOrigin(value : string) : boolean {
 	return setMobileApiOrigin(value)
 }
 
+// Both trusted login methods must accept the same server-owned merchant root;
+// no client phone string or page choice can grant a business context.
+function installMerchantRoot(root : any) : string {
+	let decision = merchantRootInstallDecision(
+		String(root.contractVersion || ''), 'mobile-merchant-v1', root.employee != null && root.employee.status == 'ACTIVE',
+		Number(root.authVersion || 0), String(root.activeContextId || ''), String(root.stateContextId || ''),
+		String(root.stateRevision || ''), root.dataScope != null && root.dataScope.authorized == true,
+		Number(root.dataScope != null ? root.dataScope.scopeEntryCount || 0 : 0), String(root.dataScope != null ? root.dataScope.scopeDigest || '' : '')
+	)
+	if (decision == 'ACCEPT') saveMerchantRoot(root)
+	return decision
+}
+
 export function enterMerchantWithPassword(account : string, password : string, done : (value : any) => void) : void {
 	let normalizedAccount = account.trim()
 	if (normalizedAccount.length == 0 || password.length == 0) {
@@ -67,14 +80,26 @@ export function enterMerchantWithPassword(account : string, password : string, d
 	}, (merchant : any) => {
 		if (!merchant.ok) { done(merchant); return }
 		let root = merchant.body
-		let decision = merchantRootInstallDecision(
-			String(root.contractVersion || ''), 'mobile-merchant-v1', root.employee != null && root.employee.status == 'ACTIVE',
-			Number(root.authVersion || 0), String(root.activeContextId || ''), String(root.stateContextId || ''),
-			String(root.stateRevision || ''), root.dataScope != null && root.dataScope.authorized == true,
-			Number(root.dataScope != null ? root.dataScope.scopeEntryCount || 0 : 0), String(root.dataScope != null ? root.dataScope.scopeDigest || '' : '')
-		)
+		let decision = installMerchantRoot(root)
 		if (decision != 'ACCEPT') { done({ ok: false, message: '商家端根状态校验失败：' + decision }); return }
-		saveMerchantRoot(root)
+		done({ ok: true, message: '', root: root })
+	})
+}
+
+/** Exchange only WeChat's one-use phone code; the server resolves the employee. */
+export function enterMerchantWithWechatPhone(phoneCode : string, done : (value : any) => void) : void {
+	let code = phoneCode.trim()
+	if (currentMobilePlatform() != 'MP_WEIXIN' || code.length == 0) {
+		done({ ok: false, message: '请在微信小程序中授权手机号，或使用员工账号密码登录。' })
+		return
+	}
+	request('POST', '/mobile/merchant/wechat-phone-login', commonHeaders('mobile-merchant-v1'), {
+		phoneCode: code, installationId: storedOpaque(DEVICE_KEY, 'mobile-device'), idempotencyKey: opaque('merchant-wechat-phone')
+	}, (merchant : any) => {
+		if (!merchant.ok) { done(merchant); return }
+		let root = merchant.body
+		let decision = installMerchantRoot(root)
+		if (decision != 'ACCEPT') { done({ ok: false, message: '商家端根状态校验失败：' + decision }); return }
 		done({ ok: true, message: '', root: root })
 	})
 }
@@ -115,15 +140,9 @@ export function enterMerchantWithSms(phone : string, captchaProviderToken : stri
 					request('POST', '/mobile/merchant/session', exchangeHeaders, { idempotencyKey: opaque('merchant-session') }, (merchant : any) => {
 						if (!merchant.ok) { done(merchant); return }
 						let root = merchant.body
-						let decision = merchantRootInstallDecision(
-							String(root.contractVersion || ''), 'mobile-merchant-v1', root.employee != null && root.employee.status == 'ACTIVE',
-							Number(root.authVersion || 0), String(root.activeContextId || ''), String(root.stateContextId || ''),
-							String(root.stateRevision || ''), root.dataScope != null && root.dataScope.authorized == true,
-							Number(root.dataScope != null ? root.dataScope.scopeEntryCount || 0 : 0), String(root.dataScope != null ? root.dataScope.scopeDigest || '' : '')
-						)
+						let decision = installMerchantRoot(root)
 						if (decision != 'ACCEPT') { done({ ok: false, message: '商家端根状态校验失败：' + decision }); return }
 						uni.setStorageSync('mobile.app.session', verified.body.appSession)
-						saveMerchantRoot(root)
 						done({ ok: true, message: '', root: root })
 					})
 				})

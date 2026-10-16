@@ -21,6 +21,25 @@
       ],
       "emptyContextValuesAllowed": false
     },
+    "WECHAT_PHONE": {
+      "required": {
+        "X-Mobile-Contract-Version": "contractVersion",
+        "X-Mobile-Client-Session-Id": "clientSessionId",
+        "X-Mobile-Platform": "MP_WEIXIN",
+        "X-Mobile-Request-Id": "requestId"
+      },
+      "forbidden": [
+        "Authorization",
+        "X-Mobile-App-Session",
+        "X-Mobile-Active-Context-Id",
+        "X-Mobile-State-Context-Id",
+        "Cookie",
+        "queryToken",
+        "bodyToken",
+        "headerAlias"
+      ],
+      "emptyContextValuesAllowed": false
+    },
     "APP_SESSION_EXCHANGE": {
       "required": {
         "X-Mobile-Contract-Version": "contractVersion",
@@ -70,6 +89,19 @@
       "requestBodyRequired": [
         "account",
         "pwd",
+        "installationId",
+        "idempotencyKey"
+      ],
+      "response": "merchantRoot"
+    },
+    "wechatPhoneLogin": {
+      "method": "POST",
+      "path": "/mobile/merchant/wechat-phone-login",
+      "requestMetadataProfile": "WECHAT_PHONE",
+      "merchantContextRequired": false,
+      "authentication": "WECHAT_SERVER_VERIFIED_PHONE_AND_UNIQUE_ACTIVE_EMPLOYEE_WITH_CURRENT_MOBILE_AUTHORIZATION",
+      "requestBodyRequired": [
+        "phoneCode",
         "installationId",
         "idempotencyKey"
       ],

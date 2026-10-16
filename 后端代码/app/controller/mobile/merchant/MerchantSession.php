@@ -14,6 +14,7 @@ final class MerchantSession extends BaseController
     private MobileMerchantSessionServices $sessions;
     public function __construct(App $app, MobileMerchantSessionServices $sessions) { parent::__construct($app); $this->sessions = $sessions; }
     public function passwordLogin() { return $this->root($this->sessions->passwordLogin($this->payload(), $this->metadata())); }
+    public function wechatPhoneLogin() { return $this->root($this->sessions->wechatPhoneLogin($this->payload(), $this->metadata())); }
     public function create() { return $this->root($this->sessions->create($this->payload(), $this->metadata())); }
     public function bootstrap() { return $this->root($this->sessions->bootstrap($this->metadata())); }
     public function switchContext() { return $this->root($this->sessions->switchContext($this->payload(), $this->metadata())); }
