@@ -1572,31 +1572,43 @@ final class AiGatewayServices
         return [$compiled,$steps,$requiresSemanticContext];
     }
 
-    /** Resolve a corrected exact name or a same-name phone locally. The
-     * frozen plan owns metric/date/store meaning; a reply cannot turn one
-     * selected member into an aggregate query or change the measurement. */
+    /** Resolve a corrected exact name or unique authorized full phone locally.
+     * The earlier name is unverified, so a full-phone correction may replace
+     * it; the frozen plan still owns metric/date/store meaning and cannot
+     * become an aggregate query or change the measurement. */
     private function confirmedMemberIdentityChoice(array $context,array $envelope,string $reply): ?array
     {
         $pending=$envelope['_member_identity_request']??null;
         if (!is_array($pending)) return null;
         $phone=preg_match('/^1[3-9][0-9]{9}$/D',$reply)===1?$reply:null;
         $name=$phone!==null?($pending['name']??null):$reply;
-        if (!is_string($name) || preg_match('/^[\p{L}\p{N}·（）() ]{2,24}$/uD',$name)!==1) return null;
+        if ($phone===null && (!is_string($name) || preg_match('/^[\p{L}\p{N}·（）() ]{2,24}$/uD',$name)!==1)) return null;
         $compiled=$pending['compiled'];$query=$compiled['plan']['query'];$metric=$query['metric_codes'][0];
         $available=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($this->capabilities($context),'member','summary');
         if (!isset($available[$metric])) throw new RuntimeException('AI_CAPABILITY_CHANGED');
-        $matches=$this->memberObjects($context)->exactCandidates($name,[$metric],$phone);
+        $members=$this->memberObjects($context);
+        $matches=$phone!==null?$members->phoneCandidates($phone,[$metric]):$members->exactCandidates($name,[$metric]);
         if (count($matches)>1) {
-            $envelope['question']='当前可查询范围内有多位同名会员。请补充该会员的完整手机号。';
-            $envelope['fields'][0]['options']=[['value'=>'__supplement__','label'=>'补充完整手机号']];
-            $envelope['_member_identity_request']['name']=$name;
-            return $envelope;
+            // Shared phone numbers cannot select a member by themselves. An
+            // exact authorized name may disambiguate; otherwise stop rather
+            // than looping over the same phone or exposing a directory.
+            if ($phone!==null) {
+                $named=is_string($name)&&preg_match('/^[\p{L}\p{N}·（）() ]{2,24}$/uD',$name)===1
+                    ?$members->exactCandidates($name,[$metric],$phone):[];
+                if (count($named)!==1) throw new RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+                $matches=$named;
+            } else {
+                $envelope['question']='当前可查询范围内有多位同名会员。请补充该会员的完整手机号。';
+                $envelope['fields'][0]['options']=[['value'=>'__supplement__','label'=>'补充完整手机号']];
+                $envelope['_member_identity_request']['name']=$name;
+                return $envelope;
+            }
         }
         if ($matches===[]) {
             // An absent current relation is not a zero-valued metric result.
             // Keep the accepted slots while allowing the name to be corrected.
             $envelope['question']=$phone!==null
-                ?'当前可查询范围未找到与该姓名和手机号同时匹配的会员。请核对完整手机号或更正姓名。'
+                ?'当前可查询范围未找到该手机号对应的会员。请核对完整手机号或更正姓名。'
                 :'当前可查询范围未找到可确认的会员。请核对完整姓名。';
             $envelope['fields'][0]['options']=[['value'=>'__supplement__','label'=>'更正姓名或完整手机号']];
             $envelope['_member_identity_request']['name']=$name;

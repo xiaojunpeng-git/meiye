@@ -9,10 +9,11 @@ namespace think\facade {
 namespace {
 require __DIR__.'/r6-gateway-harness.php';
 final class R8fMemberQuery {
-    private $table; private $field='';
+    private $table; private $field=''; private $phone=null;
     public function __construct($table) { $this->table=$table; }
     public function __call($name,$args) {
         if ($name==='field') $this->field=$args[0];
+        if ($name==='where' && ($args[0]??null)==='u.phone') $this->phone=$args[1]??null;
         foreach ($args as $arg) if ($arg instanceof \Closure) $arg($this);
         return $this;
     }
@@ -20,6 +21,11 @@ final class R8fMemberQuery {
     public function column() { return []; }
     public function toArray() {
         if ($this->table!=='user') return [];
+        if ($this->phone==='13800000002' && $this->field==='u.uid,u.real_name,u.nickname') return [
+            ['uid'=>19,'real_name'=>'测试乙','nickname'=>''],
+            ['uid'=>20,'real_name'=>'测试丙','nickname'=>''],
+        ];
+        if ($this->phone!==null && $this->phone!=='13800000000') return [];
         if ($this->field==='u.real_name') return [['real_name'=>'测试乙']];
         if ($this->field==='u.nickname') return [];
         return [['uid'=>19,'real_name'=>'测试乙','nickname'=>'']];
@@ -69,6 +75,60 @@ try {
         'answer names the corrected authorized member: '.json_encode(array_keys($answer)));
     r6hCheck((int)$h->db->query("SELECT COUNT(*) FROM mohe_ai_attempt WHERE target_code='unified_metric_query' AND state='SUCCEEDED'")->fetchColumn()===1,
         'one fact read only after exact identity');
+    // A full-phone correction is sufficient when it uniquely identifies an
+    // authorized member, even if the earlier unverified name was different.
+    $h->understandingOverride=['goal'=>'查询会员业绩','status'=>'needs_clarification','requirements'=>[[
+        'id'=>'r1','meaning'=>'会员业绩','fields'=>['object_kind','object_relation','metric_codes'],
+        'values'=>['object_kind'=>'member','object_relation'=>'selection','metric_terms'=>['业绩']],
+        'evidence'=>[['message_id'=>'current','quote'=>'管慧的业绩是多少？']],
+    ]]];
+    $h->semanticIntent['metric_codes']=[];$h->semanticIntent['needs_metric_choice']=true;
+    $phoneMetric=$h->start('管慧的业绩是多少？');
+    r6hCheck($phoneMetric['status']==='WAITING_CLARIFICATION','phone scenario asks metric first');
+    $h->understandingOverride=['goal'=>'查询实际收款销售额','status'=>'understood','requirements'=>[[
+        'id'=>'r1','meaning'=>'实际收款销售额','fields'=>['metric_codes'],
+        'values'=>['metric_terms'=>['实际收款销售额']],
+        'evidence'=>[['message_id'=>'current','quote'=>'实际收款销售额']],
+    ]]];
+    $h->semanticIntent['metric_codes']=['sales_collected_amount'];$h->semanticIntent['needs_metric_choice']=false;
+    $phoneCard=$h->choose($phoneMetric,['semantic_reply'=>'member_metric_1']);
+    r6hCheck($phoneCard['status']==='WAITING_CLARIFICATION',
+        'unknown name asks identity before phone correction: '.($phoneCard['status']??'missing').'/'.($phoneCard['reason']??''));
+    $wrongPhone=$h->choose($phoneCard,['semantic_reply'=>'__supplement__','supplement_text'=>'13800000001']);
+    r6hCheck($wrongPhone['status']==='WAITING_CLARIFICATION'
+        && strpos($wrongPhone['clarification']['question'],'该手机号')!==false,
+        'unknown phone remains unresolved without claiming name mismatch');
+    $byPhone=$h->choose($wrongPhone,['semantic_reply'=>'__supplement__','supplement_text'=>'13800000000']);
+    r6hCheck($byPhone['status']==='COMPLETED' && $byPhone['run_id']===$phoneCard['run_id'],
+        'unique authorized phone completes the same Run');
+    $phoneEvidence=$h->private->read($h->row($byPhone)['evidence_ref']);
+    r6hCheck($phoneEvidence['query']['business_filters']['selection_ref']==='member:19',
+        'phone correction binds the authorized member without the old name');
+    $phoneAnswer=$h->private->read($h->row($byPhone)['answer_ref']);
+    r6hCheck(strpos(json_encode($phoneAnswer,JSON_UNESCAPED_UNICODE),'会员“测试乙”')!==false,
+        'answer uses the confirmed phone member label, not the earlier name');
+    $identityMethod=new \ReflectionMethod($h->gateway,'confirmedMemberIdentityChoice');
+    if (PHP_VERSION_ID<80100) $identityMethod->setAccessible(true);
+    $privateCard=['_member_identity_request'=>['name'=>'管慧','compiled'=>[
+        'kind'=>'plan','plan'=>['query'=>['metric_codes'=>['sales_collected_amount'],'business_filters'=>['selection_ref'=>null]]],
+    ]]];
+    try {
+        $identityMethod->invoke($h->gateway,$h->context,$privateCard,'13800000002');
+        r6hCheck(false,'shared phone must not guess a member');
+    } catch (\RuntimeException $error) {
+        r6hCheck($error->getMessage()==='AI_OBJECT_BINDING_UNAVAILABLE',
+            'shared phone without matching name fails closed');
+    }
+    $h->auth['member_data_authorized']=false;
+    try {
+        $identityMethod->invoke($h->gateway,$h->context,$privateCard,'13800000000');
+        r6hCheck(false,'revoked member permission must not resolve phone');
+    } catch (\RuntimeException $error) {
+        r6hCheck($error->getMessage()==='AI_MEMBER_PERMISSION_REQUIRED',
+            'phone correction rechecks current member permission');
+    } finally {
+        $h->auth['member_data_authorized']=true;
+    }
     // The identity gate uses the accepted object term and literal source,
     // not a fixed Chinese performance question template.
     $h->understandingOverride=['goal'=>'查询会员本月实际收款销售额','status'=>'understood','requirements'=>[[

@@ -52,11 +52,34 @@ final class MemberAnalysisObjectServices
         if ($phone!==null) $query->where('u.phone',$phone);
         $rows=$query->field('u.uid,u.real_name,u.nickname')->order('u.uid','asc')->limit(2)->select()->toArray();
         if (call_user_func($this->authorize)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
+        return $this->candidateObjects($rows,$metrics,$name);
+    }
+
+    /** A full phone entered in an identity correction replaces an unverified
+     * name only when it identifies one current authorized member. The same
+     * live store relation and two-row ambiguity limit protect this lookup;
+     * no phone or member directory is returned to the external model. */
+    public function phoneCandidates(string $phone,array $metrics): array
+    {
+        if (preg_match('/^1[3-9][0-9]{9}$/D',$phone)!==1) throw new \RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+        $scope=$this->scope();
+        $rows=$this->members($scope)->where('u.phone',$phone)
+            ->field('u.uid,u.real_name,u.nickname')->order('u.uid','asc')->limit(2)->select()->toArray();
+        if (call_user_func($this->authorize)!==$scope) throw new \RuntimeException('AI_AUTHORIZATION_CHANGED');
+        return $this->candidateObjects($rows,$metrics,null);
+    }
+
+    /** Keep the identity reference and label contract identical for exact
+     * name and full-phone resolution; blank or duplicate rows never become
+     * a guessed member selection. */
+    private function candidateObjects(array $rows,array $metrics,?string $requiredName): array
+    {
         $objects=[];
         foreach ($rows as $row) {
             $uid=(int)($row['uid']??0);$real=trim((string)($row['real_name']??''));$nickname=trim((string)($row['nickname']??''));
-            if ($uid<1 || $real!==$name && $nickname!==$name) continue;
+            if ($uid<1 || $requiredName!==null && $real!==$requiredName && $nickname!==$requiredName) continue;
             $label=$real!==''?$real:$nickname;
+            if ($label==='') continue;
             $objects[]=['ref'=>'member:'.$uid,'kind'=>'member','label'=>$label,'aliases'=>$nickname!==''&&$nickname!==$label?[$nickname]:[],
                 'version'=>hash('sha256',$uid."\0".$real."\0".$nickname),'relations'=>array_values($metrics)];
         }
