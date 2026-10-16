@@ -344,7 +344,7 @@
     <Card :bordered="false" dis-hover class="ivu-mt">
       <!-- 相关操作 -->
       <div class="new_tab">
-        <Tabs v-model="artFrom.type" @on-click="onClickTab">
+        <Tabs ref="productStatusTabs" v-model="artFrom.type" @on-click="onClickTab">
           <TabPane
             :label="item.name + ' (' + item.count + ')'"
             :name="item.type.toString()"
@@ -1360,6 +1360,10 @@ const PRODUCT_DEFAULT_COLUMN_CONFIG = [
   { key: "action", show: true },
 ];
 
+// 商品编辑页保存后会返回一个全新的列表路由实例；使用一次性会话键跨实例传递
+// 离开时的分页和筛选，读取后立即删除，避免后续正常进入列表时套用旧状态。
+const PRODUCT_LIST_RETURN_STATE_KEY = "admin:product-list:return-state";
+
 const allOptions = [
   {
     label: "批量上架",
@@ -1814,8 +1818,13 @@ export default {
     this.updateTableHeight();
     window.addEventListener("resize", this.updateTableHeight);
   },
-  activated(e) {
-    this.artFrom.type = this.$route.query.type || "1";
+  activated() {
+    // 商品列表由 keep-alive 缓存，编辑保存返回时 activated 是最后一个会重置
+    // 查询条件的生命周期；必须在这里消费一次性状态，避免恢复结果再次被默认值覆盖。
+    const returnState = this.consumeProductListReturnState();
+    if (!this.restoreProductListReturnState(returnState)) {
+      this.artFrom.type = this.$route.query.type || "1";
+    }
     this.getDataList();
     this.$nextTick(this.updateTableHeight);
   },
@@ -1824,9 +1833,10 @@ export default {
   },
   beforeRouteEnter(to, from, next) {
     next((vm) => {
-      if (from.path.indexOf("/admin/product/add_product") != -1) {
+      if (from.path.indexOf("/product/add_product") != -1) {
         document.documentElement.scrollTop = to.meta.scollTopPosition;
       } else {
+        vm.consumeProductListReturnState();
         if (
           vm.artFrom.page != 1 ||
           vm.artFrom.cate_id != "" ||
@@ -1898,10 +1908,88 @@ export default {
     if (from.meta.keepAlive) {
       from.meta.scollTopPosition = document.documentElement.scrollTop;
     }
+    if (this.isProductEditRoute(to)) {
+      this.persistProductListReturnState(this.buildProductListReturnState());
+    }
     next();
   },
   methods: {
     ...mapMutations("admin/layout", ["setCopyrightShow"]),
+    isProductEditRoute(route) {
+      const match = route && route.path.match(/\/product\/add_product\/(\d+)$/);
+      return Boolean(match && Number(match[1]) > 0);
+    },
+    persistProductListReturnState(state) {
+      try {
+        window.sessionStorage.setItem(
+          PRODUCT_LIST_RETURN_STATE_KEY,
+          JSON.stringify(state)
+        );
+      } catch (error) {
+        // 浏览器禁用会话存储时不阻断编辑流程；列表仍按原有默认行为返回。
+      }
+    },
+    consumeProductListReturnState() {
+      let raw = null;
+      try {
+        raw = window.sessionStorage.getItem(PRODUCT_LIST_RETURN_STATE_KEY);
+        window.sessionStorage.removeItem(PRODUCT_LIST_RETURN_STATE_KEY);
+      } catch (error) {
+        // 会话存储不可用时回退到列表原有行为，不能阻断商品列表加载。
+        return null;
+      }
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch (error) {
+        // 无法解析的旧暂存已经在读取时删除，不能污染后续列表访问。
+        return null;
+      }
+    },
+    buildProductListReturnState() {
+      const clone = (value) => JSON.parse(JSON.stringify(value));
+      return {
+        artFrom: clone(this.artFrom),
+        timeVal: clone(this.timeVal),
+        value1: clone(this.value1),
+        goodsDataLabel: clone(this.goodsDataLabel),
+        ranges: {
+          stockStart: this.stockStart,
+          stockEnd: this.stockEnd,
+          salesStart: this.salesStart,
+          salesEnd: this.salesEnd,
+          priceStart: this.priceStart,
+          priceEnd: this.priceEnd,
+          collectStart: this.collectStart,
+          collectEnd: this.collectEnd,
+        },
+      };
+    },
+    restoreProductListReturnState(state) {
+      if (!state || !state.artFrom) return false;
+      const clone = (value) => JSON.parse(JSON.stringify(value));
+      this.artFrom = {
+        ...this.artFrom,
+        ...clone(state.artFrom),
+        page: Math.max(1, Number(state.artFrom.page) || 1),
+      };
+      // iView Tabs 会缓存离开列表前后的内部激活态；显式同步其激活键，
+      // 保证“仓库中”等视觉高亮与实际查询 type 始终指向同一数据集。
+      this.$nextTick(() => {
+        if (this.$refs.productStatusTabs) {
+          this.$refs.productStatusTabs.activeKey = String(this.artFrom.type);
+        }
+      });
+      this.timeVal = clone(state.timeVal || "");
+      this.value1 = clone(state.value1 || []);
+      this.goodsDataLabel = clone(state.goodsDataLabel || []);
+      Object.keys(state.ranges || {}).forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(this.$data, key)) {
+          this[key] = state.ranges[key];
+        }
+      });
+      return true;
+    },
     // 具体日期
     onchangeTime(e) {
       if (e[1].slice(-8) === "00:00:00") {
