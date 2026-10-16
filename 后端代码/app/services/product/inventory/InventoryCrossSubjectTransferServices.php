@@ -15,16 +15,25 @@ use think\facade\Db;
  */
 final class InventoryCrossSubjectTransferServices
 {
-    /** Compare ASCII document numbers and Chinese remarks under one text collation without changing stored values. */
+    /** Match document text or any active product snapshot without narrowing the joined lines used for detail counts. */
     private function applyListKeyword($query, string $keyword): void
     {
         $keyword = trim($keyword);
         if ($keyword === '') return;
         $like = '%' . $keyword . '%';
-        $query->whereRaw('(CONVERT(d.transfer_no USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :transfer_search_no OR CONVERT(d.remark USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :transfer_search_remark)', [
-            'transfer_search_no' => $like,
-            'transfer_search_remark' => $like,
-        ]);
+        $query->where(function ($matches) use ($like): void {
+            $matches->whereRaw('(CONVERT(d.transfer_no USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :transfer_search_no OR CONVERT(d.remark USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :transfer_search_remark)', [
+                'transfer_search_no' => $like,
+                'transfer_search_remark' => $like,
+            ])->whereExists(function ($line) use ($like): void {
+                $line->name('inventory_cross_transfer_line')->alias('search_line')
+                    ->whereRaw('search_line.document_id=d.id')
+                    ->where('search_line.retired_at', 0)
+                    ->whereRaw('CONVERT(search_line.product_name_snapshot USING utf8mb4) COLLATE utf8mb4_general_ci LIKE :transfer_search_product', [
+                        'transfer_search_product' => $like,
+                    ]);
+            }, 'OR');
+        });
     }
 
     public function listForStore(int $storeId, int $operatorId, string $keyword, int $page = 1, int $limit = 20, bool $canViewCost = false, string $dateFrom = '', string $dateTo = ''): array
