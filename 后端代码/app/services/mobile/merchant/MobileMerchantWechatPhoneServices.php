@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace app\services\mobile\merchant;
 
 use app\services\mobile\protocol\MobileApiException;
+use EasyWeChat\Factory;
 use mohe\services\wechat\MiniProgram;
+use Symfony\Component\Cache\Adapter\RedisAdapter;
+use think\facade\Cache;
 use think\facade\Db;
+use Yurun\Util\Swoole\Guzzle\SwooleHandler;
 
 /** Exchanges a one-use WeChat phone code for a verified employee phone on this instance. */
 final class MobileMerchantWechatPhoneServices
@@ -16,14 +20,29 @@ final class MobileMerchantWechatPhoneServices
         if ($code === '' || strlen($code) > 512) {
             throw MobileApiException::protocol('INVALID_REQUEST_FIELD', '微信手机号授权凭据无效。', 'phoneCode');
         }
-        $appid = trim((string)sys_config('routine_appId', ''));
-        if ($appid === '') {
+        [$appid, $secret, $merchantProgram] = self::miniProgramCredentials(
+            (string)sys_config('merchant_mini_appid', ''),
+            (string)sys_config('merchant_mini_appsecret', ''),
+            (string)sys_config('routine_appId', ''),
+            (string)sys_config('routine_appsecret', '')
+        );
+        if ($appid === '' || $secret === '') {
             throw MobileApiException::business('WECHAT_PHONE_UNAVAILABLE', '当前小程序尚未配置微信手机号登录。');
         }
         try {
             // The instance's mini-program access token redeems this one-use
             // code. This service does not write the code or phone to audit data.
-            $response = MiniProgram::instance()->application()->phone_number->getUserPhoneNumber($code);
+            if ($merchantProgram) {
+                // Keep provider transport and cache consistent with the
+                // existing Swoole mini-program client, while isolating this
+                // merchant AppID from member mini-program operations.
+                $application = Factory::miniProgram(['app_id' => $appid, 'secret' => $secret, 'response_type' => 'array']);
+                $application['guzzle_handler'] = SwooleHandler::class;
+                $application->rebind('cache', new RedisAdapter(Cache::store('redis')->handler()));
+            } else {
+                $application = MiniProgram::instance()->application();
+            }
+            $response = $application->phone_number->getUserPhoneNumber($code);
         } catch (\Throwable $exception) {
             throw MobileApiException::business('WECHAT_PHONE_UNAVAILABLE', '微信手机号验证暂不可用，请使用账号密码登录。');
         }
@@ -31,6 +50,25 @@ final class MobileMerchantWechatPhoneServices
             $response = $response->toArray();
         }
         return self::phoneFromResponse(is_array($response) ? $response : [], $appid);
+    }
+
+    /**
+     * A separate merchant mini-program must use its own AppID and secret.
+     * An incomplete pair fails closed; only instances without either override
+     * keep the original routine credentials used by the accepted R10A path.
+     */
+    public static function miniProgramCredentials(
+        string $merchantAppId,
+        string $merchantSecret,
+        string $routineAppId,
+        string $routineSecret
+    ): array {
+        $merchantAppId = trim($merchantAppId);
+        $merchantSecret = trim($merchantSecret);
+        if ($merchantAppId !== '' || $merchantSecret !== '') {
+            return [$merchantAppId, $merchantSecret, true];
+        }
+        return [trim($routineAppId), trim($routineSecret), false];
     }
 
     /** Validate the provider response before it can become a merchant identity. */

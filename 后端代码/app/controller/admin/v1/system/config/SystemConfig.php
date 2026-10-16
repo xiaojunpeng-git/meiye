@@ -151,6 +151,10 @@ class SystemConfig extends AuthController
      */
     public function edit($id)
     {
+        $config = $this->services->get((int)$id);
+        if ($config && in_array($config['menu_name'], ['merchant_mini_appid', 'merchant_mini_appsecret'], true)) {
+            return $this->fail('请在小程序配置页成对修改商家小程序凭据');
+        }
         return $this->success($this->services->editConfigForm((int)$id));
     }
 
@@ -183,8 +187,12 @@ class SystemConfig extends AuthController
 			['input_type', '']
 		]);
         $data['config_tab_id'] = end($data['config_tab_id']);
-        if (!$this->services->get($id)) {
+        $config = $this->services->get($id);
+        if (!$config) {
             return $this->fail('编辑的记录不存在!');
+        }
+        if (in_array($config['menu_name'], ['merchant_mini_appid', 'merchant_mini_appsecret'], true)) {
+            return $this->fail('请在小程序配置页成对修改商家小程序凭据');
         }
         $data['value'] = json_encode($data['value']);
         $this->services->update($id, $data);
@@ -413,6 +421,35 @@ class SystemConfig extends AuthController
             unset($post['fuyou_key']);
         }
 
+        if (array_key_exists('merchant_mini_appid', $post) || array_key_exists('merchant_mini_appsecret', $post)) {
+            // Merchant and member mini-programs can have different AppIDs.
+            // Save the pair only after the instance's config rows exist, and
+            // never erase a stored secret when the password field is blank.
+            if (!$this->services->getOne(['menu_name' => 'merchant_mini_appid', 'is_store' => 0])
+                || !$this->services->getOne(['menu_name' => 'merchant_mini_appsecret', 'is_store' => 0])) {
+                return $this->fail('请先完成商家小程序配置升级');
+            }
+            $merchantAppId = trim((string)($post['merchant_mini_appid'] ?? sys_config('merchant_mini_appid', '')));
+            $merchantSecret = trim((string)($post['merchant_mini_appsecret'] ?? ''));
+            $storedAppId = trim((string)sys_config('merchant_mini_appid', ''));
+            $storedSecret = trim((string)sys_config('merchant_mini_appsecret', ''));
+            if ($merchantAppId !== '' && !preg_match('/^wx[A-Za-z0-9]{16}$/', $merchantAppId)) {
+                return $this->fail('商家小程序 AppID 格式无效');
+            }
+            if ($merchantSecret !== '' && !preg_match('/^[A-Za-z0-9]{16,128}$/', $merchantSecret)) {
+                return $this->fail('商家小程序 AppSecret 格式无效');
+            }
+            if (($merchantAppId === '') !== ($merchantSecret === '' && $storedSecret === '')) {
+                return $this->fail('商家小程序 AppID 和 AppSecret 必须配套填写');
+            }
+            if ($merchantAppId !== $storedAppId && $merchantSecret === '' && $storedSecret !== '') {
+                return $this->fail('更换商家小程序 AppID 时必须填写对应的 AppSecret');
+            }
+            if ($merchantSecret === '') {
+                unset($post['merchant_mini_appsecret']);
+            }
+        }
+
         foreach ($post as $k => $v) {
             $config_one = $this->services->getOne(['menu_name' => $k]);
             if ($config_one) {
@@ -457,6 +494,11 @@ class SystemConfig extends AuthController
      */
     public function get_system($name)
     {
+        if ($name === 'merchant_mini_appsecret') {
+            // The generic single-value endpoint must not bypass the
+            // credential form's non-echo behavior.
+            return $this->success(['value' => '', 'configured' => (string)sys_config($name, '') !== '']);
+        }
         $value = sys_config($name);
         return $this->success(compact('value'));
     }

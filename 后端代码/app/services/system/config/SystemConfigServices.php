@@ -335,6 +335,12 @@ class SystemConfigServices extends BaseServices implements ServeConfigInterface
         $count = $this->dao->count($where);
         foreach ($list as &$item) {
             $item['value'] = $item['value'] ? json_decode($item['value'], true) ?: '' : '';
+            if ($item['menu_name'] === 'merchant_mini_appsecret') {
+                // Configuration lists are readable by more roles than the
+                // credential editor; never return the saved AppSecret.
+                $item['configured'] = (string)$item['value'] !== '';
+                $item['value'] = '';
+            }
             if ($item['type'] == 'radio' || $item['type'] == 'checkbox') {
                 $item['value'] = $this->getRadioOrCheckboxValueInfo($item['menu_name'], $item['value']);
             }
@@ -893,6 +899,14 @@ class SystemConfigServices extends BaseServices implements ServeConfigInterface
                 $item['value'] = $item['store_value'] ?? '';
             }
         }
+        foreach ($list as &$item) {
+            if ($item['menu_name'] === 'merchant_mini_appsecret') {
+                // Generic configuration forms must not reveal the stored
+                // credential even when they share the routine config tab.
+                $item['value'] = '';
+            }
+        }
+        unset($item);
         $formbuider = $this->createForm($list, $type);
         $name = 'setting';
         if ($url) {
@@ -2088,8 +2102,14 @@ WSS;
     public function routineBaseFormBuild()
     {
         $data = $this->getConfigAllField([
-            'routine_appId', 'routine_appsecret', 'routine_contact_type', 'routine_name', 'store_user_avatar', 'order_shipping_open', 'routine_auth_type', 'store_user_agreement'
+            'routine_appId', 'routine_appsecret', 'routine_contact_type', 'routine_name', 'store_user_avatar', 'order_shipping_open', 'routine_auth_type', 'store_user_agreement',
+            'merchant_mini_appid', 'merchant_mini_appsecret'
         ]);
+        // Never echo the merchant AppSecret into the browser. A blank input
+        // means “keep the saved secret” on the matching save endpoint.
+        $secret = (string)($data['merchant_mini_appsecret']['value'] ?? '');
+        $data['merchant_mini_appsecret']['configured'] = $secret !== '';
+        $data['merchant_mini_appsecret']['value'] = '';
         return $data;
     }
 

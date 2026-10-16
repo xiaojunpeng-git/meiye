@@ -32,6 +32,29 @@
                 <Input v-model="formData.routine_appsecret" placeholder="请输入AppSecret" />
               </div>
             </div>
+            <div class="content-box title">
+              <div class="line"></div>
+              <div class="right title">商家端微信手机号登录</div>
+            </div>
+            <div class="content-box">
+              <div class="left">商家小程序 AppID：</div>
+              <div class="right">
+                <Input v-model="formData.merchant_mini_appid" placeholder="与商家端体验版 AppID 一致" />
+              </div>
+            </div>
+            <div class="content-box">
+              <div class="left">商家小程序 AppSecret：</div>
+              <div class="right">
+                <Input v-model="formData.merchant_mini_appsecret" type="password" autocomplete="new-password"
+                  :placeholder="merchantMiniSecretConfigured ? '已配置；留空则不修改' : '请输入商家小程序 AppSecret'" />
+              </div>
+            </div>
+            <div class="content-box last">
+              <div class="left"></div>
+              <div class="right">
+                <div class="tip">商家小程序与上方小程序不同时填写这组配置；首次不配置时沿用上方配置。更换 AppID 须填写对应的新密钥，密钥不会回显。</div>
+              </div>
+            </div>
             <div class="content-box">
               <div class="left">小程序名称：</div>
               <div class="right">
@@ -197,6 +220,8 @@ export default {
       formData: {
         routine_appId: '',
         routine_appsecret: '',
+        merchant_mini_appid: '',
+        merchant_mini_appsecret: '',
         routine_name: '',
         store_user_avatar: 0,
 		    order_shipping_open: 0,
@@ -204,6 +229,7 @@ export default {
         routine_auth_type: [1, 2],
       },
       guideShow: false,
+      merchantMiniSecretConfigured: false,
       avatarDesc: '',
       phoneAuthDesc: '',
       orderShippingDesc: '',
@@ -217,6 +243,10 @@ export default {
         let data = res.data;
         this.formData.routine_appId = data.routine_appId.value;
         this.formData.routine_appsecret = data.routine_appsecret.value;
+        this.formData.merchant_mini_appid = (data.merchant_mini_appid && data.merchant_mini_appid.value) || '';
+        // The API only returns whether a merchant secret exists, never its value.
+        this.formData.merchant_mini_appsecret = '';
+        this.merchantMiniSecretConfigured = !!(data.merchant_mini_appsecret && data.merchant_mini_appsecret.configured);
         this.formData.routine_name = data.routine_name.value;
         this.formData.routine_contact_type = data.routine_contact_type.value;
         this.formData.store_user_avatar = data.store_user_avatar.value;
@@ -273,6 +303,10 @@ export default {
     },
     submitForm () {
       saveBasicsApi(this.formData).then(res => {
+        if (this.formData.merchant_mini_appsecret) {
+          this.merchantMiniSecretConfigured = true;
+          this.formData.merchant_mini_appsecret = '';
+        }
         this.$Message.success(res.msg);
       }).catch(res => {
         this.$Message.error(res.msg);
