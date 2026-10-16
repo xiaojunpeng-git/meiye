@@ -284,6 +284,17 @@ final class AiAnswerRenderer
             // avoid repeating the whole table in the introductory sentence.
             $summary='已按'.$metricNames[0].'排序，列出'.count($rows).'条结果及相关指标。';
         }
+        if ($member && in_array($shape,['summary','comparison'],true)
+            && isset($view['query']['business_filters']['selection_ref'])) {
+            // A corrected private identity must be visible in the answer.
+            // Use only the live, authorized label bound into Reader evidence;
+            // otherwise a zero could be mistaken for the original name.
+            $label=$view['member_selection_label']??null;
+            if (!is_string($label) || trim($label)==='' || preg_match('/[\x00-\x1f\x7f]/u',$label)) {
+                throw new RuntimeException('AI_EVIDENCE_INVALID');
+            }
+            $summary='会员“'.$label.'”：'.$summary;
+        }
         $conclusion = $summary;
         $periodLabel = '统计时间：' . $view['query']['start_date'] . ' 至 ' . $view['query']['end_date'] . '。';
         $summary .= ($summary === '' ? '' : ' ') . $periodLabel;

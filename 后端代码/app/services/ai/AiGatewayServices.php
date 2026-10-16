@@ -1523,7 +1523,7 @@ final class AiGatewayServices
         $reply=$selected===null?$this->semanticClarificationReply($stored['envelope'],$input):null;
         $identity=$reply!==null?$this->confirmedMemberIdentityChoice($context,$stored['envelope'],$reply):null;
         if ($identity!==null) {
-            // A complete phone answers a server-issued identity slot only;
+            // An exact identity correction answers this server-issued slot;
             // no language model may reinterpret already accepted conditions.
             $compiled=$identity;$steps=[];$requiresSemanticContext=false;
             $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
@@ -1572,23 +1572,34 @@ final class AiGatewayServices
         return [$compiled,$steps,$requiresSemanticContext];
     }
 
-    /** Resolve only a full-phone reply to our encrypted identity request.
-     * The frozen plan already owns metric/date/store meaning. Current local
-     * member scope, followed by the ordinary compiler and Reader guards,
-     * owns identity and facts. Other prose still uses semantic understanding. */
+    /** Resolve a corrected exact name or a same-name phone locally. The
+     * frozen plan owns metric/date/store meaning; a reply cannot turn one
+     * selected member into an aggregate query or change the measurement. */
     private function confirmedMemberIdentityChoice(array $context,array $envelope,string $reply): ?array
     {
         $pending=$envelope['_member_identity_request']??null;
-        if (!is_array($pending) || preg_match('/^1[3-9][0-9]{9}$/D',$reply)!==1) return null;
+        if (!is_array($pending)) return null;
+        $phone=preg_match('/^1[3-9][0-9]{9}$/D',$reply)===1?$reply:null;
+        $name=$phone!==null?($pending['name']??null):$reply;
+        if (!is_string($name) || preg_match('/^[\p{L}\p{N}·（）() ]{2,24}$/uD',$name)!==1) return null;
         $compiled=$pending['compiled'];$query=$compiled['plan']['query'];$metric=$query['metric_codes'][0];
         $available=\app\services\ai\execution\AiCapabilityGuidanceCatalog::discover($this->capabilities($context),'member','summary');
         if (!isset($available[$metric])) throw new RuntimeException('AI_CAPABILITY_CHANGED');
-        $matches=$this->memberObjects($context)->exactCandidates($pending['name'],[$metric],$reply);
-        if (count($matches)>1) throw new RuntimeException('AI_OBJECT_BINDING_UNAVAILABLE');
+        $matches=$this->memberObjects($context)->exactCandidates($name,[$metric],$phone);
+        if (count($matches)>1) {
+            $envelope['question']='当前可查询范围内有多位同名会员。请补充该会员的完整手机号。';
+            $envelope['fields'][0]['options']=[['value'=>'__supplement__','label'=>'补充完整手机号']];
+            $envelope['_member_identity_request']['name']=$name;
+            return $envelope;
+        }
         if ($matches===[]) {
-            // Keep every accepted slot and ask for a corrected identifier;
-            // zero exact matches is never an empty consumption result.
-            $envelope['question']='未找到与该姓名和手机号同时匹配的会员。请核对完整手机号。';
+            // An absent current relation is not a zero-valued metric result.
+            // Keep the accepted slots while allowing the name to be corrected.
+            $envelope['question']=$phone!==null
+                ?'当前可查询范围未找到与该姓名和手机号同时匹配的会员。请核对完整手机号或更正姓名。'
+                :'当前可查询范围未找到可确认的会员。请核对完整姓名。';
+            $envelope['fields'][0]['options']=[['value'=>'__supplement__','label'=>'更正姓名或完整手机号']];
+            $envelope['_member_identity_request']['name']=$name;
             return $envelope;
         }
         $compiled['plan']['query']['business_filters']['selection_ref']=$matches[0]['ref'];
@@ -3802,6 +3813,53 @@ final class AiGatewayServices
         // facts are included; the normal compiler and Reader still enforce
         // readiness, object grain, authority and the execution budget.
         $intent=$this->resolveOverviewMetrics($intent,$caps);
+        // A selected member needs one current authorized identity. A name
+        // that was not found during masking must never become an aggregate
+        // member read when the customer answers a later metric card.
+        if (($intent['object_kind']??null)==='member' && ($intent['object_relation']??null)==='selection'
+            && $localTerm===null && $sourceQuery===null) {
+            // Clarification history appends later replies to this private
+            // carrier. Only the first question states the original target.
+            $original=explode("\n",(string)($body['_clarification_context']['original_question']??$body['question']),2)[0];
+            // The accepted model term is only a candidate, never an identity
+            // proof. Require its literal presence in the customer's original
+            // question before checking the current authorized member relation.
+            $name=trim((string)($intent['object_term']??''));
+            if ($name==='' || mb_strpos($original,$name,0,'UTF-8')===false
+                || preg_match('/^[\p{L}\p{N}·（）() ]{2,24}$/uD',$name)!==1) {
+                $name=(new \app\services\ai\semantic\AiDeterministicSummaryAdmission())
+                    ->unresolvedNamedPerformanceTarget($original,\app\services\query\metric\MetricSemanticCatalog::entries());
+            }
+            if ($name!==null && count($intent['metric_codes'])===1 && isset($memberMetrics[$intent['metric_codes'][0]])) {
+                $metric=$intent['metric_codes'][0];
+                $matches=$this->memberObjects($context)->exactCandidates($name,[$metric],$memberPhone);
+                if (count($matches)===1) {
+                    $localTerm=$name;
+                } else {
+                    $dateTerms=(array)($projection['date_terms']??[]);
+                    $period=(new \app\services\ai\execution\AiWorkflowPlanner())->normalizePeriod($dateTerms[0]??['code'=>'TODAY'],$today);
+                    $query=['query_shape'=>'summary','metric_codes'=>[$metric],
+                        'start_date'=>$period['start'],'end_date'=>$period['end'],
+                        'compare_range'=>null,'store_ids'=>[],'business_filters'=>['object_kind'=>'member','selection_ref'=>null],
+                        'ranking'=>null,'aggregate_condition'=>null];
+                    $pending=$finish(['kind'=>'plan','plan'=>['workflow_code'=>'wf_performance_summary','query'=>$query,'output_format'=>$body['output_format']]]);
+                    $guidance=$this->semanticClarification($understanding,$safe,$body);
+                    $guidance['question']=$matches===[]
+                        ?'当前可查询范围无法确认这位会员。请核对完整姓名；如有同名会员，再补充完整手机号。'
+                        :'当前可查询范围内有多位同名会员。请补充该会员的完整手机号。';
+                    $guidance['fields'][0]['label']='确认会员';
+                    $guidance['fields'][0]['options']=[['value'=>'__supplement__','label'=>$matches===[]?'更正完整姓名':'补充完整手机号']];
+                    if (($pending['kind']??null)==='plan') $guidance['_member_identity_request']=['name'=>$name,'compiled'=>$pending];
+                    return $guidance;
+                }
+            } else {
+                $guidance=$this->semanticClarification($understanding,$safe,$body);
+                $guidance['question']='当前可查询范围无法确认指定会员。请补充完整会员姓名。';
+                $guidance['fields'][0]['label']='确认会员';
+                $guidance['fields'][0]['options']=[['value'=>'__supplement__','label'=>'补充完整姓名']];
+                return $guidance;
+            }
+        }
         // A named member is a local private selection, not an aggregate
         // member dimension.  The language model chooses the semantic object
         // and registered measurement; this block only proves that its opaque
@@ -7646,7 +7704,10 @@ final class AiGatewayServices
                     // failure is overwritten and cannot be distinguished from
                     // a database or PHP runtime failure during acceptance.
                     $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,$predicate,[],'query_runtime_probe');
-                    throw new RuntimeException('AI_QUERY_FAILED');
+                    // A Reader contract mismatch is a capability boundary.
+                    // Retrying the identical plan cannot make it executable.
+                    throw new RuntimeException($error instanceof \app\services\query\metric\MetricQueryContractException
+                        ? 'AI_QUERY_CONTRACT_UNAVAILABLE' : 'AI_QUERY_FAILED');
                 }
                 return $evidence;
             },
@@ -7733,7 +7794,7 @@ final class AiGatewayServices
             // The export handler records a more specific, payload-free
             // diagnostic before returning one of these boundary codes.  Do
             // not overwrite it with a generic graph-level label.
-            if (in_array($error->getMessage(),['AI_QUERY_FAILED','AI_DETAIL_SCOPE_TOO_LARGE','AI_EXPORT_HANDOFF_FAILED','AI_EXPORT_QUEUE_FAILED'],true)) throw $error;
+            if (in_array($error->getMessage(),['AI_QUERY_FAILED','AI_QUERY_CONTRACT_UNAVAILABLE','AI_DETAIL_SCOPE_TOO_LARGE','AI_EXPORT_HANDOFF_FAILED','AI_EXPORT_QUEUE_FAILED'],true)) throw $error;
             // The graph is server-owned.  Record a bounded execution-code
             // diagnostic, never an exception message that may contain data.
             $known=['AI_EVIDENCE_INCOMPLETE','AI_NODE_OUTPUT_INVALID','AI_WORKFLOW_BUDGET_EXHAUSTED','AI_NODE_TIMEOUT','AI_EXECUTION_CLOCK_REGRESSED','AI_EXECUTION_CLOCK_INVALID','AI_WORKFLOW_DEPENDENCY_UNSATISFIED','AI_ANSWER_RENDER_FAILED','AI_EVIDENCE_GUARD_FAILED'];
@@ -8194,6 +8255,7 @@ final class AiGatewayServices
                 'METRIC_PERMISSION_GRAIN_UNAVAILABLE'=>'当前权限范围不支持这项明细查询。',
                 'AI_CAPABILITY_NOT_READY'=>'当前系统尚不能执行这项查询。',
                 'AI_ANALYSIS_COMBINATION_UNAVAILABLE'=>'当前系统尚不能完整执行这些对象、指标和条件的组合。',
+                'AI_QUERY_CONTRACT_UNAVAILABLE'=>'当前对象、指标与条件的组合暂不支持查询，请调整条件或联系管理员。',
                 'AI_PERSONNEL_PERMISSION_REQUIRED'=>'当前账号没有员工业绩查询权限。',
                 'AI_NODE_TIMEOUT'=>'数据查询未能在规定时间内完成，请稍后重试。',
                 'DEADLINE_EXCEEDED'=>'本次处理超时，尚未获得可交付的结果，请稍后重试。',
