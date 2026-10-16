@@ -27,4 +27,6 @@ assertInvalidBatch($method, $service, ['drafts' => [$draft], 'idempotency_key' =
 assertInvalidBatch($method, $service, ['drafts' => array_fill(0, 201, $draft), 'idempotency_key' => 'transfer-batch-201-01234567']);
 assertInvalidBatch($method, $service, ['drafts' => [['lines' => array_fill(0, 501, ['product_id' => 1])]], 'idempotency_key' => 'transfer-batch-1-01234567']);
 assertInvalidBatch($method, $service, ['drafts' => [['lines' => []], ['lines' => []]], 'idempotency_key' => 'transfer-batch-1-01234567']);
+assertInvalidBatch($method, $service, ['drafts' => [$draft], 'idempotency_key' => 'transfer-batch-1-01234567', 'dispatch_after_create' => 'true']);
+assertInvalidBatch($method, $service, ['drafts' => [$draft], 'idempotency_key' => 'transfer-batch-1-01234567', 'dispatch_after_create' => true]);
 echo "CROSS_TRANSFER_BATCH_CONTRACT_OK\n";

@@ -254,7 +254,7 @@ export function createInventoryApi(options = {}) {
     hqCrossTransferStaffs(query = {}) { return request('/v3/hq/cross-transfer/transfer-staffs', { query }) },
     hqCrossTransferDetail(id, query = {}) { return request(`/v3/hq/cross-transfer/${Number(id)}/detail`, { query }) },
     createHqCrossTransfer(body) { return request('/v3/hq/cross-transfer', { method: 'POST', body }) },
-    createHqCrossTransferBatch(body) { return request('/v3/hq/cross-transfer/batch', { method: 'POST', body }) },
+    createHqCrossTransferBatch(body) { return request('/v3/hq/cross-transfer/batch', { method: 'POST', body, timeoutMs: 300000 }) },
     operateHqCrossTransferBatch(body) { return request('/v3/hq/cross-transfer/batch-operation', { method: 'POST', body, timeoutMs: 300000 }) },
     // 平台只切换认证入口，草稿版本和库存事实仍由同一领域服务处理。
     updateHqCrossTransfer(id, body) { return request(`/v3/hq/cross-transfer/${Number(id)}/update`, { method: 'POST', body }) },
@@ -295,7 +295,7 @@ export function createInventoryApi(options = {}) {
     crossTransferIncomingRequests() { return request('/v3/cross-transfer/incoming-requests') },
     crossTransferDetail(id) { return request(`/v3/cross-transfer/${Number(id)}/detail`) },
     createCrossTransfer(body) { return request('/v3/cross-transfer', { method: 'POST', body }) },
-    createCrossTransferBatch(body) { return request('/v3/cross-transfer/batch', { method: 'POST', body }) },
+    createCrossTransferBatch(body) { return request('/v3/cross-transfer/batch', { method: 'POST', body, timeoutMs: 300000 }) },
     operateCrossTransferBatch(body) { return request('/v3/cross-transfer/batch-operation', { method: 'POST', body, timeoutMs: 300000 }) },
     updateCrossTransfer(id, body) { return request(`/v3/cross-transfer/${Number(id)}/update`, { method: 'POST', body }) },
     deleteCrossTransferDraft(id, body) { return request(`/v3/cross-transfer/${Number(id)}/delete-draft`, { method: 'POST', body }) },

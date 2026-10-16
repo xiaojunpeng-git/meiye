@@ -144,24 +144,27 @@ final class InventoryCrossSubjectTransferServices
         return ['list' => array_values(array_filter($documents, static fn (array $document): bool => (bool)$document['lines']))];
     }
 
-    public function createDraftForStore(int $storeId, int $operatorId, array $input): array
+    public function createDraftForStore(int $storeId, int $operatorId, array $input, bool $allowDispatchedReplay = false): array
     {
         $command = $this->normalize($input);
-        return Db::transaction(function () use ($storeId, $operatorId, $command): array {
+        return Db::transaction(function () use ($storeId, $operatorId, $command, $allowDispatchedReplay): array {
             $sourceScope = $this->scope($storeId, $operatorId, true);
             $target = $this->targetForStore($sourceScope, $command);
             // 目录只展示同组织调入方，但服务端仍需防止直接构造跨组织写请求。
             if (!$this->sameOrganizationRoot($sourceScope, $target)) throw new \RuntimeException('inventory_cross_transfer_target_scope_denied');
-            return $this->createDraft($sourceScope, $target, $command);
+            return $this->createDraft($sourceScope, $target, $command, $allowDispatchedReplay);
         });
     }
 
     /** One worksheet may fan out to many source/target documents, but either all drafts exist or none do. */
     public function createDraftBatchForStore(int $storeId, int $operatorId, array $input): array
     {
-        return $this->createDraftBatch($input, function (array $draft) use ($storeId, $operatorId): array {
-            return $this->createDraftForStore($storeId, $operatorId, $draft);
-        });
+        $dispatchAfterCreate = ($input['dispatch_after_create'] ?? false) === true;
+        return $this->createDraftBatch(
+            $input,
+            fn (array $draft): array => $this->createDraftForStore($storeId, $operatorId, $draft, $dispatchAfterCreate),
+            fn (int $documentId, array $draft): array => $this->dispatch($this->scope($storeId, $operatorId, true), $documentId)
+        );
     }
 
     /** Replace an unshipped source-store draft under its document lock; no stock, allocation or fact is changed. */
@@ -267,7 +270,7 @@ final class InventoryCrossSubjectTransferServices
     }
 
     /** 平台新建调拨只限制调出库存的操作范围；调入方是接收对象，不继承操作人的门店权限。 */
-    public function createDraftForHeadquarters(array $adminInfo, int $hqLocationId, array $input, ?array &$batchStaffRows = null): array
+    public function createDraftForHeadquarters(array $adminInfo, int $hqLocationId, array $input, ?array &$batchStaffRows = null, bool $allowDispatchedReplay = false): array
     {
         $command = $this->normalize($input);
         if (!in_array($command['targetPartyType'], ['STORE', 'HQ'], true)) throw new \InvalidArgumentException('inventory_cross_transfer_target_invalid');
@@ -282,13 +285,13 @@ final class InventoryCrossSubjectTransferServices
             $sourceRoot = explode('/', trim((string)$sourceScope['organizationPath'], '/'))[0] ?? '';
             if ($hqRoot === '' || $sourceRoot === '' || $hqRoot !== $sourceRoot) throw new \RuntimeException('inventory_cross_transfer_source_scope_denied');
         }
-        return Db::transaction(function () use ($sourceScope, $hqScope, $command, &$batchStaffRows): array {
+        return Db::transaction(function () use ($sourceScope, $hqScope, $command, &$batchStaffRows, $allowDispatchedReplay): array {
             $target = $command['targetPartyType'] === 'HQ' ? $this->headquartersForScope($sourceScope, $command['targetLocationId']) : $this->scope($command['targetStoreId'], 0, false);
             if ($target === null) throw new \RuntimeException('inventory_cross_transfer_hq_location_missing');
             // 产品确认：调入方不按人员门店/组织权限裁剪；有效实体和租户隔离仍须服务端验证。
             $this->assertSameTenant($sourceScope, $target);
             $command['transferStaff'] = $this->platformTransferStaff($hqScope, $sourceScope, $target, (int)$command['transferStaffId'], $batchStaffRows);
-            return $this->createDraft($sourceScope, $target, $command);
+            return $this->createDraft($sourceScope, $target, $command, $allowDispatchedReplay);
         });
     }
 
@@ -297,19 +300,32 @@ final class InventoryCrossSubjectTransferServices
     {
         // Scope this cache to one batch call, including on long-lived application workers.
         $staffRows = [];
-        return $this->createDraftBatch($input, function (array $draft) use ($adminInfo, &$staffRows): array {
-            $hqLocationId = (int)($draft['hq_location_id'] ?? 0);
-            unset($draft['hq_location_id']);
-            return $this->createDraftForHeadquarters($adminInfo, $hqLocationId, $draft, $staffRows);
-        });
+        $hqScopes = [];
+        $dispatchAfterCreate = ($input['dispatch_after_create'] ?? false) === true;
+        return $this->createDraftBatch(
+            $input,
+            function (array $draft) use ($adminInfo, &$staffRows, $dispatchAfterCreate): array {
+                $hqLocationId = (int)($draft['hq_location_id'] ?? 0);
+                unset($draft['hq_location_id']);
+                return $this->createDraftForHeadquarters($adminInfo, $hqLocationId, $draft, $staffRows, $dispatchAfterCreate);
+            },
+            function (int $documentId, array $draft) use ($adminInfo, &$hqScopes): array {
+                $hqLocationId = (int)($draft['hq_location_id'] ?? 0);
+                if (!isset($hqScopes[$hqLocationId])) $hqScopes[$hqLocationId] = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+                return $this->dispatch($this->platformSourceScope($hqScopes[$hqLocationId], $documentId, true), $documentId);
+            }
+        );
     }
 
-    /** Derive stable child command keys so a retry cannot duplicate any of the 102 destination drafts. */
-    private function createDraftBatch(array $input, callable $create): array
+    /** Create and optionally dispatch every destination inside one transaction; retrying cannot duplicate stock facts. */
+    private function createDraftBatch(array $input, callable $create, ?callable $dispatch = null): array
     {
         $keys = array_keys($input);
         sort($keys);
-        if ($keys !== ['drafts', 'idempotency_key'] || !is_array($input['drafts'])
+        $dispatchAfterCreate = ($input['dispatch_after_create'] ?? false) === true;
+        if (!in_array($keys, [['drafts', 'idempotency_key'], ['dispatch_after_create', 'drafts', 'idempotency_key']], true)
+            || (array_key_exists('dispatch_after_create', $input) && !is_bool($input['dispatch_after_create']))
+            || ($dispatchAfterCreate && $dispatch === null) || !is_array($input['drafts'])
             || array_keys($input['drafts']) !== array_keys(array_values($input['drafts']))
             || count($input['drafts']) < 1 || count($input['drafts']) > 200
             || !is_string($input['idempotency_key'])
@@ -325,13 +341,28 @@ final class InventoryCrossSubjectTransferServices
             $lineCount += count($draft['lines']);
         }
         if ($lineCount > 500) throw new \InvalidArgumentException('inventory_cross_transfer_batch_invalid');
-        return Db::transaction(function () use ($input, $create): array {
+        return Db::transaction(function () use ($input, $create, $dispatch, $dispatchAfterCreate): array {
             $created = [];
             foreach ($input['drafts'] as $index => $draft) {
-                $draft['idempotency_key'] = 'transfer-batch-' . substr(hash('sha256', $input['idempotency_key'] . ':' . $index), 0, 48);
+                // Dispatch commands cannot replay a draft-only command with the same client key.
+                $modeKey = $dispatchAfterCreate ? 'dispatch:' : '';
+                $draft['idempotency_key'] = 'transfer-batch-' . substr(hash('sha256', $modeKey . $input['idempotency_key'] . ':' . $index), 0, 48);
                 $created[] = $create($draft);
             }
-            return ['draft_count' => count($created), 'drafts' => $created];
+            if (!$dispatchAfterCreate) return ['draft_count' => count($created), 'drafts' => $created];
+            $replayed = array_filter($created, static fn (array $item): bool => (bool)($item['idempotent'] ?? false));
+            if ($replayed) {
+                if (count($replayed) !== count($created) || count(array_filter($created, static fn (array $item): bool => in_array((string)$item['document_status'], ['DISPATCHED', 'RECEIVED'], true))) !== count($created)) {
+                    throw new \RuntimeException('inventory_cross_transfer_idempotency_conflict');
+                }
+                return ['draft_count' => count($created), 'dispatch_count' => count($created), 'drafts' => $created, 'idempotent' => true];
+            }
+            foreach ($created as $index => &$document) {
+                $dispatch((int)$document['transfer_id'], $input['drafts'][$index]);
+                $document['document_status'] = 'DISPATCHED';
+            }
+            unset($document);
+            return ['draft_count' => count($created), 'dispatch_count' => count($created), 'drafts' => $created, 'idempotent' => false];
         });
     }
 
@@ -729,7 +760,7 @@ final class InventoryCrossSubjectTransferServices
         return Db::transaction(fn (): array => $this->voidWithdrawnDraft($this->platformSourceScope($scope, $documentId, true), $documentId, $input));
     }
 
-    private function createDraft(array $source, array $target, array $command): array
+    private function createDraft(array $source, array $target, array $command, bool $allowDispatchedReplay = false): array
     {
         $this->assertSameTenant($source, $target);
         $source['location'] = $this->subjectLocation($source, $command['now']);
@@ -740,7 +771,7 @@ final class InventoryCrossSubjectTransferServices
         $sourceLocation = $this->subjectLocation($source, $command['now']);
         $targetLocation = $this->subjectLocation($target, $command['now']);
         $existing = Db::name('inventory_cross_transfer_document')->where('tenant_id', $source['tenantId'])->where('idempotency_key', $command['key'])->lock(true)->find();
-        if ($existing) return $this->replayDraft((array)$existing, $source, $target, $command);
+        if ($existing) return $this->replayDraft((array)$existing, $source, $target, $command, $allowDispatchedReplay);
         $request = $this->requestDocument($target, $command['requestDocumentId'], $source);
         $transferNo = (new InventoryBusinessDocumentNumberServices())->next($source['tenantId'], InventoryBusinessDocumentNumberServices::TRANSFER, $command['date'], $command['now']);
         $documentId = (int)Db::name('inventory_cross_transfer_document')->insertGetId([
@@ -1398,7 +1429,7 @@ final class InventoryCrossSubjectTransferServices
     private function assertRequestRemaining(int $requestLineId,int $units):void{if($requestLineId<=0)return;$line=Db::name('inventory_stock_request_line')->where('id',$requestLineId)->lock(true)->find();$document=$line?Db::name('inventory_stock_request_document')->where('id',(int)$line['document_id'])->lock(true)->find():null;if(!$line||!$document||!in_array((string)$document['document_status'],['APPLIED','PARTIAL'],true))throw new \RuntimeException('inventory_cross_transfer_request_unavailable');$requested=(int)$line['requested_quantity_units'];$fulfilled=$this->fulfilledUnits($requestLineId);if($requested<$fulfilled+$units)throw new \RuntimeException('inventory_cross_transfer_request_quantity_exceeded');}
     private function refreshRequestStatus(int $requestId):void{if($requestId<=0)return;$document=Db::name('inventory_stock_request_document')->where('id',$requestId)->lock(true)->find();if(!$document||in_array((string)$document['document_status'],['CANCELLED','TERMINATED'],true))return;$lines=Db::name('inventory_stock_request_line')->where('document_id',$requestId)->lock(true)->select()->toArray();if(!$lines)return;$requested=0;$fulfilled=0;foreach($lines as $line){$requested+=(int)$line['requested_quantity_units'];$fulfilled+=$this->fulfilledUnits((int)$line['id']);}$status=$fulfilled>= $requested?'DONE':($fulfilled>0?'PARTIAL':'APPLIED');Db::name('inventory_stock_request_document')->where('id',$requestId)->whereIn('document_status',['APPLIED','PARTIAL','DONE'])->update(['document_status'=>$status]);}
     /** 幂等重放必须绑定两端实际仓库，避免同一总部内切仓重试读回另一仓草稿。 */
-    private function replayDraft(array $document, array $from, array $to, array $command): array
+    private function replayDraft(array $document, array $from, array $to, array $command, bool $allowDispatchedReplay = false): array
     {
         $legacyStoreReplay = $from['partyType'] === 'STORE' && $to['partyType'] === 'STORE'
             && (string)$document['request_fingerprint'] === (string)($command['legacyFingerprint'] ?? '');
@@ -1407,8 +1438,8 @@ final class InventoryCrossSubjectTransferServices
             || (string)$document['to_party_type'] !== $to['partyType'] || (int)$document['to_party_id'] !== (int)$to['partyId']
             || (int)$document['from_location_id'] !== (int)$from['location']['id']
             || (int)$document['to_location_id'] !== (int)$to['location']['id']
-            || (string)$document['document_status'] !== 'DRAFT') throw new \RuntimeException('inventory_cross_transfer_idempotency_conflict');
-        return ['transfer_id' => (int)$document['id'], 'transfer_no' => (string)$document['transfer_no'], 'document_status' => 'DRAFT', 'idempotent' => true];
+            || !in_array((string)$document['document_status'], $allowDispatchedReplay ? ['DRAFT', 'DISPATCHED', 'RECEIVED'] : ['DRAFT'], true)) throw new \RuntimeException('inventory_cross_transfer_idempotency_conflict');
+        return ['transfer_id' => (int)$document['id'], 'transfer_no' => (string)$document['transfer_no'], 'document_status' => (string)$document['document_status'], 'idempotent' => true];
     }
     private function statusName(string $status):string{return['DRAFT'=>'草稿','DISPATCHED'=>'在途','RECEIVED'=>'已收货','CANCELLED'=>'已取消','REVERSED'=>'已作废'][$status]??$status;}
     private function date(string $value):string{$date=\DateTimeImmutable::createFromFormat('!Y-m-d',trim($value));$errors=\DateTimeImmutable::getLastErrors();if(!$date||($errors!==false&&($errors['warning_count']||$errors['error_count']))||$date->format('Y-m-d')!==trim($value))throw new \InvalidArgumentException('inventory_cross_transfer_date_invalid');return$date->format('Y-m-d');}

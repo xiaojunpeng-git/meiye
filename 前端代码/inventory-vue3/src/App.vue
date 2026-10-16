@@ -142,6 +142,7 @@ const stockSummary = ref({ available_quantity: '0', inventory_amount_cents: null
 const stockTableLayout = ref({ fixed: false, summaryRow: false })
 const listLoading = ref(false)
 const listError = ref('')
+const transferSavedNotice = ref('')
 const listDateRange = ref(null)
 const groupedListPages = new Set(Object.keys(groupedDetailColumns))
 const groupedDetails = ref({})
@@ -1749,6 +1750,19 @@ async function confirmRecipeAction() {
 
 function onModalSaved(result = {}) {
   editor.value = ''
+  if (mode.value === 'platform' && active.value === 'transfer' && result?.transferSourceKey) {
+    const [sourceType, sourceId] = String(result.transferSourceKey).split(':', 2)
+    // A new transfer is visible only in its source scope and resulting lifecycle filter.
+    if (sourceType === 'HQ' && Number(sourceId) > 0) platformHqLocationId.value = Number(sourceId)
+    platformTransferFromParty.value = result.transferSourceKey
+    platformTransferToParty.value = 'ALL:0'
+    platformTransferStatus.value = result.transferStatus === 'DISPATCHED' ? 'DISPATCHED' : 'DRAFT'
+    keyword.value = ''
+    const savedKind = result.transferStatus === 'DISPATCHED' ? '已发货调拨单' : '调拨草稿'
+    transferSavedNotice.value = Number(result.transferSourceCount) > 1
+      ? `已生成 ${Number(result.transferDraftCount)} 张${savedKind}，涉及 ${Number(result.transferSourceCount)} 个调出方；当前显示第一个调出方，其余可切换调出方查看。`
+      : `已生成 ${Number(result.transferDraftCount)} 张${savedKind}。`
+  }
   // 新单可能在弹窗内换仓；刷新列表前对准实际落单仓，避免误以为保存失败。
   if (mode.value === 'platform' && platformListWarehouseOptions.value.some((item) => item.key === result?.warehouseSelection)) {
     platformListWarehouseSelection.value = result.warehouseSelection
@@ -2049,6 +2063,7 @@ onBeforeUnmount(() => {
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresWarehouse && !platformListWarehouseOptions.length)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
+            <p v-if="active === 'transfer' && transferSavedNotice" class="inventory-save-notice" role="status">{{ transferSavedNotice }}</p>
             <div v-if="active === 'transfer'" class="transfer-batch-toolbar">
               <label><input type="checkbox" :checked="selectableTransferRows.length > 0 && selectedTransferRows.length === selectableTransferRows.length" :disabled="!selectableTransferRows.length || transferBatchPreparing || transferActionSubmitting" @change="toggleAllVisibleTransfers" />全选当前列表</label>
               <span>已选 {{ selectedTransferRows.length }} 张</span>

@@ -103,12 +103,13 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
         }
     }
 
-    /** Multi-destination imports remain draft-only and commit as one transaction. */
+    /** Batch creation stays draft-only unless the caller explicitly requests atomic dispatch. */
     public function createBatch()
     {
         try {
             $input = $this->request->post();
-            return $this->success('调拨草稿已批量生成。', $this->services->createDraftBatchForHeadquarters((array)$this->adminInfo, is_array($input) ? $input : []));
+            $input = is_array($input) ? $input : [];
+            return $this->success(($input['dispatch_after_create'] ?? false) === true ? '调拨单已生成并发货。' : '调拨草稿已批量生成。', $this->services->createDraftBatchForHeadquarters((array)$this->adminInfo, $input));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\InvalidArgumentException $exception) {

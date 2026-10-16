@@ -11,6 +11,33 @@ function quantity(value) {
   return text
 }
 
+/** Change only selected unsaved lines; a shared target list is valid only for one source. */
+export function applyTransferDetailBatch(rows, selectedIds, action, value) {
+  const selected = new Set(selectedIds)
+  if (!selected.size || !rows.some((row) => selected.has(row.id))) throw new Error('请先勾选调拨明细。')
+  if (action === 'delete') return rows.filter((row) => !selected.has(row.id))
+  if (action === 'quantity') {
+    const amount = quantity(value)
+    return rows.map((row) => selected.has(row.id)
+      ? { ...row, quantity: amount, destinations: row.destinations.map((item) => ({ ...item, quantity: amount, custom: false })) }
+      : row)
+  }
+  if (action === 'destinations') {
+    const sources = new Set(rows.filter((row) => selected.has(row.id)).map((row) => row.sourceKey))
+    if (sources.size !== 1) throw new Error('请只勾选同一调出方的明细。')
+    if (!Array.isArray(value) || !value.length) throw new Error('请至少选择一个调入方。')
+    const targets = [...new Set(value.map((item) => item.key))]
+    for (const key of targets) {
+      party(key)
+      if (key === [...sources][0]) throw new Error('调出方与调入方不能相同。')
+    }
+    return rows.map((row) => selected.has(row.id)
+      ? { ...row, destinations: targets.map((key) => ({ key, quantity: row.quantity, custom: false })) }
+      : row)
+  }
+  throw new Error('不支持的批量操作。')
+}
+
 /** Expand multi-destination rows into one authoritative document per source/target pair. */
 export function planTransferDraftBatch(rows, { platform, storeSourceKey, businessDate, remark, staffId, hqLocationId }) {
   if (!Array.isArray(rows) || !rows.length) throw new Error('请添加调拨商品。')

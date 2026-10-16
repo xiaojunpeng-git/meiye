@@ -1,11 +1,11 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { FileSpreadsheet, Plus, Search, Trash2, X } from '@lucide/vue'
+import { FileSpreadsheet, ListChecks, Plus, Search, Trash2, X } from '@lucide/vue'
 import { inventoryApi, platformInventoryApi } from '../services/inventoryApi'
 import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { exportTransferTemplateXlsx, parseTransferXlsx } from './transferWorksheet'
-import { planTransferDraftBatch } from './transferDraftBatch'
+import { applyTransferDetailBatch, planTransferDraftBatch } from './transferDraftBatch'
 
 const props = defineProps({
   mode: { type: String, default: 'store' },
@@ -27,6 +27,12 @@ const targetLists = ref({})
 const targetLoading = ref({})
 const productRowId = ref(0)
 const destinationRowId = ref(0)
+const batchTargetRow = ref(null)
+const batchMode = ref(false)
+const selectedRowIds = ref([])
+const batchQuantity = ref('')
+const dispatchConfirmation = ref(false)
+const dispatchCount = ref(0)
 const destinationSearch = ref('')
 const fileInput = ref(null)
 const busy = ref(false)
@@ -45,7 +51,8 @@ const sourceOptions = computed(() => {
   return [...hq, ...stores].filter((item, index, list) => list.findIndex((other) => other.key === item.key) === index)
 })
 const activeProductRow = computed(() => rows.value.find((row) => row.id === productRowId.value))
-const activeDestinationRow = computed(() => rows.value.find((row) => row.id === destinationRowId.value))
+const activeDestinationRow = computed(() => batchTargetRow.value || rows.value.find((row) => row.id === destinationRowId.value))
+const selectedRows = computed(() => rows.value.filter((row) => selectedRowIds.value.includes(row.id)))
 const destinationOptions = computed(() => {
   const row = activeDestinationRow.value
   if (!row) return []
@@ -73,6 +80,40 @@ function addRow() {
   const row = newRow(rows.value[rows.value.length - 1]?.sourceKey || defaultSourceKey.value)
   rows.value.push(row)
   if (row.sourceKey) loadTargets(row.sourceKey)
+}
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  selectedRowIds.value = []
+  batchTargetRow.value = null
+  error.value = ''
+}
+function toggleRow(rowId) {
+  selectedRowIds.value = selectedRowIds.value.includes(rowId)
+    ? selectedRowIds.value.filter((id) => id !== rowId)
+    : [...selectedRowIds.value, rowId]
+}
+function toggleAllRows() {
+  selectedRowIds.value = selectedRows.value.length === rows.value.length ? [] : rows.value.map((row) => row.id)
+}
+function applyBatch(action, value) {
+  try {
+    rows.value = applyTransferDetailBatch(rows.value, selectedRowIds.value, action, value)
+    if (action === 'delete') selectedRowIds.value = []
+    if (action === 'quantity') batchQuantity.value = ''
+    if (action === 'destinations') batchTargetRow.value = null
+    error.value = ''
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '批量操作失败。' }
+}
+async function openBatchDestinations() {
+  if (!selectedRows.value.length) { error.value = '请先勾选调拨明细。'; return }
+  const sources = new Set(selectedRows.value.map((row) => row.sourceKey))
+  if (sources.size !== 1) { error.value = '请只勾选同一调出方的明细。'; return }
+  const sourceKey = selectedRows.value[0].sourceKey
+  if (!sourceKey && platform.value) { error.value = '请先选择调出方。'; return }
+  await loadTargets(sourceKey)
+  batchTargetRow.value = { sourceKey, quantity: '1', destinations: [] }
+  destinationSearch.value = ''
+  error.value = ''
 }
 function onSourceChanged(row, key) {
   // A source change invalidates both the selected SKU identity and its eligible recipients.
@@ -177,6 +218,17 @@ function updateDefaultQuantity(row, value) {
   row.quantity = value
   row.destinations = row.destinations.map((item) => item.custom ? item : { ...item, quantity: value })
 }
+function openDispatchConfirmation() {
+  try {
+    dispatchCount.value = planTransferDraftBatch(rows.value, {
+      platform: platform.value, storeSourceKey: defaultSourceKey.value,
+      businessDate: businessDate.value, remark: remark.value,
+      staffId: staffId.value, hqLocationId: props.hqLocationId
+    }).length
+    error.value = ''
+    dispatchConfirmation.value = true
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '调拨明细不完整。' }
+}
 function saveBlob(bytes) {
   const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   const url = URL.createObjectURL(blob)
@@ -248,7 +300,7 @@ async function importFile(event) {
     error.value = cause instanceof Error ? cause.message : '调拨文件读取失败。'
   } finally { busy.value = false }
 }
-async function submitDrafts(items = rows.value) {
+async function submitDrafts(items = rows.value, dispatchAfterCreate = false) {
   if (busy.value) return
   error.value = ''
   let drafts
@@ -259,17 +311,26 @@ async function submitDrafts(items = rows.value) {
       staffId: staffId.value, hqLocationId: props.hqLocationId
     })
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '调拨明细不完整。'; return }
-  const content = JSON.stringify(drafts)
+  const content = JSON.stringify({ drafts, dispatchAfterCreate })
   if (attempt.value.content !== content) {
     const nonce = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`
     attempt.value = { content, key: `transfer-batch-${drafts.length}-${nonce}` }
   }
   busy.value = true
   try {
-    const payload = { idempotency_key: attempt.value.key, drafts }
-    if (platform.value) await platformInventoryApi.createHqCrossTransferBatch(payload)
-    else await inventoryApi.createCrossTransferBatch(payload)
-    emit('saved', { businessDate: businessDate.value })
+    const payload = { idempotency_key: attempt.value.key, drafts, ...(dispatchAfterCreate ? { dispatch_after_create: true } : {}) }
+    const response = platform.value
+      ? await platformInventoryApi.createHqCrossTransferBatch(payload)
+      : await inventoryApi.createCrossTransferBatch(payload)
+    if (dispatchAfterCreate && Number(response?.dispatch_count) !== drafts.length) throw new Error('发货结果未确认，请先查询单据状态后再重试。')
+    // Drafts are scoped to their source; return it so the list opens the saved documents.
+    emit('saved', {
+      businessDate: businessDate.value,
+      transferSourceKey: platform.value ? String(items[0]?.sourceKey || '') : '',
+      transferDraftCount: drafts.length,
+      transferSourceCount: new Set(items.map((row) => row.sourceKey)).size,
+      transferStatus: dispatchAfterCreate ? 'DISPATCHED' : 'DRAFT'
+    })
     emit('close')
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '生成调拨草稿失败。' }
   finally { busy.value = false }
@@ -309,12 +370,20 @@ watch(defaultSourceKey, (sourceKey, previous) => {
         <input ref="fileInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden @change="importFile" />
       </section>
       <section class="composer-lines">
-        <header><h3>调拨明细</h3><button v-if="!importMode" type="button" :disabled="busy" @click="addRow"><Plus :size="16" />添加明细</button></header>
+        <header><h3>调拨明细</h3><div v-if="!importMode" class="line-header-actions"><button type="button" :disabled="busy" :aria-pressed="batchMode" @click="toggleBatchMode"><ListChecks :size="16" />批量操作</button><button type="button" :disabled="busy" @click="addRow"><Plus :size="16" />添加明细</button></div></header>
+        <div v-if="batchMode && !importMode" class="line-batch-toolbar">
+          <span>已选 {{ selectedRows.length }} 条</span>
+          <button type="button" :disabled="busy || !selectedRows.length" @click="openBatchDestinations">设置调入方</button>
+          <input v-model="batchQuantity" inputmode="decimal" aria-label="批量每店数量" placeholder="每店数量" :disabled="busy" />
+          <button type="button" :disabled="busy || !selectedRows.length" @click="applyBatch('quantity', batchQuantity)">应用数量</button>
+          <button type="button" class="batch-delete" :disabled="busy || !selectedRows.length" @click="applyBatch('delete')"><Trash2 :size="14" />删除所选</button>
+        </div>
         <div class="composer-table-scroll">
-          <table><thead><tr><th>调出方</th><th>商品</th><th>调入方</th><th>每店数量</th><th>明细备注</th><th>操作</th></tr></thead>
+          <table><thead><tr><th v-if="batchMode && !importMode" class="select-cell"><input type="checkbox" aria-label="全选调拨明细" :checked="rows.length > 0 && selectedRows.length === rows.length" :disabled="busy || !rows.length" @change="toggleAllRows" /></th><th>调出方</th><th>商品</th><th>调入方</th><th>每店数量</th><th>明细备注</th><th>操作</th></tr></thead>
             <tbody>
-              <tr v-if="!rows.length"><td colspan="6" class="empty">暂无调拨明细</td></tr>
+              <tr v-if="!rows.length"><td :colspan="batchMode && !importMode ? 7 : 6" class="empty">暂无调拨明细</td></tr>
               <tr v-for="row in rows" :key="row.id">
+                <td v-if="batchMode && !importMode" class="select-cell"><input type="checkbox" :checked="selectedRowIds.includes(row.id)" :disabled="busy" :aria-label="`选择第 ${rows.indexOf(row) + 1} 条明细`" @change="toggleRow(row.id)" /></td>
                 <td class="party-cell"><InventoryStoreSelector v-if="platform" :model-value="row.sourceKey" :options="sourceOptions" presentation="modal" :disabled="busy" placeholder="选择调出方" @update:modelValue="onSourceChanged(row, $event)" /><span v-else>{{ scopeName }}</span></td>
                 <td><button type="button" class="product-button" :disabled="busy" @click="openProducts(row)">{{ row.product ? `${row.product.product_name} · ${row.product.sku_name || '默认规格'}` : '选择商品' }}</button></td>
                 <td><button type="button" class="destination-button" :disabled="busy || !!targetLoading[row.sourceKey]" @click="openDestinations(row)">{{ row.destinations.length ? `已选 ${row.destinations.length} 个调入方` : '选择调入方' }}</button></td>
@@ -328,23 +397,31 @@ watch(defaultSourceKey, (sourceKey, previous) => {
       </section>
       <p v-if="error" class="composer-error" role="alert">{{ error }}</p>
     </main>
-    <footer class="composer-footer"><span>{{ rows.length }} 项商品 · {{ plannedCount }} 张调拨草稿</span><div><button type="button" :disabled="busy" @click="emit('close')">取消</button><button v-if="!importMode || !!error" type="button" class="primary" :disabled="!canSubmit" @click="submitDrafts()">{{ busy ? '生成中' : importMode ? '重试生成草稿' : '生成调拨草稿' }}</button></div></footer>
+    <footer class="composer-footer"><span>{{ rows.length }} 项商品 · {{ plannedCount }} 张调拨草稿</span><div><button v-if="!importMode" type="button" class="dispatch-button" :disabled="!canSubmit" @click="openDispatchConfirmation">生成调拨并发货</button><button type="button" :disabled="busy" @click="emit('close')">取消</button><button v-if="!importMode || !!error" type="button" class="primary" :disabled="!canSubmit" @click="submitDrafts()">{{ busy ? '生成中' : importMode ? '重试生成草稿' : '生成调拨草稿' }}</button></div></footer>
   </section>
   <InventoryProductSelector :visible="!!productRowId" :selected-rows="activeProductRow?.product ? [activeProductRow.product] : []" :catalog-api="catalogApi" :catalog-query="catalogQuery" @close="productRowId = 0" @confirm="selectProducts" />
   <Teleport to="body">
+    <div v-if="dispatchConfirmation" class="dispatch-layer">
+      <button class="dispatch-mask" aria-label="返回调拨明细" @click="dispatchConfirmation = false" />
+      <section class="dispatch-dialog" role="dialog" aria-modal="true" aria-label="确认生成并发货">
+        <header><h3>确认生成并发货</h3><button class="icon-button" title="关闭" @click="dispatchConfirmation = false"><X :size="18" /></button></header>
+        <p>将生成 {{ dispatchCount }} 张调拨单并立即发货，调出方库存随即扣减。任一单发货失败，本次全部不生成。</p>
+        <footer><button type="button" @click="dispatchConfirmation = false">返回</button><button type="button" class="dispatch-button" @click="dispatchConfirmation = false; submitDrafts(rows, true)">确认发货</button></footer>
+      </section>
+    </div>
     <div v-if="activeDestinationRow" class="destination-layer">
-      <button class="destination-mask" aria-label="关闭调入方选择" @click="destinationRowId = 0" />
+      <button class="destination-mask" aria-label="关闭调入方选择" @click="destinationRowId = 0; batchTargetRow = null" />
       <section class="destination-dialog" role="dialog" aria-modal="true" aria-label="选择调入方">
-        <header><h3>选择调入方</h3><button class="icon-button" title="关闭" @click="destinationRowId = 0"><X :size="18" /></button></header>
+        <header><h3>选择调入方</h3><button class="icon-button" title="关闭" @click="destinationRowId = 0; batchTargetRow = null"><X :size="18" /></button></header>
         <div class="destination-toolbar"><label><Search :size="16" /><input v-model="destinationSearch" placeholder="搜索门店或编码" /></label><button type="button" @click="selectVisibleDestinations(activeDestinationRow)">全选当前结果</button><span>已选 {{ activeDestinationRow.destinations.length }}</span></div>
         <div class="destination-list">
           <div v-for="option in destinationOptions" :key="option.key" class="destination-item">
             <label><input type="checkbox" :checked="activeDestinationRow.destinations.some((item) => item.key === option.key)" @change="toggleDestination(activeDestinationRow, option)" />{{ option.name }}</label>
-            <input v-if="activeDestinationRow.destinations.some((item) => item.key === option.key)" :value="activeDestinationRow.destinations.find((item) => item.key === option.key)?.quantity" inputmode="decimal" aria-label="该门店调拨数量" @input="activeDestinationRow.destinations.find((item) => item.key === option.key).quantity = $event.target.value; activeDestinationRow.destinations.find((item) => item.key === option.key).custom = true" />
+            <input v-if="!batchTargetRow && activeDestinationRow.destinations.some((item) => item.key === option.key)" :value="activeDestinationRow.destinations.find((item) => item.key === option.key)?.quantity" inputmode="decimal" aria-label="该门店调拨数量" @input="activeDestinationRow.destinations.find((item) => item.key === option.key).quantity = $event.target.value; activeDestinationRow.destinations.find((item) => item.key === option.key).custom = true" />
           </div>
           <p v-if="!destinationOptions.length">没有符合条件的调入方</p>
         </div>
-        <footer><button type="button" class="primary" @click="destinationRowId = 0">完成</button></footer>
+        <footer><button type="button" class="primary" :disabled="!!batchTargetRow && !batchTargetRow.destinations.length" @click="batchTargetRow ? applyBatch('destinations', batchTargetRow.destinations) : destinationRowId = 0">{{ batchTargetRow ? `应用到 ${selectedRows.length} 条明细` : '完成' }}</button></footer>
       </section>
     </div>
   </Teleport>
@@ -356,6 +433,9 @@ watch(defaultSourceKey, (sourceKey, previous) => {
 .composer-body { min-height: 0; overflow: auto; padding: 15px 18px; }.composer-meta { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin-bottom: 14px; }.composer-meta label { display: grid; min-width: 170px; gap: 5px; font-size: 12px; color: #60748a; }.composer-meta label:last-child { flex: 1; }.composer-meta input, .composer-meta select { height: 34px; padding: 0 9px; border: 1px solid #d8e3ed; border-radius: 6px; background: #fff; color: #30465d; }
 .composer-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }.composer-upload span { flex: 1; min-width: 200px; font-size: 12px; color: #60748a; }.composer-upload button, .composer-lines header button, .composer-footer button, .destination-toolbar button, .destination-dialog footer button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 33px; padding: 0 11px; border: 1px solid #d5e1ee; border-radius: 6px; background: #fff; color: #47627d; font-size: 12px; }.primary, .composer-footer button.primary, .destination-dialog footer button.primary { border-color: #176fd1; background: #176fd1; color: #fff; }button:disabled { opacity: .5; cursor: default; }.icon-button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; background: transparent; color: #60748a; }
 .composer-lines { overflow: hidden; border: 1px solid #dce6ef; border-radius: 8px; background: #fff; }.composer-lines > header { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 1px solid #e8eef4; }.composer-lines h3 { margin: 0; font-size: 14px; }.composer-table-scroll { max-height: 480px; overflow: auto; }.composer-table-scroll table { width: 100%; min-width: 1050px; border-collapse: collapse; }.composer-table-scroll th, .composer-table-scroll td { padding: 8px 10px; border-bottom: 1px solid #edf1f5; text-align: left; font-size: 12px; }.composer-table-scroll th { position: sticky; top: 0; z-index: 1; background: #f7f9fc; color: #60748a; }.composer-table-scroll td { height: 52px; }.composer-table-scroll td.party-cell { min-width: 190px; }.composer-table-scroll td input { height: 32px; padding: 0 7px; border: 1px solid #d8e3ed; border-radius: 6px; }.composer-table-scroll td input.quantity-input { width: 82px; }.product-button, .destination-button { max-width: 230px; overflow: hidden; border: 0; background: none; color: #176fd1; text-overflow: ellipsis; white-space: nowrap; }.delete-button { border: 0; background: none; color: #c75353; }.empty { height: 90px; color: #8393a3; text-align: center !important; }.composer-error { color: #bb4646; font-size: 12px; }
+.line-header-actions, .line-batch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }.line-batch-toolbar { padding: 9px 13px; border-bottom: 1px solid #e8eef4; background: #f7f9fc; font-size: 12px; }.line-batch-toolbar span { margin-right: 6px; color: #60748a; }.line-batch-toolbar button { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid #d5e1ee; border-radius: 6px; background: #fff; color: #47627d; font-size: 12px; }.line-batch-toolbar .batch-delete { color: #c75353; }.line-batch-toolbar input { width: 100px; height: 32px; padding: 0 8px; border: 1px solid #d8e3ed; border-radius: 6px; }.composer-table-scroll .select-cell { width: 38px; min-width: 38px; text-align: center; }.composer-table-scroll .select-cell input { width: 16px; height: 16px; padding: 0; }
+.composer-footer .dispatch-button, .dispatch-dialog .dispatch-button { border-color: #c94343; background: #c94343; color: #fff; }.dispatch-layer { position: fixed; z-index: 140; inset: 0; display: grid; place-items: center; padding: 16px; }.dispatch-mask { position: absolute; inset: 0; border: 0; background: #12283d66; }.dispatch-dialog { position: relative; width: min(440px, 100%); border-radius: 8px; background: #fff; box-shadow: 0 24px 60px #061e3660; }.dispatch-dialog header, .dispatch-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; }.dispatch-dialog header { border-bottom: 1px solid #e5ecf3; }.dispatch-dialog h3 { margin: 0; font-size: 15px; }.dispatch-dialog p { margin: 0; padding: 17px 16px; color: #40566d; font-size: 13px; line-height: 1.6; }.dispatch-dialog footer { justify-content: flex-end; border-top: 1px solid #e5ecf3; }.dispatch-dialog footer button { min-height: 33px; padding: 0 11px; border: 1px solid #d5e1ee; border-radius: 6px; background: #fff; color: #47627d; font-size: 12px; }
+.dispatch-dialog footer .dispatch-button { border-color: #c94343; background: #c94343; color: #fff; }
 .destination-layer { position: fixed; z-index: 130; inset: 0; display: grid; place-items: center; padding: 16px; }.destination-mask { position: absolute; inset: 0; border: 0; background: #12283d66; }.destination-dialog { position: relative; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: min(620px, 100%); max-height: min(760px, 90vh); overflow: hidden; border-radius: 8px; background: #fff; box-shadow: 0 24px 60px #061e3660; }.destination-dialog > header, .destination-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5ecf3; }.destination-dialog > footer { justify-content: flex-end; border-top: 1px solid #e5ecf3; border-bottom: 0; }.destination-dialog h3 { margin: 0; font-size: 15px; }.destination-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; }.destination-toolbar label { display: flex; flex: 1; align-items: center; gap: 5px; min-width: 180px; border: 1px solid #d8e3ed; border-radius: 6px; padding: 0 8px; }.destination-toolbar input { width: 100%; height: 32px; border: 0; outline: 0; }.destination-toolbar span { font-size: 12px; color: #60748a; }.destination-list { min-height: 120px; overflow: auto; padding: 0 16px 12px; }.destination-item { display: flex; align-items: center; justify-content: space-between; min-height: 43px; gap: 8px; border-bottom: 1px solid #eff3f7; font-size: 12px; }.destination-item label { display: flex; align-items: center; gap: 8px; flex: 1; }.destination-item > input { width: 90px; height: 30px; border: 1px solid #d8e3ed; border-radius: 6px; padding: 0 7px; }
 @media (max-width: 650px) { .transfer-composer { height: calc(100vh - 94px); }.composer-meta { display: grid; }.composer-meta label { min-width: 0; }.composer-footer { align-items: flex-start; flex-direction: column; }.composer-footer > div { align-self: flex-end; } }
 </style>

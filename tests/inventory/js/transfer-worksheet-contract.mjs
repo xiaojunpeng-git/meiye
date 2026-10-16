@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { exportTransferTemplateXlsx, parseTransferXlsx, TRANSFER_COLUMNS } from '../../../前端代码/inventory-vue3/src/components/transferWorksheet.js'
-import { planTransferDraftBatch } from '../../../前端代码/inventory-vue3/src/components/transferDraftBatch.js'
+import { applyTransferDetailBatch, planTransferDraftBatch } from '../../../前端代码/inventory-vue3/src/components/transferDraftBatch.js'
 
 const inventoryRequire = createRequire(new URL('../../../前端代码/inventory-vue3/package.json', import.meta.url))
 const ExcelJS = inventoryRequire('exceljs')
@@ -70,6 +70,24 @@ assert.throws(() => planTransferDraftBatch([{ ...row, destinations: [{ key: 'STO
 const excessiveRows = Array.from({ length: 201 }, (_, index) => ({ ...row, sourceKey: 'HQ:1', destinations: [{ key: `STORE:${index + 1}`, quantity: '1' }] }))
 assert.throws(() => planTransferDraftBatch(excessiveRows, context), /最多生成 200/)
 
+const editableRows = [
+  { ...row, id: 1, destinations: [{ key: 'STORE:1', quantity: '3.5', custom: true }] },
+  { ...row, id: 2, quantity: '4', destinations: [{ key: 'STORE:2', quantity: '4', custom: false }] },
+  { ...row, id: 3, sourceKey: 'HQ:2', destinations: [{ key: 'STORE:3', quantity: '2', custom: false }] }
+]
+const withQuantity = applyTransferDetailBatch(editableRows, [1, 2], 'quantity', '10')
+assert.deepEqual(withQuantity.map((item) => item.quantity), ['10', '10', '2'])
+assert.deepEqual(withQuantity[0].destinations, [{ key: 'STORE:1', quantity: '10', custom: false }])
+assert.deepEqual(editableRows[0].destinations, [{ key: 'STORE:1', quantity: '3.5', custom: true }])
+const withTargets = applyTransferDetailBatch(editableRows, [1, 2], 'destinations', [{ key: 'STORE:4' }, { key: 'STORE:5' }])
+assert.deepEqual(withTargets[0].destinations.map((item) => item.quantity), ['2', '2'])
+assert.deepEqual(withTargets[1].destinations.map((item) => item.quantity), ['4', '4'])
+assert.deepEqual(withTargets[2], editableRows[2])
+assert.deepEqual(applyTransferDetailBatch(editableRows, [1, 3], 'delete').map((item) => item.id), [2])
+assert.throws(() => applyTransferDetailBatch(editableRows, [1, 3], 'destinations', [{ key: 'STORE:4' }]), /同一调出方/)
+assert.throws(() => applyTransferDetailBatch(editableRows, [1], 'quantity', '0'), /大于零/)
+assert.throws(() => applyTransferDetailBatch(editableRows, [1], 'destinations', [{ key: 'HQ:1' }]), /不能相同/)
+
 const app = readFileSync(new URL('../../../前端代码/inventory-vue3/src/App.vue', import.meta.url), 'utf8')
 const composer = readFileSync(new URL('../../../前端代码/inventory-vue3/src/components/InventoryTransferDraftComposer.vue', import.meta.url), 'utf8')
 const service = readFileSync(new URL('../../../后端代码/app/services/product/inventory/InventoryCrossSubjectTransferServices.php', import.meta.url), 'utf8')
@@ -79,9 +97,17 @@ assert.match(app, /InventoryTransferDraftComposer v-else-if="editor && active ==
 assert.match(composer, /await submitDrafts\(imported\)/)
 assert.match(composer, /createHqCrossTransferBatch\(payload\)/)
 assert.match(composer, /createCrossTransferBatch\(payload\)/)
-assert.match(service, /return Db::transaction\(function \(\) use \(\$input, \$create\): array/)
+assert.match(service, /return Db::transaction\(function \(\) use \(\$input, \$create, \$dispatch, \$dispatchAfterCreate\): array/)
 assert.match(service, /\(int\)\$batchKey\[1\] !== count\(\$input\['drafts'\]\)/)
 assert.match(composer, /key: `transfer-batch-\$\{drafts.length\}-\$\{nonce\}`/)
+assert.match(composer, /批量操作<\/button>/)
+assert.match(composer, /生成调拨并发货<\/button><button type="button" :disabled="busy" @click="emit\('close'\)">取消/)
+assert.match(composer, /dispatch_after_create: true/)
+assert.match(composer, /确认生成并发货/)
+assert.match(service, /'dispatch_count' => count\(\$created\)/)
+assert.match(service, /\$dispatch\(\(int\)\$document\['transfer_id'\], \$input\['drafts'\]\[\$index\]\)/)
+assert.match(composer, /transferSourceKey: platform\.value/)
+assert.match(app, /platformTransferStatus\.value = result\.transferStatus === 'DISPATCHED' \? 'DISPATCHED' : 'DRAFT'/)
 assert.match(service, /'document_status' => 'DRAFT'/)
 assert.match(storeRoute, /v3\/cross-transfer\/batch/)
 assert.match(platformRoute, /v3\/hq\/cross-transfer\/batch/)

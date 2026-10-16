@@ -41,11 +41,12 @@ final class InventoryCrossSubjectTransfer extends AuthController
         return $this->run(fn (): array => $this->services->createDraftForStore((int)$this->storeId, (int)$this->storeStaffId, $input), '跨店调拨草稿已保存。');
     }
 
-    /** Store source remains the authenticated store for every draft in the batch. */
+    /** Store source remains authenticated; optional immediate dispatch shares the same transaction. */
     public function createBatch()
     {
         $input = $this->request->post();
-        return $this->run(fn (): array => $this->services->createDraftBatchForStore((int)$this->storeId, (int)$this->storeStaffId, is_array($input) ? $input : []), '调拨草稿已批量生成。');
+        $input = is_array($input) ? $input : [];
+        return $this->run(fn (): array => $this->services->createDraftBatchForStore((int)$this->storeId, (int)$this->storeStaffId, $input), ($input['dispatch_after_create'] ?? false) === true ? '调拨单已生成并发货。' : '调拨草稿已批量生成。');
     }
 
     /** A bulk lifecycle command is one transaction and retains the authenticated source-store boundary. */
