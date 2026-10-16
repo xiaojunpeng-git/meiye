@@ -274,8 +274,8 @@ final class InventoryCrossSubjectTransferServices
     {
         $command = $this->normalize($input);
         if (!in_array($command['targetPartyType'], ['STORE', 'HQ'], true)) throw new \InvalidArgumentException('inventory_cross_transfer_target_invalid');
-        // 调拨单编辑功能授权本单据流程，不授予其他库存模块的通用管理权。
-        $hqScope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+        // 生成入口继承调拨页面，源方仓库、商品和租户仍逐单校验。
+        $hqScope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer-generate');
         $sourceScope = $hqScope;
         if ($command['sourcePartyType'] === 'STORE') {
             $sourceStoreId = (int)$command['sourceStoreId'];
@@ -311,7 +311,7 @@ final class InventoryCrossSubjectTransferServices
             },
             function (int $documentId, array $draft) use ($adminInfo, &$hqScopes): array {
                 $hqLocationId = (int)($draft['hq_location_id'] ?? 0);
-                if (!isset($hqScopes[$hqLocationId])) $hqScopes[$hqLocationId] = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+                if (!isset($hqScopes[$hqLocationId])) $hqScopes[$hqLocationId] = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer-generate');
                 return $this->dispatch($this->platformSourceScope($hqScopes[$hqLocationId], $documentId, true), $documentId);
             }
         );
@@ -512,7 +512,7 @@ final class InventoryCrossSubjectTransferServices
     public function transferStaffCandidatesForHeadquarters(array $adminInfo, int $hqLocationId, string $sourcePartyType, int $sourceStoreId, int $targetStoreId, int $targetLocationId = 0): array
     {
         // 人员候选仍按原授权范围返回；选中的调入方本身不要求在操作者的门店范围内。
-        $hqScope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+        $hqScope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer-generate');
         $sourcePartyType = strtoupper(trim($sourcePartyType));
         if (!in_array($sourcePartyType, ['HQ', 'STORE'], true) || ($sourcePartyType === 'HQ' && $sourceStoreId !== 0) || ($sourcePartyType === 'STORE' && $sourceStoreId <= 0) || $targetStoreId < 0) throw new \InvalidArgumentException('inventory_cross_transfer_transfer_staff_invalid');
         $sourceScope = $hqScope;
@@ -567,8 +567,8 @@ final class InventoryCrossSubjectTransferServices
 
     public function incomingRequestsForHeadquarters(array $adminInfo, int $hqLocationId, bool $canViewCost = false, string $sourcePartyType = 'HQ', int $sourceStoreId = 0): array
     {
-        // 待履约选择只服务于已授权的新建调拨，不提前执行发货。
-        $scope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+        // 待履约选择只服务于调拨页生成表单，不提前执行发货。
+        $scope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer-generate');
         $source = $scope;
         $sourcePartyType = strtoupper(trim($sourcePartyType));
         if (!in_array($sourcePartyType, ['HQ', 'STORE'], true) || ($sourcePartyType === 'HQ' && $sourceStoreId !== 0) || ($sourcePartyType === 'STORE' && $sourceStoreId <= 0)) throw new \InvalidArgumentException('inventory_cross_transfer_source_invalid');
@@ -663,7 +663,7 @@ final class InventoryCrossSubjectTransferServices
             $row['can_reverse'] = $row['can_edit'] && (int)$row['withdrawal_count'] > 0;
         }
         unset($row);
-        return ['count' => $count, 'list' => $list, 'can_create' => $scope['canCreate']];
+        return ['count' => $count, 'list' => $list, 'can_create' => $scope['canGenerate']];
     }
 
     public function detailForHeadquarters(array $adminInfo, int $hqLocationId, int $documentId): array
@@ -1144,6 +1144,7 @@ final class InventoryCrossSubjectTransferServices
         $scope['allowedStoreIds'] = array_values(array_map('intval', (array)($resolved['access']['store_ids'] ?? [])));
         $scope['isSuperAdmin'] = !empty($resolved['access']['is_super_admin']);
         $scope['canCreate'] = (new InventoryPlatformAccessPolicy())->canCreate($resolved['access'], 'transfer');
+        $scope['canGenerate'] = (new InventoryPlatformAccessPolicy())->canGenerateTransfer($resolved['access']);
         $scope['employeeId'] = (int)($adminInfo['employee_id'] ?? 0);
         $scope['operatorType'] = 'PLATFORM_ADMIN';
         $scope['operatorName'] = mb_substr(trim((string)($adminInfo['real_name'] ?? $adminInfo['name'] ?? $adminInfo['account'] ?? '')), 0, 120);

@@ -177,8 +177,11 @@ try {
     $tenantCheck = new ReflectionMethod($service, 'assertSameTenant'); $tenantCheck->setAccessible(true);
     r9TargetReject(fn () => $tenantCheck->invoke($service, ['tenantId' => '0'], ['tenantId' => 'foreign']), 'inventory_cross_transfer_target_scope_denied', 'foreign tenant still rejected');
     Db::name('system_role')->where('id', $roleId)->update(['rules' => (string)$menuIds[0]]);
-    try { $service->createDraftForHeadquarters($admin, (int)$hq['id'], $command); throw new LogicException('Create without feature accepted'); }
-    catch (\app\services\query\UnifiedQueryException $expected) { echo 'PASS removing create feature still blocks creation' . PHP_EOL; }
+    // A visible transfer page may generate a new draft, but cannot dispatch an existing one without its operation grant.
+    $menuDraft = $service->createDraftForHeadquarters($admin, (int)$hq['id'], array_merge($command, ['idempotency_key' => $tag . '-menu-only']));
+    r9TargetCheck((string)$menuDraft['document_status'] === 'DRAFT', 'page-only transfer generation stays draft-only');
+    try { $service->dispatchForHeadquarters($admin, (int)$hq['id'], (int)$menuDraft['transfer_id']); throw new LogicException('Existing document dispatch accepted'); }
+    catch (\app\services\query\UnifiedQueryException $expected) { echo 'PASS existing document dispatch still needs its operation grant' . PHP_EOL; }
 } finally {
     Db::rollback();
 }

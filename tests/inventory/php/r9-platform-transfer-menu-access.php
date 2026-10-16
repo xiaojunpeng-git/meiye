@@ -65,16 +65,25 @@ try {
         checkR9Transfer($roles->verifiAuth($request), 'legacy transfer menu allows registered GET ' . $route);
     }
     foreach ([['get', 'dashboard'], ['get', 'batch-stock'], ['get', 'hq/inbound'],
-        ['get', 'hq/request'], ['get', 'hq/cross-transfer/incoming-requests'],
-        ['post', 'hq/cross-transfer'], ['post', 'hq/cross-transfer/<id>/dispatch'],
-        ['post', 'hq/cross-transfer/<id>/receive'], ['post', 'hq/cross-transfer/<id>/withdraw'],
-        ['post', 'hq/cross-transfer/<id>/reverse'], ['get', 'not-registered']] as $case) {
+        ['get', 'hq/request'], ['post', 'hq/cross-transfer/batch-operation'],
+        ['post', 'hq/cross-transfer/<id>/dispatch'], ['post', 'hq/cross-transfer/<id>/receive'],
+        ['post', 'hq/cross-transfer/<id>/withdraw'], ['post', 'hq/cross-transfer/<id>/reverse'],
+        ['get', 'not-registered']] as $case) {
         [$request->testMethod, $route] = $case;
         $request->testRule = 'adminapi/product/inventory/v3/' . $route;
         try { $roles->verifiAuth($request); throw new RuntimeException('Unexpected route grant ' . $route); }
         catch (AuthException $expected) { echo 'PASS legacy menu denies ' . $case[0] . ' ' . $route . PHP_EOL; }
     }
     $access = $policy->resolve($admin);
+    // Transfer menu visibility authorizes generation and its form reads, not later document actions.
+    foreach ([['get', 'hq/cross-transfer/incoming-requests'], ['get', 'hq/cross-transfer/transfer-staffs'],
+        ['post', 'hq/cross-transfer'], ['post', 'hq/cross-transfer/batch']] as $case) {
+        [$request->testMethod, $route] = $case;
+        $request->testRule = 'adminapi/product/inventory/v3/' . $route;
+        checkR9Transfer($roles->verifiAuth($request), 'transfer page opens own workflow ' . $route);
+    }
+    checkR9Transfer($policy->canGenerateTransfer($access) && !$policy->canCreate($access, 'transfer'), 'transfer generation does not require legacy add task');
+    checkR9Transfer((int)(new InventoryHqLocationServices())->writableLocation($admin, (int)$hq['id'], 'transfer-generate')['location']['id'] === (int)$hq['id'], 'generation resolves only the authorized HQ');
     checkR9Transfer(!in_array(InventoryPlatformAccessPolicy::AUTH_VIEW, $access['unique_auth'], true)
         && !in_array('inventory.location.manage', $access['features'], true)
         && !in_array('inventory.batch.export', $access['features'], true), 'compatibility does not mint broad view/write/export grants');
@@ -91,13 +100,13 @@ try {
         ]);
     }
     $list = $transfers->listForHeadquarters($admin, (int)$hq['id'], $tag);
-    checkR9Transfer($list['count'] === 2 && count($list['list']) === 2 && !$list['can_create'], 'actual transfer list works with menu-only grant');
-    checkR9Transfer(!array_filter($list['list'], static fn ($x) => $x['can_dispatch'] || $x['can_receive']), 'draft/in-transit rows do not advertise write actions');
+    checkR9Transfer($list['count'] === 2 && count($list['list']) === 2 && $list['can_create'], 'actual transfer list opens page-authorized draft creation');
+    checkR9Transfer(!array_filter($list['list'], static fn ($x) => $x['can_dispatch'] || $x['can_receive']), 'existing draft actions still require operation grant');
     checkR9Transfer((int)$transfers->detailForHeadquarters($admin, (int)$hq['id'], $docIds[0])['id'] === $docIds[0], 'actual transfer detail works with menu-only grant');
-    // Domain guard is tested directly too, so direct service calls cannot bypass HTTP denial.
+    checkR9Transfer(isset($transfers->transferStaffCandidatesForHeadquarters($admin, (int)$hq['id'], 'HQ', 0, 0)['list']), 'page-authorized staff candidates resolve');
     foreach (['dispatchForHeadquarters', 'receiveForHeadquarters'] as $method) {
         try { $transfers->{$method}($admin, (int)$hq['id'], $docIds[0]); throw new RuntimeException('Domain write accepted'); }
-        catch (UnifiedQueryException $expected) { echo 'PASS domain write denied ' . $method . PHP_EOL; }
+        catch (UnifiedQueryException $expected) { echo 'PASS existing document action denied ' . $method . PHP_EOL; }
     }
     try { (new InventoryHqLocationServices())->writableLocation($admin, (int)$hq['id']); throw new RuntimeException('Warehouse write accepted'); }
     catch (UnifiedQueryException $expected) { echo 'PASS warehouse create/write authority unchanged' . PHP_EOL; }
@@ -221,7 +230,7 @@ try {
     }
     checkR9Transfer(!$policy->allowsLegacyMenuRead($adminId, 'product/inventory/v3/unified-query/operational', 'get', ['pageCode' => ['inventory_request']]), 'malformed pageCode fails closed without string coercion');
     checkR9Transfer(!$policy->allowsLegacyMenuRead($adminId, 'product/inventory/v3/hq/request/arbitrary', 'get'), 'known prefix never grants an unknown route');
-    // Existing function nodes authorize their own create commands, not a broad warehouse grant.
+    // Other pages still require their function nodes; transfer uses its visible page permission.
     $createCases = [
         ['inbound', 'admin-inbound-manage', 'admin-inbound-manage-add', 'hq/inbound'],
         ['outbound', 'admin-outbound-manage', 'admin-outbound-manage-add', 'hq/outbound'],
@@ -295,13 +304,14 @@ try {
         // Losing either the page or operation, deleting the function or disabling the role takes effect immediately.
         foreach ([(string)$functionIds[0], (string)$functionIds[1]] as $partialRules) {
             Db::name('system_role')->where('id', $roleId)->update(['rules' => $partialRules]);
-            checkR9Transfer(!$policy->allowsFunctionRoute($adminId, 'product/inventory/v3/' . $route, 'post'), 'page and function both required: ' . $page);
+            $expected = $page === 'transfer' && $partialRules === (string)$functionIds[0];
+            checkR9Transfer($policy->allowsFunctionRoute($adminId, 'product/inventory/v3/' . $route, 'post') === $expected, 'page and function boundary: ' . $page);
         }
         Db::name('system_role')->where('id', $roleId)->update(['rules' => implode(',', $functionIds), 'status' => 0]);
         checkR9Transfer(!$policy->allowsFunctionRoute($adminId, 'product/inventory/v3/' . $route, 'post'), 'disabled role revokes create: ' . $page);
         Db::name('system_role')->where('id', $roleId)->update(['status' => 1]);
         Db::name('system_menus')->where('id', $functionIds[1])->update(['is_del' => 1]);
-        checkR9Transfer(!$policy->allowsFunctionRoute($adminId, 'product/inventory/v3/' . $route, 'post'), 'deleted function revokes create: ' . $page);
+        checkR9Transfer($policy->allowsFunctionRoute($adminId, 'product/inventory/v3/' . $route, 'post') === ($page === 'transfer'), 'deleted function preserves only page-authorized transfer: ' . $page);
     }
     // Remove test query state before checking the original native authority contract.
     $request->testQuery = [];

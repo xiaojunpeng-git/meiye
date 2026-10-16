@@ -55,6 +55,18 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
                 }
                 return $next($request);
             }
+            // 新建调拨页始终走批量保存（也包含单张）；用当前 V3 调拨入口授权，
+            // 不再回落到旧门店任务节点，源方门店与员工身份仍由领域服务复核。
+            if ($this->isTransferGenerationCommand((string)$request->pathinfo(), strtoupper((string)$request->method()))) {
+                $resolver = app()->make(CashierV3FeatureResolver::class);
+                $features = !empty($staffInfo['_cashier_v3_delegated'])
+                    ? $resolver->resolveVisibleFeatures($staffInfo)
+                    : $resolver->resolveGrantedFeatures($staffInfo);
+                if (!in_array('cashier.v3.inventory.transfer', $features, true)) {
+                    throw new AuthException('当前账号无法进入调拨功能。', 403);
+                }
+                return $next($request);
+            }
             // 查看模式原本只有菜单可见性；产品单独确认调拨可操作，
             // 仅对调拨写路由放行旧角色门禁，实际令牌选店和员工审计由调拨服务复核。
             if (!empty($staffInfo['_cashier_v3_delegated'])
@@ -76,12 +88,23 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
         return $next($request);
     }
 
+    /** 仅新单生成可复用已授权调拨入口；旧单据生命周期命令不在此放宽。 */
+    private function isTransferGenerationCommand(string $path, string $method): bool
+    {
+        if ($method !== 'POST') return false;
+        $path = ltrim($path, '/');
+        return $path === 'storeapi/product/inventory/v3/cross-transfer'
+            || $path === 'storeapi/product/inventory/v3/cross-transfer/batch';
+    }
+
     /** Delegated transfer mode can act only on the selected store's transfer command routes. */
     private function isDelegatedTransferCommand(string $path, string $method): bool
     {
         if ($method !== 'POST') return false;
         $path = ltrim($path, '/');
         return $path === 'storeapi/product/inventory/v3/cross-transfer'
+            || $path === 'storeapi/product/inventory/v3/cross-transfer/batch'
+            || $path === 'storeapi/product/inventory/v3/cross-transfer/batch-operation'
             // 只扩展同一调拨单的撤回/记名作废命令，服务层仍复核调出方与单据状态。
             || preg_match('#^storeapi/product/inventory/v3/cross-transfer/[0-9]+/(?:update|delete-draft|dispatch|receive|withdraw|reverse)$#D', $path) === 1;
     }

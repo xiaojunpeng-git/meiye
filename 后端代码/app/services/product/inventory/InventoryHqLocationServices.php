@@ -32,7 +32,11 @@ final class InventoryHqLocationServices
         $policy = new InventoryPlatformAccessPolicy();
         $access = $policy->resolve($adminInfo);
         if ($createPage !== '') {
-            if (!$policy->canCreate($access, $createPage)) throw new \app\services\query\UnifiedQueryException('INVENTORY_PLATFORM_ACCESS_DENIED', '当前岗位未配置对应单据的功能操作权限。', []);
+            // 调拨生成只继承调拨页面；其他写命令仍走单据操作或仓库管理权限。
+            $allowed = $createPage === 'transfer-generate'
+                ? $policy->canGenerateTransfer($access)
+                : $policy->canCreate($access, $createPage);
+            if (!$allowed) throw new \app\services\query\UnifiedQueryException('INVENTORY_PLATFORM_ACCESS_DENIED', '当前岗位未配置对应单据的功能操作权限。', []);
         } else {
             $policy->assertFeature($access, 'inventory.location.manage', '当前岗位未配置“平台仓库管理”权限。');
         }

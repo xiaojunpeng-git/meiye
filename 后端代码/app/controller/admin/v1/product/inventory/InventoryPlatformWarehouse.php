@@ -37,9 +37,11 @@ final class InventoryPlatformWarehouse extends AuthController
                 // 页面只消费可信写能力；读取库位不会自动开放新建、导入或作废。
                 'can_manage_warehouses' => in_array('inventory.location.settings', $access['features'], true),
                 'can_manage' => in_array('inventory.location.manage', $access['features'], true),
-                // 按功能分别返回新建能力，不能由任一添加节点推导全部库存操作。
+                // 调拨生成沿用可见页面，其余单据仍按各自新增节点返回能力。
                 'can_create' => array_combine(['inbound', 'outbound', 'count', 'request', 'transfer'], array_map(
-                    static fn (string $page): bool => (new InventoryPlatformAccessPolicy())->canCreate($access, $page),
+                    static fn (string $page): bool => $page === 'transfer'
+                        ? (new InventoryPlatformAccessPolicy())->canGenerateTransfer($access)
+                        : (new InventoryPlatformAccessPolicy())->canCreate($access, $page),
                     ['inbound', 'outbound', 'count', 'request', 'transfer']
                 )),
             ]);

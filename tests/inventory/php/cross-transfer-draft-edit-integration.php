@@ -20,15 +20,36 @@ if ((string)Config::get('database.connections.mysql.database') !== 'inventory_ma
 if (!Db::query("SHOW COLUMNS FROM eb_store_product LIKE 'pid'")) {
     Db::execute('ALTER TABLE eb_store_product ADD COLUMN pid bigint(20) unsigned NOT NULL DEFAULT 0');
 }
+if (!Db::query("SHOW COLUMNS FROM eb_store_product LIKE 'unit_name'")) {
+    Db::execute("ALTER TABLE eb_store_product ADD COLUMN unit_name varchar(32) NOT NULL DEFAULT ''");
+}
 foreach ([
     'transfer_staff_id' => 'bigint(20) unsigned NOT NULL DEFAULT 0',
     'transfer_employee_id' => 'bigint(20) unsigned NOT NULL DEFAULT 0',
     'transfer_staff_name_snapshot' => "varchar(120) NOT NULL DEFAULT ''",
     'created_by_operator_name_snapshot' => "varchar(128) NOT NULL DEFAULT ''",
+    'withdrawal_count' => 'int(10) unsigned NOT NULL DEFAULT 0',
 ] as $column => $definition) {
     if (!Db::query("SHOW COLUMNS FROM eb_inventory_cross_transfer_document LIKE '{$column}'")) {
         Db::execute("ALTER TABLE eb_inventory_cross_transfer_document ADD COLUMN {$column} {$definition}");
     }
+}
+// The isolated fixture predates withdrawal generations; production schema is never changed here.
+foreach (['line_generation' => 'int(10) unsigned NOT NULL DEFAULT 1',
+    'retired_at' => 'int(11) unsigned NOT NULL DEFAULT 0'] as $column => $definition) {
+    if (!Db::query("SHOW COLUMNS FROM eb_inventory_cross_transfer_line LIKE '{$column}'")) {
+        Db::execute("ALTER TABLE eb_inventory_cross_transfer_line ADD COLUMN {$column} {$definition}");
+    }
+}
+foreach (['dispatch_attempt' => 'int(10) unsigned NOT NULL DEFAULT 1',
+    'withdrawn_at' => 'int(11) unsigned NOT NULL DEFAULT 0'] as $column => $definition) {
+    if (!Db::query("SHOW COLUMNS FROM eb_inventory_cross_transfer_batch_allocation LIKE '{$column}'")) {
+        Db::execute("ALTER TABLE eb_inventory_cross_transfer_batch_allocation ADD COLUMN {$column} {$definition}");
+    }
+}
+if (!Db::query("SHOW TABLES LIKE 'eb_inventory_document_remark'")
+    && !Db::query("SHOW TABLES LIKE 'eb_inventory_document_remark_history'")) {
+    executeInventorySqlFile($backend . '/database/upgrades/2026-10-13-库存五类单据备注修订/01-正式升级.sql');
 }
 // The legacy minimal fixture has no employee directory; only this guarded test DB receives one.
 if (!Db::query("SHOW TABLES LIKE 'eb_employee'")) {
@@ -51,9 +72,19 @@ function editIntegrationReason(callable $operation): string
 $failed = 0;
 $transferRoute = new ReflectionMethod(StoreCkeckRoleMiddleware::class, 'isDelegatedTransferCommand');
 $transferRoute->setAccessible(true);
+$generationRoute = new ReflectionMethod(StoreCkeckRoleMiddleware::class, 'isTransferGenerationCommand');
+$generationRoute->setAccessible(true);
 $transferMiddleware = new StoreCkeckRoleMiddleware();
+editIntegrationAssert('store generation gate accepts single and batch save only',
+    $generationRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer', 'POST')
+    && $generationRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/batch', 'POST')
+    && !$generationRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/batch-operation', 'POST')
+    && !$generationRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/12/dispatch', 'POST')
+    && !$generationRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/batch', 'GET'));
 editIntegrationAssert('view-mode route gate admits transfer create, update, draft deletion, dispatch and receipt',
     $transferRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer', 'POST')
+    && $transferRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/batch', 'POST')
+    && $transferRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/batch-operation', 'POST')
     && $transferRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/12/update', 'POST')
     && $transferRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/12/delete-draft', 'POST')
     && $transferRoute->invoke($transferMiddleware, 'storeapi/product/inventory/v3/cross-transfer/12/dispatch', 'POST')
@@ -121,6 +152,16 @@ try {
     });
     try {
         request()->storeStaffInfo = $profile;
+        $saveRequest = new class extends \app\Request {
+            public array $testProfile = [];
+            public function storeId(): int { return (int)($this->testProfile['store_id'] ?? 0); }
+            public function storeStaffInfo(): array { return $this->testProfile; }
+            public function method(bool $origin = false): string { return 'POST'; }
+            public function pathinfo(): string { return 'storeapi/product/inventory/v3/cross-transfer/batch'; }
+        };
+        $saveRequest->testProfile = array_merge($profile, ['type' => 'cashier_v3']);
+        editIntegrationAssert('ordinary V3 store batch save passes middleware without an old task node',
+            $transferMiddleware->handle($saveRequest, static fn (): bool => true));
         $organizationCommand = $command;
         $organizationCommand['idempotency_key'] = 'test-transfer-org-' . $seed;
         $organizationId = (int)$service->createDraftForStore($sourceId, $organizationSessionId, $organizationCommand)['transfer_id'];
@@ -128,6 +169,20 @@ try {
         editIntegrationAssert('organization session creates a draft under its stable employee identity',
             (int)$organizationRow['created_by_operator_id'] === $employeeId
             && (string)$organizationRow['created_by_operator_name_snapshot'] === 'TEST 组织员工');
+        // The V3 composer uses batch save even for one document; fan-out must be atomic and idempotent.
+        $batchDraft = $command;
+        unset($batchDraft['idempotency_key']);
+        $batchInput = ['idempotency_key' => 'transfer-batch-2-store-save-' . $seed, 'drafts' => [
+            $batchDraft, array_merge($batchDraft, ['target_store_id' => $otherId]),
+        ]];
+        $batchSaved = $service->createDraftBatchForStore($sourceId, $organizationSessionId, $batchInput);
+        $batchIds = array_map(static fn (array $draft): int => (int)$draft['transfer_id'], $batchSaved['drafts']);
+        $batchReplay = $service->createDraftBatchForStore($sourceId, $organizationSessionId, $batchInput);
+        editIntegrationAssert('store batch save creates two visible drafts once without stock facts',
+            (int)$batchSaved['draft_count'] === 2 && count(array_unique($batchIds)) === 2
+            && array_map(static fn (array $draft): int => (int)$draft['transfer_id'], $batchReplay['drafts']) === $batchIds
+            && (int)Db::name('inventory_cross_transfer_document')->whereIn('id', $batchIds)->where('document_status', 'DRAFT')->count() === 2
+            && (int)Db::name('inventory_cross_transfer_batch_allocation')->whereIn('document_id', $batchIds)->count() === 0);
         $organizationEdit = $organizationCommand;
         $organizationEdit['idempotency_key'] = 'test-transfer-org-edit-' . $seed;
         $organizationEdit['expected_edit_token'] = (string)$service->detailForStore($sourceId, $organizationSessionId, $organizationId)['edit_token'];
@@ -137,6 +192,9 @@ try {
             (string)Db::name('inventory_cross_transfer_document')->where('id', $organizationId)->value('remark') === '组织员工修改');
         $delegatedProfile = ['id' => $organizationSessionId, 'employee_id' => $employeeId, 'store_id' => $sourceId,
             '_cashier_v3_delegated' => 1, 'session_mode' => 'store_read_only', 'read_only' => true];
+        $saveRequest->testProfile = array_merge($delegatedProfile, ['type' => 'cashier_v3_delegated']);
+        editIntegrationAssert('selected-store V3 batch save passes middleware without an old task node',
+            $transferMiddleware->handle($saveRequest, static fn (): bool => true));
         request()->storeStaffInfo = $delegatedProfile;
         $delegatedCommand = $command;
         $delegatedCommand['idempotency_key'] = 'test-transfer-view-' . $seed;
@@ -181,11 +239,11 @@ try {
     $created = $service->createDraftForStore($sourceId, $sourceStaffId, $command);
     $documentId = (int)$created['transfer_id'];
     $detail = $service->detailForStore($sourceId, $sourceStaffId, $documentId);
-    editIntegrationAssert('source sees an editable draft and recipient sees read-only detail',
+    editIntegrationAssert('source sees editable draft while recipient cannot preview an unshipped draft',
         $detail['can_edit'] === true && $detail['can_delete'] === true
-        && $service->detailForStore($targetId, $targetStaffId, $documentId)['can_delete'] === false);
+        && editIntegrationReason(fn () => $service->detailForStore($targetId, $targetStaffId, $documentId)) === 'inventory_cross_transfer_not_found');
     editIntegrationAssert('recipient cannot delete a source-store draft',
-        editIntegrationReason(fn () => $service->deleteDraftForStore($targetId, $targetStaffId, $documentId, (string)$detail['edit_token'])) === 'inventory_cross_transfer_delete_state_invalid');
+        editIntegrationReason(fn () => $service->deleteDraftForStore($targetId, $targetStaffId, $documentId, (string)$detail['edit_token'])) === 'inventory_cross_transfer_not_found');
     $edit = $command;
     $edit['idempotency_key'] = 'test-transfer-update-' . $seed;
     $edit['expected_edit_token'] = (string)$detail['edit_token'];
@@ -195,7 +253,7 @@ try {
     $edit['lines'][0]['quantity'] = '3';
     $edit['lines'][0]['detail_remark'] = '新备注';
     editIntegrationAssert('recipient store cannot replace source draft',
-        editIntegrationReason(fn () => $service->updateDraftForStore($targetId, $targetStaffId, $documentId, $edit)) === 'inventory_cross_transfer_edit_state_invalid');
+        editIntegrationReason(fn () => $service->updateDraftForStore($targetId, $targetStaffId, $documentId, $edit)) === 'inventory_cross_transfer_not_found');
     $service->updateDraftForStore($sourceId, $sourceStaffId, $documentId, $edit);
     $updated = $service->detailForStore($sourceId, $sourceStaffId, $documentId);
     editIntegrationAssert('edit preserves document identity while replacing date, target and lines',

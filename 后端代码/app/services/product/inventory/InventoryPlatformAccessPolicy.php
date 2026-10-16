@@ -52,17 +52,24 @@ final class InventoryPlatformAccessPolicy
         'transfer' => 'admin-stock-transfer-add',
     ];
 
-    /** 按已有功能权限计算具体新建能力；共享商品选择只能用于这些已授权表单。 */
+    /** 按已有功能权限计算具体新建能力；共享商品选择用于已授权表单。 */
     public function canCreate(array $access, string $page): bool
     {
         if (in_array('inventory.location.manage', (array)($access['features'] ?? []), true)) return true;
         $auth = (array)($access['unique_auth'] ?? []);
         if ($page === 'catalog') {
             foreach (array_keys(self::CREATE_AUTH) as $candidate) if ($this->canCreate($access, $candidate)) return true;
-            return false;
+            return $this->canGenerateTransfer($access);
         }
         return isset(self::CREATE_AUTH[$page]) && $this->hasLegacyPage($auth, $page)
             && in_array(self::CREATE_AUTH[$page], $auth, true);
+    }
+
+    /** 调拨页直接开放生成草稿/生成并发货，既有单据的发收货、撤回和删除仍用原操作授权。 */
+    public function canGenerateTransfer(array $access): bool
+    {
+        return $this->canCreate($access, 'transfer')
+            || $this->hasLegacyPage((array)($access['unique_auth'] ?? []), 'transfer');
     }
 
     /** 入库管理页面授权仅覆盖该页的总部入库作废；仓库和库存仍由领域服务逐次校验。 */
@@ -79,7 +86,7 @@ final class InventoryPlatformAccessPolicy
         if (!$this->canVoidHqInbound($access)) throw $this->denied('当前岗位无权作废入库单。');
     }
 
-    /** 精确映射已授权功能：调拨编辑包含草稿及发收货，不放开其他模块、冲销、导入或仓库设置。 */
+    /** 精确映射已授权功能；仅调拨生成和其表单依赖不要求额外任务节点。 */
     public function allowsFunctionRoute(int $adminId, string $rule, string $method): bool
     {
         $rule = str_replace(['<id>', '<productid>'], [':id', ':productid'], strtolower(trim($rule)));
@@ -102,6 +109,8 @@ final class InventoryPlatformAccessPolicy
             'get product/inventory/v3/hq/request/requester' => 'request',
             'get product/inventory/v3/hq/request/suppliers' => 'request',
             'post product/inventory/v3/hq/cross-transfer' => 'transfer',
+            'post product/inventory/v3/hq/cross-transfer/batch' => 'transfer',
+            'post product/inventory/v3/hq/cross-transfer/batch-operation' => 'transfer',
             'post product/inventory/v3/hq/cross-transfer/:id/update' => 'transfer',
             'post product/inventory/v3/hq/cross-transfer/:id/delete-draft' => 'transfer',
             'post product/inventory/v3/hq/cross-transfer/:id/dispatch' => 'transfer',
@@ -121,6 +130,15 @@ final class InventoryPlatformAccessPolicy
         }
         if (strtolower(trim($method)) === 'post' && in_array($rule, ['product/inventory/v3/locations', 'product/inventory/v3/locations/:id'], true)) {
             try { return in_array('inventory.location.settings', $this->resolveByAdminId($adminId)['features'], true); }
+            catch (UnifiedQueryException $exception) { return false; }
+        }
+        if (in_array(strtolower(trim($method)) . ' ' . $rule, [
+            'post product/inventory/v3/hq/cross-transfer',
+            'post product/inventory/v3/hq/cross-transfer/batch',
+            'get product/inventory/v3/hq/cross-transfer/incoming-requests',
+            'get product/inventory/v3/hq/cross-transfer/transfer-staffs',
+        ], true)) {
+            try { return $this->canGenerateTransfer($this->resolveByAdminId($adminId)); }
             catch (UnifiedQueryException $exception) { return false; }
         }
         $page = $routes[strtolower(trim($method)) . ' ' . $rule] ?? '';
