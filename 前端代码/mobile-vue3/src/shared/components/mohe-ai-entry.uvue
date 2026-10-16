@@ -1,5 +1,5 @@
 <template>
-  <view v-if="enabled" class="ai-entry" role="button" aria-label="打开魔核 AI 工作台" @tap="openPanel"><image class="ai-entry-icon" src="/static/mohe-ai-entry-orbits.gif" mode="aspectFit" /></view>
+  <view v-if="enabled" class="ai-entry" :style="entryPositionStyle" role="button" aria-label="打开魔核 AI 工作台" @tap="onEntryTap" @touchstart="onEntryTouchStart" @touchmove.stop.prevent="onEntryTouchMove" @touchend="onEntryTouchEnd" @touchcancel="onEntryTouchEnd"><image class="ai-entry-icon" src="/static/mohe-ai-entry-orbits.gif" mode="aspectFit" /></view>
   <view v-if="opened" class="ai-panel" :class="{ 'ai-panel--native-mini': platformUsesNativeCanvas }" :style="platformUsesNativeCanvas ? { paddingTop: nativePanelTop + 'px' } : {}">
     <view class="ai-workspace-head">
       <!-- 左右对称避让原生胶囊，让标题相对屏幕居中；退出沿用closePanel，不删除会话或取消任务。 -->
@@ -83,6 +83,61 @@
 import { mobileAiRequest, downloadMobileAi } from '../api/mobile-ai-client.uts'
 import { currentMobilePlatform } from '../platform/mobile-platform.uts'
 const enabled = ref(false), opened = ref(false), busy = ref(false)
+// 入口位置只属于当前设备的界面偏好，不能影响会话、权限或问答状态。
+const entryPositionKey = 'mohe-ai:mobile-entry-position:v1'
+const entryPositionStyle = ref('')
+const entrySize = 60, entryMargin = 8
+let entryX = -1, entryY = -1, entryTouchX = 0, entryTouchY = 0, entryStartX = 0, entryStartY = 0
+let entryTouchActive = false, entryDragged = false
+// 保留底部 Tab 与安全区；横竖屏或页面重建时收回越界位置，确保入口始终可触及。
+function entryBounds() : any {
+  const info = uni.getWindowInfo()
+  const safeBottom = Number(info.safeAreaInsets.bottom || 0)
+  return { maxX: Math.max(entryMargin, Number(info.windowWidth) - entrySize - entryMargin), maxY: Math.max(entryMargin, Number(info.windowHeight) - entrySize - 92 - safeBottom) }
+}
+function placeEntry(x : number, y : number) : void {
+  const bounds = entryBounds()
+  entryX = Math.min(bounds.maxX, Math.max(entryMargin, x))
+  entryY = Math.min(bounds.maxY, Math.max(entryMargin, y))
+  entryPositionStyle.value = 'left:' + entryX + 'px;top:' + entryY + 'px;right:auto;bottom:auto;'
+}
+function restoreEntryPosition() : void {
+  try {
+    const saved : any = uni.getStorageSync(entryPositionKey)
+    if (saved != null && Number.isFinite(Number(saved.x)) && Number.isFinite(Number(saved.y))) placeEntry(Number(saved.x), Number(saved.y))
+  } catch (_error) { /* 存储不可用时保持原始 CSS 位置，入口仍可点击。 */ }
+}
+function onEntryTouchStart(event : any) : void {
+  if (event.touches == null || event.touches.length != 1) return
+  const touch = event.touches[0]
+  const info = uni.getWindowInfo()
+  const safeBottom = Number(info.safeAreaInsets.bottom || 0)
+  entryTouchX = Number(touch.clientX); entryTouchY = Number(touch.clientY)
+  entryStartX = entryX >= 0 ? entryX : Number(info.windowWidth) - entrySize - 24
+  entryStartY = entryY >= 0 ? entryY : Number(info.windowHeight) - entrySize - 92 - safeBottom
+  entryTouchActive = Number.isFinite(entryTouchX) && Number.isFinite(entryTouchY)
+  entryDragged = false
+}
+// 超过 5px 才算拖动；移动时只改入口坐标，不能触发打开工作台。
+function onEntryTouchMove(event : any) : void {
+  if (!entryTouchActive || event.touches == null || event.touches.length != 1) return
+  const touch = event.touches[0]
+  const dx = Number(touch.clientX) - entryTouchX, dy = Number(touch.clientY) - entryTouchY
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
+  if (!entryDragged && Math.abs(dx) < 5 && Math.abs(dy) < 5) return
+  entryDragged = true
+  placeEntry(entryStartX + dx, entryStartY + dy)
+}
+function onEntryTouchEnd(_event : any) : void {
+  if (!entryTouchActive) return
+  entryTouchActive = false
+  if (!entryDragged) return
+  try { uni.setStorageSync(entryPositionKey, { x: entryX, y: entryY }) } catch (_error) { /* 页面内仍保持拖动后位置。 */ }
+}
+function onEntryTap() : void {
+  if (entryDragged) { entryDragged = false; return }
+  openPanel()
+}
 // 原生胶囊坐标决定单行导航的顶部、高度和对称留白，标题不偏移也不覆盖胶囊。
 const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
 const nativePanelTop = ref(0)
@@ -784,7 +839,7 @@ function bootstrapSession(restore : boolean = false) : void {
     else if (restore) { busy.value = false; progress.value = '上一次任务已结束，可以继续提问。' }
   })
 }
-onMounted(() => { sessionId = id(); bootstrapSession(); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
+onMounted(() => { restoreEntryPosition(); sessionId = id(); bootstrapSession(); expiryTimer = setInterval(() => { if (storageKey.length > 0 && !load().some((s : any) => s.id == conversation)) { displayed.value = []; progress.value = '会话已到期，请新建对话。' } },30000) })
 // The entry is mounted on each merchant page.  Page navigation and native
 // component recycling are not an instruction to abandon a customer's query;
 // keep the durable run for the next page to resume.  Only the explicit
@@ -793,7 +848,7 @@ onUnmounted(() => { lifecycle++; exportLifecycle++; persistActive(true); if (tim
 </script>
 <style>
 .ai-brand-tagline{display:block;width:100%;margin-top:4px;font-size:12px;line-height:18px;font-weight:400;color:#667085;text-align:center}
-.ai-entry{position:fixed;right:24px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:9999;width:60px;height:60px;border-radius:50%;box-shadow:0 10px 26px rgba(31,99,199,.32)}.ai-entry-icon{display:block;width:60px;height:60px;border-radius:50%}
+.ai-entry{position:fixed;right:24px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:9999;width:60px;height:60px;border-radius:50%;box-shadow:0 10px 26px rgba(31,99,199,.32);touch-action:none}.ai-entry-icon{display:block;width:60px;height:60px;border-radius:50%}
 .ai-panel{position:fixed;left:0;right:0;top:0;bottom:0;z-index:10000;box-sizing:border-box;background-color:#fff;display:flex;flex-direction:column;overflow:hidden;color:#111827}
 .ai-workspace-head{flex:0 0 auto;padding:0 14px 8px;border-bottom:1px solid #dde2eb}.ai-title-row{position:relative;height:44px;width:100%;box-sizing:border-box;padding:0 44px;display:flex;flex-direction:row;align-items:center;justify-content:center}.ai-back-button{position:absolute;left:0;top:0;bottom:0;width:44px;display:flex;align-items:center;justify-content:center}.ai-back-button:active{background-color:#f2f5fa;border-radius:12px}.ai-back-chevron{font-size:34px;line-height:32px;font-weight:400}.ai-title{min-width:0;white-space:nowrap;font-size:20px;font-weight:700;letter-spacing:.01em;text-align:center}
 /* 底部加号承载会话与导出操作，与顶部单行退出导航相互独立。 */
