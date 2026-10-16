@@ -101,6 +101,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       view.removeEventListener('pointermove', move);
       view.removeEventListener('pointerup', end);
       view.removeEventListener('pointercancel', end);
+      if (typeof entry.hasPointerCapture === 'function' && entry.hasPointerCapture(drag.id)) entry.releasePointerCapture(drag.id);
       entry.classList.remove('entry--dragging');
       if (drag.moved) {
         if (event.type === 'pointerup') save(place(drag.x, drag.y));
@@ -125,6 +126,9 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       suppressClick = false;
       const rect = entry.getBoundingClientRect();
       drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, x: rect.left, y: rect.top, moved: false };
+      // Capture the pointer before it crosses dashboard iframes; otherwise the
+      // parent window loses move/up events and cannot save the dropped position.
+      if (entry.setPointerCapture) entry.setPointerCapture(event.pointerId);
       view.addEventListener('pointermove', move);
       view.addEventListener('pointerup', end);
       view.addEventListener('pointercancel', end);
@@ -138,6 +142,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     entry.addEventListener('click', stopDraggedClick, true);
     view.addEventListener('resize', fit);
     disposeEntryDrag = () => {
+      if (drag && typeof entry.hasPointerCapture === 'function' && entry.hasPointerCapture(drag.id)) entry.releasePointerCapture(drag.id);
       view.removeEventListener('pointermove', move);
       view.removeEventListener('pointerup', end);
       view.removeEventListener('pointercancel', end);

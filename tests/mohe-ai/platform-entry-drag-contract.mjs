@@ -40,8 +40,12 @@ const mount = async () => {
   await nextTurn();
   const root = document.querySelector('[data-mohe-ai]').shadowRoot;
   const entry = root.querySelector('.entry');
+  let capturedPointer = null;
+  entry.setPointerCapture = id => { capturedPointer = id; };
+  entry.hasPointerCapture = id => capturedPointer === id;
+  entry.releasePointerCapture = id => { if (capturedPointer === id) capturedPointer = null; };
   entry.getBoundingClientRect = () => ({ left: parseFloat(entry.style.left) || 314, top: parseFloat(entry.style.top) || 212, width: 58, height: 58 });
-  return { dispose, root, entry };
+  return { dispose, root, entry, capturedPointer: () => capturedPointer };
 };
 
 let instance = await mount();
@@ -50,8 +54,10 @@ assert.equal(instance.entry.querySelector('img').draggable, false);
 
 // A real drag moves the launcher without opening the AI workspace.
 pointer(instance.entry, 'pointerdown', 330, 230);
+assert.equal(instance.capturedPointer(), 1);
 pointer(window, 'pointermove', 150, 100);
 pointer(window, 'pointerup', 150, 100);
+assert.equal(instance.capturedPointer(), null);
 instance.entry.click();
 assert.equal(instance.root.querySelector('[role=dialog]'), null);
 assert.deepEqual(JSON.parse(window.localStorage.getItem('mohe-ai:platform-entry-position:v1')), { x: 134, y: 82 });
