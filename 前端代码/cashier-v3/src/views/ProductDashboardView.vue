@@ -386,6 +386,11 @@ function runQuery(action = '查询') {
 .profit-category-card__rank-row>b,
 .inventory-category-card__table-head>span:not(:first-child),
 .inventory-category-card__row>b{text-align:left}
+/* Auto-fit expands sparse rows; the section width cap allows no more than six cards. */
+@media (min-width:761px){
+  .product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr))}
+  .profit-category-card__table-head,.profit-category-card__rank-row{grid-template-columns:minmax(0,1.8fr) repeat(3,minmax(0,.9fr)) minmax(0,.65fr)}
+}
 /* Bucket totals are controls: keep their original footprint and expose the selected ranking. */
 .expiry-summary-card{display:block;width:100%;font:inherit;text-align:left;cursor:pointer}
 .expiry-summary-card.is-active{outline:2px solid #1f5f8b;outline-offset:-2px;background:#f5faff}
