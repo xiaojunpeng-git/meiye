@@ -2,7 +2,7 @@ import { DeviceSessions, newId, isTerminal, acceptRun } from './device-session.m
 import { GUIDANCE_SCHEMA, validateClarification, clarificationKey, clarificationSubmission } from './clarification-state.mjs';
 
 // Framework-neutral, shadow-scoped adapter. No business arithmetic or HTML injection.
-export function mountMoheAi({ request, storage = window.localStorage, documentRef = document, entryLeft = '0px', panelLeft = '12px', presentation = 'drawer', entryIconUrl = '' }) {
+export function mountMoheAi({ request, storage = window.localStorage, documentRef = document, entryLeft = '0px', panelLeft = '12px', presentation = 'drawer', entryIconUrl = '', draggableEntry = false }) {
   // The platform shell can briefly retain the previous route component while
   // mounting its replacement.  Two entries would share one device runtime:
   // a late terminal projection from the retired entry could otherwise clear
@@ -24,7 +24,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     :host{--mohe-ai-brand:#1677cc;--mohe-ai-brand-soft:#eaf4ff;font:14px/1.5 system-ui,sans-serif;color:#243447}
     button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid #dbe2ec;border-radius:8px;background:white;padding:7px 12px;color:inherit}button:disabled{opacity:.5;cursor:default}
     .entry{position:fixed;left:var(--mohe-ai-entry-left);top:50%;transform:translateY(-50%);z-index:2147483000;background:var(--mohe-ai-brand);color:white;border-radius:0 14px 14px 0;padding:12px 10px}
-    .entry.entry--icon{width:58px;height:58px;min-width:58px;min-height:58px;box-sizing:border-box;padding:0;border:0;border-radius:50%;background:transparent;overflow:visible;box-shadow:0 10px 26px #1669ca55}.entry.entry--icon:hover{transform:translateY(-50%) scale(1.04);box-shadow:0 13px 32px #1669ca77}.entry-icon{display:block;width:100%;height:100%;border-radius:50%;object-fit:contain}
+    .entry.entry--icon{width:58px;height:58px;min-width:58px;min-height:58px;box-sizing:border-box;padding:0;border:0;border-radius:50%;background:transparent;overflow:visible;box-shadow:0 10px 26px #1669ca55}.entry.entry--icon:hover{transform:translateY(-50%) scale(1.04);box-shadow:0 13px 32px #1669ca77}.entry.entry--draggable{touch-action:none;user-select:none;cursor:grab}.entry.entry--dragging{cursor:grabbing}.entry-icon{display:block;width:100%;height:100%;border-radius:50%;object-fit:contain;pointer-events:none}
     .panel{position:fixed;left:var(--mohe-ai-panel-left);top:50%;transform:translateY(-50%);width:min(440px,calc(100vw - var(--mohe-ai-panel-left) - 12px));height:min(700px,calc(100vh - 32px));z-index:2147483001;box-sizing:border-box;background:white;border:1px solid #dce2ed;border-radius:16px;box-shadow:0 16px 60px #17233d33;display:flex;flex-direction:column;overflow:hidden}
     .head,.footer{padding:14px;border-bottom:1px solid #edf0f4}.head{display:flex;gap:8px;align-items:center;min-width:0}.head strong{flex:1;min-width:0}.head button{flex:0 0 auto;white-space:nowrap}
     .body{min-height:0;overflow:auto;padding:14px;flex:1}.message{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;padding:10px;border-radius:10px;background:#f5f6fa}.question{background:var(--mohe-ai-brand-soft);color:#174f7d}
@@ -68,8 +68,85 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   let boot, sessions, conversation, run = null, question = '', panel = null, body, progress, input, send, format, pollTimer, expiryTimer, elapsedTimer, admissionRetryTimer = null, admissionInFlight = false, admissionRetryCount = 0, disposed = false, cancelling = false, closeRequested = false, pendingCreate = null, compatibilityExecuting = false, clientDeliveryStartedAt = 0, workspaceTitle = null, workspaceHistory = null, workspaceCancel = null, readingRunway = null, activeRunStatus = null, exportRequested = false, recoveryDraft = null, freshButton = null;
   let clientSession = newId(); const entry = el('button', entryIconUrl ? null : '魔核 AI', entryIconUrl ? 'entry entry--icon' : 'entry');
   entry.type = 'button'; entry.setAttribute('aria-label', '打开魔核 AI 工作台');
-  if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; entry.appendChild(icon); }
+  if (entryIconUrl) { const icon = documentRef.createElement('img'); icon.className = 'entry-icon'; icon.src = entryIconUrl; icon.alt = ''; icon.draggable = false; entry.appendChild(icon); }
   entry.hidden = true; root.appendChild(entry);
+  // Only the platform launcher opts in. A short pointer gesture remains a
+  // normal click; a drag stores viewport pixels locally and is clamped after
+  // resize so the launcher cannot become unreachable.
+  let disposeEntryDrag = () => {};
+  if (draggableEntry && entryIconUrl) {
+    const view = documentRef.defaultView || window;
+    const positionKey = 'mohe-ai:platform-entry-position:v1';
+    let drag = null, suppressClick = false, clickResetTimer = null;
+    const clamp = (value, maximum) => Math.min(Math.max(value, 8), Math.max(8, maximum - 8));
+    const place = (x, y) => {
+      const rect = entry.getBoundingClientRect();
+      const width = rect.width || 58, height = rect.height || 58;
+      const left = clamp(x, view.innerWidth - width), top = clamp(y, view.innerHeight - height);
+      entry.style.left = `${left}px`; entry.style.right = 'auto';
+      entry.style.top = `${top}px`; entry.style.bottom = 'auto';
+      return { x: left, y: top };
+    };
+    const save = (position) => { try { storage.setItem(positionKey, JSON.stringify(position)); } catch (_) { /* Storage may be unavailable; dragging still works. */ } };
+    const fit = () => {
+      if (!entry.style.left || !entry.style.top) return;
+      save(place(parseFloat(entry.style.left), parseFloat(entry.style.top)));
+    };
+    try {
+      const saved = JSON.parse(storage.getItem(positionKey));
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) place(saved.x, saved.y);
+    } catch (_) { /* Ignore stale or unavailable local position. */ }
+    const end = (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', end);
+      view.removeEventListener('pointercancel', end);
+      entry.classList.remove('entry--dragging');
+      if (drag.moved) {
+        if (event.type === 'pointerup') save(place(drag.x, drag.y));
+        suppressClick = true;
+        clickResetTimer = view.setTimeout(() => { suppressClick = false; clickResetTimer = null; }, 0);
+      }
+      drag = null;
+    };
+    const move = (event) => {
+      if (!drag || event.pointerId !== drag.id) return;
+      const dx = event.clientX - drag.startX, dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+      drag.moved = true;
+      const placed = place(drag.left + dx, drag.top + dy);
+      drag.x = placed.x; drag.y = placed.y;
+      entry.classList.add('entry--dragging');
+      event.preventDefault();
+    };
+    const start = (event) => {
+      if (event.button !== 0 || event.isPrimary === false) return;
+      if (clickResetTimer != null) view.clearTimeout(clickResetTimer);
+      suppressClick = false;
+      const rect = entry.getBoundingClientRect();
+      drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, x: rect.left, y: rect.top, moved: false };
+      view.addEventListener('pointermove', move);
+      view.addEventListener('pointerup', end);
+      view.addEventListener('pointercancel', end);
+    };
+    const stopDraggedClick = (event) => {
+      if (!suppressClick) return;
+      event.preventDefault(); event.stopImmediatePropagation(); suppressClick = false;
+    };
+    entry.classList.add('entry--draggable');
+    entry.addEventListener('pointerdown', start);
+    entry.addEventListener('click', stopDraggedClick, true);
+    view.addEventListener('resize', fit);
+    disposeEntryDrag = () => {
+      view.removeEventListener('pointermove', move);
+      view.removeEventListener('pointerup', end);
+      view.removeEventListener('pointercancel', end);
+      view.removeEventListener('resize', fit);
+      entry.removeEventListener('pointerdown', start);
+      entry.removeEventListener('click', stopDraggedClick, true);
+      if (clickResetTimer != null) view.clearTimeout(clickResetTimer);
+    };
+  }
   // A clarification POST is durably accepted before the worker can change the
   // public Run status.  Keep polling that same step instead of rendering its
   // old controls again or treating WAITING_CLARIFICATION as an idle state.
@@ -1255,7 +1332,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   // its signed delivery session and continue polling. The visible buttons are
   // the only cancellation path.
   const unload = () => { persistActive(); }; window.addEventListener('pagehide', unload); window.addEventListener('beforeunload', unload);
-  const dispose = () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearTimeout(admissionRetryTimer); clearTimeout(clarificationTimer); clearInterval(expiryTimer); finishActiveRunStatus(); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); host.remove(); };
+  const dispose = () => { persistActive(); disposed = true; clearTimeout(pollTimer); clearTimeout(admissionRetryTimer); clearTimeout(clarificationTimer); clearInterval(expiryTimer); finishActiveRunStatus(); window.removeEventListener('pagehide', unload); window.removeEventListener('beforeunload', unload); disposeEntryDrag(); host.remove(); };
   host.__moheAiDispose = dispose;
   return dispose;
 }

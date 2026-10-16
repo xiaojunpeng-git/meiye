@@ -28,9 +28,11 @@ export default {
     };
     this.syncAiWorkArea();
     const apiPrefix = String(Setting.apiBaseURL).replace(/\/+$/, '') + '/ai';
+    // The platform icon may be moved by its user; this opt-in keeps the
+    // separate cashier presentation and its fixed placement unchanged.
     this.disposeAi = mountMoheAi({ request: browserTransport(apiPrefix, () =>
       (typeof this.__getToken === 'function' ? this.__getToken() : '') || util.cookies.get('token') || ''
-    ), entryLeft: 'var(--mohe-ai-admin-workarea-left, 0px)', panelLeft: 'calc(var(--mohe-ai-admin-workarea-left, 0px) + 12px)', presentation: 'workspace', entryIconUrl: moheAiEntryIcon });
+    ), entryLeft: 'var(--mohe-ai-admin-workarea-left, 0px)', panelLeft: 'calc(var(--mohe-ai-admin-workarea-left, 0px) + 12px)', presentation: 'workspace', entryIconUrl: moheAiEntryIcon, draggableEntry: true });
     window.addEventListener('resize', this.syncAiWorkArea);
     this.observeAiWorkArea();
     // App.vue mounts this entry before an async route has necessarily rendered
