@@ -50,6 +50,8 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
   `;
   // 两端确认卡共用黑白层级；视觉序号不参与业务选项与权限判断。
   style.textContent += `.card.guidance-card{padding:22px;border:1px solid #e5e5e7;border-radius:22px;background:#fff;color:#202124}.guidance-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:#777;font-size:14px}.guidance-cancel{border:0;background:transparent;color:#777;font-size:13px}.guidance-question{margin:10px 0 18px;font-size:18px;font-weight:600;line-height:1.65}.guidance-label{margin:12px 0 8px;color:#777;font-size:13px}.guidance-option{position:relative;display:flex;align-items:center;gap:12px;margin:6px 0;padding:12px;border:1px solid transparent;border-radius:16px;cursor:pointer}.guidance-option:has(input:checked){background:#f3f3f4;border-color:#d9d9dc}.guidance-option:focus-within{outline:2px solid #737377;outline-offset:2px}.guidance-option input{position:absolute;width:1px;height:1px;opacity:0}.guidance-number{display:flex;align-items:center;justify-content:center;flex:0 0 30px;height:30px;border:1px solid #dedee1;border-radius:50%;background:#f3f3f4;color:#737377;font-size:14px}.guidance-option-label{min-width:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}.guidance-supplement{box-sizing:border-box;width:100%;min-height:88px;padding:12px;border:1px solid #d9d9dc;border-radius:12px;font:inherit;resize:vertical}.guidance-confirm.primary{display:block;margin:18px 0 0 auto;padding:10px 18px;min-height:44px;border:0;border-radius:24px;background:#17191e;color:#fff}.guidance-confirm:disabled{background:#aaa}.guidance-card input[type=date],.guidance-card select{box-sizing:border-box;max-width:100%;min-height:44px}[hidden]{display:none!important}`;
+  // A transport failure is one small action, not another business question card.
+  style.textContent += `.workspace .failure-retry{display:inline-flex;align-items:center;min-height:38px;margin:0 0 20px;padding:7px 16px;border:1px solid #d9dee7;border-radius:999px;background:#fff;color:#273143;font-size:14px}.workspace .failure-retry:hover{background:#f4f6f9}.workspace .failure-retry:focus-visible{outline:2px solid var(--mohe-ai-brand);outline-offset:2px}`;
   style.textContent += `.answer-feedback{display:flex;align-items:center;gap:8px;margin:14px 0;color:#778399;font-size:13px}.answer-feedback button{border:1px solid #d8dee7;background:#fff;border-radius:16px;padding:5px 12px;color:#43536c;cursor:pointer}.answer-feedback button[aria-pressed="true"]{background:#eaf3ff;border-color:#2e86d0;color:#1565a8}.answer-feedback button:disabled{opacity:.6}.answer-feedback-note{font-size:12px}`;
   root.appendChild(style);
   const el = (tag, text, cls) => { const n = documentRef.createElement(tag); if (text != null) n.textContent = String(text); if (cls) n.className = cls; return n; };
@@ -119,10 +121,26 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     }
     // A provider timeout has no accepted meaning, but the failed question is
     // safe to retry as a new Run with its original predecessor context. Show
-    // the recovery actions only when this terminal outcome supplied them;
-    // semantic uncertainty still uses live clarification fields instead.
-    if (host.dataset.moheAiPresentation === 'workspace'
-      && (!guidance || guidance.kind !== 'technical_error')) return;
+    // one explicit retry in the workspace. Editing and starting over already
+    // live in its composer/sidebar; extra choices imply that more wording can
+    // repair a provider timeout. Semantic uncertainty uses live fields below.
+    if (host.dataset.moheAiPresentation === 'workspace') {
+      if (!guidance || guidance.kind !== 'technical_error'
+        || guidance.retry_original !== true && !Array.isArray(guidance.options)) return;
+      const origin = presentation.recovery_origin;
+      if (!origin || !Array.isArray(origin.history) || typeof origin.created_at !== 'number') return;
+      const currentDay = sameBusinessDay(origin.created_at, Date.now());
+      const retry = el('button', currentDay ? '重试原问题' : '核对日期后重试', 'failure-retry'); retry.type = 'button';
+      retry.dataset.failureGuidance = 'true';
+      retry.onclick = () => {
+        if (disposed || pendingCreate || (run && !isTerminal(run.status)) || conversation !== origin.conversation_id) return;
+        recoveryDraft = origin; input.value = questionText;
+        if (currentDay) void submitQuestion();
+        else input.focus();
+      };
+      turn.appendChild(retry);
+      return;
+    }
     const options = guidance && guidance.options;
     if (!Array.isArray(options) || options.length !== 3 || options.some(item => !item || typeof item.label !== 'string'
       || !['retry_original', 'edit_original', 'new_conversation'].includes(item.value))) return;
@@ -177,15 +195,10 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
       const retryAfterMs = typed && Number.isSafeInteger(value.retry_after_ms) ? value.retry_after_ms : detail.retry_after_ms;
       const retryHint = Number.isSafeInteger(retryAfterMs) && retryAfterMs > 0
         ? '\n预计 ' + Math.ceil(retryAfterMs / 1000) + ' 秒后可重试。' : '';
-      // An unknown model result cannot produce metric suggestions. Give the
-      // customer the existing safe recovery choices without claiming that
-      // the question itself was unclear or reusing the failed Run as a fact.
-      const recovery = reason === 'AI_MODEL_RESULT_UNKNOWN' ? {
-        options: [{ value: 'retry_original', label: '按原问题再查一次' },
-          { value: 'edit_original', label: '修改原问题后查询' },
-          { value: 'new_conversation', label: '开启新对话' }],
-        supplement_label: '我来补充描述'
-      } : {};
+      // The model did not return a reliable meaning, so retry the exact
+      // question with its verified predecessor instead of asking the customer
+      // for unrelated wording changes or inventing metric choices.
+      const recovery = reason === 'AI_MODEL_RESULT_UNKNOWN' ? { retry_original: true } : {};
       return { kind: typed ? value.kind : 'technical_error', question: explanation + retryHint, ...recovery };
     }
     // A server-confirmed absence of business-query meaning needs a short
@@ -222,7 +235,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
     const turn = activeConversationTurn() || body;
     message(customerText, '', turn);
     const presentation = { summary: customerText, terminal_status: 'FAILED', failure_guidance: safeGuidance };
-    if (Array.isArray(safeGuidance.options)) presentation.recovery_origin = { conversation_id: conversation,
+    if (safeGuidance.retry_original === true || Array.isArray(safeGuidance.options)) presentation.recovery_origin = { conversation_id: conversation,
       history: submitted.history, context_ref: submitted.context_ref || null, created_at: Date.now() };
     renderFailureCard(deliveredQuestion, presentation, turn);
     try { sessions.append(conversation, deliveredQuestion, customerText, presentation, null,
@@ -708,7 +721,7 @@ export function mountMoheAi({ request, storage = window.localStorage, documentRe
             source: { run_id: run.run_id, ...deliveryBinding(run), clarification_id: run.clarification.id } };
           failurePresentation.clarification_choices = expiredChoices;
           renderFailureCard(deliveredQuestion, failurePresentation, answerTurn);
-        } else if (safeGuidance && Array.isArray(safeGuidance.options)) {
+        } else if (safeGuidance && (safeGuidance.retry_original === true || Array.isArray(safeGuidance.options))) {
           // A remounted task can retain its Run and visible original question
           // after the admission envelope was retired. No newer turn can enter
           // this active conversation, so its stored transcript is the same

@@ -118,20 +118,23 @@ for (const deadlineDriven of [true, false]) {
   eq(f.root().textContent.includes('恢复查询完成'), true);
   f.dispose();
 }
-// A transport outage has no accepted semantic result. Its recovery card
-// retries the exact original question and never invents metric choices.
+// A transport outage has no accepted semantic result. The workspace offers
+// one retry using the same predecessor; it must not ask for more conditions.
 {
   const f = setup({ partial: true, failureCard: true, failureReason: 'AI_MODEL_RESULT_UNKNOWN', presentation: 'workspace' }); await f.start();
   eq(f.root().textContent.includes('AI 服务暂时未返回结果，请稍后重试。'), true);
   eq(f.root().textContent.includes('检查条件'), false);
   eq(f.root().querySelector('[data-failure-guidance]') !== null, true);
-  eq(f.root().textContent.includes('按原问题再查一次'), true);
+  eq(f.root().textContent.includes('重试原问题'), true);
+  eq(f.root().textContent.includes('您可以这样继续'), false);
+  eq(f.root().textContent.includes('我来补充描述'), false);
   eq(f.calls.filter(call => call.path === '/runs').length, 1);
-  const retry = [...f.root().querySelectorAll('.guidance-option')].find(node => node.textContent.includes('按原问题再查一次'));
+  const retry = f.root().querySelector('.failure-retry');
   retry.click(); retry.click(); await flush();
   const starts = f.calls.filter(call => call.path === '/runs');
   eq(starts.length, 2);
   eq(starts[1].payload.question, '需要确认条件的测试问题');
+  eq(starts[1].payload.history, starts[0].payload.history);
   f.dispose();
 }
 for (const rounds of [3, 4, 5]) {

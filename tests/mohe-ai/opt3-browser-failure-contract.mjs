@@ -24,9 +24,15 @@ async function setup(responses, presentation = 'workspace', historicalFailure = 
   globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.crypto = webcrypto;
   const sessions = new DeviceSessions(window.localStorage, 'opt3:platform:manager');
   if (historicalFailure) {
+    const savedGuidance = historicalFailure === 'timeout'
+      ? { kind: 'technical_error', question: '模型响应超时，请稍后重试。', retry_original: true }
+      : legacyMenu;
     sessions.create('legacy-failure');
-    sessions.append('legacy-failure', '旧失败问题', legacyMenu.question,
-      { summary: legacyMenu.question, terminal_status: 'FAILED', failure_guidance: legacyMenu }, null, { contextEligible: false });
+    sessions.append('legacy-failure', '旧失败问题', savedGuidance.question,
+      { summary: savedGuidance.question, terminal_status: 'FAILED', failure_guidance: savedGuidance,
+        ...(historicalFailure === 'timeout' ? { recovery_origin: { conversation_id: 'legacy-failure',
+          history: [], context_ref: null, created_at: Date.now() - 86400000 } } : {}) },
+      null, { contextEligible: false });
   }
   const calls = []; let index = 0;
   const request = async (method, path, payload) => {
@@ -69,7 +75,7 @@ async function setup(responses, presentation = 'workspace', historicalFailure = 
 }
 
 // During a staged update, legacy admission messages still carry the actual
-// refusal. Terminal menu copy is ignored because it contains no diagnosis.
+// refusal. A model timeout gets one retry, never the old four-choice menu.
 for (const response of [
   { accepted: false, reason: 'RATE_LIMITED', message: '您近期提问较频繁，请稍后再问。', failure_guidance: legacyMenu },
   { status: 'FAILED', reason: 'AI_MODEL_RESULT_UNKNOWN', message: legacyMenu.question, failure_guidance: legacyMenu },
@@ -79,7 +85,9 @@ for (const response of [
   const f = await setup([response]); await f.send('一次完整问题');
   const turn = f.root.querySelector('.conversation-turn');
   assert.doesNotMatch(turn.textContent, /请选择一种方式|现金业绩|消耗业绩|AI_/);
-  assert.equal(f.root.querySelector('[data-failure-guidance]'), null);
+  assert.equal(f.root.querySelector('[data-failure-guidance]') !== null,
+    response.reason === 'AI_MODEL_RESULT_UNKNOWN');
+  assert.doesNotMatch(turn.textContent, /您可以这样继续|我来补充描述/);
   if (response.accepted === false) assert.match(turn.textContent, /提问较频繁/);
   if (response.reason === 'AI_MODEL_RESULT_UNKNOWN') assert.match(turn.textContent, /AI 服务暂时未返回结果/);
   if (response.reason === 'AI_CAPABILITY_CHANGED') assert.match(turn.textContent, /请刷新页面/);
@@ -116,7 +124,7 @@ for (const topicBoundary of [undefined, 'reset']) {
   const failed = f.sessions.load()[0].rounds[1];
   assert.equal(failed.context_eligible, false);
   assert.equal(failed.topic_boundary, topicBoundary);
-  assert.equal(failed.presentation.recovery_origin, undefined);
+  assert.deepEqual(failed.presentation.recovery_origin.history.map(row => row.question), ['前序问题']);
   f.dispose();
 }
 
@@ -138,6 +146,18 @@ for (const topicBoundary of [undefined, 'reset']) {
   assert.doesNotMatch(turn.textContent, /请选择一种方式|按原问题再查一次/);
   assert.equal(turn.querySelector('[data-failure-guidance]'), null);
   assert.equal(f.sessions.load().find(session => session.id === 'legacy-failure').rounds[0].answer, legacyMenu.question);
+  f.dispose();
+}
+// Historical relative-date questions cannot be silently resubmitted on a
+// later business day. The same compact action restores the draft for review.
+{
+  const f = await setup([], 'workspace', 'timeout');
+  [...f.root.querySelectorAll('.workspace-history-open')].find(button => button.textContent === '旧失败问题').click();
+  const retry = f.root.querySelector('[data-failure-guidance]');
+  assert.equal(retry.textContent, '核对日期后重试');
+  retry.click();
+  assert.equal(f.calls.filter(call => call.path === '/runs').length, 0);
+  assert.equal(f.root.querySelector('textarea[aria-label="输入问题"]').value, '旧失败问题');
   f.dispose();
 }
 console.log('OPT3 platform failure messages / retry metadata / topic handoff / drawer compatibility: PASS');
