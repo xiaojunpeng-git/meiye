@@ -38,10 +38,18 @@ final class CashierV3OrderQueryModule
         $handlers->registerProjection('query-order-center-records', function (array $scope) use ($queries, $recordQueries): array {
             $page = self::unifiedPage($scope, (string)($scope['payload']['recordType'] ?? ''));
             $partition = $recordQueries->pagePartition($page);
+            $versionProvider = new CashierV3OrderCenterPartitionProvider($queries, $recordQueries);
+            $versions = $versionProvider->recordPublicVersions(['records' => $page['records']], $scope['data_scope']);
+            if (($page['recordType'] ?? '') === 'all') {
+                // 混合页的销售操作仍携带原资源版本，不能因入口变更绕过并发保护。
+                $sales = array_values(array_filter($page['records'], static function (array $row): bool {
+                    return ($row['recordType'] ?? '') === 'sales';
+                }));
+                $versions = array_merge($versions, $versionProvider->salesOrderPublicVersions(['salesOrders' => $sales], $scope['data_scope']));
+            }
             return [
                 'data' => ['orderCenter' => $partition],
-                'versions' => (new CashierV3OrderCenterPartitionProvider($queries, $recordQueries))
-                    ->recordPublicVersions(['records' => $page['records']], $scope['data_scope']),
+                'versions' => $versions,
                 'message' => '订单记录已重新读取。',
             ];
         });

@@ -64,4 +64,5 @@ export const schemeCreate = (data) => request({ url: 'target/scheme/create', met
 export const schemeUpdate = (data) => request({ url: 'target/scheme/update', method: 'post', data });
 export const schemeSaveLines = (data) => request({ url: 'target/scheme/lines', method: 'post', data });
 export const schemeActivate = (data) => request({ url: 'target/scheme/activate', method: 'post', data });
+export const schemeVoid = (data) => request({ url: 'target/scheme/void', method: 'post', data });
 export const schemeReport = (params) => request({ url: 'target/scheme/report', method: 'get', params });

@@ -601,7 +601,14 @@ final class CashierV3UnifiedRefundServices
             ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('refund_amount_cents');
         $priorBalanceCreditCents = (int)Db::name(self::TABLE)->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('balance_credit_cents');
-        $cashRefundRemainingCents = max(0, $cardPurchaseCents - $cardCouponCents
+        // New orders freeze how much of this card was paid by stored balance.
+        // A manual cash refund must never convert that non-cash tender to cash.
+        $balancePaidCents = $receipt && (string)($receipt['sales_order_line_id'] ?? '') !== ''
+            ? (int)Db::name('cashier_v3_order_balance_allocation')
+                ->where('tenant_id', $tenantId)
+                ->where('order_line_id', (string)$receipt['sales_order_line_id'])->value('amount_cents')
+            : 0;
+        $cashRefundRemainingCents = max(0, $cardPurchaseCents - $cardCouponCents - $balancePaidCents
             - $priorRefundCents - $priorBalanceCreditCents);
         $otherCollection = $this->usesOtherCollection($tenantId, $salesOrderId);
         $cashRefundRemainingCents = $otherCollection ? 0 : min($cashRefundRemainingCents, $usableSum);
@@ -682,7 +689,11 @@ final class CashierV3UnifiedRefundServices
         $remaining = max(0, (int)$line['sale_amount_cents']
             - (int)($line['coupon_payment_cents'] ?? 0) - $used);
         $otherCollection = $this->usesOtherCollection($tenantId, (string)$line['order_id']);
-        $cashRefundRemaining = $otherCollection ? 0 : $remaining;
+        // The frozen balance share is not refundable as cash. Historical
+        // orders have no allocation row and retain their old refund boundary.
+        $balancePaidCents = (int)Db::name('cashier_v3_order_balance_allocation')
+            ->where('tenant_id', $tenantId)->where('order_line_id', $lineId)->value('amount_cents');
+        $cashRefundRemaining = $otherCollection ? 0 : max(0, $remaining - $balancePaidCents);
         return ['lineId' => $lineId, 'memberId' => $memberId, 'name' => (string)$line['item_name_snapshot'],
             'itemType' => (string)$line['item_type'], 'sourceOrderId' => (string)$line['order_id'],
             'sourceOrderNo' => (string)$line['order_no'], 'purchaseAmountCents' => (int)$line['sale_amount_cents'],

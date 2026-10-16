@@ -202,6 +202,14 @@ export function setMobileCardShowApi(data) {
   });
 }
 
+/** 保存平台分类统计开关；会员看板读取其显隐，不改销售事实与总览金额。 */
+export function setStatisticsEnabledApi(data) {
+  return request({
+    url: `product/category/set_statistics_enabled/${data.id}/${data.statistics_enabled}`,
+    method: 'PUT'
+  });
+}
+
 /**
  * @description 选择商品 -- 列表
  */

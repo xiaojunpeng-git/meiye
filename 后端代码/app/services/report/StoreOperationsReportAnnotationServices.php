@@ -58,7 +58,8 @@ final class StoreOperationsReportAnnotationServices
         'operations_referral_beautician_pre_sale' => ['experience_people'],
         'marketing_acquisition_pre_sale' => ['experience_target', 'new_customer_target', 'new_customer_amount_target'],
         'marketing_referral_pre_sale' => ['experience_target', 'new_customer_target', 'new_customer_amount_target'],
-        'operations_performance_comparison' => ['full_target_amount'],
+        // 旧手填目标保留历史审计，但报表改读已绑定方案后禁止继续写入。
+        'operations_performance_comparison' => [],
         'operations_health_data' => ['actual_staff'],
         'marketing_health_data' => ['performance_target', 'required_staff', 'actual_staff'],
         'product_monetization_beauty_performance_total' => ['target_amount'],
@@ -96,7 +97,6 @@ final class StoreOperationsReportAnnotationServices
         'experience_target' => 'nonnegative_integer',
         'new_customer_target' => 'nonnegative_integer',
         'new_customer_amount_target' => 'integer_cents',
-        'full_target_amount' => 'integer_cents',
         'performance_target' => 'integer_cents',
         'required_staff' => 'nonnegative_integer',
         'actual_staff' => 'nonnegative_integer',

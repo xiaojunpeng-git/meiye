@@ -8,6 +8,7 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
+use app\services\activity\coupon\StoreCouponOrderRule;
 use think\facade\Db;
 
 /** Final-transaction CAS consumption of coupons frozen on checkout lines. */
@@ -25,8 +26,11 @@ final class CashierV3CheckoutCouponSettlementServices
         if ($orderId === '' || $orderId !== (string)$plan->header()['order_id']) {
             throw self::failure('checkout_coupon_sales_order_mismatch');
         }
+        $orderCouponResult = (new CashierV3CheckoutOrderCouponServices())->consumeInTx($plan, $now);
+        $orderCouponLineIds = array_fill_keys((array)$orderCouponResult['lineIds'], true);
         $consumed = [];
         foreach ($plan->lines() as $line) {
+            if (isset($orderCouponLineIds[(string)$line['checkout_line_id']])) continue;
             $couponId = (int)($line['coupon_user_id'] ?? 0);
             // Old orders used a price discount; new orders redeem the same
             // coupon as non-cash tender. Both modes consume one coupon once.
@@ -35,7 +39,11 @@ final class CashierV3CheckoutCouponSettlementServices
             if ($couponId === 0) continue;
             if (isset($consumed[$couponId])) throw self::failure('checkout_coupon_duplicate');
             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
+            $issue = (int)($coupon['cid'] ?? 0) > 0
+                ? (array)Db::name('store_coupon_issue')->where('id', (int)$coupon['cid'])->find() : [];
             if (!$coupon
+                || (int)($issue['use_mode'] ?? StoreCouponOrderRule::DETAIL) !== StoreCouponOrderRule::DETAIL
+                || (int)$orderCouponResult['consumedCount'] > 0
                 || (int)($coupon['uid'] ?? 0) !== (int)$plan->header()['member_id']
                 || (int)($coupon['status'] ?? -1) !== 0
                 || (int)($coupon['is_fail'] ?? -1) !== 0
@@ -63,7 +71,8 @@ final class CashierV3CheckoutCouponSettlementServices
                 'salesOrderLineId' => (string)$line['order_line_id'],
             ];
         }
-        return ['consumedCount' => count($consumed), 'coupons' => array_values($consumed)];
+        return ['consumedCount' => count($consumed) + (int)$orderCouponResult['consumedCount'],
+            'coupons' => array_merge(array_values($consumed), (array)$orderCouponResult['coupons'])];
     }
 
     private function moneyCents($value): int

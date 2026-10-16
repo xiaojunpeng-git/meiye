@@ -19,6 +19,11 @@ final class StoreMemberConsumptionRefundReadServices
             ->leftJoin('cashier_v3_refund_adjustment ra',
                 'ra.tenant_id=refund_operation.tenant_id AND ra.store_id=refund_operation.store_id'
                 . ' AND ra.operation_id=refund_operation.operation_id')
+            // Catalog refunds persist the selected SKU ID, never a product ID.
+            // Resolve its product before the store/platform category scope check;
+            // an equal numeric ID in store_product is unrelated and must not win.
+            ->leftJoin('store_product_attr_value refund_sku',
+                "ra.target_type='catalog' AND refund_sku.id=ra.catalog_item_id AND refund_sku.type=0")
             ->join('cashier_v3_payment_fact payment',
                 "payment.tenant_id=refund_operation.tenant_id AND payment.store_id=refund_operation.store_id"
                 . " AND payment.order_id=refund_operation.operation_id AND payment.fact_direction='adjustment'"
@@ -59,7 +64,7 @@ final class StoreMemberConsumptionRefundReadServices
         $exact = trim((string)($input['category_path_exact'] ?? ''));
         if ($categoryId > 0 || $path !== '' || $exact !== '') {
             $candidates = (clone $query)->fieldRaw('refund_operation.id,refund_operation.store_id,'
-                . 'COALESCE(NULLIF(refund_cart.product_id,0),NULLIF(ra.catalog_item_id,0),dimension.item_id,0) product_id')
+                . 'COALESCE(NULLIF(refund_cart.product_id,0),NULLIF(refund_sku.product_id,0),dimension.item_id,0) product_id')
                 ->select()->toArray();
             $links = array_map(static function (array $row): array {
                 return ['store_id' => (int)$row['store_id'], 'product_id' => (int)$row['product_id']];
@@ -138,7 +143,7 @@ final class StoreMemberConsumptionRefundReadServices
                 . 'payment.member_name_snapshot,refund_member.phone member_phone,payment.business_source_label_snapshot,'
                 . 'ra.target_name_snapshot,ra.source_sales_line_id,ra.card_component_id,'
                 . 'sale.fact_id original_sale_fact_id,sale.order_no_snapshot original_sale_no,'
-                . 'COALESCE(NULLIF(refund_cart.product_id,0),NULLIF(ra.catalog_item_id,0),dimension.item_id,0) current_product_id,'
+                . 'COALESCE(NULLIF(refund_cart.product_id,0),NULLIF(refund_sku.product_id,0),dimension.item_id,0) current_product_id,'
                 . 'dimension.product_type_snapshot,dimension.partner_category_id_snapshot,'
                 . 'dimension.partner_default_ratio_snapshot,dimension.partner_name_snapshot,'
                 . 'payment.amount_cents,payment.source_document_type')

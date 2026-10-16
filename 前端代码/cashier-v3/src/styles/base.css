@@ -3135,6 +3135,35 @@ html.group-dashboard-document #app {
   font-size: 20px;
 }
 
+.cashier-checkout-summary__entitlement strong {
+  color: #315f75;
+}
+
+/* 窄桌面下让新增展示项与操作按钮分行，避免底栏金额或结账按钮被裁切。 */
+@media (max-width: 1550px) {
+  .cashier-checkout-bar {
+    height: auto;
+    min-height: 56px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .cashier-checkout-bar__purchase {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .cashier-checkout-summary {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  .cashier-checkout-actions {
+    margin-left: auto;
+  }
+}
+
 .cashier-checkout-actions {
   flex: none;
   gap: 8px;
@@ -6917,6 +6946,12 @@ html.group-dashboard-document #app {
   .cashier-checkout-bar {
     min-height: 52px;
     height: 52px;
+  }
+}
+
+@media (max-height: 720px) and (max-width: 1550px) {
+  .cashier-checkout-bar {
+    height: auto;
   }
 }
 

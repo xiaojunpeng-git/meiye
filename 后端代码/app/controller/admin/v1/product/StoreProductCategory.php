@@ -106,6 +106,16 @@ class StoreProductCategory extends AuthController
         return $this->success($mobile_card_show == 1 ? '已开启手机端卡包展示' : '已关闭手机端卡包展示');
     }
 
+    /** 保存平台分类统计开关；会员看板据此控制分类展示，不改经营事实。 */
+    public function set_statistics_enabled($statistics_enabled = '', $id = '')
+    {
+        if (!ctype_digit((string)$id) || (int)$id <= 0 || !in_array((string)$statistics_enabled, ['0', '1'], true)) {
+            return $this->fail('统计设置参数不正确');
+        }
+        $this->service->setStatisticsEnabled((int)$id, (int)$statistics_enabled);
+        return $this->success('统计设置已保存', ['statistics_enabled' => (int)$statistics_enabled]);
+    }
+
     /**
      * 生成新增表单
      * @return mixed

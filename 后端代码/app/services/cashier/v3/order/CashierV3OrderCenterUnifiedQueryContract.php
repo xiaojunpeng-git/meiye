@@ -13,6 +13,7 @@ use app\services\query\UnifiedQueryPageRegistry;
 final class CashierV3OrderCenterUnifiedQueryContract
 {
     public const PAGE_BY_TYPE = [
+        'all' => 'order_center_all',
         'sales' => 'order_center_sales',
         'recharge' => 'order_center_recharge',
         'refund' => 'order_center_refund',
@@ -90,6 +91,21 @@ final class CashierV3OrderCenterUnifiedQueryContract
                 ['store', '办理门店'], ['operator', '操作人'], ['record_status', '记录状态'], ['operation_reason', '操作原因'], ['completed_at', '完成时间', 'datetime'],
             ], ['card_operation_no', 'member_name', 'source_card', 'target_content', 'operator']],
         ];
+        // 混合页复用各业务的金额/人员字段定义；退款不折算为负销售，充值不伪造商品明细。
+        if ($type === 'all') {
+            $mixedFields = [
+                'business_type' => ['business_type', '业务类型', 'text', true, true],
+                'order_no' => ['order_no', '订单号', 'text', true, true],
+                'event_completed_at' => ['event_completed_at', '办理时间', 'datetime'],
+            ];
+            foreach (['sales', 'recharge', 'supplement', 'refund'] as $sourceType) {
+                foreach ($definitions[$sourceType][1] as $field) {
+                    if (!isset($mixedFields[$field[0]])) $mixedFields[$field[0]] = $field;
+                }
+            }
+            $mixedFields['business_date'][1] = '业务日期';
+            $definitions['all'] = ['全部订单', array_values($mixedFields), ['order_no', 'source_order_no', 'member_name', 'phone', 'item_summary', 'product_name']];
+        }
         if (!isset($definitions[$type])) throw new \InvalidArgumentException('订单中心统一查询页面不合法');
         [$label, $fields, $keywordFields] = $definitions[$type];
         $registered = [];
@@ -99,7 +115,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
             $visible = $field[3] ?? true;
             $quick = $field[4] ?? false;
             // 一单多值字段只支持展示/筛选/导出，不能隐式取第一项排序或将明细金额当整单合计。
-            $operations = $type === 'sales' && in_array($key, ['item_name','unit_price','quantity','line_amount','craftsman','sales_manager','guide'], true)
+            $operations = in_array($type, ['sales', 'all'], true) && in_array($key, ['item_name','unit_price','quantity','line_amount','craftsman','sales_manager','guide'], true)
                 ? ['display','filter','quick','export'] : [];
             $registered[] = UnifiedQueryPageRegistry::field($key, $fieldLabel, $fieldType, $visible, $quick, $operations);
         }

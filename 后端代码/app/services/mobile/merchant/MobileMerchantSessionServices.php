@@ -93,9 +93,19 @@ final class MobileMerchantSessionServices
             $employee = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->lock(true)->find();
             if (!$employee) throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '未找到员工身份。');
             if ((int)($employee['status'] ?? 0) !== 1) throw MobileApiException::business('EMPLOYEE_DISABLED', '员工已停用。');
+            $auth = Db::name('employee_mobile_auth')->where('employee_id', $employeeId)
+                ->where('status', 1)->where('is_del', 0)->lock(true)->find();
+            if (!$auth) {
+                throw MobileApiException::business('MOBILE_ENTRY_DISABLED', '当前员工未开通手机端。');
+            }
             $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
             if (!$state) {
-                throw MobileApiException::business('MOBILE_ENTRY_DISABLED', '当前员工未开通手机端。');
+                // A valid mobile authorization can predate the state-table
+                // migration. Restore only its session-security projection;
+                // do not reinterpret it as an authorization grant.
+                /** @var MobileAuthRevocationServices $stateBootstrap */
+                $stateBootstrap = app()->make(MobileAuthRevocationServices::class);
+                $state = $stateBootstrap->ensureStateAndLeaseInCurrentTransaction($employeeId)['state'];
             }
             if ($verification !== null) {
                 $binding = Db::name('employee_phone_binding')->where('employee_id', $employeeId)->where('state', 'BOUND')->lock(true)->find();

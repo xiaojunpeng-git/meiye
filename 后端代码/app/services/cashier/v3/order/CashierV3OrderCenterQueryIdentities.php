@@ -70,10 +70,17 @@ final class CashierV3OrderCenterQueryIdentities
             $row['void_operator_query_ids'] = [];
             $people=[];
             foreach ($row['items'] ?? [] as $item) foreach ($item['salespeople'] ?? [] as $person) $people[]=$person['employeeId']??0;
-            $row['salesperson_query_ids']=$this->ids(array_merge($people,$salesIds[$row['id']]??[]));
+            $row['salesperson_query_ids']=$this->ids(array_merge($people,$salesIds[$row['id']]??[],
+                is_array($row['salesperson_query_ids'] ?? null) ? $row['salesperson_query_ids'] : []));
             $row['craftsman_query_ids']=$this->ids(array_column($row['craftsmenListAllocations']??[], 'employeeId'));
             $row['sales_manager_query_ids']=[];
             $row['guide_query_ids']=[];
+            // 补交/退款使用自身最新归属角色，不继承原销售单人员，也不按名称匹配。
+            foreach ($row['attributionPeople'] ?? [] as $person) {
+                if (in_array($person['role'] ?? '', ['guide', 'sales_manager'], true)) {
+                    $row[$person['role'] . '_query_ids'][] = (string)($person['employee_id'] ?? 0);
+                }
+            }
             // 消费单的人员位于各商品/权益明细；服务记录仍沿用记录级人员，不能只读主单漏掉手艺人。
             foreach ($row['items'] ?? [] as $item) {
                 foreach (['craftsman'=>'craftsmenListAllocations','sales_manager'=>'salesManagers','guide'=>'guides'] as $key=>$source) {

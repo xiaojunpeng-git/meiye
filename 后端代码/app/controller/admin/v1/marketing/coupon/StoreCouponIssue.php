@@ -12,6 +12,7 @@ namespace app\controller\admin\v1\marketing\coupon;
 
 use app\controller\admin\AuthController;
 use app\services\activity\coupon\StoreCouponIssueServices;
+use app\services\activity\coupon\StoreCouponOrderRule;
 use app\services\activity\coupon\StoreCouponUserServices;
 use app\services\activity\coupon\StoreCouponProductServices;
 use app\services\product\brand\StoreBrandServices;
@@ -116,6 +117,8 @@ class StoreCouponIssue extends AuthController
             ['applicable_store_id', []],//适用门店IDS
             ['rule', ''],
             ['allow_transfer', 0],//是否允许会员转赠
+            ['use_mode', StoreCouponOrderRule::DETAIL],//明细券或整单门槛券
+            ['order_tiers', []],//整单应收档位与全单张数
         ]);
         $data['allow_transfer'] = (int)!empty($data['allow_transfer']);
         if ($data['applicable_type'] == 1) {
@@ -184,6 +187,43 @@ class StoreCouponIssue extends AuthController
             return $this->fail('优惠券折扣为0～100数字');
         }
         $id = $id ?: 0;
+        // An issued rule cannot be silently repurposed. New order coupons use
+        // their first tier as the legacy minimum only for old read displays;
+        // checkout always evaluates the complete immutable tier set.
+        if ($id > 0) {
+            $existing = $this->services->get($id);
+            if (!$existing || (int)$existing->is_del === 1) return $this->fail('优惠券不存在');
+            $data['use_mode'] = (int)($existing->use_mode ?? StoreCouponOrderRule::DETAIL);
+            $data['order_tiers_json'] = (string)($existing->order_tiers_json ?? '');
+            if ($data['use_mode'] === StoreCouponOrderRule::ORDER
+                && ((int)$data['category'] !== (int)$existing->category
+                    || (int)$data['type'] !== (int)$existing->type
+                    || (int)$data['coupon_type'] !== (int)$existing->coupon_type
+                    || round((float)$data['coupon_price'] * 100) !== round((float)$existing->coupon_price * 100))) {
+                return $this->fail('整单券已发行，核心用券规则不可修改，请新建优惠券');
+            }
+            if ($data['use_mode'] === StoreCouponOrderRule::ORDER) {
+                $tiers = StoreCouponOrderRule::fromStored($data['order_tiers_json']);
+                $data['use_min_price'] = $tiers[0]['min_amount_cents'] / 100;
+            }
+        } else {
+            $mode = (int)$data['use_mode'];
+            if (!in_array($mode, [StoreCouponOrderRule::DETAIL, StoreCouponOrderRule::ORDER], true)) {
+                return $this->fail('请选择正确的用券方式');
+            }
+            if ($mode === StoreCouponOrderRule::ORDER) {
+                if ((int)$data['category'] !== 1 || (int)$data['type'] !== 0
+                    || (int)$data['coupon_type'] !== 1) {
+                    return $this->fail('整单用券仅支持普通通用满减券');
+                }
+                $tiers = StoreCouponOrderRule::normalizeForSave($data['order_tiers']);
+                $data['order_tiers_json'] = json_encode($tiers, JSON_UNESCAPED_UNICODE);
+                $data['use_min_price'] = $tiers[0]['min_amount_cents'] / 100;
+            } else {
+                $data['order_tiers_json'] = '';
+            }
+        }
+        unset($data['order_tiers']);
         $res = $this->services->saveCoupon($data, $id, 0);
         if ($res) return $this->success($id ? '编辑成功' : '添加成功!');
     }

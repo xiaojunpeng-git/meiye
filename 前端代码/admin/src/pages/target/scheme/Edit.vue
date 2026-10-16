@@ -7,7 +7,8 @@
         <div v-if="isCreate" class="scheme-new"><label>方案名称<input v-model.trim="newName" maxlength="120" placeholder="例如：2026年10月经营目标" /></label><label>方案说明<input v-model.trim="newDescription" maxlength="500" placeholder="选填" /></label><button type="button" :disabled="busy || !newName" @click="create">创建草稿并继续编辑</button></div>
         <p v-else-if="!detail">正在加载方案…</p>
         <template v-else>
-          <div class="scheme-summary"><div><h2>{{ detail.scheme.name }}</h2><p>版本 {{ detail.scheme.version }} · {{ detail.scheme.status === 'active' ? '已生效' : '草稿' }} · {{ lines.length }} 条目标</p></div><div class="scheme-summary__actions"><button type="button" @click="downloadTemplate">下载 Excel 模板</button><label v-if="isDraft" class="scheme-upload">导入 Excel<input type="file" accept=".xlsx,.xls" @change="importExcel" /></label><button v-if="isDraft" type="button" @click="addLine">添加目标</button></div></div>
+          <div class="scheme-summary"><div><h2>{{ detail.scheme.name }}</h2><p>版本 {{ detail.scheme.version }} · {{ schemeStatusLabel }} · {{ lines.length }} 条目标</p></div><div class="scheme-summary__actions"><button type="button" @click="downloadTemplate">下载 Excel 模板</button><label v-if="isDraft" class="scheme-upload">导入 Excel<input type="file" accept=".xlsx,.xls" @change="importExcel" /></label><button v-if="isDraft" type="button" @click="addLine">添加目标</button></div></div>
+          <p v-if="detail.void_info" class="scheme-note">作废原因：{{ detail.void_info.reason }} · 操作人 ID：{{ detail.void_info.actor_id }} · 作废时间：{{ voidTime }}</p>
           <div v-if="isDraft" class="scheme-metadata"><label>方案名称<input v-model.trim="editName" maxlength="120" /></label><label>方案说明<input v-model.trim="editDescription" maxlength="500" /></label><button type="button" :disabled="busy || !editName" @click="saveMetadata">保存方案信息</button></div>
           <p class="scheme-note">目标金额以元录入，保存后按分精度存储。选择组织时按授权门店分别设置；全店、分类、商品目标独立展示，不相加。</p>
           <div v-if="isDraft" class="scheme-batch">
@@ -38,7 +39,7 @@
             <tr v-if="!lines.length"><td :colspan="isDraft ? 7 : 6" class="scheme-empty">暂无目标明细</td></tr>
           </tbody></table></div>
           <div class="scheme-footer"><button v-if="isDraft" type="button" :disabled="busy || !lines.length" @click="saveLines">保存草稿</button><span v-if="isDraft">导入后请先检查明细，再保存和启用。</span></div>
-          <section class="scheme-reports"><h3>引用此方案的报表</h3><p>启用时一次切换所选报表；若旧方案仍被其他报表使用，系统会提示一并处理。</p><div class="scheme-reports__grid"><label v-for="(name, code) in catalog.reports" :key="code"><input v-model="selectedReports" type="checkbox" :value="code" :disabled="!isDraft" />{{ name }}</label></div><button v-if="isDraft" type="button" :disabled="busy || !lines.length || !selectedReports.length" @click="activate">启用并应用到所选报表</button></section>
+          <section class="scheme-reports"><h3>引用此方案的报表</h3><p>启用时只切换所选报表；其他报表继续使用各自绑定的方案。</p><div class="scheme-reports__grid"><label v-for="(name, code) in catalog.reports" :key="code"><input v-model="selectedReports" type="checkbox" :value="code" :disabled="!isDraft" />{{ name }}</label></div><button v-if="isDraft" type="button" :disabled="busy || !lines.length || !selectedReports.length" @click="activate">启用并应用到所选报表</button></section>
         </template>
       </main>
     </div>
@@ -57,7 +58,7 @@ export default {
   name: 'TargetSchemeEditPage',
   components: { OrganizationStoreScopePicker },
   data() { return { catalog: { stores: [], metrics: [], categories: [], reports: {}}, detail: null, selectedId: 0, lines: [], batchStores: [], batchMonth: new Date().toLocaleDateString('sv-SE').slice(0, 7), batchMetricCode: '', batchScopeType: 'store', batchScopeId: 0, batchDisplayValue: '', batchOverwrite: false, batchMessage: '', selectedReports: [], newName: '', newDescription: '', editName: '', editDescription: '', busy: false, error: '' }; },
-  computed: { isDraft() { return this.detail && this.detail.scheme.status === 'draft'; }, isCreate() { return this.$route.name === 'target_scheme_create'; }, batchScopes() { const metric = this.catalog.metrics.find(item => item.code === this.batchMetricCode); return metric ? metric.scopes : ['store']; } },
+  computed: { isDraft() { return this.detail && this.detail.scheme.status === 'draft'; }, isCreate() { return this.$route.name === 'target_scheme_create'; }, schemeStatusLabel() { const status = this.detail && this.detail.scheme.status; return status === 'active' ? '已生效' : (status === 'void' ? '已作废' : '草稿'); }, voidTime() { const seconds = Number(this.detail && this.detail.void_info && this.detail.void_info.occurred_at); return seconds ? new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '—'; }, batchScopes() { const metric = this.catalog.metrics.find(item => item.code === this.batchMetricCode); return metric ? metric.scopes : ['store']; } },
   watch: { '$route.params.id'(id) { if (id) this.openScheme(id); } },
   async created() { await this.load(); },
   methods: {
@@ -68,7 +69,7 @@ export default {
     loadScope() { return schemeCatalog(); },
     async openScheme(id) {
       this.error = ''; this.selectedId = Number(id);
-      try { const result = await schemeDetail(id); this.detail = result.data; this.editName = this.detail.scheme.name; this.editDescription = this.detail.scheme.description || ''; this.selectedReports = this.detail.report_codes && this.detail.report_codes.length ? this.detail.report_codes.slice() : DEFAULT_REPORTS.slice(); this.lines = (this.detail.lines || []).map(line => ({ ...line, localKey: randomKey(), displayValue: this.displayValue(line), productOptions: [] })); } catch (error) { this.error = error.message || '方案详情加载失败'; }
+      try { const result = await schemeDetail(id); this.detail = result.data; this.editName = this.detail.scheme.name; this.editDescription = this.detail.scheme.description || ''; this.selectedReports = this.detail.report_codes && this.detail.report_codes.length ? this.detail.report_codes.slice() : (this.isDraft ? DEFAULT_REPORTS.slice() : []); this.lines = (this.detail.lines || []).map(line => ({ ...line, localKey: randomKey(), displayValue: this.displayValue(line), productOptions: [] })); } catch (error) { this.error = error.message || '方案详情加载失败'; }
     },
     async create() {
       this.error = ''; this.busy = true;

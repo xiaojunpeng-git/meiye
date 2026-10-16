@@ -157,6 +157,11 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  // 页面显式启用等待反馈；默认不改变其他已验收查询栏的按钮行为。
+  showQueryLoading: {
+    type: Boolean,
+    default: false
+  },
   stateContextKey: {
     type: [String, Number],
     default: ''
@@ -510,6 +515,10 @@ function ensureQuickDateRangeDefaults() {
 
 function ensureQuickFieldDefaults() {
   activeQuickFields.value.forEach((field) => {
+    // 未设置的枚举对应“全部”；只补空值，不覆盖已选业务类型或恢复的查询条件。
+    if (field.type === 'enum' && field.options?.length && quickFieldValues[field.key] == null) {
+      quickFieldValues[field.key] = ''
+    }
     if (field.quickDefaultToday !== true || topFieldType(field) !== 'date') return
     if (!quickFieldValues[field.key]) quickFieldValues[field.key] = localToday()
   })
@@ -914,7 +923,7 @@ async function startDirectQueryExport() {
           <span class="sr-only">综合查询</span>
           <input v-model="keyword" type="search" :placeholder="searchPlaceholder" autocomplete="off" @keyup.enter="submitQuery">
         </label>
-        <button v-if="!queryActionsInSecondary" type="button" class="button button--primary" @click="submitQuery">查询</button>
+        <button v-if="!queryActionsInSecondary" type="button" class="button button--primary" :disabled="showQueryLoading && isQueryLoading" :aria-busy="showQueryLoading && isQueryLoading" @click="submitQuery">{{ showQueryLoading && isQueryLoading ? '查询中…' : '查询' }}</button>
         <div v-if="showDataScope" class="unified-query-scope" role="group" aria-label="数据范围">
           <span class="unified-query-scope__thumb" :class="{ 'unified-query-scope__thumb--all': dataScope === 'all' }" aria-hidden="true" />
           <button type="button" :aria-pressed="dataScope === 'normal'" :class="{ 'unified-query-scope__active': dataScope === 'normal' }" @click="selectScope('normal')">{{ compactScopeLabels ? '正常' : '正常数据' }}</button>
@@ -1014,7 +1023,7 @@ async function startDirectQueryExport() {
         </label>
         <!-- 复用原操作入口与查询快照，不另建页面级查询或重置实现。 -->
         <div v-if="queryActionsInSecondary" class="unified-query-toolbar__field-actions">
-          <button type="button" class="button button--primary" @click="submitQuery">查询</button>
+          <button type="button" class="button button--primary" :disabled="showQueryLoading && isQueryLoading" :aria-busy="showQueryLoading && isQueryLoading" @click="submitQuery">{{ showQueryLoading && isQueryLoading ? '查询中…' : '查询' }}</button>
           <button type="button" class="button button--secondary" @click="resetQuery">重置</button>
           <button v-if="singleRowQueryActive && showSettingsButton" type="button" class="button button--secondary" @click="openSettings">{{ settingsButtonLabel }}</button>
           <!-- 单行布局只移动入口，权限、导出抽屉与直接导出的执行契约均保持原样。 -->

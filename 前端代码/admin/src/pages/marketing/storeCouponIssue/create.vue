@@ -134,6 +134,25 @@
                 <Radio :label="3" :disabled="[1].includes(type)">品牌券</Radio>
               </RadioGroup>
             </FormItem>
+            <FormItem label="用券方式：" v-if="formData.category === 1 && formData.type === 0 && formData.coupon_type === 1">
+              <RadioGroup v-model="formData.use_mode">
+                <Radio :label="0" :disabled="type === 1">明细</Radio>
+                <Radio :label="1" :disabled="type === 1">整单门槛、明细抵付</Radio>
+              </RadioGroup>
+              <div class="info">整单门槛券在明细中选用，可多选；整单应收决定全单可用张数。</div>
+            </FormItem>
+            <FormItem label="整单用券档位：" v-if="formData.use_mode === 1 && formData.category === 1 && formData.type === 0 && formData.coupon_type === 1">
+              <div class="order-coupon-tier" v-for="(tier, index) in formData.order_tiers" :key="index">
+                <span>满</span>
+                <InputNumber :min="1" :max="100000000" :precision="0" v-model="tier.min_amount" :disabled="type === 1" />
+                <span>元，整单最多</span>
+                <InputNumber :min="1" :max="100" :precision="0" v-model="tier.max_count" :disabled="type === 1" />
+                <span>张</span>
+                <Button v-if="type !== 1" type="text" @click="removeOrderTier(index)">删除</Button>
+              </div>
+              <Button v-if="type !== 1" type="dashed" size="small" @click="addOrderTier">添加档位</Button>
+              <div class="info">按扣除本次欠款后、用券与余额支付前的应收金额命中最高档；多条明细共用张数上限。</div>
+            </FormItem>
             <FormItem v-show="formData.type === 2">
               <template>
                 <div
@@ -186,13 +205,13 @@
                 选择商品的品牌
               </div>
             </FormItem>
-            <FormItem label="使用门槛：">
+            <FormItem v-if="formData.use_mode !== 1" label="使用门槛：">
               <RadioGroup v-model="isMinPrice">
                 <Radio :label="0" :disabled="[1].includes(type)">无门槛</Radio>
                 <Radio :label="1" :disabled="[1].includes(type)">有门槛</Radio>
               </RadioGroup>
             </FormItem>
-            <FormItem v-show="isMinPrice">
+            <FormItem v-if="formData.use_mode !== 1 && isMinPrice">
               <InputNumber
                 :min="1"
                 :max="100000000"
@@ -479,6 +498,13 @@ export default {
     goodsList,
     storeList,
   },
+  watch: {
+    // Mode is available only on ordinary universal fixed-value coupons.
+    // Clear it when a merchant changes any eligibility axis on this form.
+    'formData.category': 'resetInvalidOrderMode',
+    'formData.type': 'resetInvalidOrderMode',
+    'formData.coupon_type': 'resetInvalidOrderMode',
+  },
   data() {
     return {
       roterPre: Setting.roterPre,
@@ -516,6 +542,8 @@ export default {
         rule: '',
         category: 1,
         allow_transfer: 0,
+        use_mode: 0,
+        order_tiers: [],
       },
       categoryList: [],
       brandList: [],
@@ -620,6 +648,15 @@ export default {
           this.formData.coupon_time = data.coupon_time;
           this.formData.receive_type = data.receive_type;
           this.formData.allow_transfer = Number(data.allow_transfer || 0);
+          this.formData.use_mode = Number(data.use_mode || 0);
+          try {
+            const tiers = JSON.parse(data.order_tiers_json || '[]');
+            this.formData.order_tiers = Array.isArray(tiers)
+              ? tiers.map((tier) => ({ min_amount: Number(tier.min_amount_cents || 0) / 100, max_count: Number(tier.max_count || 0) }))
+              : [];
+          } catch (error) {
+            this.formData.order_tiers = [];
+          }
           this.formData.is_permanent = data.is_permanent;
           this.formData.status = data.status;
           this.formData.product_id = data.product_id;
@@ -809,6 +846,27 @@ export default {
     },
     // 表单验证
     validate() {
+      if (this.formData.use_mode === 1) {
+        if (this.formData.category !== 1 || this.formData.type !== 0 || this.formData.coupon_type !== 1) {
+          return this.$Message.error('整单用券仅支持普通通用满减券');
+        }
+        const tiers = this.formData.order_tiers;
+        if (!Array.isArray(tiers) || !tiers.length || tiers.length > 20) {
+          return this.$Message.error('请设置1至20档整单用券门槛');
+        }
+        for (let index = 0; index < tiers.length; index += 1) {
+          const tier = tiers[index];
+          const previous = tiers[index - 1];
+          if (!Number.isInteger(tier.min_amount) || tier.min_amount <= 0
+            || !Number.isInteger(tier.max_count) || tier.max_count <= 0 || tier.max_count > 100
+            || (previous && (tier.min_amount <= previous.min_amount || tier.max_count < previous.max_count))) {
+            return this.$Message.error('整单用券档位金额须递增，张数不能下降');
+          }
+        }
+        // The legacy minimum is display compatibility; the ordered tiers are
+        // the only authority for whether the entire checkout qualifies.
+        this.formData.use_min_price = tiers[0].min_amount;
+      }
       if (!this.formData.coupon_title) {
         return this.$Message.error('请输入优惠券名称');
       }
@@ -830,7 +888,9 @@ export default {
       if (this.formData.coupon_price <= 0) {
         return this.$Message.error('优惠券面值不能小于0');
       }
-      if (!this.isMinPrice) {
+      if (this.formData.use_mode === 1) {
+        this.isMinPrice = 1;
+      } else if (!this.isMinPrice) {
         this.formData.use_min_price = 0;
       } else {
         if (this.formData.use_min_price < 1) {
@@ -873,12 +933,33 @@ export default {
       this.formData.end_time = '';
       this.formData.is_permanent = 1;
       this.formData.total_count = 1;
-    }
+    },
+    resetInvalidOrderMode() {
+      if (this.formData.category !== 1 || this.formData.type !== 0 || this.formData.coupon_type !== 1) {
+        this.formData.use_mode = 0;
+      }
+    },
+    addOrderTier() {
+      const last = this.formData.order_tiers[this.formData.order_tiers.length - 1];
+      this.formData.order_tiers.push({
+        min_amount: last ? Number(last.min_amount || 0) + 1 : 1,
+        max_count: last ? Number(last.max_count || 0) + 1 : 1,
+      });
+    },
+    removeOrderTier(index) {
+      this.formData.order_tiers.splice(index, 1);
+    },
   },
 };
 </script>
 
 <style scoped lang="stylus">
+.order-coupon-tier {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .tips {
   display: inline-bolck;
   font-size: 12px;

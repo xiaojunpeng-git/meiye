@@ -11,8 +11,13 @@ use think\facade\Db;
  */
 final class StoreReportCurrentProductCategoryServices
 {
-    /** @return array<int|string,array{id:int,root_id:int,path:string}> */
-    public function resolve(array $links): array
+    /**
+     * Link each store product to its platform product and current platform category.
+     * A caller may pass the category tree it already read for this report request;
+     * this only avoids a duplicate lookup and never changes the identity chain.
+     * @return array<int|string,array{id:int,root_id:int,path:string,platform_product_id:int,product_type:int}>
+     */
+    public function resolve(array $links, ?array $categoryRows = null): array
     {
         if ($links === []) return [];
         $ids = [];
@@ -27,8 +32,9 @@ final class StoreReportCurrentProductCategoryServices
         }
         $parents = $this->products(array_keys($parentIds));
         $categories = [];
-        foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
-            ->field('id,pid,cate_name')->select()->toArray() as $category) {
+        $categoryRows = $categoryRows ?? Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name')->select()->toArray();
+        foreach ($categoryRows as $category) {
             $categories[(int)$category['id']] = $category;
         }
 
@@ -40,7 +46,14 @@ final class StoreReportCurrentProductCategoryServices
             $platform = $this->isPlatformProduct($product) ? $product : ($parents[(int)$product['pid']] ?? []);
             if ($platform === [] || !$this->isPlatformProduct($platform)) continue;
             $category = $this->categoryForProduct($platform, $categories);
-            if ($category !== []) $result[$key] = $category;
+            if ($category !== []) {
+                // Reports may group store copies by their shared platform item.
+                // Keep the type beside the current category so a product/project
+                // report cannot mistake a card in the same category for an item.
+                $category['platform_product_id'] = (int)$platform['id'];
+                $category['product_type'] = (int)$platform['product_type'];
+                $result[$key] = $category;
+            }
         }
         return $result;
     }
@@ -51,7 +64,7 @@ final class StoreReportCurrentProductCategoryServices
         $products = [];
         foreach (array_chunk($ids, 300) as $chunk) {
             foreach (Db::name('store_product')->whereIn('id', $chunk)
-                ->field('id,pid,type,relation_id,cate_id')->select()->toArray() as $row) {
+                ->field('id,pid,type,relation_id,cate_id,product_type')->select()->toArray() as $row) {
                 $products[(int)$row['id']] = $row;
             }
         }

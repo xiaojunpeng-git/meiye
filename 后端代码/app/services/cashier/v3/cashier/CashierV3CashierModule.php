@@ -587,7 +587,9 @@ final class CashierV3CashierModule
                 self::lineKey($payload['lineId'] ?? $payload['line_id'] ?? null),
                 (int)($payload['lineAmountCents'] ?? $payload['line_amount_cents'] ?? -1),
                 (int)($payload['couponThresholdCents'] ?? $payload['coupon_threshold_cents'] ?? -1),
-                is_array($payload['reservedCouponIds'] ?? null) ? $payload['reservedCouponIds'] : []
+                is_array($payload['reservedCouponIds'] ?? null) ? $payload['reservedCouponIds'] : [],
+                (int)($payload['orderReceivableCents'] ?? -1),
+                (int)($payload['orderLineCapacityCents'] ?? -1)
             );
             return [
                 'data' => ['couponSelector' => $selector],

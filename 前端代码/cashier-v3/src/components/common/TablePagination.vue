@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 
 const props = defineProps({
+  // 新列表可采用完整页数摘要；默认保留既有页面的区间文案。
+  showPageCount: { type: Boolean, default: false },
   total: {
     type: Number,
     default: 0
@@ -72,7 +74,8 @@ function changePageSize(event) {
 <template>
   <footer class="table-pagination" aria-label="列表分页">
     <span class="table-pagination__summary">
-      共 <strong>{{ normalizedTotal }}</strong> 条，当前 {{ rangeStart }}-{{ rangeEnd }} 条
+      <template v-if="showPageCount">共 <strong>{{ normalizedTotal }}</strong> 条 · 每页 {{ normalizedPageSize }} 条 · 第 {{ currentPage }} / {{ totalPages }} 页</template>
+      <template v-else>共 <strong>{{ normalizedTotal }}</strong> 条，当前 {{ rangeStart }}-{{ rangeEnd }} 条</template>
     </span>
     <div class="table-pagination__controls">
       <label>

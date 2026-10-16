@@ -360,6 +360,9 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                         ? CashierV3MemberBalanceWriterAdapter::PAYMENT_MODE_COMBINED
                         : CashierV3MemberBalanceWriterAdapter::PAYMENT_MODE_BALANCE_ONLY,
                 ], $operatorScope, $dataScope);
+                (new CashierV3CheckoutBalanceAllocationServices())->freezeInTx(
+                    $salesPlan, $balanceAmount, $now
+                );
             }
 
             $eventRecorder = $scope['event_recorder'] ?? null;

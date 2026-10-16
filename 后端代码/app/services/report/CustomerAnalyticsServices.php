@@ -72,7 +72,9 @@ final class CustomerAnalyticsServices
             'store_ids' => $stores,
             'date_range' => ['start' => (string)$range['start'], 'end' => (string)$range['end'], 'inclusive' => true],
         ]);
-        $result['metric_version'] = self::METRIC_VERSION . ':' . (string)($result['metric_version'] ?? 'facts');
+        $version = $report === 'customer_unconsumed_analysis'
+            ? 'customer-analytics-current-category-v3' : self::METRIC_VERSION;
+        $result['metric_version'] = $version . ':' . (string)($result['metric_version'] ?? 'facts');
         $result['data_as_of'] = (string)($result['data_as_of'] ?? date('Y-m-d H:i:s'));
         $pendingByReport = [
             'customer_cash_performance' => ['转化率'],
@@ -917,10 +919,9 @@ final class CustomerAnalyticsServices
         if ($productIds !== []) {
             try {
                 foreach (array_chunk($productIds, self::UNCONSUMED_BATCH_SIZE) as $productChunk) {
-                    foreach (Db::name('store_product')->whereIn('id', $productChunk)->where('is_del', 0)->field('id,store_name,cate_id')->select()->toArray() as $product) {
+                    foreach (Db::name('store_product')->whereIn('id', $productChunk)->where('is_del', 0)->field('id,store_name')->select()->toArray() as $product) {
                         $products[(int)$product['id']] = [
                             'item_name' => trim((string)($product['store_name'] ?? '')),
-                            'cate_id' => (string)($product['cate_id'] ?? ''),
                         ];
                     }
                 }
@@ -930,29 +931,23 @@ final class CustomerAnalyticsServices
             }
         }
 
-        // Build category paths only for the optional category filter.  A
-        // missing catalogue must narrow to no rows rather than widen scope.
+        // Category filters use the linked platform product's current category.
+        // A missing catalogue narrows to no rows instead of widening scope.
         $categoryFilter = trim((string)($input['category_path'] ?? ''));
-        $categoryPaths = [];
+        $currentCategories = [];
         if ($categoryFilter !== '') {
             try {
-                $categoryRows = Db::name('store_product_category')->where('is_show', 1)->field('id,pid,cate_name')->select()->toArray();
-                $categoryMap = [];
-                foreach ($categoryRows as $category) {
-                    $categoryId = (int)($category['id'] ?? 0);
-                    if ($categoryId <= 0) continue;
-                    $categoryMap[$categoryId] = [
-                        'pid' => (int)($category['pid'] ?? 0), 'name' => (string)($category['cate_name'] ?? ''),
+                $links = [];
+                foreach ($carts as $index => $cart) {
+                    $holder = $holderByOid[(int)($cart['oid'] ?? 0)] ?? null;
+                    if ($holder === null) continue;
+                    $links[$index] = [
+                        'store_id' => (int)$holder['store_id'],
+                        'product_id' => (int)($cart['product_id'] ?? 0),
                     ];
                 }
-                foreach ($categoryMap as $id => $category) {
-                    $parts = []; $cursor = $id; $guard = 0;
-                    while ($cursor > 0 && isset($categoryMap[$cursor]) && $guard++ < 32) {
-                        array_unshift($parts, (string)$categoryMap[$cursor]['name']);
-                        $cursor = (int)$categoryMap[$cursor]['pid'];
-                    }
-                    $categoryPaths[$id] = implode(' / ', array_filter($parts, static fn(string $name): bool => trim($name) !== ''));
-                }
+                $currentCategories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+                $categoryFilter = preg_replace('/\s*\/\s*/u', '/', $categoryFilter);
             } catch (\Throwable $e) {
                 return $empty($columns, '商品分类事实暂不可读取，当前分类筛选返回空态。', $input);
             }
@@ -963,20 +958,16 @@ final class CustomerAnalyticsServices
         $cartRemainingByOid = [];
         $cartSeenByOid = [];
         $amountComplete = true;
-        foreach ($carts as $cart) {
+        foreach ($carts as $index => $cart) {
             $oid = (int)($cart['oid'] ?? 0);
             $holder = $holderByOid[$oid] ?? null;
             if ($holder === null) continue;
             $cartSeenByOid[$oid] = true;
             $productId = (int)($cart['product_id'] ?? 0);
             if ($itemFilter !== '' && (string)$productId !== $itemFilter) continue;
-            $product = $products[$productId] ?? ['item_name' => '', 'cate_id' => ''];
-            $paths = [];
-            foreach (explode(',', (string)$product['cate_id']) as $categoryId) {
-                $categoryId = (int)trim($categoryId);
-                if ($categoryId > 0 && isset($categoryPaths[$categoryId])) $paths[] = $categoryPaths[$categoryId];
-            }
-            if ($categoryFilter !== '' && !array_filter($paths, static fn(string $path): bool => $path === $categoryFilter || str_starts_with($path, $categoryFilter . ' / '))) continue;
+            $product = $products[$productId] ?? ['item_name' => ''];
+            $path = (string)($currentCategories[$index]['path'] ?? '');
+            if ($categoryFilter !== '' && $path !== $categoryFilter && !str_starts_with($path, $categoryFilter . '/')) continue;
             $remaining = max(0, (int)($cart['write_surplus_times'] ?? 0));
             if ($remaining <= 0) continue;
             $startsAt = max(0, (int)($cart['write_start'] ?? 0));

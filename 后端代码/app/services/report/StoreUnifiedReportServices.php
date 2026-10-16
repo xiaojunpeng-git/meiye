@@ -97,6 +97,19 @@ class StoreUnifiedReportServices extends BaseServices
         ];
     }
 
+    /** XLSX 与 JSON 导出共用同一已授权完整行集；仅改变门店品项分析的文件呈现。 */
+    public function exportItemAnalysisXlsx($storeId, array $input): array
+    {
+        if ((string)($input['report'] ?? '') !== 'store_item_analysis') {
+            throw new \InvalidArgumentException('该报表不支持 XLSX 导出');
+        }
+        $export = $this->export($storeId, $input);
+        return [
+            'filename' => '门店品项分析-' . date('YmdHis') . '.xlsx',
+            'content' => (new StoreItemAnalysisXlsxExporter())->render($export),
+        ];
+    }
+
     /**
      * 门店运营报表的金额、合作方和体验维度来自原业务事实；商品分类仅是
      * 实际商品 ID 关联平台商品后的当前展示维度，不能回写历史金额事实。
@@ -1844,6 +1857,12 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function range(array $input)
     {
+        // Query/export metadata must describe the same whole month as the installment reader.
+        if (($input['report'] ?? '') === 'salesperson_large_order_statistics') {
+            $range = StoreLargeOrderInstallmentServices::monthRange($input);
+            if ($range['end'] < self::COVERAGE_START) throw new \InvalidArgumentException('统计月份早于 V3 报表覆盖期');
+            return $range;
+        }
         $start = trim((string)($input['start_date'] ?? '')) ?: self::COVERAGE_START;
         $end = trim((string)($input['end_date'] ?? '')) ?: date('Y-m-d');
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $start) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $end) || $start > $end || $end < self::COVERAGE_START) throw new \InvalidArgumentException('统计日期范围无效或早于 V3 报表覆盖期');

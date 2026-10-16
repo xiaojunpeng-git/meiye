@@ -9,17 +9,41 @@ const props = defineProps({
 const emit = defineEmits(['close', 'apply', 'remove'])
 
 const selectedCouponId = ref('')
+const selectedCouponIds = ref([])
+const selectionError = ref('')
 
 watch(
   () => props.selector.selectedCouponId,
   (value) => { selectedCouponId.value = String(value || '') },
   { immediate: true }
 )
+watch(() => props.selector.selectedCouponIds, (ids) => {
+  selectedCouponIds.value = Array.isArray(ids) ? ids.map(String) : []
+}, { immediate: true })
 
 const coupons = computed(() => Array.isArray(props.selector.coupons) ? props.selector.coupons : [])
 const belowMinimumCoupons = computed(() => Array.isArray(props.selector.belowMinimumCoupons) ? props.selector.belowMinimumCoupons : [])
-const hasSelectedCoupon = computed(() => Boolean(String(props.selector.selectedCouponId || '')))
-const canConfirmSelection = computed(() => coupons.value.some((coupon) => couponId(coupon) === selectedCouponId.value))
+const hasSelectedCoupon = computed(() => Boolean(String(props.selector.selectedCouponId || ''))
+  || (Array.isArray(props.selector.selectedCouponIds) && props.selector.selectedCouponIds.length > 0))
+const confirmRemovesCoupon = computed(() => hasSelectedCoupon.value
+  && !selectedCouponId.value && !selectedCouponIds.value.length)
+const selectedMode = computed(() => selectedCouponIds.value.length ? 1
+  : (selectedCouponId.value ? 0 : props.selector.selectedMode))
+const orderLimit = computed(() => Number(coupons.value.find((coupon) =>
+  couponId(coupon) === selectedCouponIds.value[0])?.orderMaxCount || 0))
+// Zero remaining line capacity is a real boundary, not a missing value that
+// may fall back to the original line amount.
+const lineCapacityCents = computed(() => Number(props.selector.lineCapacityCents
+  ?? props.selector.lineAmountCents ?? 0))
+const selectedAmountCents = computed(() => selectedCouponIds.value.reduce((sum, id) => {
+  const coupon = coupons.value.find((item) => couponId(item) === id)
+  return sum + Number(coupon?.discountAmountCents || 0)
+}, 0))
+const canConfirmSelection = computed(() => confirmRemovesCoupon.value || (selectedCouponIds.value.length
+  ? selectedCouponIds.value.every((id) => coupons.value.some((coupon) => couponId(coupon) === id))
+    && selectedCouponIds.value.length + Number(props.selector.selectedCountOtherLines || 0) <= orderLimit.value
+    && selectedAmountCents.value <= lineCapacityCents.value
+  : coupons.value.some((coupon) => couponId(coupon) === selectedCouponId.value)))
 
 function couponId(coupon = {}) {
   return String(coupon.couponId || '')
@@ -53,7 +77,64 @@ function expiryText(value) {
 function confirmSelection() {
   // Only the server's usable set can be submitted; threshold hints are display-only.
   if (!canConfirmSelection.value || props.saving) return
-  emit('apply', selectedCouponId.value)
+  // Clicking an already selected row clears the local choice; confirming it
+  // must use the same removal command as the existing footer action.
+  if (confirmRemovesCoupon.value) {
+    emit('remove')
+    return
+  }
+  emit('apply', selectedCouponIds.value.length ? selectedCouponIds.value : selectedCouponId.value)
+}
+
+function chooseCoupon(coupon) {
+  if (props.saving) return
+  selectionError.value = ''
+  const id = couponId(coupon)
+  if (Number(coupon.useMode) !== 1) {
+    if (selectedCouponId.value === id) {
+      selectedCouponId.value = ''
+      return
+    }
+    if (selectedMode.value === 1) {
+      selectionError.value = '整单券和明细券不能混选，请先取消已选整单券。'
+      return
+    }
+    selectedCouponId.value = id
+    selectedCouponIds.value = []
+    return
+  }
+  const current = selectedCouponIds.value
+  // A selected row always remains clickable so the operator can free a slot
+  // even when the order has reached its coupon limit.
+  if (current.includes(id)) {
+    selectedCouponIds.value = current.filter((item) => item !== id)
+    return
+  }
+  if (selectedMode.value === 0) {
+    selectionError.value = '整单券和明细券不能混选，请先取消已选明细券。'
+    return
+  }
+  if (props.selector.selectedIssueId && Number(coupon.issueId) !== Number(props.selector.selectedIssueId)) {
+    selectionError.value = '同一订单只能使用同一发券规则的整单券。'
+    return
+  }
+  const first = coupons.value.find((item) => couponId(item) === current[0])
+  if (first && Number(first.issueId) !== Number(coupon.issueId)) {
+    selectionError.value = '同一订单只能使用同一发券规则的整单券。'
+    return
+  }
+  const limit = Number(coupon.orderMaxCount || 0)
+  if (current.length + Number(props.selector.selectedCountOtherLines || 0) >= limit) {
+    selectionError.value = `本单最多可选 ${limit} 张优惠券，继续选择会超过可选数量。请先取消一张。`
+    return
+  }
+  if (selectedAmountCents.value + Number(coupon.discountAmountCents || 0)
+    > lineCapacityCents.value) {
+    selectionError.value = '本条明细可结算金额不足，无法再选择这张券。'
+    return
+  }
+  selectedCouponIds.value = [...current, id]
+  selectedCouponId.value = ''
 }
 </script>
 
@@ -68,37 +149,41 @@ function confirmSelection() {
         <button type="button" aria-label="关闭" title="关闭" :disabled="saving" @click="emit('close')">×</button>
       </header>
 
-      <div v-if="coupons.length || belowMinimumCoupons.length" class="cashier-coupon-list" role="radiogroup" aria-label="会员优惠券">
-        <label
+      <div v-if="coupons.length || belowMinimumCoupons.length" class="cashier-coupon-list" aria-label="会员优惠券">
+        <p v-if="selectionError" class="cashier-coupon-list__error" role="alert">{{ selectionError }}</p>
+        <button
           v-for="coupon in coupons"
           :key="couponId(coupon)"
+          type="button"
           class="cashier-coupon-item"
-          :class="{ 'is-selected': selectedCouponId === couponId(coupon) }"
+          :class="{ 'is-selected': selectedCouponId === couponId(coupon) || selectedCouponIds.includes(couponId(coupon)) }"
+          :aria-pressed="selectedCouponId === couponId(coupon) || selectedCouponIds.includes(couponId(coupon))"
+          :disabled="saving"
+          @click="chooseCoupon(coupon)"
         >
-          <input v-model="selectedCouponId" type="radio" name="cashier-line-coupon" :value="couponId(coupon)" :disabled="saving">
           <span class="cashier-coupon-item__amount">优惠 {{ moneyFromCents(coupon.discountAmountCents) }}</span>
           <span class="cashier-coupon-item__content">
             <strong>{{ coupon.name || '优惠券' }}</strong>
             <small>
-              <template v-if="Number(coupon.useMinAmountCents || 0) > 0">满 {{ moneyFromCents(coupon.useMinAmountCents) }} 可用 · </template>
+              <template v-if="Number(coupon.useMode) === 1">整单门槛 · 本单最多 {{ coupon.orderMaxCount }} 张 · </template>
+              <template v-else-if="Number(coupon.useMinAmountCents || 0) > 0">满 {{ moneyFromCents(coupon.useMinAmountCents) }} 可用 · </template>
               {{ expiryText(coupon.expiresAt) }}
             </small>
           </span>
-        </label>
+        </button>
         <template v-if="belowMinimumCoupons.length">
           <h3 class="cashier-coupon-list__heading">未达使用门槛</h3>
-          <label
+          <div
             v-for="coupon in belowMinimumCoupons"
             :key="couponId(coupon)"
             class="cashier-coupon-item is-unavailable"
           >
-            <input type="radio" name="cashier-line-coupon" :value="couponId(coupon)" disabled>
             <span class="cashier-coupon-item__amount">暂不可用</span>
             <span class="cashier-coupon-item__content">
               <strong>{{ coupon.name || '优惠券' }}</strong>
               <small>满 {{ roundedMoneyFromCents(coupon.useMinAmountCents) }} 可用 · 还差 {{ roundedMoneyFromCents(coupon.shortfallCents) }} · {{ expiryText(coupon.expiresAt) }}</small>
             </span>
-          </label>
+          </div>
         </template>
       </div>
       <div v-else class="cashier-coupon-empty">
@@ -112,7 +197,7 @@ function confirmSelection() {
         <div>
           <button type="button" class="button button--secondary" :disabled="saving" @click="emit('close')">取消</button>
           <button type="button" class="button button--primary" :disabled="saving || !canConfirmSelection" @click="confirmSelection">
-            {{ saving ? '保存中…' : '确认使用' }}
+            {{ saving ? '保存中…' : (confirmRemovesCoupon ? '确认不使用' : '确认使用') }}
           </button>
         </div>
       </footer>
@@ -177,21 +262,28 @@ function confirmSelection() {
 }
 
 .cashier-coupon-list__heading { margin: 6px 0 0; color: #4b5961; font-size: 13px; }
+.cashier-coupon-list__error { position: sticky; top: 0; z-index: 1; margin: 0; padding: 9px 12px; border: 1px solid #f0c9c9; border-radius: 5px; background: #fff5f5; color: #b72f2f; font-size: 13px; }
 
 .cashier-coupon-item {
   min-height: 76px;
   display: grid;
-  grid-template-columns: auto 116px minmax(0, 1fr);
+  grid-template-columns: 116px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+  width: 100%;
   padding: 12px 14px;
   border: 1px solid #dfe5e7;
   border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
 .cashier-coupon-item.is-selected { border-color: #a9709d; background: #fbf7fa; }
-.cashier-coupon-item.is-unavailable { background: #f7f8f9; cursor: not-allowed; }
+.cashier-coupon-item:focus-visible { outline: 2px solid #2b7dd5; outline-offset: 2px; }
+.cashier-coupon-item.is-unavailable { background: #f7f8f9; cursor: default; }
 .cashier-coupon-item.is-unavailable .cashier-coupon-item__amount { color: #66757c; }
 .cashier-coupon-item__amount { color: #a04f83; font-weight: 700; }
 .cashier-coupon-item__content { min-width: 0; display: grid; gap: 5px; }
@@ -203,8 +295,8 @@ function confirmSelection() {
 @media (max-width: 640px) {
   .cashier-coupon-overlay { align-items: end; padding: 12px; }
   .cashier-coupon-panel { max-height: calc(100vh - 24px); }
-  .cashier-coupon-item { grid-template-columns: auto minmax(0, 1fr); }
-  .cashier-coupon-item__amount { grid-column: 2; }
-  .cashier-coupon-item__content { grid-column: 2; }
+  .cashier-coupon-item { grid-template-columns: minmax(0, 1fr); }
+  .cashier-coupon-item__amount { grid-column: 1; }
+  .cashier-coupon-item__content { grid-column: 1; }
 }
 </style>

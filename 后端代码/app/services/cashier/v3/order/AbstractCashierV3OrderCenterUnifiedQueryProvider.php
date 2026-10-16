@@ -141,7 +141,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         $rows = $this->attachMemberInitials($rows, $memberInitials);
         $payload = $this->identityFilters($payload);
         if (empty($payload['sorts'])) {
-            $dates = ['sales'=>'payment_completed_at','recharge'=>'payment_completed_at','refund'=>'refund_completed_at',
+            $dates = ['all'=>'event_completed_at','sales'=>'payment_completed_at','recharge'=>'payment_completed_at','refund'=>'refund_completed_at',
                 'debt'=>'created_at','service'=>'service_completed_at','supplement'=>'payment_completed_at','gift'=>'created_at','card_operation'=>'completed_at'];
             $payload['sorts'] = [['field'=>$dates[CashierV3OrderCenterUnifiedQueryContract::typeForPage($this->pageCode())], 'direction'=>'desc']];
         }
@@ -219,6 +219,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
     {
         [$operatorScope, $dataScope] = $this->liveScopes ?? $this->authoritativeScopes($context);
         $type = CashierV3OrderCenterUnifiedQueryContract::typeForPage($this->pageCode());
+        if ($type === 'all') return $this->allBusinessRows($operatorScope, $dataScope);
         $records = $type === 'sales'
             ? $this->allSalesRows($operatorScope, $dataScope)
             : $this->allRecordRows($type, $operatorScope, $dataScope);
@@ -232,6 +233,33 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         return (new CashierV3OrderCenterQueryIdentities())->attach($type, $this->projectRows($type, $records), (string)$operatorScope->tenantId());
     }
 
+    /** 先按同一可信门店范围读取四类事实，再由统一引擎全局筛选/排序/分页；不拼接各业务的第一页。 */
+    protected function allBusinessRows($operatorScope, $dataScope): array
+    {
+        $rows = [];
+        $identities = new CashierV3OrderCenterQueryIdentities();
+        foreach (['sales' => '消费', 'recharge' => '充值', 'supplement' => '补交', 'refund' => '退款'] as $type => $label) {
+            // 类型等值条件来自顶栏的 AND 过滤；未选类型仍读取全部，不能按单号前缀猜测业务。
+            if (isset($this->sourcePayload['_allOrderTypes']) && !in_array($label, $this->sourcePayload['_allOrderTypes'], true)) continue;
+            $records = $type === 'sales' ? $this->allSalesRows($operatorScope, $dataScope)
+                : $this->allRecordRows($type, $operatorScope, $dataScope);
+            $projected = $identities->attach($type, $this->projectRows($type, $records), (string)$operatorScope->tenantId());
+            foreach ($projected as $row) {
+                // ID 保留给原业务命令，record_id 用于跨类型的排序和页面行键。
+                $row['recordType'] = $type;
+                $row['business_type'] = $label;
+                $row['order_no'] = $row[$type === 'sales' ? 'sales_order_no' : $type . '_order_no'];
+                $row['event_completed_at'] = $row[$type === 'refund' ? 'refund_completed_at' : 'payment_completed_at'];
+                $rows[] = $row;
+            }
+            if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) {
+                throw new UnifiedQueryException('UNIFIED_QUERY_SOURCE_WINDOW_TOO_LARGE', '查询范围超过安全上限，请缩小日期范围。', []);
+            }
+        }
+        $this->sourcePage = ['recordType' => 'all', 'dataStatus' => 'ready', 'dataAsOf' => date('c'), 'statusOptions' => []];
+        return $rows;
+    }
+
     protected function allSalesRows($operatorScope, $dataScope): array
     {
         $records = [];
@@ -239,6 +267,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         $page = 1;
         do {
             $payload = array_replace($this->sourcePayload, ['recordType' => 'sales', 'page' => $page, 'pageSize' => 100]);
+            // 混合页的正常/全部范围同样下推至销售 Reader，不能让作废单混入正常列表。
+            $payload['status'] = ($payload['dataScope'] ?? 'normal') === 'normal' ? 'normal' : ($payload['businessStatus'] ?? '');
             if ($cursor !== '') $payload['queryCursor'] = $cursor;
             $result = $this->salesQueries->querySalesOrders($payload, $operatorScope, $dataScope);
             if ($page === 1) $this->sourcePage = $result;
@@ -283,6 +313,12 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'dateFrom','dateTo','businessDateFrom','businessDateTo','salesPerformanceDrilldown','servicePerformanceDrilldown']));
         foreach (($payload['topFilters'] ?? $payload['topFilterConditions'] ?? []) as $filter) {
             $key = $filter['field'] ?? $filter['field_key'] ?? $filter['fieldKey'] ?? '';
+            if ($key === 'business_type' && in_array($filter['operator'] ?? '', ['eq', 'equal'], true)
+                && is_scalar($filter['value'] ?? null)) {
+                // 仅下推严格等值，保留统一引擎的原始过滤作最终判定；高级 OR 条件不提前裁剪。
+                $allowed = $source['_allOrderTypes'] ?? ['消费', '充值', '补交', '退款'];
+                $source['_allOrderTypes'] = array_values(array_intersect($allowed, [(string)$filter['value']]));
+            }
             if ($key !== 'business_date') continue;
             $op = $filter['operator'] ?? '';
             if (in_array($op, ['gte','greater_or_equal','eq','equal'], true)) $source['dateFrom'] = $filter['value'];
@@ -384,6 +420,17 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                             $name = $person['employeeName'] ?? $person['name'] ?? '';
                             if ($name !== '') $row[$key][] = $name;
                         }
+                    }
+                }
+            }
+            if (in_array($type, ['refund', 'supplement'], true)) {
+                foreach (['guide', 'sales_manager'] as $role) {
+                    $row[$role] = [];
+                    foreach ($record['attributionPeople'] ?? [] as $person) {
+                        if (($person['role'] ?? '') !== $role) continue;
+                        $name = (string)($person['employee_name_snapshot'] ?? '');
+                        $round = (int)($person['guide_round_no'] ?? 0);
+                        $row[$role][] = $name . ($role === 'guide' && $round > 0 ? '（第' . $round . '轮）' : '');
                     }
                 }
             }

@@ -505,6 +505,13 @@ final class CashierV3SalesOrderReversalServices
     /** @return array<int,array<string,mixed>> */
     private function lockConsumedCoupons(array $source, CashierV3DataScopeContext $scope): array
     {
+        // Multi-coupon redemptions have one row per actual coupon instance.
+        // The first ID is mirrored on the sale line for legacy fact readers;
+        // do not restore that ID twice during a whole-order void.
+        $orderCoupons = Db::name('cashier_v3_checkout_order_coupon')
+            ->where('tenant_id', $scope->tenantId())->where('order_id', (string)$source['sourceId'])
+            ->where('status', 'consumed')->order('id', 'asc')->lock(true)->select()->toArray();
+        $orderCouponIds = array_fill_keys(array_map('intval', array_column($orderCoupons, 'coupon_user_id')), true);
         $lines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
             ->where('order_id', (string)$source['sourceId'])->where('line_direction', 'forward')
             ->where('line_status', 'settled')->where('coupon_user_id', '>', 0)
@@ -513,6 +520,7 @@ final class CashierV3SalesOrderReversalServices
         $seen = [];
         foreach ($lines as &$line) {
             $couponId = (int)$line['coupon_user_id'];
+            if (isset($orderCouponIds[$couponId])) continue;
             // A void restores either historical discount coupons or the new
             // non-cash tender; partial refunds intentionally restore neither.
             if (isset($seen[$couponId])
@@ -529,6 +537,23 @@ final class CashierV3SalesOrderReversalServices
             $seen[$couponId] = true;
         }
         unset($line);
+        $lines = array_values(array_filter($lines, static fn(array $line): bool =>
+            !isset($orderCouponIds[(int)$line['coupon_user_id']])));
+        foreach ($orderCoupons as $row) {
+            $couponId = (int)$row['coupon_user_id'];
+            if (isset($seen[$couponId]) || (int)$row['amount_cents'] <= 0) {
+                throw self::failure('sales_reversal_coupon_trace_invalid');
+            }
+            $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
+            if (!$coupon || (int)($coupon['uid'] ?? 0) !== (int)$source['memberId']
+                || (int)($coupon['status'] ?? -1) !== 1 || (int)($coupon['use_time'] ?? 0) <= 0
+                || (int)($coupon['is_fail'] ?? -1) !== 0) {
+                throw self::failure('sales_reversal_coupon_state_changed');
+            }
+            $row['coupon'] = $coupon;
+            $lines[] = ['coupon_user_id' => $couponId, 'coupon' => $coupon, 'order_coupon_row_id' => (int)$row['id']];
+            $seen[$couponId] = true;
+        }
         return $lines;
     }
 
@@ -541,6 +566,12 @@ final class CashierV3SalesOrderReversalServices
                 ->where('is_fail', 0)->where('use_time', (int)($coupon['use_time'] ?? 0))
                 ->update(['status' => 0, 'use_time' => 0]);
             if ((int)$updated !== 1) throw self::failure('sales_reversal_coupon_restore_race');
+            if ((int)($line['order_coupon_row_id'] ?? 0) > 0) {
+                $changed = Db::name('cashier_v3_checkout_order_coupon')
+                    ->where('id', (int)$line['order_coupon_row_id'])->where('status', 'consumed')
+                    ->update(['status' => 'voided', 'voided_at' => $now]);
+                if ((int)$changed !== 1) throw self::failure('sales_reversal_order_coupon_restore_race');
+            }
         }
     }
 

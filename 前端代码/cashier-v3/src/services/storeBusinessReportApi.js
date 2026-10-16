@@ -47,6 +47,30 @@ export const queryStoreBusinessReportCatalog = (runtime = STORE_BUSINESS_REPORT_
 export const queryStoreBusinessReportScope = (runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/scope'))
 export const queryStoreBusinessReport = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/query'), query)
 export const exportStoreBusinessReport = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => request(runtime, endpoint(runtime, 'unified/export'), query)
+
+/** 品项分析沿用原导出权限与筛选，只接收服务端生成的真实 XLSX 文件。 */
+export async function exportStoreItemAnalysisXlsx(query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) {
+  if (query.report !== 'store_item_analysis') throw new Error('当前报表不支持 XLSX 导出。')
+  const url = new URL(endpoint(runtime, 'unified/export'), window.location.origin)
+  if (url.origin !== window.location.origin) throw new Error('经营报表接口必须与当前页面同源。')
+  Object.entries({ ...query, format: 'xlsx' }).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
+  })
+  const platform = isPlatformRuntime(runtime)
+  const token = platform ? readPlatformAdminToken() : readStoreV3SessionToken()
+  const response = await fetch(url.href, {
+    method: 'GET', credentials: platform ? 'same-origin' : 'omit', cache: 'no-store',
+    headers: {
+      Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ...(token ? { 'Authori-zation': `Bearer ${token}` } : {})
+    }
+  })
+  if (!response.ok || !String(response.headers.get('content-type') || '').includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+    const payload = await response.json().catch(() => null)
+    throw new Error(String(payload?.msg || payload?.message || '门店品项分析导出失败，请稍后重试。'))
+  }
+  return response.blob()
+}
 export const queryStoreBusinessReportPersonnel = (query = {}, runtime = STORE_BUSINESS_REPORT_RUNTIME.STORE) => {
   if (isPlatformRuntime(runtime)) return request(runtime, endpoint(runtime, 'unified/personnel'), query)
   throw new Error('当前门店端人员选择器应由收银会话服务处理。')

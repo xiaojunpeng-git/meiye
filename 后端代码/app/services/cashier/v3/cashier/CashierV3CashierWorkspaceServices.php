@@ -12,6 +12,7 @@ use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\activity\coupon\StoreCouponOrderRule;
 use think\facade\Db;
 
 /**
@@ -877,7 +878,9 @@ final class CashierV3CashierWorkspaceServices
         string $lineKey,
         int $lineAmountCents,
         int $thresholdCents,
-        array $reservedCouponIds = []
+        array $reservedCouponIds = [],
+        int $orderReceivableCents = 0,
+        int $orderLineCapacityCents = 0
     ): array {
         // 浏览器本地购物车在最终确认前不写 cashier_workspace；不能从一个
         // 游客草稿反推当前选客。会员身份由同一请求内的权威会员摘要校验后
@@ -886,12 +889,14 @@ final class CashierV3CashierWorkspaceServices
         if ($memberId <= 0) {
             throw CashierV3CommandException::invalidContext('请先选择会员后再使用优惠券。');
         }
-        if ($lineKey === '' || $lineAmountCents < 0 || $thresholdCents < $lineAmountCents) {
+        if ($lineKey === '' || $lineAmountCents < 0 || $thresholdCents < $lineAmountCents
+            || $orderReceivableCents < 0 || $orderLineCapacityCents < 0) {
             throw $this->incompleteDraft('local_coupon_line_invalid');
         }
         $amounts = ['threshold' => $thresholdCents, 'base' => $lineAmountCents, 'cap' => $lineAmountCents];
         $options = $this->couponOptions(
-            $memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey, 0, $reservedCouponIds
+            $memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey, 0,
+            $reservedCouponIds, $orderReceivableCents, $orderLineCapacityCents
         );
         return [
             'lineId' => $lineKey,
@@ -3513,7 +3518,9 @@ final class CashierV3CashierWorkspaceServices
         string $workspaceId,
         string $lineKey,
         int $onlyCouponId = 0,
-        array $reservedCouponIds = []
+        array $reservedCouponIds = [],
+        int $orderReceivableCents = 0,
+        int $orderLineCapacityCents = 0
     ): array {
         $now = time();
         $query = Db::name('store_coupon_user')->alias('cu')
@@ -3521,7 +3528,7 @@ final class CashierV3CashierWorkspaceServices
             ->where('cu.uid', $memberId)->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
             ->where(function ($q) use ($now) { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
             ->where(function ($q) use ($now) { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); })
-            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id');
+            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id,ci.category,ci.type,ci.use_mode,ci.order_tiers_json');
         if ($onlyCouponId > 0) $query->where('cu.id', $onlyCouponId);
         if ($lock) $query->lock(true);
         $rows = $query->order('cu.end_time asc,cu.id asc')->select();
@@ -3535,6 +3542,28 @@ final class CashierV3CashierWorkspaceServices
             $id = (int)($row['id'] ?? 0);
             if ($id <= 0 || isset($used[$id])) continue;
             if (!$this->couponAllowsStore($row, $storeId)) continue;
+            $orderMode = (int)($row['use_mode'] ?? 0) === StoreCouponOrderRule::ORDER;
+            if ($orderMode) {
+                // Workspace draft commands still bind one coupon to one line.
+                // Order-mode multi-selection is available only to the local
+                // checkout snapshot and is always rechecked at final submit.
+                if ($orderReceivableCents <= 0 || (int)($row['category'] ?? 0) !== 1
+                    || (int)($row['type'] ?? -1) !== 0 || (int)($row['coupon_type'] ?? 0) !== 1) continue;
+                $tiers = StoreCouponOrderRule::fromStored((string)($row['order_tiers_json'] ?? ''));
+                $limit = StoreCouponOrderRule::maxCount($tiers, $orderReceivableCents);
+                $face = $this->decimalMoneyToCents($row['coupon_price'] ?? null, 'coupon_price_invalid');
+                $option = ['couponId' => $id, 'issueId' => (int)$row['cid'], 'useMode' => 1,
+                    'name' => trim((string)$row['coupon_title']) ?: '优惠券',
+                    'discountAmountCents' => $face, 'useMinAmountCents' => (int)$tiers[0]['min_amount_cents'],
+                    'orderMaxCount' => $limit, 'expiresAt' => (int)($row['end_time'] ?? 0)];
+                if ($limit === 0) {
+                    $option['shortfallCents'] = (int)$tiers[0]['min_amount_cents'] - $orderReceivableCents;
+                    $belowMinimum[] = $option;
+                } elseif ($face <= $orderLineCapacityCents && $face > 0) {
+                    $available[] = $option;
+                }
+                continue;
+            }
             $minimum = $this->decimalMoneyToCents($row['use_min_price'] ?? null, 'coupon_use_min_price_invalid');
             if ($minimum > $amounts['threshold']) {
                 $belowMinimum[] = [
@@ -3553,7 +3582,7 @@ final class CashierV3CashierWorkspaceServices
                 $top = $this->decimalMoneyToCents($row['top_discount_price'] ?? 0, 'coupon_top_discount_invalid');
                 if ($top > 0) $face = min($face, $top);
             }
-            $available[] = ['couponId' => $id, 'name' => trim((string)$row['coupon_title']) ?: '优惠券',
+            $available[] = ['couponId' => $id, 'useMode' => 0, 'name' => trim((string)$row['coupon_title']) ?: '优惠券',
                 'discountAmountCents' => min($face, $amounts['cap']),
                 'useMinAmountCents' => $minimum,
                 'expiresAt' => (int)($row['end_time'] ?? 0)];

@@ -86,6 +86,7 @@ final class CashierV3OrderCenterRecordQueryServices
         // 导航只声明类型，不跨业务扫描数量；当前列表分页总数仍由各查询返回。
         $partition['contractVersion'] = self::CONTRACT_VERSION;
         $partition['businessTypes'] = [
+            ['key' => 'all', 'label' => '全部订单', 'ready' => true],
             ['key' => 'sales', 'label' => '消费订单', 'ready' => true],
             ['key' => 'recharge', 'label' => '充值订单', 'ready' => true],
             ['key' => 'refund', 'label' => '退款记录', 'ready' => true],
@@ -96,6 +97,7 @@ final class CashierV3OrderCenterRecordQueryServices
             ['key' => 'card_operation', 'label' => '卡操作记录', 'ready' => true],
         ];
         $partition['recordsByType'] = array_merge([
+            'all' => [],
             'sales' => [],
             'recharge' => [],
             'refund' => [],
@@ -106,6 +108,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'card_operation' => [],
         ], is_array($partition['recordsByType'] ?? null) ? $partition['recordsByType'] : []);
         $partition['pagesByType'] = array_merge([
+            'all' => $this->emptyPageMeta(),
             'recharge' => $this->emptyPageMeta(),
             'refund' => $this->emptyPageMeta(),
             'debt' => $this->emptyPageMeta(),
@@ -115,6 +118,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'card_operation' => $this->emptyPageMeta(),
         ], is_array($partition['pagesByType'] ?? null) ? $partition['pagesByType'] : []);
         $partition['statusOptionsByType'] = array_merge([
+            'all' => [],
             'recharge' => $this->statusOptions('recharge'),
             'refund' => $this->statusOptions('refund'),
             'debt' => $this->statusOptions('debt'),
@@ -559,6 +563,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
                 'supplementAttributionSummary' => self::supplementAttributionSummary($attributions[$repaymentId] ?? []),
+                'attributionPeople' => $attributions[$repaymentId] ?? [],
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
@@ -639,6 +644,7 @@ final class CashierV3OrderCenterRecordQueryServices
                 'paymentMethod' => implode('、', array_values(array_unique($paymentMethods[$repaymentId] ?? []))) ?: '未标注',
                 'salespersonName' => (string)($salespeople[$repaymentId] ?? ''),
                 'supplementAttributionSummary' => self::supplementAttributionSummary($attributions[$repaymentId] ?? []),
+                'attributionPeople' => $attributions[$repaymentId] ?? [],
                 'storeName' => (string)$row['store_name'],
                 'operatorName' => (string)$row['staff_name'],
                 'paymentStatus' => (string)($row['status'] ?? '') === 'voided' ? '已作废' : '补交成功',
@@ -1040,6 +1046,8 @@ final class CashierV3OrderCenterRecordQueryServices
                 'refundAmount' => $this->centsToMoney((int)$row['cash_refund_cents']),
                 'salespersonSummary' => $salespersonSummary,
                 'refundAttributionSummary' => $attributionSummary,
+                // 混合列表分列展示和筛选使用角色快照，不解析中文归属摘要。
+                'attributionPeople' => array_merge($attribution['guide'] ?? [], $attribution['sales_manager'] ?? []),
                 'refund_attribution_query_ids' => array_values(array_unique(array_map('strval', array_merge(
                     array_column($attribution['guide'] ?? [], 'employee_id'),
                     array_column($attribution['sales_manager'] ?? [], 'employee_id'))))),

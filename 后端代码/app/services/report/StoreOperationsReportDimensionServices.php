@@ -34,8 +34,8 @@ final class StoreOperationsReportDimensionServices
                 ->where('order_line_id', (string)$sale['source_line_id'])
                 ->lock(true)->find();
             $categoryId = (int)($sale['category_id_snapshot'] ?? 0);
-            // 停用/隐藏分类不参与新事实维度；已经写入的历史快照不回算。
-            $category = $categoryId > 0 ? Db::name('store_product_category')->where('id', $categoryId)->where('is_show', 1)->find() : null;
+            // 商品分类的存在性与目录显隐无关；报表快照不得因隐藏分类丢失路径。
+            $category = $categoryId > 0 ? Db::name('store_product_category')->where('id', $categoryId)->find() : null;
             $path = $this->categoryPath($category);
             $cashPerformanceAmount = (int)($cashBySaleFact[$saleFactId] ?? 0);
             $partnerSnapshot = $category !== null

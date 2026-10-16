@@ -374,7 +374,7 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                 $orderId
             );
             $collectedAmountCents = (int)($paymentCollection['collectedAmountCents'] ?? 0);
-            return $this->balances->deductCheckoutInTx([
+            $mutation = $this->balances->deductCheckoutInTx([
                 'memberId' => (int)$request['member_id'],
                 'expectedVersion' => (int)$request['balance_account_version'],
                 'amountCents' => $amountCents,
@@ -384,6 +384,10 @@ final class ThinkPhpCashierV3CheckoutSubmissionExecutionPort
                     ? CashierV3MemberBalanceWriterAdapter::PAYMENT_MODE_COMBINED
                     : CashierV3MemberBalanceWriterAdapter::PAYMENT_MODE_BALANCE_ONLY,
             ], $context->operatorScope(), $context->dataScope());
+            (new CashierV3CheckoutBalanceAllocationServices())->freezeInTx(
+                $this->salesPlan($context, $authority), $amountCents, (int)$authority['settledAt']
+            );
+            return $mutation;
         });
     }
 

@@ -61,7 +61,7 @@ final class StoreUnifiedReportPhaseSixServices
         if ($stores === []) throw new \InvalidArgumentException('当前账号没有可查看的门店范围');
         $range = $this->range($range, $input);
         switch ($report) {
-            case 'phase_six_garden_item_analysis': $result = $this->garden($stores, $range); break;
+            case 'phase_six_garden_item_analysis': $result = $this->garden($stores, $range, $input); break;
             case 'phase_six_monthly_featured_item': $result = $this->featured($stores, $range); break;
             case 'phase_six_headquarters_acquisition': $result = $this->headquarters($stores, $range); break;
             case 'phase_six_other_multi_payment': $result = $this->multiPayment($stores, $range); break;
@@ -69,11 +69,23 @@ final class StoreUnifiedReportPhaseSixServices
             case 'phase_six_salary_detail': $result = $this->salaryDetail($stores, $range, $input); break;
             case 'phase_six_training_employee': $result = $this->trainingV2($stores, $range); break;
             case 'phase_six_acquisition_source': $result = $this->acquisitionSource($stores, $range); break;
-            case 'phase_six_human_store_health': return $this->healthWithStaffing($stores, $range);
+            case 'phase_six_human_store_health':
+                $result = $this->healthWithStaffing($stores, $range);
+                $result['metric_version'] = 'report-phase-six-current-category-v3';
+                return $result;
             default: throw new \InvalidArgumentException('不支持的第六阶段报表类型');
         }
         // 事实默认值先生成，手动补充值最后投影；查询和导出共用同一读回路径。
-        return $this->withManualAnnotations($report, $result, $stores, !empty($input['_internal_all']));
+        $result = $this->withManualAnnotations($report, $result, $stores, !empty($input['_internal_all']));
+        // Only category-bearing reports change version; salary has its own accepted allocation contract.
+        if (in_array($report, ['phase_six_garden_item_analysis', 'phase_six_monthly_featured_item', 'phase_six_other_multi_payment'], true)) {
+            $result['metric_version'] = 'report-phase-six-current-category-v3';
+        }
+        // Only the garden headcount changes; other phase-six metrics retain their accepted versions.
+        if ($report === 'phase_six_garden_item_analysis') {
+            $result['metric_version'] = 'report-phase-six-garden-market-member-day-v4';
+        }
+        return $result;
     }
 
     /** Current, non-historical headcount maintenance. */
@@ -124,19 +136,30 @@ final class StoreUnifiedReportPhaseSixServices
         });
     }
 
-    private function garden(array $stores, array $range): array
+    /** 花园明细保留原分摊金额；成交资格复用市场表，每个达标会员日只落在一条稳定明细上。 */
+    private function garden(array $stores, array $range, array $input): array
     {
-        $facts = array_values(array_filter($this->cashFacts($stores, $range), static fn(array $r): bool => trim((string)($r['category_path'] ?? '')) === '花园' || strpos((string)($r['category_path'] ?? ''), '花园 /') === 0));
-        $monthly = [];
-        foreach ($facts as $fact) if ((int)$fact['member_id'] > 0) $monthly[(string)$fact['member_id']] = ($monthly[(string)$fact['member_id']] ?? 0) + (int)$fact['amount_cents'];
+        $facts = array_values(array_filter($this->cashFacts($stores, $range, true), static fn(array $r): bool => preg_match('/^花园(?:\s*\/|$)/u', trim((string)($r['category_path'] ?? ''))) === 1));
+        $market = new StoreUnifiedReportPhaseTwoServices();
+        $qualified = $market->marketQualifiedMemberDays($stores, $range, $input);
+        $firstRows = [];
+        foreach ($facts as $fact) {
+            $key = $market->marketEffectiveMemberDayKey($fact);
+            $id = (string)$fact['allocation_id'];
+            // 分页前选定字典序最小的正向分摊键，避免翻页、导出或数据库返回顺序改变计数归属。
+            if (isset($qualified[$key]) && (int)$fact['amount_cents'] > 0
+                && (!isset($firstRows[$key]) || strcmp($id, $firstRows[$key]) < 0)) {
+                $firstRows[$key] = $id;
+            }
+        }
         $rows = [];
         foreach ($facts as $fact) {
-            $member = (int)$fact['member_id'];
+            $key = $market->marketEffectiveMemberDayKey($fact);
             $rows[] = [
                 'company_name' => (string)$fact['company_name'], 'store_name' => (string)$fact['store_name'],
                 'member_name' => (string)$fact['member_name'], 'salesperson_name' => (string)$fact['salesperson_name'],
                 'partner_name' => (string)$fact['partner_name'], 'experience_people' => (int)$fact['is_experience'],
-                'deal_people' => $member > 0 && (int)($monthly[(string)$member] ?? 0) >= 100000 ? 1 : 0,
+                'deal_people' => ($firstRows[$key] ?? null) === (string)$fact['allocation_id'] ? 1 : 0,
                 'item_name' => (string)$fact['item_name'], 'quantity' => (int)$fact['quantity'],
                 'cash_amount' => $this->money((int)$fact['amount_cents']), 'row_key' => (string)$fact['allocation_id'],
                 'store_id' => (int)$fact['store_id'], 'source_line_id' => (string)$fact['source_line_id'],
@@ -151,7 +174,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('salesperson_name','门店销售人','销售事实中的销售人历史姓名快照。'),
             $this->column('partner_name','合作方名称','商品分类合作方名称快照。'),
             $this->column('experience_people','体验人数','购物车体验标签的有效记录。',true),
-            $this->column('deal_people','成交人数','花园月累计现金业绩达到1000元的会员或顾客。',true),
+            $this->column('deal_people','成交人数','与市场业绩表一致：按门店、业务日、来源、会员统计当日净记账收款，A类满1000元、其他来源满500元计1；导入欠款补交不参与达标，退款和作废沿用市场口径。同一达标会员日的花园明细仅一条显示1，其余为0；不同日期分别累计。',true),
             $this->column('item_name','成交品名','现金购买商品明细名称。'),
             $this->column('quantity','商品数量','对应销售明细数量。',true),
             $this->column('cash_amount','成交金额','现金业绩分摊事实。',true),
@@ -198,10 +221,10 @@ final class StoreUnifiedReportPhaseSixServices
             ->where('p.draft_status', 'committed')->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('so.order_status', 'settled')
             ->where('so.order_direction', 'forward')->whereBetween('so.business_date', [$range['start'], $range['end']])
-            ->field("p.payment_draft_id,COALESCE(c.amount_cents,p.amount_cents) tender_amount_cents,s.fact_id sale_fact_id,s.source_line_id,s.sale_amount_cents,s.debt_amount_cents,so.store_id,so.business_date,so.member_name_snapshot customer_name,s.organization_name_snapshot company_name,s.store_name_snapshot store_name,s.quantity,d.category_path_snapshot category,s.item_name_snapshot item_name,a.allocation_fact_id allocation_id,a.amount_cents allocated_amount_cents,(SELECT GROUP_CONCAT(DISTINCT employee_name_snapshot ORDER BY id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact sales_person WHERE sales_person.tenant_id=s.tenant_id AND sales_person.source_line_id=s.source_line_id AND sales_person.performance_type='sales_performance_allocated' AND sales_person.status='effective') employee_name")
+            ->field("p.payment_draft_id,COALESCE(c.amount_cents,p.amount_cents) tender_amount_cents,s.fact_id sale_fact_id,s.source_line_id,s.sale_amount_cents,s.debt_amount_cents,so.store_id,so.business_date,so.member_name_snapshot customer_name,s.organization_name_snapshot company_name,s.store_name_snapshot store_name,s.quantity,d.item_id,d.category_path_snapshot category,s.item_name_snapshot item_name,a.allocation_fact_id allocation_id,a.amount_cents allocated_amount_cents,(SELECT GROUP_CONCAT(DISTINCT employee_name_snapshot ORDER BY id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact sales_person WHERE sales_person.tenant_id=s.tenant_id AND sales_person.source_line_id=s.source_line_id AND sales_person.performance_type='sales_performance_allocated' AND sales_person.status='effective') employee_name")
             ->order('p.id', 'asc')->order('s.id', 'asc')->order('a.id', 'asc');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'so.tenant_id', 'so.order_id');
-        $facts = $query->select()->toArray();
+        $facts = $this->currentCategoryPaths($query->select()->toArray(), 'item_id', 'category');
         $otherAmounts = $this->otherCollectionAmountsBySaleFact($facts);
         $rows = [];
         $receivableBySale = [];
@@ -230,7 +253,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('business_date','日期','这笔订单的结账业务日期。'),
             $this->column('customer_name','顾客姓名','结账时记录的会员或顾客姓名。'),
             $this->column('employee_name','员工姓名','这件商品结账时记录的销售人。'),
-            $this->column('category','商品分类','商品结账时所属的分类，之后改分类不追改旧单。'),
+            $this->column('category','商品分类','按商品 ID 关联平台商品当前有效分类；关联无效时留空，原结算金额不变。'),
             $this->column('item_name','商品名称','这笔订单中选择“其他收款”的商品名称。'),
             $this->column('quantity','数量','这笔订单中该商品的成交数量。',true),
             $this->column('receivable_amount','应收金额','该商品结账时的成交应收金额；同一商品有多笔“其他收款”时会在各笔明细重复显示，合计只算一次。',true),
@@ -458,7 +481,17 @@ final class StoreUnifiedReportPhaseSixServices
         return $references;
     }
 
-    private function salarySummary(array $stores,array $range,array $input):array
+    /**
+     * Give the target ranking the salary report's employee-level totals before
+     * display rounding or category-column projection. The caller supplies its
+     * already-authorized store scope; this read never changes salary facts.
+     */
+    public function salaryRankingRows(array $stores,array $range):array
+    {
+        return $this->salarySummary($stores,$range,[],true);
+    }
+
+    private function salarySummary(array $stores,array $range,array $input,bool $forRanking=false):array
     {
         $employeeName=$this->salaryEmployeeName($input);
         $rows=[];$observedCategories=[];
@@ -485,12 +518,27 @@ final class StoreUnifiedReportPhaseSixServices
             }
             $rows[$key]['labor_fee_cents']+=(int)$f['labor_fee_cents'];
         }
-        $categories=$this->salaryCategoryDefinitions($observedCategories);
         // Service people is a range-level deduplicated metric.  It must come
         // from the common reader once per store/employee, rather than by
         // adding detail rows (which would turn a multi-day member into many
         // people).
         $summaryMetrics = $this->serviceCustomerMetrics($stores, $range)['summary_by_store_employee'];
+        if($forRanking){
+            $ranking=[];
+            foreach($rows as $key=>$r){
+                $ranking[]=[
+                    'store_id'=>(int)$r['store_id'],'employee_id'=>(int)$r['employee_id'],
+                    'employee_name'=>(string)$r['employee_name'],
+                    'cash_cents'=>(int)$r['cash_cents'],'consumption_cents'=>(int)$r['consumption_cents'],
+                    'labor_fee_cents'=>(int)$r['labor_fee_cents'],
+                    'project_count_micros'=>(int)$r['project_count_micros'],
+                    'service_visit_tenths'=>(int)$r['service_visit_tenths'],
+                    'service_people_tenths'=>(int)($summaryMetrics[$key]['people_tenths']??0),
+                ];
+            }
+            return $ranking;
+        }
+        $categories=$this->salaryCategoryDefinitions($observedCategories);
         foreach($rows as $key=>&$r){
             $r['service_people_tenths']=(int)($summaryMetrics[$key]['people_tenths'] ?? 0);
             $r['project_count']=$this->projectCountText((int)$r['project_count_micros']);
@@ -662,20 +710,26 @@ final class StoreUnifiedReportPhaseSixServices
             // 活客与服务人次只受体验标记控制；销售人头、现金和消耗保持各自事实口径。
             foreach($categories as $cat){$catCash=(int)($categoryTotals[$cat]??0);$members=count((array)($categoryMembers[$cat]??[]));$servicesCount=(int)($categoryServices[$cat]??0);$consumption=(int)($categoryConsumption[$cat]??0);$rows[]=['store_id'=>$storeId,'company_name'=>$company,'store_name'=>$storeName,'item_category'=>$cat,'employee_count'=>$employeeCount,'beautician_establishment_count'=>$staffing,'beautician_fill_rate'=>$staffing>0?$this->ratio($beauticians,$staffing):'-','beautician_turnover_rate'=>'-','active_customer_count'=>count((array)($categoryVisitMembers[$cat]??[])),'service_count'=>$servicesCount,'average_order_value'=>$members?$this->money((int)round($catCash/$members)):'-','sales_efficiency'=>$employeeCount?$this->money((int)round($catCash/$employeeCount)):'-','ten_thousand_customer_ratio'=>$this->ratio($this->countMembersAtLeast($storeFacts,$cat,1000000),$members),'cash_amount'=>$this->money($catCash),'consumption_amount'=>$this->money($consumption),'consumption_efficiency'=>$employeeCount?$this->money((int)round($consumption/$employeeCount)):'-','effective_sales_headcount'=>$members,'sales_ratio'=>$this->ratio($catCash,$storeCash)];}
         }
-        return $this->result('人力-院店健康报表',[$this->column('company_name','分公司','组织中的分公司统计维度。',false,true),$this->column('store_name','门店','门店权限范围。',false,true),$this->column('item_category','品项','启用商品一级分类的历史快照。',false,true),$this->column('employee_count','员工人数','查询截止日有效员工人数。',true),$this->column('beautician_establishment_count','美容师编制人数','每门店唯一当前编制值，不分时间。',true),$this->column('beautician_fill_rate','美容师满岗率','实际美容师人数/当前编制人数，编制为0显示-。'),$this->column('beautician_turnover_rate','美容师离职率','期间离职美容师人数/对应期间在职人数。'),$this->column('active_customer_count','活跃客','区间内非体验有效服务会员去重；人员“不算人数人次”不影响门店活客。',true),$this->column('service_count','服务人次','区间内非体验有效服务项目数量；人员开关不参与，体验服务仍保留消耗业绩。',true),$this->column('average_order_value','客单价','销售业绩/不重复消费人头数。'),$this->column('sales_efficiency','销售人效','销售业绩/员工人数。'),$this->column('ten_thousand_customer_ratio','万元客比','达到1万元门槛客户数/有效客户数。'),$this->column('cash_amount','现金业绩（减退款）','现金业绩净额。',true),$this->column('consumption_amount','消耗业绩','服务或核销消耗业绩。',true),$this->column('consumption_efficiency','消耗人效','消耗业绩/员工人数。'),$this->column('effective_sales_headcount','有效销售人头数','有效销售会员或顾客去重人数。',true),$this->column('sales_ratio','销售比','对应品项业绩/门店现金业绩总额。')],$rows,$range);
+        return $this->result('人力-院店健康报表',[$this->column('company_name','分公司','组织中的分公司统计维度。',false,true),$this->column('store_name','门店','门店权限范围。',false,true),$this->column('item_category','品项','按关联平台商品当前有效分类归入一级品项。',false,true),$this->column('employee_count','员工人数','查询截止日有效员工人数。',true),$this->column('beautician_establishment_count','美容师编制人数','每门店唯一当前编制值，不分时间。',true),$this->column('beautician_fill_rate','美容师满岗率','实际美容师人数/当前编制人数，编制为0显示-。'),$this->column('beautician_turnover_rate','美容师离职率','期间离职美容师人数/对应期间在职人数。'),$this->column('active_customer_count','活跃客','区间内非体验有效服务会员去重；人员“不算人数人次”不影响门店活客。',true),$this->column('service_count','服务人次','区间内非体验有效服务项目数量；人员开关不参与，体验服务仍保留消耗业绩。',true),$this->column('average_order_value','客单价','销售业绩/不重复消费人头数。'),$this->column('sales_efficiency','销售人效','销售业绩/员工人数。'),$this->column('ten_thousand_customer_ratio','万元客比','达到1万元门槛客户数/有效客户数。'),$this->column('cash_amount','现金业绩（减退款）','现金业绩净额。',true),$this->column('consumption_amount','消耗业绩','服务或核销消耗业绩。',true),$this->column('consumption_efficiency','消耗人效','消耗业绩/员工人数。'),$this->column('effective_sales_headcount','有效销售人头数','有效销售会员或顾客去重人数。',true),$this->column('sales_ratio','销售比','对应品项业绩/门店现金业绩总额。')],$rows,$range);
     }
 
-    private function cashFacts(array $stores,array $range):array
+    /** 可选读取真实收款来源供花园会员日匹配；其他报表的金额与原销售快照不变。 */
+    private function cashFacts(array $stores,array $range,bool $withPaymentSource = false):array
     {
         $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('a')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=a.tenant_id AND d.sale_fact_id=a.sale_fact_id')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=a.tenant_id AND s.fact_id=a.sale_fact_id')
             ->where('a.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('a.store_id',$stores)->whereBetween('a.business_date',[$range['start'],$range['end']])->where('a.status','effective')
-            ->field("a.allocation_fact_id allocation_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,a.payment_method,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name");
+            ->field("a.allocation_fact_id allocation_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,a.payment_method,d.item_id,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name");
+        if ($withPaymentSource) {
+            // 补交可以另选来源，不能用原销售来源或展示名称替代支付事实的稳定来源 ID。
+            $query->leftJoin('cashier_v3_payment_fact garden_payment', 'garden_payment.tenant_id=a.tenant_id AND garden_payment.fact_id=a.payment_fact_id')
+                ->field('garden_payment.business_source_primary_id');
+        }
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($query, 'a.tenant_id', 'a.order_id');
         $normal->excludeVoidedSupplementAllocations($query, 'a');
-        return $query->select()->toArray();
+        return $this->currentCategoryPaths($query->select()->toArray(), 'item_id', 'category_path');
     }
 
     private function serviceFacts(array $stores,array $range):array
@@ -683,9 +737,23 @@ final class StoreUnifiedReportPhaseSixServices
         $query = Db::name('cashier_v3_entitlement_service_fact')->alias('sv')
             ->where('sv.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('sv.store_id',$stores)
             ->whereBetween('sv.business_date',[$range['start'],$range['end']])->where('sv.service_status','completed')
-            ->field("sv.service_fact_id fact_id,sv.store_id,sv.member_id,sv.business_date,sv.source_line_id,sv.quantity,sv.project_count,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.store_name_snapshot store_name,sv.organization_path_snapshot organization_path_snapshot,sv.is_experience,COALESCE(sv.labor_fee_amount_cents,0) labor_fee_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.checkout_request_id=sv.checkout_request_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') source_name");
+            ->field("sv.service_fact_id fact_id,sv.store_id,sv.member_id,sv.business_date,sv.source_line_id,sv.quantity,sv.project_count,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_path_snapshot category_path,sv.store_name_snapshot store_name,sv.organization_path_snapshot organization_path_snapshot,sv.is_experience,COALESCE(sv.labor_fee_amount_cents,0) labor_fee_cents,(SELECT COALESCE(SUM(pf.amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=sv.tenant_id AND pf.checkout_request_id=sv.checkout_request_id AND pf.source_line_id=sv.source_line_id AND pf.performance_type='consumption_performance_recorded' AND pf.status='effective') consumption_cents,(SELECT MAX(sf.business_source_label_snapshot) FROM eb_cashier_v3_sale_fact sf WHERE sf.tenant_id=sv.tenant_id AND sf.source_line_id=sv.source_line_id AND sf.fact_direction='forward' AND sf.status='effective') source_name");
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 'sv');
-        return $query->select()->toArray();
+        return $this->currentCategoryPaths($query->select()->toArray(), 'item_id', 'category_path');
+    }
+
+    /** Keep the original financial facts while displaying the linked platform product's current category. */
+    private function currentCategoryPaths(array $rows, string $productKey, string $pathKey): array
+    {
+        if ($rows === []) return [];
+        $links = [];
+        foreach ($rows as $index => $row) {
+            $links[$index] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)($row[$productKey] ?? 0)];
+        }
+        $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        foreach ($rows as $index => &$row) $row[$pathKey] = (string)($categories[$index]['path'] ?? '');
+        unset($row);
+        return $rows;
     }
 
     /**
@@ -824,8 +892,10 @@ final class StoreUnifiedReportPhaseSixServices
      */
     private function salarySalesDebtSupplementDimensions(array $dimensions,array $debtIds):array
     {
+        // Debt items keep historical store-product IDs even after catalog deletion;
+        // the platform link is still authoritative for the repayment's category.
         $items=Db::name('store_debt_item')->alias('i')
-            ->leftJoin('store_product p','p.id=i.product_id AND p.is_del=0')
+            ->leftJoin('store_product p','p.id=i.product_id')
             ->whereIn('i.debt_id',$debtIds)
             ->field('i.id,i.debt_id,i.order_id,i.product_id,i.product_type,i.debt_amount,p.type product_scope_type,p.relation_id product_store_id')
             ->order('i.id asc')->select()->toArray();
@@ -844,7 +914,7 @@ final class StoreUnifiedReportPhaseSixServices
         $componentsByOrder=[];
         if($cardOrderIds!==[]){
             $components=Db::name('store_order_cart_info')->alias('c')
-                ->leftJoin('store_product p','p.id=c.product_id AND p.is_del=0')
+                ->leftJoin('store_product p','p.id=c.product_id')
                 ->whereIn('c.oid',array_keys($cardOrderIds))->where('c.cart_type',2)->where('c.product_type',6)
                 ->field('c.id,c.oid,c.product_id,c.total_price,c.pay_price,p.relation_id product_store_id')
                 ->order('c.id asc')->select()->toArray();
@@ -922,15 +992,15 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /**
-     * Current visible categories define zero-sales columns; hidden or unsplit current
-     * categories retain their stable legacy column keys. No historical snapshot supplies classification.
+     * Any platform category still in the database defines current columns,
+     * regardless of catalogue visibility. No historical snapshot supplies classification.
      *
      * @return array{columns:array<int,array>,targets:array<int|string,string>}
      */
     private function salaryCategoryDefinitions(array $observed): array
     {
         $configured=Db::name('store_product_category')->where('type',0)->where('relation_id',0)
-            ->field('id,pid,cate_name,is_show')->select()->toArray();
+            ->field('id,pid,cate_name')->select()->toArray();
         return $this->buildSalaryCategoryDefinitions($configured,$observed);
     }
 
@@ -941,7 +1011,8 @@ final class StoreUnifiedReportPhaseSixServices
         foreach($configured as $category){
             $id=(int)($category['id']??0);if($id<=0)continue;
             $byId[$id]=$category;
-            if((int)($category['is_show']??0)===1)$visible[$id]=true;
+            // is_show affects catalog presentation, not classification of historical sales.
+            $visible[$id]=true;
         }
         foreach(array_keys($visible) as $id){
             $parent=(int)($byId[$id]['pid']??0);
@@ -981,8 +1052,8 @@ final class StoreUnifiedReportPhaseSixServices
         $columns=[];
         foreach($definitions as $definition){
             $explanation=$definition['key']==='salary_category_cash_unclassified'
-                ? '关联商品没有有效的当前分类，或无法关联商品的销售业绩及退款扣减；不按名称或旧分类猜填。'
-                : '按关联商品当前分类统计销售业绩减退款扣减，历史记录也随商品分类调整；卡项按卡内项目当前分类和原有金额比例拆分，原始金额不变。';
+                ? '关联的平台商品没有有效当前分类的销售业绩及退款扣减；不按名称或旧快照猜填。'
+                : '按关联平台商品当前分类统计销售业绩减退款扣减；卡项按卡内项目的平台商品分类和原有金额比例拆分，原始金额不变。';
             $columns[]=$this->column($definition['key'],$definition['label'],$explanation,true,false,140,[],'商品分类业绩');
         }
         return ['columns'=>$columns,'targets'=>$targets];
@@ -1395,57 +1466,10 @@ final class StoreUnifiedReportPhaseSixServices
         return $facts;
     }
 
-    /** 薪资全部业务共用当前商品分类解析；输入须是已经过商户/门店范围校验的实际商品 ID。 */
+    /** 薪资全部业务只沿有效商品 ID 读取平台商品当前分类；缺失分类留给独立数据修复。 */
     private function salaryCurrentProductCategories(array $links):array
     {
-        if($links===[])return [];
-        $productIds=[];
-        foreach($links as $row){if((int)($row['product_id']??0)>0)$productIds[(int)$row['product_id']]=true;}
-        $products=$this->salaryCategoryProducts(array_keys($productIds));
-        $parentIds=[];
-        foreach($products as $product){if((int)$product['pid']>0)$parentIds[(int)$product['pid']]=true;}
-        $parents=$this->salaryCategoryProducts(array_keys($parentIds));
-        $categories=[];
-        foreach(Db::name('store_product_category')->where('type',0)->where('relation_id',0)
-            ->field('id,pid,cate_name')->select()->toArray() as $category)$categories[(int)$category['id']]=$category;
-        $paths=[];
-        foreach($links as $key=>$row){
-            $product=$products[(int)($row['product_id']??0)]??[];
-            if($product===[] || !(((int)$product['type']===0 && (int)$product['relation_id']===0)
-                || ((int)$product['type']===1 && (int)$product['relation_id']===(int)$row['store_id'])))continue;
-            $candidates=[$product];
-            $parent=$parents[(int)$product['pid']]??[];
-            // 门店商品可继承其明确关联的平台商品分类；其他门店的同名或同父商品不是权威来源。
-            if($parent!==[] && (int)$parent['type']===0 && (int)$parent['relation_id']===0)$candidates[]=$parent;
-            foreach($candidates as $candidate){
-                $best=[];
-                foreach(explode(',',(string)$candidate['cate_id']) as $rawId){
-                    $rawId=trim($rawId);
-                    if(preg_match('/^[1-9][0-9]*$/D',$rawId)!==1)continue;
-                    $chain=$this->salaryCategoryChain((int)$rawId,$categories);
-                    // 配置可能同时保存祖先与叶分类；优先完整、最深路径，失效/断链/循环均不猜填。
-                    if(count($chain)>count($best) && !array_filter($chain,
-                        static fn(array $node):bool=>trim((string)$node['cate_name'])===''))$best=$chain;
-                }
-                if($best!==[]){
-                    $paths[$key]=['id'=>(int)$best[count($best)-1]['id'],
-                        'path'=>$this->salaryTwoLevelPath(implode(' / ',array_column($best,'cate_name')))];
-                    break;
-                }
-            }
-        }
-        return $paths;
-    }
-
-    /** 批量读取现行分类所需商品字段；已删除商品不提供当前分类，历史快照不兜底。 */
-    private function salaryCategoryProducts(array $ids):array
-    {
-        $products=[];
-        foreach(array_chunk($ids,300) as $chunk){
-            foreach(Db::name('store_product')->whereIn('id',$chunk)->where('is_del',0)
-                ->field('id,pid,type,relation_id,cate_id')->select()->toArray() as $row)$products[(int)$row['id']]=$row;
-        }
-        return $products;
+        return (new StoreReportCurrentProductCategoryServices())->resolve($links);
     }
 
     /**

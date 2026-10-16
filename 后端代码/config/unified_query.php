@@ -9,6 +9,7 @@ use app\services\query\provider\StaffUnifiedQueryWorkerContextResolver;
 use app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryRegistrar;
 use app\services\cashier\v3\order\CashierV3OrderCenterUnifiedQueryWorkerContextResolver;
 use app\services\cashier\v3\order\CashierV3SalesOrderUnifiedQueryProvider;
+use app\services\cashier\v3\order\CashierV3AllOrderUnifiedQueryProvider;
 use app\services\cashier\v3\order\CashierV3RechargeOrderUnifiedQueryProvider;
 use app\services\cashier\v3\order\CashierV3RefundRecordUnifiedQueryProvider;
 use app\services\cashier\v3\order\CashierV3DebtRecordUnifiedQueryProvider;
@@ -64,6 +65,7 @@ return [
         InventoryStatisticsExpiryUnifiedQueryProvider::class,
         InventoryStatisticsAgeUnifiedQueryProvider::class,
         CashierV3SalesOrderUnifiedQueryProvider::class,
+        CashierV3AllOrderUnifiedQueryProvider::class,
         CashierV3RechargeOrderUnifiedQueryProvider::class,
         CashierV3RefundRecordUnifiedQueryProvider::class,
         CashierV3DebtRecordUnifiedQueryProvider::class,

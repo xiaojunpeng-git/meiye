@@ -358,6 +358,19 @@ const ORDER_TABS = [
   }
 ]
 
+// 全部订单复用专用页字段契约；金额仍分业务命名，查询/导出由后台统一执行。
+const mixedFields = new Map([
+  ['business_type', field('business_type', '业务类型', 'enum', { options: ['消费', '充值', '补交', '退款'] })],
+  ['order_no', field('order_no', '订单号', 'text', { defaultQuick: true })],
+  ['event_completed_at', field('event_completed_at', '办理时间', 'date')]
+])
+for (const tab of ORDER_TABS.filter((item) => ['sales', 'recharge', 'supplement', 'refund'].includes(item.key))) {
+  for (const item of tab.fields) if (!mixedFields.has(item.key)) mixedFields.set(item.key, item)
+}
+mixedFields.set('business_date', { ...mixedFields.get('business_date'), label: '业务日期' })
+ORDER_TABS.unshift({ key: 'all', pageCode: 'order_center_all', label: '全部订单', stateKey: 'allOrders',
+  primaryField: 'order_no', emptyText: '当前条件下暂无订单。', fields: [...mixedFields.values()] })
+
 const FIELD_ALIASES = {
   sales_order_no: ['salesOrderNo', 'orderNo'], business_date: ['businessDate'], member_name: ['memberName'],
   store: ['storeName', 'businessStoreName'], item_summary: ['itemSummary'], item_count: ['itemCount'],
@@ -481,13 +494,13 @@ const platformScopePicker = ref({ loading: false, tree: [], allowedStoreIds: [],
 const platformScopeStoreIds = ref([])
 const orderCenter = computed(() => state.orderCenter || {})
 const requestedPlatformTab = String(route.query.tab || route.query.recordType || '').trim()
-const activeTabKey = ref(ORDER_TABS.some((tab) => tab.key === requestedPlatformTab) ? requestedPlatformTab : 'sales')
+const activeTabKey = ref(ORDER_TABS.some((tab) => tab.key === requestedPlatformTab) ? requestedPlatformTab : (isPlatformReadOnly.value ? 'sales' : 'all'))
 const availableTabs = computed(() => {
   // 平台的首个查询响应只对应当前页签，不能在它尚未带全量 businessTypes
   // 时把其余七个入口隐藏。
-  if (isPlatformReadOnly.value) return ORDER_TABS
+  if (isPlatformReadOnly.value) return ORDER_TABS.filter((tab) => tab.key !== 'all')
   const advertised = Array.isArray(orderCenter.value.businessTypes) ? orderCenter.value.businessTypes : []
-  if (!advertised.length) return serviceReportDrilldown.value ? ORDER_TABS : ORDER_TABS.filter((tab) => tab.key === 'sales')
+  if (!advertised.length) return serviceReportDrilldown.value ? ORDER_TABS : ORDER_TABS.filter((tab) => ['all', 'sales'].includes(tab.key))
   const readyKeys = new Set()
   advertised.forEach((item) => {
     if (item && typeof item === 'object' && item.ready === false) return
@@ -517,6 +530,8 @@ const rechargeOrderActionIds = ref({})
 let salesQuerySequence = 0
 let salesDetailSequence = 0
 let recordQuerySequence = 0
+// 全部订单查询失败时不把上次列表伪装成新条件结果，也不允许导出旧快照。
+const allOrderQueryError = ref('')
 
 const records = computed(() => {
   const explicit = orderCenter.value.recordsByType?.[activeTabKey.value]
@@ -613,6 +628,8 @@ const visibleFields = computed(() => {
   return fields
 })
 const detailFields = computed(() => {
+  // 混合页详情始终使用原业务字段，不能把整张联合字段表塞进一笔充值/退款。
+  if (activeTabKey.value === 'all') return recordTab(genericDetailRecord.value).fields
   // 取消信息只补充在该笔欠款详情，不改变其他业务记录的字段。
   if (activeTabKey.value === 'debt' && genericDetailRecord.value?.cancelledAt) {
     return [...visibleFields.value, field('cancelledAmount', '取消金额', 'money'),
@@ -1222,6 +1239,7 @@ function recordFieldValue(record, key) {
 
 function displayRecordField(record, key) {
   const value = recordFieldValue(record, key)
+  if (Array.isArray(value)) return value.length ? value.join('、') : '—'
   if (key === 'member_name') return value || (activeTabKey.value === 'sales' || activeTabKey.value === 'refund' ? '游客' : '—')
   if (key === 'payment_method') {
     if (activeTabKey.value === 'sales' && isUnavailableSalesOrderEconomics(record, value)) return '—'
@@ -1281,7 +1299,39 @@ function tableCellClass(record, fieldItem) {
 }
 
 function recordKey(record, index) {
-  return record?.id || record?.recordId || recordFieldValue(record, activeTab.value.primaryField) || `${activeTabKey.value}-${index}`
+  return record?.record_id || record?.id || record?.recordId || recordFieldValue(record, activeTab.value.primaryField) || `${activeTabKey.value}-${index}`
+}
+
+// 混合页必须使用服务端给出的业务类型；原 ID 专供命令，跨类型行键只用于展示。
+function recordType(record) {
+  return activeTabKey.value === 'all' ? String(record?.recordType || '') : activeTabKey.value
+}
+function recordTab(record) {
+  return ORDER_TABS.find((tab) => tab.key === recordType(record)) || activeTab.value
+}
+function recordTypeLabel(record) {
+  return { sales: '消费', recharge: '充值', supplement: '补交', refund: '退款' }[recordType(record)] || ''
+}
+function canEditRecordPersonnel(record) {
+  const type = recordType(record)
+  return !isPlatformReadOnly.value && canUseCashierV3Operation('cashier.v3.order.staff_adjust')
+    && (type === 'recharge' || (type === 'supplement' && record?.attributionEditable === true)
+      || (type === 'refund' && editableRefundPersonnelSourceTypes.has(record?.refundSourceType)))
+}
+function canEditRecordRoles(record) {
+  return canEditRecordPersonnel(record) && (recordType(record) === 'supplement'
+    || (recordType(record) === 'refund' && editableRefundSourceTypes.has(record?.refundSourceType)))
+}
+function openRecordRoles(record) {
+  return recordType(record) === 'supplement' ? openSupplementAttributionEditor(record) : openRefundAttributionEditor(record)
+}
+function recordVoidAction(record) {
+  if (isPlatformReadOnly.value || !canUseCashierV3Operation('cashier.v3.order.void')) return ''
+  const type = recordType(record)
+  if (type === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常') return 'void'
+  if (type === 'supplement' && String(record.id || '').startsWith('v3-') && record.paymentStatus !== '已作废') return 'supplement-void'
+  if (type === 'refund' && editableRefundSourceTypes.has(record.refundSourceType) && record.refundStatus === '已退款') return 'refund-record-void'
+  return ''
 }
 
 // The unified query adds a display-scoped record_id (for example
@@ -1307,7 +1357,7 @@ function giftVoidRecordId(record) {
 
 // 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
 const salesOrderListColumnKeys = ['item_name', 'unit_price', 'quantity', 'craftsman', 'salesperson', 'sales_manager', 'guide', 'line_amount', 'receivable_amount', 'debt_amount', 'coupon_discount_amount', 'actual_received_amount', 'payment_method', 'store', 'order_status']
-const salesOrderListColumns = salesOrderListColumnKeys.map((key) => ORDER_TABS[0].fields.find((item) => item.key === key).label)
+const salesOrderListColumns = salesOrderListColumnKeys.map((key) => ORDER_TABS.find((tab) => tab.key === 'sales').fields.find((item) => item.key === key).label)
 
 function salesOrderItems(record) {
   if (Array.isArray(record?.items) && record.items.length) return record.items
@@ -1375,7 +1425,7 @@ function salesOrderActionAvailable(record, action, permission) {
   return available && (!permission || canUseCashierV3Operation(permission))
 }
 
-function attributionIdentity(record, tab = activeTabKey.value) {
+function attributionIdentity(record, tab = recordType(record)) {
   const raw = String(record?.id || record?.orderId || record?.salesOrderId || '')
   // 纯服务列表的 service: 前缀只是展示分组键；写命令必须使用后端给出的结账请求 ID。
   if (tab === 'sales' && record?.entitlementOnly) return { recordType: 'service', recordId: String(record?.checkoutRequestId || '') }
@@ -1396,15 +1446,16 @@ function canCorrectAttribution(record, field) {
   // 消费订单是页面 feature，不在叶子 operation 快照中；误查 operation 会让有权门店隐藏更正入口。
   // 销售行还须由后端明确授予更正动作，实际写入仍由后端按当前会话与门店重新校验。
   if (isPlatformReadOnly.value || !canUseCashierV3Feature('cashier.v3.order_center')) return false
-  if (activeTabKey.value === 'sales') {
+  const type = recordType(record)
+  if (type === 'sales') {
     if (record?.entitlementOnly) return field === 'business_date'
       && salesOrderActionAvailable(record, 'correct-service-order-date')
     return salesOrderActionAvailable(record, 'correct-sales-order-attribution')
   }
-  if (activeTabKey.value === 'recharge') return record?.attributionEditable === true
-  if (activeTabKey.value === 'refund') return field === 'business_date'
+  if (type === 'recharge') return record?.attributionEditable === true
+  if (type === 'refund') return field === 'business_date'
     && editableRefundSourceTypes.has(record?.refundSourceType)
-  return activeTabKey.value === 'supplement' && ['business_date', 'source'].includes(field)
+  return type === 'supplement' && ['business_date', 'source'].includes(field)
     && record?.attributionEditable === true
 }
 
@@ -1416,7 +1467,7 @@ function attributionAction(type, field) {
       : field === 'source' ? 'correct-debt-repayment-source' : 'correct-debt-repayment-date'
 }
 
-async function readAttributionChanges(record, tab = activeTabKey.value) {
+async function readAttributionChanges(record, tab = recordType(record)) {
   // 详情切换时只接收最后一次请求，避免旧订单的审计记录落到新订单详情。
   const serial = ++attributionChangesSerial
   attributionChanges.value = []
@@ -1459,7 +1510,7 @@ async function openAttributionEditor(record, field) {
   const displayedValue = String(recordFieldValue(record, field) || '')
   const expectedValue = orderAttributionExpectedValue(record, field, displayedValue)
   attributionEditor.value = {
-    ...identity, field, recordNo: displayRecordField(record, activeTab.value.primaryField),
+    ...identity, field, recordNo: displayRecordField(record, recordTab(record).primaryField),
     expectedValue,
     newValue: field === 'business_date' ? displayedValue : '',
     expectedPrimarySourceId: Number(record.businessSourcePrimaryId || 0),
@@ -1904,7 +1955,7 @@ function recordPersonnelInitialSelection(line = {}) {
 }
 
 async function openRecordPersonnelEditor(record) {
-  const type = activeTabKey.value
+  const type = recordType(record)
   if (!['recharge', 'supplement', 'refund'].includes(type) || !record
     || !canUseCashierV3Operation('cashier.v3.order.staff_adjust')) return
   if (type === 'refund' && !editableRefundPersonnelSourceTypes.has(record.refundSourceType)) return
@@ -2017,7 +2068,7 @@ async function submitRecordPersonnelAdjustment() {
 
 // 补交列表值仅用于定位，编辑时从补交归属版本重新读取人员和并发版本。
 async function openSupplementAttributionEditor(record) {
-  if (activeTabKey.value !== 'supplement' || !canUseCashierV3Operation('cashier.v3.order.staff_adjust')) return
+  if (recordType(record) !== 'supplement' || !canUseCashierV3Operation('cashier.v3.order.staff_adjust')) return
   const recordId = recordPersonnelId(record, 'supplement')
   if (!recordId || !String(record?.id || '').startsWith('v3-')) return
   supplementAttributionError.value = ''
@@ -2140,7 +2191,7 @@ async function submitSupplementAttributionAdjustment() {
 
 // 列表值只负责定位记录；当前人员与并发版本必须重新从退款权威记录读取。
 async function openRefundAttributionEditor(record) {
-  if (activeTabKey.value !== 'refund' || !editableRefundSourceTypes.has(record?.refundSourceType)
+  if (recordType(record) !== 'refund' || !editableRefundSourceTypes.has(record?.refundSourceType)
     || !canUseCashierV3Operation('cashier.v3.order.staff_adjust')) return
   const recordId = recordPersonnelId(record, 'refund')
   if (!recordId) return
@@ -2548,9 +2599,14 @@ async function queryRecords(query = {}, resetPage = true) {
     queryModelByType.value = { ...queryModelByType.value, [recordType]: nextQuery }
     const sequence = ++recordQuerySequence
     isOrderQueryLoading.value = true
+    if (recordType === 'all') allOrderQueryError.value = ''
     try {
       const result = await requestAction('query-order-center-records', nextQuery)
       const projection = salesOrderProjectionFromResult(result)
+      if (!projection && recordType === 'all' && sequence === recordQuerySequence && activeTabKey.value === recordType) {
+        allOrderQueryError.value = result?.result?.message || result?.data?.result?.message || '订单查询失败，请重新点击查询。'
+        executedQueryByType.value = { ...executedQueryByType.value, all: null }
+      }
       if (projection && sequence === recordQuerySequence && activeTabKey.value === recordType) {
         state.orderCenter = mergeSalesOrderCenterProjection(state.orderCenter, projection)
         saveExecutedQuery(recordType, nextQuery)
@@ -2558,6 +2614,13 @@ async function queryRecords(query = {}, resetPage = true) {
         if (!records.value.length && targetPage > 1) return await queryRecords({ ...nextQuery, page: targetPage - 1 }, false)
       }
       return result
+    } catch (error) {
+      if (recordType !== 'all') throw error
+      if (sequence === recordQuerySequence && activeTabKey.value === recordType) {
+        allOrderQueryError.value = '订单查询失败，请重新点击查询。'
+        executedQueryByType.value = { ...executedQueryByType.value, all: null }
+      }
+      return null
     } finally {
       if (sequence === recordQuerySequence) isOrderQueryLoading.value = false
     }
@@ -2839,7 +2902,7 @@ function closeGenericDetail() {
 
 function openRecordDetail(record, initialAction = '') {
   if (isPlatformReadOnly.value) return null
-  if (activeTabKey.value === 'sales') {
+  if (recordType(record) === 'sales') {
     return openSalesOrderDetail({ orderId: record?.id || record?.orderId || record?.salesOrderId })
   }
   if (activeTabKey.value === 'service' && !canUseCashierV3Operation('cashier.v3.order.service_detail')) return
@@ -3201,24 +3264,25 @@ async function restoreDebt(record) {
 }
 
 const rechargeLifecycleActions = computed(() => {
+  const type = recordType(genericDetailRecord.value)
   // 退款作废只开放给仍生效的 V3 退款；旧退款缺少权益与余额快照，不能推测恢复。
-  if (activeTabKey.value === 'refund' && genericDetailRecord.value) {
+  if (type === 'refund' && genericDetailRecord.value) {
     return String(genericDetailRecord.value.id || '').startsWith('refund:')
       && editableRefundSourceTypes.has(genericDetailRecord.value.refundSourceType)
       && genericDetailRecord.value.refundStatus === '已退款'
       && canUseCashierV3Operation('cashier.v3.order.void') ? ['refund-record-void'] : []
   }
   // 卡操作只开放 V3 项目替换的反向操作；旧版记录缺少可核对的目标权益快照。
-  if (activeTabKey.value === 'card_operation' && genericDetailRecord.value) {
+  if (type === 'card_operation' && genericDetailRecord.value) {
     return canVoidProjectReplacement(genericDetailRecord.value) ? ['replacement-void'] : []
   }
-  if (['supplement', 'gift'].includes(activeTabKey.value) && genericDetailRecord.value) {
+  if (['supplement', 'gift'].includes(type) && genericDetailRecord.value) {
     const id = giftVoidRecordId(genericDetailRecord.value) || String(genericDetailRecord.value.id || '')
-    if (activeTabKey.value === 'supplement' && id.startsWith('v3-') && genericDetailRecord.value.paymentStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.void')) return ['supplement-void']
-    if (activeTabKey.value === 'gift' && id.startsWith('v3-direct-gift:') && genericDetailRecord.value.giftStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.void')) return ['gift-void']
+    if (type === 'supplement' && id.startsWith('v3-') && genericDetailRecord.value.paymentStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.void')) return ['supplement-void']
+    if (type === 'gift' && id.startsWith('v3-direct-gift:') && genericDetailRecord.value.giftStatus !== '已作废' && canUseCashierV3Operation('cashier.v3.order.void')) return ['gift-void']
     return []
   }
-  if (activeTabKey.value !== 'recharge' || !genericDetailRecord.value
+  if (type !== 'recharge' || !genericDetailRecord.value
     || genericDetailRecord.value.economicsDataStatus !== 'ready'
     || genericDetailRecord.value.orderStatus !== '正常') return []
   return ['refund', 'void']
@@ -3288,7 +3352,7 @@ function applySalesOrderVoidLocally(orderId, result) {
     if (!Array.isArray(rows)) return rows
     return rows.reduce((next, row) => {
       const rowId = salesOrderDisplayId(row)
-      if (rowId !== normalizedId) {
+      if ((row.recordType && row.recordType !== 'sales') || rowId !== normalizedId) {
         next.push(row)
         return next
       }
@@ -3320,6 +3384,16 @@ function applySalesOrderVoidLocally(orderId, result) {
     salesOrderDetail: salesDetailBelongsToOrder(salesDetailOrder.value, normalizedId)
       ? { ...salesDetailOrder.value, ...statusPatch }
       : currentProjection.salesOrderDetail
+  }
+  // 全部订单保留原销售终态补丁；只减少确实在当前页移除的消费行，其他业务不受同号影响。
+  if (activeTabKey.value === 'all') {
+    const allNormal = (queryModelByType.value.all?.dataScope || 'normal') === 'normal'
+    const allRows = currentProjection.recordsByType?.all || []
+    const nextAll = patchRows(allRows, allNormal)
+    state.orderCenter = { ...state.orderCenter,
+      recordsByType: { ...state.orderCenter.recordsByType, all: nextAll },
+      pagesByType: { ...state.orderCenter.pagesByType, all: { ...currentProjection.pagesByType?.all,
+        total: Math.max(0, Number(currentProjection.pagesByType?.all?.total || 0) - (allRows.length - nextAll.length)) } } }
   }
   if (salesDetailBelongsToOrder(salesDetailOrder.value, normalizedId)) {
     salesDetailOrder.value = { ...salesDetailOrder.value, ...statusPatch }
@@ -3587,6 +3661,7 @@ onBeforeUnmount(() => {
       :executed-query="executedQuery"
       :default-quick-date-ranges="platformOrderCenterDefaultDateRanges"
       :is-query-loading="isOrderQueryLoading"
+      :show-query-loading="activeTabKey === 'all'"
       :state-context-key="state.stateContextId"
       :query-capability="activeQueryCapability"
       :show-settings-button="!isPlatformReadOnly"
@@ -3625,8 +3700,10 @@ onBeforeUnmount(() => {
 
     <p v-if="activeTabKey === 'debt' && debtRestoreError" class="order-center-page__inline-error" role="alert">{{ debtRestoreError }}</p>
 
-    <main class="order-center-list-wrap">
-      <table v-if="activeTabKey === 'sales'" class="order-center-list-table sales-order-query-table" :style="{ '--order-column-count': salesOrderListColumns.length }">
+    <main class="order-center-list-wrap" :class="{ 'order-center-list-wrap--loading': activeTabKey === 'all' && (isOrderQueryLoading || allOrderQueryError) }" :aria-busy="activeTabKey === 'all' && isOrderQueryLoading">
+      <p v-if="activeTabKey === 'all' && isOrderQueryLoading" class="order-center-query-pending" role="status">正在查询订单…</p>
+      <p v-else-if="activeTabKey === 'all' && allOrderQueryError" class="order-center-query-pending order-center-query-pending--error" role="alert">{{ allOrderQueryError }}</p>
+      <table v-if="['all', 'sales'].includes(activeTabKey)" class="order-center-list-table sales-order-query-table" :style="{ '--order-column-count': salesOrderListColumns.length }">
         <thead>
           <tr>
             <th v-for="column in salesOrderListColumns" :key="column">{{ column }}</th>
@@ -3635,10 +3712,11 @@ onBeforeUnmount(() => {
         <tbody v-for="(record, recordIndex) in records" :key="recordKey(record, recordIndex)" class="sales-order-query-group">
           <tr class="sales-order-query-group__header">
             <td :colspan="salesOrderListColumns.length">
-              <!-- 主项固定列槽，业务标签放在来源之后，避免标签或名称长度推移后续字段。 -->
-              <span class="sales-order-query-meta sales-order-query-meta--date">销售日期：<button v-if="canCorrectAttribution(record, 'business_date')" type="button" class="order-link" @click="openAttributionEditor(record, 'business_date')">{{ displayRecordField(record, 'business_date') }}</button><template v-else>{{ displayRecordField(record, 'business_date') }}</template></span>
-              <span class="sales-order-query-meta sales-order-query-meta--time">实际下单时间：{{ displayRecordField(record, 'occurred_at') }}</span>
-              <span class="sales-order-query-meta sales-order-query-meta--number" :title="displayRecordField(record, 'sales_order_no')">订单编号：{{ displayRecordField(record, 'sales_order_no') }}</span>
+              <!-- 业务标签位于日期前，显示分组身份；实际操作仍由原业务 ID 定位。 -->
+              <span class="order-business-tag" :class="`is-${recordType(record)}`">{{ recordTypeLabel(record) }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--date">{{ activeTabKey === 'all' ? '业务日期' : '销售日期' }}：<button v-if="canCorrectAttribution(record, 'business_date')" type="button" class="order-link" @click="openAttributionEditor(record, 'business_date')">{{ displayRecordField(record, 'business_date') }}</button><template v-else>{{ displayRecordField(record, 'business_date') }}</template></span>
+              <span class="sales-order-query-meta sales-order-query-meta--time">{{ recordType(record) === 'sales' ? '实际下单时间' : '办理时间' }}：{{ displayRecordField(record, recordType(record) === 'sales' ? 'occurred_at' : 'event_completed_at') }}</span>
+              <span class="sales-order-query-meta sales-order-query-meta--number" :title="displayRecordField(record, recordTab(record).primaryField)">订单编号：{{ displayRecordField(record, recordTab(record).primaryField) }}</span>
               <span class="sales-order-query-meta sales-order-query-meta--store" :title="displayRecordField(record, 'store')">门店：{{ displayRecordField(record, 'store') }}</span>
               <!-- 复用服务记录的会员详情入口和权限投影；游客不按姓名猜测关联。 -->
               <span class="sales-order-query-meta sales-order-query-meta--member" :title="displayRecordField(record, 'member_name')">客户：<button
@@ -3654,7 +3732,7 @@ onBeforeUnmount(() => {
               <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
                 <button type="button" class="button button--text" @click="openRecordDetail(record)">详情</button>
                 <button
-                  v-if="canUseCashierV3Operation('cashier.v3.order.receipt_print')"
+                  v-if="recordType(record) === 'sales' && canUseCashierV3Operation('cashier.v3.order.receipt_print')"
                   type="button"
                   class="button button--text"
                   :disabled="Boolean(salesPrintLoading[String(record.id || record.orderId || record.salesOrderId || '')])"
@@ -3673,9 +3751,29 @@ onBeforeUnmount(() => {
                   class="button button--text"
                   @click="openSalesOrderNoteEditor(record)"
                 >备注</button>
+                <button v-if="recordVoidAction(record)" type="button" class="button button--text button--danger" @click="openRecordDetail(record, recordVoidAction(record))">作废</button>
+                <button v-if="recordType(record) === 'recharge' && record.economicsDataStatus === 'ready' && record.orderStatus === '正常' && canUseCashierV3Operation('cashier.v3.order.refund')" type="button" class="button button--text" @click="openRecordDetail(record, 'refund')">退款</button>
               </span>
             </td>
           </tr>
+          <tr v-if="recordType(record) !== 'sales'" class="order-business-summary-row">
+            <td class="order-center-list-table__summary">
+              {{ displayRecordField(record, recordType(record) === 'recharge' ? 'recharge_plan' : 'product_name') }}
+              <small v-if="recordType(record) === 'recharge'" class="order-business-summary-note">充值 {{ displayMoneyField(record, 'recharge_amount') }} · 赠送 {{ displayMoneyField(record, 'gift_amount') }}</small>
+              <small v-else class="order-business-summary-note">{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_summary' : 'debt_summary') }}</small>
+            </td>
+            <td>—</td><td>—</td><td>—</td>
+            <td><button v-if="canEditRecordPersonnel(record)" type="button" class="order-link" title="修改销售人" @click="openRecordPersonnelEditor(record)">{{ displayRecordField(record, 'salesperson') }}</button><span v-else>{{ displayRecordField(record, 'salesperson') }}</span></td>
+            <td><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改销售经理" @click="openRecordRoles(record)">{{ displayRecordField(record, 'sales_manager') }}</button><span v-else>{{ displayRecordField(record, 'sales_manager') }}</span></td>
+            <td><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改导购" @click="openRecordRoles(record)">{{ displayRecordField(record, 'guide') }}</button><span v-else>{{ displayRecordField(record, 'guide') }}</span></td>
+            <td>{{ displayMoneyField(record, `${recordType(record)}_amount`) }}</td>
+            <td>—</td><td>—</td><td>—</td>
+            <td>{{ recordType(record) === 'recharge' ? displayMoneyField(record, 'actual_received_amount') : '—' }}</td>
+            <td>{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_method' : 'payment_method') }}</td>
+            <td>{{ displayRecordField(record, 'store') }}</td>
+            <td><span class="order-status">{{ displayRecordField(record, recordType(record) === 'refund' ? 'refund_status' : recordType(record) === 'supplement' ? 'payment_status' : 'order_status') }}</span></td>
+          </tr>
+          <template v-else>
           <tr v-for="(item, itemIndex) in salesOrderItems(record)" :key="item.id || item.orderItemId || `${recordKey(record, recordIndex)}-${item.name}-${itemIndex}`">
             <td class="sales-order-query-item-cell">
               <span class="sales-order-query-item-cell__line">
@@ -3735,6 +3833,7 @@ onBeforeUnmount(() => {
             <td>{{ displayRecordField(record, 'store') }}</td>
             <td><span class="order-status" :class="statusClass(recordFieldValue(record, 'order_status'))">{{ displayRecordField(record, 'order_status') }}</span></td>
           </tr>
+          </template>
         </tbody>
       </table>
       <table
@@ -3844,11 +3943,12 @@ onBeforeUnmount(() => {
           </tr>
         </tbody>
       </table>
-      <div v-if="!records.length" class="order-center-list-empty">{{ activeTab.emptyText }}</div>
+      <div v-if="!records.length && !(activeTabKey === 'all' && (isOrderQueryLoading || allOrderQueryError))" class="order-center-list-empty">{{ activeTab.emptyText }}</div>
     </main>
 
     <TablePagination
       :total="total"
+      :show-page-count="activeTabKey === 'all'"
       :page="page"
       :page-size="pageSize"
       :sequential="activeTabKey === 'sales'"
@@ -3967,7 +4067,7 @@ onBeforeUnmount(() => {
 
     <BusinessRecordDetailOverlay
       v-if="!isPlatformReadOnly && genericDetailRecord"
-      :title="`${activeTab.label}详情`"
+      :title="`${recordTab(genericDetailRecord).label}详情`"
       :record="genericDetailRecord"
       :fields="detailFields"
       :resolve-value="recordFieldValue"
@@ -4364,6 +4464,17 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 查询未完成时遮住旧结果及其操作，避免把旧列表误当成新条件结果。 */
+.order-center-list-wrap--loading { position: relative; }
+.order-center-list-wrap--loading > table { visibility: hidden; }
+.order-center-query-pending { position: sticky; top: 0; left: 0; margin: 0; padding: 32px 16px; text-align: center; color: #465b75; }
+.order-center-query-pending--error { color: #af3240; }
+/* 类型标签使用固定尺寸和高对比配色，区别于明细标签，不挤动主项日期。 */
+.sales-order-query-group__header td > .order-business-tag { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 44px; height: 24px; vertical-align: middle; margin-right: 16px; padding: 0 6px; border-radius: 4px; background: var(--order-type-color, #185bb5); color: #fff; font-size: 12px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.order-business-tag.is-recharge { --order-type-color: #187451; }
+.order-business-tag.is-supplement { --order-type-color: #885a0a; }
+.order-business-tag.is-refund { --order-type-color: #af3240; }
+.order-business-summary-note { display: block; max-width: 300px; margin-top: 4px; font-size: 11px; color: #62738a; white-space: normal; overflow-wrap: anywhere; }
 .order-center-page { position: relative; }
 .order-center-page__readonly-note { margin-left: auto; color: #667085; font-size: 13px; }
 .order-center-notice { margin: 12px 0 0; padding: 9px 12px; border-left: 3px solid #c83c3c; background: #fff4f4; color: #8a3030; }

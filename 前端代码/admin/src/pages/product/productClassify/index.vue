@@ -54,6 +54,14 @@
                     </template>
                 </vxe-table-column>
                 <vxe-table-column field="sort" title="排序" min-width="100" tooltip="true"></vxe-table-column>
+                <vxe-table-column field="statistics_enabled" title="统计" min-width="120">
+                    <template v-slot="{ row }">
+                        <i-switch v-model="row.statistics_enabled" :true-value="1" :false-value="0" :disabled="row.statisticsSaving" @on-change="onchangeStatistics(row, $event)" size="large">
+                            <span slot="open">开启</span>
+                            <span slot="close">关闭</span>
+                        </i-switch>
+                    </template>
+                </vxe-table-column>
                 <vxe-table-column field="is_show" title="状态" min-width="120">
                     <template v-slot="{ row }">
                         <i-switch v-model="row.is_show" :value="row.is_show" :true-value="1" :false-value="0" @on-change="onchangeIsShow(row)" size="large">
@@ -103,7 +111,7 @@
 
 <script>
     import { mapState } from 'vuex';
-    import { productListApi, productCreateApi, productEditApi, setShowApi, setMobileCardShowApi, treeListApi } from '@/api/product';
+    import { productListApi, productCreateApi, productEditApi, setShowApi, setMobileCardShowApi, setStatisticsEnabledApi, treeListApi } from '@/api/product';
     import { reportOperationCategories, saveReportOperationCategory } from '@/api/report';
     import editFrom from '../../../components/from/from';
     export default {
@@ -195,6 +203,8 @@
                 const hasPartnerConfig = Object.prototype.hasOwnProperty.call(config, 'enabled');
                 return {
                     ...row,
+                    statistics_enabled: row.statistics_enabled === undefined || row.statistics_enabled === null ? 1 : Number(row.statistics_enabled),
+                    statisticsSaving: false,
                     mobile_card_show: row.mobile_card_show === undefined || row.mobile_card_show === null ? 1 : row.mobile_card_show,
                     partner_label: row.partner_label !== undefined ? row.partner_label : (config.partner_label || config.category_path_snapshot || ''),
                     partner_enabled: hasPartnerConfig ? Number(config.enabled) : (row.partner_enabled !== undefined ? Number(row.partner_enabled) : 0),
@@ -346,6 +356,21 @@
                 }).catch((res) => {
                     this.$Message.error(res.msg);
                     row.mobile_card_show = row.mobile_card_show ? 0 : 1;
+                });
+            },
+            // 会员看板只用此设置控制分类展示；保存失败时回退，原经营事实不变。
+            onchangeStatistics (row, nextEnabled) {
+                const next = Number(nextEnabled) === 1 ? 1 : 0;
+                const previous = next === 1 ? 0 : 1;
+                row.statisticsSaving = true;
+                setStatisticsEnabledApi({ id: row.id, statistics_enabled: next }).then((res) => {
+                    row.statistics_enabled = Number(res.data.statistics_enabled);
+                    this.$Message.success(res.msg);
+                }).catch((res) => {
+                    row.statistics_enabled = previous;
+                    this.$Message.error(res.msg || '统计设置保存失败');
+                }).finally(() => {
+                    row.statisticsSaving = false;
                 });
             },
             // 下拉树

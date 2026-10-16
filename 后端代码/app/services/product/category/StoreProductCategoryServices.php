@@ -171,6 +171,23 @@ class StoreProductCategoryServices extends BaseServices
         $this->getCategory();
     }
 
+    /** 平台分类配置的独立写入口；不级联子分类，也不触发报表重算。 */
+    public function setStatisticsEnabled(int $id, int $enabled): void
+    {
+        if ($id <= 0 || !in_array($enabled, [0, 1], true)) {
+            throw new AdminException('统计设置参数不正确');
+        }
+        $category = $this->dao->getOne(['id' => $id, 'type' => 0, 'relation_id' => 0]);
+        if (!$category) {
+            throw new AdminException('平台商品分类不存在');
+        }
+        if ((int)($category['statistics_enabled'] ?? 1) !== $enabled) {
+            if (!$this->dao->update($id, ['statistics_enabled' => $enabled])) {
+                throw new AdminException('统计设置保存失败');
+            }
+        }
+    }
+
     /**
      * 创建新增表单
      * @param int $type

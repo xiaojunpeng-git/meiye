@@ -95,6 +95,7 @@ final class CashierV3CheckoutPreparationServices
         $checkoutSnapshot = is_array($payload['checkoutSnapshot'] ?? null)
             ? $payload['checkoutSnapshot']
             : null;
+        $orderCouponSelections = [];
         if ($checkoutSnapshot !== null) {
             return $this->discoverSnapshotResources($checkoutSnapshot, $operatorScope, $dataScope);
         }
@@ -389,6 +390,11 @@ final class CashierV3CheckoutPreparationServices
                     $operatorScope,
                     $dataScope
                 );
+            // Browser coupon IDs and amounts are untrusted. Rebuild them from
+            // locked member coupon rows before freezing the checkout draft.
+            $orderCouponSelections = (new CashierV3CheckoutOrderCouponServices())
+                ->validateSnapshotInTx($authority['lines'], (int)($publicDraft['memberId'] ?? 0),
+                    $operatorScope->storeId());
         } else {
             $authority = $this->workspace->checkoutSaleSourceSetInTx(
                 $workspaceId,
@@ -471,6 +477,10 @@ final class CashierV3CheckoutPreparationServices
         // after the checkout request exists. The selection is attribution
         // metadata and deliberately does not validate the live source catalog.
         if ($checkoutSnapshot !== null) {
+            (new CashierV3CheckoutOrderCouponServices())->bindPreparedInTx(
+                $orderCouponSelections, (string)$kernel['requestId'], (int)$kernel['requestVersion'],
+                $dataScope->tenantId(), $operatorScope->storeId(), (int)($publicDraft['memberId'] ?? 0)
+            );
             $this->businessSources->captureSaleSnapshotInTx(
                 (string)$kernel['requestId'],
                 $dataScope->tenantId(),
@@ -633,6 +643,8 @@ final class CashierV3CheckoutPreparationServices
                     'categoryNameSnapshot' => (string)($server['category_name_snapshot'] ?? $server['categoryName'] ?? ''),
                     'quantity' => $customCard ? 1 : $quantity,
                     'couponUserId' => (int)($line['couponUserId'] ?? $coupon['id'] ?? $line['couponId'] ?? 0),
+                    'couponUserIds' => is_array($line['couponUserIds'] ?? null)
+                        ? array_values($line['couponUserIds']) : [],
                     'couponNameSnapshot' => (string)($line['couponNameSnapshot'] ?? $coupon['name'] ?? $line['couponSummary'] ?? ''),
                     'couponDiscountCents' => (int)($line['couponDiscountCents'] ?? $coupon['discountAmountCents'] ?? 0),
                     // The checkout snapshot owns the user's debt choice.
