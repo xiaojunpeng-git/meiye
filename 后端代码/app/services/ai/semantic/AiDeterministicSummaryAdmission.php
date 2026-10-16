@@ -157,6 +157,27 @@ final class AiDeterministicSummaryAdmission
     }
 
     /**
+     * Extracts an unbound target only from a complete "name + performance"
+     * question. This is presentation guidance, never an identity binding:
+     * the authorized person/store catalogs must still prove a target before
+     * any business query runs. Generic scope and date words stay on their
+     * ordinary understanding path rather than being presented as names.
+     */
+    public function unresolvedNamedPerformanceTarget(string $question,array $entries): ?string
+    {
+        if (!isset($entries['staff_sales_yeji'],$entries['cash_performance'])
+            || !in_array('业绩',(array)($entries['cash_performance']['terms']??[]),true)
+            || $question==='' || preg_match('//u',$question)!==1) return null;
+        $compact=(string)preg_replace('/\s/u','',$question);
+        if (preg_match('/^(?:请问|帮我查一下|查一下)?(?<target>[\p{Han}A-Za-z0-9·（）()]{2,24})的(?:现金)?业绩(?:是多少|有多少|多少)[？?]?$/uD',$compact,$match)!==1) return null;
+        $target=$match['target'];
+        if (preg_match(self::DATE_PATTERN,$target)===1
+            || preg_match('/和|与|及|、/u',$target)===1
+            || preg_match('/^(?:全部|所有|各|每|我的|我们|自己|本店|门店|员工|公司|集团|总部)/u',$target)===1) return null;
+        return $target;
+    }
+
+    /**
      * Proves a named employee cash-performance question against the current
      * authorized personnel catalog. The shared "业绩" wording is interpreted
      * at person grain only after a unique person-name span is proved; the

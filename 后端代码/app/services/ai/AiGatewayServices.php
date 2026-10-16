@@ -913,9 +913,19 @@ final class AiGatewayServices
         // the same Run. Never pad the question with unrelated retry actions.
         $options=\app\services\ai\execution\AiSemanticRecommendationPlanner::completeCardOptions($options,
             empty($body['_platform_guidance']));
-        if ($options===[]) $options[]=['value'=>'__supplement__','label'=>'补充查询条件'];
-        return ['kind'=>'clarification','question'=>'我已理解部分条件，请选择您想查询的内容，或补充描述。',
-            'fields'=>[['key'=>'semantic_reply','type'=>'select','label'=>'查询内容','options'=>$options]],
+        $unresolvedTarget=$plans===[] && !empty($body['_platform_guidance'])
+            ?(new \app\services\ai\semantic\AiDeterministicSummaryAdmission())->unresolvedNamedPerformanceTarget(
+                (string)($body['question']??''),\app\services\query\metric\MetricSemanticCatalog::entries()
+            ):null;
+        if ($options===[]) $options[]=['value'=>'__supplement__','label'=>$unresolvedTarget===null?'补充查询条件':'更正名称或补充所属门店'];
+        // A named performance request must tell the customer which object
+        // could not be verified. Keep the free-text continuation in the same
+        // signed Run; no name becomes a person/store binding from this hint.
+        $question=$unresolvedTarget===null
+            ?'我已理解部分条件，请选择您想查询的内容，或补充描述。'
+            :'我无法在当前可查询范围内确认“'.$unresolvedTarget.'”对应的员工或门店。请核对名称；若查询员工，请补充所属门店，若查询门店，请写门店全名。';
+        return ['kind'=>'clarification','question'=>$question,
+            'fields'=>[['key'=>'semantic_reply','type'=>'select','label'=>$unresolvedTarget===null?'查询内容':'查询对象','options'=>$options]],
             '_request_body'=>$body,'_semantic_reply_state'=>$this->semanticReplyState($understanding,$safe,$body),
             '_semantic_recommendations'=>$plans];
     }
