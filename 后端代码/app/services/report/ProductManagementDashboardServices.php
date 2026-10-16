@@ -15,7 +15,7 @@ use think\facade\Db;
 final class ProductManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'product_management_dashboard';
-    public const METRIC_VERSION = 'product-management-current-category-v2';
+    public const METRIC_VERSION = 'product-management-current-category-v3';
 
     public function dashboard(array $context, array $input): array
     {
@@ -24,7 +24,7 @@ final class ProductManagementDashboardServices
         $categories = $this->categories();
         $categoryId = max(0, (int)($input['category_id'] ?? 0));
         $categoryIds = $categoryId > 0 ? $this->descendants($categoryId, $categories['children']) : [];
-        if ($categoryId > 0 && $categoryIds === []) throw new \InvalidArgumentException('商品分类不存在或已停用');
+        if ($categoryId > 0 && !isset($categories['visible_ids'][$categoryId])) throw new \InvalidArgumentException('商品分类不存在或已关闭统计');
         $productType = trim((string)($input['product_type'] ?? 'all'));
         if (!in_array($productType, ['all', 'project', 'product'], true)) throw new \InvalidArgumentException('商品类型无效');
 
@@ -186,7 +186,7 @@ final class ProductManagementDashboardServices
                 'income_cents' => (int)$data['income'],
                 'cost_cents' => $cost,
                 'gross_profit_cents' => $profit,
-                'gross_margin_rate' => $this->rate($profit, (int)$data['income']),
+                'gross_margin_rate' => $this->grossMarginRate($profit, (int)$data['income']),
                 'project_rankings' => $this->ranking($data['projects']),
                 'product_rankings' => $this->ranking($data['products']),
             ];
@@ -197,18 +197,45 @@ final class ProductManagementDashboardServices
     private function ranking(array $groups): array
     {
         $rows = [];
-        foreach ($groups as $name => $row) { $profit = $row['complete'] ? $row['income'] - $row['cost'] : null; $rows[] = ['name' => $name, 'revenue_cents' => $row['income'], 'cost_cents' => $row['complete'] ? $row['cost'] : null, 'gross_profit_cents' => $profit, 'gross_margin_rate' => $this->rate($profit, $row['income'])]; }
+        foreach ($groups as $name => $row) { $profit = $row['complete'] ? $row['income'] - $row['cost'] : null; $rows[] = ['name' => $name, 'revenue_cents' => $row['income'], 'cost_cents' => $row['complete'] ? $row['cost'] : null, 'gross_profit_cents' => $profit, 'gross_margin_rate' => $this->grossMarginRate($profit, $row['income'])]; }
         usort($rows, static fn(array $a, array $b): int => ($b['gross_profit_cents'] ?? PHP_INT_MIN) <=> ($a['gross_profit_cents'] ?? PHP_INT_MIN));
         return array_slice($rows, 0, 5);
     }
 
     private function inventory(array $scope, array $categories, int $selected): array
     {
-        $rows = $this->inventoryRows($scope); $map = $this->productCategoryMap($categories, $rows);
+        $rows = $this->inventoryRows($scope);
+        $map = $this->productCategoryMap($categories, $rows);
+        return $this->inventoryCategoryRows($rows, $map, $categories, $selected, $this->costVisible($scope));
+    }
+
+    /** Aggregate authorized batch balances by current root category and exact product name, not by catalog ID. */
+    private function inventoryCategoryRows(array $rows, array $map, array $categories, int $selected, bool $costVisible): array
+    {
         $groups = [];
-        foreach ($rows as $row) { $cat = $map[(string)$row['store_id'] . ':' . (int)$row['product_id']] ?? $map[(int)$row['product_id']] ?? 0; if ($selected > 0 && !in_array($cat, $this->descendants($selected, $categories['children']), true)) continue; $key = (string)$cat; if (!isset($groups[$key])) $groups[$key] = ['cost' => $this->costVisible($scope) ? 0 : null, 'rows' => []]; if ($this->costVisible($scope)) $groups[$key]['cost'] += (int)$row['inventory_cost_cents']; $itemKey = (string)$row['product_id']; if (!isset($groups[$key]['rows'][$itemKey])) $groups[$key]['rows'][$itemKey] = ['product_name' => $row['product_name'], 'available_quantity' => 0, 'inventory_cost_cents' => $this->costVisible($scope) ? 0 : null]; $groups[$key]['rows'][$itemKey]['available_quantity'] += (float)$row['quantity']; if ($this->costVisible($scope)) $groups[$key]['rows'][$itemKey]['inventory_cost_cents'] += (int)$row['inventory_cost_cents']; }
+        $allowed = $selected > 0 ? array_fill_keys($this->descendants($selected, $categories['children']), true) : [];
+        foreach ($rows as $row) {
+            $cat = $map[(string)$row['store_id'] . ':' . (int)$row['product_id']] ?? $map[(int)$row['product_id']] ?? 0;
+            if ($selected > 0 && !isset($allowed[$cat])) continue;
+            $key = (string)$cat;
+            if (!isset($groups[$key])) $groups[$key] = ['cost' => $costVisible ? 0 : null, 'rows' => []];
+            if ($costVisible) $groups[$key]['cost'] += (int)$row['inventory_cost_cents'];
+            $name = (string)$row['product_name'];
+            $itemKey = 'name:' . $name;
+            if (!isset($groups[$key]['rows'][$itemKey])) {
+                $groups[$key]['rows'][$itemKey] = ['product_name' => $name, 'available_quantity' => 0, 'inventory_cost_cents' => $costVisible ? 0 : null];
+            }
+            $groups[$key]['rows'][$itemKey]['available_quantity'] += (float)$row['quantity'];
+            if ($costVisible) $groups[$key]['rows'][$itemKey]['inventory_cost_cents'] += (int)$row['inventory_cost_cents'];
+        }
         $result = [];
-        foreach ($categories['roots'] as $category) { $key = (string)$category['id']; $data = $groups[$key] ?? ['cost' => 0, 'rows' => []]; $items = array_values($data['rows']); usort($items, static fn(array $a, array $b): int => $b['inventory_cost_cents'] <=> $a['inventory_cost_cents']); $result[] = ['category_id' => (int)$category['id'], 'name' => (string)$category['name'], 'inventory_cost_cents' => $this->costVisible($scope) ? (int)$data['cost'] : null, 'rows' => array_slice($items, 0, 10)]; }
+        foreach ($categories['roots'] as $category) {
+            $key = (string)$category['id'];
+            $data = $groups[$key] ?? ['cost' => 0, 'rows' => []];
+            $items = array_values($data['rows']);
+            usort($items, static fn(array $a, array $b): int => ($b['inventory_cost_cents'] ?? 0) <=> ($a['inventory_cost_cents'] ?? 0) ?: strcmp($a['product_name'], $b['product_name']));
+            $result[] = ['category_id' => (int)$category['id'], 'name' => (string)$category['name'], 'inventory_cost_cents' => $costVisible ? (int)$data['cost'] : null, 'rows' => array_slice($items, 0, 10)];
+        }
         return $result;
     }
 
@@ -248,7 +275,21 @@ final class ProductManagementDashboardServices
                 'inventory_cost_cents' => $this->costVisible($scope) ? $row['inventory_cost_cents'] : null,
             ];
         }
-        return ['buckets' => $buckets, 'rows' => $detail];
+        return ['buckets' => $buckets, 'rows' => $this->topExpiryRows($detail)];
+    }
+
+    /** Display the ten most urgent batches; bucket totals still count every authorized batch. */
+    private function topExpiryRows(array $rows): array
+    {
+        usort($rows, static function (array $a, array $b): int {
+            $daysA = $a['days'] === null ? PHP_INT_MAX : (int)$a['days'];
+            $daysB = $b['days'] === null ? PHP_INT_MAX : (int)$b['days'];
+            return $daysA <=> $daysB
+                ?: strcmp((string)$a['category_name'], (string)$b['category_name'])
+                ?: strcmp((string)$a['product_name'], (string)$b['product_name'])
+                ?: strcmp((string)$a['batch_no'], (string)$b['batch_no']);
+        });
+        return array_slice($rows, 0, 10);
     }
 
     private function inventoryRows(array $scope): array
@@ -276,8 +317,29 @@ final class ProductManagementDashboardServices
         return $map;
     }
     private function rootCategory(int $id, array $parents): int { $root = $id; $guard = 0; while ($root > 0 && isset($parents[$root]) && (int)$parents[$root] > 0 && $guard++ < 32) $root = (int)$parents[$root]; return $root; }
-    /** Existing platform-category IDs remain report dimensions when hidden from catalog menus. */
-    private function categories(): array { $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->field('id,pid,cate_name')->order('pid')->order('id')->select()->toArray(); $parents = []; $children = []; $roots = []; foreach ($rows as $row) { $id = (int)$row['id']; $pid = (int)$row['pid']; $parents[$id] = $pid; $children[$pid][] = $id; if ($pid <= 0) $roots[] = ['id' => $id, 'name' => (string)$row['cate_name']]; } return compact('roots', 'children', 'parents'); }
+    /** The statistics switch hides root cards and filters, not historical facts or catalog entries. */
+    private function categories(): array
+    {
+        $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name,statistics_enabled')->order('pid')->order('id')->select()->toArray();
+        return $this->categoryTree($rows);
+    }
+
+    private function categoryTree(array $rows): array
+    {
+        $parents = []; $children = []; $roots = []; $visibleIds = [];
+        foreach ($rows as $row) {
+            $id = (int)$row['id']; $pid = (int)$row['pid'];
+            $parents[$id] = $pid;
+            $children[$pid][] = $id;
+            if ($pid <= 0 && (int)$row['statistics_enabled'] === 1) $roots[] = ['id' => $id, 'name' => (string)$row['cate_name']];
+        }
+        // Child switches do not remove historical amounts from an enabled parent's card.
+        foreach ($roots as $root) {
+            foreach ($this->descendants((int)$root['id'], $children) as $id) $visibleIds[$id] = true;
+        }
+        return ['roots' => $roots, 'children' => $children, 'parents' => $parents, 'visible_ids' => $visibleIds];
+    }
     private function descendants(int $root, array $children): array { $out = []; $queue = [$root]; while ($queue) { $id = (int)array_shift($queue); if ($id <= 0 || isset($out[$id])) continue; $out[$id] = $id; foreach ((array)($children[$id] ?? []) as $child) $queue[] = (int)$child; } return array_values($out); }
     private function scope(array $context, array $input): array { $allowed = array_values(array_unique(array_filter(array_map('intval', (array)($context['store_ids'] ?? []))))); $requested = array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($input['store_ids'] ?? '')))))); if ($requested) $allowed = array_values(array_intersect($allowed, $requested)); if (!$allowed) throw new \InvalidArgumentException('当前账号没有可查看的门店范围'); sort($allowed); return ['tenant_id' => (string)($context['tenant_id'] ?? '0'), 'store_ids' => $allowed, 'cost_visible' => (bool)($context['cost_visible'] ?? false)]; }
     private function range(array $input): array { $start = trim((string)($input['start_date'] ?? '')) ?: date('Y-m-01'); $end = trim((string)($input['end_date'] ?? '')) ?: date('Y-m-d'); if (!$this->validDate($start) || !$this->validDate($end) || $start > $end || strtotime($end) - strtotime($start) > 366 * 86400) throw new \InvalidArgumentException('统计日期范围无效'); return ['start' => $start, 'end' => $end]; }
@@ -286,6 +348,8 @@ final class ProductManagementDashboardServices
     private function previousRange(array $range): array { $days = (int)((new \DateTimeImmutable($range['start']))->diff(new \DateTimeImmutable($range['end']))->format('%a')) + 1; return ['start' => date('Y-m-d', strtotime($range['start'] . ' -' . $days . ' days')), 'end' => date('Y-m-d', strtotime($range['start'] . ' -1 day'))]; }
     private function delta(?int $current, ?int $previous): ?int { return $current === null || $previous === null ? null : $current - $previous; }
     private function rate(?int $current, ?int $previous): ?float { return $current === null || !$previous ? null : round(($current - $previous) / abs($previous) * 100, 1); }
+    /** Gross margin is a share of income; it must not use the period-over-period change formula. */
+    private function grossMarginRate(?int $profitCents, int $incomeCents): ?float { return $profitCents === null || $incomeCents === 0 ? null : round($profitCents / $incomeCents * 100, 1); }
     private function salesCost(array $scope, array $range, array $categoryIds, string $type): ?int
     {
         if (!$this->costVisible($scope) || $type !== 'product') return null;
@@ -407,5 +471,16 @@ final class ProductManagementDashboardServices
         foreach ($rows as $row) $total += (int)($row[$field] ?? 0);
         return $total;
     }
-    private function fieldExplanations(): array { return ['summary.sales' => '统一收款销售分摊事实，按业务日汇总', 'summary.consumption' => '有效服务消耗业绩事实，按核销日汇总', 'profit.project_cost' => '销售/核销时锁定的商品设置成本；缺失返回 -', 'profit.product_cost' => '实际出库批次成本，来自 cashier_sale movement fact', 'inventory.cost' => '有效批次剩余数量×批次入库进价', 'expiry' => 'settled 批次余额按到期日固定六档']; }
+    private function fieldExplanations(): array
+    {
+        return [
+            'summary.sales' => '已生效销售业绩，按业务日期和当前权限范围汇总；关闭分类统计不改写整体业绩',
+            'summary.consumption' => '已完成服务形成的消耗业绩，按业务日期汇总',
+            'profit.project_cost' => '项目缺少完整的核销成本快照时显示“-”，不使用当前商品设置成本补算',
+            'profit.product_cost' => '产品使用实际出库批次成本；无法完整关联成本时显示“-”',
+            'profit.gross_margin_rate' => '毛利率＝（收入－成本）÷收入×100%；收入为零或成本未知时显示“-”',
+            'inventory.cost' => '当前有效批次的剩余成本，按当前商品分类和品名合计后排序；无成本权限时显示“-”',
+            'expiry' => '全部有效批次按到期日统计六档；明细按紧急程度只展示前10条',
+        ];
+    }
 }

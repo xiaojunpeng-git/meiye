@@ -31,7 +31,7 @@ $assert(str_contains($service, "\$card['metric_code']") && str_contains($service
 $assert(str_contains($service, "'metric_version'"), '接口必须返回指标版本');
 $assert(str_contains($service, "'aggregation_caught_up'"), '接口必须返回聚合追平状态');
 $assert(str_contains($service, "'summary_only' => true") && str_contains($service, 'unset($payload)'), '商品看板三期摘要不得保留完整集团投影');
-$assert(str_contains($groupService, "!empty(\$input['summary_only'])") && str_contains($groupService, 'performanceTotalScalar'), '商品看板摘要必须走轻量聚合查询');
+$assert(str_contains($groupService, "!empty(\$input['summary_only'])") && str_contains($groupService, "\$reader->summary('cash_performance'") && str_contains($groupService, "\$reader->summary('consume_amount'"), '商品看板摘要必须走统一指标 Reader 的轻量汇总查询');
 $assert(str_contains($service, "'data_as_of'"), '接口必须返回数据截至时间');
 $assert(str_contains($service, 'inventory_batch_movement_fact'), '库存必须从批次库存事实读取');
 $assert(str_contains($service, "'f.fact_status', 'SETTLED'"), '库存必须只计算已结算事实');

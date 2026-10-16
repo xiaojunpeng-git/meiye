@@ -362,4 +362,9 @@ function runQuery(action = '查询') {
 .inventory-category-card .inventory-rank-row--2>em{background:#b68162;color:#fff}
 .inventory-category-card .inventory-rank-row--3>em{background:#d6c978;color:#5f562d}
 .inventory-category-card .inventory-rank-row--4>em,.inventory-category-card .inventory-rank-row--5>em{background:#a9bbc5;color:#fff}
+/* Rank headers and values share the same left edge for quick column comparison. */
+.profit-category-card__table-head>span:not(:first-child),
+.profit-category-card__rank-row>b,
+.inventory-category-card__table-head>span:not(:first-child),
+.inventory-category-card__row>b{text-align:left}
 </style>
