@@ -218,9 +218,11 @@ final class GroupManagementDashboardServices
 
     /**
      * Only first-level categories with statistics enabled appear in the group
-     * dashboard cards and filter. Keep the full tree for authorized category
-     * drilldown and attribution; hiding a card never rewrites cash facts or
-     * removes its amount from the overall operating metrics.
+     * dashboard cards and filter. The configured category order is authoritative
+     * for every consumer: sort desc first, then id desc for a stable tie-breaker.
+     * Keep the full tree for authorized category drilldown and attribution;
+     * hiding a card never rewrites cash facts or removes its amount from the
+     * overall operating metrics.
      * @return array{roots:array<int,array<string,mixed>>,children:array<int,array<int,int>>,visible_ids:array<int,bool>}
      */
     private function categories(): array
@@ -228,13 +230,13 @@ final class GroupManagementDashboardServices
         // 商品分类表同时保存平台配置和按门店同步的副本。看板只使用平台
         // 分类正本，但不因目录隐藏状态抹掉已有商品的报表分类。
         $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
-            ->field('id,pid,cate_name,statistics_enabled')->order('pid', 'asc')->order('id', 'asc')->select()->toArray();
+            ->field('id,pid,cate_name,statistics_enabled,sort')->order('pid', 'asc')->order('sort', 'desc')->order('id', 'desc')->select()->toArray();
         $ids = [];
         $children = [];
         foreach ($rows as $row) {
             $id = (int)$row['id']; $pid = (int)$row['pid'];
             $ids[$id] = ['id' => $id, 'pid' => $pid, 'name' => (string)$row['cate_name'],
-                'statistics_enabled' => (int)$row['statistics_enabled']];
+                'statistics_enabled' => (int)$row['statistics_enabled'], 'sort' => (int)$row['sort']];
             $children[$pid][] = $id;
         }
         $roots = [];

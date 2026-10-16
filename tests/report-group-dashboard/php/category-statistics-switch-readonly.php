@@ -25,7 +25,8 @@ Db::execute('SET TRANSACTION READ ONLY');
 Db::startTrans();
 try {
     $roots = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
-        ->where('pid', 0)->field('id,cate_name,statistics_enabled')->select()->toArray();
+        ->where('pid', 0)->field('id,cate_name,statistics_enabled,sort')
+        ->order('sort', 'desc')->order('id', 'desc')->select()->toArray();
     $disabled = array_values(array_map('intval', array_column(array_filter($roots,
         static fn(array $row): bool => (int)$row['statistics_enabled'] === 0), 'id')));
     $enabled = array_values(array_map('intval', array_column(array_filter($roots,
@@ -47,6 +48,9 @@ try {
         assertCategoryStatistics(in_array($id, $cardIds, true) && in_array($id, $optionIds, true),
             'enabled category '.$id.' remains in cards and filter');
     }
+    assertCategoryStatistics(array_values(array_filter($cardIds, static fn(int $id): bool => $id > 0)) === $enabled,
+        'category cards follow sort desc and id desc without client reshuffling');
+    assertCategoryStatistics(array_slice($optionIds, 1) === $enabled, 'category filter and cards share the same configured order');
 
     $cashCard = current(array_filter($dashboard['cards'],
         static fn(array $card): bool => $card['metric_code'] === 'cash_performance'));

@@ -24,5 +24,8 @@ assert(source.includes('function changeScope({ storeIds, label })'), 'permission
 assert(source.includes('--metric-consumption:#b7791f'), 'consumption trend uses the consumption card color')
 assert(!source.includes('>目标管理</button>') && !source.includes('>管理目标</button>'), 'dashboard does not expose target management actions')
 assert(source.includes('dashboard-drilldown__conditions') && source.includes('dashboard-drilldown__table'), 'drilldown separates filters from a labeled detail table')
+assert(source.includes('repeat(auto-fit,minmax(min(100%,250px),1fr))'), 'category performance cards auto-fit up to six per row')
+assert(source.includes('Number(category?.cash_performance_cents) !== 0 || hasRanking'), 'category performance hides cards without valid data')
+assert(!source.includes('categories.value.sort(') && !source.includes('categoryCards.value.sort('), 'category cards preserve the backend configured order')
 
 console.log('group dashboard refresh contract: PASS')
