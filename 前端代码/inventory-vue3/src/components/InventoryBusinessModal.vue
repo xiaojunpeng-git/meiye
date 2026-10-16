@@ -6,6 +6,7 @@ import InventoryProductSelector from './InventoryProductSelector.vue'
 import InventoryStoreSelector from './InventoryStoreSelector.vue'
 import { inventoryStatusLabel } from '../statusLabels'
 import { exportCountXlsx, parseCountXlsx, matchCountProduct } from './countWorksheet'
+import { exportTransferTemplateXlsx, parseTransferXlsx } from './transferWorksheet'
 import { countedRows, invalidCountCatalogMessage, invalidCountCatalogRowIndexes, missingCountSurplusMessage, reindexCountValidationRowsAfterRemoval, submittedCountRowIndex, sumCountBookQuantities, validateCountSubmissionRows } from '../utils/countSubmission'
 import { validateInboundDates } from '../inboundDateValidation'
 import { formatBatchNumber } from '../batchNumberDisplay.js'
@@ -53,6 +54,11 @@ const bulkValues = ref({})
 const catalogError = ref('')
 const productSelectorVisible = ref(false)
 const countFileInput = ref(null)
+const transferFileInput = ref(null)
+const transferImportFileName = ref('')
+const transferImportBusy = ref(false)
+const transferImportReady = ref(false)
+const transferImportAttempt = ref({ content: '', key: '' })
 const countLoading = ref(false)
 const countProgress = ref('')
 const countValidationRowIndexes = ref([])
@@ -126,6 +132,7 @@ const isTransferEdit = computed(() => props.modalKind === 'transfer-edit')
 const isCountEdit = computed(() => props.modalKind === 'count-edit')
 const isCountDraftDetail = computed(() => props.modalKind === 'count-draft-detail')
 const isImport = computed(() => props.modalKind === 'import')
+const isTransferImport = computed(() => props.pageKey === 'transfer' && props.modalKind === 'transfer-import')
 const isPlatformHeadquarters = computed(() => props.mode === 'platform')
  // HQ描述符携带实际仓库ID；门店描述符保留门店ID，两种身份不能混用。
  const commandHqLocationId = computed(() => {
@@ -202,6 +209,7 @@ const warehouseStoreOptions = computed(() => {
 const title = computed(() => {
   if (props.modalKind === 'warehouse-edit') return '仓库设置'
   if (isImport.value) return '库存导入'
+  if (isTransferImport.value) return '导入调拨草稿'
   if (isInboundOutboundDetail.value) return '入库批次出库明细'
   if (isDetail.value) return `${pageLabel.value}详情`
   if (isCountEdit.value) return '编辑盘点草稿'
@@ -218,18 +226,20 @@ const lineEditorKeys = ['inbound', 'outbound', 'count', 'request', 'transfer', '
 const primarySubmitDisabled = computed(() => {
   // 统一移动提交入口时保留各业务原有门禁，按钮位置不得放宽数据完整性校验。
   if (submitting.value) return true
+  if (isTransferImport.value && (transferImportBusy.value || !transferImportReady.value)) return true
   if (lineEditorKeys.includes(props.pageKey) && !selectedRows.value.length) return true
   if (isPlatformHeadquarters.value && props.pageKey === 'usage' && !usageWarehouseOptions.value.some((item) => item.key === usageWarehouseSelection.value)) return true
   if (isPlatformHeadquarters.value && ['inbound', 'outbound'].includes(props.pageKey) && !documentWarehouseOptions.value.some((item) => item.key === documentWarehouseSelection.value)) return true
   // 院装领用可以不关联核销项目；作废走独立命令，不复用领用表单。
   if (props.pageKey === 'request' && (!supplyPartySelection.value || !requesterName.value.trim() || selectedSupplyParty().locationId <= 0)) return true
   if (props.pageKey === 'transfer' && (!transferTargetSelection.value || (isPlatformHeadquarters.value && !transferStaffOptions.value.length))) return true
+  if (isTransferImport.value && isPlatformHeadquarters.value && Number(transferStaffId.value) <= 0) return true
   return props.pageKey === 'warehouse' && (Number(warehouseStoreId.value) <= 0 || !warehouseName.value.trim())
 })
 const primarySubmitLabel = computed(() => {
   if (submitting.value) return '提交中'
   if (props.pageKey === 'request') return isRequestEdit.value ? '保存修改' : '确认申请'
-  if (props.pageKey === 'transfer') return isTransferEdit.value ? '保存修改' : '保存调拨草稿'
+  if (props.pageKey === 'transfer') return isTransferEdit.value ? '保存修改' : isTransferImport.value ? '重试生成草稿' : '保存调拨草稿'
   if (props.pageKey === 'usage') return '确认领用'
   if (props.pageKey === 'warehouse') return props.modalKind === 'warehouse-edit' ? '保存设置' : '创建仓库'
   return '保存'
@@ -364,6 +374,70 @@ function saveBlob(blob, fileName) {
   anchor.click()
   document.body.removeChild(anchor)
   window.URL.revokeObjectURL(url)
+}
+
+/** The template is a local aid; only the server-scoped catalog may resolve imported codes. */
+async function downloadTransferTemplate() {
+  try {
+    const bytes = await exportTransferTemplateXlsx()
+    saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), '调拨导入模板.xlsx')
+  } catch (error) { catalogError.value = error instanceof Error ? error.message : '调拨模板下载失败。' }
+}
+
+/** Resolve a complete workbook before exposing its lines for the single draft command. */
+async function selectTransferFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || transferImportBusy.value || submitting.value) return
+  transferImportReady.value = false
+  transferImportFileName.value = ''
+  selectedRows.value = []
+  catalogError.value = ''
+  submitError.value = ''
+  if (!transferTargetSelection.value || (isPlatformHeadquarters.value && Number(transferStaffId.value) <= 0)) {
+    catalogError.value = '请先选择调入方和调拨人，再选择调拨文件。'
+    return
+  }
+  if (!/\.xlsx$/i.test(file.name) || file.size > 2 * 1024 * 1024) {
+    catalogError.value = '请选择不超过 2 MB 的 xlsx 调拨文件。'
+    return
+  }
+  transferImportBusy.value = true
+  const source = transferSourceSelection.value
+  const target = transferTargetSelection.value
+  const staffId = Number(transferStaffId.value)
+  try {
+    const lines = await parseTransferXlsx(await file.arrayBuffer())
+    const scope = { ...catalogQuery.value }
+    const resolved = []
+    // Bound concurrent catalog reads to keep a 100-line import responsive without flooding the service.
+    for (let index = 0; index < lines.length; index += 5) {
+      const batch = await Promise.all(lines.slice(index, index + 5).map(async (line) => {
+        let product
+        try { product = await catalogApi.value.findCatalogByBarcode({ ...scope, barcode: line.code }) }
+        catch (error) { throw new Error(`第 ${line.rowNumber} 行“${line.code}”：${error instanceof Error ? error.message : '商品匹配失败。'}`) }
+        if (Number(product?.product_id) <= 0 || Number(product?.sku_id) <= 0 || !String(product?.sku_unique || '').trim()) {
+          throw new Error(`第 ${line.rowNumber} 行“${line.code}”没有有效的商品规格。`)
+        }
+        return { ...product, quantity: line.quantity, detail_remark: line.detailRemark, sourceRow: line.rowNumber }
+      }))
+      resolved.push(...batch)
+      if (transferSourceSelection.value !== source) throw new Error('调出方已改变，请重新导入当前调出方的商品。')
+    }
+    const skuIds = new Set()
+    for (const row of resolved) {
+      if (skuIds.has(Number(row.sku_id))) throw new Error(`第 ${row.sourceRow} 行与前面的行指向同一商品规格，请合并数量后重新导入。`)
+      skuIds.add(Number(row.sku_id))
+    }
+    // An in-flight staff lookup may still finish while the workbook resolves.
+    if (transferTargetSelection.value !== target || Number(transferStaffId.value) !== staffId) throw new Error('调拨对象已改变，请重新选择文件。')
+    selectedRows.value = resolved
+    transferImportFileName.value = file.name
+    transferImportReady.value = true
+  } catch (error) { catalogError.value = error instanceof Error ? error.message : '调拨文件读取失败。' }
+  finally { transferImportBusy.value = false }
+  // File selection is the import command: a fully matched workbook immediately creates one draft.
+  if (transferImportReady.value && transferSourceSelection.value === source && transferTargetSelection.value === target && Number(transferStaffId.value) === staffId) await submitTransfer()
 }
 
 async function downloadImportTemplate() {
@@ -926,6 +1000,9 @@ async function loadTransferStaffs() {
 
 function onTransferSourceChanged(value) {
   transferSourceSelection.value = String(value || 'HQ:0')
+  // Imported identities were resolved for the previous stock subject; they cannot follow a source switch.
+  transferImportReady.value = false
+  transferImportFileName.value = ''
   requestDocumentId.value = 0
   transferTargetSelection.value = ''
   transferStaffOptions.value = []
@@ -1221,25 +1298,34 @@ async function submitRequest() {
 }
 
 function transferIdempotencyKey() { return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? `transfer-${crypto.randomUUID()}` : `transfer-${Date.now()}-${Math.random().toString(36).slice(2)}` }
+function transferImportIdempotencyKey(content) {
+  // A retry after an uncertain response must replay the same draft, not create another one.
+  if (transferImportAttempt.value.content !== content) transferImportAttempt.value = { content, key: transferIdempotencyKey() }
+  return transferImportAttempt.value.key
+}
 async function submitTransfer() {
   const target = selectedTransferTarget()
-  if (props.pageKey !== 'transfer' || !selectedRows.value.length || !['STORE', 'HQ'].includes(target.type) || (target.type === 'STORE' && target.id <= 0)) return
+  if (submitting.value || (isTransferImport.value && (!transferImportReady.value || transferImportBusy.value)) || props.pageKey !== 'transfer' || !selectedRows.value.length || !['STORE', 'HQ'].includes(target.type) || (target.type === 'STORE' && target.id <= 0)) return
   submitting.value = true; submitError.value = ''
   try {
     // A failed shortcut lookup must never submit an unrelated manual transfer.
     if (!isTransferEdit.value && Number(requestDocumentId.value) > 0 && !incomingRequests.value.some((item) => Number(item.id) === Number(requestDocumentId.value))) {
       throw new Error('关联请货单已无可调拨商品或不在当前供货权限内，请返回列表刷新。')
     }
-    const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, target_location_id: target.type === 'HQ' ? target.locationId : 0, request_document_id: Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: Number(row.request_line_id || 0), detail_remark: String(row.detail_remark || '') })) }
+    const commonPayload = { idempotency_key: transferIdempotencyKey(), business_date: transferDate.value, remark: transferRemark.value, target_party_type: target.type, target_store_id: target.id, target_location_id: target.type === 'HQ' ? target.locationId : 0, request_document_id: isTransferImport.value ? 0 : Number(requestDocumentId.value), lines: selectedRows.value.map((row) => ({ product_id: Number(row.product_id), sku_id: Number(row.sku_id), sku_unique: row.sku_unique, quantity: row.quantity, request_line_id: isTransferImport.value ? 0 : Number(row.request_line_id || 0), detail_remark: String(row.detail_remark || '') })) }
     if (isPlatformHeadquarters.value) {
       if (Number(commandHqLocationId.value) <= 0) throw new Error('请选择可操作的总部仓。')
       const [type, rawId] = String(transferSourceSelection.value || 'HQ:0').split(':', 2)
       const payload = { ...commonPayload, source_party_type: type, source_store_id: type === 'HQ' ? 0 : Number(rawId || 0), transfer_staff_id: Number(transferStaffId.value), hq_location_id: Number(commandHqLocationId.value) }
+      if (isTransferImport.value) payload.idempotency_key = transferImportIdempotencyKey(JSON.stringify({ ...payload, idempotency_key: '' }))
       if (isTransferEdit.value) await platformInventoryApi.updateHqCrossTransfer(Number(props.detail?.id), { ...payload, expected_edit_token: String(props.detail?.edit_token || '') })
       else await platformInventoryApi.createHqCrossTransfer(payload)
     } else if (isTransferEdit.value) {
       await inventoryApi.updateCrossTransfer(Number(props.detail?.id), { ...commonPayload, expected_edit_token: String(props.detail?.edit_token || '') })
-    } else await inventoryApi.createCrossTransfer(commonPayload)
+    } else {
+      if (isTransferImport.value) commonPayload.idempotency_key = transferImportIdempotencyKey(JSON.stringify({ ...commonPayload, idempotency_key: '' }))
+      await inventoryApi.createCrossTransfer(commonPayload)
+    }
     emit('saved', { businessDate: transferDate.value }); close()
   } catch (error) { submitError.value = error instanceof Error ? error.message : '调拨提交失败。' } finally { submitting.value = false }
 }
@@ -1303,7 +1389,7 @@ function submitPrimaryEditor() {
         <header class="inventory-editor__header">
           <div><p>{{ mode === 'platform' ? '平台端' : '门店端' }} · {{ modalScopeName }}</p><h2>{{ title }}</h2><p v-if="pageKey === 'count' && submitError" class="inventory-editor__submit-error" role="alert">{{ submitError }}</p></div>
           <div class="inventory-editor__header-actions">
-            <button class="modal-icon-button" title="返回列表" @click="close"><X :size="20" /></button>
+            <button class="modal-icon-button" title="返回列表" :disabled="isTransferImport && (transferImportBusy || submitting)" @click="close"><X :size="20" /></button>
           </div>
         </header>
 
@@ -1390,10 +1476,10 @@ function submitPrimaryEditor() {
             </section>
 
             <section v-else-if="pageKey === 'transfer'" class="form-grid">
-              <label class="form-grid__inline"><span class="field-label">调出方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" :disabled="isTransferEdit" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="scopeName" disabled /></label><label class="form-grid__inline"><span class="field-label">调入方<i>*</i></span><InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" searchable :disabled="isTransferEdit && requestDocumentId > 0" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
-              <label class="form-grid__inline form-grid__full"><span class="field-label">关联请货单</span><input v-if="isTransferEdit" :value="requestDocumentId > 0 ? `请货单 #${requestDocumentId}` : '不关联请货单'" disabled /><select v-else v-model.number="requestDocumentId" @focus="loadTransferContext" @change="applyIncomingRequest"><option :value="0">不关联请货单</option><option v-for="request in incomingRequests" :key="request.id" :value="Number(request.id)">{{ request.request_no }} · {{ request.request_party_name_snapshot || request.request_store_name || '总部仓' }}</option></select></label>
-              <label class="form-grid__inline"><span class="field-label">调拨日期<i>*</i></span><input v-model="transferDate" type="date" /></label><label class="form-grid__inline"><span class="field-label">{{ isPlatformHeadquarters ? '调拨人' : '当前操作人' }}<i v-if="isPlatformHeadquarters">*</i></span><select v-if="isPlatformHeadquarters" v-model.number="transferStaffId" :disabled="!transferTargetSelection || !transferStaffOptions.length"><option v-if="!transferStaffOptions.length" :value="0">{{ transferTargetSelection ? '暂无可选调拨人' : '请先选择调入方' }}</option><option v-for="staff in transferStaffOptions" :key="staff.id" :value="Number(staff.id)">{{ staff.employee_name || staff.staff_name }}（{{ staff.store_name || staff.store_name_snapshot || '平台账号' }}）{{ staff.is_current ? ' · 当前账户' : '' }}</option></select><input v-else value="当前登录人员" disabled /></label>
-              <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="transferRemark" placeholder="请输入备注" /></label>
+              <label class="form-grid__inline"><span class="field-label">调出方<i>*</i></span><InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" :disabled="isTransferEdit || transferImportBusy || submitting" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="scopeName" disabled /></label><label class="form-grid__inline"><span class="field-label">调入方<i>*</i></span><InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" searchable :disabled="(isTransferEdit && requestDocumentId > 0) || transferImportBusy || submitting" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
+              <label class="form-grid__inline form-grid__full"><span class="field-label">关联请货单</span><input v-if="isTransferEdit" :value="requestDocumentId > 0 ? `请货单 #${requestDocumentId}` : '不关联请货单'" disabled /><input v-else-if="isTransferImport" value="不关联请货单" disabled /><select v-else v-model.number="requestDocumentId" @focus="loadTransferContext" @change="applyIncomingRequest"><option :value="0">不关联请货单</option><option v-for="request in incomingRequests" :key="request.id" :value="Number(request.id)">{{ request.request_no }} · {{ request.request_party_name_snapshot || request.request_store_name || '总部仓' }}</option></select></label>
+              <label class="form-grid__inline"><span class="field-label">调拨日期<i>*</i></span><input v-model="transferDate" type="date" :disabled="transferImportBusy || submitting" /></label><label class="form-grid__inline"><span class="field-label">{{ isPlatformHeadquarters ? '调拨人' : '当前操作人' }}<i v-if="isPlatformHeadquarters">*</i></span><select v-if="isPlatformHeadquarters" v-model.number="transferStaffId" :disabled="!transferTargetSelection || !transferStaffOptions.length || transferImportBusy || submitting"><option v-if="!transferStaffOptions.length" :value="0">{{ transferTargetSelection ? '暂无可选调拨人' : '请先选择调入方' }}</option><option v-for="staff in transferStaffOptions" :key="staff.id" :value="Number(staff.id)">{{ staff.employee_name || staff.staff_name }}（{{ staff.store_name || staff.store_name_snapshot || '平台账号' }}）{{ staff.is_current ? ' · 当前账户' : '' }}</option></select><input v-else value="当前登录人员" disabled /></label>
+              <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="transferRemark" :disabled="transferImportBusy || submitting" placeholder="请输入备注" /></label>
             </section>
 
             <section v-else-if="pageKey === 'warehouse'" class="form-grid">
@@ -1407,6 +1493,13 @@ function submitPrimaryEditor() {
               <label v-if="isPlatformHeadquarters" class="form-grid__inline"><span class="field-label">领用仓库<i>*</i></span><InventoryStoreSelector v-model="usageWarehouseSelection" :options="usageWarehouseOptions" placeholder="请选择领用仓库" @update:modelValue="onUsageWarehouseChanged" /></label>
               <label class="form-grid__inline"><span class="field-label">操作人</span><input value="当前登录人员" disabled /></label>
               <label class="form-grid__inline form-grid__full"><span class="field-label">备注</span><input v-model="usageRemark" placeholder="请输入备注" /></label>
+            </section>
+
+            <section v-if="isTransferImport" class="transfer-import-upload">
+              <div><strong>调拨商品 Excel</strong><span>{{ transferImportFileName || '先选择调出方、调入方和调拨人；文件校验通过后直接生成草稿。' }}</span></div>
+              <button class="modal-secondary" type="button" :disabled="transferImportBusy || submitting" @click="downloadTransferTemplate">下载模板</button>
+              <button class="modal-secondary" type="button" :disabled="transferImportBusy || submitting" @click="transferFileInput?.click()">{{ transferImportBusy ? '校验中…' : '选择文件并导入' }}</button>
+              <input ref="transferFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="selectTransferFile" />
             </section>
 
           </template>
@@ -1425,7 +1518,7 @@ function submitPrimaryEditor() {
                   <input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" />
                   <button class="modal-secondary" :disabled="countLoading || submitting" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button>
                 </template>
-                <button class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span>
+                <button v-if="!isTransferImport" class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button v-if="!isTransferImport" class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button v-if="!isTransferImport" class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting || transferImportBusy" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else v-show="!isTransferImport || !!submitError" class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span>
               </div>
             </header>
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>
@@ -1484,6 +1577,10 @@ function submitPrimaryEditor() {
 .line-section { overflow: hidden; border: 1px solid #dfe8f0; border-radius: 10px; background: #fff; }.line-section > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 15px; border-bottom: 1px solid #e8eef4; }.line-section h3 { margin: 0; color: #30465d; font-size: 14px; }.line-section p { margin: 4px 0 0; color: #8795a5; font-size: 11px; }.line-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }.line-submit-actions { display: inline-flex; gap: 7px; margin-left: 2px; padding-left: 9px; border-left: 1px solid #dce5ee; }.scanner-entry { display: flex; align-items: end; gap: 9px; padding: 12px 15px; border-bottom: 1px solid #e8eef4; background: #f7fbff; color: #176fd1; }.scanner-entry label { display: grid; flex: 1; gap: 4px; color: #60748a; font-size: 11px; }.scanner-entry input { height: 31px; padding: 0 8px; border: 1px solid #bcd6ed; border-radius: 6px; color: #40566d; }.bulk-editor { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)) auto; gap: 9px; align-items: end; padding: 12px 15px; border-bottom: 1px solid #e8eef4; background: #f7fbff; }.bulk-editor strong { grid-column: 1 / -1; color: #36526e; font-size: 12px; }.bulk-editor label { display: grid; gap: 5px; color: #60748a; font-size: 11px; }.bulk-editor input { height: 30px; padding: 0 7px; border: 1px solid #bcd6ed; border-radius: 6px; color: #40566d; }.bulk-editor div { display: flex; gap: 7px; }.modal-primary, .modal-secondary, .modal-danger { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 33px; padding: 0 12px; border-radius: 8px; font-size: 12px; }.modal-primary { border: 1px solid #176fd1; background: #176fd1; color: #fff; }.modal-secondary { border: 1px solid #d5e1ee; background: #fff; color: #47627d; }.modal-danger { border: 1px solid #f0d1d1; background: #fff8f8; color: #ca4c4c; }.line-search { display: flex; align-items: center; gap: 8px; margin: 14px; padding: 0 9px; border: 1px solid #dbe5ee; border-radius: 8px; color: #7f8fa0; background: #fbfdff; }.line-search input { width: 240px; height: 34px; border: 0; outline: 0; background: transparent; }.modal-table-scroll { overflow: auto; }.modal-table-scroll table { width: 100%; min-width: 1180px; border-collapse: collapse; }.modal-table-scroll th { height: 39px; padding: 0 11px; border-bottom: 1px solid #e7edf3; background: #f7f9fc; color: #60748a; font-size: 11px; font-weight: 600; text-align: left; white-space: nowrap; }.modal-table-scroll td { height: 51px; padding: 0 11px; border-bottom: 1px solid #edf1f5; color: #40566d; font-size: 12px; white-space: nowrap; }.table-input { width: 76px; height: 29px; padding: 0 6px; border: 1px solid #bcd6ed; border-radius: 6px; color: #344d68; font-size: 12px; }.table-input[type='date'] { width: 142px; min-width: 142px; }.modal-link { border: 0; background: transparent; color: #d05252; font-size: 12px; }.line-total { display: flex; justify-content: space-between; padding: 12px 15px; background: #fbfdff; color: #7d8c9c; font-size: 12px; }.line-total strong { color: #1f4e80; }.modal-notice { display: flex; gap: 8px; margin-top: 14px; padding: 12px 14px; border: 1px solid #f0ddae; border-radius: 9px; background: #fffbef; color: #a86d12; }.modal-notice div { display: grid; gap: 4px; }.modal-notice strong { font-size: 12px; }.modal-notice p { margin: 0; color: #857040; font-size: 11px; }.detail-meta { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid #dfe8f0; border-radius: 9px; background: #fff; color: #61758b; font-size: 12px; }.detail-meta b { color: #26835f; }.detail-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 15px; }.detail-summary article { padding: 14px; border: 1px solid #e0e7ef; border-radius: 10px; background: #fff; }.detail-summary span { display: block; color: #8291a2; font-size: 11px; }.detail-summary strong { display: block; margin-top: 7px; color: #284868; font-size: 17px; }.import-workflow { display: grid; gap: 14px; }.import-modal { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 18px; border: 1px solid #cfe1f5; border-radius: 10px; background: #f2f8ff; color: #176fd1; }.import-modal div { display: grid; gap: 4px; }.import-modal strong { color: #304d69; font-size: 14px; }.import-modal p { margin: 0; color: #71849a; font-size: 12px; }.import-rules { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid #f0dfb2; border-radius: 8px; background: #fffbf1; color: #846225; font-size: 12px; line-height: 1.55; }.import-rules strong { color: #76520d; }.import-upload { display: grid; justify-items: center; gap: 7px; padding: 28px 18px; border: 1px dashed #a9c8e3; border-radius: 8px; background: #fafdff; color: #3275ae; cursor: pointer; }.import-upload input { display: none; }.import-upload strong { color: #3a5268; font-size: 13px; }.import-upload small { color: #8292a1; }.import-actions { display: flex; gap: 9px; justify-content: flex-end; }.import-success { margin: 0; color: #26835f; font-size: 13px; }
 	.catalog-results { display: grid; gap: 6px; margin: 0 14px 12px; }.catalog-results button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border: 1px solid #d8e7f5; border-radius: 7px; background: #f9fcff; color: #2165a5; text-align: left; }.catalog-results button:hover { border-color: #79afe1; background: #f0f8ff; }.catalog-results span { display: grid; gap: 3px; }.catalog-results strong { color: #40566d; font-size: 12px; }.catalog-results small { color: #8293a4; font-size: 11px; }.catalog-error { margin: 0 14px 10px !important; color: #bf5050 !important; }.modal-empty { height: 95px !important; color: #8798a9 !important; text-align: center; }
 .usage-project-picker { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(260px, 1.2fr); gap: 8px; }.usage-project-picker small { grid-column: 1 / -1; color: #8293a4; font-size: 11px; }.usage-project-picker .catalog-error { margin: 0 !important; }
+.transfer-import-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 15px; padding: 12px 15px; border: 1px solid #d9e6f2; border-radius: 8px; background: #fff; }
+.transfer-import-upload > div { display: grid; flex: 1 1 220px; min-width: 0; gap: 3px; color: #61758b; font-size: 12px; }
+.transfer-import-upload strong { color: #30465d; font-size: 13px; }
+.transfer-import-upload span { overflow-wrap: anywhere; }
 .import-store-picker { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #d9e6f2; border-radius: 8px; background: #fff; color: #40566d; font-size: 12px; }.import-picker-mask { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(21, 39, 58, .35); }.import-picker-dialog { width: min(560px, 100%); max-height: min(680px, 90vh); overflow: hidden; border: 1px solid #d9e4ee; border-radius: 12px; background: #fff; box-shadow: 0 18px 50px rgba(26, 57, 89, .22); }.import-picker-dialog > header, .import-picker-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px; border-bottom: 1px solid #e7edf3; }.import-picker-dialog > footer { justify-content: flex-end; border-top: 1px solid #e7edf3; border-bottom: 0; }.import-picker-tree { display: grid; gap: 14px; max-height: 480px; overflow: auto; padding: 16px; }.import-picker-group { display: grid; gap: 7px; }.import-picker-group > strong { color: #60748a; font-size: 12px; }.import-picker-group label { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; border-radius: 6px; color: #40566d; font-size: 12px; }.import-picker-group label:hover { background: #f1f7fd; }.import-picker-group input { accent-color: #176fd1; }
 @media (max-width: 760px) { .inventory-editor { height: calc(100vh - 94px); }.form-grid { grid-template-columns: 1fr; }.form-grid__full { grid-column: auto; }.line-section > header { flex-direction: column; }.line-actions { justify-content: flex-start; }.detail-summary { grid-template-columns: 1fr; }.import-modal { grid-template-columns: 28px 1fr; }.import-modal button { grid-column: 1 / -1; } }
 </style>

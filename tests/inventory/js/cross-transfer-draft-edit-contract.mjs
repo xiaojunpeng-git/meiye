@@ -25,7 +25,7 @@ const checks = [
     for (const field of ['business_date', 'to_party_type', 'request_document_id', 'from_product_id', 'from_sku_id', 'requested_quantity_units', 'detail_remark']) assert.ok(modal.includes(field), field)
   }],
   ['linked request cannot be replaced and locks target selection', () => {
-    assert.match(modal, /:disabled="isTransferEdit && requestDocumentId > 0"/)
+    assert.match(modal, /:disabled="\(isTransferEdit && requestDocumentId > 0\) \|\| transferImportBusy \|\| submitting"/)
     assert.match(modal, /<input v-if="isTransferEdit" :value="requestDocumentId/)
   }],
   ['edit submits the original detail token to the update route', () => {
@@ -34,7 +34,7 @@ const checks = [
     assert.match(api, /updateCrossTransfer\(id, body\).*v3\/cross-transfer\/\$\{Number\(id\)\}\/update/)
   }],
   ['draft deletion appears after edit and sends a fresh token to the guarded route', () => {
-    assert.match(app, /openTransferEditor\(sourceRows\[index\]\)">编辑<\/button><button v-if="active === 'transfer' && sourceRows\[index\]\.can_delete"/)
+    assert.match(app, /openTransferEditor\(sourceRows\[index\]\)">编辑<\/button>\s*<button v-if="active === 'transfer' && sourceRows\[index\]\.can_delete"/)
     assert.match(app, /async function requestDeleteTransferDraft\(row\)/)
     assert.match(app, /deleteCrossTransferDraft\(row\.id, \{ expected_edit_token: confirmation\.expectedEditToken \}\)/)
     assert.match(api, /deleteCrossTransferDraft\(id, body\).*v3\/cross-transfer\/\$\{Number\(id\)\}\/delete-draft/)
