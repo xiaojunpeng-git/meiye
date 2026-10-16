@@ -44,16 +44,27 @@ final class InventoryCrossSubjectTransfer extends AuthController
     /** Store source remains authenticated; optional immediate dispatch shares the same transaction. */
     public function createBatch()
     {
-        $input = $this->request->post();
-        $input = is_array($input) ? $input : [];
+        $input = $this->batchCommandInput();
         return $this->run(fn (): array => $this->services->createDraftBatchForStore((int)$this->storeId, (int)$this->storeStaffId, $input), ($input['dispatch_after_create'] ?? false) === true ? '调拨单已生成并发货。' : '调拨草稿已批量生成。');
     }
 
     /** A bulk lifecycle command is one transaction and retains the authenticated source-store boundary. */
     public function operateBatch()
     {
+        $input = $this->batchCommandInput();
+        return $this->run(fn (): array => $this->services->operateBatchForStore((int)$this->storeId, (int)$this->storeStaffId, $input), '批量调拨操作已完成。');
+    }
+
+    /** Remove only the session middleware's injected store ID; client-supplied fields remain subject to the exact command schema. */
+    private function batchCommandInput(): array
+    {
         $input = $this->request->post();
-        return $this->run(fn (): array => $this->services->operateBatchForStore((int)$this->storeId, (int)$this->storeStaffId, is_array($input) ? $input : []), '批量调拨操作已完成。');
+        $input = is_array($input) ? $input : [];
+        if (($this->request->forceStoreSessionInjectedPostStoreId ?? false) === true
+            && (int)($input['store_id'] ?? 0) === (int)$this->storeId) {
+            unset($input['store_id']);
+        }
+        return $input;
     }
 
     /** Only the authenticated source store can replace a still-unshipped draft at its observed token. */

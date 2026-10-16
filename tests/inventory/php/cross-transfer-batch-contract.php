@@ -4,6 +4,7 @@ declare(strict_types=1);
 require dirname(__DIR__, 3) . '/后端代码/vendor/autoload.php';
 
 use app\services\product\inventory\InventoryCrossSubjectTransferServices;
+use app\controller\store\product\inventory\InventoryCrossSubjectTransfer;
 
 $service = new InventoryCrossSubjectTransferServices();
 $method = new ReflectionMethod($service, 'createDraftBatch');
@@ -29,4 +30,22 @@ assertInvalidBatch($method, $service, ['drafts' => [['lines' => array_fill(0, 50
 assertInvalidBatch($method, $service, ['drafts' => [['lines' => []], ['lines' => []]], 'idempotency_key' => 'transfer-batch-1-01234567']);
 assertInvalidBatch($method, $service, ['drafts' => [$draft], 'idempotency_key' => 'transfer-batch-1-01234567', 'dispatch_after_create' => 'true']);
 assertInvalidBatch($method, $service, ['drafts' => [$draft], 'idempotency_key' => 'transfer-batch-1-01234567', 'dispatch_after_create' => true]);
+
+// ForceStoreSessionMiddleware adds store_id to POST; only its trusted injection may be removed.
+$controller = (new ReflectionClass(InventoryCrossSubjectTransfer::class))->newInstanceWithoutConstructor();
+(new ReflectionProperty(\app\controller\store\AuthController::class, 'storeId'))->setValue($controller, 7);
+$commandInput = new ReflectionMethod(InventoryCrossSubjectTransfer::class, 'batchCommandInput');
+foreach ([
+    [true, 7, false],
+    [false, 7, true],
+    [true, 8, true],
+] as [$injected, $postedStoreId, $retainStoreId]) {
+    $request = (new \app\Request())->withPost(['store_id' => $postedStoreId, 'drafts' => [$draft], 'idempotency_key' => 'transfer-batch-1-01234567']);
+    $request->forceStoreSessionInjectedPostStoreId = $injected;
+    (new ReflectionProperty(\mohe\basic\BaseController::class, 'request'))->setValue($controller, $request);
+    $normalized = $commandInput->invoke($controller);
+    if (array_key_exists('store_id', $normalized) !== $retainStoreId || count($normalized['drafts'] ?? []) !== 1) {
+        throw new RuntimeException('store_batch_context_normalization_failed');
+    }
+}
 echo "CROSS_TRANSFER_BATCH_CONTRACT_OK\n";
