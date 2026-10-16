@@ -43,6 +43,12 @@ namespace think\facade {
     }
 }
 namespace app\services\product\inventory {
+    class InventoryPlatformAccessPolicy {
+        public function canVoidHqInbound(array $access): bool {
+            return in_array('inventory.location.manage', (array)($access['features'] ?? []), true)
+                || in_array('admin-inbound-manage', (array)($access['unique_auth'] ?? []), true);
+        }
+    }
     class InventoryHqLocationServices {
         public function readableLocation($info, $id) { return ['location' => ['id' => $id, 'store_id' => 0, 'tenant_id' => 'test-tenant'],
             'access' => ['features' => ['inventory.cost.view', 'inventory.location.manage']]]; }

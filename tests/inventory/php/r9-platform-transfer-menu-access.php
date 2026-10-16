@@ -157,7 +157,33 @@ try {
         }
         if ($menuAuth === 'admin-inbound-manage') {
             $read = (new \app\services\product\inventory\InventoryPlatformHqInboundServices())->index($admin, (int)$hq['id'], '');
-            checkR9Transfer(isset($read['list']) && !array_filter($read['list'], static fn ($x) => $x['can_void']), 'real HQ inbound read has no void capability');
+            checkR9Transfer(isset($read['list']) && $policy->canVoidHqInbound($menuAccess), 'inbound page grants only its own void capability');
+            $completed = array_values(array_filter($read['list'], static fn ($x) => $x['status_name'] === '已完成'));
+            if ($completed) checkR9Transfer(!array_filter($completed, static fn ($x) => !$x['can_void']), 'completed HQ inbound rows advertise page-authorized void');
+            $request->testMethod = 'post';
+            $request->testRule = 'adminapi/product/inventory/v3/hq/inbound/<id>/void';
+            checkR9Transfer($roles->verifiAuth($request), 'inbound page alone opens exact void route');
+            checkR9Transfer(!$policy->allowsFunctionRoute($adminId, 'product/inventory/v3/hq/outbound/<id>/void', 'post'), 'inbound page does not open outbound void');
+            checkR9Transfer(!$policy->allowsFunctionRoute($adminId, 'product/inventory/v3/hq/inbound/<id>/other', 'post'), 'inbound page does not open unknown command');
+            try {
+                (new \app\services\product\inventory\InventoryPlatformHqInboundServices())->reverse($admin, (int)$hq['id'], [
+                    'source_id' => $tag . '-missing', 'idempotency_key' => $tag . '-missing', 'reason' => '权限边界测试',
+                ]);
+                throw new LogicException('Missing document accepted');
+            } catch (RuntimeException $expected) {
+                checkR9Transfer($expected->getMessage() === 'inventory_manual_reversal_document_missing', 'page-only void reaches domain document guard');
+            }
+            Db::name('system_role')->where('id', $roleId)->update(['rules' => '']);
+            checkR9Transfer(!$policy->allowsFunctionRoute($adminId, 'product/inventory/v3/hq/inbound/<id>/void', 'post'), 'removing inbound page revokes void');
+            try {
+                (new \app\services\product\inventory\InventoryPlatformHqInboundServices())->reverse($admin, (int)$hq['id'], [
+                    'source_id' => $tag . '-missing', 'idempotency_key' => $tag . '-missing', 'reason' => '权限边界测试',
+                ]);
+                throw new LogicException('Revoked void accepted');
+            } catch (UnifiedQueryException $expected) {
+                checkR9Transfer($expected->getErrorCode() === 'INVENTORY_PLATFORM_ACCESS_DENIED', 'revoked page denied by domain');
+            }
+            Db::name('system_role')->where('id', $roleId)->update(['rules' => (string)$fixtureMenu]);
         }
         if ($menuAuth === 'admin-outbound-manage') {
             $read = (new \app\services\product\inventory\InventoryPlatformHqOutboundServices())->index($admin, (int)$hq['id'], '');
@@ -227,6 +253,10 @@ try {
             'hq/inbound/<id>/void', 'locations', 'import', 'hq/count/draft/<id>/delete'] as $forbiddenRoute) {
             $request->testRule = 'adminapi/product/inventory/v3/' . $forbiddenRoute;
             // 第9轮确认：调拨编辑功能覆盖发收货，但不能借此开放其他库存命令。
+            if ($page === 'inbound' && $forbiddenRoute === 'hq/inbound/<id>/void') {
+                checkR9Transfer($roles->verifiAuth($request), 'inbound page grants its own void route');
+                continue;
+            }
             if ($page === 'transfer' && strpos($forbiddenRoute, 'hq/cross-transfer/') === 0) {
                 checkR9Transfer($roles->verifiAuth($request), 'transfer function grants its workflow command: ' . $forbiddenRoute);
                 continue;

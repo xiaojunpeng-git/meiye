@@ -13,8 +13,9 @@ use think\facade\Db;
  *
  * The browser supplies neither features nor stores.  A platform administrator
  * must hold an enabled inventory API grant, or the narrowly bridged legacy
- * inventory menu for its own read-only queries. Existing add/edit function
- * nodes authorize only their specific create commands, not warehouse management.
+ * inventory menu for its own queries. The inbound page grants only its own
+ * void command; existing add/edit nodes authorize only their specific create
+ * commands, not warehouse management.
  * Store inventory is additionally
  * limited by the organization-admin relation; the platform default HQ
  * inventory does not require a store appointment.
@@ -64,6 +65,20 @@ final class InventoryPlatformAccessPolicy
             && in_array(self::CREATE_AUTH[$page], $auth, true);
     }
 
+    /** 入库管理页面授权仅覆盖该页的总部入库作废；仓库和库存仍由领域服务逐次校验。 */
+    public function canVoidHqInbound(array $access): bool
+    {
+        return !empty($access['is_super_admin'])
+            || in_array('inventory.location.manage', (array)($access['features'] ?? []), true)
+            || $this->hasLegacyPage((array)($access['unique_auth'] ?? []), 'inbound');
+    }
+
+    /** 控制器调用领域命令时也检查同一作废授权，不依赖列表按钮或 HTTP 菜单缓存。 */
+    public function assertCanVoidHqInbound(array $access): void
+    {
+        if (!$this->canVoidHqInbound($access)) throw $this->denied('当前岗位无权作废入库单。');
+    }
+
     /** 精确映射已授权功能：调拨编辑包含草稿及发收货，不放开其他模块、冲销、导入或仓库设置。 */
     public function allowsFunctionRoute(int $adminId, string $rule, string $method): bool
     {
@@ -99,7 +114,11 @@ final class InventoryPlatformAccessPolicy
             'get product/inventory/v3/hq/catalog' => 'catalog',
             'get product/inventory/v3/hq/catalog/barcode' => 'catalog',
         ];
-        // 主数据命令可由独立仓库设置权限授权，不传播到任何库存业务写命令。
+        // 旧入库页面拥有本页作废权限，但不传播到出库、盘点或通用仓库写命令。
+        if (strtolower(trim($method)) === 'post' && $rule === 'product/inventory/v3/hq/inbound/:id/void') {
+            try { return $this->canVoidHqInbound($this->resolveByAdminId($adminId)); }
+            catch (UnifiedQueryException $exception) { return false; }
+        }
         if (strtolower(trim($method)) === 'post' && in_array($rule, ['product/inventory/v3/locations', 'product/inventory/v3/locations/:id'], true)) {
             try { return in_array('inventory.location.settings', $this->resolveByAdminId($adminId)['features'], true); }
             catch (UnifiedQueryException $exception) { return false; }

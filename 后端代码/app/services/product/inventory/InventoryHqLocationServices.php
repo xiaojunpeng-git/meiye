@@ -26,7 +26,7 @@ final class InventoryHqLocationServices
         return $this->locationForAccess($access, $locationId, true);
     }
 
-    /** 具体新建入口可用对应功能授权；未指定操作的管理/冲销路径仍强制原生仓库管理。 */
+    /** 新建入口检查对应功能；通用管理仍需原生授权，入库作废由独立页面权限和冲销事务校验。 */
     public function writableLocation(array $adminInfo, int $locationId = 0, string $createPage = ''): array
     {
         $policy = new InventoryPlatformAccessPolicy();

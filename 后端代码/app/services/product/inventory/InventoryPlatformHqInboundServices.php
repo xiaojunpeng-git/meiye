@@ -51,8 +51,9 @@ final class InventoryPlatformHqInboundServices
         $list = (new InventoryManualDocumentReversalProjectionServices())->apply(
             $list, (string)$location['tenant_id'], InventoryManualDocumentReversalServices::INBOUND, [(int)$location['id']]
         );
-        // 冲销投影只判断业务状态；平台按钮还必须满足可信写能力。
-        foreach ($list as &$row) $row['can_void'] = !empty($row['can_void']) && in_array('inventory.location.manage', $access['features'], true);
+        // 页面入口只授权本页入库作废；业务状态与仓库范围仍由服务端控制。
+        $canVoidInbound = (new InventoryPlatformAccessPolicy())->canVoidHqInbound($access);
+        foreach ($list as &$row) $row['can_void'] = !empty($row['can_void']) && $canVoidInbound;
         unset($row);
         return ['count' => count($grouped), 'list' => $list];
     }
@@ -101,8 +102,8 @@ final class InventoryPlatformHqInboundServices
                 'recorded_at' => (int)$facts[0]['recorded_at'],
                 'location_name' => (string)($location['location_name'] ?? '总部仓'),
                 'status_name' => $voided ? '已作废' : '已完成',
-                // 详情不能因单据未冲销就向只读菜单暴露作废入口。
-                'can_void' => $voided === null && in_array('inventory.location.manage', $access['features'], true),
+                // 详情与列表采用同一入库入口授权，不借此开放其他库存命令。
+                'can_void' => $voided === null && (new InventoryPlatformAccessPolicy())->canVoidHqInbound($access),
                 'void_reason' => $voided ? (string)$voided['reason'] : '',
                 'voided_at' => $voided ? (int)$voided['settled_at'] : 0,
             ],
@@ -125,7 +126,7 @@ final class InventoryPlatformHqInboundServices
     public function create(array $adminInfo, int $locationId, array $input): array
     {
         $hq = new InventoryHqLocationServices();
-        // 已有添加入库单权限仅用于新建；reverse 仍保留独立管理边界。
+        // 添加节点仅用于新建；作废按入库页面授权，并在冲销事务内核对库存。
         $resolved = $hq->writableLocation($adminInfo, $locationId, 'inbound');
         $scope = $hq->scope($resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
         $scope['operatorType'] = 'PLATFORM_ADMIN';
@@ -136,7 +137,11 @@ final class InventoryPlatformHqInboundServices
     public function reverse(array $adminInfo, int $locationId, array $input): array
     {
         $hq = new InventoryHqLocationServices();
-        $resolved = $hq->writableLocation($adminInfo, $locationId);
+        $policy = new InventoryPlatformAccessPolicy();
+        $access = $policy->resolve($adminInfo);
+        $policy->assertCanVoidHqInbound($access);
+        // 作废仅能操作当前账号可读的总部仓；冲销内再次锁仓并校验启用状态与库存。
+        $resolved = $hq->readableLocation($adminInfo, $locationId);
         $scope = $hq->scope((array)$resolved['location'], (int)($resolved['access']['admin_id'] ?? 0));
         return (new InventoryManualDocumentReversalServices())->reverseForHeadquarters(
             $scope, (array)$resolved['location'], InventoryManualDocumentReversalServices::INBOUND, $input
