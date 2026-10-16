@@ -378,16 +378,35 @@ final class CashierV3SalesOrderReversalServices
             ->where('card_holder_id', (int)$receipt['card_holder_id'])->lock(true)->find();
         $components = [];
         if ($rule) {
-            if ((int)$rule['selected_kind_count'] !== 0 || (int)$rule['shared_remaining_times'] !== (int)$rule['shared_total_times']
-                || (string)$rule['status'] !== 'active') throw self::failure('sales_reversal_card_rule_used');
+            $groups = Db::name('cashier_v3_card_rule_group_state')->where('tenant_id', $scope->tenantId())
+                ->where('rule_state_id', (int)$rule['id'])->lock(true)->order('id', 'asc')->select()->toArray();
             $components = Db::name('cashier_v3_card_rule_component')->where('tenant_id', $scope->tenantId())
                 ->where('rule_state_id', (int)$rule['id'])->lock(true)->order('id', 'asc')->select()->toArray();
-            foreach ($components as $component) {
-                if ((int)$component['remaining_times'] !== (int)$component['total_times'] || (int)$component['selected_at'] !== 0
-                    || (string)$component['status'] !== 'active') throw self::failure('sales_reversal_card_rule_component_used');
+            if (!self::cardRuleCountersRestored($rule, $groups, $components)) {
+                throw self::failure('sales_reversal_card_rule_used');
             }
         }
         return ['receipt' => $receipt, 'holder' => $holder, 'order' => $order, 'details' => $details, 'rule' => $rule, 'components' => $components];
+    }
+
+    /**
+     * 已核销权益须先由上游逐笔证明成功作废。这里检查可用次数已全数返还；
+     * 任选项目的选中时间和种数是不可抹掉的使用历史，不代表仍有有效核销。
+     */
+    private static function cardRuleCountersRestored(array $rule, array $groups, array $components): bool
+    {
+        if (!$components || ((string)$rule['rule_type'] === 'combination' && !$groups)
+            || (int)$rule['shared_remaining_times'] !== (int)$rule['shared_total_times']
+            || (string)$rule['status'] !== 'active') return false;
+        foreach ($groups as $group) {
+            if ((int)$group['shared_remaining_times'] !== (int)$group['shared_total_times']
+                || (string)$group['status'] !== 'active') return false;
+        }
+        foreach ($components as $component) {
+            if ((int)$component['remaining_times'] !== (int)$component['total_times']
+                || (string)$component['status'] !== 'active') return false;
+        }
+        return true;
     }
 
     /** @param array<int,array<string,mixed>> $writeoffs 逐笔核销必须有等量返还及成功服务作废，不能只凭次数投影相等放行。 */
@@ -477,6 +496,8 @@ final class CashierV3SalesOrderReversalServices
             Db::name('cashier_v3_card_rule_state')->where('id', (int)$card['rule']['id'])->where('status', 'active')
                 ->update(['status' => 'revoked', 'state_version' => Db::raw('state_version+1'), 'update_time' => $now]);
             Db::name('cashier_v3_card_rule_component')->where('rule_state_id', (int)$card['rule']['id'])->where('status', 'active')
+                ->update(['status' => 'revoked', 'state_version' => Db::raw('state_version+1'), 'update_time' => $now]);
+            Db::name('cashier_v3_card_rule_group_state')->where('rule_state_id', (int)$card['rule']['id'])->where('status', 'active')
                 ->update(['status' => 'revoked', 'state_version' => Db::raw('state_version+1'), 'update_time' => $now]);
         }
         $row = [
@@ -635,7 +656,6 @@ final class CashierV3SalesOrderReversalServices
             'sales_reversal_card_active_occupation_exists' => '卡项有未结束的预约或服务单，销售订单未作废。',
             'sales_reversal_card_operation_exists' => '卡项有未作废的后续操作单，销售订单未作废。',
             'sales_reversal_card_rule_used' => '卡项次数或项目选择未恢复，销售订单未作废。',
-            'sales_reversal_card_rule_component_used' => '卡项次数或项目选择未恢复，销售订单未作废。',
             'sales_reversal_coupon_trace_invalid' => '订单优惠券记录异常，操作未完成。',
             'sales_reversal_coupon_state_changed' => '订单优惠券状态已变化，操作未完成。',
             'sales_reversal_balance_credit_failed' => '会员余额退回失败，操作未完成。',
