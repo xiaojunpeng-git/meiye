@@ -69,9 +69,35 @@ final class MetricSemanticCatalog
                 return count(array_unique($owners[$term])) === 1;
             }));
             if ($terms) {
-                $patterns[$code] = '/'.implode('|', array_map(static function ($term) {
-                    return preg_quote($term, '/');
-                }, $terms)).'/u';
+                $parts=[];
+                foreach ($terms as $term) {
+                    $before=[];$after=[];
+                    foreach ($owners as $longer=>$longerOwners) {
+                        if ($longer===$term || isset($longerOwners[$code]) || mb_strlen($longer,'UTF-8')<=mb_strlen($term,'UTF-8')) continue;
+                        $offset=0;$length=mb_strlen($term,'UTF-8');
+                        while (($start=mb_strpos($longer,$term,$offset,'UTF-8'))!==false) {
+                            $prefix=mb_substr($longer,0,$start,'UTF-8');
+                            $suffix=mb_substr($longer,$start+$length,null,'UTF-8');
+                            if ($prefix!=='') $before[$prefix]=true;
+                            if ($suffix!=='') $after[$suffix]=true;
+                            $offset=$start+1;
+                        }
+                    }
+                    // These complete unresolved phrases deliberately have no
+                    // executable metric owner yet. Protect them from the broad
+                    // cash alias until the customer chooses their meaning.
+                    if ($term==='业绩') {$before['服务']=true;$before['扣卡']=true;}
+                    // A short registered alias remains valid on its own, but it
+                    // must not also fire from inside another metric's complete
+                    // title. Literal fixed-length guards keep this generated
+                    // from registry language instead of a question allow-list.
+                    $part='';
+                    foreach (array_keys($before) as $prefix) $part.='(?<!'.preg_quote($prefix,'/').')';
+                    $part.=preg_quote($term,'/');
+                    foreach (array_keys($after) as $suffix) $part.='(?!'.preg_quote($suffix,'/').')';
+                    $parts[]=$part;
+                }
+                $patterns[$code] = '/'.implode('|',$parts).'/u';
             }
         }
         return $patterns;

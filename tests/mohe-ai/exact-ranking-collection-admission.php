@@ -50,9 +50,8 @@ $saleObjects[]=['object_kind'=>'card','object_label'=>'卡项'];
 $saleObjects[]=['object_kind'=>'store','object_label'=>'哪家店'];
 $sharedDefaults=['sales_amount'=>['card','project','product'],'cash_performance'=>['store','member']];
 $shared=$admission->match('这个月项目、产品、卡项业绩最高的分别是什么',$saleObjects,$metrics,$sharedDefaults);
-$verify(is_array($shared)&&array_column($shared,'object_kind')===['project','product','card']
-    &&array_unique(array_column($shared,'metric_code'))===['sales_amount'],
-    'a distributive object list uses its one shared registered ranking default in customer order');
+$verify($shared===null,
+    'confirmed cash-performance wording never falls back to a different shared ranking metric');
 $verify($admission->match('这个月门店、产品业绩最高的分别是什么',$saleObjects,$metrics,$sharedDefaults)===null,
     'objects without one shared registered ranking default remain model work');
 $verify($admission->match('这个月项目、产品、卡项业绩最高的原因分别是什么',$saleObjects,$metrics,$sharedDefaults)===null,
@@ -105,8 +104,11 @@ $verify($admission->matchPopulationDetail(
 
 $verify($admission->match('这个月销售额最高是哪天，顺便分析原因',$objects,$metrics)===null,
     'open analysis residue must remain on the model path');
-$verify($admission->match('这个月业绩最高是哪天，销售记录最多的项目是哪个',$objects,$metrics)===null,
-    'an unregistered or ambiguous measurement must not receive a guessed metric');
+$confirmedPerformance=$admission->match('这个月业绩最高是哪天，销售记录最多的项目是哪个',$objects,$metrics);
+$verify($confirmedPerformance===[
+    ['metric_code'=>'cash_performance','object_kind'=>'business_date','direction'=>'top','limit'=>1],
+    ['metric_code'=>'sales_record_count','object_kind'=>'project','direction'=>'top','limit'=>1],
+], 'confirmed performance shorthand and a second explicit metric both remain executable');
 $singleDate=$admission->match('这个月销售额最高是哪天',$objects,$metrics);
 $verify(is_array($singleDate)&&count($singleDate)===1
     &&($singleDate[0]['metric_code']??null)==='sales_amount'
@@ -155,10 +157,8 @@ $verify($reason===null && count($prefixedPlan['plan']['items']??[])===2
 $reason=null;
 $sharedArgs=['这个月项目、产品、卡项业绩最高的分别是什么',$vocabulary,$capabilities,'screen','2026-09-25',&$reason];
 $sharedPlan=$rankingMethod->invokeArgs($gateway,$sharedArgs);
-$verify(array_column($sharedPlan['plan']['items']??[],'label')===['项目排行','产品排行','卡项排行']
-    &&array_map(static function(array $item):array{return $item['plan']['query']['metric_codes'];},$sharedPlan['plan']['items'])
-        ===[['sales_amount'],['sales_amount'],['sales_amount']],
-    'the shared registry default compiles three independent existing Reader plans');
+$verify($sharedPlan===null,
+    'gateway does not rewrite confirmed cash-performance wording to a sales-amount default');
 $reason=null;
 $dateOmittedArgs=['项目、卡项、产品卖得最好的分别是什么？',$vocabulary,$capabilities,'screen','2026-09-30',&$reason,
     ['query'=>['store_ids'=>[],'business_filters'=>[],'metric_codes'=>['cash_performance'],

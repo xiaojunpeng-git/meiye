@@ -51,9 +51,9 @@ $check($binding['object_kind']==='business_date' && $binding['operation']==='ran
     && $binding['ranking']===['direction'=>'top','limit'=>1],
     'typed binding preserves the requested daily extremum');
 
-// A broad date ranking is a first-answer request, not a forced metric form.
-// The sole registry declaration chooses a labelled perspective only after
-// the model has accepted the date and ranking; an explicit metric still wins.
+// Product wording fixes unqualified "业绩" to cash performance. The registered
+// ranking policy must therefore keep that resolved metric instead of replacing it
+// with a legacy default after the model accepts the date and ranking.
 $capabilities=MetricDefinitionRegistry::capabilities();
 $summaries=[];
 foreach ($capabilities as $code=>$capability) $summaries[]=[
@@ -72,10 +72,10 @@ $broadIntent=['object_kind'=>'business_date','object_relation'=>'analysis','obje
 $gateway=(new ReflectionClass(\app\services\ai\AiGatewayServices::class))->newInstanceWithoutConstructor();
 $rankDefault=new ReflectionMethod($gateway,'applyRegisteredRankDefaultPolicy');
 $firstAnswer=$rankDefault->invoke($gateway,$broadIntent,$broadUnderstanding,$summaries);
-$check(($firstAnswer['metric_codes']??null)===['actual_performance']
+$check(($firstAnswer['metric_codes']??null)===['cash_performance']
     && ($firstAnswer['needs_metric_choice']??true)===false
     && ($firstAnswer['recommended_initial_answer']??false)===true,
-    'broad date ranking receives one registered actual-performance first answer');
+    'unqualified performance ranking keeps the confirmed cash-performance meaning');
 // A short ranked-date continuation may carry a discourse particle, while
 // the signed previous metric remains the first matching measurement.
 $rankingAdmission=new AiExactRankingCollectionAdmission();
@@ -95,9 +95,9 @@ $source=['query'=>['query_shape'=>'summary','metric_codes'=>['cash_performance']
 $ready=['metric_codes'=>array_keys($capabilities),'metric_readiness'=>$capabilities];
 $args=['这个月业绩最高是哪天',$objectVocabulary,$ready,'screen','2026-10-08',&$reason,$source,[]];
 $continued=$exactMethod->invokeArgs($gateway,$args);
-$check(($continued['_context_reused']??false)===true
+$check(($continued['_context_reused']??false)===false
     && ($continued['plan']['query']['metric_codes']??null)===['cash_performance'],
-    'complete broad date ranking keeps the verified cash metric');
+    'self-contained performance ranking uses cash without inheriting old scope');
 $reason=null;$args[0]='这个月呢，哪天最高';
 $shortContinued=$exactMethod->invokeArgs($gateway,$args);
 $check(($shortContinued['_context_reused']??false)===true

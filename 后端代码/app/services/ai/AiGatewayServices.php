@@ -1790,32 +1790,58 @@ final class AiGatewayServices
         // cohort is a new topic. The admission below rejects any residual
         // pointer such as "这家"; therefore the old categorical source must
         // not force an unrelated self-contained question through context.
-        if (!isset($body['_clarification_context']) && ($independent || $priorSource)) {
-            $match=$admission->match(
-                (string)$body['question'],\app\services\query\metric\MetricSemanticCatalog::entries()
-            );
-            if ($match!==null) {
-                $metric=$match['metric_code'];
-                $contract=\app\services\query\metric\MetricDefinitionRegistry::capabilities()[$metric]??null;
-                // Only a registered store summary may enter this narrow path.
-                // Known but unavailable metrics stay a capability result; the
-                // model must not choose a different readable measurement.
-                if (is_array($contract) && ($contract['filter_grain']??null)==='store') {
-                    if (!in_array($metric,$caps['metric_codes'],true)) throw new RuntimeException('AI_CAPABILITY_NOT_READY');
-                    $checkpoint();
-                    $projection['signals']=[$metric,'summary'];
-                    $projection['date_terms']=[$match['date_term']];
-                    $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
-                    $compiled=(new AiWorkflowPlanner())->compile($projection,[
-                        'decision'=>'query','query_shape'=>'summary','metric_codes'=>[$metric],'object_kind'=>'store'
-                    ],$caps,$body['output_format'],$today);
-                    if (($compiled['kind']??null)==='plan') {
-                        $compiled['_context_meaning']=['presentation_origin'=>'customer_or_verified_context'];
-                        if ($sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
-                        $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,'deterministic_registered_summary_admitted');
-                    }
-                    return $compiled;
+        if (!isset($body['_clarification_context'])) {
+            $question=(string)$body['question'];
+            $entries=\app\services\query\metric\MetricSemanticCatalog::entries();
+            // Keep the common no-store question free of a store-name read. A
+            // failed closed-grammar proof gets one second proof against exact,
+            // authorized store labels; fuzzy or unauthorized names remain in
+            // the residue and never become executable identifiers.
+            $match=$admission->matchQuery($question,$entries,[],
+                \app\services\ai\execution\AiOverviewMetricResolver::MAX_METRICS);
+            if ($match===null && preg_match('/门店|店/u',$question)===1) {
+                try {
+                    $match=$admission->matchQuery($question,$entries,$this->authorizedStoreObjects($context),
+                        \app\services\ai\execution\AiOverviewMetricResolver::MAX_METRICS);
+                } catch (RuntimeException $exception) {
+                    // A context without a readable store catalogue may still
+                    // contain a valid non-store semantic request. Preserve the
+                    // normal model path, but never hide a permission change.
+                    if ($exception->getMessage()!=='AI_STORE_SCOPE_UNAVAILABLE') throw $exception;
                 }
+            }
+            if ($match!==null) {
+                $metrics=$match['metric_codes'];$contracts=\app\services\query\metric\MetricDefinitionRegistry::capabilities();
+                foreach ($metrics as $metric) {
+                    $contract=$contracts[$metric]??null;
+                    // A complete answer may use only registered store summaries.
+                    // One unavailable metric fails the entire coordinated request;
+                    // it is never dropped to manufacture a partial answer.
+                    if (!is_array($contract) || ($contract['filter_grain']??null)!=='store') {
+                        throw new RuntimeException('AI_UNSUPPORTED_CONDITION');
+                    }
+                    if (!in_array($metric,$caps['metric_codes'],true)) throw new RuntimeException('AI_CAPABILITY_NOT_READY');
+                }
+                $checkpoint();
+                // The admission proved the complete sentence, so rebuild a
+                // minimal projection instead of carrying model-facing residue
+                // such as the exact store name into the workflow compiler.
+                $summaryProjection=['signals'=>array_merge($metrics,['summary']),
+                    'date_terms'=>[$match['date_term']],'dates'=>[],
+                    'semantic_intent'=>['constraints'=>[]],
+                    'blocking_reason'=>null,'unresolved_condition'=>false];
+                $caps['current_store_bound']=\app\services\ai\execution\AiAuthority::currentStoreId($context)!==null;
+                $compiled=(new AiWorkflowPlanner())->compile($summaryProjection,[
+                    'decision'=>'query','query_shape'=>'summary','metric_codes'=>$metrics,'object_kind'=>'store'
+                ],$caps,$body['output_format'],$today);
+                if (($compiled['kind']??null)==='plan') {
+                    if (isset($match['store_id'])) $compiled['plan']['query']['store_ids']=[(int)$match['store_id']];
+                    $compiled['_context_meaning']=['presentation_origin'=>'customer_or_verified_context'];
+                    if ($sourceContext!==null) $this->runs->markTopicReset($owner,$id,$generation,$worker);
+                    $this->recordRuntimeDiagnostic($owner,$id,$generation,$worker,
+                        isset($match['store_id'])?'deterministic_registered_store_summary_admitted':'deterministic_registered_summary_admitted');
+                }
+                return $compiled;
             }
             // Complete two-period comparisons use either the exact named
             // registered metrics or the broad store overview profile. Extra
@@ -6540,7 +6566,16 @@ final class AiGatewayServices
             foreach ((array)($requirement['values']['metric_terms']??[]) as $term) if (is_string($term)) $terms[]=$term;
         }
         $exact=\app\services\query\metric\MetricSemanticCatalog::uniqueCodeForTerms($terms,$allowed);
-        $candidateCodes=$exact===null?$allowed:[$exact];
+        if ($exact!==null) {
+            // The customer has named one registered measurement, including the
+            // product-defined shorthand “业绩” for cash performance. Preserve
+            // that explicit meaning even when this analytical object has a
+            // different registry default; defaults only fill a missing metric.
+            return SiliconFlowClient::applyRankMetricResolution(
+                $intent,['decision'=>'select','metric_code'=>$exact],$understanding
+            );
+        }
+        $candidateCodes=$allowed;
         $default=$this->registeredRankDefault($intent,$understanding,$summaries,$candidateCodes);
         if ($default===null) return $intent;
         $current=array_values((array)($intent['metric_codes']??[]));

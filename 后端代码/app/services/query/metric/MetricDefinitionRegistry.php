@@ -141,6 +141,11 @@ final class MetricDefinitionRegistry
                 'derivation' => ['operator' => 'subtract', 'left_metric' => 'cash_performance', 'right_metric' => 'refund_performance'],
                 'dimensions' => ['operator' => ['id' => 'operator_id', 'name' => 'operator_name_snapshot']],
                 'default_ranking_dimension' => 'operator',
+                // A date-extremum question with no measurement at all may use
+                // actual performance as its disclosed first-answer default.
+                // The default is scoped to business_date only: customer-named
+                // cash (including “业绩”), sales or consumption always wins.
+                'analysis_default_rank_object_kinds' => ['business_date'],
                 // A broad per-store performance breakdown needs one concise
                 // first reading. This source-owned declaration is consumed
                 // only when exactly one compatible default exists; explicit

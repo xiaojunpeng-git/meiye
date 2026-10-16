@@ -4,7 +4,7 @@ namespace app\services\ai\semantic;
 /** Source-owned business language resources. No formulas, SQL or report page identities. */
 final class AiSemanticVocabulary
 {
-    public const VERSION='mohe-semantic-vocabulary-r36-v1';
+    public const VERSION='mohe-semantic-vocabulary-r8c-v1';
     public static function patterns(): array
     {
         require_once dirname(__DIR__,2).'/BaseServices.php';
@@ -28,7 +28,9 @@ final class AiSemanticVocabulary
             // first answer. Centralizing the grammar here prevents a dated
             // standalone overview from being mistaken for a pure date edit
             // of the previous customer/person/object query.
-            'ambiguous_metric'=>'/服务业绩|耗卡业绩|扣卡业绩|收入|卖了多少|业绩|做了多少|经营(?:情况|概览|得?怎么样|如何)/u',
+            // 未加限定的“业绩”已由统一指标字典归属现金业绩，
+            // 不再同时投影为“未解决指标”而阻断完整问句。
+            'ambiguous_metric'=>'/服务业绩|耗卡业绩|扣卡业绩|收入|卖了多少|做了多少|经营(?:情况|概览|得?怎么样|如何)/u',
             'definition'=>'/是什么意思|什么意思|指什么|是什么|怎么理解|口径说明|统计口径|解释/u',
             'trend'=>'/每天|每日|逐日|按天|趋势/u',
             'comparison'=>'/对比|相比|比较|分别|并排/u',

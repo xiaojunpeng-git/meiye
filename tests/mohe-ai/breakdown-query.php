@@ -58,10 +58,9 @@ try {
             'evidence'=>[['message_id'=>'current','quote'=>'今天各门店业绩多少']],
         ]],
     ];
-    $broadNormalized=AiIntentUnderstandingContract::normalize($broadProviderEcho,$safeQuestion);
-    bdCheck(!isset($broadNormalized['requirements'][0]['values']['metric_terms'])
-        &&($broadNormalized['requirements'][0]['values']['operation']??null)==='breakdown',
-        'a broad unregistered measurement keeps its typed breakdown while dropping only a fabricated echo');
+    bdReject(static function()use($broadProviderEcho,$safeQuestion):void {
+        AiIntentUnderstandingContract::normalize($broadProviderEcho,$safeQuestion);
+    }, 'a fabricated broad phrase cannot replace the now registered exact performance term');
     bdReject(static function()use($safeQuestion,$understanding):void {
         AiIntentResultContract::normalize([
             'object_kind'=>'store','object_relation'=>'analysis','object_term'=>'','operation'=>'breakdown',
