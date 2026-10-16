@@ -143,6 +143,9 @@ const stockTableLayout = ref({ fixed: false, summaryRow: false })
 const listLoading = ref(false)
 const listError = ref('')
 const transferSavedNotice = ref('')
+const transferListRefreshFailed = ref(false)
+const transferRefreshAfterSave = ref(false)
+const transferListRefreshReason = ref('')
 const listDateRange = ref(null)
 const groupedListPages = new Set(Object.keys(groupedDetailColumns))
 const groupedDetails = ref({})
@@ -656,9 +659,19 @@ function selectPage(key, options = {}) {
   if (key === 'movement') key = 'stock'
   if (deferredPageKeys.has(key)) {
     active.value = 'overview'
+    transferSavedNotice.value = ''
+    transferListRefreshFailed.value = false
+    transferRefreshAfterSave.value = false
+    transferListRefreshReason.value = ''
     return
   }
   active.value = key
+  if (key !== 'transfer') {
+    transferSavedNotice.value = ''
+    transferListRefreshFailed.value = false
+    transferRefreshAfterSave.value = false
+    transferListRefreshReason.value = ''
+  }
   // 单据明细只属于当前页面和查询；离开页面即丢弃旧响应。
   groupedListVersion += 1
   resetGroupedDetails()
@@ -1354,7 +1367,6 @@ async function loadCurrentList(unifiedQuery = null) {
   // 分组呈现按单据类型选择，不按终端分支；平台与门店共用下面唯一的表格模板。
   const groupedPage = groupedListPages.has(active.value) ? active.value : ''
   const groupedRequest = groupedPage ? ++groupedListVersion : 0
-  if (groupedRequest) resetGroupedDetails()
   listLoading.value = true
   listError.value = ''
   if (mode.value === 'platform' && active.value === 'usage' && !platformListWarehouseOptions.value.some((item) => item.key === platformListWarehouseSelection.value)) {
@@ -1512,7 +1524,15 @@ async function loadCurrentList(unifiedQuery = null) {
       await loadCurrentList(hasExplicitQuery ? { ...unifiedQuery, page: stockPage.value, limit: stockPageSize } : null)
       return
     }
-    if (groupedRequest) loadGroupedDetails(groupedPage, displayRows)
+    if (groupedRequest) {
+      resetGroupedDetails()
+      loadGroupedDetails(groupedPage, displayRows)
+    }
+    if (mode.value === 'platform' && active.value === 'transfer') {
+      transferListRefreshFailed.value = false
+      transferRefreshAfterSave.value = false
+      transferListRefreshReason.value = ''
+    }
     if (active.value === 'stock') {
       // The server total covers the complete filtered result and already applies
       // the same permission scope as the list; never recompute it from browser rows.
@@ -1531,6 +1551,13 @@ async function loadCurrentList(unifiedQuery = null) {
     }
   } catch (error) {
     if (groupedRequest && groupedRequest !== groupedListVersion) return
+    // A confirmed batch command must not be presented as a failed transfer because its follow-up read failed.
+    if (mode.value === 'platform' && active.value === 'transfer' && transferRefreshAfterSave.value) {
+      transferListRefreshFailed.value = true
+      transferListRefreshReason.value = error instanceof Error ? error.message : '库存列表加载失败。'
+      listError.value = ''
+      return
+    }
     sourceRows.value = []
     remoteRows.value = []
     remoteTotal.value = 0
@@ -1786,9 +1813,13 @@ function onModalSaved(result = {}) {
     platformTransferStatus.value = result.transferStatus === 'DISPATCHED' ? 'DISPATCHED' : 'DRAFT'
     keyword.value = ''
     const savedKind = result.transferStatus === 'DISPATCHED' ? '已发货调拨单' : '调拨草稿'
+    const transferNumbers = Array.isArray(result.transferNumbers) ? result.transferNumbers.filter(Boolean) : []
     transferSavedNotice.value = Number(result.transferSourceCount) > 1
       ? `已生成 ${Number(result.transferDraftCount)} 张${savedKind}，涉及 ${Number(result.transferSourceCount)} 个调出方；当前显示第一个调出方，其余可切换调出方查看。`
-      : `已生成 ${Number(result.transferDraftCount)} 张${savedKind}。`
+      : `已生成 ${Number(result.transferDraftCount)} 张${savedKind}${transferNumbers.length === 1 ? `（${transferNumbers[0]}）` : ''}。`
+    transferListRefreshFailed.value = false
+    transferRefreshAfterSave.value = true
+    transferListRefreshReason.value = ''
   }
   // 新单可能在弹窗内换仓；刷新列表前对准实际落单仓，避免误以为保存失败。
   if (mode.value === 'platform' && platformListWarehouseOptions.value.some((item) => item.key === result?.warehouseSelection)) {
@@ -2091,8 +2122,9 @@ onBeforeUnmount(() => {
             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresWarehouse && !platformListWarehouseOptions.length)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
             <p v-if="active === 'transfer' && transferSavedNotice" class="inventory-save-notice" role="status">{{ transferSavedNotice }}</p>
+            <p v-if="active === 'transfer' && transferListRefreshFailed" class="inventory-load-error" role="alert">单据已保存，但列表未刷新：{{ transferListRefreshReason }} 下方仍是上次列表的 {{ remoteTotal }} 条记录，不能继续操作。</p>
             <div v-if="active === 'transfer'" class="transfer-batch-toolbar">
-              <label><input type="checkbox" :checked="selectableTransferRows.length > 0 && selectedTransferRows.length === selectableTransferRows.length" :disabled="!selectableTransferRows.length || transferBatchPreparing || transferActionSubmitting" @change="toggleAllVisibleTransfers" />全选当前列表</label>
+              <label><input type="checkbox" :checked="selectableTransferRows.length > 0 && selectedTransferRows.length === selectableTransferRows.length" :disabled="transferListRefreshFailed || !selectableTransferRows.length || transferBatchPreparing || transferActionSubmitting" @change="toggleAllVisibleTransfers" />全选当前列表</label>
               <span>已选 {{ selectedTransferRows.length }} 张</span>
               <button class="secondary-button" :disabled="!selectedTransferRows.length || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DELETE_DRAFT')"><Trash2 :size="14" />删除</button>
               <button class="secondary-button" :disabled="!selectedTransferRows.length || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DISPATCH')"><Truck :size="14" />发货</button>
@@ -2102,6 +2134,7 @@ onBeforeUnmount(() => {
               <span v-else-if="selectedTransferRows.length >= 2 && !['DELETE_DRAFT', 'DISPATCH', 'WITHDRAW'].some(canOperateTransferBatch)">请只选择同一调出方、同一操作状态的单据</span>
               <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
             </div>
+            <div :inert="transferListRefreshFailed ? true : null">
 <section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active) }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" :disabled="mode === 'platform' && !platformCanManageInventory" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' && mode === 'store' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
             </tbody></table>
             <!-- 两端共用单据单行信息带和商品表头；仅能力按钮及仓库上下文来自各自权威接口。 -->
@@ -2138,6 +2171,7 @@ onBeforeUnmount(() => {
               </tbody>
             </table>
           </div><footer v-if="active === 'stock'" class="inventory-warehouse-pagination"><span>共 {{ remoteTotal }} 条 · 每页 {{ stockPageSize }} 条 · 第 {{ stockPage }} / {{ stockPages }} 页</span><button class="secondary-button" :disabled="listLoading || stockPage <= 1" @click="turnStockPage(-1)">上一页</button><button class="secondary-button" :disabled="listLoading || stockPage >= stockPages" @click="turnStockPage(1)">下一页</button></footer><footer v-else-if="active === 'warehouse'" class="inventory-warehouse-pagination"><span>共 {{ remoteTotal }} 条 · 每页 20 条 · 第 {{ warehouseSettingsPage }} / {{ warehouseSettingsPages }} 页</span><button class="secondary-button" :disabled="listLoading || warehouseSettingsPage <= 1" @click="turnWarehouseSettingsPage(-1)">上一页</button><button class="secondary-button" :disabled="listLoading || warehouseSettingsPage >= warehouseSettingsPages" @click="turnWarehouseSettingsPage(1)">下一页</button></footer></section>
+            </div>
         </template>
       </section>
     </main>

@@ -104,9 +104,6 @@ export function createInventoryApi(options = {}) {
   const apiRootPrefix = String(options.apiRootPrefix || prefix.replace(/\/product\/inventory$/, '')).replace(/\/$/, '')
 
   async function request(path, requestOptions = {}, requestPrefix = prefix) {
-    const controller = typeof AbortController === 'function' ? new AbortController() : null
-    // 大盘点仍是一张原子单据；仅延长该命令的等待时间，不拆成会部分入账的小单。
-    const timer = controller ? setTimeout(() => controller.abort(), requestOptions.timeoutMs || TIMEOUT_MS) : null
     const token = tokenFromBrowser(browserWindow)
     const [rawPath, pathQuery = ''] = String(path).split('?', 2)
     const queryParams = new URLSearchParams(pathQuery)
@@ -116,29 +113,51 @@ export function createInventoryApi(options = {}) {
     })
     const serializedQuery = queryParams.toString()
     const query = serializedQuery ? `?${serializedQuery}` : ''
-    try {
-      const response = await fetchImpl(`${requestPrefix}${rawPath}${query}`, {
-        method: requestOptions.method || 'GET',
-        credentials: 'include',
-        cache: 'no-store',
-        headers: {
-          Accept: 'application/json',
-          ...(requestOptions.body ? { 'Content-Type': 'application/json' } : {}),
-          ...(token ? { 'Authori-zation': `Bearer ${token}` } : {})
-        },
-        ...(requestOptions.body ? { body: JSON.stringify(requestOptions.body) } : {}),
-        ...(controller ? { signal: controller.signal } : {})
-      })
-      const text = await response.text()
-      let body
-      try { body = text ? JSON.parse(text) : null } catch (_) { throw new Error('库存服务返回了非 JSON 数据。') }
-      if (!response.ok) throw businessError(body, `库存服务请求失败（HTTP ${response.status}）。`)
-      return normalizeEnvelope(body)
-    } catch (error) {
-      if (error?.name === 'AbortError') throw new Error('库存服务响应超时，请先查询单据状态后再重试。')
-      throw error instanceof Error ? error : new Error('库存服务请求未完成。')
-    } finally {
-      if (timer) clearTimeout(timer)
+    const method = requestOptions.method || 'GET'
+    // Only the transfer list opts into gateway recovery; never replay a stock-changing command.
+    const retryGatewayRead = method === 'GET' && requestOptions.retryTransientGateway === true
+    for (let attempt = 0; attempt <= (retryGatewayRead ? 2 : 0); attempt += 1) {
+      const controller = typeof AbortController === 'function' ? new AbortController() : null
+      // 大盘点仍是一张原子单据；仅延长该命令的等待时间，不拆成会部分入账的小单。
+      const timer = controller ? setTimeout(() => controller.abort(), requestOptions.timeoutMs || TIMEOUT_MS) : null
+      try {
+        const response = await fetchImpl(`${requestPrefix}${rawPath}${query}`, {
+          method,
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/json',
+            ...(requestOptions.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(token ? { 'Authori-zation': `Bearer ${token}` } : {})
+          },
+          ...(requestOptions.body ? { body: JSON.stringify(requestOptions.body) } : {}),
+          ...(controller ? { signal: controller.signal } : {})
+        })
+        if (retryGatewayRead && [502, 503, 504].includes(response.status)) {
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 250 : 750))
+            continue
+          }
+          throw new Error('库存服务暂时不可用，请点击查询重试。')
+        }
+        // A gateway error on batch creation cannot prove rollback; keep the same client key and check documents first.
+        if (requestOptions.uncertainTransferCommand && [502, 503, 504].includes(response.status)) {
+          throw new Error('调拨结果尚未确认，请先查询调拨单状态，勿重复保存。')
+        }
+        const text = await response.text()
+        let body
+        try { body = text ? JSON.parse(text) : null } catch (_) { throw new Error('库存服务返回了非 JSON 数据。') }
+        if (!response.ok) throw businessError(body, `库存服务请求失败（HTTP ${response.status}）。`)
+        return normalizeEnvelope(body)
+      } catch (error) {
+        if (requestOptions.uncertainTransferCommand && (error?.name === 'AbortError' || error instanceof TypeError || error?.message === '库存服务返回了非 JSON 数据。')) {
+          throw new Error('调拨结果尚未确认，请先查询调拨单状态，勿重复保存。')
+        }
+        if (error?.name === 'AbortError') throw new Error('库存服务响应超时，请先查询单据状态后再重试。')
+        throw error instanceof Error ? error : new Error('库存服务请求未完成。')
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
     }
   }
 
@@ -248,13 +267,13 @@ export function createInventoryApi(options = {}) {
     voidHqRequest(id, body) { return request(`/v3/hq/request/${Number(id)}/void`, { method: 'POST', body }) },
     hqProductSummary(query = {}) { return request('/v3/hq/product-summary', { query }) },
     hqProductDetail(productId, query = {}) { return request(`/v3/hq/product-summary/${Number(productId)}/detail`, { query }) },
-    listHqCrossTransfers(query = {}) { return request('/v3/hq/cross-transfer', { query }) },
+    listHqCrossTransfers(query = {}) { return request('/v3/hq/cross-transfer', { query, retryTransientGateway: true }) },
     hqCrossTransferCounterparties(query = {}) { return request('/v3/hq/cross-transfer/counterparties', { query }) },
     hqCrossTransferIncomingRequests(query = {}) { return request('/v3/hq/cross-transfer/incoming-requests', { query }) },
     hqCrossTransferStaffs(query = {}) { return request('/v3/hq/cross-transfer/transfer-staffs', { query }) },
     hqCrossTransferDetail(id, query = {}) { return request(`/v3/hq/cross-transfer/${Number(id)}/detail`, { query }) },
     createHqCrossTransfer(body) { return request('/v3/hq/cross-transfer', { method: 'POST', body }) },
-    createHqCrossTransferBatch(body) { return request('/v3/hq/cross-transfer/batch', { method: 'POST', body, timeoutMs: 300000 }) },
+    createHqCrossTransferBatch(body) { return request('/v3/hq/cross-transfer/batch', { method: 'POST', body, timeoutMs: 300000, uncertainTransferCommand: true }) },
     operateHqCrossTransferBatch(body) { return request('/v3/hq/cross-transfer/batch-operation', { method: 'POST', body, timeoutMs: 300000 }) },
     // 平台只切换认证入口，草稿版本和库存事实仍由同一领域服务处理。
     updateHqCrossTransfer(id, body) { return request(`/v3/hq/cross-transfer/${Number(id)}/update`, { method: 'POST', body }) },
@@ -295,7 +314,7 @@ export function createInventoryApi(options = {}) {
     crossTransferIncomingRequests() { return request('/v3/cross-transfer/incoming-requests') },
     crossTransferDetail(id) { return request(`/v3/cross-transfer/${Number(id)}/detail`) },
     createCrossTransfer(body) { return request('/v3/cross-transfer', { method: 'POST', body }) },
-    createCrossTransferBatch(body) { return request('/v3/cross-transfer/batch', { method: 'POST', body, timeoutMs: 300000 }) },
+    createCrossTransferBatch(body) { return request('/v3/cross-transfer/batch', { method: 'POST', body, timeoutMs: 300000, uncertainTransferCommand: true }) },
     operateCrossTransferBatch(body) { return request('/v3/cross-transfer/batch-operation', { method: 'POST', body, timeoutMs: 300000 }) },
     updateCrossTransfer(id, body) { return request(`/v3/cross-transfer/${Number(id)}/update`, { method: 'POST', body }) },
     deleteCrossTransferDraft(id, body) { return request(`/v3/cross-transfer/${Number(id)}/delete-draft`, { method: 'POST', body }) },

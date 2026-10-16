@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { FileSpreadsheet, ListChecks, Plus, Search, Trash2, X } from '@lucide/vue'
 import { inventoryApi, platformInventoryApi } from '../services/inventoryApi'
 import InventoryProductSelector from './InventoryProductSelector.vue'
@@ -39,6 +39,8 @@ const busy = ref(false)
 const error = ref('')
 const fileName = ref('')
 const attempt = ref({ content: '', key: '' })
+const destinationPreview = ref(null)
+let destinationPreviewHideTimer = null
 let nextRowId = 1
 const catalogApi = computed(() => platform.value ? platformInventoryApi : inventoryApi)
 const defaultSourceKey = computed(() => platform.value && Number(props.hqLocationId) > 0 ? `HQ:${Number(props.hqLocationId)}` : '')
@@ -72,6 +74,38 @@ const catalogQuery = computed(() => {
 })
 const plannedCount = computed(() => new Set(rows.value.flatMap((row) => row.destinations.map((item) => `${row.sourceKey}>${item.key}`))).size)
 const canSubmit = computed(() => !busy.value && rows.value.length > 0)
+
+// Preview only this row's recipients, resolving names from its authorized destination directory.
+function showDestinationPreview(row, event) {
+  if (destinationPreviewHideTimer) clearTimeout(destinationPreviewHideTimer)
+  destinationPreviewHideTimer = null
+  if (!row.destinations.length) return
+  const names = new Map((targetLists.value[row.sourceKey] || []).map((item) => [item.key, item.name]))
+  const entries = row.destinations.map((item) => ({ key: item.key, name: names.get(item.key) || item.key }))
+  const rect = event.currentTarget.getBoundingClientRect()
+  const width = Math.min(240, window.innerWidth - 16)
+  const height = Math.min(240, 42 + entries.length * 30)
+  destinationPreview.value = {
+    rowId: row.id,
+    entries,
+    left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+    top: rect.bottom + height + 8 <= window.innerHeight ? rect.bottom + 8 : Math.max(8, rect.top - height - 8)
+  }
+}
+function hideDestinationPreview() {
+  if (destinationPreviewHideTimer) clearTimeout(destinationPreviewHideTimer)
+  destinationPreviewHideTimer = null
+  destinationPreview.value = null
+}
+function scheduleHideDestinationPreview() {
+  if (destinationPreviewHideTimer) clearTimeout(destinationPreviewHideTimer)
+  destinationPreviewHideTimer = setTimeout(hideDestinationPreview, 160)
+}
+function keepDestinationPreview() {
+  if (destinationPreviewHideTimer) clearTimeout(destinationPreviewHideTimer)
+  destinationPreviewHideTimer = null
+}
+onBeforeUnmount(hideDestinationPreview)
 
 function newRow(sourceKey = defaultSourceKey.value) {
   return { id: nextRowId++, sourceKey, product: null, quantity: '1', detailRemark: '', destinations: [] }
@@ -120,6 +154,7 @@ function onSourceChanged(row, key) {
   row.sourceKey = String(key || '')
   row.product = null
   row.destinations = []
+  if (destinationPreview.value?.rowId === row.id) hideDestinationPreview()
   if (productRowId.value === row.id) productRowId.value = 0
   if (destinationRowId.value === row.id) destinationRowId.value = 0
   error.value = ''
@@ -183,6 +218,7 @@ function selectProducts(products) {
   productRowId.value = 0
 }
 async function openDestinations(row) {
+  hideDestinationPreview()
   if (!row.sourceKey && platform.value) { error.value = '请先选择调出方。'; return }
   const sourceKey = row.sourceKey
   await loadTargets(sourceKey)
@@ -329,6 +365,8 @@ async function submitDrafts(items = rows.value, dispatchAfterCreate = false) {
       transferSourceKey: platform.value ? String(items[0]?.sourceKey || '') : '',
       transferDraftCount: drafts.length,
       transferSourceCount: new Set(items.map((row) => row.sourceKey)).size,
+      // The authority response supplies document numbers; a read failure after this point cannot revoke creation.
+      transferNumbers: Array.isArray(response?.drafts) ? response.drafts.map((draft) => String(draft?.transfer_no || '')).filter(Boolean) : [],
       transferStatus: dispatchAfterCreate ? 'DISPATCHED' : 'DRAFT'
     })
     emit('close')
@@ -352,7 +390,7 @@ watch(defaultSourceKey, (sourceKey, previous) => {
       <div><small>{{ mode === 'platform' ? '平台端' : '门店端' }} · {{ scopeName }}</small><h2>{{ importMode ? '导入调拨草稿' : '新建调拨草稿' }}</h2></div>
       <button class="icon-button" title="返回列表" :disabled="busy" @click="emit('close')"><X :size="19" /></button>
     </header>
-    <main class="composer-body">
+    <main class="composer-body" @scroll.capture="hideDestinationPreview">
       <section class="composer-meta">
         <label>调拨日期<input v-model="businessDate" type="date" :disabled="busy" /></label>
         <label v-if="platform">调拨人
@@ -387,7 +425,7 @@ watch(defaultSourceKey, (sourceKey, previous) => {
                 <td v-if="batchMode && !importMode" class="select-cell"><input type="checkbox" :checked="selectedRowIds.includes(row.id)" :disabled="busy" :aria-label="`选择第 ${rows.indexOf(row) + 1} 条明细`" @change="toggleRow(row.id)" /></td>
                 <td class="party-cell"><InventoryStoreSelector v-if="platform" :model-value="row.sourceKey" :options="sourceOptions" presentation="modal" :disabled="busy" placeholder="选择调出方" @update:modelValue="onSourceChanged(row, $event)" /><span v-else>{{ scopeName }}</span></td>
                 <td><button type="button" class="product-button" :disabled="busy" @click="openProducts(row)">{{ row.product ? `${row.product.product_name} · ${row.product.sku_name || '默认规格'}` : '选择商品' }}</button></td>
-                <td><button type="button" class="destination-button" :disabled="busy || !!targetLoading[row.sourceKey]" @click="openDestinations(row)">{{ row.destinations.length ? `已选 ${row.destinations.length} 个调入方` : '选择调入方' }}</button></td>
+                <td><button type="button" class="destination-button" :disabled="busy || !!targetLoading[row.sourceKey]" :aria-describedby="destinationPreview?.rowId === row.id ? 'destination-preview-tooltip' : undefined" @mouseenter="showDestinationPreview(row, $event)" @mouseleave="scheduleHideDestinationPreview" @focus="showDestinationPreview(row, $event)" @blur="scheduleHideDestinationPreview" @keydown.esc="hideDestinationPreview" @click="openDestinations(row)">{{ row.destinations.length ? `已选 ${row.destinations.length} 个调入方` : '选择调入方' }}</button></td>
                 <td><input class="quantity-input" :value="row.quantity" inputmode="decimal" :disabled="busy" aria-label="每店默认数量" @input="updateDefaultQuantity(row, $event.target.value)" /></td>
                 <td><input v-model="row.detailRemark" maxlength="500" :disabled="busy" aria-label="明细备注" /></td>
                 <td><button type="button" class="delete-button" title="删除明细" :disabled="busy" @click="rows = rows.filter((item) => item.id !== row.id)"><Trash2 :size="16" /></button></td>
@@ -402,6 +440,10 @@ watch(defaultSourceKey, (sourceKey, previous) => {
   </section>
   <InventoryProductSelector :visible="!!productRowId" :selected-rows="activeProductRow?.product ? [activeProductRow.product] : []" :catalog-api="catalogApi" :catalog-query="catalogQuery" @close="productRowId = 0" @confirm="selectProducts" />
   <Teleport to="body">
+    <div v-if="destinationPreview" id="destination-preview-tooltip" class="destination-preview-tooltip" role="tooltip" :style="{ left: `${destinationPreview.left}px`, top: `${destinationPreview.top}px` }" @mouseenter="keepDestinationPreview" @mouseleave="hideDestinationPreview">
+      <strong>已选调入方</strong>
+      <ul><li v-for="item in destinationPreview.entries" :key="item.key">{{ item.name }}</li></ul>
+    </div>
     <div v-if="dispatchConfirmation" class="dispatch-layer">
       <button class="dispatch-mask" aria-label="返回调拨明细" @click="dispatchConfirmation = false" />
       <section class="dispatch-dialog" role="dialog" aria-modal="true" aria-label="确认生成并发货">
@@ -440,4 +482,8 @@ watch(defaultSourceKey, (sourceKey, previous) => {
 .dispatch-dialog footer .dispatch-button { border-color: #c94343; background: #c94343; color: #fff; }
 .destination-layer { position: fixed; z-index: 130; inset: 0; display: grid; place-items: center; padding: 16px; }.destination-mask { position: absolute; inset: 0; border: 0; background: #12283d66; }.destination-dialog { position: relative; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: min(620px, 100%); max-height: min(760px, 90vh); overflow: hidden; border-radius: 8px; background: #fff; box-shadow: 0 24px 60px #061e3660; }.destination-dialog > header, .destination-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5ecf3; }.destination-dialog > footer { justify-content: flex-end; border-top: 1px solid #e5ecf3; border-bottom: 0; }.destination-dialog h3 { margin: 0; font-size: 15px; }.destination-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; }.destination-toolbar label { display: flex; flex: 1; align-items: center; gap: 5px; min-width: 180px; border: 1px solid #d8e3ed; border-radius: 6px; padding: 0 8px; }.destination-toolbar input { width: 100%; height: 32px; border: 0; outline: 0; }.destination-toolbar span { font-size: 12px; color: #60748a; }.destination-list { min-height: 120px; overflow: auto; padding: 0 16px 12px; }.destination-item { display: flex; align-items: center; justify-content: space-between; min-height: 43px; gap: 8px; border-bottom: 1px solid #eff3f7; font-size: 12px; }.destination-item label { display: flex; align-items: center; gap: 8px; flex: 1; }.destination-item > input { width: 90px; height: 30px; border: 1px solid #d8e3ed; border-radius: 6px; padding: 0 7px; }
 @media (max-width: 650px) { .transfer-composer { height: calc(100vh - 94px); }.composer-meta { display: grid; }.composer-meta label { min-width: 0; }.composer-footer { align-items: flex-start; flex-direction: column; }.composer-footer > div { align-self: flex-end; } }
+.destination-preview-tooltip { box-sizing: border-box; position: fixed; z-index: 125; width: min(240px, calc(100vw - 16px)); max-height: 240px; overflow: auto; padding: 10px 12px; border: 1px solid #d5e1ee; border-radius: 6px; background: #fff; box-shadow: 0 8px 24px #102b4540; color: #30465d; font-size: 12px; }
+.destination-preview-tooltip strong { display: block; margin-bottom: 6px; font-size: 12px; }
+.destination-preview-tooltip ul { margin: 0; padding-left: 16px; }
+.destination-preview-tooltip li { padding: 3px 0; overflow-wrap: anywhere; }
 </style>
