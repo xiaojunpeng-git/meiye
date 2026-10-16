@@ -1,0 +1,10 @@
+# R32 组合卡历史选择销售单作废：瑞昊 / 008 发布记录
+
+- 验收源码提交：`2c9a671f77b1cfd7e4be35edcace1f94887636aa`，只含后端修复、定向测试及本地验收记录。为避免共享开发分支中的其他任务提交进入 Gitee，隔离发布分支 `release/r32-card-choice-sales-void-20261016` 以已推送的 R31 `9fab469601ec03ae8b4bce3ca73eda07aaa9cc7e` 为父提交，仅有一笔 R32 提交 `ce07301f3f6d554eb8f449688ff7546d62353ac6`；三个文件的 blob 与验收提交逐一相同。Gitee 远端引用已核对。
+- 通用后端：只替换 `app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php`，旧 SHA-256 `2f9324d3b9537743115381cac402c2629abc64db5895eeea6fbbc9a073b91e2f`，新 SHA-256 `fb4afe2ff7d27465b8eaa8a9e139c818f74bcd953ba5d91e50e24f292857eaf6`。两站切换前分别核对旧指纹、独立备份、候选指纹和 PHP 语法，切换失败时恢复旧文件并重启；未执行迁移、数据写入或真实作废。
+- 瑞昊 `rh.cc3798.com`：独立库 `ruihao:3306`，升级记录 `id=244 / 20261016-004-system-balance-project`；备份 `/www/backups/rh.cc3798.com/20261016-r32-2c9a671f/before.php`。后端新指纹核对通过，Swoole `20800` 监听恢复，`/cashierapi/config` HTTP 200。生产只读事务用已部署门禁核对 `XS26100700206` 对应组合卡，`restoredRuleAccepted=true`，订单仍为 `settled`，未代会员执行作废。
+- 瑞昊正式 `/view_cashier_v3/` 与预览 `/preview-8080/view_cashier_v3/`：本轮只发布共用后端，不替换任一前端静态包。两处磁盘 `index.html` 发布前后均为 `64ad1b86ca07db99db2843c1987b527144dc5392fc31f304e64346071ea93740`；公网各自引用主 JS `index-c9ba1ed2.js` / CSS `index-66a7d64e.css`，内容 SHA-256 分别为 `847f0241716cae85bc0731783f11b17c2da4ed399a8483c6d4efe35585d9ee68` / `66a7d64ee1cf40d07091006d27eafccabff4b66b4c9a47707b284524dfeafb13`，与发布前磁盘一致。
+- 渼约008 `008.cc3798.com`：独立库 `mohe_008:3307`，升级记录 `id=36 / 20261016-004-system-balance-project`；备份 `/www/backups/008.cc3798.com/20261016-r32-ce07301f/before.php`。后端新指纹核对通过，独立 Swoole 服务 `active`，`/cashierapi/config` HTTP 200，已部署门禁只读样本 `restoredHistoryAccepted=true`。
+- 008 前端由另一轮在本次发布准备期间更新，本轮未覆盖：重新预检及发布后磁盘 `index.html` 均为 `fd5c7ba5eaadcaf3eb0374767b34e5376b995afd788061dba14d514684604782`。公网主 JS `index-c8a29f34.js` / CSS `index-980af278.css` 的 SHA-256 分别为 `9e30d51e4f4136c8c79836d6f92f3fd84ac55c5fa658bf9ff0566138a7f96ef6` / `980af278601e6cbfd13b4a57e19cc9616bcc53c9954676ce6aa841ef4ffa6b13`，与重新预检和发布后磁盘一致。
+- 回滚边界：仅在确认目标后端未再被后续发布修改后，各站可由各自 `before.php` 恢复该文件并重启本实例服务；不得跨客户使用备份或恢复静态包。未点名实例保持原状。
+- 数据架构自检：权益核销与服务作废事实仍逐笔配对并保留历史；本轮仅调整销售整单作废的规则状态判定，不创建新事实、事件、金额或统计口径。原事务、锁、幂等及权限路径未改变；新增的组合组计数校验仍失败即拒绝，未做历史回填或数据库变更。真实作废及其经营报表结果未在生产执行验证。
