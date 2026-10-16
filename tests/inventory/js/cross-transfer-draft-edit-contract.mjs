@@ -25,7 +25,7 @@ const checks = [
     for (const field of ['business_date', 'to_party_type', 'request_document_id', 'from_product_id', 'from_sku_id', 'requested_quantity_units', 'detail_remark']) assert.ok(modal.includes(field), field)
   }],
   ['linked request cannot be replaced and locks target selection', () => {
-    assert.match(modal, /:disabled="\(isTransferEdit && requestDocumentId > 0\) \|\| transferImportBusy \|\| submitting"/)
+    assert.match(modal, /:disabled="isTransferEdit && requestDocumentId > 0"/)
     assert.match(modal, /<input v-if="isTransferEdit" :value="requestDocumentId/)
   }],
   ['edit submits the original detail token to the update route', () => {

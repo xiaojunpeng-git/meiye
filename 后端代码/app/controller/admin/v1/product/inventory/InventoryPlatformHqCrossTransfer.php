@@ -103,6 +103,39 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
         }
     }
 
+    /** Multi-destination imports remain draft-only and commit as one transaction. */
+    public function createBatch()
+    {
+        try {
+            $input = $this->request->post();
+            return $this->success('调拨草稿已批量生成。', $this->services->createDraftBatchForHeadquarters((array)$this->adminInfo, is_array($input) ? $input : []));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('批量调拨参数不合法。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+        }
+    }
+
+    /** The selected source warehouse governs every document in one atomic lifecycle batch. */
+    public function operateBatch()
+    {
+        try {
+            $input = $this->request->post();
+            $input = is_array($input) ? $input : [];
+            return $this->success('批量调拨操作已完成。', $this->services->operateBatchForHeadquarters(
+                (array)$this->adminInfo, (int)($input['hq_location_id'] ?? 0), $input
+            ));
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->fail('批量调拨参数不合法。', ['code' => $exception->getMessage()]);
+        } catch (\RuntimeException $exception) {
+            return $this->fail($this->message($exception->getMessage()), ['code' => $exception->getMessage()]);
+        }
+    }
+
     /** 草稿写入只转交统一领域服务；控制器不自行改表或扣库存。 */
     public function update(int $id)
     {
@@ -221,6 +254,10 @@ final class InventoryPlatformHqCrossTransfer extends AuthController
             'inventory_cross_transfer_delete_state_invalid' => '仅调出方可删除未发货草稿。',
             'inventory_cross_transfer_draft_changed' => '草稿已被修改，请刷新后重试。',
             'inventory_cross_transfer_delete_facts_exist' => '调拨已有库存或履约记录，不可删除。',
+            'inventory_cross_transfer_batch_action_invalid' => '请选择至少两张可操作的调拨单，并刷新后重试。',
+            'inventory_cross_transfer_batch_source_mixed' => '批量操作只能选择同一调出方的单据。',
+            'inventory_cross_transfer_batch_state_invalid' => '选中的调拨单不属于当前调出方，整批未执行。',
+            'inventory_cross_transfer_batch_state_changed' => '选中的调拨单状态已变化，整批未执行，请刷新后重试。',
             'inventory_cross_transfer_request_target_locked' => '关联请货单的调入方不可更改。',
             'inventory_cross_transfer_scope_denied' => '当前账号无权操作该调拨单。',
             'inventory_cross_transfer_target_scope_denied' => '只能操作当前组织范围内的调拨。',

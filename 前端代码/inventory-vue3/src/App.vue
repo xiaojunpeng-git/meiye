@@ -4,10 +4,11 @@ import {
   AlertTriangle, ArrowDownToLine, ArrowUpFromLine,
   Boxes, ChartNoAxesCombined, ChevronRight, ClipboardCheck,
   Clock3, FileClock, FileSpreadsheet, FlaskConical, LayoutDashboard,
-  Package2, Plus, QrCode, Search,
+  Package2, Plus, QrCode, RotateCcw, Search, Trash2, Truck,
   SlidersHorizontal, Warehouse, X
 } from '@lucide/vue'
 import InventoryBusinessModal from './components/InventoryBusinessModal.vue'
+import InventoryTransferDraftComposer from './components/InventoryTransferDraftComposer.vue'
 import InventoryOutboundExport from './components/InventoryOutboundExport.vue'
 import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOperationalUnifiedQueryToolbar.vue'
 import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
@@ -165,6 +166,33 @@ const statisticsQueryToolbar = ref(null)
 const statisticsInitialQuery = ref({})
 const transferActionConfirmation = ref(null)
 const transferActionSubmitting = ref(false)
+const transferBatchPreparing = ref(false)
+const transferBatchError = ref('')
+const selectedTransferIds = ref([])
+const selectableTransferRows = computed(() => active.value === 'transfer'
+  ? sourceRows.value.filter((row) => row.can_delete || row.can_dispatch || row.can_withdraw)
+  : [])
+const selectedTransferRows = computed(() => selectableTransferRows.value.filter((row) => selectedTransferIds.value.includes(Number(row.id))))
+const transferBatchSourceKey = (row) => `${row.from_party_type}:${Number(row.from_party_id)}:${Number(row.from_location_id || 0)}`
+
+/** A batch uses one source and one legal lifecycle transition; the server repeats these checks under document locks. */
+function canOperateTransferBatch(action) {
+  const rows = selectedTransferRows.value
+  const capability = { DELETE_DRAFT: 'can_delete', DISPATCH: 'can_dispatch', WITHDRAW: 'can_withdraw' }[action]
+  return rows.length >= 2 && rows.every((row) => row[capability] && transferBatchSourceKey(row) === transferBatchSourceKey(rows[0]))
+}
+
+function toggleTransferSelection(row) {
+  const id = Number(row.id)
+  selectedTransferIds.value = selectedTransferIds.value.includes(id)
+    ? selectedTransferIds.value.filter((selected) => selected !== id)
+    : [...selectedTransferIds.value, id]
+}
+
+function toggleAllVisibleTransfers() {
+  const ids = selectableTransferRows.value.map((row) => Number(row.id))
+  selectedTransferIds.value = ids.every((id) => selectedTransferIds.value.includes(id)) ? [] : ids
+}
 const recipeActionConfirmation = ref(null)
 const recipeActionSubmitting = ref(false)
 const countDraftDeleteConfirmation = ref(null)
@@ -1008,6 +1036,42 @@ function runTransferAction(action, row) {
   runDocumentAction(action, row, 'transfer')
 }
 
+/** Batch confirmation freezes each selected draft version; the server validates all documents again under locks. */
+async function openBulkTransferAction(action) {
+  if (!canOperateTransferBatch(action) || transferBatchPreparing.value) return
+  const rows = [...selectedTransferRows.value]
+  const listVersion = groupedListVersion
+  transferBatchPreparing.value = true
+  transferBatchError.value = ''
+  try {
+    const documents = []
+    for (let offset = 0; offset < rows.length; offset += 8) {
+      const chunk = rows.slice(offset, offset + 8)
+      const prepared = await Promise.all(chunk.map(async (row) => {
+        if (action === 'WITHDRAW') return { id: Number(row.id), expected_withdrawal_count: Number(row.withdrawal_count) }
+        const detail = mode.value === 'platform'
+          ? await platformInventoryApi.hqCrossTransferDetail(row.id, { hq_location_id: Number(row.from_party_type === 'HQ' ? row.from_location_id : platformHqLocationId.value) })
+          : await inventoryApi.crossTransferDetail(row.id)
+        if (!detail?.can_edit || (action === 'DELETE_DRAFT' && !detail?.can_delete) || !detail?.edit_token) {
+          throw new Error(`单据 ${row.order_sn || row.id} 已变化，请刷新后重新选择。`)
+        }
+        return { id: Number(row.id), expected_edit_token: detail.edit_token }
+      }))
+      documents.push(...prepared)
+    }
+    if (listVersion !== groupedListVersion || active.value !== 'transfer') return
+    const labels = { DELETE_DRAFT: '批量删除草稿', DISPATCH: '批量发货', WITHDRAW: '批量撤回发货' }
+    transferActionConfirmation.value = {
+      batchAction: action, rows, documents, label: labels[action], error: '',
+      idempotencyKey: action === 'WITHDRAW' ? inventoryCommandIdempotencyKey() : ''
+    }
+  } catch (error) {
+    transferBatchError.value = error instanceof Error ? error.message : '批量操作状态读取失败。'
+  } finally {
+    transferBatchPreparing.value = false
+  }
+}
+
 // Confirm against a fresh draft token so a tab cannot delete a subsequently edited or dispatched transfer.
 async function requestDeleteTransferDraft(row) {
   if (!row?.can_delete) return
@@ -1052,6 +1116,31 @@ function cancelTransferAction() {
 async function confirmTransferAction() {
   const confirmation = transferActionConfirmation.value
   if (!confirmation || transferActionSubmitting.value) return
+  if (confirmation.batchAction) {
+    transferActionSubmitting.value = true
+    try {
+      const payload = {
+        action: confirmation.batchAction,
+        documents: confirmation.documents,
+        idempotency_key: confirmation.idempotencyKey
+      }
+      if (mode.value === 'platform') {
+        payload.hq_location_id = Number(confirmation.rows[0].from_party_type === 'HQ'
+          ? confirmation.rows[0].from_location_id : platformHqLocationId.value)
+        await platformInventoryApi.operateHqCrossTransferBatch(payload)
+      } else {
+        await inventoryApi.operateCrossTransferBatch(payload)
+      }
+      selectedTransferIds.value = []
+      transferActionConfirmation.value = null
+      await loadCurrentList()
+    } catch (error) {
+      confirmation.error = error instanceof Error ? error.message : '批量操作未完成，所有单据均保持原状。'
+    } finally {
+      transferActionSubmitting.value = false
+    }
+    return
+  }
   const { action, row, documentType } = confirmation
   const reason = String(confirmation.reason || '').trim()
   if (confirmation.requiresReason && reason.length < 2) return
@@ -1229,6 +1318,10 @@ function isExplicitListQuery(value) {
 
 async function loadCurrentList(unifiedQuery = null) {
   if (mode.value === 'platform' && active.value === 'transfer') platformTransferCanCreate.value = false
+  if (active.value === 'transfer') {
+    selectedTransferIds.value = []
+    transferBatchError.value = ''
+  }
   if (active.value === 'overview' || active.value === 'statistics') return
   // 分组呈现按单据类型选择，不按终端分支；平台与门店共用下面唯一的表格模板。
   const groupedPage = groupedListPages.has(active.value) ? active.value : ''
@@ -1291,6 +1384,7 @@ async function loadCurrentList(unifiedQuery = null) {
       if (platformRequestStatus.value) query.status = platformRequestStatus.value
     }
     if (mode.value === 'platform' && active.value === 'transfer') {
+      query.limit = 200
       const [fromType, fromId] = String(platformTransferFromParty.value || 'ALL:0').split(':')
       const [toType, toId] = String(platformTransferToParty.value || 'ALL:0').split(':')
       if (fromType === 'HQ' || fromType === 'STORE') { query.from_party_type = fromType; query.from_party_id = fromType === 'HQ' ? 0 : Number(fromId) || 0; if (fromType === 'HQ') query.from_location_id = Number(fromId) }
@@ -1744,7 +1838,14 @@ onBeforeUnmount(() => {
           <button class="transfer-confirmation-layer__backdrop" aria-label="关闭确认窗口" :disabled="transferActionSubmitting" @click="cancelTransferAction"></button>
           <div class="transfer-confirmation-dialog">
             <h2>确认{{ transferActionConfirmation.label }}</h2>
-            <p v-if="transferActionConfirmation.action === 'deleteDraft'">单据 {{ transferActionConfirmation.row.order_sn || transferActionConfirmation.row.id }} 的草稿及商品明细将永久删除，无法恢复。已发货或已有库存流水、请货履约的调拨单不能删除。</p>
+            <template v-if="transferActionConfirmation.batchAction">
+              <p v-if="transferActionConfirmation.batchAction === 'DELETE_DRAFT'">以下 {{ transferActionConfirmation.rows.length }} 张草稿及商品明细将永久删除，无法恢复。</p>
+              <p v-else-if="transferActionConfirmation.batchAction === 'DISPATCH'">以下 {{ transferActionConfirmation.rows.length }} 张调拨单将发货并扣减调出方库存。</p>
+              <p v-else>以下 {{ transferActionConfirmation.rows.length }} 张未收货单据将撤回；原批次库存恢复，发货和撤回流水保留。</p>
+              <div class="transfer-batch-documents" aria-label="待处理调拨单"><span v-for="row in transferActionConfirmation.rows" :key="row.id">{{ row.order_sn || row.id }} · {{ row.to_party_name || '调入方' }}</span></div>
+              <p>任一单据校验失败时，本批全部不生效。</p>
+            </template>
+            <p v-else-if="transferActionConfirmation.action === 'deleteDraft'">单据 {{ transferActionConfirmation.row.order_sn || transferActionConfirmation.row.id }} 的草稿及商品明细将永久删除，无法恢复。已发货或已有库存流水、请货履约的调拨单不能删除。</p>
             <p v-else-if="transferActionConfirmation.action === 'withdraw'">单据 {{ transferActionConfirmation.row.order_sn || transferActionConfirmation.row.id }} 尚未收货。撤回后调出方原批次库存会恢复，单据变为草稿；原发货和撤回流水会保留。</p>
             <p v-else>单据 {{ transferActionConfirmation.row.order_sn || transferActionConfirmation.row.document_no || transferActionConfirmation.row.id }} 将执行{{ transferActionConfirmation.label }}。原单和原始库存流水会保留。</p>
             <p v-if="transferActionConfirmation.error" class="inventory-load-error" role="alert">{{ transferActionConfirmation.error }}</p>
@@ -1754,7 +1855,7 @@ onBeforeUnmount(() => {
             </label>
             <footer>
               <button class="secondary-button" :disabled="transferActionSubmitting" @click="cancelTransferAction">取消</button>
-              <button class="primary-button" :disabled="transferActionSubmitting || (transferActionConfirmation.requiresReason && String(transferActionConfirmation.reason || '').trim().length < 2)" @click="confirmTransferAction">{{ transferActionSubmitting ? '处理中...' : transferActionConfirmation.action === 'deleteDraft' ? '确认永久删除' : ['void', 'voidRequest'].includes(transferActionConfirmation.action) ? '作废' : '确认' }}</button>
+              <button class="primary-button" :disabled="transferActionSubmitting || (transferActionConfirmation.requiresReason && String(transferActionConfirmation.reason || '').trim().length < 2)" @click="confirmTransferAction">{{ transferActionSubmitting ? '处理中...' : transferActionConfirmation.batchAction === 'DELETE_DRAFT' || transferActionConfirmation.action === 'deleteDraft' ? '确认永久删除' : ['void', 'voidRequest'].includes(transferActionConfirmation.action) ? '作废' : '确认' }}</button>
             </footer>
           </div>
         </section>
@@ -1783,6 +1884,7 @@ onBeforeUnmount(() => {
         </section>
         <InventoryRemarkModal v-if="remarkEditor" :page="remarkEditor.page" :detail="remarkEditor.detail" :saving="remarkSaving" :error="remarkError" @close="remarkEditor = null" @save="saveRemark" />
         <InventoryRecipeModal v-if="editor && active === 'recipe'" :recipe-id="Number(selectedDetail?.id || 0)" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" />
+        <InventoryTransferDraftComposer v-else-if="editor && active === 'transfer' && (editor === 'transfer-import' || (editor === 'transfer' && !selectedDetail?.transfer_request_id))" :mode="mode" :modal-kind="editor" :scope-name="scopeName" :warehouse-options="platformLocations" :hq-location-id="platformHqLocationId" :default-business-date="todayDate()" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" />
         <InventoryBusinessModal v-else-if="editor" :page-key="active" :modal-kind="editor" :detail="selectedDetail" :scope-name="scopeName" :default-location-name="defaultLocationName" :warehouse-options="platformLocations" :warehouse-selection="platformListWarehouseSelection" :hq-location-id="platformHqLocationId" :usage-store-id="platformUsageStoreId" :default-business-date="todayDate()" :mode="mode" @close="editor = ''; selectedDetail = null" @saved="onModalSaved" @edit-count-draft="editor = 'count-edit'" />
         <template v-else-if="active === 'overview'">
           <div class="page-heading page-heading--dashboard">
@@ -1947,6 +2049,16 @@ onBeforeUnmount(() => {
             <div v-if="active === 'count'" class="count-period-filter"><UnifiedQueryDateRange :model-value="countDateRange" label="盘点日期周期" @change="applyCountDateRange" /></div>
             <button class="primary-button" :disabled="listLoading || (platformFilterRequiresHqLocation && !platformHqLocationId) || (platformUsageRequiresWarehouse && !platformListWarehouseOptions.length)" @click="loadCurrentList">{{ listLoading ? '查询中' : '查询' }}</button>
           </section>
+            <div v-if="active === 'transfer'" class="transfer-batch-toolbar">
+              <label><input type="checkbox" :checked="selectableTransferRows.length > 0 && selectedTransferRows.length === selectableTransferRows.length" :disabled="!selectableTransferRows.length || transferBatchPreparing || transferActionSubmitting" @change="toggleAllVisibleTransfers" />全选当前列表</label>
+              <span>已选 {{ selectedTransferRows.length }} 张</span>
+              <button class="secondary-button" :disabled="!canOperateTransferBatch('DELETE_DRAFT') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DELETE_DRAFT')"><Trash2 :size="14" />删除</button>
+              <button class="secondary-button" :disabled="!canOperateTransferBatch('DISPATCH') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DISPATCH')"><Truck :size="14" />发货</button>
+              <button class="secondary-button" :disabled="!canOperateTransferBatch('WITHDRAW') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('WITHDRAW')"><RotateCcw :size="14" />撤回</button>
+              <span v-if="transferBatchPreparing">正在核对单据...</span>
+              <span v-else-if="selectedTransferRows.length >= 2 && !['DELETE_DRAFT', 'DISPATCH', 'WITHDRAW'].some(canOperateTransferBatch)">请只选择同一调出方、同一操作状态的单据</span>
+              <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
+            </div>
 <section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active) }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" :disabled="mode === 'platform' && !platformCanManageInventory" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' && mode === 'store' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
             </tbody></table>
             <!-- 两端共用单据单行信息带和商品表头；仅能力按钮及仓库上下文来自各自权威接口。 -->
@@ -1957,6 +2069,7 @@ onBeforeUnmount(() => {
                 <tr v-else-if="!currentRows.length"><td :colspan="groupedDetailColumns[active].length" class="table-empty">暂无符合条件的记录</td></tr>
                 <template v-else v-for="(row, index) in currentRows" :key="groupedDetailKey(sourceRows[index])">
                   <tr class="inventory-group-row"><td :colspan="groupedDetailColumns[active].length"><div class="inventory-group-line">
+                    <label v-if="active === 'transfer' && (sourceRows[index].can_delete || sourceRows[index].can_dispatch || sourceRows[index].can_withdraw)" class="inventory-group-select"><input type="checkbox" :checked="selectedTransferIds.includes(Number(sourceRows[index].id))" :disabled="transferBatchPreparing || transferActionSubmitting" :aria-label="`选择调拨单 ${sourceRows[index].order_sn || sourceRows[index].id}`" @change="toggleTransferSelection(sourceRows[index])" /></label>
                     <span v-for="(cell, cellIndex) in row" :key="cellIndex"><strong>{{ currentPage.columns[cellIndex] }}：</strong><b>{{ cell }}</b></span>
                     <span class="inventory-group-line__actions">
                       <button class="text-button" @click="openGroupedRowDetail(active, sourceRows[index])">查看</button>

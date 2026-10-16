@@ -41,6 +41,20 @@ final class InventoryCrossSubjectTransfer extends AuthController
         return $this->run(fn (): array => $this->services->createDraftForStore((int)$this->storeId, (int)$this->storeStaffId, $input), '跨店调拨草稿已保存。');
     }
 
+    /** Store source remains the authenticated store for every draft in the batch. */
+    public function createBatch()
+    {
+        $input = $this->request->post();
+        return $this->run(fn (): array => $this->services->createDraftBatchForStore((int)$this->storeId, (int)$this->storeStaffId, is_array($input) ? $input : []), '调拨草稿已批量生成。');
+    }
+
+    /** A bulk lifecycle command is one transaction and retains the authenticated source-store boundary. */
+    public function operateBatch()
+    {
+        $input = $this->request->post();
+        return $this->run(fn (): array => $this->services->operateBatchForStore((int)$this->storeId, (int)$this->storeStaffId, is_array($input) ? $input : []), '批量调拨操作已完成。');
+    }
+
     /** Only the authenticated source store can replace a still-unshipped draft at its observed token. */
     public function update(int $id)
     {
@@ -124,6 +138,10 @@ final class InventoryCrossSubjectTransfer extends AuthController
             'inventory_cross_transfer_edit_state_invalid' => '该调拨单已不再是可编辑草稿，请刷新列表。',
             'inventory_cross_transfer_delete_state_invalid' => '该调拨单不是当前调出门店的未发货草稿，不能删除。',
             'inventory_cross_transfer_delete_facts_exist' => '该调拨单已关联库存流水或请货履约，不能删除。',
+            'inventory_cross_transfer_batch_action_invalid' => '请选择至少两张可操作的调拨单，并刷新后重试。',
+            'inventory_cross_transfer_batch_source_mixed' => '批量操作只能选择同一调出方的单据。',
+            'inventory_cross_transfer_batch_state_invalid' => '选中的调拨单不属于当前调出方，整批未执行。',
+            'inventory_cross_transfer_batch_state_changed' => '选中的调拨单状态已变化，整批未执行，请刷新后重试。',
             'inventory_cross_transfer_draft_changed' => '调拨草稿已被其他操作修改，请重新打开后编辑。',
             'inventory_cross_transfer_request_target_locked' => '关联请货单的调入方不能更改。',
             'inventory_cross_transfer_target_scope_denied' => '只能向同一组织范围内的门店调拨。',

@@ -134,6 +134,13 @@ button { cursor: pointer; }
 .inventory-group-line b { color: #344f6c; font-weight: 600; }
 .inventory-group-line > span:first-child b { color: #176fd1; }
 .inventory-group-line__actions { gap: 8px !important; margin-left: auto; }
+.inventory-group-select { display: inline-flex; flex: none; align-items: center; }
+.inventory-group-select input, .transfer-batch-toolbar input { width: 15px; height: 15px; accent-color: #176fd1; cursor: pointer; }
+.transfer-batch-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 8px; padding: 8px 12px; border: 1px solid #e0e7ef; background: #fff; color: #52677d; font-size: 12px; }
+.transfer-batch-toolbar label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.transfer-batch-toolbar .secondary-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; }
+.transfer-batch-toolbar__error { color: #b63333; }
+.transfer-batch-documents { display: grid; gap: 5px; max-height: 170px; overflow: auto; padding: 8px 10px; border: 1px solid #e4eaf1; background: #f8fafc; color: #344f6c; font-size: 12px; }
 .table-scroll .inventory-detail-line > td { height: 39px; background: #fff; }
 .table-scroll .inventory-detail-message-row > td { height: 40px; color: #74889b; }
 .table-scroll .inventory-detail-message-row--error > td { color: #b63333; }

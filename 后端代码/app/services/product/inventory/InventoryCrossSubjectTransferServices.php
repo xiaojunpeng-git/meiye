@@ -147,6 +147,14 @@ final class InventoryCrossSubjectTransferServices
         });
     }
 
+    /** One worksheet may fan out to many source/target documents, but either all drafts exist or none do. */
+    public function createDraftBatchForStore(int $storeId, int $operatorId, array $input): array
+    {
+        return $this->createDraftBatch($input, function (array $draft) use ($storeId, $operatorId): array {
+            return $this->createDraftForStore($storeId, $operatorId, $draft);
+        });
+    }
+
     /** Replace an unshipped source-store draft under its document lock; no stock, allocation or fact is changed. */
     public function updateDraftForStore(int $storeId, int $operatorId, int $documentId, array $input): array
     {
@@ -250,7 +258,7 @@ final class InventoryCrossSubjectTransferServices
     }
 
     /** 平台新建调拨只限制调出库存的操作范围；调入方是接收对象，不继承操作人的门店权限。 */
-    public function createDraftForHeadquarters(array $adminInfo, int $hqLocationId, array $input): array
+    public function createDraftForHeadquarters(array $adminInfo, int $hqLocationId, array $input, ?array &$batchStaffRows = null): array
     {
         $command = $this->normalize($input);
         if (!in_array($command['targetPartyType'], ['STORE', 'HQ'], true)) throw new \InvalidArgumentException('inventory_cross_transfer_target_invalid');
@@ -265,13 +273,56 @@ final class InventoryCrossSubjectTransferServices
             $sourceRoot = explode('/', trim((string)$sourceScope['organizationPath'], '/'))[0] ?? '';
             if ($hqRoot === '' || $sourceRoot === '' || $hqRoot !== $sourceRoot) throw new \RuntimeException('inventory_cross_transfer_source_scope_denied');
         }
-        return Db::transaction(function () use ($sourceScope, $hqScope, $command): array {
+        return Db::transaction(function () use ($sourceScope, $hqScope, $command, &$batchStaffRows): array {
             $target = $command['targetPartyType'] === 'HQ' ? $this->headquartersForScope($sourceScope, $command['targetLocationId']) : $this->scope($command['targetStoreId'], 0, false);
             if ($target === null) throw new \RuntimeException('inventory_cross_transfer_hq_location_missing');
             // 产品确认：调入方不按人员门店/组织权限裁剪；有效实体和租户隔离仍须服务端验证。
             $this->assertSameTenant($sourceScope, $target);
-            $command['transferStaff'] = $this->platformTransferStaff($hqScope, $sourceScope, $target, (int)$command['transferStaffId']);
+            $command['transferStaff'] = $this->platformTransferStaff($hqScope, $sourceScope, $target, (int)$command['transferStaffId'], $batchStaffRows);
             return $this->createDraft($sourceScope, $target, $command);
+        });
+    }
+
+    /** Reuse the single-draft permission and SKU checks inside one outer transaction. */
+    public function createDraftBatchForHeadquarters(array $adminInfo, array $input): array
+    {
+        // Scope this cache to one batch call, including on long-lived application workers.
+        $staffRows = [];
+        return $this->createDraftBatch($input, function (array $draft) use ($adminInfo, &$staffRows): array {
+            $hqLocationId = (int)($draft['hq_location_id'] ?? 0);
+            unset($draft['hq_location_id']);
+            return $this->createDraftForHeadquarters($adminInfo, $hqLocationId, $draft, $staffRows);
+        });
+    }
+
+    /** Derive stable child command keys so a retry cannot duplicate any of the 102 destination drafts. */
+    private function createDraftBatch(array $input, callable $create): array
+    {
+        $keys = array_keys($input);
+        sort($keys);
+        if ($keys !== ['drafts', 'idempotency_key'] || !is_array($input['drafts'])
+            || array_keys($input['drafts']) !== array_keys(array_values($input['drafts']))
+            || count($input['drafts']) < 1 || count($input['drafts']) > 200
+            || !is_string($input['idempotency_key'])
+            || preg_match('/^transfer-batch-([1-9][0-9]{0,2})-[A-Za-z0-9._-]{8,64}$/D', $input['idempotency_key'], $batchKey) !== 1
+            || (int)$batchKey[1] !== count($input['drafts'])) {
+            throw new \InvalidArgumentException('inventory_cross_transfer_batch_invalid');
+        }
+        $lineCount = 0;
+        foreach ($input['drafts'] as $draft) {
+            if (!is_array($draft) || array_key_exists('idempotency_key', $draft) || !isset($draft['lines']) || !is_array($draft['lines'])) {
+                throw new \InvalidArgumentException('inventory_cross_transfer_batch_invalid');
+            }
+            $lineCount += count($draft['lines']);
+        }
+        if ($lineCount > 500) throw new \InvalidArgumentException('inventory_cross_transfer_batch_invalid');
+        return Db::transaction(function () use ($input, $create): array {
+            $created = [];
+            foreach ($input['drafts'] as $index => $draft) {
+                $draft['idempotency_key'] = 'transfer-batch-' . substr(hash('sha256', $input['idempotency_key'] . ':' . $index), 0, 48);
+                $created[] = $create($draft);
+            }
+            return ['draft_count' => count($created), 'drafts' => $created];
         });
     }
 
@@ -297,6 +348,113 @@ final class InventoryCrossSubjectTransferServices
         return Db::transaction(function () use ($hqScope, $documentId, $expectedToken): array {
             return $this->deleteDraft($this->platformSourceScope($hqScope, $documentId, true), $documentId, $expectedToken);
         });
+    }
+
+    /** One source and one lifecycle action form an atomic batch; a failed row rolls back every stock fact and document change. */
+    public function operateBatchForStore(int $storeId, int $operatorId, array $input): array
+    {
+        return $this->operateBatch($input, fn (int $documentId): array => $this->scope($storeId, $operatorId, true));
+    }
+
+    /** Platform batch authority is resolved against the actual source warehouse, never the receiving store. */
+    public function operateBatchForHeadquarters(array $adminInfo, int $hqLocationId, array $input): array
+    {
+        $hqScope = $this->headquartersScope($adminInfo, $hqLocationId, true, 'transfer');
+        return $this->operateBatch($input, fn (int $documentId): array => $this->platformSourceScope($hqScope, $documentId, true));
+    }
+
+    private function operateBatch(array $input, callable $sourceResolver): array
+    {
+        $action = strtoupper(trim((string)($input['action'] ?? '')));
+        $entries = $input['documents'] ?? null;
+        if (!in_array($action, ['DELETE_DRAFT', 'DISPATCH', 'WITHDRAW'], true)
+            || !is_array($entries) || count($entries) < 2 || count($entries) > 200 || array_keys($entries) !== range(0, count($entries) - 1)) {
+            throw new \InvalidArgumentException('inventory_cross_transfer_batch_action_invalid');
+        }
+        $byId = [];
+        foreach ($entries as $entry) {
+            $rawId = is_array($entry) ? $entry['id'] ?? null : null;
+            if ((!is_int($rawId) && !is_string($rawId)) || preg_match('/^[1-9][0-9]*$/D', (string)$rawId) !== 1) {
+                throw new \InvalidArgumentException('inventory_cross_transfer_batch_action_invalid');
+            }
+            $id = (int)$rawId;
+            if ($id <= 0 || (string)$id !== (string)$rawId || isset($byId[$id])) throw new \InvalidArgumentException('inventory_cross_transfer_batch_action_invalid');
+            $token = strtolower(trim((string)($entry['expected_edit_token'] ?? '')));
+            if ($action !== 'WITHDRAW' && preg_match('/^[a-f0-9]{64}$/D', $token) !== 1) {
+                throw new \InvalidArgumentException('inventory_cross_transfer_batch_action_invalid');
+            }
+            $count = $entry['expected_withdrawal_count'] ?? null;
+            if ($action === 'WITHDRAW' && ((!is_int($count) && !is_string($count)) || preg_match('/^(0|[1-9][0-9]*)$/D', (string)$count) !== 1)) {
+                throw new \InvalidArgumentException('inventory_cross_transfer_batch_action_invalid');
+            }
+            if ($action === 'WITHDRAW' && (string)(int)$count !== (string)$count) {
+                throw new \InvalidArgumentException('inventory_cross_transfer_batch_action_invalid');
+            }
+            $byId[$id] = ['id' => $id, 'token' => $token, 'withdrawal_count' => (int)$count];
+        }
+        ksort($byId, SORT_NUMERIC);
+        $key = trim((string)($input['idempotency_key'] ?? ''));
+        if ($action === 'WITHDRAW' && preg_match('/^[A-Za-z0-9:._-]{8,64}$/D', $key) !== 1) {
+            throw new \InvalidArgumentException('inventory_cross_transfer_batch_action_invalid');
+        }
+
+        return Db::transaction(function () use ($action, $byId, $key, $sourceResolver): array {
+            $firstId = (int)array_key_first($byId);
+            $source = $sourceResolver($firstId);
+            $first = null;
+            $replays = [];
+            // Lock the complete set in ID order before the first mutation. No selected row may silently skip an invalid state.
+            foreach ($byId as $id => $entry) {
+                $document = $this->lockedSubjectDocument($source, (int)$id, true);
+                $this->assertSourceParty($source, $document, 'batch');
+                $identity = [(string)$document['from_party_type'], (int)$document['from_party_id'], (int)$document['from_location_id']];
+                if ($first === null) $first = $identity;
+                if ($identity !== $first) throw new \RuntimeException('inventory_cross_transfer_batch_source_mixed');
+                if ($action === 'WITHDRAW') {
+                    // A lost response replays the entire successful batch, never a second stock restoration.
+                    $replay = $this->lifecycleReplay($source, $document, 'WITHDRAW', $this->batchWithdrawKey($key, (int)$id), '');
+                    if ($replay !== null) {
+                        if ((int)$document['withdrawal_count'] !== $entry['withdrawal_count'] + 1) {
+                            throw new \RuntimeException('inventory_cross_transfer_batch_state_changed');
+                        }
+                        $replays[$id] = $replay;
+                        continue;
+                    }
+                }
+                if ((string)$document['document_status'] !== ($action === 'WITHDRAW' ? 'DISPATCHED' : 'DRAFT')) {
+                    throw new \RuntimeException('inventory_cross_transfer_batch_state_changed');
+                }
+                if ($action === 'WITHDRAW') {
+                    if ((int)$document['received_at'] > 0 || (int)$document['withdrawal_count'] !== $entry['withdrawal_count']) {
+                        throw new \RuntimeException('inventory_cross_transfer_batch_state_changed');
+                    }
+                } else {
+                    $lines = Db::name('inventory_cross_transfer_line')->where('document_id', (int)$id)
+                        ->where('retired_at', 0)->order('line_no asc')->lock(true)->select()->toArray();
+                    if (!hash_equals($this->draftEditToken($document, $lines), $entry['token'])) {
+                        throw new \RuntimeException('inventory_cross_transfer_draft_changed');
+                    }
+                }
+            }
+            if ($replays) {
+                if (count($replays) !== count($byId)) throw new \RuntimeException('inventory_cross_transfer_batch_state_changed');
+                return ['action' => $action, 'count' => count($replays), 'results' => array_values($replays)];
+            }
+            $results = [];
+            foreach ($byId as $id => $entry) {
+                if ($action === 'DELETE_DRAFT') $results[] = $this->deleteDraft($source, (int)$id, $entry['token']);
+                elseif ($action === 'DISPATCH') $results[] = $this->dispatch($source, (int)$id);
+                else $results[] = $this->withdraw($source, (int)$id, [
+                    'idempotency_key' => $this->batchWithdrawKey($key, (int)$id),
+                ]);
+            }
+            return ['action' => $action, 'count' => count($results), 'results' => $results];
+        });
+    }
+
+    private function batchWithdrawKey(string $key, int $documentId): string
+    {
+        return 'transfer-batch-withdraw-' . substr(hash('sha256', $key . ':' . $documentId), 0, 48);
     }
 
     /** HQ 的 partyId 固定为零，必须额外比对仓库，防止跨总部仓操作。 */
@@ -449,7 +607,7 @@ final class InventoryCrossSubjectTransferServices
         if ($status !== '') $query->where('d.document_status', $status);
         $count = (int)(clone $query)->group('d.id')->count();
         $list = $query->field('d.id,d.transfer_no order_sn,d.from_party_type,d.from_party_id,d.from_location_id,d.from_party_name_snapshot from_party_name,d.to_party_type,d.to_party_id,d.to_location_id,d.to_party_name_snapshot to_party_name,d.document_status,d.document_status status_name,d.withdrawal_count,d.initiator_store_id,d.business_date,d.business_date transfer_date,d.recorded_at add_time,d.recorded_at operation_at,d.created_by_operator_name_snapshot operator_name,COUNT(l.id) detail_count')
-            ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(100, $limit)))->select()->toArray();
+            ->group('d.id')->order('d.id desc')->page(max(1, $page), max(1, min(200, $limit)))->select()->toArray();
         foreach ($list as &$row) {
             $row['status_name'] = $this->statusName((string)$row['status_name']);
             $sourceAllowed = in_array((int)$row['from_location_id'], $scope['hqLocationIds'], true)
@@ -853,9 +1011,9 @@ final class InventoryCrossSubjectTransferServices
         return ['key' => $key, 'date' => $date, 'remark' => $remark, 'sourcePartyType' => $sourcePartyType, 'sourceStoreId' => $sourceStoreId, 'targetPartyType' => $targetPartyType, 'targetStoreId' => $input['target_store_id'], 'targetLocationId' => $targetLocationId, 'requestDocumentId' => $input['request_document_id'], 'transferStaffId' => (int)($input['transfer_staff_id'] ?? 0), 'lines' => $lines, 'fingerprint' => hash('sha256', json_encode([$date, $remark, $sourcePartyType, $sourceStoreId, $targetPartyType, $input['target_store_id'], $input['request_document_id'], $input['transfer_staff_id'] ?? 0, $lines, $targetLocationId], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)), 'legacyFingerprint' => $legacyFingerprint, 'now' => time()];
     }
 
-    private function platformTransferStaff(array $hqScope, array $sourceScope, array $targetScope, int $staffId): array
+    private function platformTransferStaff(array $hqScope, array $sourceScope, array $targetScope, int $staffId, ?array &$batchStaffRows = null): array
     {
-        $rows = $this->platformTransferStaffRows($hqScope);
+        $rows = $this->platformTransferStaffRows($hqScope, $batchStaffRows);
         $currentEmployeeId = (int)($hqScope['employeeId'] ?? 0);
         if ($staffId <= 0 && $currentEmployeeId > 0) {
             foreach ($rows as $row) if ((int)$row['employee_id'] === $currentEmployeeId) { $staffId = (int)$row['id']; break; }
@@ -872,10 +1030,12 @@ final class InventoryCrossSubjectTransferServices
         return ['id' => 0, 'employee_id' => 0, 'store_id' => 0, 'staff_name' => $name, 'employee_name' => $name, 'store_name' => '平台账号', 'is_current' => true];
     }
 
-    private function platformTransferStaffRows(array $hqScope): array
+    private function platformTransferStaffRows(array $hqScope, ?array &$batchStaffRows = null): array
     {
         $root = explode('/', trim((string)$hqScope['organizationPath'], '/'))[0] ?? '';
         if ($root === '') throw new \RuntimeException('inventory_cross_transfer_organization_invalid');
+        $cacheKey = hash('sha256', json_encode([$root, $hqScope['tenantId'], $hqScope['isSuperAdmin'], $hqScope['allowedStoreIds']]));
+        if ($batchStaffRows !== null && isset($batchStaffRows[$cacheKey])) return $batchStaffRows[$cacheKey];
         $query = Db::name('system_store')->where('is_del', 0)->where('is_show', 1)->field('id');
         if (!$hqScope['isSuperAdmin']) $query->whereIn('id', $hqScope['allowedStoreIds']);
         $storeIds = [];
@@ -883,10 +1043,15 @@ final class InventoryCrossSubjectTransferServices
             $organizationId = (int)Db::name('organization_store')->where('store_id', (int)$store['id'])->value('org_id');
             if ($organizationId > 0 && (explode('/', trim($this->organizationPath($organizationId), '/'))[0] ?? '') === $root) $storeIds[] = (int)$store['id'];
         }
-        if (!$storeIds) return [];
-        return Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->join('system_store st', 'st.id=s.store_id')
+        if (!$storeIds) {
+            if ($batchStaffRows !== null) $batchStaffRows[$cacheKey] = [];
+            return [];
+        }
+        $rows = Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->join('system_store st', 'st.id=s.store_id')
             ->whereIn('s.store_id', $storeIds)->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->where('st.is_del', 0)->where('st.is_show', 1)
             ->field('s.id,s.employee_id,s.store_id,s.staff_name,e.name employee_name,st.name store_name')->order('s.store_id asc,s.id asc')->select()->toArray();
+        if ($batchStaffRows !== null) $batchStaffRows[$cacheKey] = $rows;
+        return $rows;
     }
 
     private function scope(int $storeId, int $operatorId, bool $requireOperator): array
