@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\services\report;
 
 use think\facade\Db;
+use app\services\query\metric\RegisteredMetricReadServices;
 
 /**
  * 商品看板统一读取服务。
@@ -15,7 +16,7 @@ use think\facade\Db;
 final class ProductManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'product_management_dashboard';
-    public const METRIC_VERSION = 'product-management-current-category-v3';
+    public const METRIC_VERSION = 'product-management-current-category-v4';
 
     public function dashboard(array $context, array $input): array
     {
@@ -34,25 +35,30 @@ final class ProductManagementDashboardServices
             'mom' => $this->previousRange($range),
         ];
         $group = [];
+        $reader = RegisteredMetricReadServices::withCurrentReportProductCategory();
         foreach ($periods as $key => $period) {
-            $payload = (new GroupManagementDashboardServices())->dashboard($scope, [
-                'start_date' => $period['start'], 'end_date' => $period['end'],
-                'category_id' => $categoryId, 'store_ids' => implode(',', $scope['store_ids']),
-                // The product dashboard only needs the three summary cards.
-                // Avoid retaining each full group-dashboard projection
-                // (trend, targets, sources and rankings) for all periods.
-                'summary_only' => true,
-            ]);
-            $group[$key] = [
-                'cards' => (array)($payload['cards'] ?? []),
-                'aggregation_caught_up' => (bool)($payload['aggregation_caught_up'] ?? false),
-            ];
-            unset($payload);
+            // Match the group dashboard's registered reader and category scope,
+            // but skip its unused refund/actual cards and detail projections.
+            if ($categoryIds === []) {
+                $sales = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $period);
+                $consumption = $reader->summary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $period);
+            } else {
+                $sales = $reader->categorySummary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $period, $categoryIds);
+                $consumption = $reader->categorySummary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $period, $categoryIds);
+            }
+            $group[$key] = ['cards' => [
+                ['metric_code' => 'cash_performance', 'value_cents' => $sales],
+                ['metric_code' => 'consumption_performance', 'value_cents' => $consumption],
+            ]];
         }
         $summary = $this->summary($group, $periods, $scope, $range, $categoryIds);
         $profit = $this->profitCategories($categories, $scope, $range, $categoryIds, $productType);
-        $inventory = $this->inventory($scope, $categories, $categoryId);
-        $expiry = $this->expiry($scope, $categories, $categoryId);
+        // Inventory and expiry share the same authorized batch snapshot and
+        // current-category resolution; neither may read a different balance.
+        $inventoryRows = $this->inventoryRows($scope);
+        $inventoryMap = $this->productCategoryMap($categories, $inventoryRows);
+        $inventory = $this->inventoryCategoryRows($inventoryRows, $inventoryMap, $categories, $categoryId, $this->costVisible($scope));
+        $expiry = $this->expiry($inventoryRows, $inventoryMap, $scope, $categories, $categoryId);
 
         return [
             'dashboard_code' => self::DASHBOARD_CODE,
@@ -69,7 +75,7 @@ final class ProductManagementDashboardServices
             'expiry_alerts' => $expiry,
             'data_as_of' => date('Y-m-d H:i:s'),
             'metric_version' => self::METRIC_VERSION,
-            'aggregation_caught_up' => (bool)($group['current']['aggregation_caught_up'] ?? false),
+            'aggregation_caught_up' => false,
             'field_explanations' => $this->fieldExplanations(),
             'drilldown' => ['enabled' => false, 'reason' => '商品看板下钻契约在统一报表验收阶段单独确认。'],
         ];
@@ -174,10 +180,17 @@ final class ProductManagementDashboardServices
             }
         }
 
+        return $this->profitCategoryCards($categories, $byCategory);
+    }
+
+    /** Only categories with authorized fact rows have a meaningful profit card. */
+    private function profitCategoryCards(array $categories, array $byCategory): array
+    {
         $result = [];
         foreach ($categories['roots'] as $category) {
             $id = (int)$category['id'];
-            $data = $byCategory[(string)$id] ?? ['income' => 0, 'cost' => 0, 'projects' => [], 'products' => []];
+            if (!isset($byCategory[(string)$id])) continue;
+            $data = $byCategory[(string)$id];
             $cost = $data['cost'];
             $profit = $cost === null ? null : (int)$data['income'] - $cost;
             $result[] = [
@@ -202,13 +215,6 @@ final class ProductManagementDashboardServices
         return array_slice($rows, 0, 5);
     }
 
-    private function inventory(array $scope, array $categories, int $selected): array
-    {
-        $rows = $this->inventoryRows($scope);
-        $map = $this->productCategoryMap($categories, $rows);
-        return $this->inventoryCategoryRows($rows, $map, $categories, $selected, $this->costVisible($scope));
-    }
-
     /** Aggregate authorized batch balances by current root category and exact product name, not by catalog ID. */
     private function inventoryCategoryRows(array $rows, array $map, array $categories, int $selected, bool $costVisible): array
     {
@@ -231,6 +237,7 @@ final class ProductManagementDashboardServices
         $result = [];
         foreach ($categories['roots'] as $category) {
             $key = (string)$category['id'];
+            if (empty($groups[$key]['rows'])) continue;
             $data = $groups[$key] ?? ['cost' => 0, 'rows' => []];
             $items = array_values($data['rows']);
             usort($items, static fn(array $a, array $b): int => ($b['inventory_cost_cents'] ?? 0) <=> ($a['inventory_cost_cents'] ?? 0) ?: strcmp($a['product_name'], $b['product_name']));
@@ -239,10 +246,8 @@ final class ProductManagementDashboardServices
         return $result;
     }
 
-    private function expiry(array $scope, array $categories, int $selected): array
+    private function expiry(array $rows, array $map, array $scope, array $categories, int $selected): array
     {
-        $rows = $this->inventoryRows($scope);
-        $map = $this->productCategoryMap($categories, $rows);
         $categoryNames = [];
         foreach ($categories['roots'] as $category) $categoryNames[(int)$category['id']] = (string)$category['name'];
         $cutoff = date('Y-m-d');
@@ -256,26 +261,28 @@ final class ProductManagementDashboardServices
         }));
         $labels = ['OVERDUE' => '已过期', 'WITHIN_30' => '30天内临期', 'DAYS_31_60' => '31至60天', 'DAYS_61_90' => '61至90天', 'SAFE_OVER_90' => '90天以上', 'UNKNOWN' => '到期日未知'];
         $bucketTotals = array_fill_keys(array_keys($labels), ['count' => 0, 'quantity' => 0]);
+        $rankings = array_fill_keys(array_keys($labels), []);
+        $today = new \DateTimeImmutable($cutoff);
         foreach ($rows as $row) {
-            $days = $row['expire_date'] ? (int)((new \DateTimeImmutable($cutoff))->diff(new \DateTimeImmutable($row['expire_date']))->format('%r%a')) : null;
+            $days = $row['expire_date'] ? (int)$today->diff(new \DateTimeImmutable($row['expire_date']))->format('%r%a') : null;
             $key = $days === null ? 'UNKNOWN' : ($days < 0 ? 'OVERDUE' : ($days <= 30 ? 'WITHIN_30' : ($days <= 60 ? 'DAYS_31_60' : ($days <= 90 ? 'DAYS_61_90' : 'SAFE_OVER_90'))));
             $bucketTotals[$key]['count']++;
             $bucketTotals[$key]['quantity'] += (float)$row['quantity'];
-        }
-        $buckets = [];
-        foreach ($labels as $key => $label) $buckets[] = ['key' => $key, 'label' => $label, 'count' => $bucketTotals[$key]['count'], 'quantity' => $bucketTotals[$key]['quantity']];
-        $detail = [];
-        foreach ($rows as $row) {
-            $days = $row['expire_date'] ? (int)((new \DateTimeImmutable($cutoff))->diff(new \DateTimeImmutable($row['expire_date']))->format('%r%a')) : null;
-            if ($days !== null && $days > 90) continue;
-            $detail[] = [
+            $rankings[$key][] = [
                 'product_name' => $row['product_name'], 'category_name' => $categoryNames[(int)$row['category_id']] ?? '未分类',
                 'batch_no' => $row['batch_no'], 'current_quantity' => $row['quantity'], 'expire_date' => $row['expire_date'],
-                'days' => $days, 'status' => $days === null ? '到期日未知' : ($days < 0 ? '已过期' : ($days <= 30 ? '30天内临期' : ($days <= 60 ? '31至60天' : '61至90天'))),
+                'days' => $days, 'status' => $labels[$key],
                 'inventory_cost_cents' => $this->costVisible($scope) ? $row['inventory_cost_cents'] : null,
             ];
         }
-        return ['buckets' => $buckets, 'rows' => $this->topExpiryRows($detail)];
+        $buckets = [];
+        foreach ($labels as $key => $label) {
+            $buckets[] = ['key' => $key, 'label' => $label, 'count' => $bucketTotals[$key]['count'], 'quantity' => $bucketTotals[$key]['quantity']];
+            // Totals cover all authorized batches; each switchable ranking is
+            // independently bounded to ten rows and does not change totals.
+            $rankings[$key] = $this->topExpiryRows($rankings[$key]);
+        }
+        return ['buckets' => $buckets, 'default_bucket' => 'OVERDUE', 'rankings' => $rankings];
     }
 
     /** Display the ten most urgent batches; bucket totals still count every authorized batch. */
@@ -480,7 +487,7 @@ final class ProductManagementDashboardServices
             'profit.product_cost' => '产品使用实际出库批次成本；无法完整关联成本时显示“-”',
             'profit.gross_margin_rate' => '毛利率＝（收入－成本）÷收入×100%；收入为零或成本未知时显示“-”',
             'inventory.cost' => '当前有效批次的剩余成本，按当前商品分类和品名合计后排序；无成本权限时显示“-”',
-            'expiry' => '全部有效批次按到期日统计六档；明细按紧急程度只展示前10条',
+            'expiry' => '全部有效批次按到期日统计六档；点击指标切换该档按到期日排序的前10条',
         ];
     }
 }

@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 php "$ROOT/tests/report-product-dashboard/php/static-contract.php"
 php "$ROOT/tests/report-product-dashboard/php/round37-contract.php"
+php "$ROOT/tests/report-product-dashboard/php/round38-contract.php"
 php -l "$ROOT/后端代码/app/services/report/ProductManagementDashboardServices.php"
 php -l "$ROOT/后端代码/app/controller/admin/v1/report/UnifiedReport.php"
 php -l "$ROOT/后端代码/route/admin.php"

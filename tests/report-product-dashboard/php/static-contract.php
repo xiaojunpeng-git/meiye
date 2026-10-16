@@ -30,7 +30,11 @@ $assert(str_contains($service, "DASHBOARD_CODE = 'product_management_dashboard'"
 $assert(str_contains($service, "\$card['metric_code']") && str_contains($service, "\$card['value_cents']"), '顶部汇总必须读取统一指标契约字段');
 $assert(str_contains($service, "'metric_version'"), '接口必须返回指标版本');
 $assert(str_contains($service, "'aggregation_caught_up'"), '接口必须返回聚合追平状态');
-$assert(str_contains($service, "'summary_only' => true") && str_contains($service, 'unset($payload)'), '商品看板三期摘要不得保留完整集团投影');
+$assert(str_contains($service, 'RegisteredMetricReadServices::withCurrentReportProductCategory()')
+    && str_contains($service, "\$reader->summary('cash_performance'")
+    && str_contains($service, "\$reader->summary('consume_amount'")
+    && str_contains($service, "\$reader->categorySummary('cash_performance'")
+    && str_contains($service, "\$reader->categorySummary('consume_amount'"), '商品看板三期摘要必须只读统一销售和消耗指标');
 $assert(str_contains($groupService, "!empty(\$input['summary_only'])") && str_contains($groupService, "\$reader->summary('cash_performance'") && str_contains($groupService, "\$reader->summary('consume_amount'"), '商品看板摘要必须走统一指标 Reader 的轻量汇总查询');
 $assert(str_contains($service, "'data_as_of'"), '接口必须返回数据截至时间');
 $assert(str_contains($service, 'inventory_batch_movement_fact'), '库存必须从批次库存事实读取');

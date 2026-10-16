@@ -108,7 +108,8 @@ const overviewCards = ref([])
 const profitCategories = ref([])
 const inventoryCategories = ref([])
 const expiryCards = ref([])
-const expiryRows = ref([])
+const expiryRankings = ref({})
+const selectedExpiryBucket = ref('OVERDUE')
 let queuedQuery = false
 let refreshTimer = null
 const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000
@@ -166,7 +167,9 @@ function applyDashboard(data) {
   }))
   inventoryCategories.value = (data?.product_inventory_categories || []).map((item) => ({ id: String(item.category_id), name: item.name, amount: money(item.inventory_cost_cents), rows: (item.rows || []).map((row) => [row.product_name, row.available_quantity, money(row.inventory_cost_cents)]) }))
   expiryCards.value = (data?.expiry_alerts?.buckets || []).map((item) => ({ key: item.key, label: item.label, value: Number(item.quantity ?? item.count ?? 0).toLocaleString('zh-CN'), tone: item.key === 'OVERDUE' ? 'expired' : item.key === 'WITHIN_30' ? 'urgent' : item.key === 'DAYS_31_60' ? 'warm' : item.key === 'DAYS_61_90' ? 'watch' : item.key === 'SAFE_OVER_90' ? 'normal' : 'unknown' }))
-  expiryRows.value = (data?.expiry_alerts?.rows || []).map((row) => [row.product_name, row.category_name, row.batch_no, row.current_quantity, row.expire_date || '-', row.days === null ? '-' : `${row.days}天`, row.status, money(row.inventory_cost_cents)])
+  // The server owns bucket membership and each top-ten ranking; switching tabs is display-only.
+  expiryRankings.value = Object.fromEntries(Object.entries(data?.expiry_alerts?.rankings || {}).map(([key, rows]) => [key, rows.map((row) => [row.product_name, row.category_name, row.batch_no, row.current_quantity, row.expire_date || '-', row.days === null ? '-' : `${row.days}天`, row.status, money(row.inventory_cost_cents)])]))
+  selectedExpiryBucket.value = data?.expiry_alerts?.default_bucket || 'OVERDUE'
   refreshedAt.value = data?.data_as_of || today()
 }
 
@@ -192,7 +195,7 @@ async function loadDashboard(action = '查询') {
     applyDashboard(data)
     queryMessage.value = action === '刷新' ? '已刷新商品看板。' : '已按当前筛选更新商品看板。'
   } catch (error) {
-    overviewCards.value = []; profitCategories.value = []; inventoryCategories.value = []; expiryCards.value = []; expiryRows.value = []
+    overviewCards.value = []; profitCategories.value = []; inventoryCategories.value = []; expiryCards.value = []; expiryRankings.value = {}
     queryMessage.value = error.message || '商品看板请求失败。'
   } finally {
     loading.value = false
@@ -227,6 +230,8 @@ const profitCategoryCards = computed(() => categoryId.value === 'all'
 const inventoryCategoryCards = computed(() => categoryId.value === 'all'
   ? inventoryCategories.value
   : inventoryCategories.value.filter((category) => category.id === categoryId.value))
+
+const expiryRows = computed(() => expiryRankings.value[selectedExpiryBucket.value] || [])
 
 function rowsFor(category) {
   return categoryRankType.value[category.id] === 'product' ? category.products : category.projects
@@ -324,7 +329,21 @@ function runQuery(action = '查询') {
     <section class="product-dashboard__section product-dashboard__section--expiry" aria-labelledby="expiry-title">
       <header class="product-dashboard__section-header"><div><span class="product-dashboard__section-kicker"><TriangleAlert :size="16" aria-hidden="true" />库存预警</span><h2 id="expiry-title">临期产品预警</h2></div><button type="button" class="product-dashboard__guide"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></header>
       <div v-if="loading" class="product-dashboard__loading">正在加载临期产品预警数据...</div>
-      <template v-else><div class="product-dashboard__expiry-summary"><article v-for="item in expiryCards" :key="item.key" :class="`expiry-summary-card expiry-summary-card--${item.tone}`"><span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>当前库存数量</small></article></div><p v-if="!expiryRows.length" class="product-dashboard__empty">当前筛选范围没有临期或到期日未知的产品批次。</p><div v-else class="product-dashboard__table-wrap"><table><thead><tr><th>品名</th><th>商品分类</th><th>批次号</th><th>当前库存数量</th><th>到期日</th><th>剩余天数</th><th>状态</th><th>库存成本</th></tr></thead><tbody><tr v-for="row in expiryRows" :key="row[2]"><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{ row[3] }}</td><td>{{ row[4] }}</td><td>{{ row[5] }}</td><td><span class="expiry-status" :class="{ 'expiry-status--expired': row[6] === '已过期', 'expiry-status--urgent': row[6] === '30天内临期' }">{{ row[6] }}</span></td><td>{{ row[7] }}</td></tr></tbody></table></div></template>
+      <template v-else>
+        <div class="product-dashboard__expiry-summary" role="tablist" aria-label="到期日排行">
+          <button v-for="item in expiryCards" :key="item.key" type="button" role="tab"
+            class="expiry-summary-card" :class="[`expiry-summary-card--${item.tone}`, { 'is-active': selectedExpiryBucket === item.key }]"
+            :aria-selected="selectedExpiryBucket === item.key" @click="selectedExpiryBucket = item.key">
+            <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>当前库存数量</small>
+          </button>
+        </div>
+        <p v-if="!expiryRows.length" class="product-dashboard__empty">当前筛选范围没有该档的产品批次。</p>
+        <div v-else class="product-dashboard__table-wrap" role="tabpanel">
+          <table><thead><tr><th>品名</th><th>商品分类</th><th>批次号</th><th>当前库存数量</th><th>到期日</th><th>剩余天数</th><th>状态</th><th>库存成本</th></tr></thead>
+            <tbody><tr v-for="(row, index) in expiryRows" :key="`${selectedExpiryBucket}-${index}-${row[2]}`"><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{ row[3] }}</td><td>{{ row[4] }}</td><td>{{ row[5] }}</td><td><span class="expiry-status" :class="{ 'expiry-status--expired': row[6] === '已过期', 'expiry-status--urgent': row[6] === '30天内临期' }">{{ row[6] }}</span></td><td>{{ row[7] }}</td></tr></tbody>
+          </table>
+        </div>
+      </template>
     </section>
   </main>
 </template>
@@ -367,4 +386,8 @@ function runQuery(action = '查询') {
 .profit-category-card__rank-row>b,
 .inventory-category-card__table-head>span:not(:first-child),
 .inventory-category-card__row>b{text-align:left}
+/* Bucket totals are controls: keep their original footprint and expose the selected ranking. */
+.expiry-summary-card{display:block;width:100%;font:inherit;text-align:left;cursor:pointer}
+.expiry-summary-card.is-active{outline:2px solid #1f5f8b;outline-offset:-2px;background:#f5faff}
+.expiry-summary-card:focus-visible{outline:2px solid #1769aa;outline-offset:2px}
 </style>
