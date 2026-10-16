@@ -186,16 +186,38 @@ function canOperateTransferBatch(action) {
   return rows.length >= 2 && rows.every((row) => row[capability] && transferBatchSourceKey(row) === transferBatchSourceKey(rows[0]))
 }
 
+/** Explain a blocked command from authoritative status/capability fields; the server still validates every write. */
+function transferBatchUnavailableReason(action) {
+  const rows = selectedTransferRows.value
+  if (!rows.length) return '请先勾选调拨单。'
+  if (action === 'WITHDRAW') {
+    if (rows.some((row) => row.document_status === 'DRAFT')) return '所选包含未发货的草稿，尚未扣减库存，无发货可撤回。'
+    if (rows.some((row) => row.document_status === 'RECEIVED')) return '所选包含已收货的调拨单，不能撤回发货。'
+  }
+  if (action === 'DELETE_DRAFT') {
+    if (rows.some((row) => Number(row.withdrawal_count) > 0)) return '所选包含曾发货并撤回的草稿，已有库存流水，不能删除；请逐张作废。'
+    if (rows.some((row) => row.document_status === 'DISPATCHED')) return '所选包含已发货的调拨单，已有库存流水，不能删除。'
+    if (rows.some((row) => row.document_status === 'RECEIVED')) return '所选包含已收货的调拨单，不能删除。'
+  }
+  if (action === 'DISPATCH' && selectedTransferAlreadyDispatched.value) return '所选包含已发货的调拨单，无需重复发货。'
+  if (rows.length < 2) return '批量操作请至少选择两张调拨单。'
+  if (rows.some((row) => transferBatchSourceKey(row) !== transferBatchSourceKey(rows[0]))) return '批量操作只能选择同一调出方的调拨单。'
+  if (!canOperateTransferBatch(action)) return '所选调拨单的状态或操作权限不一致，请刷新后重新选择。'
+  return ''
+}
+
 function toggleTransferSelection(row) {
   const id = Number(row.id)
   selectedTransferIds.value = selectedTransferIds.value.includes(id)
     ? selectedTransferIds.value.filter((selected) => selected !== id)
     : [...selectedTransferIds.value, id]
+  transferBatchError.value = ''
 }
 
 function toggleAllVisibleTransfers() {
   const ids = selectableTransferRows.value.map((row) => Number(row.id))
   selectedTransferIds.value = ids.every((id) => selectedTransferIds.value.includes(id)) ? [] : ids
+  transferBatchError.value = ''
 }
 const recipeActionConfirmation = ref(null)
 const recipeActionSubmitting = ref(false)
@@ -1042,7 +1064,9 @@ function runTransferAction(action, row) {
 
 /** Batch confirmation freezes each selected draft version; the server validates all documents again under locks. */
 async function openBulkTransferAction(action) {
-  if (!canOperateTransferBatch(action) || transferBatchPreparing.value) return
+  if (transferBatchPreparing.value || transferActionSubmitting.value) return
+  const unavailableReason = transferBatchUnavailableReason(action)
+  if (unavailableReason) { transferBatchError.value = unavailableReason; return }
   const rows = [...selectedTransferRows.value]
   const listVersion = groupedListVersion
   transferBatchPreparing.value = true
@@ -2070,11 +2094,11 @@ onBeforeUnmount(() => {
             <div v-if="active === 'transfer'" class="transfer-batch-toolbar">
               <label><input type="checkbox" :checked="selectableTransferRows.length > 0 && selectedTransferRows.length === selectableTransferRows.length" :disabled="!selectableTransferRows.length || transferBatchPreparing || transferActionSubmitting" @change="toggleAllVisibleTransfers" />全选当前列表</label>
               <span>已选 {{ selectedTransferRows.length }} 张</span>
-              <button class="secondary-button" :disabled="!canOperateTransferBatch('DELETE_DRAFT') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DELETE_DRAFT')"><Trash2 :size="14" />删除</button>
-              <button class="secondary-button" :disabled="!canOperateTransferBatch('DISPATCH') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DISPATCH')"><Truck :size="14" />发货</button>
-              <button class="secondary-button" :disabled="!canOperateTransferBatch('WITHDRAW') || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('WITHDRAW')"><RotateCcw :size="14" />撤回</button>
+              <button class="secondary-button" :disabled="!selectedTransferRows.length || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DELETE_DRAFT')"><Trash2 :size="14" />删除</button>
+              <button class="secondary-button" :disabled="!selectedTransferRows.length || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('DISPATCH')"><Truck :size="14" />发货</button>
+              <button class="secondary-button" :disabled="!selectedTransferRows.length || transferBatchPreparing || transferActionSubmitting" @click="openBulkTransferAction('WITHDRAW')"><RotateCcw :size="14" />撤回</button>
               <span v-if="transferBatchPreparing">正在核对单据...</span>
-              <span v-else-if="selectedTransferAlreadyDispatched" class="transfer-batch-toolbar__notice" role="status">所选包含已发货的调拨单，无需重复发货</span>
+              <span v-else-if="selectedTransferAlreadyDispatched && !transferBatchError" class="transfer-batch-toolbar__notice" role="status">所选包含已发货的调拨单，无需重复发货</span>
               <span v-else-if="selectedTransferRows.length >= 2 && !['DELETE_DRAFT', 'DISPATCH', 'WITHDRAW'].some(canOperateTransferBatch)">请只选择同一调出方、同一操作状态的单据</span>
               <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
             </div>
