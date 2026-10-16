@@ -101,6 +101,7 @@ assert.match(service, /return Db::transaction\(function \(\) use \(\$input, \$cr
 assert.match(service, /\(int\)\$batchKey\[1\] !== count\(\$input\['drafts'\]\)/)
 assert.match(composer, /key: `transfer-batch-\$\{drafts.length\}-\$\{nonce\}`/)
 assert.match(composer, /批量操作<\/button>/)
+assert.match(composer, /v-if="!selectedRows.length" class="line-batch-toolbar__notice" role="alert">请先选中商品记录/)
 assert.match(composer, /生成调拨并发货<\/button><button type="button" :disabled="busy" @click="emit\('close'\)">取消/)
 assert.match(composer, /dispatch_after_create: true/)
 assert.match(composer, /确认生成并发货/)
