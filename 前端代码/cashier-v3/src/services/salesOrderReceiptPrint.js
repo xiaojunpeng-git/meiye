@@ -249,6 +249,9 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   const entitlementItems = items.filter(isEntitlementItem)
   const services = firstList(source, ['serviceRecords', 'services', 'serviceItems', 'serviceLines'])
   const payments = firstList(source, ['paymentDetails', 'paymentLines', 'receipts', 'payments'])
+  // 非销售业务只传入已授权订单投影；标题、金额标签由调用方显式给出，
+  // 避免把充值面额、补交金额或现金退款误写成销售应付与实收。
+  const businessReceipt = source.businessReceipt && typeof source.businessReceipt === 'object' ? source.businessReceipt : null
   const receiptMode = String(source.receiptMode || (services.length && !items.length ? 'service' : 'sales'))
   const hasSalesReceipt = receiptMode !== 'service'
   const hasSalesSection = hasSalesReceipt && salesItems.length > 0
@@ -272,18 +275,21 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
     ? payments.map((line) => `<tr><td>${escapeHtml(paymentName(line))}</td><td class="right">${escapeHtml(displayAmount(paymentAmount(line)))}</td></tr>`).join('')
     : '<tr><td colspan="2" class="empty">暂无收款明细</td></tr>'
   const debtAmount = summaryValue(source, ['debtAmount', 'debt_amount'])
-  const summaryRows = receiptRows([
+  const summaryRows = receiptRows(businessReceipt?.summaryRows || [
     { label: '应付金额', value: summaryValue(source, ['payableAmount', 'receivableAmount', 'amountDue']) },
     ...(Number(debtAmount) > 0 ? [{ label: '欠款合计', value: debtAmount }] : []),
     { label: '实收金额', value: summaryValue(source, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) }
   ])
+  const extraMetaRows = (Array.isArray(businessReceipt?.metaRows) ? businessReceipt.metaRows : [])
+    .filter((row) => hasValue(row?.value))
+    .map((row) => `<div><span>${escapeHtml(row.label)}</span><span>${escapeHtml(row.value)}</span></div>`).join('')
 
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${source.isPrintTest ? '打印测试小票' : receiptMode === 'service' ? '服务小票' : receiptMode === 'mixed' ? '结账小票' : '销售订单小票'}</title>
+<title>${escapeHtml(source.isPrintTest ? '打印测试小票' : businessReceipt?.title || (receiptMode === 'service' ? '服务小票' : receiptMode === 'mixed' ? '结账小票' : '销售订单小票'))}</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; padding: 16px; color: #000; font: ${paperProfile.fontSizePx}px/1.5 "PingFang SC", "Microsoft YaHei", Arial, sans-serif; font-weight: 500; background: #f8fafc; }
@@ -350,19 +356,21 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
   <main class="receipt">
   <h1>${escapeHtml(displayText(pickValue(source, ['storeName', 'shopName']), '销售小票'))}</h1>
   ${source.isPrintTest ? '<div class="test-label">打印测试小票 · 非业务凭证</div>' : ''}
+  ${businessReceipt?.title ? `<div class="test-label">${escapeHtml(businessReceipt.title)}</div>` : ''}
   <div class="meta">
     <div><span>单号</span><span>${escapeHtml(displayText(orderNo))}</span></div>
     <div><span>顾客</span><span>${escapeHtml(memberName)}</span></div>
     <div><span>日期</span><span>${escapeHtml(displayText(pickValue(source, ['businessDate', 'settledAt', 'paymentCompletedAt', 'occurredAt'])))}</span></div>
     <div><span>收银员</span><span>${escapeHtml(displayText(pickValue(source, ['cashierName', 'operatorName', 'operatedBy'])))}</span></div>
+    ${extraMetaRows}
   </div>
-  ${hasSalesSection ? `<h2>销售明细</h2>
+  ${hasSalesSection ? `<h2>${escapeHtml(businessReceipt?.detailHeading || '销售明细')}</h2>
   <table class="items-table"><thead><tr><th>名称</th><th class="right">数量</th><th class="right">金额</th></tr></thead><tbody>${itemRows}</tbody></table>` : ''}
   ${hasEntitlementSection ? `<h2>权益明细</h2>
   <table class="entitlements-table"><thead><tr><th>名称</th><th class="right">次数</th><th class="right">余次</th></tr></thead><tbody>${entitlementRows}</tbody></table>` : ''}
   ${hasServiceSection ? `<h2>服务明细</h2>
   <table class="services-table"><thead><tr><th>项目</th><th class="right">次数</th><th>来源</th></tr></thead><tbody>${serviceRows}</tbody></table>` : ''}
-  ${payments.length || hasSalesReceipt ? `<h2>收款明细</h2>
+  ${businessReceipt?.showPaymentSection === false ? '' : payments.length || hasSalesReceipt ? `<h2>${escapeHtml(businessReceipt?.paymentHeading || '收款明细')}</h2>
   <table class="payments-table"><thead><tr><th>收款方式</th><th class="right">金额</th></tr></thead><tbody>${paymentRows}</tbody></table>` : ''}
   ${summaryRows || hasSalesReceipt ? `<div class="summary">${summaryRows || '<div class="empty">暂无金额汇总</div>'}</div>` : ''}
   ${hasValue(storeAddress) ? `<div class="store-address"><strong>门店地址：</strong>${escapeHtml(storeAddress)}</div>` : ''}

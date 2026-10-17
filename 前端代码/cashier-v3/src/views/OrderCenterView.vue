@@ -32,6 +32,11 @@ import {
 import {
   openSalesOrderReceiptPrint
 } from '@/services/salesOrderReceiptPrint'
+import {
+  businessReceiptFromRecord,
+  businessReceiptRefreshQuery,
+  refreshedBusinessReceiptRecord
+} from '@/services/orderCenterBusinessReceipt'
 import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 import { queryPlatformOrderCenterScope } from '@/services/platformOrderCenterApi'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
@@ -3148,6 +3153,47 @@ async function printSalesOrderRecord(record = {}) {
   }
 }
 
+function canPrintBusinessRecord(record) {
+  return ['recharge', 'supplement', 'refund'].includes(recordType(record))
+    && canUseCashierV3Operation('cashier.v3.order.receipt_print')
+}
+
+async function printBusinessRecord(record = {}) {
+  const type = recordType(record)
+  const query = businessReceiptRefreshQuery(type, record)
+  const recordId = String(record.id || '').trim()
+  if (!query) {
+    servicePrintError.value = '单据缺少业务单号，暂无法生成小票。'
+    return
+  }
+  if (salesPrintLoading.value[recordId]) return
+  servicePrintError.value = ''
+  salesPrintLoading.value = { ...salesPrintLoading.value, [recordId]: true }
+  try {
+    // 打印前重读服务端权限投影，避免将旧列表中的作废状态或金额印成现状。
+    const response = await requestAction('query-order-center-records', query)
+    const partition = salesOrderProjectionFromResult(response)
+    const current = refreshedBusinessReceiptRecord(partition, type, record)
+    if (!current) {
+      servicePrintError.value = '单据已变化或当前无权读取，请刷新列表后重试。'
+      return
+    }
+    const receipt = businessReceiptFromRecord(type, current)
+    if (!receipt) {
+      servicePrintError.value = '单据金额或单号不完整，暂无法生成小票。'
+      return
+    }
+    const printed = openSalesOrderReceiptPrint(receipt)
+    if (!printed.ok) servicePrintError.value = printed.message
+  } catch (error) {
+    servicePrintError.value = error?.message || '小票暂时无法生成，请稍后重试。'
+  } finally {
+    const next = { ...salesPrintLoading.value }
+    delete next[recordId]
+    salesPrintLoading.value = next
+  }
+}
+
 function serviceCraftsmanAdjustable(record = {}) {
   const serviceFactId = record.serviceFactId || String(record.id || '').replace(/^service:/, '')
   return /^[1-9][0-9]*$/.test(String(serviceFactId))
@@ -3935,6 +3981,13 @@ onBeforeUnmount(() => {
                   @click="printSalesOrderRecord(record)"
                 >{{ salesPrintLoading[String(record.id || record.orderId || record.salesOrderId || '')] ? '生成中…' : '打印' }}</button>
                 <button
+                  v-if="canPrintBusinessRecord(record)"
+                  type="button"
+                  class="button button--text"
+                  :disabled="Boolean(salesPrintLoading[String(record.id || '')])"
+                  @click="printBusinessRecord(record)"
+                >{{ salesPrintLoading[String(record.id || '')] ? '生成中…' : '打印' }}</button>
+                <button
                   v-if="salesOrderActionAvailable(record, 'void-sales-order', 'cashier.v3.order.void')"
                   type="button"
                   class="button button--text"
@@ -4116,6 +4169,10 @@ onBeforeUnmount(() => {
                 class="button button--text"
                 @click="openRecordDetail(record)"
               >{{ activeTabKey === 'service' ? '详情' : '查看详情' }}</button>
+              <button v-if="canPrintBusinessRecord(record)" type="button" class="button button--text"
+                :disabled="Boolean(salesPrintLoading[String(record.id || '')])"
+                @click="printBusinessRecord(record)"
+              >{{ salesPrintLoading[String(record.id || '')] ? '生成中…' : '打印' }}</button>
               <button v-if="activeTabKey === 'refund' && editableRefundSourceTypes.has(record.refundSourceType) && record.refundStatus === '已退款' && canUseCashierV3Operation('cashier.v3.order.void')"
                 type="button" class="button button--text button--danger" @click="openRecordDetail(record, 'refund-record-void')">作废</button>
               <button v-if="canVoidProjectReplacement(record)" type="button"
