@@ -596,11 +596,11 @@ onBeforeUnmount(() => {
 /* These cards present server totals at one business grain; responsive wrapping
    keeps both quantity and whole-yuan cash legible without a second scroll. */
 .group-dashboard__sale-type-section{margin-top:-6px}
-.group-dashboard__sale-type-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+/* The shared backend exposes the same three sale types at both display levels. */
+.group-dashboard__sale-type-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .dashboard-sale-type-card{min-width:0;border:1px solid #dde5ee;border-top:3px solid #1f5f8b;border-radius:8px;padding:13px 14px;background:#fff}
-.dashboard-sale-type-card:nth-child(2){border-top-color:#8b6cac}
-.dashboard-sale-type-card:nth-child(3){border-top-color:#357a72}
-.dashboard-sale-type-card:nth-child(4){border-top-color:#b7791f}
+.dashboard-sale-type-card:nth-child(2){border-top-color:#357a72}
+.dashboard-sale-type-card:nth-child(3){border-top-color:#b7791f}
 .dashboard-sale-type-card__heading,.dashboard-sale-type-card__values{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .dashboard-sale-type-card__heading h3{color:#334b61;font-size:14px}
 .dashboard-sale-type-card__values{margin-top:12px}

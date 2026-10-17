@@ -72,7 +72,8 @@ final class RegisteredMetricReadServices
      * The top sale-type cards and each first-level category share these exact
      * sale/cash populations. Category rows only narrow by the sold item's current
      * category (including descendants), never by card components or its label.
-     * Query once for all roots; project sales stay in the top totals only.
+     * Query once for all roots. Both display levels use normal cards, projects
+     * and products; experience cards remain distinct in totals, never reassigned.
      */
     public function dashboardSaleTypeBreakdown(string $tenantId, array $stores, array $range, array $roots = [], array $children = [], array $categoryIds = []): array
     {
@@ -86,7 +87,7 @@ final class RegisteredMetricReadServices
         foreach ($roots as $root) {
             $rootId = $this->integer($root['id'] ?? null);
             if ($rootId <= 0) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
-            $categoryTotals[$rootId] = array_intersect_key($totals, array_flip(['normal_card', 'experience_card', 'product']));
+            $categoryTotals[$rootId] = array_intersect_key($totals, array_flip(['normal_card', 'project', 'product']));
             foreach ($this->categoryDescendants($rootId, $children) as $id) $rootByCategory[$id] = $rootId;
         }
 
@@ -1953,7 +1954,7 @@ final class RegisteredMetricReadServices
                     return (string)($row['product_type_snapshot'] ?? '') === 'product';
                 })), 'item_name', '产品'),
                 'source_explanation' => $metricCode === 'actual_performance'
-                    ? '当前启用一级商品分类及全部下级分类的实际业绩净额；现金退款在退款业务日抵减，卡项按卡内项目分类和分摊金额归入。分类下固定展示疗程卡、体验卡、产品的销售量和现金业绩，按所售商品当前分类归入，与上方同类型卡片口径一致；现金业绩不扣退款，因此三项金额不等同于一级分类实际业绩合计，单项销售也不进入这三项。'
+                    ? '当前启用一级商品分类及全部下级分类的实际业绩净额；现金退款在退款业务日抵减，卡项按卡内项目分类和分摊金额归入。分类下固定展示疗程卡、单项、产品的销售量和现金业绩，按所售商品当前分类归入，与上方同类型卡片口径一致；体验卡不在三项中展示，也不并入其他类型。现金业绩不扣退款，因此三项金额不等同于一级分类实际业绩合计。'
                     : '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入，排行榜按卡内项目商品名称展示。',
             ];
         }

@@ -32,6 +32,7 @@ assert(source.includes('category.sale_types') && !source.includes('secondary_cat
 assert(source.indexOf('{{ type.title }}') < source.indexOf('Number(type.sales_quantity || 0)')
   && source.indexOf('Number(type.sales_quantity || 0)') < source.indexOf('formatMoney(type.cash_performance_cents)'), 'sale types show name then quantity then cash amount')
 assert(source.includes('grid-template-columns:repeat(3,minmax(0,1fr))'), 'each category keeps three stable horizontal tracks')
+assert(source.includes('.group-dashboard__sale-type-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))'), 'top sale types use three equal desktop tracks')
 assert(!source.includes('categories.value.sort(') && !source.includes('categoryCards.value.sort('), 'category cards preserve the backend configured order')
 
 console.log('group dashboard refresh contract: PASS')

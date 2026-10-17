@@ -1,15 +1,15 @@
 <?php
 declare(strict_types=1);
 
-// Run through scripts/r91-local-verification.mjs. Baseline is loaded from an
+// Run through scripts/group-dashboard-sale-types-local-verification.mjs. Baseline is loaded from an
 // immutable Git blob in memory, never a parallel editable business source tree.
 require '/var/www/html/vendor/autoload.php';
 (new think\App('/var/www/html/'))->initialize();
 use app\services\query\metric\RegisteredMetricReadServices;
-use app\services\query\metric\R91BaselineMetricReader;
+use app\services\query\metric\SaleTypesBaselineMetricReader;
 use app\services\report\GroupManagementDashboardServices;
 use think\facade\Db;
-// R91_BASELINE_INJECTION
+// BASELINE_INJECTION
 if (!is_file('/.dockerenv') || config('database.connections.mysql.hostname') !== 'mysql'
     || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local mirror only');
 $checks = 0;
@@ -19,7 +19,7 @@ function r91Check(bool $ok, string $message): void {
     $checks++;
 }
 $reader = RegisteredMetricReadServices::withCurrentReportProductCategory();
-$baseline = R91BaselineMetricReader::withCurrentReportProductCategory();
+$baseline = SaleTypesBaselineMetricReader::withCurrentReportProductCategory();
 $dashboard = new GroupManagementDashboardServices();
 $treeMethod = new ReflectionMethod($dashboard,'categories');
 $treeMethod->setAccessible(true);
@@ -49,8 +49,8 @@ try {
                 foreach ($tree['children'][$id] ?? [] as $next) $queue[] = $next;
             }
             $expected = $baseline->dashboardSaleTypeTotals('0',$stores,$range,array_keys($ids));
-            unset($expected['project']);
-            r91Check(array_keys($result['categories'][$rootId]) === ['normal_card','experience_card','product'], 'Three fixed types in stable order, including zeros');
+            unset($expected['experience_card']);
+            r91Check(array_keys($result['categories'][$rootId]) === ['normal_card','project','product'], 'Three fixed types in stable order, including zeros');
             r91Check($result['categories'][$rootId] === $expected, 'Each category exactly equals the original top-card logic with category scope');
             $display[$rootId] = $expected;
         }
@@ -74,10 +74,14 @@ try {
     // A single-store end-to-end service response validates labels and the shared
     // composition used by platform/embedded dashboards without changing data.
     $page = $dashboard->dashboard(['tenant_id'=>'0','store_ids'=>[23]],['start_date'=>$range['start'],'end_date'=>$range['end']]);
-    r91Check(array_column($page['sale_type_cards'],'title') === ['疗程卡','体验卡','单项','产品'], 'Top cards unchanged');
+    r91Check(array_column($page['sale_type_cards'],'title') === ['疗程卡','单项','产品'], 'Only experience card display removed');
+    foreach ($page['sale_type_cards'] as $type) {
+        r91Check(['sales_quantity'=>$type['sales_quantity'],'cash_performance_cents'=>$type['cash_performance_cents']]
+            === $baseline->dashboardSaleTypeTotals('0',[23],$range)[$type['code']], 'Visible top values unchanged');
+    }
     foreach ($page['categories'] as $card) {
         if ($card['category_id'] === 0) continue;
-        r91Check(array_column($card['sale_types'],'title') === ['疗程卡','体验卡','产品'], 'Every first-level category exposes three fixed labels');
+        r91Check(array_column($card['sale_types'],'title') === ['疗程卡','单项','产品'], 'Every first-level category exposes the same three labels');
         r91Check(!isset($card['secondary_categories']), 'Superseded child-category projection removed');
     }
     echo json_encode(['result'=>'PASS','checks'=>$checks,'cases'=>$cases,'writes'=>0],JSON_UNESCAPED_UNICODE),PHP_EOL;

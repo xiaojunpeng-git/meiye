@@ -1,0 +1,25 @@
+{
+  "result": "PASS",
+  "source": "美容源码/前端代码/cashier-v3 -> local mohe-cashier-v3-src /app",
+  "entry": "http://127.0.0.1:18091/view_cashier_v3/",
+  "head": "c5df15aa0247f5d9725d488f2b5076d7dc742819",
+  "scope": "本地验证构建，含当前共享工作区，非获准发布包",
+  "warnings": [
+    "chunk size >500kB",
+    "外部临时输出目录未清空；指纹只记录当前HTML引用资源"
+  ],
+  "fingerprints": [
+    {
+      "path": "index.html",
+      "sha256": "7fb2026124b3d83566825b339b5b474c022d304556f068fa48b60bbd574c42a5"
+    },
+    {
+      "path": "assets/index-65e0490e.js",
+      "sha256": "12b351258e12c98a519fe37d22d005d95e5e04c88ad55eb1a30d30d9f627f652"
+    },
+    {
+      "path": "assets/index-cbe15d34.css",
+      "sha256": "cbe15d34be46badd0b5c95fa835ed9f3f5e526ca9f6a5bee7487b2369c87c468"
+    }
+  ]
+}
