@@ -147,13 +147,18 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $categoryIds = $this->categoryIds('六维', $input);
         $periodCash = $this->cashRows($stores, $range, $categoryIds);
         $historyCash = $this->cashRows($stores, ['end' => $range['end']], $categoryIds);
+        // 旧导入和旧卡录入原单的补交保留在金额中，但不能达标或提前确定首次购买日。
+        $countablePeriodCash = StoreReportImportedRepaymentCountScope::exclude($periodCash, $stores);
+        $countableHistoryCash = StoreReportImportedRepaymentCountScope::exclude($historyCash, $stores);
+        $market = new StoreUnifiedReportPhaseTwoServices();
+        $qualifiedDays = $market->marketQualifiedMemberDays($stores, $range, $input);
         // 六维见诊取实际完成的体验服务；人员不计数开关不能过滤门店见诊人数。
         // 金额、核销数量和手工费仍各自读取原有权威事实，不受人数口径反向影响。
         $services = $this->serviceRows($stores, $range, $categoryIds);
         // The workbook defines new/old by the member's six-dimension purchase
         // history, not by the member-import/source flag used by other reports.
         $firstPositive = [];
-        foreach ($historyCash as $fact) {
+        foreach ($countableHistoryCash as $fact) {
             $memberId = (int)($fact['member_id'] ?? 0);
             if ($memberId <= 0 || (int)($fact['amount_cents'] ?? 0) <= 0) continue;
             $date = (string)($fact['business_date'] ?? '');
@@ -184,25 +189,36 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             if ($firstPurchaseDate === '' || $firstPurchaseDate > (string)$service['business_date']) $rows[$key]['new_visit_people'][(string)$memberId] = true;
             else $rows[$key]['old_visit_people'][(string)$memberId] = true;
         }
-        $dealCandidates = [];
         foreach ($periodCash as $fact) {
             $key = $ensure($fact); $memberId = (int)($fact['member_id'] ?? 0); $amount = (int)($fact['amount_cents'] ?? 0);
-            if ($memberId > 0) $dealCandidates[$key][$memberId] = (int)($dealCandidates[$key][$memberId] ?? 0) + $amount;
             $path = (string)($fact['category_path'] ?? '');
             if (str_contains($path, '合作')) $rows[$key]['partner_received_cents'] += $amount;
             else $rows[$key]['self_received_cents'] += $amount;
         }
-        foreach ($dealCandidates as $key => $members) {
-            foreach ($members as $memberId => $amount) {
-                // "购买现金业绩1000元以上" is evaluated per member in the selected period.
-                if ($amount < 100000) continue;
+        $dealCandidates = [];
+        foreach ($countablePeriodCash as $fact) {
+            $memberId = (int)($fact['member_id'] ?? 0);
+            if ($memberId <= 0) continue;
+            $dayKey = $market->marketEffectiveMemberDayKey($fact);
+            if (!isset($qualifiedDays[$dayKey])) continue;
+            $key = $ensure($fact);
+            $dealCandidates[$key][$dayKey]['member_id'] = $memberId;
+            $dealCandidates[$key][$dayKey]['amount_cents'] = (int)($dealCandidates[$key][$dayKey]['amount_cents'] ?? 0)
+                + (int)($fact['amount_cents'] ?? 0);
+        }
+        foreach ($dealCandidates as $key => $days) {
+            foreach ($days as $dayKey => $day) {
+                $memberId = (int)$day['member_id'];
+                $amount = (int)$day['amount_cents'];
+                // Market qualification is source-specific; this category must also have positive net cash.
+                if ($amount <= 0) continue;
                 $firstPurchaseDate = (string)($firstPositive[(int)$memberId] ?? '');
                 $isNewDeal = $firstPurchaseDate !== '' && $firstPurchaseDate >= $range['start'] && $firstPurchaseDate <= $range['end'];
                 if ($isNewDeal) {
-                    $rows[$key]['new_deal_people'][(string)$memberId] = true;
+                    $rows[$key]['new_deal_people'][$dayKey] = true;
                     $rows[$key]['new_deal_cents'] += $amount;
                 } else {
-                    $rows[$key]['old_deal_people'][(string)$memberId] = true;
+                    $rows[$key]['old_deal_people'][$dayKey] = true;
                     $rows[$key]['old_deal_cents'] += $amount;
                 }
             }
@@ -230,34 +246,34 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $row['old_unit_output'] = $this->moneyRatio((int)$row['old_deal_cents'], (int)$row['old_deal_people']);
             $row['partner_received_performance'] = $this->money((int)$row['partner_received_cents']);
             // The workbook formula is U=Q+T, independent from the qualified
-            // 1,000-yuan conversion threshold used in the deal columns.
+            // Source-specific daily qualification applies only to deal columns.
             $row['all_received_performance'] = $this->money((int)$row['self_received_cents'] + (int)$row['partner_received_cents']);
             unset($row['new_deal_cents'], $row['old_deal_cents'], $row['debt_cents'], $row['self_received_cents'], $row['partner_received_cents']);
         }
         unset($row);
         // 这里的说明直接展示给门店用户：明确新老客只看六维购买历史、
-        // 1,000 元门槛只限制成交列；“历史总欠款”是当前未还余额，不随所选期间重算。
+        // A 来源满 1,000 元、其他来源满 500 元的同日门槛只限制成交列；欠款余额不随期间重算。
         $columns = [
             $this->pathColumn('company_name', '分公司', '按业务门店所属分公司展示；没有配置分公司时显示“未配置分公司”。', ['分公司'], false, true, 130),
             $this->pathColumn('store_name', '门店', '显示发生六维服务、收款或欠款的门店名称。', ['门店'], false, true, 140),
             $this->pathColumn('new_visit_people', '新客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内还没有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '新客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('old_visit_people', '老客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内已有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '老客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('total_visit_people', '合计见诊人数', '本店新客见诊人数加老客见诊人数。同一会员如果在所选期间先后符合两种身份，会分别计入两列。', ['合计见诊人数'], true, false, 120, [], '', 'integer'),
-            $this->pathColumn('new_deal_people', '新客人数', '在本店所选期间所选六维分类的收款减退款达到1,000元，且在当前可查看范围内首次购买该分类的付费日期属于本期的会员，按会员去重计人数。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
-            $this->pathColumn('old_deal_people', '老客人数', '在本店所选期间所选六维分类的收款减退款达到1,000元，且在当前可查看范围内首次购买该分类的付费日期早于本期的会员，按会员去重计人数。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
-            $this->pathColumn('total_deal_people', '合计成交人数', '本店达到1,000元成交条件的新客人数加老客人数；不足1,000元的不计入。', ['合计成交人数'], true, false, 120, [], '', 'integer'),
-            $this->pathColumn('new_deal_performance', '新客业绩', '只合计达到1,000元成交条件的新客在本店所选期间的六维实际收款，扣除本期退款；不是只取首次购买金额。', ['成交业绩', '新客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
-            $this->pathColumn('old_deal_performance', '老客业绩', '只合计达到1,000元成交条件的老客在本店所选期间的六维实际收款，扣除本期退款。', ['成交业绩', '老客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
-            $this->pathColumn('total_deal_performance', '合计成交业绩', '新客业绩加老客业绩。未达到1,000元成交条件的收款不计入此列，但仍计入实收业绩。', ['合计成交业绩'], true, false, 130, $this->drill('六维')),
+            $this->pathColumn('new_deal_people', '新客人数', '本店同一业务日、来源、会员净收款独立达标：A 来源满1,000元，其他来源满500元；同日多笔合并，不跨天凑门槛。所选六维分类当天净收款须大于0元；首次该分类有效购买在本期的会员按达标日累计，游客不计。旧导入及旧卡录入原单的补交不参与人数资格。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('old_deal_people', '老客人数', '本店同一业务日、来源、会员净收款独立达标：A 来源满1,000元，其他来源满500元；同日多笔合并，不跨天凑门槛。所选六维分类当天净收款须大于0元；首次该分类有效购买早于本期的会员按达标日累计，游客不计。旧导入及旧卡录入原单的补交不参与人数资格。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('total_deal_people', '合计成交人数', '所选六维分类的新客与老客达标日人数之和；同一会员多天达标分别累计，不跨天凑门槛。', ['合计成交人数'], true, false, 120, [], '', 'integer'),
+            $this->pathColumn('new_deal_performance', '新客业绩', '合计本期新客达标日所选六维分类的净收款；同日多笔合并、退款抵减，不只取首次购买金额。未达标日收款仍进入实收业绩。', ['成交业绩', '新客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
+            $this->pathColumn('old_deal_performance', '老客业绩', '合计本期老客达标日所选六维分类的净收款；退款抵减，未达标日收款仍进入实收业绩。', ['成交业绩', '老客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
+            $this->pathColumn('total_deal_performance', '合计成交业绩', '新客业绩加老客业绩；未达标日的收款不计入此列，但仍计入实收业绩。', ['合计成交业绩'], true, false, 130, $this->drill('六维')),
             $this->pathColumn('new_deal_rate', '新客成交率', '新客成交人数除以新客见诊人数；新客见诊人数为0时显示“-”。', ['成交率', '新客成交率'], false, false, 120, [], '成交率'),
             $this->pathColumn('old_deal_rate', '老客成交率', '老客成交人数除以老客见诊人数；老客见诊人数为0时显示“-”。', ['成交率', '老客成交率'], false, false, 120, [], '成交率'),
             $this->pathColumn('debt', '历史总欠款', '历史六维销售订单截至当前仍未还清的欠款余额合计，不受所选日期限制；还款成功后余额减少。', ['历史总欠款'], true),
-            $this->pathColumn('self_received_performance', '自营实收业绩', '所选期间六维中非合作分类的实际收款，扣除退款；卡项按卡内六维项目计入，不受1,000元成交条件限制。', ['自营实收业绩'], true, false, 130, $this->drill('六维 / 自营')),
+            $this->pathColumn('self_received_performance', '自营实收业绩', '所选期间六维中非合作分类的实际收款，扣除退款；卡项按卡内六维项目计入，不受成交人数的每日门槛限制。', ['自营实收业绩'], true, false, 130, $this->drill('六维 / 自营')),
             $this->pathColumn('self_to_date_performance', '自营截止今日合计业绩', '当前与本表“自营实收业绩”相同，只统计所选期间，不额外累加之前月份。', ['自营截止今日合计业绩'], true, false, 150, $this->drill('六维 / 自营')),
             $this->pathColumn('new_unit_output', '新客单产', '新客业绩除以新客成交人数；没有新客成交时显示“-”。', ['成交单产', '新客单产'], false, false, 110, [], '成交单产'),
             $this->pathColumn('old_unit_output', '老客单产', '老客业绩除以老客成交人数；没有老客成交时显示“-”。', ['成交单产', '老客单产'], false, false, 110, [], '成交单产'),
-            $this->pathColumn('partner_received_performance', '合作六维实收业绩', '所选期间六维中合作分类的实际收款，扣除退款；卡项按卡内合作六维项目计入，不受1,000元成交条件限制。', ['合作六维实收业绩'], true, false, 140, $this->drill('六维 / 合作')),
-            $this->pathColumn('all_received_performance', '六维全部实收业绩', '所选期间六维自营与合作实际收款之和，已扣除退款；包括未达到1,000元成交条件的收款。', ['六维全部实收业绩'], true, false, 140, $this->drill('六维')),
+            $this->pathColumn('partner_received_performance', '合作六维实收业绩', '所选期间六维中合作分类的实际收款，扣除退款；卡项按卡内合作六维项目计入，不受成交人数的每日门槛限制。', ['合作六维实收业绩'], true, false, 140, $this->drill('六维 / 合作')),
+            $this->pathColumn('all_received_performance', '六维全部实收业绩', '所选期间六维自营与合作实际收款之和，已扣除退款；包括未达到来源对应每日成交门槛的收款。', ['六维全部实收业绩'], true, false, 140, $this->drill('六维')),
         ];
         // 展示解释与计算规则同源，避免把人员开关误写成门店见诊资格。
         foreach ($columns as &$column) {
@@ -266,7 +282,9 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             }
         }
         unset($column);
-        return $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input, ['category' => true]);
+        $result = $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input, ['category' => true]);
+        $result['metric_version'] = 'six-dimension-analysis-market-qualified-days-v4';
+        return $result;
     }
 
     private function itemReport(string $report, array $definition, array $stores, array $range, array $input): array

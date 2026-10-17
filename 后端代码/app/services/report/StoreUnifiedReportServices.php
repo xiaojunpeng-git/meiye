@@ -308,7 +308,22 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function partnerItemSummary($storeId, array $range, array $input): array
     {
-        $facts = $this->partnerItemFacts($storeId, $range, $input);
+        $personCash = [];
+        $facts = $this->partnerItemFacts($storeId, $range, $input, $personCash);
+        $stores = $this->organizationDimensions()->narrowStoreIds(is_array($storeId) ? $storeId : [(int)$storeId], $input);
+        $market = new StoreUnifiedReportPhaseTwoServices();
+        $qualifiedDays = $stores === [] ? [] : $market->marketQualifiedMemberDays($stores, $range, $input);
+        // 市场达标先按门店/日/来源/会员判定；本表再投影到月度分类，金额仍取完整收退款。
+        $memberNets = [];
+        foreach ($personCash as $payment) {
+            $memberId = (int)($payment['member_id'] ?? 0);
+            if ($memberId <= 0) continue;
+            $this->applyOrganizationDimensions($payment);
+            $month = substr((string)$payment['business_date'], 0, 7);
+            $key = $this->partnerSummaryGroupKey($month, $payment, (string)$payment['category_path']);
+            $dayKey = $market->marketEffectiveMemberDayKey($payment);
+            $memberNets[$key][$dayKey] = (int)($memberNets[$key][$dayKey] ?? 0) + (int)$payment['amount_cents'];
+        }
         $grouped = [];
         foreach ($facts as $fact) {
             $this->applyOrganizationDimensions($fact);
@@ -330,7 +345,6 @@ class StoreUnifiedReportServices extends BaseServices
                     'performance_type' => $categoryPath,
                     'sale_amount_cents' => 0, 'experience_count' => 0, 'quantity' => 0,
                     'consumption_amount_cents' => 0, 'labor_amount_cents' => 0,
-                    '_member_ids' => [],
                 ];
             }
             $row =& $grouped[$key];
@@ -339,20 +353,20 @@ class StoreUnifiedReportServices extends BaseServices
             $row['quantity'] += (int)$fact['quantity'];
             $row['consumption_amount_cents'] += (int)$fact['consumption_amount_cents'];
             $row['labor_amount_cents'] += (int)$fact['labor_amount_cents'];
-            // 补交只增加收款金额，不再制造一笔原销售的成交人头或项目数量。
-            if (!empty($fact['_sale_activity']) && (int)$fact['member_id'] > 0) $row['_member_ids'][(string)$fact['member_id']] = true;
             unset($row);
         }
-        $rows = array_values($grouped);
-        foreach ($rows as &$row) {
+        foreach ($grouped as $key => &$row) {
             $row['store_summary'] = (string)$row['store_name'];
-            $row['member_count'] = count($row['_member_ids']);
-            unset($row['_member_ids']);
+            $row['member_count'] = 0;
+            foreach ($memberNets[$key] ?? [] as $dayKey => $cents) {
+                if ($cents > 0 && isset($qualifiedDays[$dayKey])) $row['member_count']++;
+            }
             $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']);
             $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']);
             $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']);
         }
         unset($row);
+        $rows = array_values($grouped);
         usort($rows, static function (array $left, array $right): int {
             return strcmp((string)$right['month'], (string)$left['month'])
                 ?: ((int)$right['sale_amount_cents'] <=> (int)$left['sale_amount_cents']);
@@ -360,7 +374,7 @@ class StoreUnifiedReportServices extends BaseServices
         $columns = $this->fixedColumns(array_merge([
             ['key'=>'month','label'=>'月份'],
         ], $this->organizationDimensionColumns(), [
-            ['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人头'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩'],
+            ['key'=>'store_summary','label'=>'门店汇总'],['key'=>'performance_type','label'=>'分类'],['key'=>'experience_count','label'=>'体验人次'],['key'=>'member_count','label'=>'成交人数'],['key'=>'consumption_amount','label'=>'消耗业绩'],['key'=>'labor_amount','label'=>'手工汇总'],['key'=>'sale_amount','label'=>'成交业绩'],
         ]), ['month'=>88, 'division_name'=>130, 'city_manager'=>130, 'store_summary'=>132, 'performance_type'=>220]);
         // 汇总逐列解释实际分组和计数边界，不能把体验数量说成去重人数；只更新说明，不改变指标。
         $explanations = [
@@ -369,7 +383,7 @@ class StoreUnifiedReportServices extends BaseServices
             'store_summary'=>'本行汇总的门店名称，使用业务发生时记录的名称。不同门店分别列示。',
             'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；同一门店、月份和分类汇总为一行。平台改分类后，历史行的分类归属会更新，金额事实不变。',
             'experience_count'=>'查询日期内销售时记为体验的明细，按购买数量累计。例如一条体验明细购买2份，记2；不是按会员去重的人数。补交及独立服务手工费行不增加体验人次。',
-            'member_count'=>'查询日期内本门店、本月份、本分类成交过的会员人数；同一会员重复成交只算1人，未关联会员的销售不计入。补交和独立服务手工费行不增加人数。一个会员可能出现在多行，因此合计栏显示“-”，不直接相加。',
+            'member_count'=>'先按同一门店、业务日期、来源、会员合并净收款：A 来源满1,000元、其他来源满500元，当天计1；同日多笔合并，不跨天凑门槛，多天达标分别累计。本分类当天有效净收款还须大于0元。普通欠款补交按收款日参与；旧导入或旧卡录入原单的补交、游客和未收款销售不计人数，金额仍保留。一个会员可能出现在多行，因此合计栏显示“-”。',
             'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交和新增的独立服务手工费行不增加此销售消耗指标。',
             'labor_amount'=>'销售明细对应的有效手艺人分配，以及没有同源销售行的独立服务分配，累计其手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
             'sale_amount'=>'查询日期内本分类已记账的现金业绩净额；销售按成交日、补交按收款日、退款按退款日计算。独立服务手工费行不增加成交业绩。旧单能核实卡内项目但不能核实原合作方时，金额仍冲减项目分类，合作方名称留空；无法核实项目时列为未分类。',
@@ -384,7 +398,7 @@ class StoreUnifiedReportServices extends BaseServices
         }
         unset($column);
         return [
-            'title'=>'合作方品项汇总','metric_version'=>'partner-item-current-category-v6','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
+            'title'=>'合作方品项汇总','metric_version'=>'partner-item-market-qualified-days-v7','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, [
@@ -402,7 +416,7 @@ class StoreUnifiedReportServices extends BaseServices
      * 没有同源销售行的服务单另占一行，只承载其有效手工费，不能强行归到其他会员的销售或补交。
      * 同一销售行/日期/完整分类合并多笔收款，不重复统计原成交活动。
      */
-    private function partnerItemFacts($storeId, array $range, array $input): array
+    private function partnerItemFacts($storeId, array $range, array $input, ?array &$personCash = null): array
     {
         $stores = $this->organizationDimensions()->narrowStoreIds(is_array($storeId) ? $storeId : [(int)$storeId], $input);
         if ($stores === []) return [];
@@ -434,16 +448,22 @@ class StoreUnifiedReportServices extends BaseServices
         $refundRows = $refundReader->rows($refundQuery, array_map('intval', $refundIds));
         $refundOperations = array_fill_keys(array_map('strval', array_column($refundRows, 'order_id')), true);
         $exact = trim((string)($input['category_path_exact'] ?? ''));
-        // Refund reversals already occur in the metric reader. Their operation
-        // rows below replace that display grain, so the same cash cannot count twice.
-        $cash = array_values(array_filter($cash, static function (array $row) use ($exact, $refundOperations, $input): bool {
+        $cash = array_values(array_filter($cash, static function (array $row) use ($exact, $input): bool {
             $historicalProjectRepayment = in_array((string)($row['product_type_snapshot'] ?? ''),
                 ['card_component', 'card_component_unnamed'], true)
                 && (int)($row['category_id'] ?? 0) > 0
                 && trim((string)($input['partner_name'] ?? '')) === '';
             return ((string)($row['partner_name_snapshot'] ?? '') !== '' || $historicalProjectRepayment)
-                && !((int)($row['amount_cents'] ?? 0) < 0 && isset($refundOperations[(string)($row['order_id'] ?? '')]))
                 && ($exact === '' || (string)($row['category_path'] ?? '') === $exact);
+        }));
+        // Keep the reversal in the counting population even when its display row
+        // is replaced by the refund operation below; same-period refunds must reduce eligibility.
+        if ($personCash !== null) $personCash = StoreReportImportedRepaymentCountScope::exclude($cash, $stores);
+        // Refund reversals already occur in the metric reader. Their operation
+        // rows below replace that display grain, so the same cash cannot count twice.
+        $cash = array_values(array_filter($cash, static function (array $row) use ($refundOperations): bool {
+            return !((int)($row['amount_cents'] ?? 0) < 0
+                && isset($refundOperations[(string)($row['order_id'] ?? '')]));
         }));
         $saleIds = array_values(array_unique(array_column($cash, 'sale_fact_id')));
         $metadata = [];
