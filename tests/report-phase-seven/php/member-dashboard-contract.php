@@ -30,7 +30,7 @@ $checks = [
         && str_contains($service, "'consumption_products' => \$this->ranking(")
         && !str_contains($service, 'consumption_performance_recorded')
         && !str_contains($service, 'serviceRanking(')
-        && str_contains($view, '按实际业绩净额达到各档下限'),
+        && str_contains($view, '按会员实际业绩净额归入唯一金额区间'),
     'cash excludes non-cash methods and follows reversals' => str_contains($cashReader, "p.payment_method <> 'other_collection'")
         && str_contains($cashReader, "p.payment_method <> 'old_card_entry'")
         && str_contains($cashReader, "['other_collection', 'old_card_entry']")
@@ -43,10 +43,11 @@ $checks = [
         && str_contains($service, "'consumption_products'"),
     'visit bands and tiers' => str_contains($service, "[30, 60, 90, 180, 360]")
         && str_contains($service, "'new_customer'")
+        && str_contains($service, "METRIC_VERSION = 'member-management-dashboard-actual-v6'")
         && str_contains($service, 'metric_version'),
-    'both tier columns are cumulative' => str_contains($service, "'member' => \$this->buildCumulativeTierRows(\$tiers, \$members, false)")
-        && str_contains($service, "'new_customer' => \$this->buildCumulativeTierRows(\$tiers, \$members, true)")
-        && str_contains($view, '累计达标：达到高档也计入低档，各档不可相加'),
+    'both tier columns are exclusive' => str_contains($service, "'member' => \$this->buildExclusiveTierRows(\$tiers, \$members, false)")
+        && str_contains($service, "'new_customer' => \$this->buildExclusiveTierRows(\$tiers, \$members, true)")
+        && str_contains($view, '每位消费会员只归入一档，档内业绩不跨档重复'),
     'experience and frequency scope' => str_contains($service, '$this->memberSet($this->withoutExperience($cash), true)')
         && str_contains($service, '$startMonth = substr($start, 0, 7)'),
     'business field explanation labels' => str_contains($service, "ranking.consumption.cash_income")

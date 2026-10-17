@@ -58,12 +58,16 @@ function percent(value) {
 
 function tierRows(people, amounts) {
   const names = ['0-5000', '5000-10000', '10000-30000', '30000-50000', '50000-100000', '100000以上']
+  // Preview rows follow the live exclusive-tier contract; percentages use
+  // each column's own cohort so they remain additive across the six rows.
+  const totalPeople = people.reduce((sum, value) => sum + value, 0)
+  const totalAmount = amounts.reduce((sum, value) => sum + value, 0)
   return names.map((name, index) => ({
     name,
     people: people[index],
     amount_cents: amounts[index],
-    member_share: [23, 31, 27, 13.5, 4.3, 1.1][index],
-    amount_share: [5.9, 16.4, 31.9, 35.3, 19.1, 7][index],
+    member_share: totalPeople ? people[index] / totalPeople * 100 : null,
+    amount_share: totalAmount ? amounts[index] / totalAmount * 100 : null,
     average_cents: people[index] ? Math.round(amounts[index] / people[index]) : null
   }))
 }
@@ -81,13 +85,13 @@ function previewDashboard() {
   return {
     title: '会员看板', data_as_of: '前端布局预览', scope: { label: '当前权限范围' },
     customer_overview: {
-      member: { consuming_members: { value: 2680 }, service_members: { value: 943 }, sleeping_members: { value: 116 } },
+      member: { consuming_members: { value: 1820 }, service_members: { value: 943 }, sleeping_members: { value: 116 } },
       consumption: { people: { value: 1820 }, amount: { value_cents: 28600000 }, average: { value_cents: 15714 } },
       service: { people: { value: 1314 }, amount: { value_cents: 28600000 }, projects: { value: 4820 }, average_amount: { value_cents: 21766 }, average_items: { value: 3.67 }, unit_amount: { value_cents: 5934 } }
     },
     consumption: { people: { value: 1820 }, amount: { value_cents: 28600000 }, average: { value_cents: 15714 }, categories: categories.map((category) => ({ ...category, rankings: { projects, products, consumption_projects: consumptionProjects, consumption_products: consumptionProducts } })), rankings: { projects, products, consumption_projects: consumptionProjects, consumption_products: consumptionProducts } },
     visit_bands: { recency: [30, 60, 90, 180, 360].map((days, index) => ({ label: `${days}天到店`, value: [1320, 1018, 774, 428, 192][index] })), frequency: [1, 2, 3, 4, 5].map((count, index) => ({ label: count === 5 ? '月服务超4次' : `月服务到店${count}次`, value: [782, 504, 326, 188, 96][index] })) },
-    tiers: { member: tierRows([420, 566, 492, 246, 78, 18], [1680000, 4680000, 9120000, 10100000, 5450000, 1990000]), new_customer: tierRows([206, 238, 176, 84, 26, 5], [810000, 1940000, 3190000, 3560000, 1780000, 520000]) }
+    tiers: { member: tierRows([1790, 20, 10, 0, 0, 0], [1800000, 12000000, 14800000, 0, 0, 0]), new_customer: tierRows([180, 3, 2, 0, 0, 0], [180000, 1800000, 2960000, 0, 0, 0]) }
   }
 }
 
@@ -131,11 +135,11 @@ const fieldExplanationLabels = {
   'ranking.consumption_amount.average': '实际业绩排行·人均实际业绩',
   'visit.recency': '到店波段·累计到店顾客数',
   'visit.frequency': '到店波段·月服务频次',
-  'tier.people': '消费层级·累计达标人数',
-  'tier.amount': '消费层级·达标会员实际业绩',
-  'tier.member_share': '消费层级·累计达标人数占比',
-  'tier.amount_share': '消费层级·累计达标金额占比',
-  'tier.average': '消费层级·达标会员人均实际业绩',
+  'tier.people': '消费层级·区间人数',
+  'tier.amount': '消费层级·区间实际业绩',
+  'tier.member_share': '消费层级·区间人数占比',
+  'tier.amount_share': '消费层级·区间金额占比',
+  'tier.average': '消费层级·区间人均实际业绩',
   'tier.new_customer': '新客分层·排除来源 A'
 }
 function fieldExplanationLabel(key) {
@@ -303,12 +307,12 @@ onBeforeUnmount(() => {
       <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>消费顾客分析</h2><span>分类读取当前启用的一级商品分类；每个分类独立展示排行</span></div></div><div class="member-dashboard__summary-row"><div><span>消费顾客数</span><strong>{{ number(consumption.people?.value) }}</strong></div><div><span>实际业绩</span><strong>{{ money(consumption.amount?.value_cents) }}</strong></div><div><span>人均实际业绩</span><strong>{{ money(consumption.average?.value_cents) }}</strong></div></div><div class="member-dashboard__category-grid"><div v-for="category in categories" :key="category.id" class="category-column"><article class="category-panel"><header><Tags :size="16" aria-hidden="true" /><strong>{{ category.name }}</strong></header><div><span>消费会员数</span><b>{{ number(category.people) }}</b></div><div><span>实际业绩</span><b>{{ money(category.amount_cents) }}</b></div><div><span>人均实际业绩</span><b>{{ money(category.average_cents) }}</b></div><div><span>金额占比</span><b>{{ percent(category.share) }}</b></div></article><article class="ranking-panel category-ranking-panel"><header><div><h3>消费排行</h3><span>项目 / 产品 · 前五名</span></div><div class="member-dashboard__segmented"><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumption') === 'projects' }" @click="setCategoryRankMode(category, 'consumption', 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumption') === 'products' }" @click="setCategoryRankMode(category, 'consumption', 'products')">产品</button></div></header><div v-for="(row, index) in categoryRankRows(category, 'consumption')" :key="row.name" :class="['ranking-compact__row', row.__empty ? 'ranking-compact__row--empty' : `ranking-compact__row--rank-${index + 1}`]" :aria-hidden="row.__empty ? 'true' : undefined"><em class="ranking-compact__rank">{{ row.__empty ? '' : index + 1 }}</em><strong>{{ row.__empty ? '' : row.name }}</strong><span>{{ row.__empty ? '' : money(row.cash_income_cents) }}</span><small>{{ row.__empty ? '' : `${number(row.orders)}单 · ${number(row.people)}人 · 人均 ${money(row.average_cents)}` }}</small></div></article><article class="ranking-panel category-ranking-panel"><header><div><h3>实际业绩排行</h3><span>项目 / 产品 · 前五名</span></div><div class="member-dashboard__segmented"><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumptionAmount') === 'projects' }" @click="setCategoryRankMode(category, 'consumptionAmount', 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumptionAmount') === 'products' }" @click="setCategoryRankMode(category, 'consumptionAmount', 'products')">产品</button></div></header><div v-for="(row, index) in categoryRankRows(category, 'consumptionAmount')" :key="row.name" :class="['ranking-compact__row', row.__empty ? 'ranking-compact__row--empty' : `ranking-compact__row--rank-${index + 1}`]" :aria-hidden="row.__empty ? 'true' : undefined"><em class="ranking-compact__rank">{{ row.__empty ? '' : index + 1 }}</em><strong>{{ row.__empty ? '' : row.name }}</strong><span>{{ row.__empty ? '' : money(row.consumption_cents) }}</span><small>{{ row.__empty ? '' : `${number(row.people)}人 · 人均 ${money(row.average_cents)}` }}</small></div></article></div><div v-if="!categories.length" class="member-dashboard__empty">暂无商品分类数据</div></div></section>
       <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>到店波段</h2><span>累计统计；满足 360 天条件的会员同时计入前序波段</span></div></div><template v-if="(visitBands.recency || []).length || (visitBands.frequency || []).length"><div class="visit-grid"><div v-for="item in visitBands.recency || []" :key="item.label" class="visit-card"><span>{{ item.label }}</span><strong>{{ number(item.value) }}</strong><small>顾客数</small></div></div><div class="visit-grid visit-grid--frequency"><div v-for="item in visitBands.frequency || []" :key="item.label" class="visit-card visit-card--frequency"><span>{{ item.label }}</span><strong>{{ number(item.value) }}</strong><small>顾客数</small></div></div></template><p v-else class="member-dashboard__empty-inline">暂无到店波段数据</p></section>
       <section class="member-dashboard__section">
-        <div class="member-dashboard__section-title"><div><h2>会员消费层级</h2><span>累计达标：达到高档也计入低档，各档不可相加</span></div></div>
+        <div class="member-dashboard__section-title"><div><h2>会员消费层级</h2><span>每位消费会员只归入一档，档内业绩不跨档重复</span></div></div>
         <div class="tier-grid">
           <article v-for="key in ['member', 'new_customer']" :key="key" class="tier-panel">
-            <header><div><h3>{{ key === 'member' ? '会员分层' : '新客分层（不统计来源 A）' }}</h3><span>按实际业绩净额达到各档下限</span></div><button type="button" class="member-dashboard__guide" @click="openTierSettings"><BookOpen :size="14" aria-hidden="true" />区间设置</button></header>
+            <header><div><h3>{{ key === 'member' ? '会员分层' : '新客分层（不统计来源 A）' }}</h3><span>按会员实际业绩净额归入唯一金额区间</span></div><button type="button" class="member-dashboard__guide" @click="openTierSettings"><BookOpen :size="14" aria-hidden="true" />区间设置</button></header>
             <div v-if="(tiers[key] || []).length" class="tier-table">
-              <div class="tier-table__head"><span>层级</span><span>达标人数</span><span>实际业绩</span><span>人数占比</span><span>金额占比</span><span>人均实际业绩</span></div>
+              <div class="tier-table__head"><span>层级</span><span>人数</span><span>实际业绩</span><span>人数占比</span><span>金额占比</span><span>人均实际业绩</span></div>
               <div v-for="row in tiers[key] || []" :key="row.name" class="tier-table__row"><strong>{{ row.name }}</strong><span>{{ number(row.people) }}</span><span>{{ money(row.amount_cents) }}</span><span>{{ percent(row.member_share) }}</span><span>{{ percent(row.amount_share) }}</span><span>{{ money(row.average_cents) }}</span></div>
             </div>
             <p v-else class="member-dashboard__empty-inline">暂无消费层级数据</p>

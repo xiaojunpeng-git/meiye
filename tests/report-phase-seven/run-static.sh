@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 php "$ROOT/tests/report-phase-seven/php/member-dashboard-contract.php"
+php "$ROOT/tests/report-phase-seven/php/member-dashboard-exclusive-tiers-contract.php"
 php "$ROOT/tests/report-phase-seven/php/group-dashboard-stability-contract.php"
 php "$ROOT/tests/report-phase-seven/php/store-target-dashboard-contract.php"
 node "$ROOT/tests/report-phase-seven/js/group-dashboard-refresh-contract.mjs"

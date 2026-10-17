@@ -19,7 +19,7 @@ use think\facade\Db;
 final class MemberManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'member_management_dashboard';
-    public const METRIC_VERSION = 'member-management-dashboard-actual-v5';
+    public const METRIC_VERSION = 'member-management-dashboard-actual-v6';
 
     /** @return array<string,mixed> */
     public function dashboard(array $context, array $input = []): array
@@ -263,49 +263,66 @@ final class MemberManagementDashboardServices
     private function tiers(array $cash, string $tenant): array
     {
         $tiers = $this->tierConfig($tenant);
+        $members = $this->tierMembers($cash, $this->sourceAIds());
+        return [
+            'member' => $this->buildExclusiveTierRows($tiers, $members, false),
+            'new_customer' => $this->buildExclusiveTierRows($tiers, $members, true),
+        ];
+    }
+
+    /**
+     * Keep the overview's positive-fact member population, then assign each
+     * member the full signed actual-performance net for the selected period.
+     * Refund-only members must not make the lowest tier exceed the overview count.
+     */
+    private function tierMembers(array $cash, array $sourceAIds): array
+    {
+        $eligibleIds = $this->memberSet($cash, true);
         $members = [];
-        $sourceAIds = $this->sourceAIds();
-        // Tier thresholds use the same complete actual-performance net as the
-        // category cards; otherwise the displayed amount and member tiers drift.
         foreach ($cash as $row) {
             $id = (int)($row['member_id'] ?? 0);
-            if ($id <= 0) continue;
+            if (!isset($eligibleIds[$id])) continue;
             $members[$id]['amount'] = (int)($members[$id]['amount'] ?? 0) + (int)$row['amount_cents'];
             $sourceId = (int)($row['business_source_primary_id'] ?? 0);
             $members[$id]['source_a'] = in_array($sourceId, $sourceAIds, true)
                 || (string)($row['business_source_label_snapshot'] ?? '') === 'A'
                 || (bool)($members[$id]['source_a'] ?? false);
         }
-        return [
-            'member' => $this->buildCumulativeTierRows($tiers, $members, false),
-            'new_customer' => $this->buildCumulativeTierRows($tiers, $members, true),
-        ];
+        return $members;
     }
 
-    /** A higher-tier member also reaches every lower threshold; row amounts and shares are not additive across tiers. */
-    private function buildCumulativeTierRows(array $tiers, array $members, bool $excludeSourceA): array
+    /** Each member's net belongs to exactly one configured [lower, upper) tier. */
+    private function buildExclusiveTierRows(array $tiers, array $members, bool $excludeSourceA): array
     {
         $eligible = array_filter($members, static fn(array $member): bool => !$excludeSourceA || !$member['source_a']);
         $totalPeople = count($eligible);
         $totalAmount = array_sum(array_column($eligible, 'amount'));
-        $rows = [];
-        foreach ($tiers as $tier) {
-            $people = 0;
-            $amount = 0;
-            foreach ($eligible as $member) {
-                if (max(0, (int)$member['amount']) < (int)$tier['lower']) continue;
-                $people++;
-                $amount += (int)$member['amount'];
+        $rows = array_map(static fn(array $tier): array => [
+            'name' => $tier['name'], 'people' => 0, 'amount_cents' => 0,
+        ], $tiers);
+        // Match once per member, so even an unexpectedly overlapping config
+        // cannot duplicate either the person or the signed performance net.
+        foreach ($eligible as $member) {
+            // A negative refund-adjusted net stays in the zero tier so its
+            // member and signed amount remain visible exactly once.
+            $net = max(0, (int)$member['amount']);
+            $matched = false;
+            foreach ($tiers as $index => $tier) {
+                if ($net < (int)$tier['lower']
+                    || ($tier['upper'] !== null && $net >= (int)$tier['upper'])) continue;
+                $rows[$index]['people']++;
+                $rows[$index]['amount_cents'] += (int)$member['amount'];
+                $matched = true;
+                break;
             }
-            $rows[] = [
-                'name' => $tier['name'],
-                'people' => $people,
-                'amount_cents' => $amount,
-                'member_share' => $totalPeople ? ($people / $totalPeople) * 100 : null,
-                'amount_share' => $totalAmount ? ($amount / $totalAmount) * 100 : null,
-                'average_cents' => $this->ratio($amount, $people),
-            ];
+            if (!$matched) throw new \RuntimeException('消费分层区间未覆盖会员实际业绩');
         }
+        foreach ($rows as &$row) {
+            $row['member_share'] = $totalPeople ? ($row['people'] / $totalPeople) * 100 : null;
+            $row['amount_share'] = $totalAmount ? ($row['amount_cents'] / $totalAmount) * 100 : null;
+            $row['average_cents'] = $this->ratio($row['amount_cents'], $row['people']);
+        }
+        unset($row);
         return $rows;
     }
 
@@ -401,12 +418,12 @@ final class MemberManagementDashboardServices
             'ranking.consumption_amount.average' => '第二排行人均金额为实际业绩净额除以同期购买人头。',
             'visit.recency' => '截至查询结束日最后一次非体验有效服务距今达到 30/60/90/180/360 天的会员数，按累计区间统计；人员开关不参与。',
             'visit.frequency' => '按非体验有效服务事实统计每个会员每月到店次数；全年按各月份会员频次桶合计，人员开关不参与。',
-            'tier.people' => '达到该档金额下限的会员按会员 ID 去重；达到高档时也计入所有已达到的低档。',
-            'tier.amount' => '达到该档的会员完整实际业绩净额合计；跨档重复展示，不可将各档相加。',
-            'tier.member_share' => '该档累计达标人数除以本列去重顾客总人数；各档占比不可相加。',
-            'tier.amount_share' => '该档达标会员完整实际业绩净额除以本列顾客实际业绩净额；各档占比不可相加。',
-            'tier.average' => '该档达标会员完整实际业绩净额除以该档达标人数；分母为零显示 -。',
-            'tier.new_customer' => '新客分层同样按金额下限累计达标，但排除来源 A 的会员。',
+            'tier.people' => '查询期间有正向实际业绩事实的会员，按个人实际业绩净额归入唯一金额区间；负净额归入最低档，会员 ID 去重。',
+            'tier.amount' => '该档会员查询期间的完整实际业绩净额，每名会员只归入一个区间，跨档金额不重复；未关联会员或仅有零、负向记录的金额不进入分层，因此分层合计可能与概况总金额不同。',
+            'tier.member_share' => '该档人数除以本列去重会员总人数；各档人数占比可合计。',
+            'tier.amount_share' => '该档实际业绩净额除以本列会员实际业绩净额；各档金额占比可合计。',
+            'tier.average' => '该档会员实际业绩净额除以该档人数；分母为零显示 -。',
+            'tier.new_customer' => '新客分层同样将每名会员归入唯一金额区间，但排除来源 A 的会员。',
         ];
     }
 }
