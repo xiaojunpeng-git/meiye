@@ -14,6 +14,34 @@ use think\facade\Db;
 final class StoreRefundCurrentCategoryServices
 {
     /**
+     * 按已核实项目金额拆分一个退款且不复制现金。整元退款保持整元，
+     * 历史非整元事实保留分精度；权重缺失时整笔退回未分类，避免错误归属。
+     *
+     * @param array<int,array<string,mixed>> $categories
+     * @return array<int,int>
+     */
+    public static function allocateAmountCents(int $amount, array &$categories): array
+    {
+        if (count($categories) <= 1) return [$amount];
+        $weights = array_map(static fn(array $category): int => (int)($category['weight_cents'] ?? 0), $categories);
+        $totalWeight = array_sum($weights);
+        if ($totalWeight <= 0 || count(array_filter($weights, static fn(int $weight): bool => $weight <= 0)) > 0) {
+            $categories = [['id' => 0, 'path' => '', 'platform_product_id' => 0, 'weight_cents' => 0]];
+            return [$amount];
+        }
+        $unit = $amount % 100 === 0 ? 100 : 1;
+        $units = intdiv(abs($amount), $unit);
+        $remaining = $units;
+        $split = [];
+        foreach ($weights as $index => $weight) {
+            $part = $index === count($weights) - 1 ? $remaining : intdiv($units * $weight, $totalWeight);
+            $remaining -= $part;
+            $split[] = ($amount < 0 ? -1 : 1) * $part * $unit;
+        }
+        return $split;
+    }
+
+    /**
      * @param array<int,array<string,mixed>> $refunds Already authorized refund rows
      * @return array<string,array<int,array<string,mixed>>> Operation ID => current categories
      */

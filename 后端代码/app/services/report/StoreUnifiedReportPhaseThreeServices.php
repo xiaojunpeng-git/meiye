@@ -218,7 +218,10 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
     {
         $range = $this->drilldownRange($range, $input);
         $stores = $this->drilldownStores($stores, $range, $input);
-        $categoryIds = !empty($input['six_dimension_only']) ? $this->sixDimensionCategoryIds() : [];
+        // 汇总列传入的分类路径必须继续约束明细；旧入口仅传六维标记时
+        // 仍兼容整棵六维分类，未传任何分类才展示全部授权事件。
+        $categoryIds = !empty($input['six_dimension_only'])
+            ? $this->sixDimensionCategoryIds() : $this->categoryScope($input);
         $itemId = trim((string)($input['item_id'] ?? ''));
         $metricCode = trim((string)($input['metric_code'] ?? ''));
         $cashOnly = in_array($metricCode, [
@@ -252,6 +255,9 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
                 'source_order_id' => (string)$cash['order_id'],
                 'source_line_id' => (string)$cash['source_line_id'],
             ];
+        }
+        foreach ($this->standaloneRefundEventRows($stores, $range, $categoryIds, $itemId) as $refundEvent) {
+            $events[] = $refundEvent;
         }
         $serviceRows = $cashOnly || $stores === [] ? [] : $this->serviceEventRows($stores, $range);
         foreach ($serviceRows as $service) {
@@ -336,6 +342,72 @@ final class StoreUnifiedReportPhaseThreeServices extends BaseServices
             'subject_type' => 'business_event_line',
         ]];
         return $result;
+    }
+
+    /**
+     * 补充没有销售分摊行的手工/旧卡退款。查询、权限、退款业务日和当前
+     * 项目分类均复用会员退款事实读取器；有销售分摊的退款由 cashItemRows()
+     * 提供，必须在此排除，保证汇总与明细只扣一次。
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function standaloneRefundEventRows(array $stores, array $range, array $categoryIds, string $itemId): array
+    {
+        if ($stores === []) return [];
+        $reader = new StoreMemberConsumptionRefundReadServices();
+        $query = $reader->query($stores, $range, [], $this->participantEmployeeId)
+            ->whereIn('payment.source_document_type', ['manual_refund', 'imported_card_refund'])
+            ->whereNotExists(function ($allocation): void {
+                $allocation->name('cashier_v3_payment_sale_allocation_fact')->alias('refund_allocation')
+                    ->whereRaw('refund_allocation.tenant_id=payment.tenant_id')
+                    ->whereRaw('refund_allocation.payment_fact_id=payment.fact_id')
+                    ->where('refund_allocation.status', 'effective');
+            });
+        $identity = [];
+        foreach ((clone $query)->fieldRaw('refund_operation.id,payment.occurred_at,sale.business_date purchase_date')
+            ->select()->toArray() as $row) {
+            $identity[(int)$row['id']] = [
+                'occurred_at' => (int)($row['occurred_at'] ?? 0),
+                'purchase_date' => (string)($row['purchase_date'] ?? ''),
+            ];
+        }
+        $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
+        $events = [];
+        foreach (array_chunk(array_keys($identity), 500) as $batch) {
+            foreach ($reader->rows($query, $batch, false) as $refund) {
+                $categories = (array)($refund['_current_categories'] ?? []);
+                if ($categories === []) {
+                    $categories = [['id' => 0, 'path' => '', 'platform_product_id' => 0, 'weight_cents' => 0]];
+                }
+                $amounts = StoreRefundCurrentCategoryServices::allocateAmountCents(
+                    (int)$refund['amount_cents'], $categories);
+                foreach ($categories as $index => $category) {
+                    if ($allowed !== [] && !isset($allowed[(int)$category['id']])) continue;
+                    $platformProductId = (int)($category['platform_product_id'] ?? 0);
+                    $resolvedItemId = (string)($platformProductId > 0 ? $platformProductId : $refund['current_product_id']);
+                    if ($itemId !== '' && $resolvedItemId !== $itemId) continue;
+                    $meta = (array)($identity[(int)$refund['id']] ?? []);
+                    $events[] = [
+                        'event_sort_at' => (int)($meta['occurred_at'] ?? 0), 'event_type' => '退款',
+                        'company_name' => $this->dimensionNameForEvent(
+                            'company', (string)($refund['organization_id'] ?? ''),
+                            (string)($refund['organization_path_snapshot'] ?? ''),
+                            (int)$refund['store_id'], (string)$refund['business_date']
+                        ),
+                        'store_id' => (int)$refund['store_id'], 'store_name' => (string)$refund['store_name_snapshot'],
+                        'craftsman' => '-', 'item_name' => (string)$refund['item_name_snapshot'],
+                        'purchase_date' => (string)($meta['purchase_date'] ?? ''),
+                        'consumption_amount_cents' => 0, 'consultant' => '-', 'received_amount_cents' => 0,
+                        'transfer_amount_cents' => 0, 'refund_amount_cents' => abs((int)$amounts[$index]),
+                        'annotation_subject_key' => 'standalone-refund:' . (string)$refund['id'] . ':' . $index,
+                        'annotation_subject_type' => 'business_event_line',
+                        'source_fact_id' => (int)$refund['id'], 'source_order_id' => (string)$refund['order_id'],
+                        'source_line_id' => (string)$refund['order_id'],
+                    ];
+                }
+            }
+        }
+        return $events;
     }
 
     private function performanceDeal(array $stores, array $range, array $input): array

@@ -145,7 +145,10 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     private function sixDimensionAnalysisReport(array $stores, array $range, array $input, array $definition): array
     {
         $categoryIds = $this->categoryIds('六维', $input);
-        $periodCash = $this->cashRows($stores, $range, $categoryIds);
+        // 六维实收必须覆盖退款业务日内的全部权威负数事实。销售分摊退款由
+        // cashRows() 提供；没有销售分摊的手工/旧卡退款只在退款事实层存在，
+        // 由同一补充行集按已核实当前项目分类并入，且不得重复既有付款事实。
+        $periodCash = $this->sixDimensionCashRows($stores, $range, $categoryIds);
         $historyCash = $this->cashRows($stores, ['end' => $range['end']], $categoryIds);
         // 旧导入和旧卡录入原单的补交保留在金额中，但不能达标或提前确定首次购买日。
         $countablePeriodCash = StoreReportImportedRepaymentCountScope::exclude($periodCash, $stores);
@@ -290,7 +293,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
         unset($column);
         $result = $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input, ['category' => true]);
-        $result['metric_version'] = 'six-dimension-analysis-order-first-crossing-v5';
+        $result['metric_version'] = 'six-dimension-analysis-standalone-refund-v6';
         return $result;
     }
 
@@ -602,15 +605,27 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         return $result;
     }
 
-    /** Summary and drilldown share the exact scoped receipt/refund population. */
-    private function sixDimensionItemCashRows(array $stores, array $range, array $categoryIds, bool $withDocument = false): array
+    /** 六维汇总、品项和下钻共用同一授权收款/退款总体，避免独立退款只出现在部分视图。 */
+    private function sixDimensionCashRows(
+        array $stores,
+        array $range,
+        array $categoryIds,
+        bool $withDocument = false,
+        bool $singleScan = false
+    ): array
     {
-        $rows = $this->cashRows($stores, $range, $categoryIds, $withDocument, true);
+        $rows = $this->cashRows($stores, $range, $categoryIds, $withDocument, $singleScan);
         $allowed = array_fill_keys($categoryIds, true);
-        foreach ($this->comparisonStandaloneRefundRows($stores, $range) as $refund) {
+        foreach ($this->comparisonStandaloneRefundRows($stores, $range, true) as $refund) {
             if (isset($allowed[(int)$refund['category_id']])) $rows[] = $refund;
         }
         return $rows;
+    }
+
+    /** 品项报表沿用单次扫描，同时复用六维汇总的完整退款总体。 */
+    private function sixDimensionItemCashRows(array $stores, array $range, array $categoryIds, bool $withDocument = false): array
+    {
+        return $this->sixDimensionCashRows($stores, $range, $categoryIds, $withDocument, true);
     }
 
     /** Read sale units once, independent of payment count, including unpaid/zero-cash sales. */
@@ -3225,7 +3240,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
      * verified project/category resolution. Only missing standalone payment
      * allocations are supplemented; no writes, name matching or synthetic sales.
      */
-    private function comparisonStandaloneRefundRows(array $stores, array $range): array
+    private function comparisonStandaloneRefundRows(array $stores, array $range, bool $expandVerifiedCategories = false): array
     {
         $reader = new StoreMemberConsumptionRefundReadServices();
         $query = $reader->query($stores, $range, [], $this->participantEmployeeId)
@@ -3246,22 +3261,68 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $rows = [];
         foreach (array_chunk($ids, 500) as $batch) {
             foreach ($reader->rows($query, $batch, false) as $refund) {
-                $rows[] = [
-                    'id' => 'comparison-refund:' . $refund['id'], 'store_id' => (int)$refund['store_id'],
-                    'payment_fact_id' => $paymentByRefund[(int)$refund['id']] ?? '',
-                    'member_id' => (int)$refund['member_id'], 'member_name' => (string)$refund['member_name_snapshot'],
-                    'order_id' => (string)$refund['order_id'], 'order_no_snapshot' => (string)$refund['order_no_snapshot'],
-                    'business_date' => (string)$refund['business_date'], 'amount_cents' => (int)$refund['amount_cents'],
-                    'category_id' => (int)$refund['current_category_id'], 'category_path' => (string)$refund['category_path_snapshot'],
-                    // Item reports reuse this deduplicated standalone refund
-                    // population without resolving product identity a second time.
-                    'platform_product_id' => (int)($refund['platform_product_id'] ?? 0),
-                    'item_id' => (string)$refund['current_product_id'], 'item_name' => (string)$refund['item_name_snapshot'],
-                    'store_name' => (string)$refund['store_name_snapshot'],
-                ];
+                if (!$expandVerifiedCategories) {
+                    // 既有通用报表仍以一个退款操作对应一条金额事实；多项目整卡
+                    // 只有在明确需要分类拆分的六维行集中展开，避免改变其他报表粒度。
+                    $rows[] = [
+                        'id' => 'comparison-refund:' . $refund['id'], 'store_id' => (int)$refund['store_id'],
+                        'payment_fact_id' => $paymentByRefund[(int)$refund['id']] ?? '',
+                        'member_id' => (int)$refund['member_id'], 'member_name' => (string)$refund['member_name_snapshot'],
+                        'order_id' => (string)$refund['order_id'], 'order_no_snapshot' => (string)$refund['order_no_snapshot'],
+                        'business_date' => (string)$refund['business_date'], 'amount_cents' => (int)$refund['amount_cents'],
+                        'business_source_primary_id' => 0,
+                        'business_source_label' => (string)($refund['business_source_label_snapshot'] ?? ''),
+                        'category_id' => (int)$refund['current_category_id'],
+                        'category_path' => (string)$refund['category_path_snapshot'],
+                        'platform_product_id' => (int)($refund['platform_product_id'] ?? 0),
+                        'item_id' => (string)$refund['current_product_id'], 'item_name' => (string)$refund['item_name_snapshot'],
+                        'organization_id' => (string)($refund['organization_id'] ?? ''),
+                        'organization_path_snapshot' => (string)($refund['organization_path_snapshot'] ?? ''),
+                        'store_name' => (string)$refund['store_name_snapshot'],
+                    ];
+                    continue;
+                }
+                $categories = (array)($refund['_current_categories'] ?? []);
+                // 无法核实全部卡内项目时保留一条未分类退款，禁止把整笔金额
+                // 猜到任一可见分类；核实成功的整卡退款才按原项目金额稳定分摊。
+                if ($categories === []) $categories = [['id' => 0, 'path' => '', 'platform_product_id' => 0, 'weight_cents' => 0]];
+                $amounts = $this->allocateStandaloneRefundCategoryCents((int)$refund['amount_cents'], $categories);
+                foreach ($categories as $index => $category) {
+                    $platformProductId = (int)($category['platform_product_id'] ?? 0);
+                    $rows[] = [
+                        'id' => 'comparison-refund:' . $refund['id'] . ':' . $index,
+                        'store_id' => (int)$refund['store_id'],
+                        'payment_fact_id' => $paymentByRefund[(int)$refund['id']] ?? '',
+                        'member_id' => (int)$refund['member_id'], 'member_name' => (string)$refund['member_name_snapshot'],
+                        'order_id' => (string)$refund['order_id'], 'order_no_snapshot' => (string)$refund['order_no_snapshot'],
+                        'business_date' => (string)$refund['business_date'], 'amount_cents' => (int)$amounts[$index],
+                        // 独立退款没有可重新建立的原销售来源身份，显式置零，
+                        // 使它只能冲减实收金额，不能凭退款本身生成成交资格。
+                        'business_source_primary_id' => 0,
+                        'business_source_label' => (string)($refund['business_source_label_snapshot'] ?? ''),
+                        'category_id' => (int)$category['id'], 'category_path' => (string)$category['path'],
+                        // 多项目整卡退款用已核实的平台项目身份展开；精确退款继续
+                        // 保留原项目身份，确保品项汇总、下钻和导出使用同一行键。
+                        'platform_product_id' => $platformProductId,
+                        'item_id' => (string)($platformProductId > 0 ? $platformProductId : $refund['current_product_id']),
+                        'item_name' => (string)$refund['item_name_snapshot'],
+                        'organization_id' => (string)($refund['organization_id'] ?? ''),
+                        'organization_path_snapshot' => (string)($refund['organization_path_snapshot'] ?? ''),
+                        'store_name' => (string)$refund['store_name_snapshot'],
+                    ];
+                }
             }
         }
         return $rows;
+    }
+
+    /**
+     * 按已核实项目金额拆分一个独立退款，不复制现金。整元退款保持整元，
+     * 历史非整元事实保留分精度；权重缺失时整笔退回未分类，避免错误归属。
+     */
+    private function allocateStandaloneRefundCategoryCents(int $amount, array &$categories): array
+    {
+        return StoreRefundCurrentCategoryServices::allocateAmountCents($amount, $categories);
     }
 
     /** Keep health summary refunds on the same authorized, deduplicated population as its drilldown. */

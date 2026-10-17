@@ -983,7 +983,7 @@ final class StoreUnifiedReportPhaseSixServices
                 'annotation_subject_type' => 'phase_six_row',
                 'annotation_subject_key' => 'phase_six:payment:' . $rowKey,
                 'company_name' => $fact['company_name'], 'store_name' => $fact['store_name'],
-                // 传递销售事实的会员身份，供公共展示层识别真正的游客。
+                // Carry the sale identity into the visible row so the common display layer can name true guests.
                 'business_date' => $fact['business_date'], 'member_id' => (int)$fact['member_id'], 'customer_name' => $fact['customer_name'],
                 'employee_name' => $fact['employee_name'], 'category' => $fact['category'],
                 'item_name' => $fact['item_name'], 'quantity' => (int)$fact['quantity'],
@@ -1138,7 +1138,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
             $this->column('store_name','门店','该笔业务实际发生的门店。',false,true),
             $this->column('employee_name','员工','该笔项目的服务员工，或销售/退款业绩分配到的员工；显示业务记账时记录的姓名。',false,true),
-            $this->column('position_name','岗位','显示该员工目前在这家门店的有效岗位；已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
+            $this->column('position_name','岗位','显示该员工当前有效岗位；跨组织参与人员依次读取业务门店任职、直属岗位和其他有效任职。已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
             $this->column('member_name','会员','显示该笔服务或销售记录中的会员、顾客姓名；游客显示“游客”，已建档会员未记录姓名时显示“-”。'),
             $this->column('document_no','单据号','显示订单中心对应的订单编号；点击可查看该订单详情。没有对应订单时显示“-”。',false,false,180,[
                 'report'=>'order_center_order_detail','param_map'=>['order_id'=>'document_order_id','order_no'=>'document_no'],
@@ -1307,7 +1307,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('company_name','分公司','按业务门店当前所属组织查找已配置的分公司统计维度；未配置时显示“未配置分公司”。',false,true),
             $this->column('store_name','门店','该员工业务实际发生的门店。',false,true),
             $this->column('employee_name','员工','按门店和员工汇总所选日期内的有效业务，显示业务记账时记录的姓名；页面可输入姓名中的任意文字进行筛选。',false,true),
-            $this->column('position_name','岗位','显示该员工目前在这家门店的有效岗位；已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
+            $this->column('position_name','岗位','显示该员工当前有效岗位；跨组织参与人员依次读取业务门店任职、直属岗位和其他有效任职。已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
             $this->column('project_count','项目数','所选日期内该员工分得的服务项目数之和；多人服务及人工调整可产生小数，点击可查看对应明细。',true,false,120,$this->salaryMetricDrilldown('project_count')),
             $this->column('service_visit_count','服务人次','会员本人在同一门店同一天服务多项目只计一次，朋友和无会员顾客按每笔有效服务计算；普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_visit_count')),
             $this->column('service_people_count','服务人数','所选日期内，同一会员在同一门店的合格服务多天只计一次；朋友及无会员的顾客按每次合格服务计算。原权益或项目结账含其他收款、不计人数人次的服务均排除；普通员工分摊，独立核算岗位分别计算。点击可查看明细。',true,false,120,$this->salaryMetricDrilldown('service_people_count')),
@@ -1429,8 +1429,8 @@ final class StoreUnifiedReportPhaseSixServices
             'key'=>'document_no','label'=>'单据号','show_label'=>false,'aria_label'=>'单据号',
             'type'=>'text','placeholder'=>'输入单据号',
         ];
-        // 薪资汇总和下钻共享版本；服务人数资格变化不回写原服务、消耗或收款事实。
-        $result['metric_version']=self::METRIC_VERSION.':salary-presale-allocation-v1:other-collection-people-v1';
+        // 薪资汇总和下钻共享版本；岗位只更新当前展示维度，不回写原服务、消耗或收款事实。
+        $result['metric_version']=self::METRIC_VERSION.':salary-presale-allocation-v1:other-collection-people-v1:current-position-v2';
         $result['filters']['employee_name']=$employeeName;
         if($documentFilter)$result['filters']['document_no']=$documentNo;
         return $result;
@@ -2338,24 +2338,9 @@ final class StoreUnifiedReportPhaseSixServices
         $facts=$this->salaryFactsWithServiceCustomerMetrics($stores,$range);
         // 所有服务（含已有旧分类）均使用实际项目当前分类；现金分类分摊由同一商品读取器产生。
         $facts=$this->salaryServiceProductCategories($facts,$stores);
-        $employeeIds=array_values(array_unique(array_filter(array_map(static fn(array $fact):int=>(int)($fact['employee_id']??0),$facts))));
-        $positions=[];
-        if($employeeIds!==[]){
-            // Position is a present-day staff dimension, not an immutable salary fact.
-            // Keep this lookup scoped to authorized stores and never regroup historical amounts by it.
-            foreach(array_chunk($employeeIds,300) as $employeeChunk){
-                $positionRows=Db::name('system_store_staff')->alias('ss')
-                    ->join('staff_job_position sjp','sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
-                    ->join('position p','p.id=sjp.position_id AND p.status=1')
-                    ->whereIn('ss.store_id',$stores)->whereIn('ss.employee_id',$employeeChunk)
-                    ->where('ss.status',1)->where('ss.is_del',0)->field('ss.store_id,ss.employee_id,p.name position_name')
-                    ->order('sjp.id','desc')->select()->toArray();
-                foreach($positionRows as $position){
-                    $key=(int)$position['store_id'].'|'.(int)$position['employee_id'];
-                    if(!isset($positions[$key]))$positions[$key]=trim((string)$position['position_name'])?:'-';
-                }
-            }
-        }
+        $positions=(new EmployeeCurrentPositionDimensionServices())->resolve(array_map(static function(array $fact):array{
+            return ['store_id'=>(int)($fact['store_id']??0),'employee_id'=>(int)($fact['employee_id']??0)];
+        },$facts));
         $dimensions=new StoreUnifiedReportOrganizationDimensionServices();
         foreach($facts as &$fact){
             $company=$dimensions->resolve('company','','',(string)$range['end'],(int)($fact['store_id']??0));

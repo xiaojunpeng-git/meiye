@@ -1494,7 +1494,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $refundFacts = $this->salespersonBeautyRefundFacts($stores, $calculationRange, $input);
         $managerRefundFacts = $this->managerBeautyRefundFacts($stores, $calculationRange, $input);
         $repaymentFacts = $this->salespersonBeautyRepaymentFacts($stores, $calculationRange, $input);
-        $facts = $this->currentBeautyLargeOrderFacts(array_merge($facts, $managerFacts, $refundFacts, $managerRefundFacts, $repaymentFacts));
+        // Sales and repayments have an exact component product. A whole-card refund intentionally
+        // stores card_component_id=0, so it must use the shared verified refund-category reader
+        // instead of disappearing at an exact-component inner join.
+        $facts = array_merge(
+            $this->currentBeautyLargeOrderFacts(array_merge($facts, $managerFacts, $repaymentFacts)),
+            $this->currentBeautyLargeOrderRefundFacts(array_merge($refundFacts, $managerRefundFacts))
+        );
         usort($facts, static function (array $a, array $b): int {
             return strcmp((string)$a['business_date'], (string)$b['business_date'])
                 ?: strcmp((string)$a['source_line_id'], (string)$b['source_line_id']);
@@ -1505,11 +1511,18 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 手机号原事实未保存，只读会员当前登记号码，不能伪装为历史号码。
         // 游客身份以 member_id=0 为准，不从姓名或空手机号猜测。
         $phones = $this->phones(array_values(array_unique(array_filter(array_map('intval', array_column($facts, 'member_id'))))));
+        $positions = (new EmployeeCurrentPositionDimensionServices())->resolve(array_map(static function(array $fact):array{
+            return ['store_id'=>(int)($fact['store_id']??0),'employee_id'=>(int)($fact['employee_id']??0)];
+        },$facts));
         foreach ($facts as &$row) {
             $memberId = (int)($row['member_id'] ?? 0);
             $row['member_name_snapshot'] = $memberId === 0 ? '游客' : (string)($row['member_name_snapshot'] ?? '');
             $row['phone'] = $memberId > 0 ? (string)($phones[$memberId] ?? '') : '';
+            // 岗位是当前人员维度，仅补充展示；大单达标与分期仍完全读取原业绩事实。
+            $row['position_name'] = $positions[(int)($row['store_id']??0).'|'.(int)($row['employee_id']??0)] ?? '-';
             $row['award_amount'] = $this->money($row['award_amount_cents']);
+            // 退款与达标本金同组展示，但不进入门槛、档位或任何一期应计公式。
+            $row['refund_amount'] = $this->money($row['refund_amount_cents']);
             $row['monthly_due'] = $this->money($row['due_amount_cents']);
             $row['installment'] = $row['installment_number'] . '/' . $row['installment_count'];
             $row['tier'] = ($row['rule_type'] === 'partner' ? '合作方' : '生美')
@@ -1521,8 +1534,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         unset($row);
         $columns = $this->columns([
             'division_name' => '分公司', 'store_name' => '门店', 'award_month' => '达标月份',
-            'salesperson' => '销售人/销售经理', 'member_name_snapshot' => '会员', 'phone' => '手机', 'classification' => '分类',
+            'salesperson' => '销售人/销售经理', 'position_name' => '岗位', 'member_name_snapshot' => '会员', 'phone' => '手机', 'classification' => '分类',
             'beauty_category' => '商品分类', 'tier' => '达标档位', 'award_amount' => '达标月累计现金业绩',
+            'refund_amount' => '退款金额',
             'accrual_month' => '应计月份', 'installment' => '本月期次', 'monthly_due' => '本月应计金额',
         ]);
         // 本报表的页面与导出共用业务说明；只解释已确认的应计规则，不暗示已发放或改变计算。
@@ -1531,15 +1545,17 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'store_name' => '显示达标归属记录所在门店；按现有人员月度规则统计，不扩大门店权限。',
             'award_month' => '该销售人或销售经理在本会员、入选商品分类中累计现金业绩达标的整月，也是开始分摊的月份。例如10月达标，第1期计入10月，第2期计入11月。',
             'salesperson' => '取得这笔现金业绩的销售人或销售经理。两种角色分别按自己的业绩计算，不合并判断是否达标，也不能将两种角色的金额相加当作门店实收。',
+            'position_name' => '显示该人员当前有效岗位；跨组织参与人员依次读取业务门店任职、直属岗位和其他有效任职。岗位只供查看，不改变历史业绩、达标金额或分期结果。',
             'member_name_snapshot' => '显示销售或补交时保存的会员姓名；退款取关联原销售的姓名。游客显示“游客”。不同会员的金额分别累计，不合并凑门槛。',
             'phone' => '显示该会员当前登记的手机号；业务事实没有保存历史号码，会员改号后此列会更新，游客或未登记号码时留空。',
             'classification' => '属于生美的显示“生美”；非生美且商品分类已开启合作方的显示“合作方”。同时符合两项时优先按生美计算，同一笔业绩不重复计入合作方。',
             'beauty_category' => '取卡内项目对应的平台当前商品分类，不取卡项自身分类。生美按二级分类统计，合作方按已开启的一级或二级分类统计。每名人员对每位会员按整月累计，生美、合作方各取累计业绩最高的一个分类；不同会员或分类不拼凑金额达标。',
-            'tier' => '生美：满30,000元、未满50,000元，分3个月；50,000元及以上，分6个月。合作方：满50,000元、未满100,000元，分3个月；100,000元及以上，分6个月。未达到各自最低门槛的不计入。',
-            'award_amount' => '该人员对本会员在达标整月、入选商品分类中的现金业绩净额，是分摊计算的基数，按实际金额计算、不按档位金额封顶。销售收款、欠款补交计入各自业务月，成功现金退款在退款业务月扣减，作废不计。后月退款不改写原月收款；本月金额随新增业务更新。',
+            'tier' => '生美：正向现金业绩满30,000元、未满50,000元，分3个月；50,000元及以上，分6个月。合作方：正向现金业绩满50,000元、未满100,000元，分3个月；100,000元及以上，分6个月。退款不降低档位，也不参与达标判断。',
+            'award_amount' => '该人员对本会员在达标整月、入选商品分类中的正向现金业绩，是分摊计算的唯一基数，按实际金额计算、不按档位金额封顶。销售收款、欠款补交计入各自业务月；退款不扣减本列，也不参与达标、档位或分期计算。',
+            'refund_amount' => '显示该人员对本会员在同一达标月份、同一入选商品分类中的成功现金退款金额，按退款业务日归月并以正数展示。此列只供查看和合计，不扣减累计现金业绩，不参与达标、档位、本月期次或应计金额计算；作废不计。',
             'accrual_month' => '查询时选择的月份。统计该月应计金额，既包含本月达标的第1期，也包含以前月份达标、仍在分摊期内的后续期；不重复计入整笔达标金额。',
-            'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。分3个月：第1个月40%、第2个月30%、第3个月30%。分6个月：第1个月40%，第2至第6个月各12%。',
-            'monthly_due' => '本行销售人、会员与分类在达标月的累计现金业绩×本月对应比例。例如生美10月达标102,000元，10月计40,800元，11月至次年3月各计12,240元。合计为当前查询范围内全部本月应计金额，并非已发放金额。计算及导出保留分，尾差归最后一期；页面按元四舍五入。',
+            'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。分3个月：第1个月40%、第2个月30%、第3个月30%。分6个月：第1个月40%，第2至第6个月各12%。退款仅展示，不改变总期数或当前期次。',
+            'monthly_due' => '本行销售人、会员与分类在达标月的正向累计现金业绩×本月对应比例，退款不加、不减，也不改变期次。例如生美10月达标102,000元，10月计40,800元，11月至次年3月各计12,240元。合计为当前查询范围内全部本月应计金额，并非已发放金额。计算及导出保留分，尾差归最后一期；页面按元四舍五入。',
         ];
         foreach (range(1, 6) as $i) {
             $key = 'installment_' . $i;
@@ -1551,66 +1567,16 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         foreach ($columns as &$column) {
             $column['source_explanation'] = $explanations[$column['key']];
-            if (in_array($column['key'], ['award_amount', 'monthly_due'], true) || strpos($column['key'], 'installment_') === 0) {
+            if (in_array($column['key'], ['award_amount', 'refund_amount', 'monthly_due'], true) || strpos($column['key'], 'installment_') === 0) {
                 $column['value_type'] = 'money';
             }
         }
         unset($column);
         $result = $this->result('销售人生美大单统计表', $columns, $facts, $input);
-        $result['metric_version'] = 'large-order-member-monthly-accrual-v8';
+        $result['metric_version'] = 'large-order-gross-cash-refund-display-v11';
         $result['range'] = $range;
         $result['filter_schema'][] = ['key' => 'month', 'type' => 'month', 'label' => '应计月份'];
         return $result;
-    }
-
-    /**
-     * A refund has one selected card component and its own salesperson deduction.
-     * Only a verified original sale/component can place that deduction in a beauty category;
-     * the refund-day person and amount never inherit the original sale's attribution.
-     */
-    private function salespersonBeautyRefundFacts(array $stores, array $range, array $input): array
-    {
-        $query = $this->participantEmployeeFact($this->applyOrganizationFilters(
-            $this->scope(Db::name('cashier_v3_performance_fact')->alias('rp'), $stores, 'rp'),
-            'rp', $input, $range), 'rp.employee_id')
-            ->join('cashier_v3_order_lifecycle_operation ro',
-                "ro.tenant_id=rp.tenant_id AND ro.store_id=rp.store_id AND ro.operation_id=rp.order_id"
-                . " AND ro.operation_type='refund' AND ro.status='succeeded'")
-            ->join('cashier_v3_refund_adjustment ra',
-                "ra.tenant_id=rp.tenant_id AND ra.store_id=rp.store_id AND ra.operation_id=rp.order_id"
-                . " AND ra.status='effective' AND ra.target_type='card'")
-            ->join('cashier_v3_sale_fact original',
-                "original.tenant_id=ra.tenant_id AND original.store_id=ra.store_id"
-                . " AND original.order_id=ra.source_sales_order_id"
-                . " AND original.source_line_id=ra.source_sales_line_id"
-                . " AND original.source_type='card' AND original.fact_direction='forward'"
-                . " AND original.status='effective'")
-            ->join('user_card_holder holder',
-                'holder.id=ra.card_holder_id AND holder.uid=ra.member_id')
-            ->join('store_order_cart_info component',
-                'component.id=ra.card_component_id AND component.oid=holder.oid')
-            ->where('rp.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereBetween('rp.business_date', [$range['start'], $range['end']])
-            ->where('rp.status', 'effective')->where('rp.fact_direction', 'forward')
-            ->where('rp.performance_type', 'refund_sales_deduction')->where('rp.amount_cents', '<', 0)
-            ->where('component.product_id', '>', 0)
-            ->whereNotExists(function ($reversal): void {
-                $reversal->name('cashier_v3_performance_fact')->alias('rp_reversal')
-                    ->whereRaw('rp_reversal.tenant_id=rp.tenant_id')
-                    ->whereRaw('rp_reversal.reversal_of=rp.fact_id')
-                    ->where('rp_reversal.fact_direction', 'reversal')
-                    ->where('rp_reversal.status', 'effective');
-            });
-        $this->requireVerifiedBeautyRefundComponent($query);
-        $rows = $query->fieldRaw('rp.tenant_id,rp.store_id,rp.organization_id,rp.organization_path_snapshot,'
-            . 'rp.organization_name_snapshot division_name,rp.store_name_snapshot store_name,'
-            . 'rp.business_date,rp.employee_id,rp.employee_name_snapshot salesperson,'
-            . 'rp.order_id,rp.order_id source_line_id,rp.member_id,original.member_name_snapshot,original.fact_id sale_fact_id,'
-            . 'component.product_id component_product_id,rp.amount_cents direct_amount_cents,'
-            . 'ro.operation_no refund_no')->select()->toArray();
-        foreach ($rows as &$row) $row['role_snapshot'] = 'salesperson';
-        unset($row);
-        return $rows;
     }
 
     /**
@@ -1772,6 +1738,50 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
 
     /**
+     * Read each successful card refund's own salesperson deductions. Classification is deferred
+     * to StoreRefundCurrentCategoryServices so exact-component and verified whole-card refunds
+     * share one authority; the refund-day person and amount never inherit original attribution.
+     */
+    private function salespersonBeautyRefundFacts(array $stores, array $range, array $input): array
+    {
+        $query = $this->participantEmployeeFact($this->applyOrganizationFilters(
+            $this->scope(Db::name('cashier_v3_performance_fact')->alias('rp'), $stores, 'rp'),
+            'rp', $input, $range), 'rp.employee_id')
+            ->join('cashier_v3_order_lifecycle_operation ro',
+                "ro.tenant_id=rp.tenant_id AND ro.store_id=rp.store_id AND ro.operation_id=rp.order_id"
+                . " AND ro.operation_type='refund' AND ro.status='succeeded'")
+            ->join('cashier_v3_refund_adjustment ra',
+                "ra.tenant_id=rp.tenant_id AND ra.store_id=rp.store_id AND ra.operation_id=rp.order_id"
+                . " AND ra.status='effective' AND ra.target_type='card'")
+            ->join('cashier_v3_sale_fact original',
+                "original.tenant_id=ra.tenant_id AND original.store_id=ra.store_id"
+                . " AND original.order_id=ra.source_sales_order_id"
+                . " AND original.source_line_id=ra.source_sales_line_id"
+                . " AND original.source_type='card' AND original.fact_direction='forward'"
+                . " AND original.status='effective'")
+            ->where('rp.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->whereBetween('rp.business_date', [$range['start'], $range['end']])
+            ->where('rp.status', 'effective')->where('rp.fact_direction', 'forward')
+            ->where('rp.performance_type', 'refund_sales_deduction')->where('rp.amount_cents', '<', 0)
+            ->whereNotExists(function ($reversal): void {
+                $reversal->name('cashier_v3_performance_fact')->alias('rp_reversal')
+                    ->whereRaw('rp_reversal.tenant_id=rp.tenant_id')
+                    ->whereRaw('rp_reversal.reversal_of=rp.fact_id')
+                    ->where('rp_reversal.fact_direction', 'reversal')
+                    ->where('rp_reversal.status', 'effective');
+            });
+        $rows = $query->fieldRaw('rp.tenant_id,rp.store_id,rp.organization_id,rp.organization_path_snapshot,'
+            . 'rp.organization_name_snapshot division_name,rp.store_name_snapshot store_name,'
+            . 'rp.business_date,rp.employee_id,rp.employee_name_snapshot salesperson,'
+            . 'rp.order_id,rp.order_id source_line_id,rp.member_id,original.member_name_snapshot,original.fact_id sale_fact_id,'
+            . 'ro.operation_id,ro.source_type,ro.source_order_id,ra.card_holder_id refund_card_holder_id,'
+            . 'ra.card_component_id,rp.amount_cents direct_amount_cents,ro.operation_no refund_no')->select()->toArray();
+        foreach ($rows as &$row) $row['role_snapshot'] = 'salesperson';
+        unset($row);
+        return $rows;
+    }
+
+    /**
      * Manager attribution is versioned independently of salesperson deductions.
      * A selected manager receives the successful cash-refund amount as a negative
      * projection, using the latest complete attribution revision (including clears).
@@ -1811,10 +1821,6 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 . " AND original.source_line_id=ra.source_sales_line_id"
                 . " AND original.source_type='card' AND original.fact_direction='forward'"
                 . " AND original.status='effective'")
-            ->join('user_card_holder holder',
-                'holder.id=ra.card_holder_id AND holder.uid=ra.member_id')
-            ->join('store_order_cart_info component',
-                'component.id=ra.card_component_id AND component.oid=holder.oid')
             ->leftJoin([$latest => 'latest_manager'],
                 'latest_manager.tenant_id=ro.tenant_id AND latest_manager.store_id=ro.store_id'
                 . ' AND latest_manager.operation_id=ro.operation_id')
@@ -1832,8 +1838,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->whereBetween('ro.business_date', [$range['start'], $range['end']])
             ->where('ro.operation_type', 'refund')->where('ro.status', 'succeeded')
             ->where('refund_cash.amount_cents', '<', 0)
-            ->where('component.product_id', '>', 0)->whereRaw($managerId . '>0');
-        $this->requireVerifiedBeautyRefundComponent($query);
+            ->whereRaw($managerId . '>0');
         if ($this->participantEmployeeId > 0) {
             $query->whereRaw($managerId . '=?', [$this->participantEmployeeId]);
         }
@@ -1842,7 +1847,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             . 'ro.business_date,' . $managerId . ' employee_id,'
             . 'COALESCE(revised_manager.employee_name_snapshot,original_manager.employee_name_snapshot) salesperson,'
             . 'ro.operation_id order_id,ro.operation_id source_line_id,ro.member_id,original.member_name_snapshot,'
-            . 'original.fact_id sale_fact_id,component.product_id component_product_id,'
+            . 'original.fact_id sale_fact_id,ro.operation_id,ro.source_type,ro.source_order_id,'
+            . 'ra.card_holder_id refund_card_holder_id,ra.card_component_id,'
             . 'refund_cash.amount_cents direct_amount_cents,ro.operation_no refund_no')
             ->select()->toArray();
         foreach ($rows as &$row) $row['role_snapshot'] = 'sales_manager';
@@ -1851,35 +1857,83 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
 
     /**
-     * A refund is classifiable only when the original card component is proven
-     * by its sale allocation or by a completed purchase receipt for that exact
-     * holder and sale line. The receipt path covers older sales without an
-     * allocation fact; an unrelated or complimentary cart must not qualify.
+     * Convert verified current refund categories into the same employee/member/month facts used
+     * for qualification. One resolved category receives the whole deduction; multiple categories
+     * require positive immutable component weights and conserve every cent with a stable last share.
      */
-    private function requireVerifiedBeautyRefundComponent($query): void
+    private function currentBeautyLargeOrderRefundFacts(array $refunds): array
     {
-        $query->where(function ($verified): void {
-            $verified->whereExists(function ($allocation): void {
-                $allocation->name('cashier_v3_card_sale_category_allocation_fact')->alias('verified_component')
-                    ->whereRaw('verified_component.tenant_id=original.tenant_id')
-                    ->whereRaw('verified_component.store_id=original.store_id')
-                    ->whereRaw('verified_component.sale_fact_id=original.fact_id')
-                    ->whereRaw('verified_component.component_product_id=component.product_id')
-                    ->where('verified_component.status', 'effective');
-            })->whereExists(function ($receipt): void {
-                $receipt->name('cashier_v3_card_purchase_receipt')->alias('verified_receipt')
-                    ->whereRaw('verified_receipt.tenant_id=original.tenant_id')
-                    ->whereRaw('verified_receipt.store_id=original.store_id')
-                    ->whereRaw('verified_receipt.member_id=ra.member_id')
-                    ->whereRaw('verified_receipt.card_holder_id=holder.id')
-                    ->whereRaw('verified_receipt.legacy_order_id=holder.oid')
-                    ->whereRaw('verified_receipt.sales_order_id=original.order_id')
-                    ->whereRaw('verified_receipt.sales_order_line_id=original.source_line_id')
-                    ->where('verified_receipt.status', 'completed')
-                    ->where('component.cart_type', 2)->where('component.product_type', 6)
-                    ->where('component.is_gift', 0)->where('component.pay_price', '>', 0);
-            }, 'OR');
+        if ($refunds === []) return [];
+        $resolved = (new StoreRefundCurrentCategoryServices())->resolve($refunds);
+        $expanded = [];
+        foreach ($refunds as $refund) {
+            $categories = $resolved[(string)($refund['operation_id'] ?? '')] ?? [];
+            foreach (self::allocateLargeOrderRefundCategories((int)($refund['direct_amount_cents'] ?? 0), $categories) as $part) {
+                if ((int)$part['amount_cents'] === 0 || (int)($part['platform_product_id'] ?? 0) <= 0) continue;
+                $row = $refund;
+                $row['component_product_id'] = (int)$part['platform_product_id'];
+                $row['direct_amount_cents'] = (int)$part['amount_cents'];
+                $expanded[] = $row;
+            }
+        }
+        if ($expanded === []) return [];
+        $classifications = (new StoreLargeOrderInstallmentServices())->categories($expanded);
+        $facts = [];
+        foreach ($expanded as $index => $row) {
+            if (empty($classifications[$index])) continue;
+            $row = array_merge($row, $classifications[$index]);
+            $key = json_encode([(string)$row['tenant_id'], (int)$row['store_id'],
+                (string)$row['role_snapshot'], (int)$row['employee_id'], (int)$row['member_id'],
+                (string)$row['operation_id'], (string)$row['business_date'],
+                (string)$row['rule_type'], (int)$row['award_category_id']], JSON_UNESCAPED_UNICODE);
+            if (!isset($facts[$key])) {
+                $facts[$key] = $row;
+                $facts[$key]['amount_cents'] = 0;
+            }
+            $facts[$key]['amount_cents'] += (int)$row['direct_amount_cents'];
+        }
+        foreach ($facts as &$fact) {
+            unset($fact['component_product_id'], $fact['direct_amount_cents'],
+                $fact['refund_card_holder_id'], $fact['card_component_id']);
+        }
+        unset($fact);
+        return array_values($facts);
+    }
+
+    /**
+     * Allocate one negative refund amount without inventing weights. A single verified category is
+     * unambiguous even for a whole-card refund; multi-category refunds are admitted only when every
+     * category has a positive verified weight. The final stable category absorbs integer remainder.
+     */
+    private static function allocateLargeOrderRefundCategories(int $amountCents, array $categories): array
+    {
+        if ($amountCents >= 0 || $categories === []) return [];
+        usort($categories, static function (array $left, array $right): int {
+            return (int)($left['id'] ?? 0) <=> (int)($right['id'] ?? 0)
+                ?: strcmp((string)($left['path'] ?? ''), (string)($right['path'] ?? ''))
+                ?: ((int)($left['platform_product_id'] ?? 0) <=> (int)($right['platform_product_id'] ?? 0));
         });
+        if (count($categories) === 1) {
+            $categories[0]['amount_cents'] = $amountCents;
+            return $categories;
+        }
+        $weights = array_map(static function (array $category): int {
+            return max(0, (int)($category['weight_cents'] ?? 0));
+        }, $categories);
+        if (in_array(0, $weights, true)) return [];
+        $totalWeight = array_sum($weights);
+        if ($totalWeight <= 0) return [];
+        $absolute = abs($amountCents);
+        $allocated = 0;
+        $last = count($categories) - 1;
+        foreach ($categories as $index => &$category) {
+            $share = $index === $last ? $absolute - $allocated
+                : intdiv($absolute * $weights[$index], $totalWeight);
+            $allocated += $share;
+            $category['amount_cents'] = -$share;
+        }
+        unset($category);
+        return $categories;
     }
 
     /** Rebucket frozen card-component cash weights by today's linked platform category before rounding. */
@@ -1940,9 +1994,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
      * 每名人员、每位会员、每月在生美、合作方两套规则内分别选累计最高的一类，
      * 不同会员或不同分类不能拼凑金额达标；同组内的原门槛和分期规则保持不变。
      * 生美优先的互斥归类已在组件投影完成；销售人与经理保持独立。
-     * 稳定选择最后一条事实承载追溯信息，分期本金则取整月净额而非该笔金额。
+     * 退款与正向现金按同组分别累计：只用正向现金选择档位和分期本金，
+     * 退款只形成展示金额，不能降低达标金额或改变任何计算结果。
+     * 稳定选择最后一条正向事实承载追溯信息。
      *
-     * @return array<int,array{beauty_category:string,amount_cents:int,threshold_cents:int}>
+     * @return array<int,array{beauty_category:string,amount_cents:int,refund_amount_cents:int,threshold_cents:int}>
      */
     private static function beautyLargeOrderMonthlyAwards(array $facts): array
     {
@@ -1957,10 +2013,18 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 (string)($fact['employee_id'] ?? ''), (int)($fact['member_id'] ?? 0), $month, $rule]);
             $categoryKey = $scope . '|' . ($fact['award_category_id'] ?? $category);
             if (!isset($monthly[$scope][$categoryKey])) {
-                $monthly[$scope][$categoryKey] = ['beauty_category' => $category, 'rule_type' => $rule, 'amount_cents' => 0, 'last_index' => $index];
+                $monthly[$scope][$categoryKey] = [
+                    'beauty_category' => $category, 'rule_type' => $rule,
+                    'amount_cents' => 0, 'refund_amount_cents' => 0, 'last_positive_index' => null,
+                ];
             }
-            $monthly[$scope][$categoryKey]['amount_cents'] += (int)($fact['amount_cents'] ?? 0);
-            $monthly[$scope][$categoryKey]['last_index'] = $index;
+            $amount = (int)($fact['amount_cents'] ?? 0);
+            if ($amount > 0) {
+                $monthly[$scope][$categoryKey]['amount_cents'] += $amount;
+                $monthly[$scope][$categoryKey]['last_positive_index'] = $index;
+            } elseif ($amount < 0) {
+                $monthly[$scope][$categoryKey]['refund_amount_cents'] += abs($amount);
+            }
         }
         $awards = [];
         foreach ($monthly as $categories) {
@@ -1973,10 +2037,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if (!is_array($winner)) continue;
             $minimum = $winner['rule_type'] === 'partner' ? 5000000 : 3000000;
             $high = $winner['rule_type'] === 'partner' ? 10000000 : 5000000;
-            if ((int)$winner['amount_cents'] < $minimum) continue;
-            $awards[(int)$winner['last_index']] = [
+            if ((int)$winner['amount_cents'] < $minimum || $winner['last_positive_index'] === null) continue;
+            $awards[(int)$winner['last_positive_index']] = [
                 'beauty_category' => (string)$winner['beauty_category'],
                 'amount_cents' => (int)$winner['amount_cents'],
+                'refund_amount_cents' => (int)$winner['refund_amount_cents'],
                 'threshold_cents' => (int)$winner['amount_cents'] >= $high ? $high : $minimum,
             ];
         }
@@ -3041,8 +3106,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     {
         if($title==='市场业绩表')return preg_match('/^(channel_\d+_(walk_in|visits|effective)|payment_.+|channel_\d+_amount|total_performance)$/',$key)?(preg_match('/_(walk_in|visits|effective)$/',$key)?'count':'money'):'';
         if($title==='市场明细表')return in_array($key,['walk_in','visits','amount'],true)?($key==='amount'?'money':'count'):'';
-        if($title==='会员进店明细')return $key==='amount'?'money':'';
         if($title==='会员进店分析表')return $key==='total_visits'||preg_match('/^month_\d+_visits$/',$key)?'count':($key==='annual_cash'||preg_match('/^month_\d+_cash$/',$key)?'money':'');
+        if($title==='会员进店明细')return $key==='amount'?'money':'';
         if($title==='会员进店年度汇总表')return $key==='total'||strpos($key,'store_')===0?'count':'';
         if($title==='地推拓客明细表')return in_array($key,['visit_over_one_hour','fourth_and_above'],true)?'count':(in_array($key,['labor_fee','cash_none','cash_1','cash_2','cash_3'],true)?'money':'');
         if($title==='地推拓客汇总表')return $key==='annual_total'||preg_match('/^month_\d+$/',$key)?'money':'';
@@ -3050,7 +3115,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if($title==='异业收客汇总表')return $key==='remaining_service_count'?'count':(in_array($key,['remaining_service_amount','first_500','reached_2400','annual_cash'],true)||preg_match('/^month_\d+$/',$key)?'money':'');
         if($title==='新客明细表')return $key==='guide_effective_count'?'count':(in_array($key,['experience_card_amount','labor_fee','full_payment','deposit_payment','cleared_payment'],true)?'money':'');
         if($title==='新客汇总表')return preg_match('/^month_\d+_count$/',$key)?'count':($key==='annual_cash'||preg_match('/^month_\d+_(full|deposit|cleared)$/',$key)?'money':'');
-        if($title==='销售人生美大单统计表')return $key==='monthly_due'||preg_match('/^installment_[1-6]$/D',$key)?'money':'';
+        // 退款金额只汇总当前可见的人员归属行；它仍是展示合计，不参与达标或应计公式。
+        if($title==='销售人生美大单统计表')return in_array($key,['refund_amount','monthly_due'],true)||preg_match('/^installment_[1-6]$/D',$key)?'money':'';
         if($title==='院店退款台账')return $key==='refund_amount'?'money':'';
         return'';
     }

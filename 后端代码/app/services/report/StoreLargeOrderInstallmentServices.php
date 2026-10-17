@@ -85,7 +85,7 @@ final class StoreLargeOrderInstallmentServices
         return $values;
     }
 
-    /** One selected month's accrual per qualifying origin month; historical principals are not current cash. */
+    /** One selected month's accrual per qualifying origin month; displayed refunds never alter the principal. */
     public static function dueRows(array $facts, array $awards, string $month): array
     {
         $target = (int)substr($month, 0, 4) * 12 + (int)substr($month, 5, 2);
@@ -101,6 +101,7 @@ final class StoreLargeOrderInstallmentServices
             $row['installment_number'] = $offset + 1;
             $row['installment_count'] = count($schedule);
             $row['award_amount_cents'] = (int)$award['amount_cents'];
+            $row['refund_amount_cents'] = (int)($award['refund_amount_cents'] ?? 0);
             $row['due_amount_cents'] = $schedule[$offset];
             $row['threshold_cents'] = (int)$award['threshold_cents'];
             // 会员加入应计行身份：同一人员、月份、分类下两名会员不能共用行键。
