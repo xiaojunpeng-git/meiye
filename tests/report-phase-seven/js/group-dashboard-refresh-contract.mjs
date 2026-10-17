@@ -25,7 +25,13 @@ assert(source.includes('--metric-consumption:#b7791f'), 'consumption trend uses 
 assert(!source.includes('>目标管理</button>') && !source.includes('>管理目标</button>'), 'dashboard does not expose target management actions')
 assert(source.includes('dashboard-drilldown__conditions') && source.includes('dashboard-drilldown__table'), 'drilldown separates filters from a labeled detail table')
 assert(source.includes('repeat(auto-fit,minmax(min(100%,250px),1fr))'), 'category performance cards auto-fit up to six per row')
-assert(source.includes('Number(category?.cash_performance_cents) !== 0 || hasRanking'), 'category performance hides cards without valid data')
+// Parent cards use actual performance; fixed sale types may remain meaningful
+// when refunds net the parent amount to zero. Empty types alone do not show it.
+assert(source.includes('Number(category?.amount_cents) !== 0 || hasRanking || hasSaleType'), 'category performance hides cards without valid data')
+assert(source.includes('category.sale_types') && !source.includes('secondary_categories'), 'fixed sale types replace secondary category rendering')
+assert(source.indexOf('{{ type.title }}') < source.indexOf('Number(type.sales_quantity || 0)')
+  && source.indexOf('Number(type.sales_quantity || 0)') < source.indexOf('formatMoney(type.cash_performance_cents)'), 'sale types show name then quantity then cash amount')
+assert(source.includes('grid-template-columns:repeat(3,minmax(0,1fr))'), 'each category keeps three stable horizontal tracks')
 assert(!source.includes('categories.value.sort(') && !source.includes('categoryCards.value.sort('), 'category cards preserve the backend configured order')
 
 console.log('group dashboard refresh contract: PASS')

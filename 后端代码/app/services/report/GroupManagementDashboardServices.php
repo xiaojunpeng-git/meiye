@@ -113,7 +113,7 @@ final class GroupManagementDashboardServices
         );
         $monthTargets = $goalProgress['month_targets'];
         $categoryCards = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()->categoryDashboardCards(
-            'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds, $categoryTree['labels']
+            'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
         );
         $currentTarget = array_sum($monthTargets);
         $yearTarget = array_sum($goalProgress['year_targets']);
@@ -123,7 +123,11 @@ final class GroupManagementDashboardServices
         // The four sale-mix cards share the dashboard's authorized store/date
         // scope. Their positive sale receipts are narrower than the overall
         // cash card, which also includes recharge and debt repayments.
-        $saleTypeTotals = $reader->dashboardSaleTypeTotals($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+        // One reader result supplies both the top four types and each category's
+        // fixed three types. This layer labels values only; it never recalculates them.
+        $saleTypeBreakdown = $reader->dashboardSaleTypeBreakdown($scope['tenant_id'], $scope['store_ids'], $range,
+            $categoryTree['roots'], $categoryTree['children'], $categoryIds);
+        $saleTypeTotals = $saleTypeBreakdown['totals'];
         $saleTypeCards = [];
         foreach (['normal_card' => '疗程卡', 'experience_card' => '体验卡', 'project' => '单项', 'product' => '产品'] as $code => $title) {
             $saleTypeCards[] = [
@@ -133,6 +137,15 @@ final class GroupManagementDashboardServices
                 'cash_performance_cents' => $saleTypeTotals[$code]['cash_performance_cents'],
             ];
         }
+        foreach ($categoryCards as &$category) {
+            $category['sale_types'] = [];
+            foreach ($saleTypeCards as $type) {
+                $values = $saleTypeBreakdown['categories'][$category['category_id']][$type['code']] ?? null;
+                if ($values === null) continue;
+                $category['sale_types'][] = ['code' => $type['code'], 'title' => $type['title']] + $values;
+            }
+        }
+        unset($category);
 
         return [
             'dashboard_code' => self::DASHBOARD_CODE,

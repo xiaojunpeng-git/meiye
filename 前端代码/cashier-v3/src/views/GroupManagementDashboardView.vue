@@ -102,11 +102,12 @@ const categoryCards = computed(() => categories.value.filter((category) => {
   const name = String(category?.name || '').trim()
   const hasRanking = (Array.isArray(category?.project_rankings) && category.project_rankings.length > 0)
     || (Array.isArray(category?.product_rankings) && category.product_rankings.length > 0)
+  const hasSaleType = (category?.sale_types || []).some((type) => Number(type.sales_quantity) !== 0 || Number(type.cash_performance_cents) !== 0)
   return name
     && name !== '未分类'
     && category?.is_uncategorized !== true
     && Number(category?.is_uncategorized) !== 1
-    && (Number(category?.amount_cents) !== 0 || hasRanking || category?.secondary_categories?.length > 0)
+    && (Number(category?.amount_cents) !== 0 || hasRanking || hasSaleType)
 }))
 const sources = computed(() => Array.isArray(dashboard.value?.sources?.records) ? dashboard.value.sources.records : [])
 const alerts = computed(() => Array.isArray(dashboard.value?.alerts?.records) ? dashboard.value.alerts.records : [])
@@ -229,7 +230,7 @@ async function showDrilldown(drill, label = '') {
     conditions: {
       开始日期: scope.range?.start || currentQuery().start_date,
       截止日期: scope.range?.end || currentQuery().end_date,
-      商品分类: drill.category_id ? categories.value.flatMap((item) => [item, ...(item.secondary_categories || [])]).find((item) => Number(item.category_id) === Number(drill.category_id))?.name || '-' : '全部商品'
+      商品分类: drill.category_id ? categories.value.find((item) => Number(item.category_id) === Number(drill.category_id))?.name || '-' : '全部商品'
     },
     records: []
   }
@@ -413,12 +414,14 @@ onBeforeUnmount(() => {
               <button type="button" class="dashboard-category-card" @click="showDrilldown(category.drilldown, `${category.name}实际业绩`)"><span>{{ category.name }}</span><strong>{{ formatMoney(category.amount_cents) }}</strong><small>分类实际业绩</small><span class="dashboard-category-pie" :class="{ 'is-empty': category.share === null }" :style="{ '--category-progress': category.share || 0 }"><b>{{ formatRate(category.share) }}</b></span></button>
               <button type="button" class="dashboard-card-guide" :aria-label="`${category.name}列名取值来源`" @click="openFieldGuide('categories')"><BookOpen :size="14" aria-hidden="true" /></button>
             </div>
-            <!-- The backend owns child order, zero suppression and exact drilldown scope. -->
-            <div v-if="category.secondary_categories?.length" class="dashboard-secondary-categories" :aria-label="`${category.name}二级分类实际业绩`">
-              <button v-for="child in category.secondary_categories" :key="child.category_id" type="button" class="dashboard-secondary-category" :disabled="!child.drilldown" @click="showDrilldown(child.drilldown, `${category.name}/${child.name}实际业绩`)">
-                <span>{{ child.name }}</span>
-                <strong>{{ formatMoney(child.amount_cents) }}</strong>
-              </button>
+            <!-- Fixed sale types reuse the top cards' server-calculated quantity
+                 and cash values; they are not second-level category drilldowns. -->
+            <div v-if="category.sale_types?.length" class="dashboard-category-sale-types" :aria-label="`${category.name}销售类型`">
+              <div v-for="type in category.sale_types" :key="type.code" class="dashboard-category-sale-type">
+                <span>{{ type.title }}</span>
+                <span class="dashboard-category-sale-type__quantity">销售量 {{ Number(type.sales_quantity || 0).toLocaleString('zh-CN') }}</span>
+                <strong :aria-label="`现金业绩 ${formatMoney(type.cash_performance_cents)}`">{{ formatMoney(type.cash_performance_cents) }}</strong>
+              </div>
             </div>
             <div class="dashboard-category-rank__header"><strong>{{ categoryRankType(category) === 'projects' ? '项目业绩排行' : '产品业绩排行' }}</strong><div class="dashboard-category-rank__toggle" role="tablist"><button type="button" :class="{ 'is-active': categoryRankType(category) === 'projects' }" @click="setCategoryRankType(category, 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankType(category) === 'products' }" @click="setCategoryRankType(category, 'products')">产品</button></div></div>
             <div v-for="(item, rank) in categoryRankings(category)" :key="`${item.name}-${rank}`" class="dashboard-category-rank__row" :class="`dashboard-category-rank__row--${rank + 1}`"><em>{{ rank + 1 }}</em><span>{{ item.name }}</span><b>{{ formatMoney(item.amount_cents) }}</b></div>
@@ -502,7 +505,7 @@ onBeforeUnmount(() => {
 .group-dashboard__header{align-items:center;justify-content:flex-start;min-height:40px;margin-bottom:8px}
 .group-dashboard__header h1{margin:0;text-align:left}
 @media(max-width:760px){.group-dashboard__header{display:flex;align-items:flex-start;justify-content:flex-start;min-height:36px;margin-bottom:8px}}
-/* Rank colors must not depend on whether the secondary-category strip exists. */
+/* Rank colors must not depend on whether the sale-type strip exists. */
 .dashboard-category-panel .dashboard-category-rank__row--1 { background: #fff7df; }
 .dashboard-category-panel .dashboard-category-rank__row--1 em { background: #d49b2c; color: #fff; }
 .dashboard-category-panel .dashboard-category-rank__row--2 em { background: #b68162; color: #fff; }
@@ -607,13 +610,12 @@ onBeforeUnmount(() => {
 .dashboard-sale-type-card__values strong{overflow:hidden;color:#1f5f8b;font-size:18px;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:900px){.group-dashboard__sale-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.group-dashboard__sale-type-grid{grid-template-columns:1fr}}
-/* Keep second-level values side by side; overflow stays inside the category
-   panel so long labels or many children never widen the page. */
-.dashboard-secondary-categories{display:flex;gap:0;overflow-x:auto;max-width:100%;border-top:1px solid #edf1f5;padding:8px 0;scrollbar-width:thin}
-.dashboard-secondary-category{display:flex;flex:1 0 104px;min-width:0;max-width:156px;flex-direction:column;align-items:flex-start;gap:5px;border:0;border-right:1px solid #edf1f5;padding:2px 12px;background:transparent;color:#53667a;text-align:left;font:inherit;cursor:pointer}
-.dashboard-secondary-category:last-child{border-right:0}
-.dashboard-secondary-category span{width:100%;overflow-wrap:anywhere;font-size:12px;line-height:1.4}
-.dashboard-secondary-category strong{width:100%;overflow-wrap:anywhere;color:#1f5f8b;font-size:14px;line-height:1.4}
-.dashboard-secondary-category:hover{background:#f4f8fc}
-.dashboard-secondary-category:focus-visible{outline:2px solid #1769aa;outline-offset:-2px}
+/* Keep the fixed three sale types side by side; wrapping values must not
+   widen the category panel or move quantity above its type label. */
+.dashboard-category-sale-types{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));max-width:100%;border-top:1px solid #edf1f5;padding:8px 0}
+.dashboard-category-sale-type{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:5px;border-right:1px solid #edf1f5;padding:2px 8px;color:#53667a}
+.dashboard-category-sale-type:last-child{border-right:0}
+.dashboard-category-sale-type span{width:100%;overflow-wrap:anywhere;font-size:12px;line-height:1.4}
+.dashboard-category-sale-type .dashboard-category-sale-type__quantity{color:#2b4358;font-variant-numeric:tabular-nums}
+.dashboard-category-sale-type strong{width:100%;overflow-wrap:anywhere;color:#1f5f8b;font-size:14px;line-height:1.4}
 </style>
