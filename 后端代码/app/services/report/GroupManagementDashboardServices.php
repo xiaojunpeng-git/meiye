@@ -113,7 +113,7 @@ final class GroupManagementDashboardServices
         );
         $monthTargets = $goalProgress['month_targets'];
         $categoryCards = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()->categoryDashboardCards(
-            'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
+            'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds, $categoryTree['labels']
         );
         $currentTarget = array_sum($monthTargets);
         $yearTarget = array_sum($goalProgress['year_targets']);
@@ -237,7 +237,7 @@ final class GroupManagementDashboardServices
      * Keep the full tree for authorized category drilldown and attribution;
      * hiding a card never rewrites cash facts or removes its amount from the
      * overall operating metrics.
-     * @return array{roots:array<int,array<string,mixed>>,children:array<int,array<int,int>>,visible_ids:array<int,bool>}
+     * @return array{roots:array<int,array<string,mixed>>,children:array<int,array<int,int>>,visible_ids:array<int,bool>,labels:array<int,array<string,mixed>>}
      */
     private function categories(): array
     {
@@ -259,11 +259,11 @@ final class GroupManagementDashboardServices
             if (isset($ids[(int)$row['pid']]) && (int)$row['pid'] > 0) continue;
             if ($row['statistics_enabled'] !== 1) continue;
             $roots[] = $row;
-            // A child switch does not erase its historical amount from an
-            // enabled parent: this dashboard displays first-level cards only.
+            // Child switches do not erase amounts from an enabled parent or
+            // its secondary-category breakdown; the parent controls visibility.
             foreach ($this->descendants($id, $children) as $visibleId) $visibleIds[$visibleId] = true;
         }
-        return ['roots' => $roots, 'children' => $children, 'visible_ids' => $visibleIds];
+        return ['roots' => $roots, 'children' => $children, 'visible_ids' => $visibleIds, 'labels' => $ids];
     }
 
     /** @return array<int,int> */

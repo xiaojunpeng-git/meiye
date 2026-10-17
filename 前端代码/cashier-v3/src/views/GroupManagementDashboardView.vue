@@ -106,7 +106,7 @@ const categoryCards = computed(() => categories.value.filter((category) => {
     && name !== '未分类'
     && category?.is_uncategorized !== true
     && Number(category?.is_uncategorized) !== 1
-    && (Number(category?.amount_cents) !== 0 || hasRanking)
+    && (Number(category?.amount_cents) !== 0 || hasRanking || category?.secondary_categories?.length > 0)
 }))
 const sources = computed(() => Array.isArray(dashboard.value?.sources?.records) ? dashboard.value.sources.records : [])
 const alerts = computed(() => Array.isArray(dashboard.value?.alerts?.records) ? dashboard.value.alerts.records : [])
@@ -229,7 +229,7 @@ async function showDrilldown(drill, label = '') {
     conditions: {
       开始日期: scope.range?.start || currentQuery().start_date,
       截止日期: scope.range?.end || currentQuery().end_date,
-      商品分类: drill.category_id ? categories.value.find((item) => Number(item.category_id) === Number(drill.category_id))?.name || '-' : '全部商品'
+      商品分类: drill.category_id ? categories.value.flatMap((item) => [item, ...(item.secondary_categories || [])]).find((item) => Number(item.category_id) === Number(drill.category_id))?.name || '-' : '全部商品'
     },
     records: []
   }
@@ -405,7 +405,27 @@ onBeforeUnmount(() => {
 
       <section class="group-dashboard__section dashboard-trend-panel"><div class="group-dashboard__section-title"><div><h2>经营业绩趋势</h2><span>{{ trendChart.rangeLabel }}</span></div><div class="dashboard-trend-panel__tools"><span class="dashboard-trend-legend dashboard-trend-legend--actual">实际业绩</span><span class="dashboard-trend-legend dashboard-trend-legend--consumption">消耗业绩</span><button type="button" class="dashboard-guide" @click="openFieldGuide('trend')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div></div><div v-if="trendChart.labels.length" class="dashboard-trend-chart"><svg viewBox="0 0 768 148" role="img" aria-label="实际业绩与消耗业绩趋势图" preserveAspectRatio="none"><line v-for="y in [13, 52, 91, 131]" :key="y" x1="24" x2="744" :y1="y" :y2="y" class="dashboard-trend-chart__grid" /><polyline :points="trendChart.consumptionPoints" class="dashboard-trend-chart__line dashboard-trend-chart__line--consumption" /><polyline :points="trendChart.actualPoints" class="dashboard-trend-chart__line dashboard-trend-chart__line--actual" /><g v-for="point in trendChart.actualNodes" :key="point.id"><circle :cx="point.x" :cy="point.y" r="3.5" class="dashboard-trend-chart__dot dashboard-trend-chart__dot--actual" /><text :x="point.x" :y="Math.max(10, Number(point.y) - 8)" class="dashboard-trend-chart__value dashboard-trend-chart__value--actual">{{ point.label }}</text></g><g v-for="point in trendChart.consumptionNodes" :key="point.id"><circle :cx="point.x" :cy="point.y" r="3.5" class="dashboard-trend-chart__dot dashboard-trend-chart__dot--consumption" /><text :x="point.x" :y="Number(point.y) + 15" class="dashboard-trend-chart__value dashboard-trend-chart__value--consumption">{{ point.label }}</text></g></svg><div class="dashboard-trend-chart__labels" :style="{ '--label-count': trendChart.labels.length }"><span v-for="label in trendChart.labels" :key="label">{{ label }}</span></div></div><p v-else class="dashboard-empty">当前筛选范围暂无趋势数据。</p></section>
 
-      <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>分类业绩</h2><span>当前启用一级商品分类，默认显示项目业绩前五名</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('categories')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="group-dashboard__category-grid"><article v-for="(category, index) in categoryCards" :key="category.category_id" class="dashboard-category-panel" :class="`dashboard-category-panel--${categoryTone(index)}`"><div class="dashboard-card-wrap"><button type="button" class="dashboard-category-card" @click="showDrilldown(category.drilldown, `${category.name}实际业绩`)"><span>{{ category.name }}</span><strong>{{ formatMoney(category.amount_cents) }}</strong><small>分类实际业绩</small><span class="dashboard-category-pie" :class="{ 'is-empty': category.share === null }" :style="{ '--category-progress': category.share || 0 }"><b>{{ formatRate(category.share) }}</b></span></button><button type="button" class="dashboard-card-guide" :aria-label="`${category.name}列名取值来源`" @click="openFieldGuide('categories')"><BookOpen :size="14" aria-hidden="true" /></button></div><div class="dashboard-category-rank__header"><strong>{{ categoryRankType(category) === 'projects' ? '项目业绩排行' : '产品业绩排行' }}</strong><div class="dashboard-category-rank__toggle" role="tablist"><button type="button" :class="{ 'is-active': categoryRankType(category) === 'projects' }" @click="setCategoryRankType(category, 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankType(category) === 'products' }" @click="setCategoryRankType(category, 'products')">产品</button></div></div><div v-for="(item, rank) in categoryRankings(category)" :key="`${item.name}-${rank}`" class="dashboard-category-rank__row"><em>{{ rank + 1 }}</em><span>{{ item.name }}</span><b>{{ formatMoney(item.amount_cents) }}</b></div><p v-if="!categoryRankings(category).length" class="dashboard-category-rank__empty">暂无项目或产品排行</p></article></div></section>
+      <section class="group-dashboard__section">
+        <div class="group-dashboard__section-title"><div><h2>分类业绩</h2><span>当前启用一级商品分类，默认显示项目业绩前五名</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('categories')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div>
+        <div class="group-dashboard__category-grid">
+          <article v-for="(category, index) in categoryCards" :key="category.category_id" class="dashboard-category-panel" :class="`dashboard-category-panel--${categoryTone(index)}`">
+            <div class="dashboard-card-wrap">
+              <button type="button" class="dashboard-category-card" @click="showDrilldown(category.drilldown, `${category.name}实际业绩`)"><span>{{ category.name }}</span><strong>{{ formatMoney(category.amount_cents) }}</strong><small>分类实际业绩</small><span class="dashboard-category-pie" :class="{ 'is-empty': category.share === null }" :style="{ '--category-progress': category.share || 0 }"><b>{{ formatRate(category.share) }}</b></span></button>
+              <button type="button" class="dashboard-card-guide" :aria-label="`${category.name}列名取值来源`" @click="openFieldGuide('categories')"><BookOpen :size="14" aria-hidden="true" /></button>
+            </div>
+            <!-- The backend owns child order, zero suppression and exact drilldown scope. -->
+            <div v-if="category.secondary_categories?.length" class="dashboard-secondary-categories" :aria-label="`${category.name}二级分类实际业绩`">
+              <button v-for="child in category.secondary_categories" :key="child.category_id" type="button" class="dashboard-secondary-category" :disabled="!child.drilldown" @click="showDrilldown(child.drilldown, `${category.name}/${child.name}实际业绩`)">
+                <span>{{ child.name }}</span>
+                <strong>{{ formatMoney(child.amount_cents) }}</strong>
+              </button>
+            </div>
+            <div class="dashboard-category-rank__header"><strong>{{ categoryRankType(category) === 'projects' ? '项目业绩排行' : '产品业绩排行' }}</strong><div class="dashboard-category-rank__toggle" role="tablist"><button type="button" :class="{ 'is-active': categoryRankType(category) === 'projects' }" @click="setCategoryRankType(category, 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankType(category) === 'products' }" @click="setCategoryRankType(category, 'products')">产品</button></div></div>
+            <div v-for="(item, rank) in categoryRankings(category)" :key="`${item.name}-${rank}`" class="dashboard-category-rank__row" :class="`dashboard-category-rank__row--${rank + 1}`"><em>{{ rank + 1 }}</em><span>{{ item.name }}</span><b>{{ formatMoney(item.amount_cents) }}</b></div>
+            <p v-if="!categoryRankings(category).length" class="dashboard-category-rank__empty">暂无项目或产品排行</p>
+          </article>
+        </div>
+      </section>
 
       <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>今日客情</h2><span>按实际启用来源动态展示，只有来源 A 显示活客数</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('sources')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="dashboard-source-grid"><button v-for="source in sources" :key="source.source_id || source.name" type="button" class="dashboard-source-card" @click="showConditions('今日客情统计条件', { 来源: source.name }, dashboard?.sources?.source_explanation)"><strong>{{ source.name }}</strong><span class="source-metric source-metric--visits">进店数 <b>{{ source.visit_count ?? '-' }}</b></span><span v-if="String(source.source_code).toUpperCase() === 'A'" class="source-metric source-metric--active">活客数 <b>{{ source.active_customer_count ?? '-' }}</b></span><span class="source-metric source-metric--deals">成交人数 <b>{{ source.deal_count ?? '-' }}</b></span><span class="source-metric source-metric--amount">实际业绩 <b>{{ formatMoney(source.deal_amount_cents) }}</b></span></button></div><p v-if="!sources.length" class="dashboard-empty">当前没有启用的业务来源。</p></section>
 
@@ -482,16 +502,17 @@ onBeforeUnmount(() => {
 .group-dashboard__header{align-items:center;justify-content:flex-start;min-height:40px;margin-bottom:8px}
 .group-dashboard__header h1{margin:0;text-align:left}
 @media(max-width:760px){.group-dashboard__header{display:flex;align-items:flex-start;justify-content:flex-start;min-height:36px;margin-bottom:8px}}
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(3) { background: #fff7df; }
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(3) em { background: #d49b2c; color: #fff; }
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(4) em { background: #b68162; color: #fff; }
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(5) em { background: #d6c978; color: #5f562d; }
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(6) em,
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(7) em { background: #a9bbc5; color: #fff; }
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(4),
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(5),
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(6),
-.dashboard-category-panel .dashboard-category-rank__row:nth-child(7) { background: transparent; }
+/* Rank colors must not depend on whether the secondary-category strip exists. */
+.dashboard-category-panel .dashboard-category-rank__row--1 { background: #fff7df; }
+.dashboard-category-panel .dashboard-category-rank__row--1 em { background: #d49b2c; color: #fff; }
+.dashboard-category-panel .dashboard-category-rank__row--2 em { background: #b68162; color: #fff; }
+.dashboard-category-panel .dashboard-category-rank__row--3 em { background: #d6c978; color: #5f562d; }
+.dashboard-category-panel .dashboard-category-rank__row--4 em,
+.dashboard-category-panel .dashboard-category-rank__row--5 em { background: #a9bbc5; color: #fff; }
+.dashboard-category-panel .dashboard-category-rank__row--2,
+.dashboard-category-panel .dashboard-category-rank__row--3,
+.dashboard-category-panel .dashboard-category-rank__row--4,
+.dashboard-category-panel .dashboard-category-rank__row--5 { background: transparent; }
 .dashboard-target-rank-list button:nth-child(1) { background: #fff7df; }
 .dashboard-target-rank-list button:nth-child(1) em { background: #d49b2c; color: #fff; }
 .dashboard-target-rank-list button:nth-child(2) em { background: #b68162; color: #fff; }
@@ -586,4 +607,13 @@ onBeforeUnmount(() => {
 .dashboard-sale-type-card__values strong{overflow:hidden;color:#1f5f8b;font-size:18px;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:900px){.group-dashboard__sale-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.group-dashboard__sale-type-grid{grid-template-columns:1fr}}
+/* Keep second-level values side by side; overflow stays inside the category
+   panel so long labels or many children never widen the page. */
+.dashboard-secondary-categories{display:flex;gap:0;overflow-x:auto;max-width:100%;border-top:1px solid #edf1f5;padding:8px 0;scrollbar-width:thin}
+.dashboard-secondary-category{display:flex;flex:1 0 104px;min-width:0;max-width:156px;flex-direction:column;align-items:flex-start;gap:5px;border:0;border-right:1px solid #edf1f5;padding:2px 12px;background:transparent;color:#53667a;text-align:left;font:inherit;cursor:pointer}
+.dashboard-secondary-category:last-child{border-right:0}
+.dashboard-secondary-category span{width:100%;overflow-wrap:anywhere;font-size:12px;line-height:1.4}
+.dashboard-secondary-category strong{width:100%;overflow-wrap:anywhere;color:#1f5f8b;font-size:14px;line-height:1.4}
+.dashboard-secondary-category:hover{background:#f4f8fc}
+.dashboard-secondary-category:focus-visible{outline:2px solid #1769aa;outline-offset:-2px}
 </style>

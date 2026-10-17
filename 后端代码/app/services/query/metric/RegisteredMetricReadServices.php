@@ -1875,7 +1875,7 @@ final class RegisteredMetricReadServices
      *
      * @return array<int,array<string,mixed>>
      */
-    public function categoryDashboardCards(string $metricCode, string $tenantId, array $stores, array $range, array $roots, array $children, array $categoryIds = []): array
+    public function categoryDashboardCards(string $metricCode, string $tenantId, array $stores, array $range, array $roots, array $children, array $categoryIds = [], array $categoryLabels = []): array
     {
         // Net actual performance must retain signed refund/reversal rows; the
         // positive cash metric keeps its existing positive-only card behavior.
@@ -1902,6 +1902,9 @@ final class RegisteredMetricReadServices
                 'amount_cents' => $amount, 'cash_performance_cents' => $amount,
                 'share' => $total === 0 ? null : round($amount / $total * 100, 1),
                 'drilldown' => ['metric_code' => $metricCode, 'category_id' => $rootId],
+                // Reuse the parent's authorized, signed population. No query
+                // per child and no change to parent totals or ranking inputs.
+                'secondary_categories' => $this->categorySecondaryCards($rootId, $matched, $children, $categoryLabels, $metricCode),
                 'project_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
                     return in_array((string)($row['product_type_snapshot'] ?? ''), ['project', 'card_component'], true);
                 })), 'item_name', '项目'),
@@ -1909,7 +1912,7 @@ final class RegisteredMetricReadServices
                     return (string)($row['product_type_snapshot'] ?? '') === 'product';
                 })), 'item_name', '产品'),
                 'source_explanation' => $metricCode === 'actual_performance'
-                    ? '当前启用一级商品分类及全部下级分类的实际业绩净额；现金退款在退款业务日抵减，卡项按卡内项目分类和分摊金额归入。'
+                    ? '当前启用一级商品分类及全部下级分类的实际业绩净额；现金退款在退款业务日抵减，卡项按卡内项目分类和分摊金额归入。二级分类沿用同一范围和口径，净额为零不显示，负值保留；直接归属一级的业绩不重复放入二级。'
                     : '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入，排行榜按卡内项目商品名称展示。',
             ];
         }
@@ -1938,6 +1941,35 @@ final class RegisteredMetricReadServices
             ];
         }
         return $cards;
+    }
+
+    /**
+     * Display direct children in configured tree order, rolling deeper leaves
+     * into their second-level ancestor. Zero net amounts disappear, not refunds.
+     * Parent-only amounts stay at the parent; labels never determine membership.
+     */
+    private function categorySecondaryCards(int $rootId, array $rows, array $children, array $labels, string $metricCode): array
+    {
+        $amounts = [];
+        foreach ($rows as $row) {
+            $id = (int)($row['category_id'] ?? 0);
+            $amounts[$id] = $this->add((int)($amounts[$id] ?? 0), (int)$row['amount_cents']);
+        }
+        $result = [];
+        foreach ((array)($children[$rootId] ?? []) as $childId) {
+            $childId = (int)$childId;
+            $label = $labels[$childId] ?? [];
+            if ((int)($label['pid'] ?? 0) !== $rootId || trim((string)($label['name'] ?? '')) === '') continue;
+            $amount = 0;
+            foreach ($this->categoryDescendants($childId, $children) as $id) {
+                $amount = $this->add($amount, (int)($amounts[$id] ?? 0));
+            }
+            if ($amount === 0) continue;
+            $result[] = ['category_id' => $childId, 'name' => (string)$label['name'],
+                'metric_code' => $metricCode, 'amount_cents' => $amount,
+                'drilldown' => ['metric_code' => $metricCode, 'category_id' => $childId]];
+        }
+        return $result;
     }
 
     private function categoryAggregate(array $rows, string $field): int

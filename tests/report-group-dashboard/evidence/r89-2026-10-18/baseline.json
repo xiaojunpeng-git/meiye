@@ -1,0 +1,21 @@
+{
+  "head": "494d6098b51ccc53842d037e659aa0ec92911e9b",
+  "files": [
+    {
+      "path": "前端代码/cashier-v3/src/views/GroupManagementDashboardView.vue",
+      "sha256": "5a7ebe0b3b185bac8bbbe3938a6b55e351d0c510e8dc87853c3ecfa3f7ede4f6",
+      "existingDiff": ""
+    },
+    {
+      "path": "后端代码/app/services/report/GroupManagementDashboardServices.php",
+      "sha256": "f7fe0a9ab804f31309689e408d28d075dd883483d232c272b08999c5fb30e4c3",
+      "existingDiff": ""
+    },
+    {
+      "path": "后端代码/app/services/query/metric/RegisteredMetricReadServices.php",
+      "sha256": "6ba057a6c8e9cfb49dd0d13ef1930ae771491b050c18ec3f88c82fdb77c1d642",
+      "existingDiff": "diff --git a/后端代码/app/services/query/metric/RegisteredMetricReadServices.php b/后端代码/app/services/query/metric/RegisteredMetricReadServices.php\nindex 85f8080e..c7ad3a83 100644\n--- a/后端代码/app/services/query/metric/RegisteredMetricReadServices.php\n+++ b/后端代码/app/services/query/metric/RegisteredMetricReadServices.php\n@@ -1673,20 +1673,30 @@ final class RegisteredMetricReadServices\n         $handler = $handlers[$projection['strategy']] ?? null;\n         if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');\n         $rows = $handler();\n-        return $this->currentReportProductCategory\n-            ? $this->projectCurrentReportCategories($rows, $categoryIds, $filters)\n-            : $rows;\n+        // Completed-service facts may legitimately carry the product ID of the\n+        // store that sold a cross-store entitlement. The fact itself is already\n+        // authorized by execution store, so only this server-owned population\n+        // may resolve category identity without requiring the two stores to match.\n+        $verifiedServiceItems = in_array($projection['strategy'],\n+            ['completed_service_performance', 'completed_service_quantity'], true);\n+        if (!$this->currentReportProductCategory) return $rows;\n+        return $verifiedServiceItems\n+            ? $this->projectCurrentReportCategories($rows, $categoryIds, $filters, true)\n+            : $this->projectCurrentReportCategories($rows, $categoryIds, $filters);\n     }\n \n     /** Apply current platform category after every strategy has resolved its immutable item ID and amount. */\n-    private function projectCurrentReportCategories(array $rows, array $categoryIds, array $filters): array\n+    private function projectCurrentReportCategories(array $rows, array $categoryIds, array $filters, bool $verifiedServiceItems = false): array\n     {\n         $links = [];\n         foreach ($rows as $index => $row) {\n             $links[$index] = ['store_id' => (int)($row['store_id'] ?? 0),\n                 'product_id' => (int)($row['item_id'] ?? $row['project_id'] ?? 0)];\n         }\n-        $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);\n+        $resolver = new StoreReportCurrentProductCategoryServices();\n+        $resolved = $verifiedServiceItems\n+            ? $resolver->resolveVerifiedFactItems($links)\n+            : $resolver->resolve($links);\n         $allowed = array_fill_keys($categoryIds, true);\n         $pathFilter = (string)($filters['category_path'] ?? '');\n         $projected = [];\n"
+    }
+  ],
+  "remote": "not applicable: local development only"
+}
