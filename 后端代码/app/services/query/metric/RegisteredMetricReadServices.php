@@ -53,6 +53,97 @@ final class RegisteredMetricReadServices
         };
     }
 
+    /**
+     * Group dashboard sale mix at completed-sale line grain. Quantity uses the
+     * registered sales_quantity source; cash uses the same positive sale
+     * allocations as cash_performance, excluding recharge and refund receipts.
+     * Card statistics are a current platform product setting, with a store
+     * product fallback for historic standalone catalog items. No source fact
+     * or already-issued card is rewritten when that setting changes.
+     *
+     * @return array<string,array{sales_quantity:int,cash_performance_cents:int}>
+     */
+    public function dashboardSaleTypeTotals(string $tenantId, array $stores, array $range, array $categoryIds = []): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        $totals = [];
+        foreach (['normal_card', 'experience_card', 'project', 'product'] as $key) {
+            $totals[$key] = ['sales_quantity' => 0, 'cash_performance_cents' => 0];
+        }
+
+        $saleSource = MetricDefinitionRegistry::get('sales_quantity')['source'];
+        $saleRows = $this->factQuery($saleSource, $tenantId, $stores, $range)
+            ->whereIn('p.source_type', ['card', 'project', 'product'])
+            ->fieldRaw('p.source_type,p.store_id,p.item_id,COALESCE(SUM(p.quantity),0) metric_value')
+            ->group('p.source_type,p.store_id,p.item_id')->select()->toArray();
+        $cashRows = $this->saleCashQuery($tenantId, $stores, $range)
+            ->whereIn('s.source_type', ['card', 'project', 'product'])
+            ->where('p.amount_cents', '>', 0)
+            ->fieldRaw('s.source_type,s.store_id,s.item_id,COALESCE(SUM(p.amount_cents),0) metric_value')
+            ->group('s.source_type,s.store_id,s.item_id')->select()->toArray();
+
+        $links = [];
+        $cardIds = [];
+        foreach (array_merge($saleRows, $cashRows) as $row) {
+            $id = (int)($row['item_id'] ?? 0);
+            $storeId = (int)($row['store_id'] ?? 0);
+            if ($id <= 0 || $storeId <= 0) continue;
+            $links[$storeId . ':' . $id] = ['product_id' => $id, 'store_id' => $storeId];
+            if ((string)$row['source_type'] === 'card') $cardIds[$id] = true;
+        }
+        $cardTypes = $this->dashboardCardStatisticsTypes(array_keys($cardIds));
+        $categories = $categoryIds === [] ? [] : (new StoreReportCurrentProductCategoryServices())->resolve($links);
+
+        foreach ([[$saleRows, 'sales_quantity'], [$cashRows, 'cash_performance_cents']] as [$rows, $field]) {
+            foreach ($rows as $row) {
+                $sourceType = (string)($row['source_type'] ?? '');
+                $id = (int)($row['item_id'] ?? 0);
+                $storeId = (int)($row['store_id'] ?? 0);
+                $linkKey = $storeId . ':' . $id;
+                if ($categoryIds !== [] && !in_array((int)($categories[$linkKey]['id'] ?? 0), $categoryIds, true)) continue;
+                $key = $sourceType === 'card'
+                    ? (($cardTypes[$id] ?? null) === 1 ? 'experience_card' : (($cardTypes[$id] ?? null) === 0 ? 'normal_card' : ''))
+                    : $sourceType;
+                if (!isset($totals[$key])) continue;
+                $totals[$key][$field] = $this->add($totals[$key][$field], $this->integer($row['metric_value'] ?? null));
+            }
+        }
+        return $totals;
+    }
+
+    /** Only actual catalog cards qualify; deleted products remain readable for historical sales. */
+    private function dashboardCardStatisticsTypes(array $ids): array
+    {
+        $products = [];
+        foreach (array_chunk($ids, 300) as $chunk) {
+            foreach (call_user_func($this->queryFactory, 'store_product')->whereIn('id', $chunk)
+                ->field('id,pid,type,relation_id,product_type,card_statistics_type')->select()->toArray() as $row) {
+                $products[(int)$row['id']] = $row;
+            }
+        }
+        $parentIds = [];
+        foreach ($products as $row) {
+            if ((int)$row['type'] === 1 && (int)$row['pid'] > 0) $parentIds[(int)$row['pid']] = true;
+        }
+        $parents = [];
+        foreach (array_chunk(array_keys($parentIds), 300) as $chunk) {
+            foreach (call_user_func($this->queryFactory, 'store_product')->whereIn('id', $chunk)
+                ->field('id,type,relation_id,product_type,card_statistics_type')->select()->toArray() as $row) {
+                $parents[(int)$row['id']] = $row;
+            }
+        }
+        $types = [];
+        foreach ($products as $id => $row) {
+            $platform = $parents[(int)$row['pid']] ?? null;
+            $configured = $platform && (int)$platform['type'] === 0 && (int)$platform['relation_id'] === 0
+                ? $platform : $row;
+            if ((int)$configured['product_type'] !== 5) continue;
+            $type = (int)$configured['card_statistics_type'];
+            if ($type === 0 || $type === 1) $types[$id] = $type;
+        }
+        return $types;
+    }
+
     public function summary(string $metricCode, string $tenantId, array $stores, array $range): int
     {
         $this->assertScope($tenantId, $stores, $range);

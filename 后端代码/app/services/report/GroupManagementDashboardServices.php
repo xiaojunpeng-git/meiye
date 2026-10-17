@@ -16,7 +16,7 @@ use think\facade\Db;
 final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
-    public const METRIC_VERSION = 'group-management-actual-below-cards-v6';
+    public const METRIC_VERSION = 'group-management-sale-type-cards-v7';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -120,6 +120,19 @@ final class GroupManagementDashboardServices
         $monthActual = $goalProgress['month_actual'];
         $yearActual = $goalProgress['year_actual'];
         $targetedStoreIds = array_map('intval', array_keys($monthTargets));
+        // The four sale-mix cards share the dashboard's authorized store/date
+        // scope. Their positive sale receipts are narrower than the overall
+        // cash card, which also includes recharge and debt repayments.
+        $saleTypeTotals = $reader->dashboardSaleTypeTotals($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+        $saleTypeCards = [];
+        foreach (['normal_card' => '疗程卡', 'experience_card' => '体验卡', 'project' => '单项', 'product' => '产品'] as $code => $title) {
+            $saleTypeCards[] = [
+                'code' => $code,
+                'title' => $title,
+                'sales_quantity' => $saleTypeTotals[$code]['sales_quantity'],
+                'cash_performance_cents' => $saleTypeTotals[$code]['cash_performance_cents'],
+            ];
+        }
 
         return [
             'dashboard_code' => self::DASHBOARD_CODE,
@@ -127,6 +140,7 @@ final class GroupManagementDashboardServices
             'scope' => ['store_ids' => $scope['store_ids'], 'range' => $range, 'selected_category_id' => $selectedCategory],
             'filter_schema' => $this->filterSchema($categoryTree['roots']),
             'cards' => $cards,
+            'sale_type_cards' => $saleTypeCards,
             'trend' => $this->trend($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds),
             'categories' => $categoryCards,
             'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows, $categoryIds),
@@ -435,6 +449,7 @@ final class GroupManagementDashboardServices
             $out[$outputCode] = (string)$definition['summary'];
         }
         $out['consumption_unit_price'] = '消耗业绩除以消耗数量；分母为零显示 -。';
+        $out['sale_type_cards'] = '销售数量来自已完成销售明细；现金业绩来自关联该销售明细的正向实收分摊，不含充值、退款及未关联明细的补交。疗程卡和体验卡按卡项商品当前统计类型区分；单项和产品按销售明细商品类型区分。门店、日期及已选择的商品分类沿用本看板筛选范围。';
         return $out;
     }
 }

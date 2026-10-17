@@ -92,6 +92,9 @@ function currentQuery() {
 
 const scopeLabel = computed(() => scopePicker.value.label || dashboard.value?.scope?.label || dashboard.value?.scope?.scope_label || '当前权限范围')
 const cards = computed(() => Array.isArray(dashboard.value?.cards) ? dashboard.value.cards : [])
+// Sale mix is already grouped by the backend's authorized fact reader; the
+// browser only renders the four returned quantities and receipt amounts.
+const saleTypeCards = computed(() => Array.isArray(dashboard.value?.sale_type_cards) ? dashboard.value.sale_type_cards : [])
 const categories = computed(() => Array.isArray(dashboard.value?.categories) ? dashboard.value.categories : [])
 // Preserve the backend's configured category order; visibility only removes
 // unavailable cards and must never trigger a client-side amount/rank re-sort.
@@ -391,6 +394,15 @@ onBeforeUnmount(() => {
     <template v-else-if="dashboard">
       <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>经营业绩</h2><span>按当前筛选范围</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide()"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="group-dashboard__metric-grid"><div v-for="metric in cards" :key="metric.metric_code" class="dashboard-card-wrap"><button type="button" class="dashboard-metric" :class="`dashboard-metric--${metricTone(metric)}`" :disabled="!metric.drilldown" @click="showDrilldown(metric.drilldown, metric.name)"><span class="dashboard-metric__icon"><component :is="metricIcon(metric)" :size="17" aria-hidden="true" /></span><span>{{ metric.name }}</span><strong>{{ metric.value_type === 'money' ? formatMoney(metric.value_cents) : (metric.value ?? '-') }}</strong><small>{{ metric.source_explanation }}</small></button><button type="button" class="dashboard-card-guide" :aria-label="`${metric.name}列名取值来源`" @click="openFieldGuide(metric.metric_code)"><BookOpen :size="14" aria-hidden="true" /></button></div></div></section>
 
+      <section class="group-dashboard__section group-dashboard__sale-type-section" aria-label="按商品类型统计销售">
+        <div class="group-dashboard__sale-type-grid">
+          <article v-for="card in saleTypeCards" :key="card.code" class="dashboard-sale-type-card">
+            <div class="dashboard-sale-type-card__heading"><h3>{{ card.title }}</h3><button type="button" class="dashboard-guide" :aria-label="`${card.title}列名取值来源`" @click="openFieldGuide('sale_type_cards')"><BookOpen :size="14" aria-hidden="true" /></button></div>
+            <div class="dashboard-sale-type-card__values"><div><span>销售数量</span><strong>{{ Number(card.sales_quantity || 0).toLocaleString('zh-CN') }}</strong></div><div><span>现金业绩</span><strong>{{ formatMoney(card.cash_performance_cents) }}</strong></div></div>
+          </article>
+        </div>
+      </section>
+
       <section class="group-dashboard__section dashboard-trend-panel"><div class="group-dashboard__section-title"><div><h2>经营业绩趋势</h2><span>{{ trendChart.rangeLabel }}</span></div><div class="dashboard-trend-panel__tools"><span class="dashboard-trend-legend dashboard-trend-legend--actual">实际业绩</span><span class="dashboard-trend-legend dashboard-trend-legend--consumption">消耗业绩</span><button type="button" class="dashboard-guide" @click="openFieldGuide('trend')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div></div><div v-if="trendChart.labels.length" class="dashboard-trend-chart"><svg viewBox="0 0 768 148" role="img" aria-label="实际业绩与消耗业绩趋势图" preserveAspectRatio="none"><line v-for="y in [13, 52, 91, 131]" :key="y" x1="24" x2="744" :y1="y" :y2="y" class="dashboard-trend-chart__grid" /><polyline :points="trendChart.consumptionPoints" class="dashboard-trend-chart__line dashboard-trend-chart__line--consumption" /><polyline :points="trendChart.actualPoints" class="dashboard-trend-chart__line dashboard-trend-chart__line--actual" /><g v-for="point in trendChart.actualNodes" :key="point.id"><circle :cx="point.x" :cy="point.y" r="3.5" class="dashboard-trend-chart__dot dashboard-trend-chart__dot--actual" /><text :x="point.x" :y="Math.max(10, Number(point.y) - 8)" class="dashboard-trend-chart__value dashboard-trend-chart__value--actual">{{ point.label }}</text></g><g v-for="point in trendChart.consumptionNodes" :key="point.id"><circle :cx="point.x" :cy="point.y" r="3.5" class="dashboard-trend-chart__dot dashboard-trend-chart__dot--consumption" /><text :x="point.x" :y="Number(point.y) + 15" class="dashboard-trend-chart__value dashboard-trend-chart__value--consumption">{{ point.label }}</text></g></svg><div class="dashboard-trend-chart__labels" :style="{ '--label-count': trendChart.labels.length }"><span v-for="label in trendChart.labels" :key="label">{{ label }}</span></div></div><p v-else class="dashboard-empty">当前筛选范围暂无趋势数据。</p></section>
 
       <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>分类业绩</h2><span>当前启用一级商品分类，默认显示项目业绩前五名</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('categories')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="group-dashboard__category-grid"><article v-for="(category, index) in categoryCards" :key="category.category_id" class="dashboard-category-panel" :class="`dashboard-category-panel--${categoryTone(index)}`"><div class="dashboard-card-wrap"><button type="button" class="dashboard-category-card" @click="showDrilldown(category.drilldown, `${category.name}实际业绩`)"><span>{{ category.name }}</span><strong>{{ formatMoney(category.amount_cents) }}</strong><small>分类实际业绩</small><span class="dashboard-category-pie" :class="{ 'is-empty': category.share === null }" :style="{ '--category-progress': category.share || 0 }"><b>{{ formatRate(category.share) }}</b></span></button><button type="button" class="dashboard-card-guide" :aria-label="`${category.name}列名取值来源`" @click="openFieldGuide('categories')"><BookOpen :size="14" aria-hidden="true" /></button></div><div class="dashboard-category-rank__header"><strong>{{ categoryRankType(category) === 'projects' ? '项目业绩排行' : '产品业绩排行' }}</strong><div class="dashboard-category-rank__toggle" role="tablist"><button type="button" :class="{ 'is-active': categoryRankType(category) === 'projects' }" @click="setCategoryRankType(category, 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankType(category) === 'products' }" @click="setCategoryRankType(category, 'products')">产品</button></div></div><div v-for="(item, rank) in categoryRankings(category)" :key="`${item.name}-${rank}`" class="dashboard-category-rank__row"><em>{{ rank + 1 }}</em><span>{{ item.name }}</span><b>{{ formatMoney(item.amount_cents) }}</b></div><p v-if="!categoryRankings(category).length" class="dashboard-category-rank__empty">暂无项目或产品排行</p></article></div></section>
@@ -557,4 +569,21 @@ onBeforeUnmount(() => {
 @media(max-width:700px){.dashboard-drilldown__conditions{grid-template-columns:1fr}.dashboard-drilldown__body{padding:14px}}
 .group-dashboard__filters>.group-dashboard__custom-period{flex:0 1 290px;min-width:210px;max-width:100%}
 @media(max-width:760px){.group-dashboard__filters>.group-dashboard__custom-period{flex:1 1 100%;min-width:0}}
+/* These cards present server totals at one business grain; responsive wrapping
+   keeps both quantity and whole-yuan cash legible without a second scroll. */
+.group-dashboard__sale-type-section{margin-top:-6px}
+.group-dashboard__sale-type-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.dashboard-sale-type-card{min-width:0;border:1px solid #dde5ee;border-top:3px solid #1f5f8b;border-radius:8px;padding:13px 14px;background:#fff}
+.dashboard-sale-type-card:nth-child(2){border-top-color:#8b6cac}
+.dashboard-sale-type-card:nth-child(3){border-top-color:#357a72}
+.dashboard-sale-type-card:nth-child(4){border-top-color:#b7791f}
+.dashboard-sale-type-card__heading,.dashboard-sale-type-card__values{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.dashboard-sale-type-card__heading h3{color:#334b61;font-size:14px}
+.dashboard-sale-type-card__values{margin-top:12px}
+.dashboard-sale-type-card__values>div{display:grid;min-width:0;gap:5px}
+.dashboard-sale-type-card__values>div:last-child{text-align:right}
+.dashboard-sale-type-card__values span{color:#74869a;font-size:11px}
+.dashboard-sale-type-card__values strong{overflow:hidden;color:#1f5f8b;font-size:18px;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:900px){.group-dashboard__sale-type-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.group-dashboard__sale-type-grid{grid-template-columns:1fr}}
 </style>
