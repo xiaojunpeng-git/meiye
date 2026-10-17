@@ -1983,7 +1983,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     private function storeRefundLedger(array $stores,array $range,array $input):array
     {
         // 旧销售退款仍以成功的生命周期操作为准，且只读销售单现金退款。
-        // 卡项、明细和余额的登记退款在下方单独读取；余额扣减不是额外退款金额。
+        // 卡项、明细、无原单商品/项目和余额的登记退款在下方单独读取；余额扣减不是额外退款金额。
         $rows=$this->participantOrder($this->scope(Db::name('cashier_v3_order_lifecycle_operation')->alias('r'),$stores,'r'),'r.source_order_id')
             ->join('cashier_v3_sales_order o','o.order_id=r.source_order_id AND o.tenant_id=r.tenant_id')
             ->whereBetween('r.business_date',[$range['start'],$range['end']])
@@ -2011,9 +2011,37 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             ->leftJoin('store_order legacy_card_sale',
                 "refund_operation.source_type='card' AND legacy_card_sale.id=refund_operation.source_order_id AND legacy_card_sale.uid=refund_operation.member_id")
             ->whereBetween('ledger_refund.business_date',[$range['start'],$range['end']])
-            ->whereIn('refund_operation.source_type',['card','document','imported_card','balance'])
-            ->field('refund_operation.id refund_sequence,refund_operation.tenant_id,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,ledger_refund.store_id,ledger_refund.organization_id,ledger_refund.organization_path_snapshot,ledger_refund.organization_name_snapshot refund_market,ledger_refund.store_name_snapshot refund_store_name,ledger_refund.member_id,ledger_refund.member_name_snapshot refund_customer,adjustment.card_holder_id,adjustment.target_name_snapshot,adjustment.salespeople_snapshot_json,card_line.order_line_id card_order_line_id,document_line.order_line_id document_order_line_id,document_line.item_id document_product_id,document_line.item_type document_item_type,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time')
+            ->whereIn('refund_operation.source_type',['card','document','catalog','imported_card','balance'])
+            ->field('refund_operation.id refund_sequence,refund_operation.tenant_id,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,ledger_refund.store_id,ledger_refund.organization_id,ledger_refund.organization_path_snapshot,ledger_refund.organization_name_snapshot refund_market,ledger_refund.store_name_snapshot refund_store_name,ledger_refund.member_id,ledger_refund.member_name_snapshot refund_customer,adjustment.card_holder_id,adjustment.catalog_item_id,adjustment.target_name_snapshot,adjustment.salespeople_snapshot_json,card_line.order_line_id card_order_line_id,document_line.order_line_id document_order_line_id,document_line.item_id document_product_id,document_line.item_type document_item_type,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time')
             ->order('refund_operation.business_date','desc')->order('refund_operation.id','desc')->select()->toArray();
+        // A successful refund can close an entitlement without returning cash. It has no
+        // negative payment fact, but still belongs in the operation ledger at amount zero.
+        $zeroCash=$this->scope(Db::name('cashier_v3_order_lifecycle_operation')->alias('refund_operation'),$stores,'refund_operation')
+            ->join('cashier_v3_refund_adjustment adjustment',
+                "adjustment.tenant_id=refund_operation.tenant_id AND adjustment.operation_id=refund_operation.operation_id AND adjustment.status='effective'")
+            ->leftJoin('cashier_v3_sales_order document_sale',
+                "refund_operation.source_type='document' AND document_sale.tenant_id=refund_operation.tenant_id AND document_sale.order_id=refund_operation.source_order_id")
+            ->leftJoin('cashier_v3_card_purchase_receipt card_receipt',
+                "refund_operation.source_type='card' AND card_receipt.tenant_id=refund_operation.tenant_id AND card_receipt.card_holder_id=adjustment.card_holder_id AND card_receipt.legacy_order_id=refund_operation.source_order_id AND card_receipt.status='completed'")
+            ->leftJoin('cashier_v3_sales_order card_sale',
+                'card_sale.tenant_id=card_receipt.tenant_id AND card_sale.order_id=card_receipt.sales_order_id')
+            ->leftJoin('cashier_v3_sales_order_line card_line',
+                'card_line.tenant_id=card_receipt.tenant_id AND card_line.order_line_id=card_receipt.sales_order_line_id')
+            ->leftJoin('cashier_v3_sales_order_line document_line',
+                "refund_operation.source_type='document' AND document_line.tenant_id=adjustment.tenant_id AND document_line.order_line_id=adjustment.source_line_id")
+            ->leftJoin('store_order legacy_card_sale',
+                "refund_operation.source_type='card' AND legacy_card_sale.id=refund_operation.source_order_id AND legacy_card_sale.uid=refund_operation.member_id")
+            ->leftJoin('system_store refund_store','refund_store.id=refund_operation.store_id')
+            ->leftJoin('user refund_member','refund_member.uid=refund_operation.member_id')
+            ->whereBetween('refund_operation.business_date',[$range['start'],$range['end']])
+            ->where('refund_operation.operation_type','refund')
+            ->where('refund_operation.status','succeeded')
+            ->where('refund_operation.cash_refund_cents',0)
+            ->whereIn('refund_operation.source_type',['card','document','catalog','imported_card','balance']);
+        $this->applyOrganizationFilters($zeroCash,'refund_operation',$input,$range);
+        $this->participantOrder($zeroCash,'adjustment.source_order_id');
+        $zeroCash->field("refund_operation.id refund_sequence,refund_operation.tenant_id,refund_operation.settled_at refund_settled_at,refund_operation.operation_id,refund_operation.source_type,refund_operation.request_json,refund_operation.reason_snapshot refund_reason,refund_operation.cash_refund_cents refund_amount_cents,refund_operation.business_date,refund_operation.business_date refund_date,refund_operation.source_order_id order_id,refund_operation.store_id,COALESCE(document_sale.organization_id,card_sale.organization_id,0) organization_id,COALESCE(document_sale.organization_path_snapshot,card_sale.organization_path_snapshot,'') organization_path_snapshot,'' refund_market,refund_store.name refund_store_name,refund_operation.member_id,COALESCE(NULLIF(refund_member.real_name,''),refund_member.nickname,'') refund_customer,adjustment.card_holder_id,adjustment.catalog_item_id,adjustment.target_name_snapshot,adjustment.salespeople_snapshot_json,card_line.order_line_id card_order_line_id,document_line.order_line_id document_order_line_id,document_line.item_id document_product_id,document_line.item_type document_item_type,document_sale.organization_name_snapshot document_market,document_sale.store_name_snapshot document_store_name,document_sale.member_name_snapshot document_customer,document_sale.business_date document_sale_date,card_sale.organization_name_snapshot card_market,card_sale.store_name_snapshot card_store_name,card_sale.member_name_snapshot card_customer,card_sale.business_date card_sale_date,legacy_card_sale.pay_time legacy_pay_time,legacy_card_sale.add_time legacy_add_time");
+        $adjustments=array_merge($adjustments,$zeroCash->order('refund_operation.business_date','desc')->order('refund_operation.id','desc')->select()->toArray());
         // 导入旧卡使用成功操作保存的原订单 ID，不回读会员当前持卡关系。
         $importedOrderIds=[];
         foreach($adjustments as $adjustment){
@@ -2063,14 +2091,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $phones=$memberIds?Db::name('user')->whereIn('uid',$memberIds)->column('phone','uid'):[];
         foreach($rows as &$row){
             $row['phone']=(string)($phones[(int)($row['member_id']??0)]??'');
-            unset($row['refund_sequence'],$row['refund_settled_at'],$row['card_holder_id'],$row['card_order_line_id'],$row['document_order_line_id'],
+            unset($row['refund_sequence'],$row['refund_settled_at'],$row['card_holder_id'],$row['catalog_item_id'],$row['card_order_line_id'],$row['document_order_line_id'],
                 $row['document_product_id'],$row['document_item_type']);
         }unset($row);
         // 市场归属仍供客户退款分析使用，本台账只移除其展示及导出列。
         $columns=$this->columns(['store_name'=>'门店','customer'=>'会员','phone'=>'手机','refund_date'=>'退款申请时间','salesperson'=>'销售人','guide'=>'导购','sales_manager'=>'销售经理','category'=>'分类','refund_items'=>'退款项目','original_sale_date'=>'原销售日期','refund_amount'=>'退款金额','refund_remark'=>'退款原因']);
         $explanations=[
             'store_name'=>'优先显示原销售单保存的门店；旧卡没有原销售快照时显示办理退款的门店。',
-            'customer'=>'优先显示原销售单保存的会员姓名；旧卡没有原销售快照时显示退款记录保存的姓名。',
+            'customer'=>'优先显示原销售单保存的会员姓名；没有原销售快照时显示退款记录保存的姓名，零现金退款无该快照时回退当前会员资料。',
             'phone'=>'显示会员当前登记的手机号；退款时没有保存历史号码，会员改号后此列会更新。',
             'refund_date'=>'成功办理退款的业务日期，不按原销售日期回填。',
             'salesperson'=>'显示本笔退款分配的销售人；改派后显示当前有效人员。原销售退款取当次负向销售业绩人员，旧记录没有可靠快照时留空。',
@@ -2078,7 +2106,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             'sales_manager'=>'显示本笔退款选择的销售经理；改派后显示当前有效人员。未保存归属的旧退款留空，不回填原销售经理。',
             'category'=>'按退款所对应商品、卡内项目或系统余额项目的平台商品当前分类显示；多项退款合并显示。没有可核对商品关联时留空，不按名称猜填。',
             'refund_items'=>'显示本次成功退款时保存的项目或卡项名称；余额退款显示系统“余额”项目。',
-            'original_sale_date'=>'显示原销售单的业务日期；旧卡按原订单支付时间、无支付时间时按创建时间显示。余额退款没有原销售日期。',
+            'original_sale_date'=>'显示原销售单的业务日期；旧卡按原订单支付时间、无支付时间时按创建时间显示。无原单退款和余额退款没有原销售日期。',
             'refund_amount'=>'统计成功退款时登记的金额；转入余额独立记账，不重复计入，也不表示已通过支付渠道退钱。',
             'refund_remark'=>'显示退款时填写的原因；旧销售退款未填原因时显示原销售备注。',
         ];
@@ -2088,8 +2116,9 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
 
     /**
      * Refund categories follow the refunded project's linked platform product, not a name or sale-time label.
-     * Card refunds use the original sale components or a validated legacy cart line. Balance refunds
-     * use the protected system project; missing links remain unclassified rather than guessing by name.
+     * Card refunds use the original sale components or a validated legacy cart line. Catalog refunds
+     * resolve their SKU through the store product, and balance refunds use the protected system project.
+     * Missing links remain unclassified rather than guessing.
      */
     private function refundLedgerCurrentProductCategories(array &$rows): void
     {
@@ -2101,10 +2130,13 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $owners = [];
         $cardLines = [];
         $legacyCartOwners = [];
+        $catalogRows = [];
         $balanceProductId = null;
         foreach ($rows as $index => $row) {
             $type = (string)$row['source_type'];
-            if ($type === 'balance') {
+            if ($type === 'catalog') {
+                $catalogRows[] = $row;
+            } elseif ($type === 'balance') {
                 if ($balanceProductId === null) $balanceProductId = (new SystemBalanceProjectServices())->productId();
                 if ($balanceProductId > 0) {
                     $owners[] = $index;
@@ -2214,6 +2246,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         foreach ($owners as $key => $owner) {
             $path = trim((string)($resolved[$key]['path'] ?? ''));
             if ($path !== '') $categories[$owner][$path] = true;
+        }
+        // 无原单退款只能用已核实的 SKU 和退款门店归类，不能借同号商品或名称猜测。
+        $catalogCategories = $catalogRows ? (new StoreRefundCurrentCategoryServices())->resolve($catalogRows) : [];
+        foreach ($rows as $index => $row) {
+            foreach ($catalogCategories[(string)$row['operation_id']] ?? [] as $category) {
+                $path = trim((string)($category['path'] ?? ''));
+                if ($path !== '') $categories[$index][$path] = true;
+            }
         }
         foreach ($rows as $index => &$row) $row['category'] = implode('、', array_keys($categories[$index] ?? []));
         unset($row);
@@ -2733,8 +2773,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         // 成交人数取原单首次跨门槛事件；K 人次仍按有效退款会员日，体验人次不变。
         $isMarketReport = in_array($title, ['市场业绩表', '市场明细表'], true);
         if ($isMarketReport) $metricVersion = 'market-order-first-crossing-v8';
-        // v8 纳入有效余额退款并沿系统项目取分类；原退款事实和余额扣减不回写。
-        if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v8';
+        // v9 补齐无原单商品/项目和零现金成功退款；各类型沿成功业务日和原退款金额读取。
+        if ($title === '院店退款台账') $metricVersion = 'store-refund-ledger-v9';
         // 护理槽位与首次到店日期原先误用了人员标记；相关报表单独升级口径，其他报表不变。
         if (in_array($title, ['地推拓客明细表', '地推拓客汇总表', '异业收客明细表', '异业收客汇总表'], true)) {
             $metricVersion = 'store-customer-service-events-v2';

@@ -7,6 +7,8 @@ $backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
 require rtrim($backend, '/\\') . '/vendor/autoload.php';
 
 use app\services\report\StoreUnifiedReportServices;
+use app\services\report\StoreRefundCurrentCategoryServices;
+use app\services\product\product\SystemBalanceProjectServices;
 use think\facade\Db;
 
 $app = new \think\App(rtrim($backend, '/\\') . '/');
@@ -16,7 +18,7 @@ date_default_timezone_set('Asia/Shanghai');
 $reports = new StoreUnifiedReportServices();
 $operations = Db::name('cashier_v3_order_lifecycle_operation')
     ->where('operation_type', 'refund')->where('status', 'succeeded')
-    ->whereIn('source_type', ['card', 'document', 'imported_card'])
+    ->whereIn('source_type', ['card', 'document', 'catalog', 'imported_card', 'balance'])
     ->order('id', 'desc')->select()->toArray();
 if (!$operations) throw new RuntimeException('Local successful refund fixtures are required');
 
@@ -45,7 +47,7 @@ foreach ($byStoreAndDate as $group) {
         || count(array_intersect(array_column($group, 'operation_id'), $ids)) !== count($group)
         || $actualCents !== $expectedCents
         || (int)($result['totals']['refund_amount_cents'] ?? -1) !== $expectedCents
-        || (string)($result['metric_version'] ?? '') !== 'store-refund-ledger-v5'
+        || (string)($result['metric_version'] ?? '') !== 'store-refund-ledger-v9'
         || in_array('market', $columnKeys, true)
         || ($columnLabels['store_name'] ?? '') !== '门店'
         || ($columnLabels['customer'] ?? '') !== '会员'
@@ -62,7 +64,8 @@ foreach ($byStoreAndDate as $group) {
     foreach ($result['records'] as $row) {
         $currentPhone = (string)Db::name('user')->where('uid', (int)$row['member_id'])->value('phone');
         if (trim((string)($row['refund_items'] ?? '')) === ''
-            || trim((string)($row['original_sale_date'] ?? '')) === ''
+            || (!in_array((string)$row['source_type'], ['catalog', 'balance'], true)
+                && trim((string)($row['original_sale_date'] ?? '')) === '')
             || (string)($row['phone'] ?? '') !== $currentPhone) {
             throw new RuntimeException('Refund target, original sale date or member phone was lost');
         }
@@ -121,12 +124,35 @@ foreach ($byStoreAndDate as $group) {
             }
         }
         if ($sourceType === 'catalog') {
-            $operation = Db::name('cashier_v3_order_lifecycle_operation')
+            $adjustment = (array)Db::name('cashier_v3_refund_adjustment')
                 ->where('tenant_id', $tenantId)->where('operation_id', $operationId)->find();
-            $request = json_decode((string)($operation['request_json'] ?? ''), true);
-            if ((string)$row['category'] !== trim((string)($request['_productCategoryNameSnapshot'] ?? ''))) {
-                throw new RuntimeException('Catalog refund category must use the refund-time snapshot');
+            $categories = (new StoreRefundCurrentCategoryServices())->resolve([[
+                'operation_id' => $operationId, 'source_type' => 'catalog',
+                'store_id' => (int)$row['store_id'],
+                'catalog_item_id' => (int)($adjustment['catalog_item_id'] ?? 0),
+            ]]);
+            $paths = array_values(array_unique(array_filter(array_map(
+                static fn(array $category): string => trim((string)($category['path'] ?? '')),
+                $categories[$operationId] ?? []
+            ))));
+            if ((string)$row['category'] !== implode('、', $paths)) {
+                throw new RuntimeException('Catalog refund category must follow its verified current platform product');
             }
+        }
+        if ($sourceType === 'balance') {
+            $category = (new SystemBalanceProjectServices())->category($storeId);
+            if ((string)$row['refund_items'] !== '余额'
+                || (string)$row['category'] !== (string)($category['path'] ?? '')
+                || (string)$row['original_sale_date'] !== '') {
+                throw new RuntimeException('Balance refund lost its protected project category');
+            }
+        }
+    }
+    // The zero-cash operation path must honor the same organization narrowing as paid refunds.
+    if (array_filter($group, static fn(array $operation): bool => (int)$operation['cash_refund_cents'] === 0)) {
+        $narrowed = $reports->query([$storeId], $input + ['company_dimension_id' => '__missing__']);
+        if (array_intersect(array_column($group, 'operation_id'), array_column($narrowed['records'], 'operation_id'))) {
+            throw new RuntimeException('Zero-cash refund escaped the organization filter');
         }
     }
     echo "PASS store={$storeId} date={$date} count=" . count($group) . " cents={$expectedCents}\n";
