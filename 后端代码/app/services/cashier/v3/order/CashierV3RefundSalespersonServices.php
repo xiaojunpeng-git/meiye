@@ -38,7 +38,7 @@ final class CashierV3RefundSalespersonServices
     {
         $mode = (string)($payload['mode'] ?? '');
         $memberId = (int)($payload['memberId'] ?? 0);
-        if ($memberId <= 0 || !in_array($mode, ['card', 'document', 'catalog'], true)) throw self::fail('退款对象无效，请重新选择。');
+        if ($memberId <= 0 || !in_array($mode, ['card', 'document', 'catalog', 'balance'], true)) throw self::fail('退款对象无效，请重新选择。');
         $source = $this->sourceIdentity($mode, $payload, $memberId, $scope->tenantId());
         $candidates = $this->candidates($operator);
         $byEmployee = [];
@@ -209,8 +209,8 @@ final class CashierV3RefundSalespersonServices
 
     private function sourceIdentity(string $mode, array $payload, int $memberId, string $tenant): array
     {
-        // 无原单退款只归属退款销售人；绝不把目录商品伪装成原销售明细。
-        if ($mode === 'catalog') return ['orderId' => '', 'lineId' => ''];
+        // 目录与余额退款都没有原销售明细；不能从会员历史订单猜测人员归属。
+        if (in_array($mode, ['catalog', 'balance'], true)) return ['orderId' => '', 'lineId' => ''];
         if ($mode === 'document') {
             $line = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $tenant)
                 ->where('order_line_id', (string)($payload['lineId'] ?? ''))->where('member_id', $memberId)
