@@ -1673,20 +1673,30 @@ final class RegisteredMetricReadServices
         $handler = $handlers[$projection['strategy']] ?? null;
         if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         $rows = $handler();
-        return $this->currentReportProductCategory
-            ? $this->projectCurrentReportCategories($rows, $categoryIds, $filters)
-            : $rows;
+        // Completed-service facts may legitimately carry the product ID of the
+        // store that sold a cross-store entitlement. The fact itself is already
+        // authorized by execution store, so only this server-owned population
+        // may resolve category identity without requiring the two stores to match.
+        $verifiedServiceItems = in_array($projection['strategy'],
+            ['completed_service_performance', 'completed_service_quantity'], true);
+        if (!$this->currentReportProductCategory) return $rows;
+        return $verifiedServiceItems
+            ? $this->projectCurrentReportCategories($rows, $categoryIds, $filters, true)
+            : $this->projectCurrentReportCategories($rows, $categoryIds, $filters);
     }
 
     /** Apply current platform category after every strategy has resolved its immutable item ID and amount. */
-    private function projectCurrentReportCategories(array $rows, array $categoryIds, array $filters): array
+    private function projectCurrentReportCategories(array $rows, array $categoryIds, array $filters, bool $verifiedServiceItems = false): array
     {
         $links = [];
         foreach ($rows as $index => $row) {
             $links[$index] = ['store_id' => (int)($row['store_id'] ?? 0),
                 'product_id' => (int)($row['item_id'] ?? $row['project_id'] ?? 0)];
         }
-        $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $resolver = new StoreReportCurrentProductCategoryServices();
+        $resolved = $verifiedServiceItems
+            ? $resolver->resolveVerifiedFactItems($links)
+            : $resolver->resolve($links);
         $allowed = array_fill_keys($categoryIds, true);
         $pathFilter = (string)($filters['category_path'] ?? '');
         $projected = [];

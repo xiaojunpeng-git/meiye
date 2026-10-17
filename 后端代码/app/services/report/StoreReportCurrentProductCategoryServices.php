@@ -37,6 +37,24 @@ final class StoreReportCurrentProductCategoryServices
      */
     public function resolve(array $links, ?array $categoryRows = null): array
     {
+        return $this->resolveProducts($links, $categoryRows, true);
+    }
+
+    /**
+     * Resolve product IDs already persisted by an authoritative business fact.
+     * A cross-store entitlement keeps the source store's product ID when it is
+     * consumed elsewhere, so the execution store cannot be used as the product
+     * owner check. This method only returns the linked platform category and
+     * must never be used to authorize a catalogue row or accept a client ID.
+     */
+    public function resolveVerifiedFactItems(array $links, ?array $categoryRows = null): array
+    {
+        return $this->resolveProducts($links, $categoryRows, false);
+    }
+
+    /** @return array<int|string,array{id:int,root_id:int,path:string,platform_product_id:int,product_type:int}> */
+    private function resolveProducts(array $links, ?array $categoryRows, bool $requireStoreScope): array
+    {
         if ($links === []) return [];
         $ids = [];
         foreach ($links as $link) {
@@ -60,7 +78,9 @@ final class StoreReportCurrentProductCategoryServices
         foreach ($links as $key => $link) {
             $product = $products[(int)($link['product_id'] ?? 0)] ?? [];
             $storeId = (int)($link['store_id'] ?? 0);
-            if ($product === [] || !$this->belongsToScope($product, $storeId)) continue;
+            if ($product === [] || ($requireStoreScope
+                ? !$this->belongsToScope($product, $storeId)
+                : !$this->isVerifiedProductIdentity($product))) continue;
             $platform = $this->isPlatformProduct($product) ? $product : ($parents[(int)$product['pid']] ?? []);
             if ($platform === [] || !$this->isPlatformProduct($platform)) continue;
             $category = $this->categoryForProduct($platform, $categories);
@@ -98,6 +118,13 @@ final class StoreReportCurrentProductCategoryServices
     {
         return $this->isPlatformProduct($product)
             || ((int)$product['type'] === 1 && (int)$product['relation_id'] === $storeId);
+    }
+
+    /** Facts may carry a platform product or a concrete store copy, never an unrelated product shape. */
+    private function isVerifiedProductIdentity(array $product): bool
+    {
+        return $this->isPlatformProduct($product)
+            || ((int)$product['type'] === 1 && (int)$product['relation_id'] > 0 && (int)$product['pid'] > 0);
     }
 
     /** @return array{id:int,root_id:int,path:string}|array{} */
