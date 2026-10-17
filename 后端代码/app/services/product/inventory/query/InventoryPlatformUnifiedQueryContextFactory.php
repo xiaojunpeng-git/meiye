@@ -44,6 +44,10 @@ final class InventoryPlatformUnifiedQueryContextFactory
         $subject = strtoupper(trim($subject));
         if (!in_array($subject, ['HQ', 'STORE'], true)) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存主体参数不合法。', []);
         if ($subject === 'STORE' && empty($access['is_super_admin']) && empty($access['store_ids'])) {
+            // 库存查询已通过页面授权；此处的空范围表示实例尚未建立门店默认仓，不是账号无权。
+            if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {
+                throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前实例暂无已启用的门店库存仓，暂无门店库存数据。', []);
+            }
             throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前平台账号未被授予任何门店库存范围。', []);
         }
         $locationsQuery = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
@@ -69,7 +73,13 @@ final class InventoryPlatformUnifiedQueryContextFactory
             $storeId = (int)($location['store_id'] ?? 0); if ($storeId > 0) $storeIds[$storeId] = true;
             $organizationId = trim((string)($location['organization_id'] ?? '')); if ($organizationId !== '') $organizationIds['org:' . $organizationId] = $organizationId;
         }
-        if (!$locationIds) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '当前平台没有可用库存仓库，查询已停止。', []);
+        if (!$locationIds) {
+            // 超级管理员也不能在空仓范围上继续查询，避免空 scope_dimensions 被解释为无限制。
+            $message = $subject === 'STORE' && $pageCode === InventoryBatchStockQueryContract::PAGE_CODE
+                ? '当前实例暂无已启用的门店库存仓，暂无门店库存数据。'
+                : '当前平台没有可用库存仓库，查询已停止。';
+            throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', $message, []);
+        }
         if ($selectedStoreId > 0) {
             if ($subject !== 'STORE') throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '总部仓查询不支持门店筛选。', []);
             if (!isset($storeIds[$selectedStoreId])) {

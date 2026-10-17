@@ -38,6 +38,12 @@ platformOperationalAssert('stock read alone derives all active stores after page
     && strpos($context, 'if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE)') !== false
     && strpos($context, '$access = $policy->forStockRead($access);') !== false
     && strpos($context, 'locationsForAccess($hqAccess, true)') !== false);
+platformOperationalAssert('empty stock warehouse directory is reported as missing data without widening scope',
+    strpos($context, "if (\$subject === 'STORE' && empty(\$access['is_super_admin']) && empty(\$access['store_ids']))") !== false
+    && strpos($context, "if (\$pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {") !== false
+    && substr_count($context, '当前实例暂无已启用的门店库存仓，暂无门店库存数据。') === 2
+    && strpos($context, '当前平台账号未被授予任何门店库存范围。') !== false
+    && strpos($context, 'if (!$locationIds) {') !== false);
 platformOperationalAssert('stock store picker and legacy stock read use the same read-only scope',
     strpos($warehouse, 'if ($stockRead) $access = $policy->forStockRead($access);') !== false
     && strpos($warehouse, '$this->resolvedLocations($adminInfo, false, true)') !== false
