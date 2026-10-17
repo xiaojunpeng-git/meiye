@@ -10,6 +10,20 @@
             </PageHeader>
         </div>
         <Card :bordered="false" dis-hover class="ivu-mt fromBox">
+            <section v-if="$route.name === 'setting_setSystem'" class="deal-people-threshold" aria-label="成交人数门槛">
+                <div class="deal-people-threshold__title">成交人数门槛</div>
+                <div class="deal-people-threshold__fields">
+                    <label>A 来源
+                        <InputNumber v-model="dealPeopleThreshold.a_yuan" :min="1" :max="99999999" :precision="0" :disabled="dealPeopleSaving" />
+                        <span>元</span>
+                    </label>
+                    <label>其他来源
+                        <InputNumber v-model="dealPeopleThreshold.other_yuan" :min="1" :max="99999999" :precision="0" :disabled="dealPeopleSaving" />
+                        <span>元</span>
+                    </label>
+                    <Button type="primary" :loading="dealPeopleSaving" @click="saveDealPeopleThreshold">保存</Button>
+                </div>
+            </section>
             <Tabs type="card" v-model="childrenId" v-if="headerChildrenList.length" @on-click="changeChildrenTab">
                 <TabPane :label="item.label" :name="item.id.toString()" v-for="(item,index) in headerChildrenList" :key="index"></TabPane>
             </Tabs>
@@ -22,6 +36,7 @@
 <script>
     import formCreate from '@form-create/iview'
     import { headerListApi, dataFromApi } from '@/api/setting';
+    import { getDealPeopleThreshold, saveDealPeopleThreshold as updateDealPeopleThreshold } from '@/api/system';
     import request from '@/plugins/request';
     import fromSubmit from '@/components/fromSubmit/fromSubmit.vue';
     import util from '@/libs/util';
@@ -68,22 +83,46 @@
                 headerList: [],
                 headerChildrenList: [],
                 childrenId: '',
-                title: ''
+                title: '',
+                dealPeopleThreshold: { a_yuan: 1000, other_yuan: 500, version: 0 },
+                dealPeopleSaving: false
             }
         },
         created () {
             this.getAllData();
+            if (this.$route.name === 'setting_setSystem') this.loadDealPeopleThreshold();
         },
         watch: {
             $route (to, from) {
                 this.headerChildrenList = [];
                 this.getAllData();
+                if (to.name === 'setting_setSystem' && from.name !== to.name) this.loadDealPeopleThreshold();
             },
             childrenId () {
                 this.getFrom();
             }
         },
         methods: {
+            // 门槛是实例级版本化设置；本页仅录入整数元，历史销售单不被重新定价。
+            loadDealPeopleThreshold () {
+                getDealPeopleThreshold().then(res => {
+                    this.dealPeopleThreshold = res.data;
+                }).catch(res => this.$Message.error(res.msg || '读取成交人数门槛失败'));
+            },
+            saveDealPeopleThreshold () {
+                const value = this.dealPeopleThreshold;
+                if (![value.a_yuan, value.other_yuan].every(v => Number.isInteger(v) && v > 0)) {
+                    this.$Message.error('门槛必须填写正整数元');
+                    return;
+                }
+                this.dealPeopleSaving = true;
+                updateDealPeopleThreshold(value).then(res => {
+                    this.dealPeopleThreshold = res.data;
+                    this.$Message.success('保存成功');
+                }).catch(res => this.$Message.error(res.msg || '保存失败')).finally(() => {
+                    this.dealPeopleSaving = false;
+                });
+            },
             childrenList () {
                 let that = this;
                 that.headerList.forEach(function (item) {
@@ -188,6 +227,14 @@
         }
     }
 </script>
+
+<style scoped>
+.deal-people-threshold { padding: 4px 0 18px; margin-bottom: 18px; border-bottom: 1px solid #e8edf2; }
+.deal-people-threshold__title { margin-bottom: 12px; font-weight: 600; color: #263746; }
+.deal-people-threshold__fields { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; }
+.deal-people-threshold__fields label { display: flex; align-items: center; gap: 8px; color: #526273; }
+.deal-people-threshold__fields .ivu-input-number { width: 120px; }
+</style>
 
 <style scoped lang="stylus">
 .ivu-tabs{

@@ -35,7 +35,7 @@ $yearCash = array_merge($facts, [
     ['member_id' => 3, 'order_id' => 'order-2026-a', 'source_line_id' => 'new-a', 'business_date' => '2026-04-01', 'amount_cents' => 5000, 'business_source_label' => 'A老客首护'],
 ]);
 $metrics = $call('aggregateBdeghMonthlyMetrics', $yearCash, ['start' => '2026-01-01', 'end' => '2026-12-31'], $rule);
-if ($metrics['2026-04']['deal_people'] !== 1) throw new RuntimeException('only first cash events at least 500 yuan count as deal people');
+if ($metrics['2026-04']['deal_people'] !== 0) throw new RuntimeException('legacy cash projection must not calculate deal people');
 if ($metrics['2026-04']['deal_amount'] !== 120000) throw new RuntimeException('first cash amount must retain sales below 500 yuan and sum allocated lines');
 if ($metrics['2026-05']['transition_people'] !== 2 || $metrics['2026-05']['transition_amount'] !== 85000) throw new RuntimeException('later-day cash on the same order is a second cash event');
 if ($metrics['2026-04']['transition_people'] !== 0) throw new RuntimeException('two product lines in one order must not become two cash events');
@@ -53,8 +53,8 @@ if ($sameDayOnly['2026-10']['deal_amount'] !== 450000 || $sameDayOnly['2026-10']
     throw new RuntimeException('same-day distinct orders must not create a second cash event');
 }
 $sameDayMetrics = $call('aggregateBdeghMonthlyMetrics', $sameDayFacts, ['start' => '2026-01-01', 'end' => '2026-12-31'], $rule);
-if ($sameDayMetrics['2026-10']['deal_people'] !== 1 || $sameDayMetrics['2026-10']['deal_amount'] !== 450000) {
-    throw new RuntimeException('different orders for one member on one business day must be one first cash event');
+if ($sameDayMetrics['2026-10']['deal_people'] !== 0 || $sameDayMetrics['2026-10']['deal_amount'] !== 450000) {
+    throw new RuntimeException('first cash amount remains day-based, while deal people comes from original-order qualification');
 }
 if ($sameDayMetrics['2026-10']['transition_people'] !== 1 || $sameDayMetrics['2026-10']['transition_amount'] !== 20000) {
     throw new RuntimeException('only the later cash day may become the second cash event');

@@ -2423,6 +2423,9 @@ Route::group('adminapi', function () {
         // RH-GAP-WRITEOFF-WORKBENCH
         Route::get('writeoff-performance-mode', 'v1.system.WriteoffPerformanceMode/read')->option(['real_name' => '读取核销业绩计算方式']);
         Route::put('writeoff-performance-mode', 'v1.system.WriteoffPerformanceMode/update')->option(['real_name' => '保存核销业绩计算方式']);
+        // R41 成交人数门槛由平台系统设置管理，原单读取结账时的版本。
+        Route::get('deal-people-threshold', 'v1.system.DealPeopleThresholdPolicy/read')->option(['real_name' => '读取成交人数门槛']);
+        Route::put('deal-people-threshold', 'v1.system.DealPeopleThresholdPolicy/update')->option(['real_name' => '保存成交人数门槛']);
         Route::get('config/edit_new_build/:type', 'v1.system.config.SystemConfig/getNewFormBuild')->option(['real_name' => '新配置编辑表单']);
         //获取置缩略图配置信息
         Route::get('config/image', 'v1.system.config.SystemConfig/getImageConfig')->option(['real_name' => '获取置缩略图配置信息']);

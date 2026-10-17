@@ -340,25 +340,16 @@ final class GroupManagementDashboardServices
         return $out;
     }
 
-    /** 来源成交人数复用市场报表的达标会员日；分类筛选只缩小人数，不重算门槛。 */
+    /** 来源人数复用原销售单首次达标事件；分类筛选只投影归属，不重算门槛。 */
     private function sources(array $stores, array $range, array $cashRows, array $serviceRows, array $categoryIds): array
     {
         $configured = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('status', 1)->order('sort', 'asc')->order('id', 'asc')->field('id,name')->select()->toArray();
         $market = new StoreUnifiedReportPhaseTwoServices();
         $qualifiedDays = $market->marketQualifiedMemberDays($stores, $range);
-        $categoryNetByDay = [];
-        if ($categoryIds !== []) {
-            // Only count a qualifying member-day when the selected category has positive signed net cash.
-            // Excluded historical/old-card repayments remain in amount metrics but cannot create a person.
-            foreach (StoreReportImportedRepaymentCountScope::exclude($cashRows, $stores) as $row) {
-                if ((int)($row['member_id'] ?? 0) <= 0) continue;
-                $key = $market->marketEffectiveMemberDayKey($row);
-                $categoryNetByDay[$key] = ($categoryNetByDay[$key] ?? 0) + (int)($row['amount_cents'] ?? 0);
-            }
-        }
         $dealCounts = [];
-        foreach ($qualifiedDays as $key => $day) {
-            if ($categoryIds !== [] && ($categoryNetByDay[$key] ?? 0) <= 0) continue;
+        foreach ($qualifiedDays as $day) {
+            // 分类筛选只显示原单首次达标时最大现金分摊分类的人数。
+            if ($categoryIds !== [] && !in_array((int)($day['category_id'] ?? 0), $categoryIds, true)) continue;
             $sourceId = (int)$day['business_source_primary_id'];
             $dealCounts[$sourceId] = ($dealCounts[$sourceId] ?? 0) + 1;
         }
@@ -381,7 +372,7 @@ final class GroupManagementDashboardServices
             if ($code === 'A') $item['active_customer_count'] = count($activeMembers);
             $out[] = $item;
         }
-        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按门店、业务日、来源、会员去重，A 来源当日净收款满1,000元、其他来源满500元计1人，同日合并、多日累计，游客不计；旧导入及旧卡录入原单补交不计人数，普通补交计入。筛选商品分类时还要求该分类当日净收款为正。实际业绩金额按成功现金收款减现金退款，分别归属各自业务日期。'];
+        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按原销售单独立累计成功现金收款，在首次达到平台设置的来源门槛之日计一次，跨店补交归原销售门店。同一会员同日跨单跨店只计一次，多天可累计，游客不计；旧导入及旧卡录入原单补交不推动门槛，退款不改变人数资格。按商品分类筛选人数时，资格只归首次达标时该单现金分摊最多的分类。实际业绩金额仍按成功现金收款减现金退款及各自业务日期统计。'];
     }
 
     private function rankings(array $stores, array $targets, array $actual, string $asOfDate): array

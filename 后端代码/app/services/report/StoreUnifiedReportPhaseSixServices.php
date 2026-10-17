@@ -103,7 +103,7 @@ final class StoreUnifiedReportPhaseSixServices
         }
         // Only the garden headcount changes; other phase-six metrics retain their accepted versions.
         if ($report === 'phase_six_garden_item_analysis') {
-            $result['metric_version'] = 'report-phase-six-garden-market-member-day-v5+actual-'
+            $result['metric_version'] = 'report-phase-six-garden-order-first-crossing-v6+actual-'
                 . (string)(MetricDefinitionRegistry::get('actual_performance')['metric_version'] ?? '');
         }
         if ($report === 'phase_six_monthly_featured_item') {
@@ -115,9 +115,9 @@ final class StoreUnifiedReportPhaseSixServices
                 . (string)(MetricDefinitionRegistry::get('actual_performance')['metric_version'] ?? '');
         }
         if ($report === 'phase_six_acquisition_source') {
-            $result['metric_version'] = 'report-phase-six-acquisition-source-exclude-a-v3+actual-' .
+            $result['metric_version'] = 'report-phase-six-acquisition-source-original-order-r41+actual-' .
                 (string)(MetricDefinitionRegistry::get('actual_performance')['metric_version'] ?? '')
-                . '+imported-and-old-card-repayment-people-r82';
+                . '+global-member-day-v1';
         }
         if (in_array($report, ['phase_six_other_multi_payment', 'phase_six_salary_summary', 'phase_six_salary_detail'], true)) {
             $result['metric_version'] .= ':product-category-r2';
@@ -173,10 +173,10 @@ final class StoreUnifiedReportPhaseSixServices
         });
     }
 
-    /** 花园成交人数保留市场会员日资格；金额另取同分类的已登记实际业绩。 */
+    /** 花园人数取原销售单首次达标事件；金额仍取原有已登记实际业绩。 */
     private function garden(array $stores, array $range, array $input): array
     {
-        $facts = array_values(array_filter($this->cashFacts($stores, $range, true), static fn(array $r): bool => preg_match('/^花园(?:\s*\/|$)/u', trim((string)($r['category_path'] ?? ''))) === 1));
+        $facts = array_values(array_filter($this->cashFacts($stores, $range), static fn(array $r): bool => preg_match('/^花园(?:\s*\/|$)/u', trim((string)($r['category_path'] ?? ''))) === 1));
         $actualById = [];
         foreach ($this->registeredActualRows($stores, $range) as $actual) {
             if (preg_match('/^花园(?:\s*\/|$)/u', trim((string)$actual['category_path'])) !== 1) continue;
@@ -185,32 +185,38 @@ final class StoreUnifiedReportPhaseSixServices
             $actualById[$id]['cents'] += (int)$actual['amount_cents'];
             if ((string)$actual['item_name'] !== '') $actualById[$id]['names'][(string)$actual['item_name']] = true;
         }
-        $market = new StoreUnifiedReportPhaseTwoServices();
-        $qualified = $market->marketQualifiedMemberDays($stores, $range, $input);
-        $firstRows = [];
-        // A qualified member-day may also contain an excluded repayment. Keep its
-        // money row visible, but never assign that row the day's single headcount.
-        $countFacts = StoreReportImportedRepaymentCountScope::exclude($facts, $stores, 'allocation_row_id');
-        foreach ($countFacts as $fact) {
-            $key = $market->marketEffectiveMemberDayKey($fact);
+        $qualified = array_values(array_filter(
+            (new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $range, $input),
+            static fn(array $day): bool => preg_match('/^花园(?:\s*\/|$)/u', trim((string)($day['category_path'] ?? ''))) === 1
+        ));
+        $allocationByReceiptItem = []; $matchedEvents = [];
+        foreach ($facts as $fact) {
+            $key = (string)json_encode([(string)($fact['payment_fact_id'] ?? ''),
+                (int)$fact['store_id'], (int)$fact['item_id']]);
             $id = (string)$fact['allocation_id'];
-            // 分页前选定字典序最小的正向分摊键，避免翻页、导出或数据库返回顺序改变计数归属。
-            if (isset($qualified[$key]) && (int)$fact['amount_cents'] > 0
-                && (!isset($firstRows[$key]) || strcmp($id, $firstRows[$key]) < 0)) {
-                $firstRows[$key] = $id;
+            if (!isset($allocationByReceiptItem[$key]) || strcmp($id, $allocationByReceiptItem[$key]) < 0) {
+                $allocationByReceiptItem[$key] = $id;
             }
         }
+        $eventByAllocation = [];
+        foreach ($qualified as $eventIndex => $event) {
+            $key = (string)json_encode([(string)$event['fact_id'], (int)$event['store_id'],
+                (int)($event['item_id'] ?? 0)]);
+            if (isset($allocationByReceiptItem[$key])) $eventByAllocation[$eventIndex] = $allocationByReceiptItem[$key];
+        }
+        $allocationEvents = array_flip($eventByAllocation);
         $rows = []; $matchedActualIds = [];
         foreach ($facts as $fact) {
-            $key = $market->marketEffectiveMemberDayKey($fact);
             $actualId = (string)$fact['allocation_row_id'];
             $actualCents = isset($matchedActualIds[$actualId]) ? 0 : (int)($actualById[$actualId]['cents'] ?? 0);
             $matchedActualIds[$actualId] = true;
+            $eventIndex = $allocationEvents[(string)$fact['allocation_id']] ?? null;
+            if ($eventIndex !== null) $matchedEvents[$eventIndex] = true;
             $rows[] = [
                 'company_name' => (string)$fact['company_name'], 'store_name' => (string)$fact['store_name'],
                 'member_name' => (string)$fact['member_name'], 'salesperson_name' => (string)$fact['salesperson_name'],
                 'partner_name' => (string)$fact['partner_name'], 'experience_people' => (int)$fact['is_experience'],
-                'deal_people' => ($firstRows[$key] ?? null) === (string)$fact['allocation_id'] ? 1 : 0,
+                'deal_people' => $eventIndex === null ? 0 : 1,
                 'item_name' => (string)$fact['item_name'], 'quantity' => (int)$fact['quantity'],
                 'cash_amount' => $this->money($actualCents), 'row_key' => (string)$fact['allocation_id'],
                 'store_id' => (int)$fact['store_id'], 'source_line_id' => (string)$fact['source_line_id'],
@@ -240,6 +246,24 @@ final class StoreUnifiedReportPhaseSixServices
                 'annotation_subject_key' => 'phase_six:garden:' . $rowKey,
             ];
         }
+        // 跨店补交或卡内项目未形成本表普通销售明细时，资格仍归原店、达标日。
+        foreach ($qualified as $eventIndex => $event) {
+            if (isset($matchedEvents[$eventIndex])) continue;
+            $company = $dimensions->resolve('company', (string)($event['organization_id'] ?? ''),
+                (string)($event['organization_path_snapshot'] ?? ''), (string)$event['business_date'],
+                (int)$event['store_id']);
+            $rowKey = 'deal:' . (string)$event['fact_id'];
+            $rows[] = [
+                'company_name' => (string)($company['name'] ?? ''), 'store_name' => (string)$event['store_name_snapshot'],
+                'member_name' => (string)$event['member_name_snapshot'], 'salesperson_name' => '',
+                'partner_name' => '', 'experience_people' => 0, 'deal_people' => 1,
+                'item_name' => (string)($event['item_name'] ?? ''), 'quantity' => 0,
+                'cash_amount' => $this->money(0), 'row_key' => $rowKey,
+                'store_id' => (int)$event['store_id'], 'source_line_id' => '',
+                'annotation_subject_type' => 'phase_six_row',
+                'annotation_subject_key' => 'phase_six:garden:' . $rowKey,
+            ];
+        }
         return $this->result('花园品项分析表', [
             $this->column('company_name','分公司','销售事实发生时的组织快照。',false,true),
             $this->column('store_name','门店','销售事实发生时的门店快照。',false,true),
@@ -247,7 +271,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('salesperson_name','门店销售人','销售事实中的销售人历史姓名快照。'),
             $this->column('partner_name','合作方名称','商品分类合作方名称快照。'),
             $this->column('experience_people','体验人数','购物车体验标签的有效记录。',true),
-            $this->column('deal_people','成交人数','与市场业绩表一致：按门店、业务日、来源、会员统计当日净记账收款，A类满1000元、其他来源满500元计1；旧导入数据或旧卡录入原单的欠款补交不参与达标，退款和作废沿用市场口径。同一达标会员日的花园明细仅一条显示1，其余为0；不同日期分别累计。',true),
+            $this->column('deal_people','成交人数','原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原销售门店。跨分类单归达标时分摊金额最大的分类，退款不改变人数。',true),
             $this->column('item_name','成交品名','现金购买商品明细名称。'),
             $this->column('quantity','商品数量','对应销售明细数量。',true),
             $this->column('cash_amount','成交金额','花园分类已登记实际业绩：成功现金收款减成功现金退款；卡项与独立退款按已核实项目归类。',true),
@@ -1395,12 +1419,12 @@ final class StoreUnifiedReportPhaseSixServices
     private function acquisitionSource(array $stores,array $range):array
     {
         $map=[];
-        // Count people by immutable member ID; registered performance owns the amount independently.
-        foreach($this->acquisitionCashFacts($stores,$range) as $fact){
+        // 成交只取原单首次达标事件；实际业绩仍读取独立的正负财务事实。
+        foreach($this->acquisitionQualifiedFacts($stores,$range) as $fact){
             $source=$this->acquisitionSourceLabel($fact,false);
             $map[$source]??=['category'=>$source,'amount_cents'=>0,'members'=>[],'deal_members'=>[]];
             $memberId=(int)$fact['member_id'];
-            if($memberId>0)$map[$source]['deal_members'][$memberId]=true;
+            if($memberId>0)$map[$source]['deal_members'][(string)$fact['business_date'].'|'.$memberId]=true;
         }
         foreach($this->acquisitionActualFacts($stores,$range) as $fact){
             $source=$this->acquisitionSourceLabel($fact,false);
@@ -1423,7 +1447,7 @@ final class StoreUnifiedReportPhaseSixServices
         }
         unset($row);
         $drilldown=['report'=>'phase_six_acquisition_source'];
-        return $this->result('拓客部门客户来源数据分析表',[$this->column('category','类别','进店按完成服务时保存的来源；历史服务未保存时取同明细销售来源，仍无来源显示“来源未标记”。成交按销售时保存的来源；A 来源不参与本表。',false,true),$this->column('visit_count','进店人数','已完成且未作废的非体验服务会员按非 A 来源去重；人员“不算人数人次”不影响门店进店。',true,false,120,$drilldown),$this->column('deal_count','成交人数','非 A 来源成功收款分摊关联会员按销售来源去重；旧导入数据或旧卡录入原单的欠款补交与游客不计人数。',true,false,120,$drilldown),$this->column('amount','金额','非 A 来源已登记实际业绩，成功现金收款减成功现金退款；体验不排除金额。',true,false,120,$drilldown),$this->column('deal_rate','成交率','成交人数/进店人数，分母为0显示-。'),$this->column('unit_output','成交单产','实际业绩/成交人数，分母为0显示-。')],array_values($map),$range);
+        return $this->result('拓客部门客户来源数据分析表',[$this->column('category','类别','进店按完成服务时保存的来源；历史服务未保存时取同明细销售来源，仍无来源显示“来源未标记”。成交按原销售单来源；A 来源不参与本表。',false,true),$this->column('visit_count','进店人数','已完成且未作废的非体验服务会员按非 A 来源去重；人员“不算人数人次”不影响门店进店。',true,false,120,$drilldown),$this->column('deal_count','成交人数','非 A 来源原销售单独立累计有效现金收款，首次达到平台设置的非 A 门槛时按收款业务日计1；跨店补交归原店，会员同日跨单跨店只计1，多日可累计。旧导入和旧卡录入原单补交不推动门槛，游客与退款不参与人数资格。',true,false,120,$drilldown),$this->column('amount','金额','非 A 来源已登记实际业绩，成功现金收款减成功现金退款；体验不排除金额。',true,false,120,$drilldown),$this->column('deal_rate','成交率','成交人数/进店人数，分母为0显示-。'),$this->column('unit_output','成交单产','实际业绩/成交人数，分母为0显示-。')],array_values($map),$range);
     }
 
     /** Money uses the registered signed population; source filtering uses each fact's frozen source. */
@@ -1432,21 +1456,21 @@ final class StoreUnifiedReportPhaseSixServices
         return $this->acquisitionWithoutSourceA($this->registeredActualRows($stores, $range, false), false);
     }
 
-    /** Read only allocation and frozen sale-source fields required by this report's count cohort. */
-    private function acquisitionCashFacts(array $stores,array $range):array
+    /** 成交明细与汇总共用一次达标的原单事件，不能从商品收款行重复生成会员。 */
+    private function acquisitionQualifiedFacts(array $stores,array $range):array
     {
-        $query=Db::name('cashier_v3_payment_sale_allocation_fact')->alias('a')
-            ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=a.tenant_id AND s.fact_id=a.sale_fact_id')
-            ->where('a.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereIn('a.store_id',$stores)->whereBetween('a.business_date',[$range['start'],$range['end']])
-            ->where('a.status','effective')
-            ->field('a.id allocation_row_id,a.allocation_fact_id fact_id,a.store_id,a.member_id,a.order_id,a.order_no_snapshot order_no,a.business_date,a.amount_cents,s.member_name_snapshot member_name,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name');
-        $normal=new StoreReportNormalDataScopeServices();
-        $normal->excludeVoidedSalesOrderFacts($query,'a.tenant_id','a.order_id');
-        $normal->excludeVoidedSupplementAllocations($query,'a');
-        // Source counts exclude migrated and old-card repayments; the actual-performance scan is unchanged.
-        return $this->acquisitionWithoutSourceA(StoreReportImportedRepaymentCountScope::exclude(
-            $query->select()->toArray(), $stores, 'allocation_row_id'), false);
+        $days=(new StoreDealPeopleQualificationServices())->qualifiedDays($stores,$range);
+        $rows=[];
+        foreach($days as $day){
+            $row=$day;
+            $row['order_id']=(string)$day['sales_order_id'];
+            $row['order_no']=(string)$day['order_no_snapshot'];
+            $row['member_name']=(string)$day['member_name_snapshot'];
+            $row['store_name']=(string)$day['store_name_snapshot'];
+            $row['source_name']=(string)$day['business_source_primary_name_snapshot'];
+            if(!str_starts_with($this->acquisitionSourceLabel($row,false),'A'))$rows[]=$row;
+        }
+        return $rows;
     }
 
     /** Completed non-experience service snapshots drive visits; fill only historical blank sources in batches. */
@@ -1478,7 +1502,7 @@ final class StoreUnifiedReportPhaseSixServices
         return $this->acquisitionWithoutSourceA($facts,true);
     }
 
-    /** Drilldown rechecks the source hash inside the authorized facts; count rows are unique members. */
+    /** Drilldown rechecks the source hash inside authorized facts; deal rows are unique member-days. */
     private function acquisitionSourceDetail(array $stores,array $range,array $input):array
     {
         $metric=trim((string)($input['metric_code']??''));
@@ -1488,13 +1512,14 @@ final class StoreUnifiedReportPhaseSixServices
         $isVisit=$metric==='visit_count';$isCount=$metric!=='amount';
         $facts=$isVisit?$this->acquisitionVisitFacts($stores,$range)
             :($metric==='amount'?$this->acquisitionActualFacts($stores,$range)
-                :$this->acquisitionCashFacts($stores,$range));
+                :$this->acquisitionQualifiedFacts($stores,$range));
         $selected=[];$amountCents=0;
         foreach($facts as $fact){
             if(sha1($this->acquisitionSourceLabel($fact,$isVisit))!==$code)continue;
             $memberId=(int)$fact['member_id'];
             if($isCount){
-                if($memberId>0 && !isset($selected[$memberId]))$selected[$memberId]=$fact;
+                $personKey=$metric==='deal_count'?(string)$fact['business_date'].'|'.$memberId:(string)$memberId;
+                if($memberId>0 && !isset($selected[$personKey]))$selected[$personKey]=$fact;
             }else{
                 $selected[]=$fact;$amountCents+=(int)$fact['amount_cents'];
             }
@@ -1529,10 +1554,10 @@ final class StoreUnifiedReportPhaseSixServices
         }
         $columns=[$this->column('member_name','会员','事实发生时冻结的会员名称。',false,true),
             $this->column('member_phone','手机号','会员当前登记的手机号。'),
-            $this->column('business_date','业务日期','完成服务日或收款分摊业务日。'),
+            $this->column('business_date','业务日期','进店取完成服务日，成交取原销售单首次达标的收款业务日，金额取财务事实业务日。'),
             $this->column('store_name','门店','事实发生时冻结的门店。'),
             $this->column('order_no','单据号','进店取服务关联单据号，成交取销售单据号。'),
-            $this->column('receipt_amount',$isCount?'人数':'实际业绩','人数按会员去重每人显示1；金额逐笔展示已登记实际业绩。',true)];
+            $this->column('receipt_amount',$isCount?'人数':'实际业绩','进店人数按会员去重；成交人数按首次达标的会员业务日计1，金额逐笔展示已登记实际业绩。',true)];
         $result=$this->result('拓客来源明细',$columns,$records,$range);
         $result['summary_row']['receipt_amount']=$isCount?$total:$this->money($amountCents);
         $result['total']=$total;$result['page']=$page;$result['limit']=$limit;
@@ -1578,18 +1603,13 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /** 可选读取真实收款来源供花园会员日匹配；其他报表的金额与原销售快照不变。 */
-    private function cashFacts(array $stores,array $range,bool $withPaymentSource = false):array
+    private function cashFacts(array $stores,array $range):array
     {
         $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('a')
             ->leftJoin('cashier_v3_report_sale_dimension_fact d','d.tenant_id=a.tenant_id AND d.sale_fact_id=a.sale_fact_id')
             ->leftJoin('cashier_v3_sale_fact s','s.tenant_id=a.tenant_id AND s.fact_id=a.sale_fact_id')
             ->where('a.tenant_id',CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('a.store_id',$stores)->whereBetween('a.business_date',[$range['start'],$range['end']])->where('a.status','effective')
-            ->field("a.id allocation_row_id,a.allocation_fact_id allocation_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,a.payment_method,d.item_id,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.fact_id sale_fact_id,s.source_type,s.order_no_snapshot order_no,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name");
-        if ($withPaymentSource) {
-            // 补交可以另选来源，不能用原销售来源或展示名称替代支付事实的稳定来源 ID。
-            $query->leftJoin('cashier_v3_payment_fact garden_payment', 'garden_payment.tenant_id=a.tenant_id AND garden_payment.fact_id=a.payment_fact_id')
-                ->field('garden_payment.business_source_primary_id');
-        }
+            ->field("a.id allocation_row_id,a.allocation_fact_id allocation_id,a.payment_fact_id,a.store_id,a.member_id,a.order_id,a.source_line_id,a.business_date,a.amount_cents,a.payment_method,d.item_id,d.item_name_snapshot item_name,d.category_path_snapshot category_path,d.partner_name_snapshot partner_name,d.is_experience,s.fact_id sale_fact_id,s.source_type,s.order_no_snapshot order_no,s.quantity,s.member_name_snapshot member_name,s.organization_name_snapshot company_name,s.organization_path_snapshot organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_label_snapshot source_name,(SELECT GROUP_CONCAT(DISTINCT pf.employee_name_snapshot ORDER BY pf.id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact pf WHERE pf.tenant_id=a.tenant_id AND pf.source_line_id=a.source_line_id AND pf.performance_type='sales_performance_allocated' AND pf.status='effective') salesperson_name");
         $normal = new StoreReportNormalDataScopeServices();
         $normal->excludeVoidedSalesOrderFacts($query, 'a.tenant_id', 'a.order_id');
         $normal->excludeVoidedSupplementAllocations($query, 'a');

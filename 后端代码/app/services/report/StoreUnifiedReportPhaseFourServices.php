@@ -151,6 +151,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $countablePeriodCash = StoreReportImportedRepaymentCountScope::exclude($periodCash, $stores);
         $countableHistoryCash = StoreReportImportedRepaymentCountScope::exclude($historyCash, $stores);
         $market = new StoreUnifiedReportPhaseTwoServices();
+        // 同一资格集合供人数与既有“新老客业绩”投影复用，避免重复读取全实例原单。
         $qualifiedDays = $market->marketQualifiedMemberDays($stores, $range, $input);
         // 六维见诊取实际完成的体验服务；人员不计数开关不能过滤门店见诊人数。
         // 金额、核销数量和手工费仍各自读取原有权威事实，不受人数口径反向影响。
@@ -214,14 +215,21 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 if ($amount <= 0) continue;
                 $firstPurchaseDate = (string)($firstPositive[(int)$memberId] ?? '');
                 $isNewDeal = $firstPurchaseDate !== '' && $firstPurchaseDate >= $range['start'] && $firstPurchaseDate <= $range['end'];
-                if ($isNewDeal) {
-                    $rows[$key]['new_deal_people'][$dayKey] = true;
-                    $rows[$key]['new_deal_cents'] += $amount;
-                } else {
-                    $rows[$key]['old_deal_people'][$dayKey] = true;
-                    $rows[$key]['old_deal_cents'] += $amount;
-                }
+                if ($isNewDeal) $rows[$key]['new_deal_cents'] += $amount;
+                else $rows[$key]['old_deal_cents'] += $amount;
             }
+        }
+        foreach ($qualifiedDays as $event) {
+            if (!in_array((int)($event['category_id'] ?? 0), $categoryIds, true)) continue;
+            $event['store_name'] = (string)$event['store_name_snapshot'];
+            $key = $ensure($event);
+            $memberId = (int)$event['member_id'];
+            $dayKey = (string)$event['business_date'] . '|' . $memberId;
+            $firstPurchaseDate = (string)($firstPositive[$memberId] ?? '');
+            $isNewDeal = $firstPurchaseDate !== '' && $firstPurchaseDate >= $range['start']
+                && $firstPurchaseDate <= $range['end'];
+            if ($isNewDeal) $rows[$key]['new_deal_people'][$dayKey] = true;
+            else $rows[$key]['old_deal_people'][$dayKey] = true;
         }
         foreach ($this->outstandingDebtRows($stores, $categoryIds) as $debt) {
             $key = $ensure($debt);
@@ -246,22 +254,21 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $row['old_unit_output'] = $this->moneyRatio((int)$row['old_deal_cents'], (int)$row['old_deal_people']);
             $row['partner_received_performance'] = $this->money((int)$row['partner_received_cents']);
             // The workbook formula is U=Q+T, independent from the qualified
-            // Source-specific daily qualification applies only to deal columns.
+            // Original-order qualification applies only to deal-person columns.
             $row['all_received_performance'] = $this->money((int)$row['self_received_cents'] + (int)$row['partner_received_cents']);
             unset($row['new_deal_cents'], $row['old_deal_cents'], $row['debt_cents'], $row['self_received_cents'], $row['partner_received_cents']);
         }
         unset($row);
-        // 这里的说明直接展示给门店用户：明确新老客只看六维购买历史、
-        // A 来源满 1,000 元、其他来源满 500 元的同日门槛只限制成交列；欠款余额不随期间重算。
+        // 新老客只看六维购买历史；原单门槛只限制成交人数，欠款余额不随期间重算。
         $columns = [
             $this->pathColumn('company_name', '分公司', '按业务门店所属分公司展示；没有配置分公司时显示“未配置分公司”。', ['分公司'], false, true, 130),
             $this->pathColumn('store_name', '门店', '显示发生六维服务、收款或欠款的门店名称。', ['门店'], false, true, 140),
             $this->pathColumn('new_visit_people', '新客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内还没有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '新客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('old_visit_people', '老客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内已有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '老客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('total_visit_people', '合计见诊人数', '本店新客见诊人数加老客见诊人数。同一会员如果在所选期间先后符合两种身份，会分别计入两列。', ['合计见诊人数'], true, false, 120, [], '', 'integer'),
-            $this->pathColumn('new_deal_people', '新客人数', '本店同一业务日、来源、会员净收款独立达标：A 来源满1,000元，其他来源满500元；同日多笔合并，不跨天凑门槛。所选六维分类当天净收款须大于0元；首次该分类有效购买在本期的会员按达标日累计，游客不计。旧导入及旧卡录入原单的补交不参与人数资格。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
-            $this->pathColumn('old_deal_people', '老客人数', '本店同一业务日、来源、会员净收款独立达标：A 来源满1,000元，其他来源满500元；同日多笔合并，不跨天凑门槛。所选六维分类当天净收款须大于0元；首次该分类有效购买早于本期的会员按达标日累计，游客不计。旧导入及旧卡录入原单的补交不参与人数资格。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
-            $this->pathColumn('total_deal_people', '合计成交人数', '所选六维分类的新客与老客达标日人数之和；同一会员多天达标分别累计，不跨天凑门槛。', ['合计成交人数'], true, false, 120, [], '', 'integer'),
+            $this->pathColumn('new_deal_people', '新客人数', '原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原店。主归属品项为六维且首次六维购买在本期的会员按达标日累计，退款不改变人数。', ['成交人数', '新客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('old_deal_people', '老客人数', '与新客人数使用相同的原单首次达标事件；首次六维购买早于本期的会员归老客，游客不计，退款不改变人数。', ['成交人数', '老客人数'], true, false, 110, [], '成交人数', 'integer'),
+            $this->pathColumn('total_deal_people', '合计成交人数', '所选六维分类的新客与老客首次达标会员日数之和；同一会员多天分别累计，同日跨单跨店只计1。', ['合计成交人数'], true, false, 120, [], '', 'integer'),
             $this->pathColumn('new_deal_performance', '新客业绩', '合计本期新客达标日所选六维分类的净收款；同日多笔合并、退款抵减，不只取首次购买金额。未达标日收款仍进入实收业绩。', ['成交业绩', '新客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
             $this->pathColumn('old_deal_performance', '老客业绩', '合计本期老客达标日所选六维分类的净收款；退款抵减，未达标日收款仍进入实收业绩。', ['成交业绩', '老客业绩'], true, false, 120, $this->drill('六维'), '成交业绩'),
             $this->pathColumn('total_deal_performance', '合计成交业绩', '新客业绩加老客业绩；未达标日的收款不计入此列，但仍计入实收业绩。', ['合计成交业绩'], true, false, 130, $this->drill('六维')),
@@ -283,7 +290,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
         unset($column);
         $result = $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input, ['category' => true]);
-        $result['metric_version'] = 'six-dimension-analysis-market-qualified-days-v4';
+        $result['metric_version'] = 'six-dimension-analysis-order-first-crossing-v5';
         return $result;
     }
 
@@ -713,8 +720,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             }
         }
         unset($allCash);
-        // Counts keep their established purchase-event cohort. Money is a
-        // separate registered population, so refunds cannot manufacture a buyer.
+        // 购买事件只用于年度复购次数；成交人头另取原单首达标事件。
         $actualByMonth = [];
         foreach ($this->actualCategoryRows($stores, $expandedRange, $ids, true) as $fact) {
             $month = substr((string)$fact['business_date'], 0, 7);
@@ -749,13 +755,12 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             foreach ($years as $year => $itemFacts) {
                 $byMonth = [];
                 foreach ($itemFacts as $fact) $byMonth[substr((string)$fact['business_date'], 0, 7)][] = $fact;
-                $members = []; $lineEvents = []; $purchaseCounts = []; $repeat = 0;
+                $lineEvents = []; $purchaseCounts = []; $repeat = 0;
                 for ($monthNumber = 1; $monthNumber <= 12; $monthNumber++) {
                     $snapshotMonth = sprintf('%04d-%02d', (int)$year, $monthNumber);
                     foreach ((array)($byMonth[$snapshotMonth] ?? []) as $fact) {
                         $memberId = (int)($fact['member_id'] ?? 0);
                         if ($memberId <= 0) continue;
-                        $members[$memberId] = true;
                         $eventKey = $memberId . '|' . (string)$fact['source_line_id'] . '|'
                             . (string)$fact['business_date'];
                         if (isset($lineEvents[$eventKey])) continue;
@@ -764,11 +769,33 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                         if ($purchaseCounts[$memberId] === 2) $repeat++;
                     }
                     $annualCounts[(string)$groupKey][(string)$year][$snapshotMonth] = [
-                        'members' => count($members), 'repeat' => $repeat];
+                        'members' => 0, 'repeat' => $repeat];
                 }
             }
         }
         unset($categoryCashByGroup);
+        $qualifiedByGroupMonth = [];
+        foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $expandedRange, $input,
+            '', $this->participantEmployeeId) as $event) {
+            if (!isset($allowed[(int)($event['category_id'] ?? 0)])) continue;
+            $categoryName = $this->marketingCategoryPath((string)($event['category_path'] ?? ''));
+            $itemName = trim((string)($event['item_name'] ?? ''));
+            $groupKey = $this->marketingItemGroupKey($categoryName, $itemName);
+            $month = substr((string)$event['business_date'], 0, 7);
+            $qualifiedByGroupMonth[$groupKey][$month][] = $event;
+        }
+        // 年度成交人头是每月达标会员日累计，不是年内去重会员；复购仍按购买次数。
+        foreach ($qualifiedByGroupMonth as $groupKey => $byMonth) {
+            $years = array_unique(array_map(static fn(string $month): string => substr($month, 0, 4), array_keys($byMonth)));
+            foreach ($years as $year) {
+                $cumulative = 0;
+                for ($number = 1; $number <= 12; $number++) {
+                    $month = sprintf('%04d-%02d', (int)$year, $number);
+                    $cumulative += count($byMonth[$month] ?? []);
+                    $annualCounts[$groupKey][$year][$month]['members'] = $cumulative;
+                }
+            }
+        }
         $rows = [];
         foreach ($months as $month) {
             $facts = (array)($categoryCashByMonth[$month] ?? []);
@@ -783,11 +810,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                     'month_total_cents' => $total, 'cash_cents' => 0, 'members' => [],
                     'experience_members' => [], 'active_members' => $active,
                 ];
-                $countKey = !empty($fact['unallocated_repayment'])
-                    ? 'payment:' . (string)$fact['payment_fact_id'] : 'allocation:' . (string)$fact['id'];
-                if (isset($eligibleCountIds[$countKey]) && (int)$fact['member_id'] > 0) {
-                    $rows[$key]['members'][(string)$fact['member_id']] = true;
-                }
             }
             foreach ((array)($actualByMonth[$month] ?? []) as $fact) {
                 $key = $month . '|' . (string)$fact['marketing_group_key'];
@@ -805,6 +827,23 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                     trim((string)($service['project_name_snapshot'] ?? '')));
                 if (isset($rows[$key]) && (int)$service['is_experience'] === 1 && (int)$service['member_id'] > 0) {
                     $rows[$key]['experience_members'][(string)$service['member_id']] = true;
+                }
+            }
+        }
+        foreach ($months as $month) {
+            foreach ($qualifiedByGroupMonth as $groupKey => $byMonth) {
+                foreach ($byMonth[$month] ?? [] as $event) {
+                    $key = $month . '|' . $groupKey;
+                    if (!isset($rows[$key])) $rows[$key] = [
+                        'month' => $month,
+                        'category_name' => $this->marketingCategoryPath((string)($event['category_path'] ?? '')),
+                        'item_name' => trim((string)($event['item_name'] ?? '')),
+                        'item_group_key' => $groupKey,
+                        'month_total_cents' => (int)($actualMonthTotals[$month] ?? 0),
+                        'cash_cents' => 0, 'members' => [], 'experience_members' => [],
+                        'active_members' => (int)($activeByMonth[$month] ?? 0),
+                    ];
+                    $rows[$key]['members'][(string)$event['business_date'] . '|' . (int)$event['member_id']] = true;
                 }
             }
         }
@@ -835,12 +874,12 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->column('item_performance', '品项业绩', '该分类下同名品项当月登记实际业绩；成功现金退款按退款日冲减。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'item_performance')),
             $this->column('item_share', '品项业绩占比', '品项业绩除以月度总业绩；分母为零显示“-”。'),
             $this->column('experience_people', '体验人数', '当月完成该分类下同名项目且带体验标记的不同会员数。', true, false, 120, $this->serviceDetailDrill('marketing_beauty_new_item', 'experience_people')),
-            $this->column('deal_people', '成交人头', '当月购买该分类下同名品项的不同会员数；旧导入数据或旧卡录入原单的欠款补交不计人数。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'deal_people')),
+            $this->column('deal_people', '成交人头', '原销售单累计有效现金首度达到来源门槛的会员日数；同日跨单跨店只计1，跨店补交归原店，本表只计主归属为该分类下同名品项的事件。退款不改变人数。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'deal_people')),
             $this->column('deal_rate', '成交率', '成交人头除以体验人数；分母为零显示“-”。'),
             $this->column('deal_unit_output', '成交单产', '品项业绩除以成交人头；分母为零显示“-”。'),
             $this->column('annual_repeat_people', '年度购买≥2次人数', '截至当前月，本年度购买该分类下同名品项不少于两次的不同会员数；旧导入数据或旧卡录入原单的欠款补交不算购买次数。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'annual_repeat_people')),
             $this->column('annual_repeat_rate', '年度复购率', '年度购买≥2次人数除以年度成交人头；分母为零显示“-”。'),
-            $this->column('annual_deal_people', '年度成交人头', '截至当前月，本年度购买该分类下同名品项的不同会员数；旧导入数据或旧卡录入原单的欠款补交不计人数。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'annual_deal_people')),
+            $this->column('annual_deal_people', '年度成交人头', '截至当前月，本年度该分类下同名品项原单首度达标的会员日累计；同一会员不同达标日分别计入。', true, false, 120, $this->cashDetailDrill('marketing_beauty_new_item', 'annual_deal_people')),
             $this->column('annual_active_penetration', '年度活客普及率', '年度成交人头除以当月活客数；分母为零显示“-”。'),
         ];
         foreach ($columns as $index => &$column) {
@@ -853,6 +892,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             if (in_array((string)$column['key'], ['month_total_performance', 'item_performance', 'deal_unit_output'], true)) {
                 $column['display_precision'] = 0;
             }
+            if (in_array((string)$column['key'], ['experience_people', 'deal_people',
+                'annual_repeat_people', 'annual_deal_people'], true)) $column['value_type'] = 'integer';
         }
         unset($column);
         $result = $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input,
@@ -861,7 +902,17 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         // summary must count each selected month exactly once.
         $result['summary_row']['month_total_performance'] = $this->money(array_sum(array_map(
             static fn(string $month): int => (int)($actualMonthTotals[$month] ?? 0), $months)));
-        $result['metric_version'] = $this->registeredActualMetricVersion() . '+imported-and-old-card-repayment-people-r82';
+        // 年度列每月都是累计快照；合计只取各品项在所选年度的最后一个月。
+        $annualLatest = [];
+        foreach ($rows as $row) {
+            $key = substr((string)$row['month'], 0, 4) . '|' . (string)$row['item_group_key'];
+            if (!isset($annualLatest[$key]) || (string)$row['month'] > (string)$annualLatest[$key]['month']) {
+                $annualLatest[$key] = $row;
+            }
+        }
+        $result['summary_row']['annual_deal_people'] = array_sum(array_column($annualLatest, 'annual_deal_people'));
+        $result['summary_row']['annual_repeat_people'] = array_sum(array_column($annualLatest, 'annual_repeat_people'));
+        $result['metric_version'] = $this->registeredActualMetricVersion() . '+order-first-crossing-people-r41';
         return $result;
     }
 
@@ -869,7 +920,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     {
         if (substr($range['start'], 0, 7) !== substr($range['end'], 0, 7)) throw new \InvalidArgumentException('运营生美品项表的查询时间不允许跨自然月');
         // The unit-price range was retired; old links must not silently narrow this report.
-        $allRangeCash = $this->cashRows($stores, $range, [], false, true);
         $categoryIds = $this->categoryIds('生美', $input);
         $allowed = array_fill_keys(array_map('intval', $categoryIds), true);
         // The denominator and item amounts share one authorized actual-performance
@@ -879,8 +929,9 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $actualFacts = $categoryIds === [] ? [] : $this->currentCategoryRows(
             $this->actualCategoryRows($stores, $range, $categoryIds, true, $allActualFacts), $categoryIds);
         $rows = [];
-        // Deal heads use eligible receipts; actual performance below keeps the complete cash facts.
-        foreach (StoreReportImportedRepaymentCountScope::exclude($allRangeCash, $stores) as $fact) {
+        // 人头只取原单首次达标的主分类/主品项，不能按整月同名商品重新凑门槛。
+        foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $range, $input,
+            '', $this->participantEmployeeId) as $fact) {
             if (!isset($allowed[(int)($fact['category_id'] ?? 0)])) continue;
             // The 生美 branch may contain cards. This item report counts only
             // products and projects, including projects allocated from cards.
@@ -888,16 +939,17 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             // Multiple store copies and historical product IDs can share the
             // same snapshot name. The report asks for one row per name; keep a
             // stable opaque row key so drilldown selects the same fact group.
-            $name = trim((string)$fact['item_name']);
+            $name = trim((string)($fact['item_name'] ?? ''));
+            if ($name === '') continue;
             $key = $this->beautyItemGroupKey($name);
-            if (!isset($rows[$key])) $rows[$key] = ['item_name' => $name, 'item_group_key' => $key, 'cash_cents' => 0, 'members' => []];
-            if ((int)$fact['member_id'] > 0) $rows[$key]['members'][(string)$fact['member_id']] = (int)($rows[$key]['members'][(string)$fact['member_id']] ?? 0) + (int)$fact['amount_cents'];
+            if (!isset($rows[$key])) $rows[$key] = ['item_name' => $name, 'item_group_key' => $key, 'cash_cents' => 0, 'events' => []];
+            $rows[$key]['events'][(string)$fact['business_date'] . '|' . (int)$fact['member_id']] = true;
         }
         foreach ($actualFacts as $fact) {
             if (!in_array((int)($fact['product_type'] ?? -1), [0, 6], true)) continue;
             $name = trim((string)($fact['item_name'] ?? ''));
             $key = $this->beautyItemGroupKey($name);
-            if (!isset($rows[$key])) $rows[$key] = ['item_name' => $name, 'item_group_key' => $key, 'cash_cents' => 0, 'members' => []];
+            if (!isset($rows[$key])) $rows[$key] = ['item_name' => $name, 'item_group_key' => $key, 'cash_cents' => 0, 'events' => []];
             $rows[$key]['cash_cents'] += (int)$fact['amount_cents'];
         }
         // One natural month needs a distinct eligible-service member count,
@@ -907,21 +959,20 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         // not the subtotal of just the displayed 生美 item rows.
         $storeCash = $this->factAmount($allActualFacts);
         foreach ($rows as &$row) {
-            $qualified = 0;
-            foreach ($row['members'] as $amount) if ($amount >= 100000) $qualified++;
+            $qualified = count($row['events']);
             $row['cash_performance'] = $this->money((int)$row['cash_cents']);
             $row['deal_people'] = $qualified;
             $row['deal_unit_output'] = $this->moneyRatio((int)$row['cash_cents'], $qualified);
             $row['people_share'] = $this->ratio($qualified, $allServiceMembers);
             $row['performance_share'] = $this->ratio((int)$row['cash_cents'], $storeCash);
-            unset($row['cash_cents'], $row['members']);
+            unset($row['cash_cents'], $row['events']);
         }
         unset($row);
         usort($rows, static fn(array $left, array $right): int => strcmp((string)$left['item_name'], (string)$right['item_name']));
         $columns = [
             $this->column('item_name', '商品名称', '只显示当前生美分类下的产品、项目；按成交时保存的同名商品合并，卡项购买按卡内项目展开。', false, true, 180),
             $this->column('cash_performance', '实际业绩', '该商品在筛选期间的登记实际业绩，成功现金收款减成功现金退款。', true, false, 120, $this->cashDetailDrill('operations_beauty_item', 'cash_performance')),
-            $this->column('deal_people', '成交人头', '该商品在筛选商品分类内，剔除旧导入数据或旧卡录入原单的欠款补交后，累计现金业绩达到1,000元的不同会员数；补交金额仍计入实际业绩。', true, false, 120, $this->cashDetailDrill('operations_beauty_item', 'deal_people')),
+            $this->column('deal_people', '成交人头', '原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时计1；同一会员同日跨单跨店只计1，跨店补交归原店。跨分类原单只归首次达标时现金分摊最多的分类和主品项；退款不改变人数，金额另按实际业绩统计。', true, false, 120, $this->cashDetailDrill('operations_beauty_item', 'deal_people')),
             $this->column('deal_unit_output', '成交单产', '该商品实际业绩除以成交人头；分母为零显示“-”。'),
             $this->column('people_share', '人头占比', '成交人头除以本月完成有效服务的不同会员数；分母为零显示“-”。'),
             $this->column('performance_share', '业绩占比', '该商品实际业绩除以当前门店范围当月全部商品实际业绩；分母为零显示“-”。'),
@@ -935,7 +986,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $result = $this->result((string)$definition['name'], $columns, array_values($rows), $range, $input,
             ['category' => true, 'category_root' => '生美', 'single_month' => true]);
         $result['metric_version'] = $this->registeredActualMetricVersion()
-            . '+imported-and-old-card-repayment-people-r83';
+            . '+original-order-deal-people-r41';
         return $result;
     }
 
@@ -1396,6 +1447,33 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             }
             $stores = [$selectedStore];
         }
+        if ($parent === 'operations_beauty_item' && $metric === 'deal_people') {
+            return $this->beautyItemDealDetail($stores, $range, $input, $selection,
+                (string)$selection['beauty_item_group_key']);
+        }
+        if ($parent === 'marketing_post_sale_performance' && $metric === 'deal_people') {
+            return $this->beautyItemDealDetail($stores, $range, $input, $selection);
+        }
+        if ($parent === 'marketing_beauty_new_item' && in_array($metric, ['deal_people', 'annual_deal_people'], true)) {
+            return $this->beautyItemDealDetail($stores, $range, $input, $selection,
+                (string)$selection['marketing_item_group_key'], true);
+        }
+        if (($definition['kind'] ?? '') === 'efficiency'
+            && in_array($metric, ['deal_people', 'new_deal_people'], true)) {
+            $firstDates = null;
+            if ($metric === 'new_deal_people') {
+                $ids = (array)$selection['include'];
+                $registered = in_array($parent, ['product_monetization_six_dimension_efficiency',
+                    'product_monetization_private_efficiency'], true);
+                $history = $registered
+                    ? $this->actualCategoryRows($stores, ['start' => '1970-01-01', 'end' => $range['end']], $ids)
+                    : $this->cashRows($stores, ['end' => $range['end']], $ids);
+                $firstDates = $this->firstPositivePurchaseDates(
+                    $registered ? StoreReportImportedRepaymentCountScope::exclude($history, $stores) : $history);
+            }
+            return $this->beautyItemDealDetail($stores, $range, $input, $selection,
+                '', false, (string)($selection['team'] ?? ''), $firstDates);
+        }
         $factRange = !empty($selection['pre_sale_metric']) ? ['end' => $range['end']] : $range;
         $sixDimensionItem = $parent === 'product_monetization_six_dimension_item_performance';
         $needsProductProfile = $sixDimensionItem || $parent === 'operations_beauty_item';
@@ -1428,7 +1506,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
         $countMetric = ($parent === 'marketing_acquisition_pre_sale'
                 && in_array($metric, ['new_customer_actual', 'transition_people'], true))
-            || ($parent === 'operations_beauty_item' && $metric === 'deal_people')
             || ($parent === 'marketing_referral_pre_sale'
                 && in_array($metric, ['new_customer_actual', 'transition_people'], true))
             || ($parent === 'marketing_post_sale_performance'
@@ -1488,18 +1565,10 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             if ($netCents < (int)$selection['min_total_cents']) $records = [];
         }
         if (!empty($selection['member_count'])) {
-            $seen = []; $members = []; $memberAmounts = [];
-            if (!empty($selection['member_min_amount_cents'])) {
-                foreach ($records as $record) {
-                    $id = (int)$record['member_id'];
-                    $memberAmounts[$id] = (int)($memberAmounts[$id] ?? 0) + $this->cents($record['receipt_amount']);
-                }
-            }
+            $seen = []; $members = [];
             foreach ($records as $record) {
                 $memberId = (int)$record['member_id'];
-                if ($memberId <= 0 || isset($seen[$memberId])
-                    || (!empty($selection['member_min_amount_cents'])
-                        && (int)($memberAmounts[$memberId] ?? 0) < (int)$selection['member_min_amount_cents'])) continue;
+                if ($memberId <= 0 || isset($seen[$memberId])) continue;
                 $seen[$memberId] = true;
                 $record['receipt_amount'] = 1;
                 $members[] = $record;
@@ -2018,10 +2087,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 $selection = ['include' => $this->categoryIds('生美', $input), 'exclude' => [],
                     'require_include' => true, 'beauty_item_group_key' => $groupKey];
                 if ($metric === 'cash_performance') $selection['actual_category_root'] = '生美';
-                if ($metric === 'deal_people') {
-                    $selection['member_count'] = true;
-                    $selection['member_min_amount_cents'] = 100000;
-                }
                 return $selection;
             }
             if ($parent === 'marketing_beauty_new_item' && in_array($metric,
@@ -2139,6 +2204,64 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             return $selection;
         }
         throw new \InvalidArgumentException('该指标尚无可逐单对账的收款明细');
+    }
+
+    /** 品项成交弹窗与母表使用同一原单达标事件，按事件日展示且全量合计。 */
+    private function beautyItemDealDetail(array $stores, array $range, array $input,
+        array $selection, string $groupKey = '', bool $marketingGroup = false,
+        string $team = '', ?array $firstPurchaseDates = null): array
+    {
+        $allowed = array_fill_keys(array_map('intval', (array)($selection['include'] ?? [])), true);
+        $records = [];
+        if ($allowed !== []) {
+            foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $range, $input,
+                '', $this->participantEmployeeId) as $event) {
+                if (!isset($allowed[(int)($event['category_id'] ?? 0)])) continue;
+                if ($team !== '' && (str_contains((string)($event['category_path'] ?? ''), '合作')
+                    ? 'team:partner' : 'team:self') !== $team) continue;
+                if ($firstPurchaseDates !== null) {
+                    $firstDate = (string)($firstPurchaseDates[(int)$event['member_id']] ?? '');
+                    if ($firstDate < $range['start'] || $firstDate > $range['end']) continue;
+                }
+                if ($groupKey !== '') {
+                    $eventGroup = $marketingGroup
+                        ? $this->marketingItemGroupKey(
+                            $this->marketingCategoryPath((string)($event['category_path'] ?? '')),
+                            trim((string)($event['item_name'] ?? '')))
+                        : $this->beautyItemGroupKey(trim((string)($event['item_name'] ?? '')));
+                    if ((!$marketingGroup && !in_array((int)($event['product_type'] ?? -1), [0, 6], true))
+                        || $eventGroup !== $groupKey) continue;
+                }
+                $records[] = [
+                    'member_id' => (int)$event['member_id'], 'member_name' => (string)$event['member_name_snapshot'],
+                    'business_date' => (string)$event['business_date'],
+                    'store_name' => (string)$event['store_name_snapshot'],
+                    'order_no' => (string)$event['order_no_snapshot'], 'receipt_amount' => 1,
+                ];
+            }
+        }
+        $records = StoreUnifiedReportDetailFilter::apply($records, $input);
+        usort($records, static fn(array $a, array $b): int => strcmp(
+            $a['business_date'] . '|' . $a['order_no'], $b['business_date'] . '|' . $b['order_no']));
+        $memberIds = array_values(array_unique(array_column($records, 'member_id')));
+        $phones = [];
+        foreach (array_chunk($memberIds, 500) as $ids) {
+            $phones += Db::name('user')->whereIn('uid', $ids)->column('phone', 'uid');
+        }
+        foreach ($records as &$record) $record['member_phone'] = (string)($phones[(int)$record['member_id']] ?? '');
+        unset($record);
+        $columns = [
+            $this->column('member_name', '会员', '原销售单保存的会员姓名快照。', false, true, 130),
+            $this->column('member_phone', '手机号', '会员当前登记的手机号；查询与导出使用同一授权行集。', false, false, 145),
+            $this->column('business_date', '业务日期', '原销售单累计现金首度达标的收款业务日。', false, false, 112),
+            $this->column('store_name', '门店', '原销售单门店；跨店补交不改变人数归属。', false, false, 140),
+            $this->column('order_no', '单据号', '首次达标的原销售单据号。', false, false, 180),
+            $this->column('receipt_amount', '成交人头', '一张原销售单只达标一次，会员同日跨单跨店仅展示一条。', true, false, 120),
+        ];
+        $columns[count($columns) - 1]['value_type'] = 'integer';
+        $result = $this->result('运营收款事实明细', $columns, $records, $range, $input);
+        $result['metric_version'] = 'original-order-deal-people-r41';
+        return $result;
     }
 
     /** Group only selected signed allocations into the four-field receipt contract. */
@@ -2334,16 +2457,12 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $countHistory = $registeredActual
             ? StoreReportImportedRepaymentCountScope::exclude($cashHistory, $stores) : $cashHistory;
         $firstPurchaseDates = $this->firstPositivePurchaseDates($countHistory);
-        $cashByMonth = []; $countCashByMonth = [];
+        $cashByMonth = [];
         // The history scan already includes the displayed months; reuse its
         // authorized facts instead of issuing another identical cash query.
         foreach ($cashHistory as $fact) {
             $month = substr((string)$fact['business_date'], 0, 7);
             if ($month >= $firstMonth && $month <= $lastMonth) $cashByMonth[$month][] = $fact;
-        }
-        foreach ($countHistory as $fact) {
-            $month = substr((string)$fact['business_date'], 0, 7);
-            if ($month >= $firstMonth && $month <= $lastMonth) $countCashByMonth[$month][] = $fact;
         }
         if ($expandedRange['end'] > $range['end']) {
             // Partial-date queries historically show the whole closing month
@@ -2360,44 +2479,50 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             foreach ($tailFacts as $fact) {
                 $cashByMonth[substr((string)$fact['business_date'], 0, 7)][] = $fact;
             }
-            foreach ($countTailFacts as $fact) {
-                $countCashByMonth[substr((string)$fact['business_date'], 0, 7)][] = $fact;
-            }
         }
         $historyByTeam = ['self' => $this->teamFacts($cashHistory, false), 'partner' => $this->teamFacts($cashHistory, true)];
-        $countHistoryByTeam = ['self' => $this->teamFacts($countHistory, false), 'partner' => $this->teamFacts($countHistory, true)];
         unset($cashHistory);
         $metricsByTeam = [
             'self' => $this->preSaleMetricsByMonth($historyByTeam['self'], $months, false),
             'partner' => $this->preSaleMetricsByMonth($historyByTeam['partner'], $months, false),
         ];
-        $countMetricsByTeam = [
-            'self' => $this->preSaleMetricsByMonth($countHistoryByTeam['self'], $months, false),
-            'partner' => $this->preSaleMetricsByMonth($countHistoryByTeam['partner'], $months, false),
-        ];
-        unset($countHistory, $countHistoryByTeam);
+        unset($countHistory);
         $servicesByMonth = [];
         // The same service scan supplies consultations and consumption; this report does not use source labels.
         foreach ($ids === [] ? [] : $this->serviceRows($stores, $expandedRange, $ids, false, false, true) as $service) {
             $servicesByMonth[substr((string)$service['business_date'], 0, 7)][] = $service;
         }
+        $allowedCategories = array_fill_keys(array_map('intval', $ids), true);
+        $qualifiedByTeamMonth = [];
+        foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $expandedRange, $input,
+            '', $this->participantEmployeeId) as $event) {
+            if (!isset($allowedCategories[(int)($event['category_id'] ?? 0)])) continue;
+            $month = substr((string)$event['business_date'], 0, 7);
+            $teamKey = str_contains((string)($event['category_path'] ?? ''), '合作') ? 'partner' : 'self';
+            $qualifiedByTeamMonth[$teamKey][$month][] = $event;
+        }
         foreach ($months as $month) {
             $monthRange = ['start' => $month . '-01', 'end' => date('Y-m-t', strtotime($month . '-01'))];
             $monthCash = (array)($cashByMonth[$month] ?? []);
-            $monthCountCash = (array)($countCashByMonth[$month] ?? []);
             $monthServices = (array)($servicesByMonth[$month] ?? []);
             foreach ([['key' => 'self', 'name' => '自营', 'partner' => false], ['key' => 'partner', 'name' => '合作', 'partner' => true]] as $team) {
                 $cash = $this->teamFacts($monthCash, (bool)$team['partner']);
-                $countCash = $this->teamFacts($monthCountCash, (bool)$team['partner']);
                 $services = $this->teamFacts($monthServices, (bool)$team['partner']);
-                $amount = $this->factAmount($cash); $count = $this->memberCount($countCash);
+                $amount = $this->factAmount($cash);
                 $metrics = (array)($metricsByTeam[(string)$team['key']][$month] ?? []);
-                $countMetrics = (array)($countMetricsByTeam[(string)$team['key']][$month] ?? []);
+                $dealEvents = (array)($qualifiedByTeamMonth[(string)$team['key']][$month] ?? []);
+                $count = count($dealEvents);
                 $refundLines = []; $refundAmount = 0;
                 foreach ($cash as $fact) if ((int)$fact['amount_cents'] < 0) { $refundLines[(string)($fact['id'] ?? $fact['source_line_id'])] = true; $refundAmount += abs((int)$fact['amount_cents']); }
                 $visit = count($this->efficiencyVisitFacts($services, [], false));
                 $newVisit = count($this->efficiencyVisitFacts($services, $firstPurchaseDates, true));
-                $newPeople = (int)$countMetrics['first_people']; $newAmount = (int)$metrics['first_amount'];
+                $newPeople = 0;
+                foreach ($dealEvents as $event) {
+                    $memberId = (int)$event['member_id'];
+                    $firstDate = (string)($firstPurchaseDates[$memberId] ?? '');
+                    if ($firstDate >= $monthRange['start'] && $firstDate <= $monthRange['end']) $newPeople++;
+                }
+                $newAmount = (int)$metrics['first_amount'];
                 $rows[] = [
                     'month' => $month, 'team_name' => (string)$team['name'], 'annotation_dimension_key' => 'team:' . (string)$team['key'],
                     'visit_count' => $visit,
@@ -2413,14 +2538,14 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->column('month', '月份', '按所选日期范围内的自然月分组。', false, true, 100),
             $this->column('team_name', $category . '团队', $category . '及下级平台商品当前分类路径含“合作”的归合作，其余归自营；按所选门店汇总。', false, true, 120),
             $this->column('visit_count', '见诊人数', '当月已完成且收银项目带体验标签的' . $category . '服务，按团队和会员去重计人数；未完成服务不计入。', true, false, 120, $this->serviceDetailDrill($report, 'visit_count'), '总成交数据'),
-            $this->column('deal_people', '成交人数', '当月购买' . $category . '及下级商品的去重会员数；旧导入数据或旧卡录入原单的欠款补交不计人数。', true, false, 110, $this->cashDetailDrill($report, 'deal_people'), '总成交数据'),
+            $this->column('deal_people', '成交人数', '原销售单独立累计有效现金收款，首度达到来源门槛时按达标日计1；同一会员同日跨单跨店只计1，跨店补交归原店，按达标主分类归自营或合作。', true, false, 110, $this->cashDetailDrill($report, 'deal_people'), '总成交数据'),
             $this->column('deal_rate', '成交率', '成交人数除以体验见诊人数；当月无人见诊显示“-”。', false, false, 110, [], '总成交数据'),
             $this->column('deal_amount', '成交金额', $registeredActual
                 ? '当月' . $category . '及下级商品的实际业绩，成功现金退款按退款日冲减。'
                 : '当月' . $category . '及下级商品的净现金业绩。', true, false, 120, $this->cashDetailDrill($report, 'deal_amount'), '总成交数据'),
             $this->column('unit_output', '成交单产', '成交金额除以成交人数；分母为零显示“-”。', false, false, 110, [], '总成交数据'),
             $this->column('new_visit_count', '见诊人数', '当月已完成且带体验标签的' . $category . '服务中，截至体验业务日仍无' . $category . '正金额收款的会员，按团队和会员去重；旧导入数据或旧卡录入原单的欠款补交不算购买。', true, false, 120, $this->serviceDetailDrill($report, 'new_visit_count'), '新客成交数据'),
-            $this->column('new_deal_people', '成交人数', '当月第一次购买' . $category . '及下级商品的不同会员数；旧导入数据或旧卡录入原单的欠款补交不计人数。', true, false, 110, $this->cashDetailDrill($report, 'new_deal_people'), '新客成交数据'),
+            $this->column('new_deal_people', '成交人数', '使用同一原单首度达标会员日；首次购买本分类发生在当月的会员归新客，退款不改变人数资格。', true, false, 110, $this->cashDetailDrill($report, 'new_deal_people'), '新客成交数据'),
             $this->column('new_deal_rate', '成交率', '首次' . $category . '收款会员数除以当月新客体验见诊人数；两者分别取收款与服务事实，未见诊也可成交，比例可能超过100%；分母为零显示“-”。', false, false, 110, [], '新客成交数据'),
             $this->column('new_deal_amount', '成交金额', $registeredActual
                 ? '当月首次购买' . $category . '商品会员的实际业绩；其成功现金退款按退款日冲减。'
@@ -2432,15 +2557,14 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->column('refund_count', '退款数量', '当月' . $category . '商品成功退款对应的负向收款分摊笔数；同笔分摊跨卡内项目只计一次。', true, false, 110, $this->cashDetailDrill($report, 'refund_count'), '服务消耗'),
             $this->column('refund_amount', '退款金额', '当月退款成功后按项目分摊的实际退款金额，按绝对金额展示。', true, false, 120, $this->cashDetailDrill($report, 'refund_amount'), '服务消耗'),
         ], $rows, $range, $input, ['year' => true]);
-        if ($registeredActual) $result['metric_version'] = $this->registeredActualMetricVersion()
-            . '+imported-and-old-card-repayment-people-r82';
+        $result['metric_version'] = ($registeredActual ? $this->registeredActualMetricVersion() : 'cash-performance')
+            . '+order-first-crossing-people-r41';
         return $result;
     }
 
     private function preSaleReport(string $report, array $definition, array $stores, array $range, array $input): array
     {
         $marketing = in_array($report, ['marketing_acquisition_pre_sale', 'marketing_referral_pre_sale'], true);
-        $sourceDayCohort = in_array($report, ['operations_pre_sale_bdegh', 'operations_referral_beautician_pre_sale'], true);
         // Column explanations must name the persisted primary source codes;
         // a generic "this report's rule" hides which receipts enter the cohort.
         $sourceCodes = $report === 'operations_referral_beautician_pre_sale' ? 'C/F' : 'B/D/E/G/H';
@@ -2475,31 +2599,21 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 : '本年度首次成为本表来源会员的会员，自首次成交起至所选月份末本表来源的累计已登记实际业绩；合计取年末累计值。', false, ['首年业绩']),
         ] : [
             $this->monthlySpec('experience_people', '体验人数', '手动输入当月体验人数，保存为独立报表补充记录。', true, ['体验人数']),
-            $this->monthlySpec('deal_people', '成交人数', $sourceDayCohort
-                ? "同一会员同一业务日的收款合并为一次；游客按单据区分。首次 {$sourceCodes} 来源现金业绩达到500元的会员或游客单据数；旧导入数据或旧卡录入原单的欠款补交不作为成交人数或凑足门槛，现金金额仍计入金额列。"
-                : '当月来源符合本表规则且第一次现金业绩达到500元的不同会员数。', false, ['成交人数']),
-            $this->monthlySpec('deal_amount', '成交金额', $sourceDayCohort
-                ? "{$sourceCodes} 来源会员或游客首次业务日净现金业绩，不设500元门槛；会员同日多单合并，游客按单据区分。"
-                : '当月来源符合本表规则的第一次成功现金业绩，按销售明细和卡内项目分摊。', false, ['成交金额']),
+            $this->monthlySpec('deal_people', '成交人数', "{$sourceCodes} 来源每张原销售单独立累计成功现金收款，首次达到平台设置的非 A 门槛时按收款业务日计1；跨店补交归原店，同一会员同日跨单跨店只计1、多日可累计。游客与退款不参与人数资格，旧导入和旧卡录入原单补交不推动门槛。", false, ['成交人数']),
+            $this->monthlySpec('deal_amount', '成交金额', "{$sourceCodes} 来源会员或游客首次业务日净现金业绩，不设500元门槛；会员同日多单合并，游客按单据区分。", false, ['成交金额']),
             $this->monthlySpec('deal_rate', '成交率', '成交人数除以体验人数；分母为零或未填写显示“-”。', false, ['成交率']),
             $this->monthlySpec('deal_unit_output', '成交单产', '成交金额除以成交人数；分母为零显示“-”。', false, ['成交单产']),
-            $this->monthlySpec('transition_people', '售中转换人数', $sourceDayCohort
-                ? "{$sourceCodes} 来源在第二个正向收款业务日产生有效现金业绩的不同会员数；同日多单只算一次，旧导入数据或旧卡录入原单的欠款补交不作为成交日。"
-                : '来源符合本表规则且第二次产生现金业绩的不同会员数。', false, ['售中转换人数']),
-            $this->monthlySpec('transition_amount', '售中转换业绩', $sourceDayCohort
-                ? "售中转换会员第二个 {$sourceCodes} 来源正向收款业务日的净现金业绩；同日多单合并，跨日分别计次。"
-                : '售中转换会员第二次成功现金业绩，按销售明细和卡内项目分摊。', false, ['售中转换业绩']),
+            $this->monthlySpec('transition_people', '售中转换人数', "{$sourceCodes} 来源在第二个正向收款业务日产生有效现金业绩的不同会员数；同日多单只算一次，旧导入数据或旧卡录入原单的欠款补交不作为成交日。", false, ['售中转换人数']),
+            $this->monthlySpec('transition_amount', '售中转换业绩', "售中转换会员第二个 {$sourceCodes} 来源正向收款业务日的净现金业绩；同日多单合并，跨日分别计次。", false, ['售中转换业绩']),
             $this->monthlySpec('transition_rate', '售中转换率', '售中转换人数除以成交人数；分母为零显示“-”。', false, ['售中转换率']),
             $this->monthlySpec('first_year_amount', '首年业绩', $report === 'operations_pre_sale_bdegh'
                 ? '成交金额中的会员，汇总其本年度所有来源的净现金业绩，归属首次 B/D/E/G/H 成交月份且全年只计一次；游客按收款月份计入除 A 来源外的净现金业绩。'
-                : ($sourceDayCohort
-                    ? '成交金额中的会员，汇总其本年度所有来源的净现金业绩，归属首次 C/F 成交月份且全年只计一次；游客按收款月份计入 C/F 来源的净现金业绩。'
-                    : '本年度首次成为本表来源会员的会员，在本年度内累计形成的净现金业绩。'), false, ['首年业绩']),
+                : '成交金额中的会员，汇总其本年度所有来源的净现金业绩，归属首次 C/F 成交月份且全年只计一次；游客按收款月份计入 C/F 来源的净现金业绩。', false, ['首年业绩']),
         ];
         $result = $this->monthlyProjection((string)$definition['name'], $report, $stores, $range, $input, $specs, $this->preSaleRule($report));
-        // The BDEGH first-year cohort changed independently of other phase-four reports.
-        if ($report === 'operations_pre_sale_bdegh') $result['metric_version'] = 'operations-pre-sale-bdegh-imported-and-old-card-repayment-people-r83';
-        if ($report === 'operations_referral_beautician_pre_sale') $result['metric_version'] = 'operations-pre-sale-cf-imported-and-old-card-repayment-people-r83';
+        // 来源预售的成交人数已独立切换；首年业绩及售中转换仍保留原事实口径。
+        if ($report === 'operations_pre_sale_bdegh') $result['metric_version'] = 'operations-pre-sale-bdegh-order-first-crossing-r41';
+        if ($report === 'operations_referral_beautician_pre_sale') $result['metric_version'] = 'operations-pre-sale-cf-order-first-crossing-r41';
         if ($referral) $result['metric_version'] = 'marketing-referral-source-cohort-r71+'
             . $this->registeredActualMetricVersion() . '+imported-and-old-card-repayment-people-r82';
         return $result;
@@ -2660,7 +2774,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $this->monthlySpec('post_sale_visits', '售后人次', '当月已完成且未作废的非体验服务，同一会员同店同日多项目、多服务单只计1人次；未建档按服务单计。', false, ['售后人次']),
             $this->monthlySpec('deal_visits', '成交人次', '当月购买生美卡项商品名称的会员项目人次，不以同一会员去重；旧导入数据或旧卡录入原单的欠款补交不计。', false, ['成交人次']),
             $this->monthlySpec('visit_deal_rate', '人次成交率', '成交人次除以售后人次；分母为零显示“-”。', false, ['人次成交率']),
-            $this->monthlySpec('deal_people', '成交人头', '当月购买生美卡项商品名称的不同会员数；旧导入数据或旧卡录入原单的欠款补交不计。', false, ['成交人头']),
+            $this->monthlySpec('deal_people', '成交人头', '当月首次达到原销售单可配置来源门槛、且主归属分类为生美的会员日数；跨店补交归原店，同一会员同日跨单跨店只计1，退款不改变人数资格。', false, ['成交人头']),
             $this->monthlySpec('people_deal_rate', '人头成交率', '成交人头除以售后人次；完全按原表公式，分母为零显示“-”。', false, ['人头成交率']),
             $this->monthlySpec('post_sale_amount', '售后业绩', '当月生美商品的登记实际业绩，成功现金收款减成功现金退款；成交人数仍按成交事件计。', false, ['售后业绩']),
             $this->monthlySpec('visit_unit_output', '人次单产', '售后业绩除以成交人次；分母为零显示“-”。', false, ['人次单产']),
@@ -2682,6 +2796,16 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $sourceDayCohort = in_array($report, ['operations_pre_sale_bdegh', 'operations_referral_beautician_pre_sale'], true);
         $sourceMetrics = $sourceDayCohort
             ? $this->bdeghMonthlyMetrics($stores, $range, $rule, $report === 'operations_pre_sale_bdegh') : [];
+        if ($sourceDayCohort) {
+            // 旧月度收款函数不再计算成交人数；只从全实例去重后的原单资格累加。
+            $allowedSources = array_fill_keys((array)$this->preSaleRule($report)['source_codes'], true);
+            foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $range, $input,
+                '', $this->participantEmployeeId) as $event) {
+                $code = strtoupper(substr((string)$event['business_source_primary_name_snapshot'], 0, 1));
+                $month = substr((string)$event['business_date'], 0, 7);
+                if (isset($allowedSources[$code], $sourceMetrics[$month])) $sourceMetrics[$month]['deal_people']++;
+            }
+        }
         $requiresCashHistory = in_array($report, [
             'marketing_acquisition_pre_sale', 'marketing_referral_pre_sale',
         ], true);
@@ -2725,6 +2849,16 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         $firstMonth = $months[0];
         $lastMonth = end($months);
         $fullRange = ['start' => $firstMonth . '-01', 'end' => date('Y-m-t', strtotime($lastMonth . '-01'))];
+        $postSaleDealCounts = [];
+        if ($report === 'marketing_post_sale_performance') {
+            $allowedBeauty = array_fill_keys(array_map('intval', $this->categoryIds('生美', [])), true);
+            foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $fullRange, $input,
+                '', $this->participantEmployeeId) as $event) {
+                if (!isset($allowedBeauty[(int)($event['category_id'] ?? 0)])) continue;
+                $month = substr((string)$event['business_date'], 0, 7);
+                $postSaleDealCounts[$month] = (int)($postSaleDealCounts[$month] ?? 0) + 1;
+            }
+        }
         if (in_array($report, ['marketing_acquisition_pre_sale', 'marketing_referral_pre_sale'], true)) {
             $actualHistory = $this->actualAllRows($stores, $fullRange);
             foreach ($months as $month) {
@@ -2900,6 +3034,10 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 'healthRefundCents', 'healthPriorGrossCents', 'healthActual', 'postSaleActual');
             foreach ($specs as $spec) {
                 $key = (string)$spec['key'];
+                if ($report === 'marketing_post_sale_performance' && $key === 'deal_people') {
+                    $row[$key] = (int)($postSaleDealCounts[$month] ?? 0);
+                    continue;
+                }
                 if (!empty($spec['manual'])) {
                     $manual = $this->manualValue($report, $this->manualSubject($report, $month, 0), $key);
                     $row[$key] = !$this->hasManualValue($manual) ? '-' : (str_contains($key, 'amount') || str_contains($key, 'performance') ? $this->money((int)$manual['value']) : (int)$manual['value']);
@@ -2976,8 +3114,7 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 || ($report === 'operations_health_data' && $key === 'consuming_members')) {
                 $column['drilldown'] = $this->cashDetailDrill($report, $key);
             }
-            // The five cash-backed BDEGH metrics share one scoped detail query;
-            // the member threshold is applied only when opening deal_people.
+            // 售前五项仍共享明细入口；人数由原单资格事件分支返回，金额保持收款事实。
             if ($sourceDayCohort && in_array($key, ['deal_people', 'deal_amount', 'transition_people', 'transition_amount', 'first_year_amount'], true)) {
                 $column['drilldown'] = [
                     'report' => $report === 'operations_pre_sale_bdegh'
@@ -3007,7 +3144,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         }
         if ($report === 'marketing_health_data') $result['metric_version'] = 'marketing-health-cash-refund-actual-r75';
         if ($report === 'marketing_post_sale_performance') $result['metric_version'] = $this->registeredActualMetricVersion()
-            . '+imported-and-old-card-repayment-people-r82';
+            . '+original-order-deal-people-r41';
+        if ($sourceDayCohort) $result['metric_version'] .= '+original-order-deal-people-r41';
         if ($report === 'marketing_acquisition_pre_sale') $result['metric_version'] = $this->registeredActualMetricVersion()
             . '+imported-and-old-card-repayment-people-r83';
         if ($report === 'marketing_referral_pre_sale') $result['metric_version'] = $this->registeredActualMetricVersion();
@@ -4276,6 +4414,9 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             || $month < substr($range['start'], 0, 7) || $month > substr($range['end'], 0, 7))) {
             throw new \InvalidArgumentException('下钻月份不在当前统计范围内');
         }
+        if ($metric === 'deal_people') {
+            return $this->bdeghQualifiedDetail($stores, $range, $input, $parentReport, $month, $cf);
+        }
         $facts = $this->sourceCashRows($stores, ['end' => $range['end']]);
         $records = $this->bdeghDetailRows($facts, $range, $this->preSaleRule($parentReport), $metric, $month, !$cf);
         $records = StoreUnifiedReportDetailFilter::apply($records, $input);
@@ -4307,6 +4448,57 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         return $result;
     }
 
+    /** 售前月报人数下钻只列真实达标会员日，不再返回未达标收款或游客单。 */
+    private function bdeghQualifiedDetail(array $stores, array $range, array $input,
+        string $parentReport, string $month, bool $cf): array
+    {
+        $eventRange = $month === '' ? $range : [
+            'start' => max($range['start'], $month . '-01'),
+            'end' => min($range['end'], date('Y-m-t', strtotime($month . '-01'))),
+        ];
+        $allowed = array_fill_keys((array)$this->preSaleRule($parentReport)['source_codes'], true);
+        $records = [];
+        foreach ((new StoreDealPeopleQualificationServices())->qualifiedDays($stores, $eventRange, $input,
+            '', $this->participantEmployeeId) as $event) {
+            $code = strtoupper(substr((string)$event['business_source_primary_name_snapshot'], 0, 1));
+            if (!isset($allowed[$code])) continue;
+            $records[] = [
+                'member_id' => (int)$event['member_id'],
+                'member_name' => (string)$event['member_name_snapshot'],
+                'order_no' => (string)$event['order_no_snapshot'],
+                'business_date' => (string)$event['business_date'],
+                'receipt_amount' => 1,
+            ];
+        }
+        $records = StoreUnifiedReportDetailFilter::apply($records, $input);
+        usort($records, static fn(array $a, array $b): int => strcmp(
+            $a['business_date'] . '|' . $a['order_no'], $b['business_date'] . '|' . $b['order_no']));
+        $page = max(1, (int)($input['page'] ?? 1));
+        $limit = min(100, max(10, (int)($input['limit'] ?? 20)));
+        $visible = !empty($input['_internal_all']) ? $records : array_slice($records, ($page - 1) * $limit, $limit);
+        $phones = [];
+        foreach (array_chunk(array_unique(array_column($visible, 'member_id')), 500) as $ids) {
+            $phones += Db::name('user')->whereIn('uid', $ids)->column('phone', 'uid');
+        }
+        foreach ($records as &$record) {
+            $record['member_phone'] = (string)($phones[(int)$record['member_id']] ?? '');
+            unset($record['member_id']);
+        }
+        unset($record);
+        $columns = [
+            $this->column('member_name', '会员', '原销售单的会员姓名快照。', false, true, 130),
+            $this->column('member_phone', '手机号', '当前页可见会员当前登记的手机号。', false, false, 145),
+            $this->column('order_no', '单据号', '首次达标的原销售单据号。', false, false, 180),
+            $this->column('business_date', '业务日期', '原销售单首次跨门槛的收款业务日。', false, false, 125),
+            $this->column('receipt_amount', '成交人数', '同一会员同一业务日跨单跨店只列一次。', true, false, 120),
+        ];
+        $columns[count($columns) - 1]['value_type'] = 'integer';
+        $result = $this->result($cf ? 'C/F收款明细' : 'BDEGH收款明细', $columns, $records, $eventRange, $input);
+        $result['member_count'] = count($records);
+        $result['metric_version'] = 'original-order-deal-people-r41';
+        return $result;
+    }
+
     /** Build document rows from the same event choice as the monthly summary; no name-based matching. */
     private function bdeghDetailRows(array $facts, array $range, array $rule, string $metric, string $month, bool $guestNonA = true): array
     {
@@ -4329,7 +4521,6 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
             $memberId = (int)$event['member_id'];
             $date = (string)$event['date'];
             if ($date < $range['start'] || $date > $range['end'] || ($month !== '' && substr($date, 0, 7) !== $month)) continue;
-            if ($metric === 'deal_people' && (int)$event['amount_cents'] < 50000) continue;
             // Registered members enter the annual cohort through deal_amount;
             // guest cash follows its own non-A monthly rule below.
             if ($metric === 'first_year_amount' && $memberId <= 0) continue;
@@ -4455,13 +4646,10 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
                 }
             }
         }
-        // Legacy debt settlements remain in money but cannot create a first/second person event or meet the threshold.
+        // Historical debt settlements remain in the money and second-visit cohorts;
+        // the original-order qualification service alone supplies deal_people.
         $peopleFacts = array_values(array_filter($facts, static fn(array $fact): bool => empty($fact['is_excluded_person_repayment'])));
         foreach ($this->bdeghPositiveEvents($peopleFacts, $rule) as $positive) {
-            $firstMonth = substr((string)$positive[0]['date'], 0, 7);
-            if (isset($months[$firstMonth]) && (int)$positive[0]['amount_cents'] >= 50000) {
-                $months[$firstMonth]['deal_people']++;
-            }
             if (isset($positive[1])) {
                 $secondMonth = substr((string)$positive[1]['date'], 0, 7);
                 if (isset($months[$secondMonth])) $months[$secondMonth]['transition_people']++;

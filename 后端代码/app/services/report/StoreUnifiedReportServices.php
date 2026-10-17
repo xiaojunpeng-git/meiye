@@ -308,22 +308,11 @@ class StoreUnifiedReportServices extends BaseServices
 
     private function partnerItemSummary($storeId, array $range, array $input): array
     {
-        $personCash = [];
-        $facts = $this->partnerItemFacts($storeId, $range, $input, $personCash);
+        $facts = $this->partnerItemFacts($storeId, $range, $input);
         $stores = $this->organizationDimensions()->narrowStoreIds(is_array($storeId) ? $storeId : [(int)$storeId], $input);
-        $market = new StoreUnifiedReportPhaseTwoServices();
-        $qualifiedDays = $stores === [] ? [] : $market->marketQualifiedMemberDays($stores, $range, $input);
-        // 市场达标先按门店/日/来源/会员判定；本表再投影到月度分类，金额仍取完整收退款。
-        $memberNets = [];
-        foreach ($personCash as $payment) {
-            $memberId = (int)($payment['member_id'] ?? 0);
-            if ($memberId <= 0) continue;
-            $this->applyOrganizationDimensions($payment);
-            $month = substr((string)$payment['business_date'], 0, 7);
-            $key = $this->partnerSummaryGroupKey($month, $payment, (string)$payment['category_path']);
-            $dayKey = $market->marketEffectiveMemberDayKey($payment);
-            $memberNets[$key][$dayKey] = (int)($memberNets[$key][$dayKey] ?? 0) + (int)$payment['amount_cents'];
-        }
+        $qualifiedDays = $stores === [] ? [] : (new StoreDealPeopleQualificationServices())->qualifiedDays(
+            $stores, $range, $input, '', $this->participantEmployeeId);
+        $partnerItems = $this->partnerQualifyingItems($qualifiedDays, $stores, $input);
         $grouped = [];
         foreach ($facts as $fact) {
             $this->applyOrganizationDimensions($fact);
@@ -355,12 +344,31 @@ class StoreUnifiedReportServices extends BaseServices
             $row['labor_amount_cents'] += (int)$fact['labor_amount_cents'];
             unset($row);
         }
+        // 达标资格按原单主归属品项投影；跨店补交没有原店金额行也不能漏掉人头。
+        foreach ($qualifiedDays as $day) {
+            $itemKey = (string)$day['sales_order_id'] . '|' . (int)($day['item_id'] ?? 0);
+            if (!isset($partnerItems[$itemKey])) continue;
+            $this->applyOrganizationDimensions($day);
+            $month = substr((string)$day['business_date'], 0, 7);
+            $path = (string)($day['category_path'] ?? '');
+            $key = $this->partnerSummaryGroupKey($month, $day, $path);
+            if (!isset($grouped[$key])) {
+                $grouped[$key] = [
+                    'month' => $month, 'division_name' => (string)($day['division_name'] ?? ''),
+                    'company_dimension_id' => (string)($day['company_dimension_id'] ?? ''),
+                    'city_manager' => (string)($day['city_manager'] ?? ''),
+                    'city_manager_dimension_id' => (string)($day['city_manager_dimension_id'] ?? ''),
+                    'store_id' => (int)$day['store_id'], 'store_name' => (string)$day['store_name_snapshot'],
+                    'category_path_snapshot' => $path, 'performance_type' => $path,
+                    'sale_amount_cents' => 0, 'experience_count' => 0, 'quantity' => 0,
+                    'consumption_amount_cents' => 0, 'labor_amount_cents' => 0,
+                ];
+            }
+            $grouped[$key]['member_count'] = (int)($grouped[$key]['member_count'] ?? 0) + 1;
+        }
         foreach ($grouped as $key => &$row) {
             $row['store_summary'] = (string)$row['store_name'];
-            $row['member_count'] = 0;
-            foreach ($memberNets[$key] ?? [] as $dayKey => $cents) {
-                if ($cents > 0 && isset($qualifiedDays[$dayKey])) $row['member_count']++;
-            }
+            $row['member_count'] = (int)($row['member_count'] ?? 0);
             $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']);
             $row['consumption_amount'] = $this->money((int)$row['consumption_amount_cents']);
             $row['labor_amount'] = $this->money((int)$row['labor_amount_cents']);
@@ -383,7 +391,7 @@ class StoreUnifiedReportServices extends BaseServices
             'store_summary'=>'本行汇总的门店名称，使用业务发生时记录的名称。不同门店分别列示。',
             'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；同一门店、月份和分类汇总为一行。平台改分类后，历史行的分类归属会更新，金额事实不变。',
             'experience_count'=>'查询日期内销售时记为体验的明细，按购买数量累计。例如一条体验明细购买2份，记2；不是按会员去重的人数。补交及独立服务手工费行不增加体验人次。',
-            'member_count'=>'先按同一门店、业务日期、来源、会员合并净收款：A 来源满1,000元、其他来源满500元，当天计1；同日多笔合并，不跨天凑门槛，多天达标分别累计。本分类当天有效净收款还须大于0元。普通欠款补交按收款日参与；旧导入或旧卡录入原单的补交、游客和未收款销售不计人数，金额仍保留。一个会员可能出现在多行，因此合计栏显示“-”。',
+            'member_count'=>'每张原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时按收款业务日计1；同一会员同日跨单跨店只计1。跨店补交归原销售门店，跨分类原单只归达标时现金分摊最多且属于合作方的主品项；退款不改变人数资格。游客、旧导入及旧卡录入原单的补交不计，金额仍保留。',
             'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交和新增的独立服务手工费行不增加此销售消耗指标。',
             'labor_amount'=>'销售明细对应的有效手艺人分配，以及没有同源销售行的独立服务分配，累计其手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
             'sale_amount'=>'查询日期内本分类已记账的现金业绩净额；销售按成交日、补交按收款日、退款按退款日计算。独立服务手工费行不增加成交业绩。旧单能核实卡内项目但不能核实原合作方时，金额仍冲减项目分类，合作方名称留空；无法核实项目时列为未分类。',
@@ -391,23 +399,53 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($columns as &$column) {
             $column['source_explanation'] = $explanations[$column['key']];
             if (!in_array((string)$column['key'], ['experience_count','member_count','consumption_amount','labor_amount','sale_amount'], true)) continue;
-            $column['drilldown'] = ['report'=>'partner_item_detail', 'param_map'=>[
+            $column['drilldown'] = ['report'=>'partner_item_detail',
+                'params'=>$column['key'] === 'member_count' ? ['metric_code'=>'member_count'] : [],
+                'param_map'=>[
                 'store_ids'=>'store_id', 'category_path_exact'=>'category_path_snapshot',
                 'company_dimension_id'=>'company_dimension_id', 'city_manager_dimension_id'=>'city_manager_dimension_id',
             ]];
         }
         unset($column);
         return [
-            'title'=>'合作方品项汇总','metric_version'=>'partner-item-market-qualified-days-v7','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
+            'title'=>'合作方品项汇总','metric_version'=>'partner-item-order-first-crossing-v8','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, [
                 'month'=>'合计', 'experience_count'=>array_sum(array_column($rows, 'experience_count')),
-                'member_count'=>'-', 'consumption_amount'=>$this->money(array_sum(array_column($rows, 'consumption_amount_cents'))),
+                'member_count'=>array_sum(array_column($rows, 'member_count')), 'consumption_amount'=>$this->money(array_sum(array_column($rows, 'consumption_amount_cents'))),
                 'labor_amount'=>$this->money(array_sum(array_column($rows, 'labor_amount_cents'))),
                 'sale_amount'=>$this->money(array_sum(array_column($rows, 'sale_amount_cents'))),
             ]),
         ];
+    }
+
+    /** 只让原单达标主品项在合作方筛选范围内的人数进入汇总；补交日期不限制原销售日。 */
+    private function partnerQualifyingItems(array $days, array $stores, array $input): array
+    {
+        $orderIds = array_values(array_unique(array_filter(array_column($days, 'sales_order_id'))));
+        if ($orderIds === []) return [];
+        $allowed = [];
+        foreach (array_chunk($orderIds, 500) as $chunk) {
+            $query = Db::name('cashier_v3_sale_fact')->alias('s')
+                ->leftJoin('cashier_v3_report_sale_dimension_fact d',
+                    'd.tenant_id=s.tenant_id AND d.store_id=s.store_id AND d.sale_fact_id=s.fact_id')
+                ->leftJoin('cashier_v3_card_sale_item_allocation_fact c',
+                    "c.tenant_id=s.tenant_id AND c.store_id=s.store_id AND c.sale_fact_id=s.fact_id AND c.status='effective'")
+                ->leftJoin('cashier_v3_card_sale_category_allocation_fact cc',
+                    "cc.tenant_id=c.tenant_id AND cc.store_id=c.store_id AND cc.sale_fact_id=c.sale_fact_id AND cc.card_receipt_id=c.card_receipt_id AND cc.category_id_snapshot=c.category_id_snapshot AND cc.status='effective'")
+                ->where('s.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                ->whereIn('s.store_id', $stores)->whereIn('s.order_id', $chunk)
+                ->where('s.status', 'effective')->where('s.fact_direction', 'forward')
+                ->whereRaw("COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot)<>''");
+            $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
+            $this->operationFilters($query, $input);
+            foreach ($query->fieldRaw("s.order_id,CASE WHEN s.source_type='card' THEN COALESCE(c.component_product_id,0) ELSE COALESCE(d.item_id,0) END item_id")
+                ->select()->toArray() as $row) {
+                $allowed[(string)$row['order_id'] . '|' . (int)$row['item_id']] = true;
+            }
+        }
+        return $allowed;
     }
 
     /**
@@ -416,7 +454,7 @@ class StoreUnifiedReportServices extends BaseServices
      * 没有同源销售行的服务单另占一行，只承载其有效手工费，不能强行归到其他会员的销售或补交。
      * 同一销售行/日期/完整分类合并多笔收款，不重复统计原成交活动。
      */
-    private function partnerItemFacts($storeId, array $range, array $input, ?array &$personCash = null): array
+    private function partnerItemFacts($storeId, array $range, array $input): array
     {
         $stores = $this->organizationDimensions()->narrowStoreIds(is_array($storeId) ? $storeId : [(int)$storeId], $input);
         if ($stores === []) return [];
@@ -456,9 +494,6 @@ class StoreUnifiedReportServices extends BaseServices
             return ((string)($row['partner_name_snapshot'] ?? '') !== '' || $historicalProjectRepayment)
                 && ($exact === '' || (string)($row['category_path'] ?? '') === $exact);
         }));
-        // Keep the reversal in the counting population even when its display row
-        // is replaced by the refund operation below; same-period refunds must reduce eligibility.
-        if ($personCash !== null) $personCash = StoreReportImportedRepaymentCountScope::exclude($cash, $stores);
         // Refund reversals already occur in the metric reader. Their operation
         // rows below replace that display grain, so the same cash cannot count twice.
         $cash = array_values(array_filter($cash, static function (array $row) use ($refundOperations): bool {
@@ -598,8 +633,61 @@ class StoreUnifiedReportServices extends BaseServices
         ], JSON_UNESCAPED_UNICODE);
     }
 
+    /** 合作方人数弹窗直接列出母表计数的原单资格，跨店补交也归原店显示。 */
+    private function partnerItemDealDetail($storeId, array $range, array $input): array
+    {
+        $stores = $this->organizationDimensions()->narrowStoreIds(
+            is_array($storeId) ? $storeId : [(int)$storeId], $input);
+        $days = $stores === [] ? [] : (new StoreDealPeopleQualificationServices())->qualifiedDays(
+            $stores, $range, $input, '', $this->participantEmployeeId);
+        $partnerItems = $this->partnerQualifyingItems($days, $stores, $input);
+        $exact = trim((string)($input['category_path_exact'] ?? ''));
+        $records = [];
+        foreach ($days as $day) {
+            if (!isset($partnerItems[(string)$day['sales_order_id'] . '|' . (int)($day['item_id'] ?? 0)])) continue;
+            $this->applyOrganizationDimensions($day);
+            if ($exact !== '' && (string)($day['category_path'] ?? '') !== $exact) continue;
+            if ((string)($input['company_dimension_id'] ?? '') !== ''
+                && (string)($input['company_dimension_id'] ?? '') !== (string)($day['company_dimension_id'] ?? '')) continue;
+            if ((string)($input['city_manager_dimension_id'] ?? '') !== ''
+                && (string)($input['city_manager_dimension_id'] ?? '') !== (string)($day['city_manager_dimension_id'] ?? '')) continue;
+            $records[] = [
+                'business_date' => (string)$day['business_date'],
+                'store_name' => (string)$day['store_name_snapshot'],
+                'member_name' => (string)$day['member_name_snapshot'],
+                'order_no' => (string)$day['order_no_snapshot'],
+                'item_name' => (string)($day['item_name'] ?? ''),
+                'category_path' => (string)($day['category_path'] ?? ''),
+                'member_count' => 1,
+            ];
+        }
+        usort($records, static fn(array $a, array $b): int =>
+            strcmp($a['business_date'] . '|' . $a['order_no'], $b['business_date'] . '|' . $b['order_no']));
+        $columns = $this->fixedColumns([
+            ['key'=>'business_date','label'=>'业务日期','source_explanation'=>'原单累计现金首度达到门槛的收款业务日。'],
+            ['key'=>'store_name','label'=>'门店','source_explanation'=>'原销售门店，跨店补交不改变人数归属。'],
+            ['key'=>'member_name','label'=>'会员','source_explanation'=>'原销售单保存的会员姓名快照。'],
+            ['key'=>'order_no','label'=>'原销售单号','source_explanation'=>'首次达标资格对应的原销售单据号。'],
+            ['key'=>'item_name','label'=>'主品项','source_explanation'=>'达标时累计现金分摊最多分类内的主品项。'],
+            ['key'=>'category_path','label'=>'分类','source_explanation'=>'主品项关联的平台当前商品分类。'],
+            ['key'=>'member_count','label'=>'成交人数','source_explanation'=>'同一会员同日跨单跨店只列一次，原单只在首次达标日计1。','value_type'=>'integer'],
+        ], ['business_date'=>104,'store_name'=>132,'member_name'=>105,'order_no'=>175,'item_name'=>180,'category_path'=>220]);
+        return [
+            'title'=>'合作方成交人数明细', 'metric_version'=>'partner-item-order-first-crossing-v8',
+            'columns'=>$columns,
+            'records'=>!empty($input['_internal_all']) ? $records : array_slice(
+                $records, ($this->page($input)-1)*$this->limit($input), $this->limit($input)),
+            'total'=>count($records), 'page'=>$this->page($input), 'page_size'=>$this->limit($input),
+            'summary_row'=>$this->summaryRow($columns, ['business_date'=>'合计','member_count'=>count($records)]),
+            'table_layout'=>['fixed'=>true],
+        ];
+    }
+
     private function partnerItemDetail($storeId, array $range, array $input): array
     {
+        if ((string)($input['metric_code'] ?? '') === 'member_count') {
+            return $this->partnerItemDealDetail($storeId, $range, $input);
+        }
         // 合计先覆盖完整权限行集，分页仅影响展示；导出不得沿用页面的前 100 行。
         $all = $this->partnerItemFacts($storeId, $range, $input);
         $total = count($all);

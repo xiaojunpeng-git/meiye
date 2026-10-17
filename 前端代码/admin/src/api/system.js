@@ -643,3 +643,12 @@ export function saveWriteoffPerformanceMode(data) {
     data
   });
 }
+
+/** 平台成交人数门槛只保存正整数元；后端锁定配置版本。 */
+export function getDealPeopleThreshold() {
+  return request({ url: 'setting/deal-people-threshold', method: 'get' });
+}
+
+export function saveDealPeopleThreshold(data) {
+  return request({ url: 'setting/deal-people-threshold', method: 'put', data });
+}
