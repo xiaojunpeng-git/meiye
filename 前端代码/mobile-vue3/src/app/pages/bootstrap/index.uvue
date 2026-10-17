@@ -53,6 +53,12 @@
 	const returnMemberId = ref('')
 	const returnLookup = ref('')
 
+	// 微信分享只传公开登录入口，不继承客户详情、会话参数或账号输入。
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() : any => ({ title: '商家端登录', path: '/src/app/pages/bootstrap/index' }))
+	onShareTimeline(() : any => ({ title: '商家端登录', query: '' }))
+	// #endif
+
 	onLoad((options : any) => {
 		let target = String(options != null ? options.returnTarget || '' : '')
 		let memberId = String(options != null ? options.memberId || '' : '')

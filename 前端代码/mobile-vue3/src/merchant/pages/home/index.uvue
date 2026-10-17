@@ -75,6 +75,12 @@
 		return '今天'
 	})
 
+	// 首页含经营数据，分享卡片始终只指向公开登录入口，不携带当前页面或权限数据。
+	// #ifdef MP-WEIXIN
+	onShareAppMessage(() : any => ({ title: '商家端登录', path: '/src/app/pages/bootstrap/index' }))
+	onShareTimeline(() : any => ({ title: '商家端登录', query: '' }))
+	// #endif
+
 	onShow(() => {
 		if (merchantRequestSession(currentMerchantRoot()) == null) { openMerchantBootstrap(); return }
 		reload()
