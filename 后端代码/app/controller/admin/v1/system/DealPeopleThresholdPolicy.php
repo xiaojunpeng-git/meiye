@@ -36,7 +36,7 @@ final class DealPeopleThresholdPolicy extends AuthController
         return $this->success('保存成功', $this->services->save($aYuan, $otherYuan, (int)$version, (int)$this->adminId));
     }
 
-    /** 旧路由中间件会放行未登记接口；本配置必须再核实系统设置菜单授权。 */
+    /** 旧路由中间件会放行未登记接口；匹配当前可见的基础设置菜单并兼容旧授权。 */
     private function requireSystemSettingsAccess(): void
     {
         if ((int)$this->adminId <= 0 || !$this->adminInfo) throw new AuthException(ApiErrorCode::ERR_AUTH);
@@ -44,7 +44,7 @@ final class DealPeopleThresholdPolicy extends AuthController
         $roles = (array)($this->adminInfo['roles'] ?? []);
         $grants = app()->make(SystemRoleServices::class)->getRolesByAuth($roles, 1);
         foreach ($grants as $grant) {
-            if ((string)($grant['unique_auth'] ?? '') === 'setting-system-config') return;
+            if (in_array((string)($grant['unique_auth'] ?? ''), ['setting-shop-base', 'setting-system-config'], true)) return;
         }
         throw new AuthException(ApiErrorCode::ERR_AUTH);
     }
