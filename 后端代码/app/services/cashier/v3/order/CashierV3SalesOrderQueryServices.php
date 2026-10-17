@@ -2245,8 +2245,14 @@ final class CashierV3SalesOrderQueryServices
     {
         $reversed = [];
         foreach ($rows as $row) {
+            $commandKey = (string)($row['command_idempotency_key'] ?? '');
             if ((string)$row['fact_direction'] === 'reversal'
-                && (isset($adjustmentCommandKeys[(string)($row['command_idempotency_key'] ?? '')])
+                // R47 moved an adjustment fact from its edit date back to the sale date by
+                // writing a reversal plus replacement. Treat that chain as a terminal
+                // personnel correction; refund/void reversals must still preserve the
+                // original order snapshot shown here.
+                && (isset($adjustmentCommandKeys[$commandKey])
+                    || strpos($commandKey, 'r47_personnel_date:') === 0
                     || (string)($row['rule_code_snapshot'] ?? '') === 'SHARED-CARD-PURCHASE-REPAIR-R32')
                 && (string)($row['reversal_of'] ?? '') !== '') {
                 $reversed[(string)$row['reversal_of']] = true;

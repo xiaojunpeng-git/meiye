@@ -58,4 +58,21 @@ personnelSnapshotAssert(
     '共享次数卡更正只显示有效手艺人，不叠加原事实'
 );
 
+$dateRepairResult = $method->invoke($service, [
+    $fact('dated-original', 'forward', '原销售人', 'adjust-command'),
+    $fact(
+        'dated-reversal',
+        'reversal',
+        '原销售人',
+        'r47_personnel_date:dated-original',
+        'dated-original',
+        'ORDER-PERSONNEL-ADJUST-V1'
+    ),
+    $fact('dated-corrected', 'forward', '原销售人', 'r47_personnel_date:dated-original'),
+], []);
+personnelSnapshotAssert(
+    array_column($dateRepairResult, 'fact_id') === ['dated-corrected'],
+    '人员调整日期修复只显示正确业务日期上的替代事实'
+);
+
 echo "PERSONNEL_SNAPSHOT_TERMINAL_REVERSAL_CONTRACT=PASS\n";
