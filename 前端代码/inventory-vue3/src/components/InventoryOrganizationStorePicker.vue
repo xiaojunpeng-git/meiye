@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, Network } from '@lucide/vue'
 
 const props = defineProps({
-  modelValue: { type: Number, default: 0 },
+  modelValue: { type: String, default: 'HQ:0' },
   tree: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false }
 })
@@ -14,8 +14,7 @@ const expanded = ref({})
 const selectedOrganization = ref(null)
 watch(() => props.tree, () => { selectedOrganization.value = null; expanded.value = {} })
 
-// The platform picker uses organizations only for navigation; the query always
-// names exactly one store, so selecting an organization never broadens a read.
+// Typed keys keep an organization (including legacy ID 0) distinct from HQ and stores.
 function storesUnder(node) {
   const stores = []
   const visit = item => {
@@ -39,23 +38,32 @@ const rows = computed(() => {
 })
 const visibleStores = computed(() => storesUnder(selectedOrganization.value))
 const selectedName = computed(() => {
-  if (!props.modelValue) return '平台端'
-  for (const node of props.tree) {
-    const store = storesUnder(node).find(item => Number(item.id) === props.modelValue)
-    if (store) return store.title || store.name || `门店${store.id}`
+  if (props.modelValue === 'HQ:0') return '平台端'
+  const find = nodes => {
+    for (const node of nodes || []) {
+      if (`${node.node_type === 'org' ? 'ORG' : 'STORE'}:${node.id}` === props.modelValue) return node.title || node.name
+      const nested = find(node.children)
+      if (nested) return nested
+    }
+    return ''
   }
-  return `门店${props.modelValue}`
+  return find(props.tree) || '所选范围'
 })
-function chooseOrganization(node) {
+function expandOrganization(node) {
   selectedOrganization.value = node
   expanded.value = { ...expanded.value, [node.id]: !expanded.value[node.id] }
 }
+function chooseOrganization(node) {
+  selectedOrganization.value = node
+  emit('update:modelValue', `ORG:${node.id}`)
+  open.value = false
+}
 function chooseStore(node) {
-  emit('update:modelValue', Number(node.id))
+  emit('update:modelValue', `STORE:${node.id}`)
   open.value = false
 }
 function clear() {
-  emit('update:modelValue', 0)
+  emit('update:modelValue', 'HQ:0')
   open.value = false
 }
 function closeOutside(event) {
@@ -76,14 +84,14 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
         <div class="inventory-organization-picker__organizations">
           <p v-if="loading">正在读取组织...</p>
           <p v-else-if="!rows.length">暂无可选门店</p>
-          <button v-for="row in rows" :key="row.node.id" type="button" :style="{ paddingLeft: `${10 + row.depth * 18}px` }" :class="{ active: selectedOrganization?.id === row.node.id }" @click="chooseOrganization(row.node)">
-            <ChevronDown v-if="expanded[row.node.id]" :size="13" /><ChevronRight v-else :size="13" />
-            <span>{{ row.node.title || row.node.name }}</span>
-          </button>
+          <div v-for="row in rows" :key="row.node.id" class="inventory-organization-picker__organization" :style="{ paddingLeft: `${8 + row.depth * 18}px` }">
+            <button type="button" class="inventory-organization-picker__expand" :aria-label="`展开${row.node.title || row.node.name}`" @click="expandOrganization(row.node)"><ChevronDown v-if="expanded[row.node.id]" :size="13" /><ChevronRight v-else :size="13" /></button>
+            <button type="button" class="inventory-organization-picker__organization-name" :class="{ active: modelValue === `ORG:${row.node.id}` }" @click="chooseOrganization(row.node)">{{ row.node.title || row.node.name }}</button>
+          </div>
         </div>
         <div class="inventory-organization-picker__stores">
           <p>{{ selectedOrganization ? (selectedOrganization.title || selectedOrganization.name) : '选择组织后查看门店' }}</p>
-          <button v-for="store in visibleStores" :key="store.id" type="button" :class="{ active: Number(store.id) === modelValue }" @click="chooseStore(store)">{{ store.title || store.name }}</button>
+          <button v-for="store in visibleStores" :key="store.id" type="button" :class="{ active: modelValue === `STORE:${store.id}` }" @click="chooseStore(store)">{{ store.title || store.name }}</button>
         </div>
       </div>
       <footer><button type="button" @click="clear">平台端</button></footer>
@@ -105,6 +113,9 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOutside))
 .inventory-organization-picker__body p { margin: 4px 7px 8px; color: #8393a4; }
 .inventory-organization-picker__body button { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 29px; border: 0; border-radius: 3px; background: transparent; color: #40566d; text-align: left; }
 .inventory-organization-picker__body button:hover, .inventory-organization-picker__body button.active { background: #edf5ff; color: #176fd1; }
+.inventory-organization-picker__organization { display: flex; align-items: center; }
+.inventory-organization-picker__organization .inventory-organization-picker__expand { width: 20px; min-width: 20px; padding: 0; justify-content: center; }
+.inventory-organization-picker__organization .inventory-organization-picker__organization-name { flex: 1; min-width: 0; padding: 0 4px; }
 .inventory-organization-picker__panel footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 13px; border-top: 1px solid #edf0f5; color: #8393a4; }
 .inventory-organization-picker__panel footer button { border: 0; background: transparent; color: #176fd1; cursor: pointer; }
 </style>

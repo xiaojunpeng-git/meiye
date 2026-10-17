@@ -35,7 +35,8 @@ $frontend = (string)file_get_contents(dirname(__DIR__, 3) . '/前端代码/inven
 $platform = (string)file_get_contents(dirname(__DIR__, 3) . '/后端代码/app/services/product/inventory/InventoryCrossSubjectTransferServices.php');
 transitPeriodAssert(strpos($frontend, "storeOperationalStatus.value === '在途'") !== false
     && strpos($frontend, "platformTransferStatus.value === 'DISPATCHED'") !== false
-    && substr_count($frontend, 'filtersBusinessDatePeriod() && businessPeriod.min') === 2
+    // Platform HQ, store-session and organization/store read all respect the same in-transit exception.
+    && substr_count($frontend, 'filtersBusinessDatePeriod() && businessPeriod.min') === 3
     && strpos($frontend, "filtersBusinessDatePeriod() && mode.value === 'platform'") !== false
     && substr_count($frontend, 'v-if="filtersBusinessDatePeriod()"') === 2,
     'both hosts omit and hide their date period only for in-transit transfers');

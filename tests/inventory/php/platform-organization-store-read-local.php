@@ -8,6 +8,7 @@ require '/var/www/html/vendor/autoload.php';
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\product\inventory\InventoryPlatformAccessPolicy;
 use app\services\product\inventory\InventoryDocumentRemarkServices;
+use app\services\organization\OrganizationScopeService;
 use app\services\product\inventory\query\InventoryOperationalUnifiedQueryRegistrar;
 use app\services\product\inventory\query\InventoryPlatformUnifiedQueryContextFactory;
 use app\services\query\UnifiedQueryContextFactory;
@@ -85,6 +86,99 @@ try {
             if ((int)($row['store_id'] ?? 0) !== (int)$location['store_id']) {
                 throw new RuntimeException('Foreign store row leaked: ' . $page);
             }
+        }
+    }
+    // Select the same tree node exposed to the platform UI, including legacy organizations.
+    $allowed = $policy->forOperationalRead($original, 'inventory_inbound')['store_ids'];
+    $tree = app()->make(OrganizationScopeService::class)->buildPickerTree($allowed);
+    $storesUnder = static function (array $node) use (&$storesUnder): array {
+        if (($node['node_type'] ?? '') === 'store') return [(int)$node['id']];
+        $ids = [];
+        foreach ((array)($node['children'] ?? []) as $child) $ids = array_merge($ids, $storesUnder($child));
+        return array_values(array_unique($ids));
+    };
+    $findOrganization = static function (array $nodes) use (&$findOrganization, $storesUnder, $allowed): ?array {
+        foreach ($nodes as $node) {
+            if (($node['node_type'] ?? '') !== 'org') continue;
+            $nested = $findOrganization((array)($node['children'] ?? []));
+            if ($nested !== null) return $nested;
+            $count = count($storesUnder($node));
+            if ($count >= 2 && $count < count($allowed)) return $node;
+        }
+        return null;
+    };
+    $organization = $findOrganization($tree);
+    if ($organization === null) {
+        foreach ($tree as $node) if (($node['node_type'] ?? '') === 'org' && count($storesUnder($node)) >= 2) { $organization = $node; break; }
+    }
+    if ($organization === null) throw new RuntimeException('Local organization with two active store warehouses required');
+    $organizationStores = $storesUnder($organization);
+    sort($organizationStores);
+    $organizationTotals = [];
+    $period = [['field' => 'business_date', 'operator' => 'between', 'value' => [date('Y-m-01'), date('Y-m-d')]]];
+    $allRecordIds = static function (string $page, array $scope) use ($runtime, $period): array {
+        $ids = []; $pageNumber = 1;
+        do {
+            $result = $runtime['providers']->resolve($page)->query($scope, [
+                'pageCode' => $page, 'page' => $pageNumber, 'limit' => 20, 'topFilterConditions' => $period,
+            ]);
+            foreach ($result['records'] as $row) {
+                $ids[] = in_array($page, ['inventory_inbound', 'inventory_outbound'], true)
+                    ? $page . ':' . (int)$row['store_id'] . ':' . (string)$row['source_type'] . ':' . (string)$row['source_id'] . ':' . (int)$row['location_id']
+                    : (string)($row['record_id'] ?? '');
+            }
+            $pageNumber++;
+        } while (($pageNumber - 1) * 20 < (int)$result['total']);
+        if (in_array('', $ids, true)) throw new RuntimeException('Missing stable record ID: ' . $page);
+        return $ids;
+    };
+    foreach (array_keys($pageMenus) as $page) {
+        $context = $factory->make($adminId, $admin, date('Y-m-d'), 0, 'STORE', $page, 0, (int)$organization['id']);
+        $resolvedStores = array_map('intval', (array)$context['inventory_scope_store_ids']);
+        sort($resolvedStores);
+        if ($resolvedStores !== $organizationStores || empty($context['inventory_organization_read'])
+            || (int)$context['store_id'] !== 0 || $original['store_ids'] !== []) {
+            throw new RuntimeException('Organization scope or write isolation failed: ' . $page);
+        }
+        $result = $runtime['providers']->resolve($page)->query($context, [
+            'pageCode' => $page, 'page' => 1, 'limit' => 20,
+            'topFilterConditions' => $period,
+        ]);
+        $organizationTotals[$page] = (int)$result['total'];
+        if ((int)$result['total'] < count($result['records']) || count($result['records']) > 20) {
+            throw new RuntimeException('Organization paging failed: ' . $page);
+        }
+        foreach ($result['records'] as $row) {
+            if (!in_array((int)($row['store_id'] ?? 0), $organizationStores, true)
+                || !empty($row['can_edit']) || !empty($row['can_void'])) {
+                throw new RuntimeException('Organization row scope or read-only projection failed: ' . $page);
+            }
+        }
+        $groupIds = $allRecordIds($page, $context);
+        $singleIds = [];
+        foreach ($organizationStores as $storeId) {
+            $single = $factory->make($adminId, $admin, date('Y-m-d'), $storeId, 'STORE', $page);
+            $singleIds = array_merge($singleIds, $allRecordIds($page, $single));
+        }
+        $uniqueGroup = array_values(array_unique($groupIds));
+        $uniqueSingle = array_values(array_unique($singleIds));
+        sort($uniqueGroup); sort($uniqueSingle);
+        if (count($groupIds) !== (int)$result['total'] || $uniqueGroup !== $uniqueSingle) {
+            throw new RuntimeException('Organization union/dedup mismatch: ' . $page);
+        }
+    }
+    echo 'PASS organization descendant scope for five pages: ' . count($organizationStores) . ' stores, totals ' . json_encode($organizationTotals) . "\n";
+    foreach ([
+        [0, 'STORE', 'inventory_inbound', 99999999],
+        [$organizationStores[0], 'STORE', 'inventory_inbound', (int)$organization['id']],
+        [0, 'HQ', 'inventory_inbound', (int)$organization['id']],
+        [0, 'STORE', 'inventory_count', (int)$organization['id']],
+    ] as [$storeId, $subject, $page, $orgId]) {
+        try {
+            $factory->make($adminId, $admin, date('Y-m-d'), $storeId, $subject, $page, 0, $orgId);
+            throw new RuntimeException('Invalid organization scope accepted');
+        } catch (\app\services\query\UnifiedQueryException $expected) {
+            // Invalid, conflicting and unsupported selectors must fail closed.
         }
     }
     if ($policy->allowsLegacyMenuRead($adminId, 'product/inventory/v3/organization-scope', 'get', ['pageCode' => 'inventory_count'])) {

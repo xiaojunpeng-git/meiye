@@ -70,7 +70,7 @@ final class InventoryPlatformWarehouse extends AuthController
         }
     }
 
-    /** 组织树只用于单店只读筛选；页面和门店范围均由服务端校验。 */
+    /** 组织树仅暴露页面可读门店；组织节点的实际范围须由查询上下文重新解析。 */
     public function organizationScope()
     {
         try {
@@ -192,9 +192,10 @@ final class InventoryPlatformWarehouse extends AuthController
                 $this->selectedStoreId($payload),
                 $this->selectedSubject($payload),
                 $pageCode,
-                $this->selectedHqLocationId($payload)
+                $this->selectedHqLocationId($payload),
+                $this->selectedOrganizationId($payload)
             );
-            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id']);
+            unset($payload['storeId'], $payload['subject'], $payload['hq_location_id'], $payload['organizationId']);
             return $this->success($runtime['providers']->resolve($pageCode)->query($context, $payload));
         } catch (UnifiedQueryException $exception) {
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
@@ -257,6 +258,17 @@ final class InventoryPlatformWarehouse extends AuthController
         $value = $input['storeId'];
         if (!is_int($value) && !(is_string($value) && preg_match('/^\d+$/D', $value))) {
             throw new \InvalidArgumentException('inventory_platform_uq_store_invalid');
+        }
+        return (int)$value;
+    }
+
+    /** Only this operational read endpoint accepts a typed organization choice, never raw store IDs. */
+    private function selectedOrganizationId(array $input): ?int
+    {
+        if (!array_key_exists('organizationId', $input)) return null;
+        $value = $input['organizationId'];
+        if ((!is_int($value) && !(is_string($value) && preg_match('/^\d+$/D', $value))) || (int)$value < 0) {
+            throw new \InvalidArgumentException('inventory_platform_uq_organization_invalid');
         }
         return (int)$value;
     }

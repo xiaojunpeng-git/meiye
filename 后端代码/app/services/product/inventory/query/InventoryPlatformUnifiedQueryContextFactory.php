@@ -5,6 +5,7 @@ namespace app\services\product\inventory\query;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\product\inventory\InventoryPlatformAccessPolicy;
+use app\services\organization\OrganizationScopeService;
 use app\services\query\UnifiedQueryContextFactory;
 use app\services\query\UnifiedQueryException;
 use think\facade\Db;
@@ -17,7 +18,7 @@ final class InventoryPlatformUnifiedQueryContextFactory
     public function __construct(UnifiedQueryContextFactory $core) { $this->core = $core; }
 
     /**
-     * 页面授权后可选择一个有效门店；门店默认仓仍由服务端解析。
+     * 页面授权后可选择一个有效门店或其组织；门店默认仓仍由服务端解析。
      * 此方法仅构造查询身份，不能把跨店读取范围传给写命令。
      */
     public function make(
@@ -27,7 +28,8 @@ final class InventoryPlatformUnifiedQueryContextFactory
         int $selectedStoreId = 0,
         string $subject = 'HQ',
         string $pageCode = InventoryBatchStockQueryContract::PAGE_CODE,
-        int $selectedHqLocationId = 0
+        int $selectedHqLocationId = 0,
+        ?int $selectedOrganizationId = null
     ): array
     {
         if ($adminId <= 0) throw new UnifiedQueryException('UNIFIED_QUERY_CONTEXT_INVALID', '平台库存登录身份无效。', []);
@@ -40,12 +42,16 @@ final class InventoryPlatformUnifiedQueryContextFactory
         $hqAccess = $access;
         if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {
             $access = $policy->forStockRead($access);
-        } elseif ($subject === 'STORE' && $selectedStoreId > 0) {
-            // 仅单据只读查询采用全店目录；总部默认视图和写命令维持原授权。
+        } elseif ($subject === 'STORE' && ($selectedStoreId > 0 || $selectedOrganizationId !== null)) {
+            // 仅五个单据只读页面采用全店目录；总部视图和写命令维持原授权。
             $access = $policy->forOperationalRead($access, $pageCode);
         }
         $subject = strtoupper(trim($subject));
         if (!in_array($subject, ['HQ', 'STORE'], true)) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存主体参数不合法。', []);
+        if (($selectedOrganizationId !== null && $selectedOrganizationId < 0)
+            || ($selectedOrganizationId !== null && ($subject !== 'STORE' || $selectedStoreId > 0))) {
+            throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '组织和门店筛选不能同时指定。', []);
+        }
         if ($subject === 'STORE' && empty($access['is_super_admin']) && empty($access['store_ids'])) {
             // 库存查询已通过页面授权；此处的空范围表示实例尚未建立门店默认仓，不是账号无权。
             if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {
@@ -97,6 +103,24 @@ final class InventoryPlatformUnifiedQueryContextFactory
             if (!$locationIds) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '所选门店没有可用库存。', []);
             $storeIds = [$selectedStoreId => true];
         }
+        if ($selectedOrganizationId !== null) {
+            // 复用当前页面实际返回的组织树，兼容组织迁移期的树结构；浏览器传来的组织 ID 不授予门店范围。
+            $tree = app()->make(OrganizationScopeService::class)->buildPickerTree(array_keys($storeIds));
+            $node = $this->organizationNode($tree, $selectedOrganizationId);
+            if ($node === null) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '所选组织不在当前库存范围内。', []);
+            $selectedStores = array_fill_keys($this->descendantStoreIds($node), true);
+            $storeIds = array_intersect_key($storeIds, $selectedStores);
+            if (!$storeIds) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '所选组织下暂无可用门店库存仓。', []);
+            $locationIds = [];
+            foreach ($locations as $location) {
+                if (isset($storeIds[(int)$location['store_id']])) $locationIds[(string)(int)$location['id']] = true;
+            }
+        }
+        $locationByStore = [];
+        if ($subject === 'STORE') foreach ($locations as $location) {
+            $storeId = (int)($location['store_id'] ?? 0);
+            if (isset($storeIds[$storeId])) $locationByStore[$storeId] = (int)$location['id'];
+        }
         $features = (array)($access['features'] ?? []);
         $canManageQuery = in_array('inventory.batch.query.manage', $features, true);
         $context = $this->core->make([
@@ -119,6 +143,35 @@ final class InventoryPlatformUnifiedQueryContextFactory
             $context['inventory_count_creator_id'] = $adminId;
             $context['inventory_count_operator_name'] = (string)($adminInfo['real_name'] ?? $adminInfo['account'] ?? '');
         }
+        // 仅供已验权的读取投影使用；不得把这一范围带入写命令或客户端原样回传。
+        if ($selectedOrganizationId !== null) {
+            $context['inventory_organization_read'] = true;
+            $context['inventory_scope_store_ids'] = array_keys($storeIds);
+            $context['inventory_location_by_store'] = $locationByStore;
+        }
         return $context;
+    }
+
+    /** Match a selectable organization node, never a store leaf with a colliding numeric ID. */
+    private function organizationNode(array $nodes, int $id): ?array
+    {
+        foreach ($nodes as $node) {
+            if (($node['node_type'] ?? '') !== 'org') continue;
+            if ((int)($node['id'] ?? 0) === $id) return $node;
+            $found = $this->organizationNode((array)($node['children'] ?? []), $id);
+            if ($found !== null) return $found;
+        }
+        return null;
+    }
+
+    /** The tree is already trimmed to active, page-readable default-warehouse stores. */
+    private function descendantStoreIds(array $node): array
+    {
+        $ids = [];
+        foreach ((array)($node['children'] ?? []) as $child) {
+            if (($child['node_type'] ?? '') === 'store') $ids[] = (int)$child['id'];
+            else $ids = array_merge($ids, $this->descendantStoreIds($child));
+        }
+        return array_values(array_unique(array_filter($ids)));
     }
 }
