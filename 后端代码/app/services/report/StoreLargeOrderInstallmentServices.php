@@ -103,7 +103,9 @@ final class StoreLargeOrderInstallmentServices
             $row['award_amount_cents'] = (int)$award['amount_cents'];
             $row['due_amount_cents'] = $schedule[$offset];
             $row['threshold_cents'] = (int)$award['threshold_cents'];
-            $row['row_key'] = hash('sha256', json_encode([$row['tenant_id'], $row['role_snapshot'], $row['employee_id'], $origin,
+            // 会员加入应计行身份：同一人员、月份、分类下两名会员不能共用行键。
+            $row['row_key'] = hash('sha256', json_encode([$row['tenant_id'], $row['role_snapshot'], $row['employee_id'],
+                (int)($row['member_id'] ?? 0), $origin,
                 $row['rule_type'] ?? 'beauty', $row['award_category_id'] ?? $row['beauty_category'], $month]));
             $rows[] = $row;
         }

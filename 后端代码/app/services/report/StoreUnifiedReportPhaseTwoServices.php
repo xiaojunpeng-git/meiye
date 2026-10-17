@@ -1443,7 +1443,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($facts,'p.tenant_id','p.order_id');
         $facts=$facts
             ->whereRaw('cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.allocated_cash_total_cents>0 AND bc.component_cash_amount_cents>0')
-            ->fieldRaw('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,p.order_id,p.source_line_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,s.fact_id sale_fact_id,bc.component_product_id,MAX(bc.component_cash_amount_cents) component_cash_amount_cents,MAX(cc.allocated_cash_total_cents) allocated_cash_total_cents,SUM(p.amount_cents) base_amount_cents')
+            ->fieldRaw('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,MAX(p.organization_name_snapshot) division_name,MAX(p.store_name_snapshot) store_name,p.business_date,p.employee_id,p.order_id,p.source_line_id,MAX(p.employee_name_snapshot) salesperson,p.member_id,MAX(s.member_name_snapshot) member_name_snapshot,s.fact_id sale_fact_id,bc.component_product_id,MAX(bc.component_cash_amount_cents) component_cash_amount_cents,MAX(cc.allocated_cash_total_cents) allocated_cash_total_cents,SUM(p.amount_cents) base_amount_cents')
             ->group('p.tenant_id,p.store_id,p.organization_id,p.organization_path_snapshot,p.business_date,p.employee_id,p.order_id,p.source_line_id,p.member_id,s.fact_id,bc.component_product_id')->order('p.business_date','desc')->select()->toArray();
         foreach ($facts as &$fact) $fact['role_snapshot'] = 'salesperson';
         unset($fact);
@@ -1477,7 +1477,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($managerFacts,'sm.tenant_id','sm.order_id');
         $managerFacts = $managerFacts
             ->whereRaw('cc.allocated_sale_total_cents=s.sale_amount_cents AND cc.allocated_cash_total_cents>0 AND bc.component_cash_amount_cents>0')
-            ->fieldRaw("sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id employee_id,MAX(sm.sales_manager_name_snapshot) salesperson,sm.order_id,sol.order_line_id source_line_id,sm.member_id,sm.business_date,s.fact_id sale_fact_id,bc.component_product_id,MAX(bc.component_cash_amount_cents) component_cash_amount_cents,MAX(cc.allocated_cash_total_cents) allocated_cash_total_cents,MAX(s.organization_path_snapshot) organization_path_snapshot,MAX(s.organization_name_snapshot) division_name,MAX(s.store_name_snapshot) store_name,SUM({$managerAmountSql}) base_amount_cents")
+            ->fieldRaw("sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id employee_id,MAX(sm.sales_manager_name_snapshot) salesperson,sm.order_id,sol.order_line_id source_line_id,sm.member_id,MAX(s.member_name_snapshot) member_name_snapshot,sm.business_date,s.fact_id sale_fact_id,bc.component_product_id,MAX(bc.component_cash_amount_cents) component_cash_amount_cents,MAX(cc.allocated_cash_total_cents) allocated_cash_total_cents,MAX(s.organization_path_snapshot) organization_path_snapshot,MAX(s.organization_name_snapshot) division_name,MAX(s.store_name_snapshot) store_name,SUM({$managerAmountSql}) base_amount_cents")
             ->group('sm.tenant_id,sm.store_id,sm.organization_id,sm.sales_manager_employee_id,sm.order_id,sol.order_line_id,sm.member_id,sm.business_date,s.fact_id,bc.component_product_id')->select()->toArray();
         foreach ($managerFacts as &$managerFact) $managerFact['role_snapshot'] = 'sales_manager';
         unset($managerFact);
@@ -1491,7 +1491,14 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         });
         $awards = self::beautyLargeOrderMonthlyAwards($facts);
         $facts = StoreLargeOrderInstallmentServices::dueRows($facts, $awards, substr($range['start'], 0, 7));
+        // 姓名沿销售或补交事实的历史快照；退款使用关联原销售的姓名。
+        // 手机号原事实未保存，只读会员当前登记号码，不能伪装为历史号码。
+        // 游客身份以 member_id=0 为准，不从姓名或空手机号猜测。
+        $phones = $this->phones(array_values(array_unique(array_filter(array_map('intval', array_column($facts, 'member_id'))))));
         foreach ($facts as &$row) {
+            $memberId = (int)($row['member_id'] ?? 0);
+            $row['member_name_snapshot'] = $memberId === 0 ? '游客' : (string)($row['member_name_snapshot'] ?? '');
+            $row['phone'] = $memberId > 0 ? (string)($phones[$memberId] ?? '') : '';
             $row['award_amount'] = $this->money($row['award_amount_cents']);
             $row['monthly_due'] = $this->money($row['due_amount_cents']);
             $row['installment'] = $row['installment_number'] . '/' . $row['installment_count'];
@@ -1504,7 +1511,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         unset($row);
         $columns = $this->columns([
             'division_name' => '分公司', 'store_name' => '门店', 'award_month' => '达标月份',
-            'salesperson' => '销售人/销售经理', 'classification' => '分类',
+            'salesperson' => '销售人/销售经理', 'member_name_snapshot' => '会员', 'phone' => '手机', 'classification' => '分类',
             'beauty_category' => '商品分类', 'tier' => '达标档位', 'award_amount' => '达标月累计现金业绩',
             'accrual_month' => '应计月份', 'installment' => '本月期次', 'monthly_due' => '本月应计金额',
         ]);
@@ -1512,15 +1519,17 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $explanations = [
             'division_name' => '显示达标归属记录所属的分公司，仅包含当前账号有权查看的范围。',
             'store_name' => '显示达标归属记录所在门店；按现有人员月度规则统计，不扩大门店权限。',
-            'award_month' => '该人员在入选商品分类中累计现金业绩达标的月份，也是开始分摊的月份。例如10月达标，第1期计入10月，第2期计入11月。',
+            'award_month' => '该销售人或销售经理在本会员、入选商品分类中累计现金业绩达标的整月，也是开始分摊的月份。例如10月达标，第1期计入10月，第2期计入11月。',
             'salesperson' => '取得这笔现金业绩的销售人或销售经理。两种角色分别按自己的业绩计算，不合并判断是否达标，也不能将两种角色的金额相加当作门店实收。',
+            'member_name_snapshot' => '显示销售或补交时保存的会员姓名；退款取关联原销售的姓名。游客显示“游客”。不同会员的金额分别累计，不合并凑门槛。',
+            'phone' => '显示该会员当前登记的手机号；业务事实没有保存历史号码，会员改号后此列会更新，游客或未登记号码时留空。',
             'classification' => '属于生美的显示“生美”；非生美且商品分类已开启合作方的显示“合作方”。同时符合两项时优先按生美计算，同一笔业绩不重复计入合作方。',
-            'beauty_category' => '取卡内项目对应的平台当前商品分类，不取卡项自身分类。生美按二级分类统计，合作方按已开启的一级或二级分类统计。每人每月在生美、合作方中分别取累计业绩最高的一个分类，不同分类不拼凑金额达标。',
+            'beauty_category' => '取卡内项目对应的平台当前商品分类，不取卡项自身分类。生美按二级分类统计，合作方按已开启的一级或二级分类统计。每名人员对每位会员按整月累计，生美、合作方各取累计业绩最高的一个分类；不同会员或分类不拼凑金额达标。',
             'tier' => '生美：满30,000元、未满50,000元，分3个月；50,000元及以上，分6个月。合作方：满50,000元、未满100,000元，分3个月；100,000元及以上，分6个月。未达到各自最低门槛的不计入。',
-            'award_amount' => '该人员在达标月份、入选商品分类中的现金业绩净额，是分摊计算的基数，按实际金额计算、不按档位金额封顶。销售收款、欠款补交计入各自业务月，成功现金退款在退款业务月扣减，作废不计。后月退款不改写原月收款；本月金额随新增业务更新。',
+            'award_amount' => '该人员对本会员在达标整月、入选商品分类中的现金业绩净额，是分摊计算的基数，按实际金额计算、不按档位金额封顶。销售收款、欠款补交计入各自业务月，成功现金退款在退款业务月扣减，作废不计。后月退款不改写原月收款；本月金额随新增业务更新。',
             'accrual_month' => '查询时选择的月份。统计该月应计金额，既包含本月达标的第1期，也包含以前月份达标、仍在分摊期内的后续期；不重复计入整笔达标金额。',
             'installment' => '显示所选月份是第几期／总共多少期，达标当月为第1期。分3个月：第1个月40%、第2个月30%、第3个月30%。分6个月：第1个月40%，第2至第6个月各12%。',
-            'monthly_due' => '达标月累计现金业绩×本月对应比例。例如生美10月达标102,000元，10月计40,800元，11月至次年3月各计12,240元。合计为当前查询范围内全部本月应计金额，并非已发放金额。计算及导出保留分，尾差归最后一期；页面按元四舍五入。',
+            'monthly_due' => '本行销售人、会员与分类在达标月的累计现金业绩×本月对应比例。例如生美10月达标102,000元，10月计40,800元，11月至次年3月各计12,240元。合计为当前查询范围内全部本月应计金额，并非已发放金额。计算及导出保留分，尾差归最后一期；页面按元四舍五入。',
         ];
         foreach (range(1, 6) as $i) {
             $key = 'installment_' . $i;
@@ -1538,7 +1547,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         unset($column);
         $result = $this->result('销售人生美大单统计表', $columns, $facts, $input);
-        $result['metric_version'] = 'large-order-monthly-accrual-v7';
+        $result['metric_version'] = 'large-order-member-monthly-accrual-v8';
         $result['range'] = $range;
         $result['filter_schema'][] = ['key' => 'month', 'type' => 'month', 'label' => '应计月份'];
         return $result;
@@ -1586,7 +1595,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $rows = $query->fieldRaw('rp.tenant_id,rp.store_id,rp.organization_id,rp.organization_path_snapshot,'
             . 'rp.organization_name_snapshot division_name,rp.store_name_snapshot store_name,'
             . 'rp.business_date,rp.employee_id,rp.employee_name_snapshot salesperson,'
-            . 'rp.order_id,rp.order_id source_line_id,rp.member_id,original.fact_id sale_fact_id,'
+            . 'rp.order_id,rp.order_id source_line_id,rp.member_id,original.member_name_snapshot,original.fact_id sale_fact_id,'
             . 'component.product_id component_product_id,rp.amount_cents direct_amount_cents,'
             . 'ro.operation_no refund_no')->select()->toArray();
         foreach ($rows as &$row) $row['role_snapshot'] = 'salesperson';
@@ -1822,7 +1831,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             . 'refund_cash.organization_path_snapshot,refund_cash.division_name,refund_cash.store_name,'
             . 'ro.business_date,' . $managerId . ' employee_id,'
             . 'COALESCE(revised_manager.employee_name_snapshot,original_manager.employee_name_snapshot) salesperson,'
-            . 'ro.operation_id order_id,ro.operation_id source_line_id,ro.member_id,'
+            . 'ro.operation_id order_id,ro.operation_id source_line_id,ro.member_id,original.member_name_snapshot,'
             . 'original.fact_id sale_fact_id,component.product_id component_product_id,'
             . 'refund_cash.amount_cents direct_amount_cents,ro.operation_no refund_no')
             ->select()->toArray();
@@ -1873,7 +1882,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $component = array_merge($component, $resolved[$index]);
             $category = $component['beauty_category'];
             $key = json_encode([(string)$component['tenant_id'], (int)$component['store_id'],
-                (string)$component['role_snapshot'], (int)$component['employee_id'],
+                (string)$component['role_snapshot'], (int)$component['employee_id'], (int)$component['member_id'],
                 (string)$component['order_id'], (string)$component['source_line_id'],
                 (string)$component['sale_fact_id'], (string)$component['business_date'], $component['rule_type'], $component['award_category_id']], JSON_UNESCAPED_UNICODE);
             if (!isset($bySaleCategory[$key])) {
@@ -1900,7 +1909,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                     * (int)$fact['component_cash_amount_cents'] / $denominator);
             }
             $key = json_encode([(string)$fact['tenant_id'], (int)$fact['store_id'],
-                (string)$fact['role_snapshot'], (int)$fact['employee_id'],
+                (string)$fact['role_snapshot'], (int)$fact['employee_id'], (int)$fact['member_id'],
                 (string)$fact['order_id'], (string)$fact['source_line_id'],
                 (string)$fact['business_date'], $fact['rule_type'], $fact['award_category_id']], JSON_UNESCAPED_UNICODE);
             if (!isset($byLineCategory[$key])) {
@@ -1918,7 +1927,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
     }
 
     /**
-     * 每名人员每月在生美、合作方两套规则内分别选累计最高的一类，不能跨分类凑门槛。
+     * 每名人员、每位会员、每月在生美、合作方两套规则内分别选累计最高的一类，
+     * 不同会员或不同分类不能拼凑金额达标；同组内的原门槛和分期规则保持不变。
      * 生美优先的互斥归类已在组件投影完成；销售人与经理保持独立。
      * 稳定选择最后一条事实承载追溯信息，分期本金则取整月净额而非该笔金额。
      *
@@ -1933,7 +1943,8 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             if ($category === '' || !preg_match('/^\d{4}-\d{2}$/', $month)) continue;
             // Each rule family selects one highest category; beauty/partner never share thresholds.
             $rule = (string)($fact['rule_type'] ?? 'beauty');
-            $scope = implode('|', [(string)($fact['tenant_id'] ?? ''), (string)($fact['role_snapshot'] ?? ''), (string)($fact['employee_id'] ?? ''), $month, $rule]);
+            $scope = implode('|', [(string)($fact['tenant_id'] ?? ''), (string)($fact['role_snapshot'] ?? ''),
+                (string)($fact['employee_id'] ?? ''), (int)($fact['member_id'] ?? 0), $month, $rule]);
             $categoryKey = $scope . '|' . ($fact['award_category_id'] ?? $category);
             if (!isset($monthly[$scope][$categoryKey])) {
                 $monthly[$scope][$categoryKey] = ['beauty_category' => $category, 'rule_type' => $rule, 'amount_cents' => 0, 'last_index' => $index];
@@ -2987,7 +2998,7 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             '异业收客汇总表'=>['customer_acquired_at'=>106,'partner_store_name'=>120,'member_name'=>90,'phone'=>116],
             '新客明细表'=>['division_name'=>120,'store_name_snapshot'=>120,'business_date'=>106,'customer'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'phone'=>116],
             '新客汇总表'=>['system_name'=>90,'division_name'=>120,'store_name'=>120,'member'=>90,'guide'=>110,'salesperson'=>110,'sales_manager'=>110,'source'=>110],
-            '销售人生美大单统计表'=>['division_name'=>120,'store_name'=>120,'award_month'=>106,'salesperson'=>110,'classification'=>90],
+            '销售人生美大单统计表'=>['division_name'=>120,'store_name'=>120,'award_month'=>106,'salesperson'=>110,'member_name_snapshot'=>100,'phone'=>116,'classification'=>90],
             '院店退款台账'=>['store_name'=>120,'customer'=>90,'refund_date'=>130],
         ];
         foreach($columns as &$column){$key=(string)($column['key']??'');if(isset($maps[$title][$key])&&empty($column['fixed'])){$column['fixed']='left';$column['fixed_width']=$maps[$title][$key];}}unset($column);
