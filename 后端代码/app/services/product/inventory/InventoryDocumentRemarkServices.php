@@ -67,7 +67,7 @@ final class InventoryDocumentRemarkServices
         return $this->project($type, $id, $detail, $editable);
     }
 
-    /** Platform function access permits note edits inside the document reader's warehouse scope. */
+    /** 平台详情按页面及原单仓库读取；跨店选择只读，备注写入仍要求原账号仓库管理权。 */
     public function detailForPlatform(array $adminInfo, string $type, string $id, array $selection): array
     {
         $this->assertIdentity($type, $id);
@@ -77,6 +77,11 @@ final class InventoryDocumentRemarkServices
         $policy->assertQueryPage($access, 'inventory_' . ($type === 'usage' ? 'salon_usage' : $type));
         $locationId = (int)($selection['hq_location_id'] ?? 0);
         $storeId = (int)($selection['store_id'] ?? 0);
+        if ($storeId > 0 && in_array($type, ['request', 'transfer'], true)) {
+            // 平台选择门店只建立该页的读取身份，不能借总部详情读另一店原单。
+            $detail = $this->readPlatformStoreDocument($access, $type, (int)$id, $storeId);
+            return $this->project($type, $id, $detail, false);
+        }
         switch ($type) {
             case 'inbound':
                 $detail = (new InventoryPlatformHqInboundServices())->detail($adminInfo, $locationId, $id, $selection);
@@ -94,6 +99,12 @@ final class InventoryDocumentRemarkServices
                 $detail = (new InventorySalonUsageServices())->detailForPlatform($adminInfo, $storeId, (int)$id, $locationId);
         }
         $editable = !$this->notSeparatelyEditable($type, $detail);
+        if (($selection['subject'] ?? '') === 'STORE' || $storeId > 0) {
+            $selectedStore = (int)($selection['storeId'] ?? $storeId);
+            // 单店目录的范围扩展仅用于读；原账号无该店写能力时不提供备注编辑。
+            $editable = $editable && in_array($selectedStore, (array)$access['store_ids'], true)
+                && in_array('inventory.location.manage', (array)$access['features'], true);
+        }
         return $this->project($type, $id, $detail, $editable);
     }
 
@@ -111,11 +122,83 @@ final class InventoryDocumentRemarkServices
     /** Platform writes retain the same source lock and version check as store writes. */
     public function saveForPlatform(array $adminInfo, string $type, string $id, array $selection, array $input): array
     {
+        // 跨店目录不参与任何备注写路径；原总部写权限继续由原单读写服务校验。
+        if ((int)($selection['store_id'] ?? 0) > 0 && in_array($type, ['request', 'transfer'], true)) {
+            throw new \RuntimeException('inventory_document_remark_denied');
+        }
+        if (($selection['subject'] ?? '') === 'STORE' || (int)($selection['store_id'] ?? 0) > 0) {
+            $policy = new InventoryPlatformAccessPolicy();
+            $access = $policy->resolve($adminInfo);
+            $selectedStore = (int)($selection['storeId'] ?? $selection['store_id'] ?? 0);
+            if (!in_array($selectedStore, (array)$access['store_ids'], true)
+                || !in_array('inventory.location.manage', (array)$access['features'], true)) {
+                throw new \RuntimeException('inventory_document_remark_denied');
+            }
+        }
         return Db::transaction(function () use ($adminInfo, $type, $id, $selection, $input): array {
             $this->lockOriginal($type, $id);
             $detail = $this->detailForPlatform($adminInfo, $type, $id, $selection);
             return $this->save($type, $id, $detail, $input, ['type' => 'PLATFORM_ADMIN', 'id' => (int)$adminInfo['id']]);
         });
+    }
+
+    /** 单店只读详情与统一列表使用相同的原单归属条件；接收方看不到未发货草稿。 */
+    private function readPlatformStoreDocument(array $access, string $type, int $documentId, int $storeId): array
+    {
+        $pageCode = 'inventory_' . $type;
+        $readAccess = (new InventoryPlatformAccessPolicy())->forOperationalRead($access, $pageCode);
+        if ($documentId <= 0 || !in_array($storeId, (array)$readAccess['store_ids'], true)) {
+            throw new \RuntimeException('inventory_document_remark_denied');
+        }
+        $locationIds = array_map('intval', Db::name('inventory_location')
+            ->where('tenant_id', self::TENANT)->where('store_id', $storeId)
+            ->where('location_type', 'STORE')->where('location_status', 'ACTIVE')->where('is_default', 1)->column('id'));
+        if (!$locationIds) throw new \RuntimeException('inventory_document_remark_denied');
+        $table = $type === 'request' ? 'inventory_stock_request_document' : 'inventory_cross_transfer_document';
+        $query = Db::name($table)->where('tenant_id', self::TENANT)->where('id', $documentId);
+        if ($type === 'request') {
+            $query->where(function ($subjects) use ($storeId, $locationIds): void {
+                $subjects->where(function ($requester) use ($storeId, $locationIds): void {
+                    $requester->where('store_id', $storeId)->whereIn('location_id', $locationIds);
+                })->whereOr(function ($supplier) use ($storeId): void {
+                    $supplier->where('supply_party_type', 'STORE')->where('supply_party_id', $storeId);
+                });
+            });
+        } else {
+            $query->where(function ($subjects) use ($storeId, $locationIds): void {
+                $subjects->where(function ($source) use ($storeId, $locationIds): void {
+                    $source->where('from_party_type', 'STORE')->where('from_party_id', $storeId)->whereIn('from_location_id', $locationIds);
+                })->whereOr(function ($target) use ($storeId, $locationIds): void {
+                    $target->where('to_party_type', 'STORE')->where('to_party_id', $storeId)
+                        ->whereIn('to_location_id', $locationIds)->whereIn('document_status', ['DISPATCHED', 'RECEIVED']);
+                });
+            });
+        }
+        $document = $query->find();
+        if (!$document) throw new \RuntimeException('inventory_document_remark_denied');
+        $lineTable = $type === 'request' ? 'inventory_stock_request_line' : 'inventory_cross_transfer_line';
+        $lineQuery = Db::name($lineTable)->where('document_id', $documentId);
+        if ($type === 'transfer') $lineQuery->where('retired_at', 0);
+        $lines = $lineQuery->order('line_no asc')->select()->toArray();
+        foreach ($lines as &$line) {
+            $scale = max(0, min(4, (int)($line['quantity_scale'] ?? 0)));
+            $units = (int)($line['requested_quantity_units'] ?? 0);
+            $line['quantity'] = number_format($units / (10 ** $scale), $scale, '.', '');
+            if ($type === 'transfer') {
+                $line['allocations'] = Db::name('inventory_cross_transfer_batch_allocation')
+                    ->where('line_id', (int)$line['id'])->where('withdrawn_at', 0)->order('id asc')->select()->toArray();
+            }
+            if (!in_array('inventory.cost.view', (array)$access['features'], true)) $line['reference_unit_cost_cents'] = null;
+        }
+        unset($line);
+        $document['status_name'] = (string)$document['document_status'];
+        if ($type === 'request') {
+            return ['document' => $document, 'lines' => $lines, 'can_edit' => false,
+                'can_cancel' => false, 'can_terminate' => false, 'can_void' => false];
+        }
+        $document['lines'] = $lines;
+        foreach (['can_edit', 'can_delete', 'can_dispatch', 'can_receive', 'can_withdraw', 'can_reverse'] as $key) $document[$key] = false;
+        return $document;
     }
 
     private function assertIdentity(string $type, string $id): void

@@ -17,9 +17,9 @@ use think\facade\Db;
  * inventory menu for its own queries. The inbound page grants only its own
  * void command; existing add/edit nodes authorize only their specific create
  * commands, not warehouse management.
- * Store inventory is additionally
- * limited by the organization-admin relation; the platform default HQ
- * inventory does not require a store appointment.
+ * Stock and write scopes retain their established grants. Operational page
+ * reads may select any active store with a default warehouse; that expansion
+ * never grants a store write or bypasses the page permission.
  */
 final class InventoryPlatformAccessPolicy
 {
@@ -188,7 +188,7 @@ final class InventoryPlatformAccessPolicy
         ];
         $prefix = 'product/inventory/v3/';
         $page = strpos($rule, $prefix) === 0 ? ($routes[substr($rule, strlen($prefix))] ?? '') : '';
-        if ($rule === $prefix . 'unified-query/operational') {
+        if ($rule === $prefix . 'unified-query/operational' || $rule === $prefix . 'organization-scope') {
             $page = $this->queryPage(is_string($query['pageCode'] ?? null) ? $query['pageCode'] : '');
         }
         if (in_array($rule, ['product/inventory/recipe/list', 'product/inventory/recipe/info/:id'], true)) $page = 'recipe';
@@ -326,6 +326,29 @@ final class InventoryPlatformAccessPolicy
         sort($storeIds, SORT_NUMERIC);
         $access['store_ids'] = $storeIds;
         $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|stock-read-all-stores|' . implode(',', $storeIds));
+        return $access;
+    }
+
+    /** 单据页面权限允许跨店只读；不改变原账号的建单、收发货或作废能力。 */
+    public function forOperationalRead(array $access, string $pageCode): array
+    {
+        $allowedPages = [
+            'inventory_inbound', 'inventory_outbound', 'inventory_request',
+            'inventory_transfer', 'inventory_salon_usage',
+        ];
+        if (!in_array($pageCode, $allowedPages, true)) {
+            throw $this->denied('当前库存页面不支持跨店查询。');
+        }
+        $this->assertQueryPage($access, $pageCode);
+        // 目录与统一查询同取有效默认门店仓，避免选到尚未建仓的门店后查询失败。
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', Db::name('inventory_location')
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('location_type', 'STORE')->where('location_status', 'ACTIVE')->where('is_default', 1)
+            ->column('store_id')))));
+        $storeIds = array_values(array_intersect($storeIds, $this->allActiveStoreIds()));
+        sort($storeIds, SORT_NUMERIC);
+        $access['store_ids'] = $storeIds;
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|operational-read|' . $pageCode . '|' . implode(',', $storeIds));
         return $access;
     }
 

@@ -17,8 +17,8 @@ final class InventoryPlatformUnifiedQueryContextFactory
     public function __construct(UnifiedQueryContextFactory $core) { $this->core = $core; }
 
     /**
-     * A browser may narrow the platform view to one authorized store. The
-     * location set itself is always resolved server-side from that store scope.
+     * 页面授权后可选择一个有效门店；门店默认仓仍由服务端解析。
+     * 此方法仅构造查询身份，不能把跨店读取范围传给写命令。
      */
     public function make(
         int $adminId,
@@ -40,6 +40,9 @@ final class InventoryPlatformUnifiedQueryContextFactory
         $hqAccess = $access;
         if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE) {
             $access = $policy->forStockRead($access);
+        } elseif ($subject === 'STORE' && $selectedStoreId > 0) {
+            // 仅单据只读查询采用全店目录；总部默认视图和写命令维持原授权。
+            $access = $policy->forOperationalRead($access, $pageCode);
         }
         $subject = strtoupper(trim($subject));
         if (!in_array($subject, ['HQ', 'STORE'], true)) throw new UnifiedQueryException('UNIFIED_QUERY_SCOPE_INVALID', '库存主体参数不合法。', []);

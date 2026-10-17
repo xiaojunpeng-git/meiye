@@ -8,6 +8,7 @@ use app\services\product\inventory\InventoryPlatformAccessPolicy;
 use app\services\product\inventory\InventoryPlatformWarehouseCommandServices;
 use app\services\product\inventory\InventoryPlatformWarehouseServices;
 use app\services\product\inventory\InventoryV3RolloutPolicy;
+use app\services\organization\OrganizationScopeService;
 use app\services\product\inventory\query\InventoryBatchStockQueryContract;
 use app\services\product\inventory\query\InventoryOperationalUnifiedQueryContract;
 use app\services\product\inventory\query\InventoryStatisticsUnifiedQueryContract;
@@ -66,6 +67,24 @@ final class InventoryPlatformWarehouse extends AuthController
             return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         } catch (\InvalidArgumentException $exception) {
             return $this->fail('当前平台没有可用库存仓库。');
+        }
+    }
+
+    /** 组织树只用于单店只读筛选；页面和门店范围均由服务端校验。 */
+    public function organizationScope()
+    {
+        try {
+            $pageCode = trim((string)$this->request->get('pageCode', ''));
+            $policy = new InventoryPlatformAccessPolicy();
+            $access = $policy->forOperationalRead($this->access(), $pageCode);
+            $storeIds = array_values(array_map('intval', (array)$access['store_ids']));
+            return $this->success([
+                'tree' => app()->make(OrganizationScopeService::class)->buildPickerTree($storeIds),
+                'allowed_store_ids' => $storeIds,
+                'permission_version' => (string)$access['permission_version'],
+            ]);
+        } catch (UnifiedQueryException $exception) {
+            return $this->fail($exception->getMessage(), ['code' => $exception->getErrorCode()]);
         }
     }
 

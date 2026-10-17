@@ -281,7 +281,9 @@ final class InventorySalonUsageServices
         $policy = new InventoryPlatformAccessPolicy();
         $access = $policy->resolve($adminInfo);
         if ($writable) $policy->assertFeature($access, 'inventory.location.manage', '当前岗位未配置仓库管理权限。');
-        if ($storeId <= 0 || (empty($access['is_super_admin']) && !in_array($storeId, (array)$access['store_ids'], true))) {
+        // 浏览领用可跨店，领退命令继续使用账号原始仓库授权。
+        $readAccess = $writable ? $access : $policy->forOperationalRead($access, 'inventory_salon_usage');
+        if ($storeId <= 0 || !in_array($storeId, (array)$readAccess['store_ids'], true)) {
             throw new \RuntimeException('inventory_salon_usage_platform_store_denied');
         }
         $location = Db::name('inventory_location')->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)

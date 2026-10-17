@@ -2205,6 +2205,7 @@ Route::group('adminapi', function () {
 			// 旧请货供货仓确认沿用调拨功能权限，不产生库存事实。
             Route::post('v3/hq/request/:id/bind-supply-warehouse', 'v1.product.inventory.InventoryPlatformHqStockRequest/bindSupplyWarehouse')->pattern(['id' => '\\d+'])->option(['real_name' => '确认旧请货供货仓']);
             Route::get('v3/locations', 'v1.product.inventory.InventoryPlatformWarehouse/locations')->option(['real_name' => '平台库存仓库列表']);
+            Route::get('v3/organization-scope', 'v1.product.inventory.InventoryPlatformWarehouse/organizationScope')->option(['real_name' => '平台库存业务组织门店只读范围']);
 			Route::get('v3/warehouse-settings', 'v1.product.inventory.InventoryPlatformWarehouse/settings')->option(['real_name' => '平台总部仓设置列表']);
 			Route::get('v3/import/template', 'v1.product.inventory.InventoryPlatformExcelImport/template')->option(['real_name' => '平台库存导入模板']);
 			Route::get('v3/import', 'v1.product.inventory.InventoryPlatformExcelImport/index')->option(['real_name' => '平台库存导入记录']);
