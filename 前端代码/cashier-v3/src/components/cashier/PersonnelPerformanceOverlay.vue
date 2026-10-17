@@ -1,5 +1,5 @@
 <script setup>
-import { defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
+import { automaticCraftsmanAmounts, defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
 import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
@@ -22,6 +22,8 @@ const props = defineProps({
   craftsmenCandidates: { type: Array, default: () => [] },
   allowOtherCraftsmen: { type: Boolean, default: false },
   otherCraftsmanCandidates: { type: Array, default: () => [] },
+  allowOtherSalespeople: { type: Boolean, default: false },
+  otherSalespersonCandidates: { type: Array, default: () => [] },
   storeId: { type: [Number, String], default: 0 },
   salespersonCandidates: { type: Array, default: () => [] },
   guideCandidates: { type: Array, default: () => [] },
@@ -87,6 +89,8 @@ const attributionSearchOpen = ref(false)
 const attributionSearchRole = ref('guide')
 const otherCraftsmanSearchOpen = ref(false)
 const otherCraftsmanKeyword = ref('')
+const otherSalespersonSearchOpen = ref(false)
+const otherSalespersonKeyword = ref('')
 const validationMessage = ref('')
 const PERFORMANCE_TYPES = {
   COMMISSION: 'commission',
@@ -117,6 +121,29 @@ function laborFeeCentsFor(item = {}) {
   return saved > 0
     ? saved
     : (candidateDefault > 0 ? candidateDefault : defaultLaborFeeCents())
+}
+
+function blockNonDigitLaborFeeInput(event) {
+  // 手工费属于收银保存金额，只允许录入整数元；键盘、粘贴和输入法
+  // 都不能借由 number 输入框的浏览器宽松行为产生小数或科学计数法。
+  const inserted = event?.data
+  if (typeof inserted === 'string' && /[^0-9]/.test(inserted)) event.preventDefault()
+}
+
+function updateWholeYuanLaborFee(item = {}, event) {
+  const input = event?.target
+  const raw = String(input?.value ?? '')
+  if (!/^[0-9]*$/.test(raw)) {
+    // beforeinput 不可用或被脚本绕过时恢复最近的整数值，不能把 3.5
+    // 去掉小数点后误存成 35 元。
+    const previous = item.laborFeeYuan === ''
+      ? ''
+      : String(Math.max(0, Math.trunc(Number(item.laborFeeYuan || 0))))
+    if (input) input.value = previous
+    return
+  }
+  item.laborFeeYuan = raw === '' ? '' : Number(raw)
+  item.laborFeeCents = raw === '' ? 0 : Number(raw) * 100
 }
 
 function allocationAmountCentsFor(item = {}) {
@@ -170,6 +197,7 @@ function syncManualPerformanceAmount(item) {
   // 手改金额是独立的最终分配值，绝不反向改比例或平衡其他人员。
   item.performanceAmountManual = true
   item.performanceAmountLocked = false
+  if (item.role === 'craftsmen') syncComputedPerformanceAmounts(craftsmen.value)
   if (props.refundWholeYuanTail && item.role === 'salespeople') {
     unlockRefundAutomaticGroup(item)
     syncRefundWholeYuanTail(salespeople.value)
@@ -188,6 +216,16 @@ function syncComputedPerformanceAmounts(records) {
   if (props.historyAdjustment || !Array.isArray(records)) return
   if (props.refundWholeYuanTail) {
     syncRefundWholeYuanTail(records)
+    return
+  }
+  if (records.some((record) => record.role === 'craftsmen')) {
+    // 与服务端一致：仅重算自动金额；手填值和历史锁定金额保持原样。
+    automaticCraftsmanAmounts(performanceBaseCents(), records).forEach((amount, record) => {
+      record.performanceAmountCents = amount
+      record.performanceAmountYuan = performanceAmountYuanText(record)
+      record.performanceAmountManual = false
+      record.performanceAmountLocked = false
+    })
     return
   }
   records.filter((record) => record.selected
@@ -504,7 +542,8 @@ watch(
 )
 watch(
   () => [props.salespersonCandidates, props.selectedSalespeople],
-  ([candidates, selected]) => { salespeople.value = mergeCandidates(candidates, selected, 'salespeople') },
+  // Search results must not erase a newly added salesperson before Confirm.
+  ([candidates, selected]) => { salespeople.value = mergeWithLocalSelections(candidates, selected, salespeople.value, 'salespeople') },
   { immediate: true, deep: true }
 )
 
@@ -528,6 +567,11 @@ const filteredOtherCraftsmen = computed(() => otherCraftsmanCandidates.value.fil
   const value = otherCraftsmanKeyword.value.trim().toLowerCase()
   if (!value) return true
   return [item.name, item.position, item.level, item.staffNo]
+    .some((field) => String(field || '').toLowerCase().includes(value))
+}))
+const filteredOtherSalespeople = computed(() => props.otherSalespersonCandidates.filter((item) => {
+  const value = otherSalespersonKeyword.value.trim().toLowerCase()
+  return !value || [item.name, item.position, item.level, item.staffNo]
     .some((field) => String(field || '').toLowerCase().includes(value))
 }))
 const filteredSalespeople = computed(() => salespeople.value.filter(matchesKeyword))
@@ -602,7 +646,11 @@ function selectRecord(item) {
 function markPerformanceTouched(item) {
   item.performanceTouched = true
   if (props.historyAdjustment && item.role === 'craftsmen') syncHistoryAmountFromRatio(item)
-  else syncPerformanceAmountFromRatio(item)
+  else if (item.role === 'craftsmen') {
+    item.performanceAmountManual = false
+    item.performanceAmountLocked = false
+    syncComputedPerformanceAmounts(craftsmen.value)
+  } else syncPerformanceAmountFromRatio(item)
   if (props.refundWholeYuanTail && item.role === 'salespeople') {
     unlockRefundAutomaticGroup(item)
     syncRefundWholeYuanTail(salespeople.value)
@@ -705,6 +753,41 @@ function openOtherCraftsmanSearch() {
   otherCraftsmanSearchOpen.value = true
 }
 
+function openOtherSalespersonSearch() {
+  otherSalespersonKeyword.value = ''
+  validationMessage.value = ''
+  otherSalespersonSearchOpen.value = true
+}
+
+function searchOtherSalespeople() {
+  const keywordValue = otherSalespersonKeyword.value.trim()
+  if (keywordValue.length < 2) {
+    validationMessage.value = '请输入至少 2 个字符后搜索其他销售人。'
+    return
+  }
+  validationMessage.value = ''
+  emit('search-personnel', { scope: 'cashier_other_salespeople', keyword: keywordValue, target: 'otherSalespeople' })
+}
+
+function otherSalespersonSelected(item) {
+  return salespeople.value.some((record) => record.selected && Number(record.employeeId || record.employee_id) === Number(item.employeeId || item.employee_id))
+}
+
+function addOtherSalesperson(item) {
+  if (otherSalespersonSelected(item)) return
+  const candidate = mergeCandidates([item], [], 'salespeople')[0]
+  if (!candidate) return
+  const existing = salespeople.value.find((record) => record.id === candidate.id)
+  if (existing) existing.selected = true
+  else {
+    candidate.selected = true
+    salespeople.value.push(candidate)
+  }
+  salespersonDefaultWeights(salespeople.value)
+  otherSalespersonSearchOpen.value = false
+  validationMessage.value = ''
+}
+
 function searchOtherCraftsmen() {
   const keywordValue = otherCraftsmanKeyword.value.trim()
   if (keywordValue.length < 2) {
@@ -721,12 +804,18 @@ function searchOtherCraftsmen() {
 
 function addOtherCraftsman(item) {
   const candidate = mergeCandidates([item], [], 'craftsmen')[0]
-  if (!candidate || craftsmen.value.some((record) => record.id === candidate.id)) {
+  if (!candidate) {
     otherCraftsmanSearchOpen.value = false
     return
   }
-  candidate.selected = true
-  craftsmen.value.push(candidate)
+  const existing = craftsmen.value.find((record) => record.id === candidate.id)
+  // A previously removed person remains in the local candidate list. Re-select
+  // that row instead of treating its mere presence as an active assignment.
+  if (existing) existing.selected = true
+  else {
+    candidate.selected = true
+    craftsmen.value.push(candidate)
+  }
   equalWeights(craftsmen.value)
   distributeProjectCounts(craftsmen.value, true)
   otherCraftsmanSearchOpen.value = false
@@ -809,7 +898,8 @@ function selectedSalespersonPayload() {
     positionId: Number(item.positionId || 0),
     positionName: item.position || '在职员工',
     performanceIndependent: performanceIndependent(item),
-    allocationGroupKey: allocationGroupKey(item)
+    allocationGroupKey: allocationGroupKey(item),
+    ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {})
   }))
 }
 
@@ -1013,7 +1103,7 @@ function searchGroupPersonnel(scope) {
 
 <template>
   <div class="personnel-performance-overlay" role="dialog" aria-modal="true" aria-label="业绩分配">
-    <section class="personnel-performance-panel">
+    <section class="personnel-performance-panel" :class="{ 'personnel-performance-panel--full': mode === 'full' }">
       <header>
         <div><strong>{{ historyAdjustment ? historyAdjustmentTitle : '业绩分配' }}</strong><span>{{ historyAdjustment ? historyAdjustmentSubtitle : (mode === 'simple' ? '简易选择' : '完整分配') }}</span></div>
         <button type="button" aria-label="关闭" title="关闭" @click="emit('close')">×</button>
@@ -1046,7 +1136,10 @@ function searchGroupPersonnel(scope) {
           <p v-if="!filteredCraftsmen.length" class="personnel-empty">暂无可选择的手艺人</p>
         </section>
         <section v-if="showSalespeople">
-          <div class="personnel-role-heading"><h3>销售人</h3></div>
+          <div class="personnel-role-heading">
+            <button v-if="allowOtherSalespeople" type="button" class="button button--secondary personnel-role-heading__action" @click="openOtherSalespersonSearch">添加其他销售人</button>
+            <h3>销售人</h3>
+          </div>
           <button v-for="item in filteredSalespeople" :key="item.id" type="button" class="personnel-simple-item" :class="{ 'is-selected': item.selected }" @click="selectRecord(item)">
             <span>{{ item.name }}</span>
             <label @click.stop><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)">售前</label>
@@ -1094,6 +1187,7 @@ function searchGroupPersonnel(scope) {
         </div>
         <div class="personnel-full-summary">
           <button v-if="allowOtherCraftsmen && activeTab === 'craftsmen'" type="button" class="button button--secondary" @click="openOtherCraftsmanSearch">添加其他手艺人</button>
+          <button v-if="allowOtherSalespeople && activeTab === 'salespeople'" type="button" class="button button--secondary" @click="openOtherSalespersonSearch">添加其他销售人</button>
           <button type="button" class="button button--primary" @click="mode = 'simple'">添加人员</button>
           <strong>已选择 {{ selectedRecords.length }} 人<span v-if="historyAdjustment">，{{ historyAllocationSummary }}</span><span v-else-if="!activeIsNonPerformance">，{{ activeAllocationSummary }}</span><span v-else>（仅记录归属，不分配比例）</span></strong>
         </div>
@@ -1102,21 +1196,23 @@ function searchGroupPersonnel(scope) {
           <label><input v-model="guideRoundNo" type="radio" value="none"><span>无</span></label>
           <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
         </fieldset>
-        <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen' }" role="table" aria-label="完整人员分配">
-          <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="!historyAdjustment && !activeIsNonPerformance">业绩金额</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
-          <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
-            <strong>{{ item.name }}</strong><span>{{ item.position }}</span><span>{{ item.level }}</span>
-            <span v-if="!activeIsNonPerformance && activeTab === 'craftsmen'">{{ performanceTypeLabel(item) }}</span>
-            <span v-else-if="!activeIsNonPerformance"></span>
-            <label v-if="!activeIsNonPerformance" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
-            <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="markPerformanceTouched(item)"><b>%</b></label>
-            <label v-if="!historyAdjustment && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.performanceAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="业绩金额" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncManualPerformanceAmount(item)"><b>元</b></label>
-            <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :title="historyAmountInputHint(item)" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
-            <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input v-model.number="item.laborFeeYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @input="item.laborFeeCents = Math.max(0, Number(item.laborFeeYuan || 0) * 100)"><b>元/次</b></label>
-            <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="any" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @input="markProjectCountEdited(item)" @blur="normalizeProjectCount(item)"><b>个</b></label>
-            <button type="button" @click="selectRecord(item)">删除</button>
+        <div class="personnel-full-table-scroll">
+          <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen' }" role="table" aria-label="完整人员分配">
+            <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="!historyAdjustment && !activeIsNonPerformance">业绩金额</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
+            <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
+              <strong>{{ item.name }}</strong><span>{{ item.position }}</span><span>{{ item.level }}</span>
+              <span v-if="!activeIsNonPerformance && activeTab === 'craftsmen'">{{ performanceTypeLabel(item) }}</span>
+              <span v-else-if="!activeIsNonPerformance"></span>
+              <label v-if="!activeIsNonPerformance" class="personnel-toggle"><input :checked="item.marked" type="checkbox" @change="setMarked(item, $event.target.checked)"><span>{{ item.marked ? '是' : '否' }}</span></label>
+              <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="markPerformanceTouched(item)"><b>%</b></label>
+              <label v-if="!historyAdjustment && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.performanceAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="业绩金额" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncManualPerformanceAmount(item)"><b>元</b></label>
+              <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :title="historyAmountInputHint(item)" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
+              <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input :value="item.laborFeeYuan" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @beforeinput="blockNonDigitLaborFeeInput" @input="updateWholeYuanLaborFee(item, $event)"><b>元/次</b></label>
+              <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="any" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @input="markProjectCountEdited(item)" @blur="normalizeProjectCount(item)"><b>个</b></label>
+              <button type="button" @click="selectRecord(item)">删除</button>
+            </div>
+            <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>
           </div>
-          <p v-if="!selectedRecords.length" class="personnel-empty">请先在简易选择中添加人员</p>
         </div>
       </div>
 
@@ -1131,9 +1227,29 @@ function searchGroupPersonnel(scope) {
           <div v-else class="personnel-attribution-search-results">
             <article v-for="item in filteredOtherCraftsmen" :key="`other-craftsman-${item.id}`">
               <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '当前门店人员' }}</small></div>
-              <div><button type="button" class="button button--primary" :disabled="craftsmen.some((record) => record.id === item.id)" @click="addOtherCraftsman(item)">{{ craftsmen.some((record) => record.id === item.id) ? '已添加' : '添加' }}</button></div>
+              <div><button type="button" class="button button--primary" :disabled="craftsmen.some((record) => record.id === item.id && record.selected)" @click="addOtherCraftsman(item)">{{ craftsmen.some((record) => record.id === item.id && record.selected) ? '已添加' : '添加' }}</button></div>
             </article>
             <p v-if="!filteredOtherCraftsmen.length" class="personnel-empty">未找到匹配的在职人员</p>
+          </div>
+        </section>
+      </div>
+
+      <div v-if="otherSalespersonSearchOpen" class="personnel-attribution-search-overlay" role="dialog" aria-modal="true" aria-label="添加其他销售人">
+        <section class="personnel-attribution-search-panel">
+          <header><strong>添加其他销售人</strong><button type="button" aria-label="关闭添加其他销售人" @click="otherSalespersonSearchOpen = false">×</button></header>
+          <div class="personnel-attribution-search-toolbar">
+            <input v-model="otherSalespersonKeyword" type="search" placeholder="输入姓名后搜索" @keyup.enter="searchOtherSalespeople">
+            <button type="button" class="button button--primary" :disabled="attributionSearchLoading" @click="searchOtherSalespeople">搜索</button>
+          </div>
+          <p v-if="otherSalespersonKeyword.trim().length < 2" class="personnel-empty">请输入至少 2 个字符后搜索其他销售人</p>
+          <p v-else-if="attributionSearchLoading" class="personnel-empty">正在搜索集团人员…</p>
+          <p v-else-if="attributionSearchError" class="personnel-empty" role="alert">{{ attributionSearchError }}</p>
+          <div v-else class="personnel-attribution-search-results">
+            <article v-for="item in filteredOtherSalespeople" :key="`other-salesperson-${item.id}`">
+              <div><strong>{{ item.name }}</strong><small>{{ item.storeName || '集团人员' }}</small></div>
+              <div><button type="button" class="button button--primary" :disabled="otherSalespersonSelected(item)" @click="addOtherSalesperson(item)">{{ otherSalespersonSelected(item) ? '已添加' : '添加' }}</button></div>
+            </article>
+            <p v-if="!filteredOtherSalespeople.length" class="personnel-empty">未找到匹配的在职人员</p>
           </div>
         </section>
       </div>

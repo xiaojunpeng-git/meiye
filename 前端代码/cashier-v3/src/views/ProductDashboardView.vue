@@ -7,16 +7,14 @@ import Package from '@lucide/vue/dist/esm/icons/package.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import Search from '@lucide/vue/dist/esm/icons/search.mjs'
 import TriangleAlert from '@lucide/vue/dist/esm/icons/triangle-alert.mjs'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import { queryProductDashboard, queryProductDashboardScope } from '@/services/productDashboardApi'
 
 const period = ref('month')
-const customStart = ref('2026-08-01')
-const customEnd = ref('2026-08-20')
-const categoryId = ref('all')
-const productType = ref('all')
+const customRange = ref({ min: `${today().slice(0, 7)}-01`, max: today() })
 const loading = ref(false)
-const refreshedAt = ref('2026-08-20 15:30')
+const refreshedAt = ref('')
 const queryMessage = ref('正在连接统一商品看板服务...')
 const categoryRankType = ref({})
 const scopePicker = ref({
@@ -103,7 +101,6 @@ const legacyExpiryRowFixture = Object.freeze([
   ['冷热喷仪', '仪器', 'YQ240018', '6', '2026-10-31', '72天', '61至90天', '¥9,000']
 ])
 
-const categoryOptions = ref([])
 const overviewCards = ref([])
 const profitCategories = ref([])
 const inventoryCategories = ref([])
@@ -124,7 +121,7 @@ function rangeForPeriod() {
   const end = today()
   if (period.value === 'today') return { start_date: end, end_date: end }
   if (period.value === 'year') return { start_date: `${end.slice(0, 4)}-01-01`, end_date: end }
-  if (period.value === 'custom') return { start_date: customStart.value, end_date: customEnd.value }
+  if (period.value === 'custom') return { start_date: customRange.value.min, end_date: customRange.value.max }
   return { start_date: `${end.slice(0, 7)}-01`, end_date: end }
 }
 
@@ -159,7 +156,6 @@ function mapMetric(label, tone, metric) {
 function applyDashboard(data) {
   const summary = data?.summary || {}
   overviewCards.value = [mapMetric('销售业绩', 'sales', summary.sales), mapMetric('消耗业绩', 'consumption', summary.consumption), mapMetric('品项毛利', 'profit', summary.gross_profit)]
-  categoryOptions.value = [{ value: 'all', label: '全部商品' }, ...((data?.filter_schema?.categories || []).map((item) => ({ value: String(item.id), label: item.name })))]
   profitCategories.value = (data?.profit_categories || []).map((item) => ({
     id: String(item.category_id), name: item.name, income: money(item.income_cents), cost: money(item.cost_cents), profit: money(item.gross_profit_cents), rate: percent(item.gross_margin_rate),
     projects: (item.project_rankings || []).map((row) => [row.name, money(row.revenue_cents), money(row.cost_cents), money(row.gross_profit_cents), percent(row.gross_margin_rate)]),
@@ -170,7 +166,8 @@ function applyDashboard(data) {
   // The server owns bucket membership and each top-ten ranking; switching tabs is display-only.
   expiryRankings.value = Object.fromEntries(Object.entries(data?.expiry_alerts?.rankings || {}).map(([key, rows]) => [key, rows.map((row) => [row.product_name, row.category_name, row.batch_no, row.current_quantity, row.expire_date || '-', row.days === null ? '-' : `${row.days}天`, row.status, money(row.inventory_cost_cents)])]))
   selectedExpiryBucket.value = data?.expiry_alerts?.default_bucket || 'OVERDUE'
-  refreshedAt.value = data?.data_as_of || today()
+  // A report timestamp must come from the backend snapshot, never from a demo date or browser clock.
+  refreshedAt.value = String(data?.data_as_of || '')
 }
 
 async function loadScope() {
@@ -191,11 +188,13 @@ async function loadDashboard(action = '查询') {
   loading.value = true
   queryMessage.value = `${action}中，正在读取商品看板...`
   try {
-    const data = await queryProductDashboard({ ...rangeForPeriod(), category_id: categoryId.value === 'all' ? 0 : categoryId.value, product_type: productType.value, store_ids: scopePicker.value.selectedStoreIds.join(',') })
+    // 看板始终请求权限范围内的全部商品；分类和类型仅用于结果分组，不再缩小整张看板。
+    const data = await queryProductDashboard({ ...rangeForPeriod(), store_ids: scopePicker.value.selectedStoreIds.join(',') })
     applyDashboard(data)
     queryMessage.value = action === '刷新' ? '已刷新商品看板。' : '已按当前筛选更新商品看板。'
   } catch (error) {
     overviewCards.value = []; profitCategories.value = []; inventoryCategories.value = []; expiryCards.value = []; expiryRankings.value = {}
+    refreshedAt.value = ''
     queryMessage.value = error.message || '商品看板请求失败。'
   } finally {
     loading.value = false
@@ -223,14 +222,6 @@ onUnmounted(() => {
   refreshTimer = null
 })
 
-const profitCategoryCards = computed(() => categoryId.value === 'all'
-  ? profitCategories.value
-  : profitCategories.value.filter((category) => category.id === categoryId.value))
-
-const inventoryCategoryCards = computed(() => categoryId.value === 'all'
-  ? inventoryCategories.value
-  : inventoryCategories.value.filter((category) => category.id === categoryId.value))
-
 const expiryRows = computed(() => expiryRankings.value[selectedExpiryBucket.value] || [])
 
 function rowsFor(category) {
@@ -256,6 +247,12 @@ function selectPeriod(value) {
   loadDashboard('查询')
 }
 
+/** 周期控件只更新待查询日期，确认查询时才与门店权限范围一起提交后端。 */
+function applyCustomRange(value) {
+  customRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
+  queryMessage.value = '已选择自定义周期，点击查询刷新数据。'
+}
+
 function runQuery(action = '查询') {
   loadDashboard(action)
 }
@@ -272,16 +269,13 @@ function runQuery(action = '查询') {
           <nav class="product-dashboard__periods" aria-label="日期范围">
             <button v-for="item in [['today', '今天'], ['month', '本月'], ['year', '本年'], ['custom', '自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="selectPeriod(item[0])">{{ item[1] }}</button>
           </nav>
-          <label v-if="period === 'custom'" class="product-dashboard__date">从 <input v-model="customStart" type="date" /></label>
-          <label v-if="period === 'custom'" class="product-dashboard__date">至 <input v-model="customEnd" type="date" /></label>
+          <div v-if="period === 'custom'" class="product-dashboard__custom-period">
+            <UnifiedQueryDateRange :model-value="customRange" :allow-clear="false" label="商品看板自定义周期" @change="applyCustomRange" />
+          </div>
         </div>
         <div class="product-dashboard__filter-row">
           <span class="product-dashboard__filter-label">当前权限范围</span>
           <OrganizationStoreScopePicker v-model="scopePicker.selectedStoreIds" :tree="scopePicker.tree" :allowed-store-ids="scopePicker.allowedStoreIds" :label="scopePicker.label" :loading="scopePicker.loading" @change="changeScope" />
-        </div>
-        <div class="product-dashboard__filter-row">
-          <label class="product-dashboard__select-label">商品分类 <select v-model="categoryId"><option v-for="item in categoryOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-          <label class="product-dashboard__select-label">商品类型 <select v-model="productType"><option value="all">全部</option><option value="project">项目</option><option value="product">产品</option></select></label>
         </div>
       </div>
       <div class="product-dashboard__actions">
@@ -290,11 +284,12 @@ function runQuery(action = '查询') {
       </div>
     </section>
 
-    <p class="product-dashboard__feedback" aria-live="polite">{{ queryMessage }} <span>数据截至：{{ refreshedAt }}</span></p>
+    <p class="product-dashboard__feedback" aria-live="polite">{{ queryMessage }} <span v-if="refreshedAt">数据截至：{{ refreshedAt }}</span></p>
 
     <section class="product-dashboard__summary" aria-label="商品经营概览">
       <article v-for="card in overviewCards" :key="card.label" class="product-dashboard__summary-card" :class="`product-dashboard__summary-card--${card.tone}`">
         <div class="product-dashboard__summary-card-content">
+          <!-- 指标与完整金额占据图表上方整行，避免横向分栏截断核心经营结果。 -->
           <div class="product-dashboard__summary-metric"><span>{{ card.label }}</span><strong>{{ card.value }}</strong></div>
           <div class="product-dashboard__summary-bars" :aria-label="`${card.label}本期同比环比柱状图`">
             <div v-for="bar in card.bars" :key="bar.label" class="product-dashboard__summary-bar-item"><b>{{ bar.amount }}</b><div class="product-dashboard__summary-bar-track"><i :style="{ height: `${bar.value}%` }"></i></div><span>{{ bar.label }}</span></div>
@@ -306,9 +301,9 @@ function runQuery(action = '查询') {
     <section class="product-dashboard__section product-dashboard__section--profit" aria-labelledby="profit-title">
       <header class="product-dashboard__section-header"><div><span class="product-dashboard__section-kicker"><CircleDollarSign :size="16" aria-hidden="true" />经营分析</span><h2 id="profit-title">品项毛利</h2></div><button type="button" class="product-dashboard__guide"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></header>
       <div v-if="loading" class="product-dashboard__loading">正在加载品项毛利数据...</div>
-      <p v-else-if="!profitCategoryCards.length" class="product-dashboard__empty">当前商品分类暂无品项毛利数据。</p>
+      <p v-else-if="!profitCategories.length" class="product-dashboard__empty">当前商品分类暂无品项毛利数据。</p>
       <div v-else class="product-dashboard__profit-grid">
-        <article v-for="category in profitCategoryCards" :key="category.id" class="profit-category-card">
+        <article v-for="category in profitCategories" :key="category.id" class="profit-category-card">
           <header><div><span>商品分类</span><h3>{{ category.name }}</h3></div><span class="profit-category-card__rate">毛利率 {{ category.rate }}</span></header>
           <dl class="profit-category-card__metrics"><div><dt>分类收入</dt><dd>{{ category.income }}</dd></div><div><dt>分类成本</dt><dd>{{ category.cost }}</dd></div><div><dt>分类品项毛利</dt><dd>{{ category.profit }}</dd></div></dl>
           <div class="profit-category-card__rank-header"><strong>毛利排行 · 前5名</strong><div role="tablist" class="profit-category-card__tabs"><button type="button" :class="{ 'is-active': (categoryRankType[category.id] || 'project') === 'project' }" @click="setRankType(category.id, 'project')">项目</button><button type="button" :class="{ 'is-active': categoryRankType[category.id] === 'product' }" @click="setRankType(category.id, 'product')">产品</button></div></div>
@@ -320,9 +315,9 @@ function runQuery(action = '查询') {
     <section class="product-dashboard__section product-dashboard__section--inventory" aria-labelledby="inventory-title">
       <header class="product-dashboard__section-header"><div><span class="product-dashboard__section-kicker"><Boxes :size="16" aria-hidden="true" />库存快照</span><h2 id="inventory-title">产品库存成本</h2></div><button type="button" class="product-dashboard__guide"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></header>
       <div v-if="loading" class="product-dashboard__loading">正在加载产品库存成本数据...</div>
-      <p v-else-if="!inventoryCategoryCards.length" class="product-dashboard__empty">当前商品分类没有产品库存。</p>
+      <p v-else-if="!inventoryCategories.length" class="product-dashboard__empty">当前商品分类没有产品库存。</p>
       <div v-else class="product-dashboard__inventory-grid">
-        <article v-for="category in inventoryCategoryCards" :key="category.id" class="inventory-category-card"><header><div><span>产品分类</span><h3>{{ category.name }}</h3></div><strong>{{ category.amount }}</strong></header><div class="inventory-category-card__rank-title"><Package :size="15" aria-hidden="true" />库存成本排行 · 前10名</div><div class="inventory-category-card__table"><div class="inventory-category-card__table-head"><span>品名</span><span>库存数量</span><span>库存成本</span></div><div v-for="(row, index) in category.rows" :key="row[0]" class="inventory-category-card__row" :class="`inventory-rank-row--${index + 1}`"><em>{{ index + 1 }}</em><span :title="row[0]">{{ row[0] }}</span><b>{{ row[1] }}</b><b>{{ row[2] }}</b></div></div></article>
+        <article v-for="category in inventoryCategories" :key="category.id" class="inventory-category-card"><header><div><span>产品分类</span><h3>{{ category.name }}</h3></div><strong>{{ category.amount }}</strong></header><div class="inventory-category-card__rank-title"><Package :size="15" aria-hidden="true" />库存成本排行 · 前10名</div><div class="inventory-category-card__table"><div class="inventory-category-card__table-head"><span>品名</span><span>库存数量</span><span>库存成本</span></div><div v-for="(row, index) in category.rows" :key="row[0]" class="inventory-category-card__row" :class="`inventory-rank-row--${index + 1}`"><em>{{ index + 1 }}</em><span :title="row[0]">{{ row[0] }}</span><b>{{ row[1] }}</b><b>{{ row[2] }}</b></div></div></article>
       </div>
     </section>
 
@@ -352,13 +347,14 @@ function runQuery(action = '查询') {
 :global(html.product-dashboard-document),:global(html.product-dashboard-document body),:global(html.product-dashboard-document #app){min-width:0;width:100%;max-width:100%;overflow-x:hidden}
 .product-dashboard{height:100vh;min-height:100vh;overflow:auto;padding:12px;background:#f4f6f8;color:#26364a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.product-dashboard *{box-sizing:border-box}.product-dashboard h1,.product-dashboard h2,.product-dashboard h3,.product-dashboard p,.product-dashboard dl,.product-dashboard dt,.product-dashboard dd{margin:0}.product-dashboard__header,.product-dashboard__filters,.product-dashboard__summary,.product-dashboard__section,.product-dashboard__feedback{width:100%;max-width:1600px;margin-right:auto;margin-left:auto}.product-dashboard__header{display:flex;align-items:center;min-height:40px;margin-bottom:8px}.product-dashboard h1{color:#1f2d3d;font-size:23px;line-height:1.3}.product-dashboard__filters{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid #dde4ed;border-radius:7px;padding:12px 14px;background:#fff;box-shadow:0 3px 9px rgba(26,47,71,.04)}.product-dashboard__filter-main{display:flex;flex-wrap:wrap;align-items:center;gap:9px 20px}.product-dashboard__filter-row{display:flex;align-items:center;gap:8px;min-height:34px}.product-dashboard__filter-label{color:#4c6076;font-size:13px;font-weight:600}.product-dashboard__periods{display:flex;overflow:hidden;border:1px solid #d8e0ea;border-radius:5px}.product-dashboard__periods button{min-width:48px;min-height:32px;border:0;border-right:1px solid #e4e9ef;background:#fff;color:#66778b;font:inherit;font-size:12px;cursor:pointer}.product-dashboard__periods button:last-child{border-right:0}.product-dashboard__periods button.is-active{background:#e9f4ff;color:#1769aa;font-weight:700}.product-dashboard__date,.product-dashboard__select-label{display:flex;align-items:center;gap:6px;color:#66778b;font-size:12px}.product-dashboard__date input,.product-dashboard__select-label select{min-height:32px;border:1px solid #d8e0ea;border-radius:5px;padding:4px 8px;background:#fff;color:#405166;font:inherit;font-size:13px}.product-dashboard__actions{display:flex;flex:none;gap:8px}.product-dashboard__button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:34px;border:1px solid #d6e0eb;border-radius:5px;padding:6px 11px;background:#fff;color:#426078;font:inherit;font-size:13px;cursor:pointer}.product-dashboard__button--primary{border-color:#1769aa;background:#1769aa;color:#fff}.product-dashboard__button:disabled{cursor:wait;opacity:.65}.is-spinning{animation:product-dashboard-spin .75s linear infinite}@keyframes product-dashboard-spin{to{transform:rotate(360deg)}}.product-dashboard__feedback{display:flex;justify-content:space-between;gap:12px;padding:8px 2px 12px;color:#718096;font-size:12px}.product-dashboard__feedback span{white-space:nowrap}.product-dashboard__summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:22px}.product-dashboard__summary-card{min-height:145px;border:1px solid #dde5ed;border-top:3px solid #1f5f8b;border-radius:7px;padding:15px 16px;background:#fff}.product-dashboard__summary-card--consumption{border-top-color:#b7791f}.product-dashboard__summary-card--profit{border-top-color:#357a72}.product-dashboard__summary-card>span{color:#53667b;font-size:14px;font-weight:700}.product-dashboard__summary-card>strong{display:block;margin:9px 0 13px;color:#1f5f8b;font-size:24px;line-height:1}.product-dashboard__summary-card--consumption>strong{color:#b7791f}.product-dashboard__summary-card--profit>strong{color:#357a72}.product-dashboard__summary-card dl{display:grid;grid-template-columns:1fr 1fr;gap:10px}.product-dashboard__summary-card dt{color:#7d8c9d;font-size:11px}.product-dashboard__summary-card dd{margin-top:3px;color:#526b80;font-size:13px;font-weight:600}.product-dashboard__section{margin-bottom:26px}.product-dashboard__section-header{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:10px}.product-dashboard__section-kicker{display:inline-flex;align-items:center;gap:5px;color:#718398;font-size:12px}.product-dashboard__section-kicker svg{color:#1f5f8b}.product-dashboard__section--inventory .product-dashboard__section-kicker svg{color:#357a72}.product-dashboard__section--expiry .product-dashboard__section-kicker svg{color:#b7791f}.product-dashboard h2{margin-top:2px;color:#26394d;font-size:18px;line-height:1.3}.product-dashboard__guide{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#1769aa;font:inherit;font-size:12px;cursor:pointer}.product-dashboard__loading,.product-dashboard__empty{min-height:96px;border:1px solid #dfe7ee;border-radius:7px;padding:32px 18px;background:#fff;color:#7d8d9e;font-size:13px;text-align:center}.product-dashboard__profit-grid,.product-dashboard__inventory-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.profit-category-card,.inventory-category-card{overflow:hidden;border:1px solid #dce5ed;border-radius:7px;background:#fff}.profit-category-card{border-top:3px solid #1f5f8b}.profit-category-card>header,.inventory-category-card>header{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:15px 15px 12px}.profit-category-card>header span,.inventory-category-card>header span{color:#7b8b9d;font-size:11px}.profit-category-card h3,.inventory-category-card h3{margin-top:3px;color:#2d4258;font-size:16px}.profit-category-card__rate{border-radius:4px;padding:4px 6px;background:#edf7f5;color:#357a72!important;font-size:11px!important;font-weight:700}.profit-category-card__metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 15px 13px}.profit-category-card__metrics div{min-width:0}.profit-category-card__metrics dt{color:#8090a1;font-size:11px}.profit-category-card__metrics dd{overflow:hidden;margin-top:4px;color:#1f5f8b;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:700}.profit-category-card__metrics div:nth-child(2) dd{color:#6f7f8f}.profit-category-card__metrics div:nth-child(3) dd{color:#357a72}.profit-category-card__rank-header{display:flex;align-items:center;justify-content:space-between;gap:7px;border-top:1px solid #edf1f5;padding:9px 12px}.profit-category-card__rank-header strong{color:#40576b;font-size:12px}.profit-category-card__tabs{display:flex;border:1px solid #dde6ee;border-radius:4px;padding:2px}.profit-category-card__tabs button{border:0;border-radius:3px;padding:3px 7px;background:transparent;color:#718198;font:inherit;font-size:11px;cursor:pointer}.profit-category-card__tabs button.is-active{background:#e9f4ff;color:#1769aa;font-weight:700}.profit-category-card__table{border-top:1px solid #edf1f5}.profit-category-card__table-head,.profit-category-card__rank-row{display:grid;grid-template-columns:minmax(88px,1.8fr) minmax(52px,.9fr) minmax(52px,.9fr) minmax(52px,.9fr) minmax(40px,.65fr);align-items:center;gap:5px;padding:8px 10px 8px 35px}.profit-category-card__table-head{background:#f8fafc;color:#8190a0;font-size:10px}.profit-category-card__rank-row{position:relative;min-height:34px;border-top:1px solid #f0f3f6;color:#53667a;font-size:11px}.profit-category-card__rank-row>em{position:absolute;left:10px;display:grid;width:18px;height:18px;place-items:center;border-radius:50%;background:#edf4fa;color:#4d7699;font-size:10px;font-style:normal}.profit-category-card__rank-row>span{overflow:hidden;color:#40576b;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.profit-category-card__rank-row>b{overflow:hidden;color:#1f5f8b;text-align:right;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.profit-category-card__rank-row>b:nth-last-child(2){color:#357a72}.profit-category-card__rank-row>b:last-child{color:#63778d}.profit-category-card__rank-row.rank-row--1{background:#fff7df}.profit-category-card__rank-row.rank-row--1>em{background:#d49b2c;color:#fff}.profit-category-card__rank-row.rank-row--2>em{background:#b68162;color:#fff}.profit-category-card__rank-row.rank-row--3>em{background:#d6c978;color:#5f562d}.profit-category-card__rank-row.rank-row--4>em,.profit-category-card__rank-row.rank-row--5>em{background:#a9bbc5;color:#fff}.inventory-category-card{border-top:3px solid #357a72}.inventory-category-card>header{border-bottom:1px solid #edf1f5}.inventory-category-card>header>strong{color:#1f5f8b;font-size:18px;white-space:nowrap}.inventory-category-card__rank-title{display:flex;align-items:center;gap:5px;padding:10px 14px;color:#40576b;font-size:12px;font-weight:700}.inventory-category-card__rank-title svg{color:#357a72}.inventory-category-card__table{border-top:1px solid #edf1f5}.inventory-category-card__table-head,.inventory-category-card__row{display:grid;grid-template-columns:minmax(0,1fr) 68px 78px;align-items:center;gap:8px;padding:8px 12px 8px 37px}.inventory-category-card__table-head{background:#f8fafc;color:#8190a0;font-size:10px}.inventory-category-card__row{position:relative;min-height:34px;border-top:1px solid #f0f3f6;color:#53667a;font-size:11px}.inventory-category-card__row em{position:absolute;left:12px;color:#8a9bad;font-size:10px;font-style:normal}.inventory-category-card__row span{overflow:hidden;color:#40576b;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.inventory-category-card__row b{color:#2b4358;text-align:right;font-size:10px}.inventory-category-card__row b:last-child{color:#1f5f8b}.product-dashboard__expiry-summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:12px}.expiry-summary-card{min-height:89px;border:1px solid #dce5ed;border-top:3px solid #8a9bab;border-radius:6px;padding:11px 12px;background:#fff}.expiry-summary-card span{color:#61758a;font-size:12px}.expiry-summary-card strong{display:block;margin:5px 0 2px;color:#2b4358;font-size:21px}.expiry-summary-card small{color:#8a99a8;font-size:10px}.expiry-summary-card--expired{border-top-color:#b95a4c}.expiry-summary-card--expired strong{color:#b95a4c}.expiry-summary-card--urgent{border-top-color:#c88727}.expiry-summary-card--urgent strong{color:#b7791f}.expiry-summary-card--warm{border-top-color:#d4a34b}.expiry-summary-card--watch{border-top-color:#5c8fba}.expiry-summary-card--normal{border-top-color:#357a72}.product-dashboard__table-wrap{overflow:auto;border:1px solid #dce5ed;border-radius:7px;background:#fff}.product-dashboard table{width:100%;min-width:900px;border-collapse:collapse}.product-dashboard th{padding:11px 14px;background:#f7f9fb;color:#718397;text-align:left;font-size:11px;font-weight:700}.product-dashboard td{border-top:1px solid #edf1f5;padding:11px 14px;color:#50667a;font-size:12px;white-space:nowrap}.product-dashboard td:first-child{color:#2e475e;font-weight:600}.product-dashboard td:last-child{color:#1f5f8b;font-weight:700}.expiry-status{display:inline-flex;border-radius:4px;padding:3px 6px;background:#edf4fa;color:#527591;font-size:11px}.expiry-status--expired{background:#fff0ed;color:#b45431}.expiry-status--urgent{background:#fff8e6;color:#a66c12}@media(max-width:1180px){.product-dashboard__filters{align-items:flex-start;flex-direction:column}.product-dashboard__actions{align-self:flex-end}.product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.product-dashboard__expiry-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){.product-dashboard{padding:12px}.product-dashboard__filter-main{display:grid;width:100%;gap:10px}.product-dashboard__filter-row{flex-wrap:wrap}.product-dashboard__actions{align-self:stretch}.product-dashboard__button{flex:1}.product-dashboard__feedback{align-items:flex-start;flex-direction:column}.product-dashboard__summary,.product-dashboard__profit-grid,.product-dashboard__inventory-grid{grid-template-columns:1fr}.product-dashboard__expiry-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.profit-category-card__table-head,.profit-category-card__rank-row{grid-template-columns:minmax(84px,1.7fr) minmax(48px,.8fr) minmax(48px,.8fr) minmax(48px,.8fr) minmax(36px,.6fr);gap:3px;padding-right:7px;padding-left:32px}.profit-category-card__metrics{gap:5px;padding-right:11px;padding-left:11px}.profit-category-card__metrics dd{font-size:12px}.product-dashboard__section-header{align-items:flex-end}.product-dashboard__guide{font-size:11px}}
 /* Product-dashboard prototype additions: trend sparklines and consistent rank colors. */
-.product-dashboard__summary-card-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);align-items:center;gap:14px;height:100%}
-.product-dashboard__summary-metric{min-width:0}
+.product-dashboard__summary-card-content{display:grid;grid-template-rows:auto 1fr;gap:14px;height:100%}
+.product-dashboard__summary-metric{display:flex;align-items:baseline;justify-content:space-between;gap:12px;min-width:0}
+.product-dashboard__summary-card .product-dashboard__summary-metric{justify-content:flex-start;flex-wrap:wrap;gap:4px 8px}
 .product-dashboard__summary-metric>span{display:block;color:#53667b;font-size:14px;font-weight:700}
-.product-dashboard__summary-metric>strong{display:block;margin-top:9px;overflow:hidden;color:#1f5f8b;text-overflow:ellipsis;white-space:nowrap;font-size:24px;line-height:1;font-weight:700}
+.product-dashboard__summary-metric>strong{display:block;color:#1f5f8b;white-space:nowrap;font-size:22px;line-height:1;font-weight:700}
 .product-dashboard__summary-card--consumption .product-dashboard__summary-metric>strong{color:#b7791f}
 .product-dashboard__summary-card--profit .product-dashboard__summary-metric>strong{color:#357a72}
-.product-dashboard__summary-bars{display:flex;align-items:flex-end;gap:12px;height:86px;margin:0;padding:0 2px;border-bottom:1px solid #e4eaf0}
+.product-dashboard__summary-bars{display:flex;align-items:flex-end;gap:8px;height:74px;margin:0;padding:0 2px;border-bottom:1px solid #e4eaf0}
 .product-dashboard__summary-bar-item{display:flex;flex:1;align-items:center;flex-direction:column;gap:3px;min-width:0;height:100%;color:#8291a1;font-size:10px}
 .product-dashboard__summary-bar-item>b{overflow:hidden;max-width:100%;color:#526b80;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:700}
 .product-dashboard__summary-bar-track{display:flex;align-items:flex-end;justify-content:center;width:18px;flex:1;min-height:30px}
@@ -375,6 +371,8 @@ function runQuery(action = '查询') {
 .product-dashboard__summary-card--profit .product-dashboard__summary-trend polyline{stroke:#429187}
 .product-dashboard__summary-card dl{grid-template-columns:1fr 1fr;gap:7px 10px}
 .product-dashboard__summary-card dd{font-size:12px}
+.product-dashboard__filter-label{flex:none;white-space:nowrap}
+.product-dashboard__custom-period{width:min(260px,100%);min-width:0}
 .inventory-category-card__table{max-height:380px;overflow-y:auto}
 .inventory-category-card .inventory-rank-row--1{background:#fff7df}
 .inventory-category-card .inventory-rank-row--1>em{background:#d49b2c;color:#fff}

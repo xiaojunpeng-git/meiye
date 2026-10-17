@@ -4848,6 +4848,11 @@ html.group-dashboard-document #app {
   box-shadow: 0 18px 50px rgba(16, 30, 52, .25);
 }
 
+.personnel-performance-panel--full {
+  /* 完整分配最多同时展示十列，使用更宽的业务区避免金额、单位和操作互相挤压。 */
+  width: min(1460px, calc(100vw - 48px));
+}
+
 .personnel-performance-panel > header {
   display: flex;
   align-items: center;
@@ -5217,8 +5222,10 @@ html.group-dashboard-document #app {
 }
 
 .personnel-full-view {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 16px 20px;
 }
 
@@ -5228,10 +5235,16 @@ html.group-dashboard-document #app {
 
 .personnel-full-summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 18px;
   margin-bottom: 14px;
   color: #cf1322;
+}
+
+.personnel-full-table-scroll {
+  min-height: 0;
+  overflow: auto;
 }
 
 .personnel-full-table {
@@ -5246,12 +5259,12 @@ html.group-dashboard-document #app {
 }
 
 .personnel-full-table--craftsmen {
-  min-width: 1020px;
+  min-width: 1120px;
 }
 
 .personnel-full-table--craftsmen .personnel-full-table__head,
 .personnel-full-table--craftsmen .personnel-full-table__row {
-  grid-template-columns: 1.1fr .85fr .65fr 1fr .7fr .75fr .85fr .8fr .7fr .6fr;
+  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 132px 84px 102px 118px 126px 102px 64px;
 }
 
 .personnel-full-table--history {
@@ -5281,8 +5294,11 @@ html.group-dashboard-document #app {
   font-weight: 700;
 }
 
-.personnel-full-table__row input[type="number"] {
+.personnel-full-table__row input[type="number"],
+.personnel-full-table__row .personnel-allocation-input--labor input {
+  box-sizing: border-box;
   width: calc(100% - 20px);
+  min-width: 0;
   min-height: 36px;
   border: 1px solid #cfd8e3;
   border-radius: 5px;
@@ -5298,8 +5314,9 @@ html.group-dashboard-document #app {
   gap: 3px;
 }
 
-.personnel-allocation-input--labor input[type="number"] {
-  width: 58px;
+.personnel-allocation-input--labor input {
+  flex: 0 0 68px;
+  width: 68px;
   min-height: 32px;
 }
 

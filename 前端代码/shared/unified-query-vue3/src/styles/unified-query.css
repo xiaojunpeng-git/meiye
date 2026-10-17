@@ -607,6 +607,24 @@
   color: #303133;
 }
 
+/* 仅标记为 afterKeyword 的常用字段显示在综合查询右侧；窄屏保留横向可达。 */
+.unified-query-top-field.unified-query-top-field--after-keyword {
+  display: flex;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  gap: 6px;
+}
+
+.unified-query-top-field--after-keyword > label {
+  white-space: nowrap;
+}
+
+.unified-query-top-field--after-keyword .unified-query-top-field__control {
+  width: 168px;
+}
+
 @media (max-width: 1100px) {
   .unified-query-toolbar {
     gap: 8px;

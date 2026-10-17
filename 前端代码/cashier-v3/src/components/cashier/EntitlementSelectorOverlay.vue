@@ -492,6 +492,8 @@ function operationProjectSelected(source = {}, project = {}) {
               <span v-else />
               <div class="cashier-entitlement-table__source-name" :title="sourceOrderRemark(source) || undefined">
                 <div>
+                  <!-- 定制卡身份由已售卡实例投影给出；只在父卡名称前标识，不改卡名或项目明细。 -->
+                  <span v-if="source.isCustomCard === true" class="cashier-entitlement-table__custom-tag" title="定制卡" aria-label="定制卡">定</span>
                   <strong>{{ source.name || '卡项' }}</strong>
                   <span class="cashier-entitlement-table__type-tag">{{ sourceTypeLabel(source) }}</span>
                 </div>
@@ -574,6 +576,20 @@ function operationProjectSelected(source = {}, project = {}) {
 </template>
 
 <style scoped>
+.cashier-entitlement-table__custom-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 3px;
+  background: #e9f3ff;
+  color: #1668c7;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 /* 组合前缀和项目名同属显示文案，允许本列换行以免窄表格隐藏项目名。 */
 .cashier-entitlement-table__project-name.is-combination {
   padding-top: 5px;

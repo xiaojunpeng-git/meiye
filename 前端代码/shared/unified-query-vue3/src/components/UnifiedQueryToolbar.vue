@@ -227,6 +227,8 @@ const isDirectExporting = ref(false)
 const exportError = ref('')
 const quickFieldValues = reactive({})
 const quickFieldRanges = reactive({})
+// 空值在下拉框中使用专用哨兵；空字符串仍表示“全部”，不能混成同一查询条件。
+const QUICK_EMPTY_VALUE = '__MOHE_QUERY_EMPTY__'
 
 function normalizeSettings(settings = {}) {
   const normalized = normalizeUnifiedQuerySettings(settings)
@@ -262,6 +264,8 @@ const activeQuickFieldKeys = computed(() => {
 })
 const activeQuickFields = computed(() => activeQuickFieldKeys.value.map((key) => quickFieldMap.value.get(key)).filter(Boolean))
 const primaryQuickFields = computed(() => inlineFields(true))
+const beforeKeywordQuickFields = computed(() => primaryQuickFields.value.filter((field) => field.quickPlacement !== 'afterKeyword'))
+const afterKeywordQuickFields = computed(() => primaryQuickFields.value.filter((field) => field.quickPlacement === 'afterKeyword'))
 const secondaryQuickFields = computed(() => inlineFields(false))
 // 单行页面不能继承旧的“收起”偏好而隐藏全部控件；没有字段时仍回退原首行。
 const singleRowQueryActive = computed(() => props.singleRowQuickQuery
@@ -559,6 +563,10 @@ function validateQuickRanges() {
 function exportTopFilters() {
   return activeQuickFields.value
     .flatMap((field) => {
+      // 下拉框的空来源使用 null 操作符，和普通来源名称保持同一后端查询／导出快照。
+      if (field.quickAllowEmpty === true && quickFieldValues[field.key] === QUICK_EMPTY_VALUE) {
+        return [{ field: field.key, operator: 'is_null', value: null }]
+      }
       if (field.quickRangePresets === true) {
         return numericRangePresetFilters(field.key, quickRangePreset(field), quickFieldRanges[field.key])
       }
@@ -867,8 +875,8 @@ async function startDirectQueryExport() {
             {{ filter.label }}<span v-if="filter.count !== undefined">（{{ filter.count }}）</span>
           </button>
         </div>
-        <div v-if="primaryQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
-          <label v-for="field in primaryQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
+        <div v-if="beforeKeywordQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="常用查询字段">
+          <label v-for="field in beforeKeywordQuickFields" :key="field.key" class="unified-query-top-field" :class="{ 'unified-query-top-field--label-hidden': field.quickLabelHidden === true }">
             <span v-if="field.quickLabelHidden !== true">{{ field.label }}</span>
             <div class="unified-query-top-field__control">
               <UnifiedQueryDateRange v-if="isQuickDateRange(field)" :model-value="{ min: quickRangeValue(field, 'min'), max: quickRangeValue(field, 'max') }" :label="`${field.label}周期`" @change="applyDateRange(field, $event)" />
@@ -923,6 +931,18 @@ async function startDirectQueryExport() {
           <span class="sr-only">综合查询</span>
           <input v-model="keyword" type="search" :placeholder="searchPlaceholder" autocomplete="off" @keyup.enter="submitQuery">
         </label>
+        <div v-if="afterKeywordQuickFields.length" class="unified-query-toolbar__top-fields" aria-label="综合查询右侧筛选字段">
+          <div v-for="field in afterKeywordQuickFields" :key="field.key" class="unified-query-top-field unified-query-top-field--after-keyword">
+            <label :for="`after-keyword-${field.key}`">{{ field.quickLabel || field.label }}</label>
+            <div class="unified-query-top-field__control">
+              <select :id="`after-keyword-${field.key}`" v-model="quickFieldValues[field.key]" @change="submitQuery">
+                <option value="">{{ field.quickAllLabel || '全部' }}</option>
+                <option v-if="field.quickAllowEmpty === true" :value="QUICK_EMPTY_VALUE">{{ field.quickEmptyLabel || '空值' }}</option>
+                <option v-for="option in field.options || []" :key="option.value || option" :value="option.value || option">{{ option.label || option }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
         <button v-if="!queryActionsInSecondary" type="button" class="button button--primary" :disabled="showQueryLoading && isQueryLoading" :aria-busy="showQueryLoading && isQueryLoading" @click="submitQuery">{{ showQueryLoading && isQueryLoading ? '查询中…' : '查询' }}</button>
         <div v-if="showDataScope" class="unified-query-scope" role="group" aria-label="数据范围">
           <span class="unified-query-scope__thumb" :class="{ 'unified-query-scope__thumb--all': dataScope === 'all' }" aria-hidden="true" />

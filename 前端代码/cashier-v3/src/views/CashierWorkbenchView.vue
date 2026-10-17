@@ -44,7 +44,7 @@ import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSele
 import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
-import { defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
+import { automaticCraftsmanAmounts, defaultCraftsmanWeights, defaultProjectCounts, defaultSalespersonWeights } from '@/services/personnelDefaultAllocation'
 
 const state = useCashierV3State()
 const route = useRoute()
@@ -172,6 +172,8 @@ const defaultTypes = [...preferredCatalogTypeOrder]
 
 const cashier = computed(() => state.cashier || {})
 const member = computed(() => cashier.value.member || null)
+// 实例开关关闭或投影尚未到达时，不提供新增欠款入口；已存在的欠款事实不在页面清除。
+const isDebtEntryVisible = computed(() => cashier.value.debtPaymentEnabled === true)
 const currentMemberId = computed(() => member.value?.id || member.value?.memberId || '')
 // Browser checkout identity is derived from the selected member itself. The
 // root projection's customerMode can lag behind a member-selection response;
@@ -419,6 +421,10 @@ const hasCartLines = computed(() => cartLines.value.length > 0)
 // openCheckout() 内的恢复逻辑永远无法执行，工作台会被永久锁住。
 const canSubmitCart = computed(() => hasCartLines.value)
 const summary = computed(() => cart.value.summary || {})
+// 权益合计只展示当前权益服务行的实际分摊金额；购卡销售和应收仍各走原有结账口径。
+const entitlementTotalCents = computed(() => cartLines.value
+  .filter(isEntitlementLine)
+  .reduce((total, line) => total + cartLineTotalAmountCents(line), 0))
 const entitlementSelector = computed(() => localEntitlementSelector.value || {})
 const activeCheckoutComposition = computed(() => localCashierDraft.value?.checkoutComposition || cashier.value.checkoutComposition || null)
 const checkoutEntryLabel = computed(() => activeCardOperationUpgrade.value
@@ -434,6 +440,10 @@ const hidesCheckoutBarForCardOperation = computed(() => (
 const isAwaitingCustomCardUpgradeTarget = computed(() => (
   previewCardOperation.value?.awaitingTarget === true
   && previewCardOperation.value.mode === 'card-upgrade'
+))
+// 卡升级的新建入口与普通收银目录使用同一服务端开关，不能单独漏出。
+const isCustomCardEntryVisible = computed(() => (
+  Array.isArray(catalog.value.types) && catalog.value.types.includes('定制卡')
 ))
 const productTypes = computed(() => {
   if (previewCardOperation.value?.awaitingTarget) {
@@ -990,6 +1000,7 @@ function canonicalCheckoutSalespeople(records = []) {
     // 售前标记属于销售人快照的一部分；否则多选售前虽然能保存分配比例，
     // 最终销售订单和业绩事实会把它们误记成普通售后销售人。
     isPreSale: Boolean(record?.isPreSale ?? record?.is_presale ?? record?.marked),
+    ...(record?.personnelSource === 'other' ? { personnelSource: 'other' } : {}),
     ...(Number(record?.positionId ?? record?.position_id ?? 0) > 0
       ? {
           positionId: Number(record.positionId ?? record.position_id),
@@ -1090,7 +1101,7 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
     }
     if (action === 'change-cart-line-quantity') {
       target.quantity = Math.max(1, Number(target.quantity || 1) + Number(payload.delta || 0))
-      if (target.couponId) {
+      if (target.couponId || (Array.isArray(target.couponUserIds) && target.couponUserIds.length)) {
         // The previous coupon decision was made for a different line total.
         // Require a fresh selector lookup before the edited row can use it.
         if (!isLocalCashierDraftLine(target) && target.couponBaseAmount !== undefined) {
@@ -1099,6 +1110,9 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
           refreshMultiCardUpgradePayable(target, moneyToCents(target.finalAmount))
         }
         delete target.couponId
+        delete target.couponUserIds
+        delete target.couponIssueId
+        delete target.couponUseMode
         delete target.couponSummary
         delete target.couponDiscountCents
         delete target.couponBaseAmount
@@ -1142,6 +1156,18 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
     }
     if (action === 'apply-line-coupon') {
       target.couponId = String(payload.couponId || '')
+      // An order-threshold coupon still pays this line. Keep every instance
+      // identity in the final browser snapshot; the server rechecks the whole
+      // order cap and consumes each identity inside the checkout transaction.
+      if (Number(payload.couponUseMode || 0) === 1) {
+        target.couponUserIds = (payload.couponIds || []).map(String)
+        target.couponIssueId = Number(payload.couponIssueId || 0)
+        target.couponUseMode = 1
+      } else {
+        delete target.couponUserIds
+        delete target.couponIssueId
+        delete target.couponUseMode
+      }
       target.couponSummary = String(payload.couponSummary || '已选优惠券')
       const multiUpgrade = target?.cardPurchaseSnapshot?.multiCardUpgrade
       const baseAmount = moneyToCents(target.couponBaseAmount ?? (
@@ -1165,6 +1191,9 @@ function applyLocalCashierDraftMutation(action, line, payload = {}) {
     }
     if (action === 'remove-line-coupon') {
       delete target.couponId
+      delete target.couponUserIds
+      delete target.couponIssueId
+      delete target.couponUseMode
       delete target.couponSummary
       delete target.couponDiscountCents
       if (target.couponBaseAmount !== undefined) {
@@ -1184,6 +1213,8 @@ function applyLocalCashierRootMutation(action, payload = {}) {
   appendLocalCashierDraftOperation({ action, payload: clonePlain(payload) }, (draft) => {
     if (action === 'clear-cart-lines') {
       draft.lines = []
+      draft.orderNote = ''
+      draft.supplement = {}
       return
     }
     if (action === 'update-cashier-order-note') {
@@ -2221,13 +2252,14 @@ async function defaultExclusivePersonnelForLine(line) {
   }
   if (salespeople.length) defaultSalespersonWeights(salespeople)
   const amountFor = (weight) => Math.max(0, Math.round(amountCents * Number(weight || 0) / 10000) * 100)
+  const craftsmanAmounts = automaticCraftsmanAmounts(craftsmanAmountCents, craftsmen)
   return {
     ...(craftsmen.length ? { craftsmen: craftsmen.map((record, index) => ({
       ...record, id: Number(record.staffId || record.id),
       name: record.name || record.staffName || '',
       laborWeight: Number(record.performance || 0),
       performanceAmountCents: record.craftsmanPerformanceType === 'labor' ? 0
-        : Math.max(0, Math.round(craftsmanAmountCents * Number(record.performance || 0) / 10000) * 100),
+        : (craftsmanAmounts.get(record) ?? 0),
       performanceAmountManual: false,
       laborFeeCents: record.craftsmanPerformanceType === 'commission' ? 0 : Number(record.laborDefaultFeeCents || 0),
       projectCount: record.projectCountText || '0',
@@ -2250,6 +2282,9 @@ async function appendCatalogItemToDraft(item) {
   const itemId = Number(item?.id || 0)
   const catalogKind = String(item?.kind || '').trim()
   const queued = catalogItemAppendQueue.then(async () => {
+    if (isClearingCart.value) {
+      return { result: { status: 'failed', message: '购物车正在清空，请稍后重新添加。' } }
+    }
     if (!itemId || !catalogKind) {
       return { result: { status: 'failed', code: 'CASHIER_CATALOG_ITEM_INVALID', message: '商品信息不完整，请重新选择。' } }
     }
@@ -3388,14 +3423,16 @@ async function addEntitlementLines(payload = {}) {
 }
 
 function localEntitlementAmount(lines = [], line = {}) {
-  // 任选次数卡的所有原项目共用一份购买金额和次数序号；替换/升级项目
-  // 有独立金额快照，仍以明细为键，不占用整卡分摊序号。
+  // 任选次数卡按整卡共享次数序号；组合卡每个权益组拥有独立次数池，
+  // 不能把其他组的已选次数推进到当前组，否则同一结账内会产生假冲突。
   const sharedCard = String(line.amountCalculationVersion || '').startsWith('shared-card-purchase-amount-')
-  const sourceKey = `${line.entitlementInstanceType || 'card_holder'}:${line.entitlementInstanceId || line.cardHolderId || ''}:${sharedCard ? 'shared' : (line.entitlementSourceDetailId || line.memberBenefitPoolId || '')}`
+  const combinationGroupNo = Number(line.combinationGroupNo ?? line.displaySnapshot?.combinationGroupNo ?? 0)
+  const sourceKey = `${line.entitlementInstanceType || 'card_holder'}:${line.entitlementInstanceId || line.cardHolderId || ''}:${sharedCard ? `shared:${combinationGroupNo}` : (line.entitlementSourceDetailId || line.memberBenefitPoolId || '')}`
   const selectedBefore = (Array.isArray(lines) ? lines : []).reduce((total, current) => {
     if (!isEntitlementLine(current)) return total
     const currentShared = String(current.amountCalculationVersion || '').startsWith('shared-card-purchase-amount-')
-    const currentKey = `${current.entitlementInstanceType || 'card_holder'}:${current.entitlementInstanceId || current.cardHolderId || ''}:${currentShared ? 'shared' : (current.entitlementSourceDetailId || current.memberBenefitPoolId || '')}`
+    const currentGroupNo = Number(current.combinationGroupNo ?? current.displaySnapshot?.combinationGroupNo ?? 0)
+    const currentKey = `${current.entitlementInstanceType || 'card_holder'}:${current.entitlementInstanceId || current.cardHolderId || ''}:${currentShared ? `shared:${currentGroupNo}` : (current.entitlementSourceDetailId || current.memberBenefitPoolId || '')}`
     return currentKey === sourceKey ? total + Math.max(1, Number(current.quantity || 1)) : total
   }, 0)
   const totalCents = moneyToCents(line.purchaseAmount)
@@ -3405,16 +3442,8 @@ function localEntitlementAmount(lines = [], line = {}) {
   // 编辑态只按当前展示权益计算应收，不以剩余次数阻止加入；实际余次由
   // 第三步确认时的权威结账事务重新读取并校验。
   if (!totalCents || !Number.isInteger(totalTimes) || totalTimes <= 0) return 0
-  const centCapable = String(line.displaySnapshot?.sourceType || '').startsWith('cashier_v3_project_')
-    || String(line.amountCalculationVersion || '').startsWith('operation-cent-')
-    || String(line.displaySnapshot?.amountCalculationVersion || '').startsWith('operation-cent-')
-  if (centCapable) {
-    const regularCents = Math.floor(totalCents / totalTimes)
-    const cumulative = (times) => times >= totalTimes
-      ? totalCents
-      : regularCents * Math.max(0, times)
-    return centsToMoney(cumulative(consumedTimes + quantity) - cumulative(consumedTimes))
-  }
+  // 收银保存整数最高准则：所有卡项（含组合、替换和升级权益）只生成
+  // 整数元核销快照。历史按分版本可供追溯，不能继续产生新的按分事实。
   const totalWholeYuan = Math.floor(totalCents / 100)
   const regularWholeYuan = Math.floor(totalWholeYuan / totalTimes)
   const cumulative = (times) => times >= totalTimes
@@ -3916,6 +3945,7 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
     requireCraftsmen: showCraftsmen,
     craftsmenCandidates: [],
     otherCraftsmanCandidates: [],
+    otherSalespersonCandidates: [],
     salespersonCandidates: [],
     guideCandidates: [],
     salesManagerCandidates: [],
@@ -3959,7 +3989,7 @@ async function loadPersonnelOverlay(line, initialTab, roleScope = 'personnel') {
 
 async function searchPersonnelOverlay({ scope, keyword, target } = {}) {
   const current = personnelOverlay.value
-  if (!current?.line || !['group_attributions', 'cashier_other_craftsmen'].includes(scope)) return
+  if (!current?.line || !['group_attributions', 'cashier_other_craftsmen', 'cashier_other_salespeople'].includes(scope)) return
   const requestKey = current.requestKey
   try {
     const records = await queryPersonnelCandidates(scope, current.line, keyword)
@@ -3968,6 +3998,8 @@ async function searchPersonnelOverlay({ scope, keyword, target } = {}) {
       ...personnelOverlay.value,
       ...(target === 'otherCraftsmen'
         ? { otherCraftsmanCandidates: records }
+        : target === 'otherSalespeople'
+          ? { otherSalespersonCandidates: records }
         : target === 'salesManager'
           ? { salesManagerCandidates: records }
           : target === 'guide'
@@ -4011,6 +4043,7 @@ async function saveCartLineSalespeople(line, salespeople) {
 }
 
 function openCartLineDebt(line) {
+  if (!isDebtEntryVisible.value) return
   const debtAmountCents = lineDebtAmountCents(line)
   debtEditorAmount.value = debtAmountCents > 0
     ? String(Math.trunc(debtAmountCents / 100))
@@ -4039,7 +4072,18 @@ function normalizeCouponSelector(selector = {}, line = {}) {
     lineId: String(selector.lineId || line.id || ''),
     lineName: String(selector.lineName || line.name || ''),
     lineAmountCents: Number(selector.lineAmountCents ?? localDraftLineTotalAmountCents(line)),
-    selectedCouponId: String(selector.selectedCouponId || ''),
+    lineCapacityCents: Math.max(0,
+      localDraftLineTotalAmountCents(line, line.couponBaseAmount ?? getLineAmount(line)) - lineDebtAmountCents(line)),
+    selectedCouponId: Number(line.couponUseMode || 0) === 1
+      ? '' : String(line.couponId || selector.selectedCouponId || ''),
+    selectedCouponIds: Number(line.couponUseMode || 0) === 1 && Array.isArray(line.couponUserIds)
+      ? line.couponUserIds.map(String) : [],
+    selectedCountOtherLines: cartLines.value.reduce((count, candidate) =>
+      count + (String(candidate?.id || '') === String(line.id || '') || Number(candidate?.couponUseMode || 0) !== 1
+        ? 0 : (Array.isArray(candidate.couponUserIds) ? candidate.couponUserIds.length : 0)), 0),
+    selectedIssueId: Number(cartLines.value.find((candidate) => Number(candidate?.couponUseMode || 0) === 1)?.couponIssueId || 0),
+    selectedMode: cartLines.value.some((candidate) => Number(candidate?.couponUseMode || 0) === 1)
+      ? 1 : (cartLines.value.some((candidate) => candidate?.couponId) ? 0 : null),
     coupons,
     belowMinimumCoupons
   }
@@ -4047,7 +4091,20 @@ function normalizeCouponSelector(selector = {}, line = {}) {
 
 async function openCartLineCoupon(line, { present = true } = {}) {
   if (isEntitlementLine(line)) return
-  if (present && isRefreshingLineCoupon.value) return
+  // Coupon instances belong to members. The template hides this action from
+  // guests; retain this guard for stale callbacks during identity switches.
+  if (!Number(currentMemberId.value || 0)) {
+    if (present) window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'error', message: '请先选择本次办理会员，再使用优惠券。' }
+    }))
+    return
+  }
+  if (present && isRefreshingLineCoupon.value) {
+    window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'info', message: '优惠券正在按新数量校验，请稍候再选券。' }
+    }))
+    return
+  }
   activeCartLineId.value = line.id
   // 本地草稿可能同时投影旧服务端行和新临时行。只要当前存在本地草稿，
   // 所有券选择都必须写入同一份本地快照，不能按单行 ID 退回旧接口。
@@ -4055,7 +4112,8 @@ async function openCartLineCoupon(line, { present = true } = {}) {
   const reservedCouponIds = localDraft
     ? cartLines.value
       .filter((candidate) => String(candidate?.id || '') !== String(line.id || ''))
-      .map((candidate) => Number(candidate?.couponId || 0))
+      .flatMap((candidate) => Array.isArray(candidate?.couponUserIds)
+        ? candidate.couponUserIds.map(Number) : [Number(candidate?.couponId || 0)])
       .filter((couponId) => Number.isInteger(couponId) && couponId > 0)
     : []
   const lineAmountCents = localDraftLineTotalAmountCents(
@@ -4066,6 +4124,14 @@ async function openCartLineCoupon(line, { present = true } = {}) {
     lineAmountCents,
     Number(line?.cardOperationUpgrade?.targetAmountCents || 0)
   )
+  // The tier sees the complete payable checkout before coupon and balance;
+  // each selected coupon still has to fit its own line after this order's debt.
+  const orderReceivableCents = cartLines.value
+    .filter((candidate) => cartLineRole(candidate) === 'sale')
+    .reduce((total, candidate) => total + Math.max(0,
+      localDraftLineTotalAmountCents(candidate, candidate.couponBaseAmount ?? getLineAmount(candidate))
+      - lineDebtAmountCents(candidate)), 0)
+  const orderLineCapacityCents = Math.max(0, lineAmountCents - lineDebtAmountCents(line))
   if (localDraft && member.value) {
     localCouponProjectionGuard.value = {
       scopeKey: currentCashierDraftScopeKey.value,
@@ -4084,6 +4150,8 @@ async function openCartLineCoupon(line, { present = true } = {}) {
           memberId: String(currentMemberId.value || ''),
           lineAmountCents,
           couponThresholdCents,
+          orderReceivableCents,
+          orderLineCapacityCents,
           reservedCouponIds,
           // This is a read-only lookup for a browser-owned line.  Its root
           // projection is intentionally guest-shaped, so never let it replace
@@ -4094,7 +4162,12 @@ async function openCartLineCoupon(line, { present = true } = {}) {
   } finally {
     localCouponProjectionGuard.value = null
   }
-  if (!['success', 'succeeded'].includes(resultStatus(result))) return
+  if (!['success', 'succeeded'].includes(resultStatus(result))) {
+    if (present) window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+      detail: { status: 'failed', message: resultMessage(result, '优惠券查询失败，请重试。') }
+    }))
+    return
+  }
   const selector = responseDataBlock(result).couponSelector
   if (!selector || String(selector.lineId || '') !== String(line.id || '') || !Array.isArray(selector.coupons)) {
     window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
@@ -4107,7 +4180,7 @@ async function openCartLineCoupon(line, { present = true } = {}) {
   return normalized
 }
 
-async function saveLineCoupon(action, couponId = '') {
+async function saveLineCoupon(action, couponSelection = '') {
   if (isSavingLineCoupon.value) return
   const lineId = String(couponSelector.value?.lineId || '')
   const line = cartLines.value.find((item) => String(item?.id || '') === lineId)
@@ -4117,14 +4190,31 @@ async function saveLineCoupon(action, couponId = '') {
   }
   isSavingLineCoupon.value = true
   try {
-    const coupon = (couponSelector.value?.coupons || []).find((item) => String(item?.couponId || '') === String(couponId || ''))
+    const couponIds = Array.isArray(couponSelection) ? couponSelection.map(String) : []
+    const couponId = couponIds[0] || String(couponSelection || '')
+    const coupon = (couponSelector.value?.coupons || []).find((item) => String(item?.couponId || '') === couponId)
     // The read-only below-minimum list must never enter a local draft command.
     if (couponId && !coupon) return
+    const chosen = couponIds.map((id) => (couponSelector.value?.coupons || [])
+      .find((item) => String(item?.couponId || '') === id))
+    if (couponIds.length && (chosen.some((item) => !item || Number(item.useMode) !== 1)
+      || new Set(chosen.map((item) => Number(item.issueId))).size !== 1
+      || couponIds.length + Number(couponSelector.value?.selectedCountOtherLines || 0) > Number(coupon?.orderMaxCount || 0)
+      || chosen.reduce((sum, item) => sum + Number(item.discountAmountCents || 0), 0)
+        > Math.max(0, localDraftLineTotalAmountCents(line, line.couponBaseAmount ?? getLineAmount(line)) - lineDebtAmountCents(line)))) {
+      return
+    }
     const payload = couponId
       ? {
           couponId,
-          couponSummary: String(coupon?.name || '已选优惠券'),
-          discountAmountCents: Math.max(0, Number(coupon?.discountAmountCents || 0))
+          couponIds,
+          couponIssueId: couponIds.length ? Number(coupon.issueId) : 0,
+          couponUseMode: couponIds.length ? 1 : 0,
+          couponSummary: couponIds.length
+            ? `${coupon?.name || '优惠券'} × ${couponIds.length}` : String(coupon?.name || '已选优惠券'),
+          discountAmountCents: couponIds.length
+            ? chosen.reduce((sum, item) => sum + Number(item.discountAmountCents || 0), 0)
+            : Math.max(0, Number(coupon?.discountAmountCents || 0))
         }
       : {}
     let result = await mutateCashierDraft(action, line, payload)
@@ -4142,8 +4232,8 @@ async function saveLineCoupon(action, couponId = '') {
   }
 }
 
-function applyLineCoupon(couponId) {
-  return saveLineCoupon('apply-line-coupon', String(couponId || ''))
+function applyLineCoupon(couponSelection) {
+  return saveLineCoupon('apply-line-coupon', couponSelection)
 }
 
 function removeLineCoupon() {
@@ -4304,7 +4394,8 @@ async function confirmPersonnelAssignment(result = {}) {
       performanceIndependent: record.performanceIndependent === true
         || Number(record.performanceIndependent ?? record.performance_independent ?? 0) === 1
         || String(record.allocationGroupKey || '').trim().startsWith('independent:'),
-      allocationGroupKey: record.allocationGroupKey || ''
+      allocationGroupKey: record.allocationGroupKey || '',
+      ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
     }))
     const guideSelections = (result.guideSelections || []).map((record) => ({
       staffId: canonicalCheckoutPositiveId(record.staffId, record.id, record.employeeId, record.employee_id),
@@ -4425,7 +4516,8 @@ async function applyPersonnelAssignmentToAll(result = {}) {
     performanceIndependent: record.performanceIndependent === true
       || Number(record.performanceIndependent ?? record.performance_independent ?? 0) === 1
       || String(record.allocationGroupKey || '').trim().startsWith('independent:'),
-    allocationGroupKey: record.allocationGroupKey || ''
+    allocationGroupKey: record.allocationGroupKey || '',
+    ...(record.personnelSource === 'other' ? { personnelSource: 'other' } : {})
   }))
   if (craftsmen.length && !personnelAllocationGroupsAreValid(craftsmen, 'laborWeight')) {
     reportPersonnelAssignmentFailure(
@@ -4670,15 +4762,59 @@ async function removeCartLine(line) {
 }
 
 async function confirmClearCart() {
-  // “清空”同时是收银台的恢复出口。即使当前购物车已经为空，仍需让
-  // 收银员释放未完成结账草稿、前端遮罩和恢复票据，避免失败页或强刷后
-  // 的旧状态继续锁住下一单。
+  // 清空必须先由当前工作台的服务端事务解除挂单来源和未完成结账草稿。
+  // 只有成功回执才能丢弃浏览器草稿，否则失败重试会丢失原单上下文。
   if (isClearingCart.value) return
   isClearingCart.value = true
   try {
-    applyLocalCashierRootMutation('clear-cart-lines')
+    if (draftCommandRecovery.pendingForScope(draftRecoveryScopeKey.value)
+      || isSynchronizingLocalCashierDraft.value || isAddingEntitlementLines.value
+      || isPreparingCheckout.value || isPreparingServiceCompletion.value
+      || isSubmittingCardOperation.value || isConfirmingCardPurchase.value) {
+      throw new Error('当前购物车操作尚未确认，请等待结果后再清空。')
+    }
+    if (isCheckoutOpen.value && !['failed', 'conflict'].includes(checkoutLocalOutcome.value.status)) {
+      throw new Error('结账结果尚未确认，请先核对结账结果。')
+    }
+    const contextId = String(state.stateContextId || '')
+    if (!contextId) throw new Error('当前收银工作台未就绪，请刷新后重试。')
+    // 先等已进入人员默认值查询的本地加购结束；清空期间新加购会被拒绝。
+    await catalogItemAppendQueue
+    const cleared = await clearCashierDraft(contextId)
+    if (cleared?.cashierDraft?.complete !== true
+      || !Array.isArray(cleared.cashierDraft.lines)
+      || cleared.cashierDraft.lines.length !== 0
+      || String(cleared.cashierDraft.stateContextId || '') !== contextId) {
+      throw new Error('购物车清空回执不完整，请刷新工作台核对。')
+    }
+    resetCashierLocalContext()
+    localCheckoutPreview.value = null
+    localCheckoutPaymentOperations.value = []
+    localPersonnelAssignments.value = {}
+    pendingCardPurchase.value = null
+    activeCartLineId.value = null
+    guidedBusinessMode.value = ''
+    const emptyDraft = localDraftBase()
+    emptyDraft.lines = []
+    emptyDraft.orderNote = ''
+    emptyDraft.supplement = {}
+    commitLocalCashierDraft(emptyDraft)
     draftCommandRecovery.clear()
     cashierDraftHasUnresolvedCommand.value = false
+    try {
+      window.sessionStorage.removeItem('cashier-v3:prepared-checkout-handoff')
+    } catch (_) {
+      // 存储被浏览器禁用时，服务端事务和内存状态仍已清空。
+    }
+    let refreshed
+    try {
+      refreshed = await requestAction('open-cashier-workbench', { silent: true })
+    } catch (_) {
+      refreshed = null
+    }
+    if (!['success', 'succeeded'].includes(resultStatus(refreshed))) {
+      window.location.reload()
+    }
     window.dispatchEvent(new CustomEvent('cashier-v3:clear-negative-state'))
     return localDraftResult()
   } catch (error) {
@@ -5136,11 +5272,22 @@ async function changeLineQuantity(line, delta) {
 
 async function changeLineQuantityWithCoupon(line, delta) {
   if (isRefreshingLineCoupon.value) return { result: { status: 'failed', message: '优惠券正在按新数量校验，请稍候。' } }
-  const selectedCouponId = String(line.couponId || '')
-  if (selectedCouponId) isRefreshingLineCoupon.value = true
+  const isOrderCoupon = Number(line.couponUseMode || 0) === 1
+    && Array.isArray(line.couponUserIds) && line.couponUserIds.length > 0
+  const selectedCouponId = isOrderCoupon ? '' : String(line.couponId || '')
+  if (selectedCouponId || isOrderCoupon) isRefreshingLineCoupon.value = true
   try {
     const result = await mutateCashierDraft('change-cart-line-quantity', line, { delta })
-    if (!['success', 'succeeded'].includes(resultStatus(result)) || !selectedCouponId) return result
+    if (!['success', 'succeeded'].includes(resultStatus(result))) return result
+    if (isOrderCoupon) {
+      // 数量变化会同时改变整单档位与该行可抵扣额；原多张选择已在草稿中清除，
+      // 必须由收银员按新整单金额重选，不能只恢复第一张或沿用旧的张数上限。
+      window.dispatchEvent(new CustomEvent('cashier-v3:ui-result', {
+        detail: { status: 'info', message: '数量已更新，请按新的整单金额重新选择优惠券。' }
+      }))
+      return result
+    }
+    if (!selectedCouponId) return result
     const latest = cartLines.value.find((item) => String(item.id) === String(line.id))
     const scopeKey = currentCashierDraftScopeKey.value
     const quantity = Number(latest?.quantity || 0)
@@ -7637,7 +7784,7 @@ onBeforeUnmount(() => {
               {{ type }}
             </button>
             <button
-              v-if="isAwaitingCustomCardUpgradeTarget"
+              v-if="isAwaitingCustomCardUpgradeTarget && isCustomCardEntryVisible"
               type="button"
               class="filter-chip"
               @click="openCustomCardUpgradeTarget"
@@ -7921,7 +8068,7 @@ onBeforeUnmount(() => {
                       <template v-else>销售人</template>
                     </button>
                   </div>
-                  <div class="cart-line__meta-slot cart-line__meta-slot--debt">
+                  <div v-if="isDebtEntryVisible" class="cart-line__meta-slot cart-line__meta-slot--debt">
                     <!-- 高亮只反映当前草稿行的欠款事实，不从按钮文字反推金额。 -->
                     <button
                       v-if="canSetCartLineDebt(line)"
@@ -8083,6 +8230,7 @@ onBeforeUnmount(() => {
           <span>原价<strong>{{ formatPlainAmount(summary.originalAmount) }}</strong></span>
           <span>优惠<strong>{{ formatPlainAmount(summary.discountAmount) }}</strong></span>
           <span class="cashier-checkout-summary__receivable">应收<strong>{{ formatMoney(summary.receivableAmount) }}</strong></span>
+          <span class="cashier-checkout-summary__entitlement">权益合计<strong>{{ formatMoney(Math.round(entitlementTotalCents / 100)) }}</strong></span>
         </div>
 
         <div class="cashier-checkout-actions">
@@ -8209,10 +8357,12 @@ onBeforeUnmount(() => {
         :show-sales-managers="personnelOverlay.showSalesManagers"
         :guest-customer="currentCustomerMode === 'guest'"
         :allow-other-craftsmen="personnelOverlay.showCraftsmen"
+        :allow-other-salespeople="personnelOverlay.showSalespeople"
         :require-craftsmen="personnelOverlay.requireCraftsmen"
         :store-id="currentCashierStoreId"
         :craftsmen-candidates="personnelOverlay.craftsmenCandidates"
         :other-craftsman-candidates="personnelOverlay.otherCraftsmanCandidates"
+        :other-salesperson-candidates="personnelOverlay.otherSalespersonCandidates"
         :salesperson-candidates="personnelOverlay.salespersonCandidates"
         :guide-candidates="personnelOverlay.guideCandidates"
         :sales-manager-candidates="personnelOverlay.salesManagerCandidates"
@@ -8324,7 +8474,7 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div
-        v-if="debtEditor"
+        v-if="debtEditor && isDebtEntryVisible"
         class="cashier-card-operation-editor"
         role="dialog"
         aria-modal="true"

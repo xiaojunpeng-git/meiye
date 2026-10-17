@@ -13,6 +13,7 @@ import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
 import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
+import ReportDetailDialog from '@/components/reports/ReportDetailDialog.vue'
 import {
   PHASE_FOUR_ANNUAL_REPORT_CODES,
   PHASE_FOUR_CROSS_END_REPORT_TABS,
@@ -21,6 +22,7 @@ import {
 import { PHASE_SIX_REPORTS, PHASE_SIX_REPORT_CODES, PHASE_SIX_CROSS_END_REPORT_TABS } from '@/constants/phaseSixReports'
 import {
   exportStoreBusinessReport,
+  exportStoreBusinessReportXlsx,
   queryStoreBusinessReport,
   queryStoreBusinessReportCatalog,
   queryStoreBusinessReportScope,
@@ -44,6 +46,8 @@ const REPORT_TABS = Object.freeze([
   // 仅由汇总单元格的服务端下钻声明进入，不能作为独立导航页签。
   { code: 'store_craftsman_consumption_detail', name: '手艺人消耗明细', hidden: true },
   { code: 'store_salesperson_performance', name: '门店销售人业绩' },
+  // 汇总单元格的后端下钻目标；沿用同一报表壳，不增加独立导航入口。
+  { code: 'store_salesperson_performance_detail', name: '销售人业绩明细', hidden: true },
   { code: 'market_performance', name: '市场业绩表' },
   { code: 'market_detail', name: '市场明细表' },
   { code: 'member_visit_analysis', name: '会员进店分析表' },
@@ -95,10 +99,17 @@ const result = ref({})
 const loading = ref(false)
 const exporting = ref(false)
 const errorMessage = ref('')
-// 会员进店下钻保留分析表筛选上下文，关闭后仍停留在原报表和页码。
-const memberVisitDetail = ref({ open: false, loading: false, memberId: 0, memberName: '', month: 0, metric: 'visits', page: 1, total: 0, records: [], amount: 0, error: '' })
+const bdeghDetail = ref({ open: false, loading: false, detailReport: 'operations_pre_sale_bdegh_detail', parentReport: '', itemId: '', itemGroupKey: '', categoryPath: '', memberId: '', storeId: '', sourceCode: '', companyId: '', teamKey: '', metric: '', label: '', month: '', actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], amount: '-', error: '' })
+const SOURCE_PRE_SALE_DETAIL_REPORTS = ['operations_pre_sale_bdegh_detail', 'operations_referral_beautician_pre_sale_detail']
+let bdeghDetailRequestId = 0
+// 会员进店明细只保留当前分析表的筛选上下文；关闭弹窗后仍停留在原报表和页码。
+const memberVisitDetail = ref({ open: false, loading: false, memberId: 0, memberName: '', month: 0, metric: 'visits', page: 1, total: 0, columns: [], records: [], amount: 0, error: '' })
 let memberVisitDetailRequestId = 0
-
+const detailMemberFilter = ref('')
+const detailOrderFilter = ref('')
+const detailExporting = ref(false)
+const detailExportError = ref('')
+let detailExportRequestId = 0
 const initialDateRange = defaultReportDateRange()
 const startDate = ref(initialDateRange.start)
 const endDate = ref(initialDateRange.end)
@@ -154,8 +165,8 @@ const FIELD_LOGIC = Object.freeze({
   store_summary: '同一月份、同一分类下的成交门店。',
   store_name: '该笔业务发生的门店。',
   store_name_snapshot: '该笔业务发生的门店。后续门店改名不会改变历史显示。',
-  performance_type: '成交项目在发生时所属分类的第一层分类。',
-  category: '成交项目在发生时所属的完整分类路径。',
+  performance_type: '成交项目关联的平台商品当前分类，按本列规定的层级展示。',
+  category: '商品或项目通过门店商品关联到平台商品后，读取平台商品当前的完整分类路径；卡项按实际包含的项目归类。',
   experience_count: '体验项目的成交数量合计；一位会员购买多份时按实际份数计算。',
   member_count: '在当前汇总范围内成交过的会员人数，同一会员重复成交只算一人。',
   consumption_amount: '项目完成服务后形成的消耗业绩金额。',
@@ -263,7 +274,7 @@ function fieldLogic(column) {
   if (serverLogic) return serverLogic
   if (FIELD_LOGIC[key]) return FIELD_LOGIC[key]
   if (key.startsWith('payment_')) return `本单使用“${label}”且成功记账的金额；未使用或未成功记账时显示 0。`
-  if (key.startsWith('partner_category_')) return `普通商品和项目按自身成交分类归集；卡项按卡内项目的成交分类归集，卡内有多个分类时按各项目配置金额分摊。该分类的现金业绩乘以成交时设置的合作方默认比例，得到“${label}”；后续修改分类或比例不会改写已成交数据。`
+  if (key.startsWith('partner_category_')) return `普通商品和项目按关联的平台当前分类归集，卡项按内含项目分别归类。“${label}”保留原成交分成及退款冲减金额；修改分类只改变归列，不按当前比例重新计算历史分成。`
   // 动态来源列只提供同口径说明，不在前端判定或重算达标人员。
   if (/^channel_\d+_effective$/.test(key)) return '同一门店、同一来源的会员按业务日期每天独立达标后累计：A 类来源每天为 1000 元，其他来源每天为 500 元。同日多笔合并，不跨天凑门槛；同一会员多天达标可累计。点击后仅显示达标当天的会员明细。'
   if (/^day_\d+_consume$/.test(key)) return `${label.replace('消耗', '')}该手艺人按项目分配到的劳动业绩合计。`
@@ -315,7 +326,7 @@ const fieldGuideIntro = computed(() => {
     return '顾客首次办理疗程卡即计入新客，未付清也计入；后续补清不重复记人次。首次办卡或补交来源为 A 的数据不计入，已作废订单也不计入；其他补交按自身来源统计。下方说明各列的数据从哪里来。'
   }
   if (activeReport.value === 'store_item_analysis') {
-    return '分类列按当前可见的商品分类显示；每笔金额仍按发生业务时记录的分类归入。旧记录没有可用分类时显示在“未分类”，以后修改项目分类不会改变旧记录。'
+    return '分类按商品或项目关联的平台商品当前分类归入，卡项按内含项目分别归类。修改商品分类后，历史记录的分类归属随之更新；原金额、业务日期和分成事实保留。无法核实商品关联的记录计入“未分类”。'
   }
   if (activeReport.value === 'store_craftsman_consumption') {
     return '本表只显示当前仍有效、未作废的服务。服务一旦作废，原金额和冲销金额在任何日期都不再显示；原始记录仍保留在业务审计中。'
@@ -403,7 +414,7 @@ const reportTabs = computed(() => allowedReportTabs.value.filter((tab) => !tab.h
 const isFirstPhaseReport = computed(() => [
   'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
   'store_item_analysis', 'store_craftsman_consumption',
-  'store_craftsman_consumption_detail', 'store_salesperson_performance'
+  'store_craftsman_consumption_detail', 'store_salesperson_performance', 'store_salesperson_performance_detail'
 ].includes(activeReport.value))
 const isSixDimensionReport = computed(() => SIX_DIMENSION_REPORT_TABS.some((item) => item.code === activeReport.value))
 const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => item.code === activeReport.value))
@@ -425,10 +436,11 @@ const filterSchema = computed(() => {
 })
 const isAnnualAcquisitionSummary = computed(() => ['field_acquisition_summary', 'cross_industry_customer_summary'].includes(activeReport.value))
 const isMemberVisitAnalysis = computed(() => activeReport.value === 'member_visit_analysis')
-const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
+const isHeadquartersAcquisition = computed(() => activeReport.value === 'phase_six_headquarters_acquisition')
+const usesAnnualYearFilter = computed(() => isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value || PHASE_FOUR_ANNUAL_REPORT_CODES.includes(activeReport.value)
   || filterSchema.value.some((field) => String(field?.type || '') === 'year'))
-// 会员进店分析与获客汇总按完整自然年筛选；其他明细仍用各自周期。
-const reportPeriodMode = computed(() => (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
+// 总部拓客、会员进店分析与获客汇总按完整自然年筛选；其他明细仍用各自周期。
+const reportPeriodMode = computed(() => (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) ? 'year' : !isPlatformRuntimeRoute() ? 'range' : usesAnnualYearFilter.value ? 'year' : usesNaturalMonthFilter.value ? 'month' : 'range')
 const reportDateRange = computed(() => {
   if (reportPeriodMode.value === 'year') {
     const { start, end } = yearBounds(selectedYear.value)
@@ -843,8 +855,8 @@ function monthBounds(month) {
 
 function yearBounds(year) {
   let normalized = /^\d{4}$/.test(String(year || '')) ? String(year) : today().slice(0, 4)
-  // 年度获客与会员进店只能查询 V3 事实覆盖期内的年份。
-  if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) {
+  // 总部拓客、年度获客与会员进店只能查询 V3 事实覆盖期内的年份。
+  if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) {
     const minYear = LEGACY_COVERAGE_START.slice(0, 4)
     normalized = normalized < minYear ? minYear : normalized > today().slice(0, 4) ? today().slice(0, 4) : normalized
     if (selectedYear.value !== normalized) selectedYear.value = normalized
@@ -1024,8 +1036,21 @@ async function exportReport() {
   }
 }
 
-function formatCell(value) {
+/** Round signed report amounts symmetrically; refunds must not round half yuan toward zero. */
+function formatWholeYuan(value, withCurrency = true) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '-'
+  const formatted = formatMoney(Math.sign(amount) * Math.round(Math.abs(amount)))
+  return withCurrency ? formatted : formatted.replace(/^¥/, '')
+}
+
+function formatCell(value, column) {
   if (value === null || value === undefined || value === '') return '-'
+  // Display precision never changes the cents retained for calculations, exports, or detail requests.
+  if (column?.display_precision === 0 && Number.isFinite(Number(value))) {
+    const amount = Number(value)
+    return formatMoney(Math.sign(amount) * Math.round(Math.abs(amount))).replace(/^¥/, '')
+  }
   if (value === true) return '是'
   if (value === false) return '否'
   return String(value)
@@ -1041,7 +1066,7 @@ function syncActiveReportFromRoute() {
   startDate.value = String(route.query?.start_date || route.query?.end_date || defaults.start)
   endDate.value = String(route.query?.end_date || route.query?.start_date || defaults.end)
   // 无年份的新入口回到今年；不能把上一张汇总的历史年份带入默认页。
-  if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) selectedYear.value = today().slice(0, 4)
+  if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) selectedYear.value = today().slice(0, 4)
   if (usesAnnualYearFilter.value && !/^\d{4}$/.test(selectedYear.value)) selectedYear.value = today().slice(0, 4)
 }
 
@@ -1053,7 +1078,7 @@ function syncFiltersFromRoute() {
   else if (usesNaturalMonthFilter.value && query.start_date) selectedMonth.value = String(query.start_date).slice(0, 7)
   if (query.year && /^\d{4}$/.test(String(query.year))) selectedYear.value = String(query.year)
   // 兼容旧日期链接：原后端使用结束日所在年份，改控件不能让旧链接换成另一个年度。
-  else if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value) selectedYear.value = String(query.end_date || query.start_date || today()).slice(0, 4)
+  else if (isAnnualAcquisitionSummary.value || isMemberVisitAnalysis.value || isHeadquartersAcquisition.value) selectedYear.value = String(query.end_date || query.start_date || today()).slice(0, 4)
   else if (usesAnnualYearFilter.value && query.start_date) selectedYear.value = String(query.start_date).slice(0, 4)
   const storeIds = String(query.store_ids || '').split(',').map(Number).filter(Boolean)
   if (storeIds.length) {
@@ -1362,14 +1387,55 @@ function drilldownConfig(row, column) {
 }
 
 function canDrilldown(row, column) {
+  if (loading.value) return false
   const config = drilldownConfig(row, column)
   const target = String(config?.report || config?.report_code || '')
+  // A cell is a link only when the same target has a popup or a reachable route.
+  if (!detailPopupOpeners[target] && !drilldownRequest(row, column)) return false
   if (Array.isArray(config?.required_row_keys) && config.required_row_keys.some((key) => !String(row?.[key] ?? '').trim())) return false
+  // Member visits require a stable backend member identity; a display name cannot scope the query.
+  if (target === 'member_visit_detail') {
+    const memberId = Number(row?.[config?.param_map?.member_id || 'member_id'] || 0)
+    return Number.isInteger(memberId) && memberId > 0
+  }
+  if (target === 'store_salesperson_performance_detail') {
+    return Number(row?.employee_id || 0) > 0 && Number(row?.store_id || 0) > 0
+  }
+  if (['phase_six_headquarters_acquisition', 'phase_six_acquisition_source'].includes(target)) return Boolean(String(row?.source_code || '').trim())
   // Only an order-center identity returned for this scoped salary row can open details.
   if (target === 'order_center_order_detail') return !isPlatformReport.value && Boolean(String(row?.document_order_id || '').trim())
-  return Boolean(target)
+  return true
 }
 
+function canSummaryReceiptDrilldown(row, column) {
+  if (loading.value) return false
+  const target = String(drilldownConfig(row, column)?.report || '')
+  // This item report repeats the same monthly total on every product row;
+  // its summed footer is not one distinct set of receipt documents.
+  if (activeReport.value === 'marketing_beauty_new_item' && column.key === 'month_total_performance') return false
+  if (activeReport.value === 'operations_health_data' && column.key === 'consuming_members') return false
+  // A cumulative first-year cohort repeats earlier receipts in later months;
+  // its footer cannot be represented by one de-duplicated receipt list.
+  if (column.key === 'first_year_amount' && ['marketing_acquisition_pre_sale',
+    'marketing_referral_pre_sale'].includes(activeReport.value)) return false
+  // Team-specific first-purchase and refund cohorts can overlap. Their
+  // arithmetic footer cannot be reconstructed as one distinct fact set.
+  if (['product_monetization_six_dimension_efficiency', 'product_monetization_private_efficiency'].includes(activeReport.value)) return false
+  // Per-source headcounts may overlap; the footer is not one deduplicated cohort.
+  if (['phase_six_headquarters_acquisition', 'phase_six_acquisition_source'].includes(activeReport.value)) return false
+  // Monthly service/member cohorts cannot be represented by one distinct
+  // full-year document set; only a concrete month can open their popup.
+  if (target === 'operations_service_fact_detail') return false
+  return [...SOURCE_PRE_SALE_DETAIL_REPORTS, 'operations_cash_fact_detail', 'operations_service_fact_detail',
+    'phase_six_monthly_featured_item'].includes(target) && canDrilldown(row, column)
+}
+
+const bdeghDetailPageCount = computed(() => Math.max(1, Math.ceil(bdeghDetail.value.total / DEFAULT_LIMIT)))
+const isFeaturedReceiptDetail = computed(() => bdeghDetail.value.detailReport === 'phase_six_monthly_featured_item')
+const isHeadquartersReceiptDetail = computed(() => bdeghDetail.value.detailReport === 'phase_six_headquarters_acquisition')
+const isAcquisitionReceiptDetail = computed(() => bdeghDetail.value.detailReport === 'phase_six_acquisition_source')
+const isFeaturedCountMetric = computed(() => isFeaturedReceiptDetail.value
+  && /_(experience|deal)$/.test(bdeghDetail.value.metric))
 const memberVisitDetailPageCount = computed(() => Math.max(1, Math.ceil(memberVisitDetail.value.total / DEFAULT_LIMIT)))
 
 /** 会员进店金额始终按元整数显示，与其他经营弹窗的指标类型无关。 */
@@ -1382,21 +1448,28 @@ function closeMemberVisitDetail() {
   memberVisitDetail.value = { ...memberVisitDetail.value, open: false, loading: false }
 }
 
+/** Query and XLSX must carry the same clicked member, month, metric and applied detail filters. */
+function memberVisitDetailParams(pageNumber = 1) {
+  return reportParams({
+    report: 'member_visit_detail',
+    member_id: memberVisitDetail.value.memberId,
+    visit_month: memberVisitDetail.value.month,
+    visit_metric: memberVisitDetail.value.metric,
+    detail_member: detailMemberFilter.value,
+    detail_order_no: detailOrderFilter.value,
+    page: pageNumber,
+    limit: DEFAULT_LIMIT
+  })
+}
+
 /** 后端按会员、月份、所点指标和授权范围返回明细；弹窗不把现金业绩混成服务消耗业绩。 */
 async function loadMemberVisitDetail(pageNumber = 1) {
   const requestId = ++memberVisitDetailRequestId
   memberVisitDetail.value = { ...memberVisitDetail.value, loading: true, error: '', page: pageNumber }
   try {
-    const data = await queryStoreBusinessReport(reportParams({
-      report: 'member_visit_detail',
-      member_id: memberVisitDetail.value.memberId,
-      visit_month: memberVisitDetail.value.month,
-      visit_metric: memberVisitDetail.value.metric,
-      page: pageNumber,
-      limit: DEFAULT_LIMIT
-    }), reportRuntime.value)
+    const data = await queryStoreBusinessReport(memberVisitDetailParams(pageNumber), reportRuntime.value)
     if (requestId !== memberVisitDetailRequestId || !memberVisitDetail.value.open) return
-    memberVisitDetail.value = { ...memberVisitDetail.value, loading: false, total: Number(data?.total || 0), records: Array.isArray(data?.records) ? data.records : [], amount: data?.summary_row?.amount ?? 0 }
+    memberVisitDetail.value = { ...memberVisitDetail.value, loading: false, total: Number(data?.total || 0), columns: Array.isArray(data?.columns) ? data.columns : [], records: Array.isArray(data?.records) ? data.records : [], amount: data?.summary_row?.amount ?? 0 }
   } catch (error) {
     if (requestId !== memberVisitDetailRequestId || !memberVisitDetail.value.open) return
     memberVisitDetail.value = { ...memberVisitDetail.value, loading: false, records: [], error: error?.message || '会员明细读取失败，请稍后重试。' }
@@ -1407,8 +1480,314 @@ function openMemberVisitDetail(row, column) {
   const config = drilldownConfig(row, column)
   const memberId = Number(row?.[config?.param_map?.member_id || 'member_id'] || 0)
   if (config?.report !== 'member_visit_detail' || !Number.isInteger(memberId) || memberId <= 0) return
-  memberVisitDetail.value = { open: true, loading: false, memberId, memberName: String(row?.member_name || ''), month: Number(config?.params?.visit_month || 0), metric: config?.params?.visit_metric === 'cash' ? 'cash' : 'visits', page: 1, total: 0, records: [], amount: 0, error: '' }
+  memberVisitDetail.value = { open: true, loading: false, memberId, memberName: String(row?.member_name || ''), month: Number(config?.params?.visit_month || 0), metric: config?.params?.visit_metric === 'cash' ? 'cash' : 'visits', page: 1, total: 0, columns: [], records: [], amount: 0, error: '' }
   loadMemberVisitDetail(1)
+}
+
+function closeBdeghDetail() {
+  bdeghDetailRequestId += 1
+  bdeghDetail.value = { ...bdeghDetail.value, open: false, loading: false }
+}
+
+/** Preserve the server-declared drilldown key and parent report for both list and XLSX. */
+function bdeghDetailParams(pageNumber = 1) {
+  return reportParams({
+    report: bdeghDetail.value.detailReport,
+    parent_report: bdeghDetail.value.parentReport,
+    item_id: bdeghDetail.value.itemId,
+    item_group_key: bdeghDetail.value.itemGroupKey,
+    detail_category_path: bdeghDetail.value.categoryPath,
+    member_id: bdeghDetail.value.memberId,
+    detail_store_id: bdeghDetail.value.storeId,
+    company_dimension_id: bdeghDetail.value.companyId,
+    team_key: bdeghDetail.value.teamKey,
+    metric_code: bdeghDetail.value.metric,
+    source_code: bdeghDetail.value.sourceCode || '',
+    drill_month: bdeghDetail.value.month,
+    detail_member: detailMemberFilter.value,
+    detail_order_no: detailOrderFilter.value,
+    ...(bdeghDetail.value.detailReport === 'store_salesperson_performance_detail' ? {
+      salesperson_id: bdeghDetail.value.salespersonId,
+      store_ids: bdeghDetail.value.storeId,
+      day_of_month: bdeghDetail.value.dayOfMonth
+    } : {}),
+    page: pageNumber,
+    limit: DEFAULT_LIMIT
+  })
+}
+
+async function loadBdeghDetail(pageNumber) {
+  const requestId = ++bdeghDetailRequestId
+  bdeghDetail.value = { ...bdeghDetail.value, loading: true, error: '', page: pageNumber }
+  try {
+    // The server re-applies report permissions and derives fact filters from
+    // its own metric whitelist; the browser supplies only the clicked key.
+    const data = await queryStoreBusinessReport(bdeghDetailParams(pageNumber), reportRuntime.value)
+    if (requestId !== bdeghDetailRequestId || !bdeghDetail.value.open) return
+    bdeghDetail.value = {
+      ...bdeghDetail.value,
+      loading: false,
+      records: Array.isArray(data?.records) ? data.records : [],
+      columns: Array.isArray(data?.columns) ? data.columns : [],
+      total: Number(data?.total || 0),
+      memberCount: Number(data?.member_count || 0),
+      actualStart: String(data?.scope?.date_range?.start || ''),
+      actualEnd: String(data?.scope?.date_range?.end || ''),
+      amount: data?.summary_row?.[bdeghDetail.value.detailReport === 'store_salesperson_performance_detail'
+        ? 'performance_amount' : bdeghDetail.value.detailReport === 'operations_service_fact_detail' ? 'detail_value' : 'receipt_amount'] ?? '-'
+    }
+  } catch (error) {
+    if (requestId !== bdeghDetailRequestId || !bdeghDetail.value.open) return
+    bdeghDetail.value = { ...bdeghDetail.value, loading: false, records: [], error: error?.message || '明细读取失败，请稍后重试。' }
+  }
+}
+
+function openBdeghDetail(row, column) {
+  const detailReport = String(drilldownConfig(row, column)?.report || '')
+  if (!SOURCE_PRE_SALE_DETAIL_REPORTS.includes(detailReport)) return
+  const month = String(row?.drill_month || '')
+  bdeghDetail.value = { open: true, loading: false, detailReport, parentReport: '', itemId: '', categoryPath: '', memberId: '', storeId: '', companyId: '', teamKey: '', metric: String(column.key), label: String(column.label), month, actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], amount: '-', error: '' }
+  loadBdeghDetail(1)
+}
+
+function openOperationsCashDetail(row, column) {
+  // Initialize dimensions from backend metadata to keep loading geometry stable.
+  const detailColumns = (drilldownConfig(row, column)?.display_columns || []).map((key) => ({ key }))
+  const value = String(row?.month || '')
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : ''
+  bdeghDetail.value = { open: true, loading: false, detailReport: 'operations_cash_fact_detail', parentReport: activeReport.value, itemId: String(row?.item_id || ''), itemGroupKey: String(row?.item_group_key || ''), categoryPath: String(row?.detail_category_path || ''), memberId: String(row?.member_id || ''), storeId: String(row?.store_id || ''), companyId: String(row?.company_dimension_id || ''), teamKey: String(row?.annotation_dimension_key || ''), metric: String(column.key), label: String(column.label), month, actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], amount: '-', error: '' }
+  bdeghDetail.value.columns = detailColumns
+  loadBdeghDetail(1)
+}
+
+/** The server resolves the clicked category hash and reapplies the authorized store scope. */
+function openFeaturedDetail(row, column) {
+  bdeghDetail.value = { open: true, loading: false, detailReport: 'phase_six_monthly_featured_item',
+    parentReport: '', itemId: '', categoryPath: '', memberId: '', storeId: String(row?.store_id || ''),
+    companyId: '', teamKey: '', metric: String(column.key), label: String(column.label), month: '',
+    actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], columns: [], amount: '-', error: '' }
+  loadBdeghDetail(1)
+}
+
+/** The server checks the clicked source and metric again under the user's authorized store scope. */
+function openHeadquartersDetail(row, column) {
+  bdeghDetail.value = { open: true, loading: false, detailReport: 'phase_six_headquarters_acquisition',
+    parentReport: '', itemId: '', categoryPath: '', memberId: '', storeId: '', sourceCode: String(row?.source_code || ''),
+    companyId: '', teamKey: '', metric: String(column.key), label: String(column.label), month: '',
+    actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], columns: [], amount: '-', error: '' }
+  loadBdeghDetail(1)
+}
+
+/** Source identity comes from the scoped report row; the server validates it again. */
+function openAcquisitionDetail(row, column) {
+  bdeghDetail.value = { open: true, loading: false, detailReport: 'phase_six_acquisition_source',
+    parentReport: '', itemId: '', categoryPath: '', memberId: '', storeId: '', sourceCode: String(row?.source_code || ''),
+    companyId: '', teamKey: '', metric: String(column.key), label: String(column.label), month: '',
+    actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], columns: [], amount: '-', error: '' }
+  loadBdeghDetail(1)
+}
+
+function openOperationsServiceDetail(row, column) {
+  const value = String(row?.month || '')
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : ''
+  // Item cohorts use the server-declared category/name key, not a store-local product ID.
+  bdeghDetail.value = { open: true, loading: false, detailReport: 'operations_service_fact_detail', parentReport: activeReport.value, itemId: String(row?.item_id || ''), itemGroupKey: String(row?.item_group_key || ''), categoryPath: '', memberId: '', storeId: '', companyId: '', teamKey: String(row?.annotation_dimension_key || ''), metric: String(column.key), label: String(column.label), month, actualStart: '', actualEnd: '', page: 1, total: 0, memberCount: 0, records: [], amount: '-', error: '' }
+  loadBdeghDetail(1)
+}
+
+/** The clicked employee and store IDs are stable fact keys; the backend reapplies permission and date scope. */
+function openSalespersonPerformanceDetail(row, column) {
+  const config = drilldownConfig(row, column)
+  const dayOfMonth = Number(config?.params?.day_of_month ?? 0)
+  if (!Number.isInteger(dayOfMonth) || dayOfMonth < 0 || dayOfMonth > 31) return
+  detailMemberFilter.value = ''
+  detailOrderFilter.value = ''
+  bdeghDetail.value = {
+    open: true, loading: false, detailReport: 'store_salesperson_performance_detail',
+    parentReport: activeReport.value, salespersonId: String(row.employee_id),
+    employeeName: String(row.employee_name || ''), storeId: String(row.store_id), dayOfMonth,
+    metric: String(column.key), label: String(column.label), month: '', actualStart: '', actualEnd: '',
+    page: 1, total: 0, memberCount: 0, records: [], columns: [], amount: '-', error: ''
+  }
+  loadBdeghDetail(1)
+}
+
+// One target table drives both link visibility and click dispatch. Query scopes
+// remain in the report-specific adapters and are revalidated by the backend.
+const detailPopupOpeners = {
+  operations_pre_sale_bdegh_detail: openBdeghDetail,
+  operations_referral_beautician_pre_sale_detail: openBdeghDetail,
+  operations_cash_fact_detail: openOperationsCashDetail,
+  operations_service_fact_detail: openOperationsServiceDetail,
+  store_salesperson_performance_detail: openSalespersonPerformanceDetail,
+  phase_six_monthly_featured_item: openFeaturedDetail,
+  phase_six_headquarters_acquisition: openHeadquartersDetail,
+  phase_six_acquisition_source: openAcquisitionDetail,
+  member_visit_detail: openMemberVisitDetail
+}
+
+function receiptDetailPeriod() {
+  if (['operations_cash_fact_detail', 'operations_service_fact_detail'].includes(bdeghDetail.value.detailReport) && bdeghDetail.value.actualStart) {
+    return bdeghDetail.value.actualStart.slice(0, 7) === bdeghDetail.value.actualEnd.slice(0, 7)
+      ? bdeghDetail.value.actualStart.slice(0, 7)
+      : `${bdeghDetail.value.actualStart} 至 ${bdeghDetail.value.actualEnd}`
+  }
+  if (bdeghDetail.value.month) return bdeghDetail.value.month
+  const params = reportParams()
+  return `${params.start_date} 至 ${params.end_date}`
+}
+
+function receiptAmountLabel() {
+  if (bdeghDetail.value.detailReport === 'store_salesperson_performance_detail') return '销售业绩'
+  if (isAcquisitionReceiptDetail.value) return bdeghDetail.value.metric === 'amount' ? '收款金额' : '人数'
+  if (isHeadquartersReceiptDetail.value) return bdeghDetail.value.metric.endsWith('_count') ? '人数' : '现金业绩'
+  if (isFeaturedReceiptDetail.value) {
+    return bdeghDetail.value.metric.endsWith('_cash') ? '成交金额'
+      : (bdeghDetail.value.metric.endsWith('_deal') ? '成交人数' : '体验人数')
+  }
+  if (bdeghDetail.value.detailReport === 'operations_service_fact_detail') return bdeghDetail.value.label
+  if (['consuming_members', 'deal_people', 'deal_visits', 'refund_count', 'experience_actual',
+    'experience_people', 'annual_repeat_people', 'annual_deal_people', 'new_deal_people',
+    'new_customer_actual', 'transition_people'].includes(bdeghDetail.value.metric)) return bdeghDetail.value.label
+  return bdeghDetail.value.metric === 'refund_amount' ? '退款金额' : '收款金额'
+}
+
+function receiptDetailUnit() {
+  if (isAcquisitionReceiptDetail.value) return bdeghDetail.value.metric === 'amount' ? '笔' : '人'
+  if (isHeadquartersReceiptDetail.value) return bdeghDetail.value.metric.endsWith('_count') ? '人' : '笔'
+  if (isFeaturedReceiptDetail.value) return isFeaturedCountMetric.value ? '条' : '笔'
+  // A deduplicated member cohort is people; service facts and payments are rows.
+  if (['active_members', 'consuming_members', 'deal_people', 'experience_actual', 'experience_people',
+    'annual_repeat_people', 'annual_deal_people', 'new_deal_people', 'new_customer_actual',
+    'transition_people', 'one_to_two_visits', 'three_plus_visits', 'regular_customers', 'inactive_customers',
+    'visit_count', 'new_visit_count'].includes(bdeghDetail.value.metric)) return '人'
+  return bdeghDetail.value.detailReport === 'operations_service_fact_detail' ? '条' : '笔'
+}
+
+function detailValueText(value) {
+  if (isAcquisitionReceiptDetail.value && bdeghDetail.value.metric !== 'amount') return String(Number(value) || 0)
+  if (isHeadquartersReceiptDetail.value && bdeghDetail.value.metric.endsWith('_count')) return String(Number(value) || 0)
+  if (isFeaturedCountMetric.value) return String(Number(value) || 0)
+  // A fact-backed count is not currency even when it shares the receipt popup.
+  if (['service_count', 'active_members', 'post_sale_visits', 'beauty_service_count', 'consuming_members',
+    'deal_people', 'deal_visits', 'refund_count', 'experience_actual', 'experience_people',
+    'annual_repeat_people', 'annual_deal_people', 'new_deal_people', 'new_customer_actual', 'transition_people',
+    'one_to_two_visits', 'three_plus_visits', 'regular_customers', 'inactive_customers',
+    'visit_count', 'new_visit_count'].includes(bdeghDetail.value.metric)) {
+    return String(Number(value) || 0)
+  }
+  return formatWholeYuan(value)
+}
+
+const detailDialog = computed(() => {
+  const filtered = detailMemberFilter.value !== '' || detailOrderFilter.value !== ''
+  if (memberVisitDetail.value.open) {
+    const detail = memberVisitDetail.value
+    const metricLabel = detail.metric === 'cash' ? '现金业绩' : '进店'
+    return {
+      open: true,
+      title: `${detail.memberName || '会员'} · ${detail.month ? `${detail.month}月` : '全年'}${metricLabel}明细`,
+      columns: detail.columns.length ? detail.columns : [
+        { key: 'member_name', label: '会员' }, { key: 'phone', label: '手机' },
+        { key: 'order_no', label: '单号' }, { key: 'visit_date', label: '日期' },
+        { key: 'amount', label: '金额' }
+      ],
+      records: detail.records,
+      footer: `${filtered ? '筛选后' : ''}${detail.metric === 'cash'
+        ? `共 ${detail.total} 笔 · 现金业绩合计 ${memberVisitAmountText(detail.amount)}`
+        : `共 ${detail.total} 次进店 · 消耗业绩合计 ${memberVisitAmountText(detail.amount)}`}`,
+      emptyText: filtered ? '没有匹配的明细' : `暂无${metricLabel}明细`,
+      loading: detail.loading, error: detail.error, filterActive: filtered, page: detail.page,
+      pageCount: memberVisitDetailPageCount.value
+    }
+  }
+  if (!bdeghDetail.value.open) return { open: false }
+  const detail = bdeghDetail.value
+  const extraKeys = detail.detailReport === 'phase_six_monthly_featured_item'
+    ? ['business_date', 'store_name', 'item_name']
+    : ['phase_six_headquarters_acquisition', 'phase_six_acquisition_source'].includes(detail.detailReport)
+      ? ['business_date', 'store_name', ...(detail.metric === 'annual_amount' ? ['cash_kind'] : [])]
+      : (detail.columns || []).map((column) => column.key).filter((key) => !['member_name', 'member_phone', 'order_no', 'receipt_amount', 'detail_value'].includes(key))
+  const fallbackLabels = { business_date: '业务日期', store_name: '门店', item_name: '商品/项目', cash_kind: '业务类型' }
+  const columns = detail.columns?.some((column) => column.label) ? detail.columns : [
+    { key: 'member_name', label: '会员' }, { key: 'member_phone', label: '手机号' },
+    ...extraKeys.filter((key) => key !== 'item_name').map((key) => ({ key, label: fallbackLabels[key] || key })),
+    { key: 'order_no', label: '单据号' },
+    ...extraKeys.filter((key) => key === 'item_name').map((key) => ({ key, label: fallbackLabels[key] })),
+    { key: detail.detailReport === 'operations_service_fact_detail' ? 'detail_value' : 'receipt_amount', label: receiptAmountLabel() }
+  ]
+  return {
+    open: true,
+    title: detail.detailReport === 'store_salesperson_performance_detail'
+      ? `${receiptDetailPeriod()} · ${detail.employeeName} · ${detail.label}明细`
+      : `${receiptDetailPeriod()} · ${detail.label}明细`,
+    columns,
+    records: detail.records,
+    footer: `${filtered ? '筛选后' : ''}${SOURCE_PRE_SALE_DETAIL_REPORTS.includes(detail.detailReport)
+      ? `共 ${detail.total} 笔 · ${detail.memberCount} 个计数对象（会员按人、游客按单） · 收款合计 ${detailValueText(detail.amount)}`
+      : `共 ${detail.total} ${receiptDetailUnit()} · ${receiptAmountLabel()}合计 ${detailValueText(detail.amount)}`}`,
+    emptyText: filtered ? '没有匹配的明细' : '暂无明细', loading: detail.loading, error: detail.error, filterActive: filtered,
+    page: detail.page, pageCount: bdeghDetailPageCount.value
+  }
+})
+
+function detailDialogCell(record, column) {
+  const value = record?.[column.key]
+  if (value === null || value === undefined || value === '') return '-'
+  if (memberVisitDetail.value.open && column.key === 'amount') return memberVisitAmountText(value)
+  if (['receipt_amount', 'detail_value', 'performance_amount'].includes(column.key)) return detailValueText(value)
+  if (column.value_type === 'integer') return String(Number(value) || 0)
+  return String(value)
+}
+
+function closeDetailDialog() {
+  detailExportRequestId += 1
+  detailExporting.value = false
+  detailExportError.value = ''
+  if (memberVisitDetail.value.open) closeMemberVisitDetail()
+  if (bdeghDetail.value.open) closeBdeghDetail()
+  detailMemberFilter.value = ''
+  detailOrderFilter.value = ''
+}
+
+function detailDialogPage(pageNumber) {
+  if (memberVisitDetail.value.open) loadMemberVisitDetail(pageNumber)
+  else if (bdeghDetail.value.open) loadBdeghDetail(pageNumber)
+}
+
+/** A new search reuses the clicked metric and authorized scope, resetting only its detail page. */
+function detailDialogFilter({ member, orderNo }) {
+  detailExportRequestId += 1
+  detailExporting.value = false
+  detailExportError.value = ''
+  detailMemberFilter.value = member
+  detailOrderFilter.value = orderNo
+  detailDialogPage(1)
+}
+
+/** The server exports every matching authorized row; no client-side pagination or permission toggle. */
+async function exportDetailDialog() {
+  if (detailExporting.value || detailDialog.value.loading) return
+  const requestId = ++detailExportRequestId
+  detailExporting.value = true
+  detailExportError.value = ''
+  try {
+    const params = memberVisitDetail.value.open ? memberVisitDetailParams() : bdeghDetailParams()
+    const workbook = await exportStoreBusinessReportXlsx(params, reportRuntime.value)
+    if (requestId !== detailExportRequestId || !detailDialog.value.open) return
+    const url = URL.createObjectURL(workbook)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${detailDialog.value.title.replace(/[\\/:*?"<>|]/g, '-')}-${today().replaceAll('-', '')}.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (error) {
+    if (requestId === detailExportRequestId) detailExportError.value = error?.message || '明细导出失败，请稍后重试。'
+  } finally {
+    if (requestId === detailExportRequestId) detailExporting.value = false
+  }
 }
 
 function drilldownRequest(row, column) {
@@ -1423,10 +1802,9 @@ function drilldownRequest(row, column) {
 }
 
 function openDrilldown(row, column) {
-  if (String(drilldownConfig(row, column)?.report || '') === 'member_visit_detail') {
-    openMemberVisitDetail(row, column)
-    return
-  }
+  if (!canDrilldown(row, column)) return
+  const target = String(drilldownConfig(row, column)?.report || drilldownConfig(row, column)?.report_code || '')
+  if (detailPopupOpeners[target]) return detailPopupOpeners[target](row, column)
   const request = drilldownRequest(row, column)
   if (!request) return
   if (request.report === 'order_center_order_detail') {
@@ -1511,6 +1889,8 @@ function openDrilldown(row, column) {
 
 watch(() => route.fullPath, () => {
   closeMemberVisitDetail()
+  // A scope change invalidates receipt details opened from the previous result set.
+  closeBdeghDetail()
   syncActiveReportFromRoute()
   syncFiltersFromRoute()
   page.value = 1
@@ -1622,7 +2002,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           <footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>选择组织查询其全部下级门店；选择门店仅查询该门店。</span></footer>
         </section>
       </div>
-      <label v-if="isAnnualAcquisitionSummary || isMemberVisitAnalysis || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" :min="isAnnualAcquisitionSummary || isMemberVisitAnalysis ? LEGACY_COVERAGE_START.slice(0, 4) : 2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
+      <label v-if="isAnnualAcquisitionSummary || isMemberVisitAnalysis || isHeadquartersAcquisition || (isPlatformReport && usesAnnualYearFilter)" class="store-business-report__date-field"><span>年份</span><input v-model="selectedYear" type="number" inputmode="numeric" :min="isAnnualAcquisitionSummary || isMemberVisitAnalysis || isHeadquartersAcquisition ? LEGACY_COVERAGE_START.slice(0, 4) : 2000" :max="today().slice(0, 4)" aria-label="统计年份" /></label>
       <div v-else-if="!isPlatformReport" class="store-business-report__period-picker">
         <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
       </div>
@@ -1709,7 +2089,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           </thead>
           <tbody>
             <tr v-if="summaryRow" class="store-business-report__summary-row">
-              <td v-for="column in columns" :key="column.key" :class="cellClasses(column)" :style="fixedColumnStyle(column)">{{ formatCell(summaryRow[column.key]) }}</td>
+              <td v-for="column in columns" :key="column.key" :class="cellClasses(column)" :style="fixedColumnStyle(column)">
+                <button v-if="canSummaryReceiptDrilldown(summaryRow, column)" type="button" class="store-business-report__drilldown" @click="openDrilldown(summaryRow, column)">{{ formatCell(summaryRow[column.key], column) }}</button>
+                <template v-else>{{ formatCell(summaryRow[column.key], column) }}</template>
+              </td>
+
               <td v-if="editableReport">-</td>
             </tr>
             <tr v-for="(row, rowIndex) in records" :key="rowKey(row) || `${activeReport}:${rowIndex}`">
@@ -1736,8 +2120,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
                     :step="manualFieldStep(editableFieldByKey.get(column.key))"
                   />
                 </template>
-                <button v-else-if="canDrilldown(row, column)" type="button" class="store-business-report__drilldown" @click="openDrilldown(row, column)">{{ formatCell(row[column.key]) }}</button>
-                <template v-else>{{ formatCell(row[column.key]) }}</template>
+                <button v-else-if="canDrilldown(row, column)" type="button" class="store-business-report__drilldown" @click="openDrilldown(row, column)">{{ formatCell(row[column.key], column) }}</button>
+                <template v-else>{{ formatCell(row[column.key], column) }}</template>
               </td>
               <td v-if="editableReport">
                 <button v-if="editingRow !== row" type="button" class="button button--text" @click="beginEdit(row)">编辑</button>
@@ -1758,38 +2142,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <button type="button" :disabled="!canPageForward" @click="nextPage">下一页</button>
       </footer>
     </section>
-    <div v-if="memberVisitDetail.open" class="store-business-report__modal" role="dialog" aria-modal="true" :aria-label="`${memberVisitDetail.memberName}${memberVisitDetail.metric === 'cash' ? '现金业绩' : '进店'}明细`">
-      <section class="store-business-report__modal-card store-business-report__visit-detail">
-        <header>
-          <strong>{{ memberVisitDetail.memberName || '会员' }} · {{ memberVisitDetail.month ? `${memberVisitDetail.month}月` : '全年' }}{{ memberVisitDetail.metric === 'cash' ? '现金业绩' : '进店' }}明细</strong>
-          <button type="button" class="store-business-report__modal-close" aria-label="关闭会员明细" title="关闭会员明细" @click="closeMemberVisitDetail"><X :size="20" aria-hidden="true" /></button>
-        </header>
-        <p v-if="memberVisitDetail.error" class="store-business-report__error" role="alert">{{ memberVisitDetail.error }}</p>
-        <div class="store-business-report__visit-detail-scroll">
-          <table>
-            <thead><tr><th>会员</th><th>手机</th><th>单号</th><th>日期</th><th>金额</th></tr></thead>
-            <tbody>
-              <tr v-for="(record, index) in memberVisitDetail.records" :key="`${record.visit_date}-${index}`">
-                <td>{{ record.member_name || '-' }}</td>
-                <td>{{ record.phone || '-' }}</td>
-                <td>{{ record.order_no || '-' }}</td>
-                <td>{{ record.visit_date || '-' }}</td>
-                <td>{{ memberVisitAmountText(record.amount) }}</td>
-              </tr>
-              <tr v-if="!memberVisitDetail.loading && !memberVisitDetail.records.length"><td colspan="5">暂无{{ memberVisitDetail.metric === 'cash' ? '现金业绩' : '进店' }}明细</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <footer>
-          <span>{{ memberVisitDetail.loading ? '正在读取' : memberVisitDetail.metric === 'cash' ? `共 ${memberVisitDetail.total} 笔 · 现金业绩合计 ${memberVisitAmountText(memberVisitDetail.amount)}` : `共 ${memberVisitDetail.total} 次进店 · 消耗业绩合计 ${memberVisitAmountText(memberVisitDetail.amount)}` }}</span>
-          <div>
-            <button type="button" class="button button--secondary" :disabled="memberVisitDetail.loading || memberVisitDetail.page <= 1" @click="loadMemberVisitDetail(memberVisitDetail.page - 1)">上一页</button>
-            <span>{{ memberVisitDetail.page }} / {{ memberVisitDetailPageCount }}</span>
-            <button type="button" class="button button--secondary" :disabled="memberVisitDetail.loading || memberVisitDetail.page >= memberVisitDetailPageCount" @click="loadMemberVisitDetail(memberVisitDetail.page + 1)">下一页</button>
-          </div>
-        </footer>
-      </section>
-    </div>
+    <ReportDetailDialog v-if="detailDialog.open" :title="detailDialog.title" :columns="detailDialog.columns"
+      :records="detailDialog.records" :footer="detailDialog.footer" :empty-text="detailDialog.emptyText"
+      :loading="detailDialog.loading" :error="detailDialog.error" :filter-active="detailDialog.filterActive" :page="detailDialog.page"
+      :page-count="detailDialog.pageCount" :format-cell="detailDialogCell"
+      :exporting="detailExporting" :export-error="detailExportError" :applied-member="detailMemberFilter"
+      :applied-order-no="detailOrderFilter" @export="exportDetailDialog"
+      @close="closeDetailDialog" @page="detailDialogPage" @filter="detailDialogFilter" />
     <div v-if="isFieldGuideOpen" class="store-business-report__modal" role="dialog" aria-modal="true" aria-label="列名取值来源">
       <section class="store-business-report__modal-card store-business-report__field-guide">
         <header>
@@ -1878,18 +2237,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__modal-card { width: min(520px, 100%); max-height: min(620px, 90vh); overflow: auto; border-radius: 10px; padding: 18px; background: #fff; box-shadow: 0 16px 50px rgba(24, 39, 58, .2); }
 .store-business-report__modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .store-business-report__modal-close { border: 0; background: transparent; color: #657386; font-size: 24px; cursor: pointer; }
-.store-business-report__visit-detail { display: flex; width: min(920px, 100%); max-height: min(680px, 90vh); flex-direction: column; overflow: hidden; }
-.store-business-report__visit-detail-scroll { min-height: 0; flex: 1; overflow: auto; }
-.store-business-report__visit-detail table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; }
-.store-business-report__visit-detail th, .store-business-report__visit-detail td { border-bottom: 1px solid #e5eaf0; padding: 10px 12px; text-align: left; overflow-wrap: anywhere; }
-.store-business-report__visit-detail th { position: sticky; top: 0; background: #f5f8fc; color: #526174; font-size: 12px; }
-.store-business-report__visit-detail th:nth-child(1) { width: 14%; }
-.store-business-report__visit-detail th:nth-child(2) { width: 17%; }
-.store-business-report__visit-detail th:nth-child(3) { width: 39%; }
-.store-business-report__visit-detail th:nth-child(4) { width: 16%; }
-.store-business-report__visit-detail th:nth-child(5) { width: 14%; }
-.store-business-report__visit-detail footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #e5eaf0; padding-top: 12px; font-size: 12px; color: #526174; }
-.store-business-report__visit-detail footer div { display: flex; align-items: center; gap: 8px; }
 .store-business-report__person-search { display: flex; gap: 8px; }
 .store-business-report__person-search input { flex: 1; min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; font: inherit; }
 .store-business-report__person-results { display: grid; gap: 6px; margin-top: 12px; }

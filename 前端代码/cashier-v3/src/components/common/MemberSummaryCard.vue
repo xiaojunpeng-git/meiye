@@ -112,6 +112,14 @@ function openMemberDebt(member) {
               {{ formatPlainAmount(outstandingDebtAmount(member)) }}
             </button>
             <strong v-else class="member-card__debt-zero">{{ formatPlainAmount(outstandingDebtAmount(member)) }}</strong>
+            <!-- 仅有欠款时提供还款入口，并与欠款数字共用同一明细处理函数。 -->
+            <button
+              v-if="hasOutstandingDebt(member)"
+              type="button"
+              class="member-card__repay-button"
+              :aria-label="`去还款，查看${member.name}的欠款明细`"
+              @click.stop="openMemberDebt(member)"
+            >去还款</button>
           </div>
           <button v-if="showInlineSelect" type="button" class="member-card__inline-change" @click="$emit('select')">{{ selectLabel }}</button>
         </div>
@@ -139,3 +147,27 @@ function openMemberDebt(member) {
     </div>
   </section>
 </template>
+
+<style scoped>
+.member-card__repay-button {
+  flex: none;
+  min-height: 22px;
+  margin-left: 5px;
+  padding: 0 6px;
+  border: 1px solid #cf1322;
+  border-radius: 5px;
+  background: #cf1322;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.member-card__repay-button:hover,
+.member-card__repay-button:focus-visible {
+  border-color: #a8071a;
+  background: #a8071a;
+}
+
+</style>

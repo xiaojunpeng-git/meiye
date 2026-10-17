@@ -273,6 +273,8 @@ const C5_ACTIONS = {
     'update-sales-order-note': FEATURE_ORDER_CENTER,
     'correct-sales-order-attribution': FEATURE_ORDER_CENTER,
     'correct-service-order-date': FEATURE_ORDER_CENTER,
+    // 纯权益服务来源按整次完成事件更正，与日期命令共用订单中心权限但保持独立审计动作。
+    'correct-service-order-attribution': FEATURE_ORDER_CENTER,
     'correct-recharge-order-attribution': FEATURE_ORDER_CENTER,
     'correct-debt-repayment-date': FEATURE_ORDER_CENTER,
     'correct-debt-repayment-source': FEATURE_ORDER_CENTER,

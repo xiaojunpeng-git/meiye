@@ -30,6 +30,28 @@ export function defaultCraftsmanWeights(records) {
   groups(records, (record) => record.craftsmanPerformanceType !== 'labor').forEach((group) => split(100, group))
 }
 
+// 自动业绩按岗位组先确定整元总额，再把不可整除的尾差给组内最后一人。
+// 手填金额不参与自动金额池，也不要求与项目基数凑齐。
+export function automaticCraftsmanAmounts(baseCents, records) {
+  const result = new Map()
+  const baseYuan = Math.max(0, Math.trunc(Number(baseCents || 0) / 100))
+  groups(records, (record) => record.craftsmanPerformanceType !== 'labor'
+    && !record.performanceAmountManual && !record.performanceAmountLocked).forEach((group) => {
+    const totalWeight = group.reduce((sum, record) => sum + Math.max(0, Math.trunc(Number(record.performance || 0))), 0)
+    const targetYuan = Math.round(baseYuan * totalWeight / 100)
+    let allocatedYuan = 0
+    group.forEach((record, index) => {
+      const weight = Math.max(0, Math.trunc(Number(record.performance || 0)))
+      const yuan = index === group.length - 1
+        ? targetYuan - allocatedYuan
+        : Math.floor(baseYuan * weight / 100)
+      result.set(record, Math.max(0, yuan) * 100)
+      allocatedYuan += yuan
+    })
+  })
+  return result
+}
+
 export function defaultSalespersonWeights(records) {
   groups(records).forEach((group) => {
     const ratio = Math.max(0, Math.min(100, Math.trunc(Number(group[0].partnerDefaultRatio || 0))))
