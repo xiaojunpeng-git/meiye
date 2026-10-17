@@ -30,8 +30,25 @@ final class InventoryPlatformWarehouse extends AuthController
     {
         try {
             $access = $this->access();
+            $locations = [];
+            try {
+                $locations = $this->services->resolvedLocations((array)$this->adminInfo, (int)$this->request->get('include_inactive', 0) === 1)['locations'];
+            } catch (\InvalidArgumentException $exception) {
+                // 只有库存查询授权、没有组织任职或总部仓的账号仍可获得查询专用门店目录。
+                (new InventoryPlatformAccessPolicy())->assertQueryPage($access, InventoryBatchStockQueryContract::PAGE_CODE);
+            }
+            $stockStoreLocations = [];
+            try {
+                $stockStoreLocations = array_values(array_filter(
+                    $this->services->resolvedLocations((array)$this->adminInfo, false, true)['locations'],
+                    static fn (array $location): bool => (string)$location['location_type'] === 'STORE'
+                ));
+            } catch (UnifiedQueryException | \InvalidArgumentException $exception) {
+                // 非库存查询页面不获得全门店目录；原页面权限仍由各自接口验证。
+            }
             return $this->success([
-                'list' => $this->services->resolvedLocations((array)$this->adminInfo, (int)$this->request->get('include_inactive', 0) === 1)['locations'],
+                'list' => $locations,
+                'stock_store_locations' => $stockStoreLocations,
                 'permission_anchor' => InventoryBatchStockQueryContract::PERMISSION_VIEW,
                 'cost_visible' => in_array(InventoryBatchStockQueryContract::PERMISSION_COST, $access['features'], true),
                 // 页面只消费可信写能力；读取库位不会自动开放新建、导入或作废。

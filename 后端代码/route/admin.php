@@ -2249,6 +2249,7 @@ Route::group('adminapi', function () {
 			Route::post('v3/hq/request/:id/void', 'v1.product.inventory.InventoryPlatformHqStockRequest/void')->pattern(['id' => '\\d+'])->option(['real_name' => '平台总部请货整单作废']);
 			Route::get('v3/hq/product-summary', 'v1.product.inventory.InventoryPlatformHqReadModel/productSummary')->option(['real_name' => '平台总部库存商品汇总']);
 			Route::get('v3/hq/product-summary/:productId/detail', 'v1.product.inventory.InventoryPlatformHqReadModel/productDetail')->pattern(['productId' => '\\d+'])->option(['real_name' => '平台总部库存商品详情']);
+			Route::get('v3/store/product-summary/:productId/detail', 'v1.product.inventory.InventoryPlatformStoreStockDetail/productDetail')->pattern(['productId' => '\\d+'])->option(['real_name' => '平台门店仓库存进出记录']);
 			Route::get('v3/hq/catalog', 'v1.product.inventory.InventoryPlatformHqCatalog/search')->option(['real_name' => '平台总部库存商品目录']);
 			Route::get('v3/hq/catalog/barcode', 'v1.product.inventory.InventoryPlatformHqCatalog/barcode')->option(['real_name' => '平台总部库存商品精确条码查询']);
 			Route::get('v3/hq/cross-transfer', 'v1.product.inventory.InventoryPlatformHqCrossTransfer/index')->option(['real_name' => '平台总部仓跨主体调拨查询']);

@@ -67,6 +67,8 @@ const platformHqLocationId = ref(0)
 // subject directly.
 const platformListWarehouseSelection = ref('HQ:0')
 const platformLocations = ref([])
+// 库存查询专用目录可覆盖全部有效门店；业务单据继续使用原组织授权目录。
+const platformStockStoreLocations = ref([])
 // 接收目录与调出库存权限分离；仅提供名称筛选，不扩大单据数据范围。
 const platformTransferTargetOptions = ref([])
 const storeLocations = ref([])
@@ -524,8 +526,8 @@ const platformStoreOptions = computed(() => {
   })
 })
 const platformStoreSelectorOptions = computed(() => [
-  { key: '0', name: '全部授权门店', type: 'ALL' },
-  ...platformStoreOptions.value.map((location) => ({
+  { key: '0', name: '全部门店', type: 'ALL' },
+  ...platformStockStoreLocations.value.map((location) => ({
     key: String(Number(location.store_id)),
     name: location.store_name_snapshot || location.store_name || `门店${location.store_id}`,
     type: 'STORE'
@@ -592,8 +594,9 @@ const scopeName = computed(() => {
   if (active.value === 'usage') {
     return platformListWarehouseOptions.value.find((item) => item.key === platformListWarehouseSelection.value)?.name || '请选择领用仓库'
   }
-  const current = platformLocations.value.find((item) => Number(item.store_id) === Number(platformStoreId.value))
-  return current?.store_name_snapshot || current?.store_name || '全部授权门店'
+  const locations = active.value === 'stock' ? platformStockStoreLocations.value : platformLocations.value
+  const current = locations.find((item) => Number(item.store_id) === Number(platformStoreId.value))
+  return current?.store_name_snapshot || current?.store_name || (active.value === 'stock' ? '全部门店' : '全部授权门店')
 })
 const defaultLocationName = computed(() => {
   if (platformUsesHqSubject.value) return scopeName.value
@@ -1673,8 +1676,10 @@ async function openStockDetail(row) {
   if (!row?.product_id || !inventoryApi) return
   listError.value = ''
   try {
-    selectedDetail.value = mode.value === 'platform' && platformStockSubject.value === 'HQ'
-      ? await platformInventoryApi.hqProductDetail(row.product_id, { hq_location_id: Number(row.location_id || platformHqLocationId.value) })
+    selectedDetail.value = mode.value === 'platform'
+      ? platformStockSubject.value === 'HQ'
+        ? await platformInventoryApi.hqProductDetail(row.product_id, { hq_location_id: Number(row.location_id || platformHqLocationId.value) })
+        : await platformInventoryApi.storeProductDetail(row.product_id, row.location_id)
       : await inventoryApi.productDetail(row.product_id)
     openEditor('stock-detail', selectedDetail.value)
   } catch (error) { listError.value = error instanceof Error ? error.message : '库存详情读取失败。' }
@@ -1688,7 +1693,8 @@ async function loadPlatformLocations() {
     platformCanManageWarehouses.value = response?.can_manage_warehouses === true
     platformCreatePermissions.value = response?.can_create || {}
     platformLocations.value = Array.isArray(response?.list) ? response.list : []
-    if (platformStoreId.value > 0 && !platformLocations.value.some((item) => Number(item.store_id) === Number(platformStoreId.value))) platformStoreId.value = 0
+    platformStockStoreLocations.value = Array.isArray(response?.stock_store_locations) ? response.stock_store_locations : []
+    if (platformStoreId.value > 0 && !platformStockStoreLocations.value.some((item) => Number(item.store_id) === Number(platformStoreId.value))) platformStoreId.value = 0
     if (platformHqLocationId.value > 0 && !platformHqLocations.value.some((item) => Number(item.id) === Number(platformHqLocationId.value))) platformHqLocationId.value = 0
     if (platformHqLocationId.value <= 0 && platformHqLocations.value.length >= 1) platformHqLocationId.value = Number((platformHqLocations.value.find((item) => item.location_status === 'ACTIVE') || platformHqLocations.value[0])?.id || 0)
     const selected = String(platformListWarehouseSelection.value || '')
@@ -1702,6 +1708,7 @@ async function loadPlatformLocations() {
     await loadPlatformTransferTargets()
   } catch (error) {
     platformLocations.value = []
+    platformStockStoreLocations.value = []
     platformCanManageInventory.value = false
     platformCreatePermissions.value = {}
     listError.value = error instanceof Error ? error.message : '平台仓库范围读取失败。'
@@ -2137,7 +2144,7 @@ onBeforeUnmount(() => {
               <span v-if="transferBatchError" class="transfer-batch-toolbar__error" role="alert">{{ transferBatchError }}</span>
             </div>
             <div :inert="transferListRefreshFailed ? true : null">
-<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active) }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" :disabled="mode === 'platform' && !platformCanManageInventory" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' && mode === 'store' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
+<section class="content-card table-card" :class="{ 'table-card--stock-scroll': stockTableFixed || active === 'warehouse', 'table-card--grouped-scroll': groupedListPages.has(active) }"><header class="table-meta"><span>共 {{ remoteTotal }} 条记录</span><span v-if="listDateRange" class="table-meta__note">业务日期：{{ listDateRange.from }} 至 {{ listDateRange.to }}</span><div v-if="!(mode === 'store' && active === 'outbound')"><button v-if="['store', 'platform'].includes(mode) && ['inbound', 'outbound'].includes(active)" class="text-button" :disabled="mode === 'platform' && !platformCanManageInventory" @click="openEditor('import')">导入</button><span v-if="active !== 'stock' && active !== 'request'" class="table-meta__note">导出将在对应权威导出任务接入后开放</span></div></header><p v-if="listError" class="inventory-load-error">{{ listError }}</p><div v-else class="table-scroll"><table v-if="!groupedListPages.has(active)"><thead><tr><th v-for="column in currentPage.columns" :key="column">{{ column }}</th><th>操作</th></tr></thead><tbody><tr v-if="active === 'stock' && stockTableLayout.summaryRow === true && !listLoading && currentRows.length" class="table-summary-row"><td v-for="(cell, cellIndex) in stockSummaryRow" :key="`stock-summary-${cellIndex}`">{{ cell }}</td><td>-</td></tr><tr v-if="listLoading"><td :colspan="currentPage.columns.length + 1" class="table-empty">正在读取库存数据...</td></tr><tr v-else-if="!currentRows.length"><td :colspan="currentPage.columns.length + 1" class="table-empty">暂无符合条件的记录</td></tr><tr v-else v-for="(row, index) in currentRows" :key="index"><td v-for="(cell, cellIndex) in row" :key="cellIndex"><span v-if="isOperationalStatusCell(active, cellIndex)" class="state-tag">{{ cell }}</span><template v-else>{{ cell }}</template></td><td><template v-if="active === 'warehouse'"><button class="text-button" :disabled="!platformCanManageWarehouses" @click="openEditor('warehouse-edit', sourceRows[index])">设置</button></template><template v-else-if="active === 'recipe'"><button class="text-button" @click="openRecipeEditor(sourceRows[index])">编辑</button><button class="text-button" @click="toggleRecipeStatus(sourceRows[index])">{{ Number(sourceRows[index].status) === 1 ? '停用' : '启用' }}</button><button class="text-button text-button--danger" @click="deleteRecipe(sourceRows[index])">删除</button></template><template v-else><button class="text-button" @click="active === 'stock' ? openStockDetail(sourceRows[index]) : active === 'import' ? openImportDetail(sourceRows[index]) : openEditor(`${active}-detail`, sourceRows[index])">{{ active === 'stock' ? '查看进出记录' : '查看' }}</button><button v-if="active === 'count' && Number(sourceRows[index]?.draft_id || 0) > 0" class="text-button text-button--danger" :disabled="countDraftDeleteBusy" @click="requestDeleteCountDraft(sourceRows[index])">删除</button></template></td></tr>
             </tbody></table>
             <!-- 两端共用单据单行信息带和商品表头；仅能力按钮及仓库上下文来自各自权威接口。 -->
             <table v-else class="inventory-grouped-table" :class="`inventory-grouped-table--${active}`" :aria-label="`${currentPage.title}明细列表`">

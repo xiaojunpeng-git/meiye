@@ -48,8 +48,8 @@
           <Tag :color="statusColor(row.claim_status)">{{ statusLabel(row.claim_status) }}</Tag>
         </template>
         <template slot-scope="{ row }" slot="action">
-          <a v-if="row.can_claim" @click="openClaim(row)">领用</a>
-          <span v-else class="disabled-action">不可领用</span>
+          <a v-if="row.can_claim && row.can_operate" @click="openClaim(row)">领用</a>
+          <span v-else class="disabled-action">{{ row.can_claim ? '仅查看' : '不可领用' }}</span>
           <a class="action-gap" @click="openDetail(row)">领用明细</a>
         </template>
       </Table>
@@ -95,8 +95,8 @@
             <span v-else>-</span>
           </template>
           <template slot-scope="{ row }" slot="detail_action">
-            <a v-if="row.status === 'SETTLED'" @click="openVoid(row)">作废领用</a>
-            <span v-else class="disabled-action">已作废</span>
+            <a v-if="row.status === 'SETTLED' && detail.can_manage" @click="openVoid(row)">作废领用</a>
+            <span v-else class="disabled-action">{{ row.status === 'SETTLED' ? '仅查看' : '已作废' }}</span>
           </template>
         </Table>
       </template>

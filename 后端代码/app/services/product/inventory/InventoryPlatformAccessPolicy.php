@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\services\product\inventory;
 
+use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\organization\OrganizationScopeService;
 use app\services\product\inventory\query\InventoryBatchStockQueryContract;
 use app\services\query\UnifiedQueryException;
@@ -128,6 +129,17 @@ final class InventoryPlatformAccessPolicy
             try { return $this->canVoidHqInbound($this->resolveByAdminId($adminId)); }
             catch (UnifiedQueryException $exception) { return false; }
         }
+        // 预售出库与作废改变门店实物库存：页面可见不足以授权，仍须原生查看和仓库管理双权限。
+        if (strtolower(trim($method)) === 'post' && in_array($rule, [
+            'product/inventory/v3/presale-claims/claim',
+            'product/inventory/v3/presale-claims/:id/void',
+        ], true)) {
+            try {
+                $access = $this->resolveByAdminId($adminId);
+                return ($access['is_super_admin'] || $this->hasLegacyPage((array)$access['unique_auth'], 'overview'))
+                    && in_array('inventory.location.manage', (array)$access['features'], true);
+            } catch (UnifiedQueryException $exception) { return false; }
+        }
         if (strtolower(trim($method)) === 'post' && in_array($rule, ['product/inventory/v3/locations', 'product/inventory/v3/locations/:id'], true)) {
             try { return in_array('inventory.location.settings', $this->resolveByAdminId($adminId)['features'], true); }
             catch (UnifiedQueryException $exception) { return false; }
@@ -168,7 +180,11 @@ final class InventoryPlatformAccessPolicy
             'salon-usage' => 'usage', 'salon-usage/:id/detail' => 'usage',
             'hq/count/:id/detail' => 'count',
             'hq/product-summary' => 'stock', 'hq/product-summary/:productid/detail' => 'stock-detail',
+            'store/product-summary/:productid/detail' => 'stock-detail',
             'batch-stock' => 'stock', 'unified-query/batch-stock' => 'stock', 'unified-query/capabilities' => 'stock',
+            // 预售页面沿用库存管理菜单；查询仅进入该页，服务层再按任职门店收窄。
+            'presale-claims' => 'overview', 'presale-claims/scope' => 'overview',
+            'presale-claims/:id' => 'overview',
         ];
         $prefix = 'product/inventory/v3/';
         $page = strpos($rule, $prefix) === 0 ? ($routes[substr($rule, strlen($prefix))] ?? '') : '';
@@ -296,6 +312,34 @@ final class InventoryPlatformAccessPolicy
                 $headquartersOnly ? 'hq-only' : 'hq-and-store',
             ])),
         ];
+    }
+
+    /** 库存查询页可读全部有效门店；仅派生查询上下文，不提升原账号的单据或仓库写权限。 */
+    public function forStockRead(array $access): array
+    {
+        $this->assertQueryPage($access, InventoryBatchStockQueryContract::PAGE_CODE);
+        // 以实际启用的默认门店仓为目录，避免门店显示状态与库存仓范围漂移。
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', Db::name('inventory_location')
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('location_type', 'STORE')->where('location_status', 'ACTIVE')->where('is_default', 1)
+            ->column('store_id')))));
+        sort($storeIds, SORT_NUMERIC);
+        $access['store_ids'] = $storeIds;
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|stock-read-all-stores|' . implode(',', $storeIds));
+        return $access;
+    }
+
+    /** 预售领用页面授权仅扩展列表、范围树和明细的门店读取；领用及作废仍使用原账号写权限。 */
+    public function forPresaleRead(array $access): array
+    {
+        if (empty($access['is_super_admin']) && !$this->hasLegacyPage((array)($access['unique_auth'] ?? []), 'overview')) {
+            throw $this->denied('当前岗位无权查看预售领用。');
+        }
+        $storeIds = $this->allActiveStoreIds();
+        sort($storeIds, SORT_NUMERIC);
+        $access['store_ids'] = $storeIds;
+        $access['permission_version'] = hash('sha256', (string)$access['permission_version'] . '|presale-read-all-stores|' . implode(',', $storeIds));
+        return $access;
     }
 
     /** @param string[] $features */

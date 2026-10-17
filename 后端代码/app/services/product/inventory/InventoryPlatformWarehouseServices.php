@@ -14,9 +14,13 @@ final class InventoryPlatformWarehouseServices
     /**
      * @return array{access:array,locations:array}
      */
-    public function resolvedLocations(array $adminInfo, bool $includeInactive = false): array
+    public function resolvedLocations(array $adminInfo, bool $includeInactive = false, bool $stockRead = false): array
     {
-        $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
+        $policy = new InventoryPlatformAccessPolicy();
+        $access = $policy->resolve($adminInfo);
+        $hqAccess = $access;
+        // 仅库存读接口借用全门店范围；通用仓库目录仍按组织任职保护单据操作。
+        if ($stockRead) $access = $policy->forStockRead($access);
         $query = Db::name('inventory_location')
             ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
             // 本轮只开放总部多仓；门店目录仍只暴露原默认仓。
@@ -28,7 +32,7 @@ final class InventoryPlatformWarehouseServices
         if (!$includeInactive) $query->where('location_status', 'ACTIVE');
         if (empty($access['is_super_admin'])) {
             $storeIds = array_values(array_filter(array_map('intval', (array)$access['store_ids'])));
-            $hqIds = array_map('intval', array_column((new InventoryHqLocationServices())->locationsForAccess($access, $includeInactive), 'id'));
+            $hqIds = array_map('intval', array_column((new InventoryHqLocationServices())->locationsForAccess($hqAccess, $includeInactive), 'id'));
             if (!$storeIds && !$hqIds) throw new \InvalidArgumentException('inventory_platform_location_scope_empty');
             $query->where(function ($scope) use ($storeIds, $hqIds): void {
                 // An HQ-only platform account has no store ids by design. Do
@@ -77,7 +81,7 @@ final class InventoryPlatformWarehouseServices
 
     public function batchStock(array $adminInfo, int $locationId, string $cutoffDate): array
     {
-        $resolved = $this->resolvedLocations($adminInfo);
+        $resolved = $this->resolvedLocations($adminInfo, false, true);
         $access = $resolved['access'];
         $locations = $resolved['locations'];
         $locationIds = array_map('intval', array_column($locations, 'id'));

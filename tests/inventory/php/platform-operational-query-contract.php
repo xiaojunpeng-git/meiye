@@ -12,6 +12,7 @@ $dashboardMigration = (string)file_get_contents($root . '/后端代码/database/
 $policy = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryPlatformAccessPolicy.php');
 $hqLocations = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryHqLocationServices.php');
 $warehouse = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryPlatformWarehouseServices.php');
+$inventoryPage = (string)file_get_contents($root . '/前端代码/inventory-vue3/src/App.vue');
 $movementAnalytics = (string)file_get_contents($root . '/后端代码/app/services/product/inventory/InventoryMovementAnalyticsServices.php');
 $failed = 0;
 function platformOperationalAssert(string $name, bool $ok): void { global $failed; echo ($ok ? 'PASS ' : 'FAIL ') . $name . PHP_EOL; if (!$ok) $failed++; }
@@ -25,12 +26,25 @@ platformOperationalAssert('selected HQ location must belong to the authenticated
     && strpos($context, '所选总部仓不在当前平台库存范围内') !== false);
 platformOperationalAssert('platform store narrowing keeps the selected store id in the resolved context',
     strpos($context, "'store_id' => \$subject === 'STORE' ? \$selectedStoreId : 0") !== false);
-platformOperationalAssert('platform HQ inventory does not require a store appointment while STORE remains scope-gated',
+platformOperationalAssert('platform HQ inventory does not require a store appointment while operational STORE remains scope-gated',
     strpos($policy, '$headquartersOnly = !$isSuperAdmin && !$storeIds;') !== false
     && strpos($policy, "'headquarters_only' => \$headquartersOnly") !== false
     && strpos($context, "if (\$subject === 'STORE' && empty(\$access['is_super_admin']) && empty(\$access['store_ids']))") !== false
     && strpos($hqLocations, "empty(\$access['headquarters_only'])") !== false);
-// 原生查看或对应旧菜单都只能读取既有组织/仓库范围；兼容菜单不替代写授权前提。
+platformOperationalAssert('stock read alone derives all active stores after page authorization',
+    strpos($policy, 'function forStockRead(array $access)') !== false
+    && strpos($policy, '$this->assertQueryPage($access, InventoryBatchStockQueryContract::PAGE_CODE);') !== false
+    && strpos($policy, '$access[\'store_ids\'] = $storeIds;') !== false
+    && strpos($context, 'if ($pageCode === InventoryBatchStockQueryContract::PAGE_CODE)') !== false
+    && strpos($context, '$access = $policy->forStockRead($access);') !== false
+    && strpos($context, 'locationsForAccess($hqAccess, true)') !== false);
+platformOperationalAssert('stock store picker and legacy stock read use the same read-only scope',
+    strpos($warehouse, 'if ($stockRead) $access = $policy->forStockRead($access);') !== false
+    && strpos($warehouse, '$this->resolvedLocations($adminInfo, false, true)') !== false
+    && strpos($controller, "'stock_store_locations' => \$stockStoreLocations") !== false
+    && strpos($inventoryPage, 'platformStockStoreLocations.value = Array.isArray(response?.stock_store_locations)') !== false
+    && strpos($inventoryPage, '...platformStockStoreLocations.value.map') !== false);
+// 页面授权与写权限保持独立；库存查询单独放宽门店读取，不传播给业务单据。
 platformOperationalAssert('platform inventory view grants cost visibility within its existing scope',
     strpos($policy, '$hasNativeView = in_array(self::AUTH_VIEW, $uniqueAuth, true);') !== false
     && strpos($policy, "!\$this->hasLegacyPage(\$uniqueAuth, '*')") !== false

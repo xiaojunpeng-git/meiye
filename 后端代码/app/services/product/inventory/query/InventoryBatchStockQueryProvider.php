@@ -95,8 +95,17 @@ final class InventoryBatchStockQueryProvider
         if (count($rows) > self::MAX_SOURCE_ROWS) {
             throw new \RuntimeException('inventory_query_source_window_too_large');
         }
-        $projected = array_map(function (array $row) use ($scope, $request): array {
-            return $this->projectRow($row, $scope, $request['queryCutoffDate']);
+        // 旧库位缺少门店名称快照时，按库位的门店 ID 一次性补读当前名称；不按仓名猜门店。
+        $missingStoreIds = [];
+        foreach ($rows as $row) {
+            $storeId = (int)$row['store_id'];
+            if ($storeId > 0 && trim((string)$row['store_name']) === '') $missingStoreIds[$storeId] = $storeId;
+        }
+        $currentStoreNames = $missingStoreIds
+            ? Db::name('system_store')->whereIn('id', array_values($missingStoreIds))->column('name', 'id')
+            : [];
+        $projected = array_map(function (array $row) use ($scope, $request, $currentStoreNames): array {
+            return $this->projectRow($row, $scope, $request['queryCutoffDate'], $currentStoreNames);
         }, $rows);
         // 当前批次库存及由其派生的首页、查询、临期统计共用当前商品单位；事实数量不变。
         $projected = (new InventoryCurrentStockUnitProjection())->decorate($projected);
@@ -146,7 +155,8 @@ final class InventoryBatchStockQueryProvider
     private function projectRow(
         array $row,
         InventoryBatchStockDataScope $scope,
-        string $cutoffDate
+        string $cutoffDate,
+        array $currentStoreNames
     ): array {
         $scale = (int)$row['quantity_scale'];
         $status = (string)$row['quality_status_code'];
@@ -155,6 +165,13 @@ final class InventoryBatchStockQueryProvider
             && $expireDate !== null && $expireDate < $cutoffDate) {
             $status = InventoryBatchStockQueryContract::STATUS_EXPIRED;
         }
+        $storeId = (int)$row['store_id'];
+        $storeName = trim((string)$row['store_name']);
+        if ($storeId > 0 && $storeName === '') $storeName = trim((string)($currentStoreNames[$storeId] ?? ''));
+        // 查询、筛选与导出共用此展示名；总部仍保留真实仓名，门店不再重复显示“默认门店仓”。
+        $locationDisplayName = $storeId > 0
+            ? ($storeName !== '' ? $storeName : '门店' . $storeId)
+            : (string)$row['location_name'];
         return [
             'batch_balance_id' => (int)$row['batch_balance_id'],
             'tenant_id' => (string)$row['tenant_id'],
@@ -162,9 +179,9 @@ final class InventoryBatchStockQueryProvider
             'organization_path' => (string)$row['organization_path'],
             'organization_name' => (string)$row['organization_name'],
             'location_id' => (int)$row['location_id'],
-            'location_name' => (string)$row['location_name'],
-            'store_id' => (int)$row['store_id'],
-            'store_name' => (string)$row['store_name'],
+            'location_name' => $locationDisplayName,
+            'store_id' => $storeId,
+            'store_name' => $storeName,
             'product_id' => (int)$row['product_id'],
             'sku_id' => (int)$row['sku_id'],
             'sku_unique' => (string)$row['sku_unique'],

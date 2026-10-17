@@ -116,6 +116,20 @@ mysql_sql "$db" "
 " >/dev/null
 
 mysql_file "$db" "$query_upgrade/03-升级后验证.sql" >/dev/null
+# 开账迁移按执行当天写事实；夹具固定历史查询日，需在隔离库中固定开账业务日。
+mysql_sql "$db" "UPDATE eb_inventory_batch_movement_fact SET business_date='2026-07-29' WHERE source_type='opening_balance'" >/dev/null
+# 当前库存单位投影会只读当前商品目录；空目录表即可覆盖无匹配 SKU 时沿用事实单位的分支。
+mysql_sql "$db" "
+  CREATE TABLE eb_store_product (
+    id bigint unsigned NOT NULL PRIMARY KEY, is_del tinyint NOT NULL DEFAULT 0,
+    is_inventory tinyint NOT NULL DEFAULT 1, salon_stock_enabled tinyint NOT NULL DEFAULT 0,
+    unit_name varchar(32) NOT NULL DEFAULT ''
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  CREATE TABLE eb_store_product_attr_value (
+    id bigint unsigned NOT NULL PRIMARY KEY, product_id bigint unsigned NOT NULL,
+    type tinyint NOT NULL DEFAULT 0, stock_unit varchar(32) NOT NULL DEFAULT ''
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+" >/dev/null
 echo "FRESH_REPLAY_AND_VERIFY=PASS"
 
 partial_db="inventory_batch_query_partial"

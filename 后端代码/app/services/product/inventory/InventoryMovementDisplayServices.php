@@ -18,6 +18,7 @@ final class InventoryMovementDisplayServices
         'manual_inbound' => '手工入库', 'manual_inbound_reversal' => '手工入库作废',
         'manual_outbound' => '手工出库', 'manual_outbound_reversal' => '手工出库作废',
         'cross_transfer_in' => '调拨入库', 'cross_transfer_out' => '调拨出库',
+        'cross_transfer_withdraw' => '调拨撤回入库',
         'cross_transfer_in_reversal' => '调拨入库冲销', 'cross_transfer_out_reversal' => '调拨出库冲销',
         'batch_transfer_in' => '仓库调拨入库', 'batch_transfer_out' => '仓库调拨出库',
         'stock_count_gain' => '盘盈入库', 'stock_count_loss' => '盘亏出库',

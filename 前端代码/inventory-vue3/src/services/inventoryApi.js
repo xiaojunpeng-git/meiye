@@ -267,6 +267,7 @@ export function createInventoryApi(options = {}) {
     voidHqRequest(id, body) { return request(`/v3/hq/request/${Number(id)}/void`, { method: 'POST', body }) },
     hqProductSummary(query = {}) { return request('/v3/hq/product-summary', { query }) },
     hqProductDetail(productId, query = {}) { return request(`/v3/hq/product-summary/${Number(productId)}/detail`, { query }) },
+    storeProductDetail(productId, locationId) { return request(`/v3/store/product-summary/${Number(productId)}/detail`, { query: { location_id: Number(locationId) } }) },
     listHqCrossTransfers(query = {}) { return request('/v3/hq/cross-transfer', { query, retryTransientGateway: true }) },
     hqCrossTransferCounterparties(query = {}) { return request('/v3/hq/cross-transfer/counterparties', { query }) },
     hqCrossTransferIncomingRequests(query = {}) { return request('/v3/hq/cross-transfer/incoming-requests', { query }) },

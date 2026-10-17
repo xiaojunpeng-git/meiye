@@ -68,6 +68,9 @@ batchProviderAssert('historical snapshots are projected',
     && $openingRows[0]['batch_no'] === 'BATCH-001'
     && $openingRows[0]['received_date'] === '2026-07-20',
     json_encode($openingRows[0], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+batchProviderAssert('store stock uses its store name rather than the generic warehouse name',
+    $openingRows[0]['location_name'] === '锦江门店'
+    && $openingRows[0]['store_name'] === '锦江门店');
 
 $costScope = new InventoryBatchStockDataScope(
     'tenant-1',

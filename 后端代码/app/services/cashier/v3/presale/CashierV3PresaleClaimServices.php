@@ -227,7 +227,9 @@ final class CashierV3PresaleClaimServices
 
     public function listForPlatform(array $adminInfo, array $criteria): array
     {
-        $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
+        $policy = new InventoryPlatformAccessPolicy();
+        $writeAccess = $policy->resolve($adminInfo);
+        $access = $policy->forPresaleRead($writeAccess);
         $allowed = (array)($access['store_ids'] ?? []);
         /** @var OrganizationScopeService $organizationScope */
         $organizationScope = app()->make(OrganizationScopeService::class);
@@ -239,13 +241,20 @@ final class CashierV3PresaleClaimServices
                 max(0, (int)($criteria['store_id'] ?? 0)),
                 $allowed
             );
-        return $this->list(['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'storeIds' => $stores, 'platform' => true], $criteria);
+        $result = $this->list(['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'storeIds' => $stores, 'platform' => true], $criteria);
+        // 可查看全部有效门店，但操作按钮只显示在原账号仍有仓库管理和门店任职的行。
+        foreach ($result['list'] as &$row) {
+            $row['can_operate'] = $this->canPlatformWriteStore($writeAccess, (int)$row['store_id']);
+        }
+        unset($row);
+        return $result;
     }
 
-    /** Read-only inventory permission range for the standard organization/store picker. */
+    /** 预售页面与列表共用只读门店范围，供标准组织/门店选择器展示。 */
     public function scopeForPlatform(array $adminInfo): array
     {
-        $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
+        $policy = new InventoryPlatformAccessPolicy();
+        $access = $policy->forPresaleRead($policy->resolve($adminInfo));
         $allowed = array_values(array_unique(array_filter(array_map('intval', (array)($access['store_ids'] ?? [])))));
         /** @var OrganizationScopeService $organizationScope */
         $organizationScope = app()->make(OrganizationScopeService::class);
@@ -309,8 +318,19 @@ final class CashierV3PresaleClaimServices
 
     public function detailForPlatform(array $adminInfo, string $claimableId): array
     {
-        $access = (new InventoryPlatformAccessPolicy())->resolve($adminInfo);
-        return $this->detail(['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'storeIds' => (array)$access['store_ids'], 'platform' => true], $claimableId);
+        $policy = new InventoryPlatformAccessPolicy();
+        $writeAccess = $policy->resolve($adminInfo);
+        $access = $policy->forPresaleRead($writeAccess);
+        $detail = $this->detail(['tenantId' => CashierV3ScopeResolver::TENANT_SCOPE_ID, 'storeIds' => (array)$access['store_ids'], 'platform' => true], $claimableId);
+        $detail['can_manage'] = $this->canPlatformWriteStore($writeAccess, (int)$detail['claimable']['store_id']);
+        return $detail;
+    }
+
+    /** 只用于平台预售页面的操作呈现；正式命令仍在事务中独立重验权限和门店。 */
+    private function canPlatformWriteStore(array $access, int $storeId): bool
+    {
+        return in_array('inventory.location.manage', (array)($access['features'] ?? []), true)
+            && ($access['is_super_admin'] || in_array($storeId, (array)$access['store_ids'], true));
     }
 
     public function voidForStore(int $storeId, int $operatorId, string $claimId, array $input, array $sessionInfo = []): array
@@ -828,7 +848,7 @@ final class CashierV3PresaleClaimServices
     private function claimableProjection(array $row): array
     {
         $quantity = (int)$row['quantity']; $claimed = (int)$row['claimed_quantity'];
-        return ['claimable_line_id' => (string)$row['claimable_line_id'], 'source_kind' => (string)$row['source_kind'], 'presale_order_no' => (string)$row['source_order_no_snapshot'], 'sales_date' => (string)$row['business_date'],
+        return ['claimable_line_id' => (string)$row['claimable_line_id'], 'source_kind' => (string)$row['source_kind'], 'presale_order_no' => (string)$row['source_order_no_snapshot'], 'sales_date' => (string)$row['business_date'], 'store_id' => (int)$row['store_id'],
             'member_name' => (string)$row['member_name_snapshot'], 'member_phone' => (string)$row['member_phone_snapshot'], 'product_name' => (string)$row['product_name_snapshot'],
             'quantity' => $quantity, 'claimed_quantity' => $claimed, 'unclaimed_quantity' => max(0, $quantity - $claimed), 'claim_status' => $this->claimableDisplayStatus($row)];
     }

@@ -101,6 +101,14 @@ final class InventoryStoreReadModelServices
     {
         if ($productId <= 0) throw new \InvalidArgumentException('inventory_product_id_invalid');
         $scope = $this->scope($storeId, $operatorId, $canViewCost);
+        return $this->productDetailForScope($scope, $productId);
+    }
+
+    /** 平台端复用同一批次与流水投影；调用方须先从已授权的单一门店仓构造范围。 */
+    public function productDetailForScope(InventoryBatchStockDataScope $scope, int $productId): array
+    {
+        if ($productId <= 0) throw new \InvalidArgumentException('inventory_product_id_invalid');
+        $canViewCost = $scope->canViewCost();
         // Zero/all query results can point to exhausted products. Resolve their identity from settled
         // zero-balance facts, without creating stock from the catalog or weakening scope/reconciliation.
         $rows = array_values(array_filter($this->rowsForScope($scope, null, true), static fn(array $row): bool => (int)$row['product_id'] === $productId));
