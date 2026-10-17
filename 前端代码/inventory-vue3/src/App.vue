@@ -14,6 +14,7 @@ import InventoryOperationalUnifiedQueryToolbar from './components/InventoryOpera
 import InventoryRecipeModal from './components/InventoryRecipeModal.vue'
 import InventoryRemarkModal from './components/InventoryRemarkModal.vue'
 import InventoryStoreSelector from './components/InventoryStoreSelector.vue'
+import { formatBatchNumber } from './batchNumberDisplay'
 import { formatIntegerQuantity } from './quantityFormat'
 import { groupedDetailColumns, groupedDetailKey, groupedDisplayMoney, groupedLineCells } from './groupedDocumentRows'
 import { createDocumentDetailReader } from './documentDetailReader'
@@ -617,8 +618,9 @@ const analysisBuckets = computed(() => activeStatisticsTab.value === 'expiry'
   ? batchAnalysis.value.expiry_buckets
   : batchAnalysis.value.age_buckets)
 const analysisRows = computed(() => batchAnalysis.value.list.map((row) => activeStatisticsTab.value === 'expiry'
-  ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_no), text(row.batch_balance_quantity), text(row.expire_date), text(row.remaining_shelf_life_days), text(row.remaining_shelf_life_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
-  : [text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_no), text(row.received_date), text(row.inventory_age_days), text(row.inventory_age_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]))
+  // AUTO 批号是免录商品的内部成本层身份，只在读模型中留空；原始值继续用于追溯和库存扣减。
+  ? [text(row.product_name), text(row.sku_name), text(row.stock_unit), formatBatchNumber(row.batch_no), text(row.batch_balance_quantity), text(row.expire_date), text(row.remaining_shelf_life_days), text(row.remaining_shelf_life_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
+  : [text(row.product_name), text(row.sku_name), text(row.stock_unit), formatBatchNumber(row.batch_no), text(row.received_date), text(row.inventory_age_days), text(row.inventory_age_band), row.inventory_amount === null ? '-' : money(row.inventory_amount)]))
 const movementStatisticRows = computed(() => movementStatistics.value.list.map((row) => [
   text(row.source_type_name), text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.document_count, '0'),
   text(row.movement_count, '0'), text(row.quantity, '0'), centsMoney(row.cost_amount_cents)
@@ -1274,8 +1276,8 @@ function mapApiRow(page, row) {
     // Store headers show the saved optional recipient before the owning store; HQ columns stay unchanged.
     case 'outbound': return [text(row.order_sn), text(row.business_date), text(row.order_type_name), ...(mode.value === 'store' ? [text(row.outbound_recipient), text(row.store_name)] : [text(row.location_name)]), `${text(row.detail_count, '0')} 项`, groupedDisplayMoney(row.cost_amount_cents), inventoryStatusLabel(row.status_name, '已完成'), operationTime(row.operation_at), text(row.operator_name)]
     case 'stock': return row.available_quantity !== undefined
-      ? [...(mode.value === 'platform' ? [text(row.location_name), text(row.batch_no)] : []), text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
-      : [...(mode.value === 'platform' ? [text(row.location_name), text(row.batch_no)] : []), text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
+      ? [...(mode.value === 'platform' ? [text(row.location_name), formatBatchNumber(row.batch_no)] : []), text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.available_quantity), row.inventory_amount_cents !== undefined ? centsMoney(row.inventory_amount_cents) : money(row.inventory_amount)]
+      : [...(mode.value === 'platform' ? [text(row.location_name), formatBatchNumber(row.batch_no)] : []), text(row.product_name), text(row.sku_name), text(row.stock_unit), text(row.batch_balance_quantity), row.inventory_amount === null ? '-' : money(row.inventory_amount)]
     // 只展示该行的权威名称；缺失时留空占位，避免将仓库或当前筛选范围冒充单据门店。
     case 'count': return [text(row.order_sn), text(mode.value === 'platform' ? row.location_name || row.store_name : row.store_name), text(row.count_type || '全盘'), text(row.detail_count), centsMoney(row.change_amount_cents), text(row.count_date), countStatusName(row.status_name), operationTime(row.operation_at), text(row.operator_name)]
     case 'request': return [text(row.order_sn), text(row.request_date || row.business_date), text(row.request_party_name || row.request_store_name), text(row.supply_party_name || row.supply_store_name), text(row.detail_count), inventoryStatusLabel(row.status_name), operationTime(row.operation_at), text(row.operator_name || row.operator_name_snapshot)]
