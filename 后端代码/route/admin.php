@@ -1649,6 +1649,7 @@ Route::group('adminapi', function () {
         Route::post('scheme/update', 'v1.target.StoreTarget/schemeUpdate')->option(['real_name' => '编辑目标方案']);
         Route::post('scheme/lines', 'v1.target.StoreTarget/schemeLines')->option(['real_name' => '保存目标方案明细']);
         Route::post('scheme/activate', 'v1.target.StoreTarget/schemeActivate')->option(['real_name' => '启用目标方案']);
+        Route::post('scheme/void', 'v1.target.StoreTarget/schemeVoid')->option(['real_name' => '作废目标方案']);
         Route::get('scheme/report', 'v1.target.StoreTarget/schemeReport')->option(['real_name' => '目标方案分析']);
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
@@ -1981,6 +1982,7 @@ Route::group('adminapi', function () {
         //商品分类修改状态
         Route::put('category/set_show/:id/:is_show', 'v1.product.StoreProductCategory/set_show')->option(['real_name' => '商品分类修改状态']);
         Route::put('category/set_mobile_card_show/:id/:mobile_card_show', 'v1.product.StoreProductCategory/set_mobile_card_show')->option(['real_name' => '商品分类手机端卡包展示']);
+        Route::put('category/set_statistics_enabled/:id/:statistics_enabled', 'v1.product.StoreProductCategory/set_statistics_enabled')->option(['real_name' => '商品分类统计设置']);
         //商品分类快捷编辑
         Route::put('category/set_category/:id', 'v1.product.StoreProductCategory/set_category')->option(['real_name' => '商品分类快捷编辑']);
         //商品列表
