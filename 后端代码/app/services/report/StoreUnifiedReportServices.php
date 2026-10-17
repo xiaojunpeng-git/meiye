@@ -453,12 +453,12 @@ class StoreUnifiedReportServices extends BaseServices
             'month'=>'销售按成交日、补交按收款日、退款按退款业务日、独立服务手工费按服务日归入月份。只统计所选日期范围内的记录。',
             'division_name'=>'这家门店当前所属的分公司；没有配置时显示“未配置分公司”。',
             'store_summary'=>'本行汇总的门店名称，使用业务发生时记录的名称。不同门店分别列示。',
-            'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；同一门店、月份和分类汇总为一行。平台改分类后，历史行的分类归属会更新，金额事实不变。',
+            'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示，只纳入按现有一级、二级规则开启合作方的分类；同一门店、月份和分类汇总为一行，历史金额和合作方归属不变。',
             'experience_count'=>'查询日期内销售时记为体验的明细，按购买数量累计。例如一条体验明细购买2份，记2；不是按会员去重的人数。补交及独立服务手工费行不增加体验人次。',
-            'member_count'=>'每张原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时按收款业务日计1；同一会员同日跨单跨店只计1。跨店补交归原销售门店，跨分类原单只归达标时现金分摊最多且属于合作方的主品项；退款不改变人数资格。游客、旧导入及旧卡录入原单的补交不计，金额仍保留。',
+            'member_count'=>'每张原销售单独立累计有效现金收款，首次达到其来源的可配置门槛时按收款业务日计1；同一会员同日跨单跨店只计1。跨店补交归原销售门店，主品项仍按既有成交人数算法确定；只有主品项当前分类开启合作方才进入本表，不在合作方范围内重新挑选主品项。退款不改变人数资格；游客、旧导入及旧卡录入原单的补交不计人数，范围内金额仍保留。',
             'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交和新增的独立服务手工费行不增加此销售消耗指标。',
             'labor_amount'=>'销售明细对应的有效手艺人分配，以及没有同源销售行的独立服务分配，累计其手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
-            'sale_amount'=>'查询日期内本分类已记账的现金业绩净额；销售按成交日、补交按收款日、退款按退款日计算。独立服务手工费行不增加成交业绩。旧单能核实卡内项目但不能核实原合作方时，金额仍冲减项目分类，合作方名称留空；无法核实项目时列为未分类。',
+            'sale_amount'=>'查询日期内已开启合作方分类的现金业绩净额；销售按成交日、补交按收款日、退款按退款日计算。独立服务手工费行不增加成交业绩。旧单能核实项目及其开启的分类但不能核实原合作方时，名称留空；无法核实分类的记录不进入本表，原始金额事实不变。',
         ];
         foreach ($columns as &$column) {
             $column['source_explanation'] = $explanations[$column['key']];
@@ -478,7 +478,7 @@ class StoreUnifiedReportServices extends BaseServices
         }
         unset($column);
         return [
-            'title'=>'合作方品项汇总','metric_version'=>'partner-item-order-first-crossing-v8','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
+            'title'=>'合作方品项汇总','metric_version'=>'partner-item-enabled-category-v9','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->partnerItemSummaryRow($columns, $rows),
@@ -500,6 +500,12 @@ class StoreUnifiedReportServices extends BaseServices
     /** 只让原单达标主品项在合作方筛选范围内的人数进入汇总；补交日期不限制原销售日。 */
     private function partnerQualifyingItems(array $days, array $stores, array $input): array
     {
+        // 资格、首达标日和主品项由成交人数算法先确定；这里只裁剪报表范围，不在合作方子集内重新选主品项或去重。
+        $categoryIds = $this->partnerReportCategoryIds($stores);
+        $days = array_values(array_filter($days, static fn(array $day): bool =>
+            isset($categoryIds[(int)($day['category_id'] ?? 0)])));
+        $qualifiedItems = [];
+        foreach ($days as $day) $qualifiedItems[(string)$day['sales_order_id'] . '|' . (int)($day['item_id'] ?? 0)] = true;
         $orderIds = array_values(array_unique(array_filter(array_column($days, 'sales_order_id'))));
         if ($orderIds === []) return [];
         $allowed = [];
@@ -513,13 +519,13 @@ class StoreUnifiedReportServices extends BaseServices
                     "cc.tenant_id=c.tenant_id AND cc.store_id=c.store_id AND cc.sale_fact_id=c.sale_fact_id AND cc.card_receipt_id=c.card_receipt_id AND cc.category_id_snapshot=c.category_id_snapshot AND cc.status='effective'")
                 ->where('s.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
                 ->whereIn('s.store_id', $stores)->whereIn('s.order_id', $chunk)
-                ->where('s.status', 'effective')->where('s.fact_direction', 'forward')
-                ->whereRaw("COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot)<>''");
+                ->where('s.status', 'effective')->where('s.fact_direction', 'forward');
             $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
             $this->operationFilters($query, $input);
             foreach ($query->fieldRaw("s.order_id,CASE WHEN s.source_type='card' THEN COALESCE(c.component_product_id,0) ELSE COALESCE(d.item_id,0) END item_id")
                 ->select()->toArray() as $row) {
-                $allowed[(string)$row['order_id'] . '|' . (int)$row['item_id']] = true;
+                $key = (string)$row['order_id'] . '|' . (int)$row['item_id'];
+                if (isset($qualifiedItems[$key])) $allowed[$key] = true;
             }
         }
         return $allowed;
@@ -535,17 +541,33 @@ class StoreUnifiedReportServices extends BaseServices
     {
         $stores = $this->organizationDimensions()->narrowStoreIds(is_array($storeId) ? $storeId : [(int)$storeId], $input);
         if ($stores === []) return [];
+        $categoryIds = $this->partnerReportCategoryIds($stores);
+        if ($categoryIds === []) return [];
         $sales = $this->operationSaleQuery($stores, $range, $input)
             // 原销售活动也要固定租户，不能只给现金行做隔离而让其他实例活动污染数量。
             ->where('s.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereRaw("COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot)<>''")
             ->leftJoin('user u', 'u.uid=s.member_id')
-            ->fieldRaw("s.fact_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.store_name_snapshot AS store_name,s.order_id,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,CASE WHEN s.source_type='card' THEN COALESCE(c.component_product_id,0) ELSE COALESCE(d.item_id,0) END current_product_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(cc.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,COALESCE(d.is_experience,0) AS is_experience,s.source_line_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
+            ->fieldRaw("s.fact_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.store_name_snapshot AS store_name,s.order_id,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,CASE WHEN s.source_type='card' THEN COALESCE(c.component_product_id,0) ELSE COALESCE(d.item_id,0) END current_product_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(cc.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,COALESCE(d.is_experience,0) AS is_experience,s.source_line_id")
             ->select()->toArray();
         $this->projectSaleCategories($sales, 'current_product_id', 'category_id_snapshot', 'category_path_snapshot');
+        $sales = array_values(array_filter($sales, static fn(array $sale): bool =>
+            isset($categoryIds[(int)$sale['category_id_snapshot']])));
+        // 先裁剪分类，再批量求原销售行的有效手工费；避免逐行相关子查询因读取更多原销售而放大开销。
+        // 沿用原有有效事实求和及跨日归属，不新增日期过滤或重算分配比例。
+        $laborByLine = [];
+        foreach (array_chunk(array_values(array_unique(array_column($sales, 'source_line_id'))), 500) as $lineIds) {
+            foreach (Db::name('cashier_v3_performance_fact')
+                ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)->whereIn('store_id', $stores)
+                ->whereIn('source_line_id', $lineIds)->where('performance_type', 'labor_performance_allocated')
+                ->where('status', 'effective')->fieldRaw('store_id,source_line_id,SUM(labor_fee_amount_cents) labor_cents')
+                ->group('store_id,source_line_id')->select()->toArray() as $labor) {
+                $laborByLine[(int)$labor['store_id'] . '|' . (string)$labor['source_line_id']] = (int)$labor['labor_cents'];
+            }
+        }
         $consume = $this->metricSourceLineCategoryTotals('consume_amount', $stores, $range, $input, array_column($sales, 'source_line_id'));
         $rows = [];
         foreach ($sales as $sale) {
+            $sale['labor_amount_cents'] = $laborByLine[(int)$sale['store_id'] . '|' . (string)$sale['source_line_id']] ?? 0;
             $key = $this->partnerItemFactKey($sale);
             if (isset($rows[$key])) continue;
             $consumeKey = (string)$sale['source_line_id'] . '|' . (int)$sale['category_id_snapshot'];
@@ -563,12 +585,9 @@ class StoreUnifiedReportServices extends BaseServices
         $refundRows = $refundReader->rows($refundQuery, array_map('intval', $refundIds));
         $refundOperations = array_fill_keys(array_map('strval', array_column($refundRows, 'order_id')), true);
         $exact = trim((string)($input['category_path_exact'] ?? ''));
-        $cash = array_values(array_filter($cash, static function (array $row) use ($exact, $input): bool {
-            $historicalProjectRepayment = in_array((string)($row['product_type_snapshot'] ?? ''),
-                ['card_component', 'card_component_unnamed'], true)
-                && (int)($row['category_id'] ?? 0) > 0
-                && trim((string)($input['partner_name'] ?? '')) === '';
-            return ((string)($row['partner_name_snapshot'] ?? '') !== '' || $historicalProjectRepayment)
+        $cash = array_values(array_filter($cash, static function (array $row) use ($exact, $categoryIds): bool {
+            // 当前分类开关决定入表；历史合作方名称只供展示/显式筛选，不能替代分类开关。
+            return isset($categoryIds[(int)($row['category_id'] ?? 0)])
                 && ($exact === '' || (string)($row['category_path'] ?? '') === $exact);
         }));
         // Refund reversals already occur in the metric reader. Their operation
@@ -589,15 +608,16 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ($cash as $payment) {
             $source = $metadata[(string)($payment['sale_fact_id'] ?? '')] ?? null;
             if ($source === null && in_array((string)($payment['product_type_snapshot'] ?? ''),
-                ['card_component', 'card_component_unnamed'], true)) {
-                // Verified historical card repayments have no V3 sale fact.
-                // Their project category is known, but partner attribution is not.
+                ['card_component', 'card_component_unnamed', 'recharge'], true)) {
+                // Verified historical repayments and recharge receipts have no V3 sale fact.
+                // The Reader supplies their real document and current category; never invent a sale or partner attribution.
                 $source = [
                     'fact_id' => '', 'order_id' => (string)$payment['order_id'],
                     'order_no_snapshot' => (string)$payment['order_no_snapshot'],
                     'member_name_snapshot' => (string)$payment['member_name_snapshot'],
                     'item_name_snapshot' => (string)$payment['item_name'],
-                    'source_type' => 'supplement', 'member_phone' => '',
+                    'source_type' => (string)$payment['product_type_snapshot'] === 'recharge' ? 'recharge' : 'supplement',
+                    'member_phone' => '',
                 ];
             }
             if ($source === null) throw new \RuntimeException('合作方收款缺少原销售明细，请联系管理员核对。');
@@ -611,13 +631,12 @@ class StoreUnifiedReportServices extends BaseServices
             }
             $rows[$key]['sale_amount_cents'] += (int)$payment['amount_cents'];
         }
-        // A refund is its own dated negative business fact. Current product
-        // classification may be recovered from IDs even when a historical
-        // partner allocation cannot; the latter must remain visibly blank.
+        // A refund is its own dated negative fact. Allocate across all original
+        // categories first, then apply the final partner scope without redistributing excluded cents.
         foreach ($refundRows as $refund) {
             $categories = $refund['_current_categories'] ?? [];
-            // A missing item link still keeps the real refund visible as an
-            // unclassified adjustment; it must not disappear from cash totals.
+            // Preserve an unresolved refund while allocating; the final category
+            // gate excludes it from this report only, never from source cash facts.
             if ($categories === []) $categories = [['id' => 0, 'path' => '', 'weight_cents' => 0]];
             $amounts = self::allocateRefundCategoryCents((int)$refund['amount_cents'], $categories);
             $exactPath = trim((string)($input['category_path_exact'] ?? ''));
@@ -645,9 +664,11 @@ class StoreUnifiedReportServices extends BaseServices
         foreach ((new StorePartnerIndependentServiceFacts())->read($stores, $range, $input, $this->participantEmployeeId) as $service) {
             $rows['service:' . (string)$service['fact_id']] = $service;
         }
-        $rows = array_values($rows);
+        // 最终闸门覆盖销售、补交、退款及独立服务；分页、合计、下钻和导出都只能消费这一行集。
+        $rows = array_values(array_filter($rows, static fn(array $row): bool =>
+            isset($categoryIds[(int)($row['category_id_snapshot'] ?? 0)])));
         // 历史补交可能能核实项目分类，却没有原合作方快照。统一行集显式保留空值，
-        // 让汇总、明细及导出共享完整契约；不得猜测合作方或丢弃对应收款事实。
+        // 让范围内的汇总、明细及导出共享完整契约；不得猜测合作方或改写对应收款事实。
         foreach ($rows as &$row) {
             $row['partner_name_snapshot'] = (string)($row['partner_name_snapshot'] ?? '');
         }
@@ -750,7 +771,7 @@ class StoreUnifiedReportServices extends BaseServices
             ['key'=>'member_count','label'=>'成交人数','source_explanation'=>'同一会员同日跨单跨店只列一次，原单只在首次达标日计1。','value_type'=>'integer'],
         ], ['business_date'=>104,'store_name'=>132,'member_name'=>105,'order_no'=>175,'item_name'=>180,'category_path'=>220]);
         return [
-            'title'=>'合作方成交人数明细', 'metric_version'=>'partner-item-order-first-crossing-v8',
+            'title'=>'合作方成交人数明细', 'metric_version'=>'partner-item-enabled-category-v9',
             'columns'=>$columns,
             'records'=>!empty($input['_internal_all']) ? $records : array_slice(
                 $records, ($this->page($input)-1)*$this->limit($input), $this->limit($input)),
@@ -790,10 +811,10 @@ class StoreUnifiedReportServices extends BaseServices
             'store_name_snapshot'=>'销售或独立服务发生门店的业务快照名称。',
             'member_name_snapshot'=>'销售或独立服务事实中的会员姓名快照。',
             'member_phone'=>'会员档案中当前保存的手机号；没有手机号时显示“-”。',
-            'order_no_snapshot'=>'成交及补交显示原销售单号；退款显示独立退款单号；独立服务显示服务记录号。',
+            'order_no_snapshot'=>'可关联原销售的成交及补交显示原销售单号；充值及充值补交显示对应收款单号；退款显示独立退款单号；独立服务显示服务记录号。',
             'original_sale_no'=>'退款对应的原销售单号；无法核实原单时留空。',
-            'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；平台改分类后，历史行的分类归属随之更新。',
-            'business_date'=>'销售显示成交日期，补交显示补交收款日期，退款显示退款业务日期，独立服务显示服务日期。',
+            'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示，只纳入按现有一级、二级规则开启合作方的分类；分类或开关变化后，报表范围随之更新，不改写历史金额和合作方归属。',
+            'business_date'=>'销售显示成交日期，充值及补交显示收款日期，退款显示退款业务日期，独立服务显示服务日期。',
             'experience_project'=>'销售或独立服务事实中记为体验的项目显示“是”，其余显示“否”；补交欠款不重复计为体验。',
             'medical_elevation'=>'人工填写的复诊信息，系统不自动判断；未填写时显示“-”。',
             'medical_followup'=>'人工填写的业务类型，系统不自动分类；未填写时显示“-”。',
@@ -812,7 +833,7 @@ class StoreUnifiedReportServices extends BaseServices
         }
         unset($column);
         return [
-            'title'=>'合作方品项明细','metric_version'=>'partner-item-current-category-v6','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
+            'title'=>'合作方品项明细','metric_version'=>'partner-item-enabled-category-v9','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, [
@@ -2662,6 +2683,28 @@ class StoreUnifiedReportServices extends BaseServices
         // Each customer instance has one database tenant.  Header configuration
         // must be available even before the selected store has any V3 facts.
         return [CashierV3ScopeResolver::TENANT_SCOPE_ID];
+    }
+
+    /**
+     * 合作方报表的当前分类范围，复用既有一级/二级开关规则并按真实分类 ID 纳入后代。
+     * 只裁剪读模型，不重算历史分成、不改写事实；无配置或不可核实分类时不入表。
+     * 不跨请求缓存，避免常驻进程在分类开关修改后继续使用旧范围。
+     * @return array<int,bool>
+     */
+    private function partnerReportCategoryIds($storeId): array
+    {
+        $enabled = array_fill_keys(array_column($this->partnerPerformanceDefinitions($storeId), 'category_id'), true);
+        if ($enabled === []) return [];
+        $tree = [];
+        foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name')->select()->toArray() as $node) $tree[(int)$node['id']] = $node;
+        $allowed = [];
+        foreach (array_keys($tree) as $id) {
+            foreach ($this->partnerCategoryChain($id, $tree) as $ancestor) {
+                if (isset($enabled[(int)$ancestor['id']])) { $allowed[$id] = true; break; }
+            }
+        }
+        return $allowed;
     }
 
     /** @return array<int,array> root first */

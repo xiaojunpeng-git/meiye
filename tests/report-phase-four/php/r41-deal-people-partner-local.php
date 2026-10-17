@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-/** 只在本机开发库临时赋予样本单合作方归属，验证人数汇总/明细/导出后回滚。 */
+/** R87 后以当前开启分类限定样本；只读验证既有原单达标算法与人数汇总/下钻/导出。 */
 $backend = getenv('BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
 require rtrim($backend, '/\\') . '/vendor/autoload.php';
 
@@ -17,31 +17,27 @@ if (getenv('R41_DEAL_PEOPLE_LOCAL_TEST') !== '1'
     throw new RuntimeException('需要显式指定本机瑞昊开发库');
 }
 $range = ['start' => '2026-10-01', 'end' => '2026-10-17'];
+$report = new StoreUnifiedReportServices();
+$scopeMethod = new ReflectionMethod($report, 'partnerReportCategoryIds');
+$scopeMethod->setAccessible(true);
+$allowed = $scopeMethod->invoke($report, [41, 108]);
 $events = (new StoreDealPeopleQualificationServices())->qualifiedDays([41, 108], $range);
 $sample = null;
 foreach ($events as $event) {
-    if ((int)($event['item_id'] ?? 0) > 0 && (string)($event['category_path'] ?? '') !== '') {
+    if ((int)($event['item_id'] ?? 0) > 0 && isset($allowed[(int)($event['category_id'] ?? 0)])) {
         $sample = $event;
         break;
     }
 }
 if ($sample === null) throw new RuntimeException('本机样本缺少可核实商品的达标原单');
-$saleFactIds = Db::name('cashier_v3_sale_fact')->alias('s')
-    ->join('cashier_v3_card_sale_item_allocation_fact c',
-        "c.tenant_id=s.tenant_id AND c.store_id=s.store_id AND c.sale_fact_id=s.fact_id AND c.status='effective'")
-    ->where('s.order_id', (string)$sample['sales_order_id'])
-    ->where('s.store_id', (int)$sample['store_id'])
-    ->where('c.component_product_id', (int)$sample['item_id'])
-    ->column('s.fact_id');
-if ($saleFactIds === []) throw new RuntimeException('本机样本缺少可核实的卡项明细');
-
+Db::execute('SET TRANSACTION READ ONLY');
 Db::startTrans();
 try {
-    $changed = Db::name('cashier_v3_card_sale_category_allocation_fact')
-        ->whereIn('sale_fact_id', array_values(array_unique($saleFactIds)))
-        ->where('status', 'effective')->update(['partner_name_snapshot' => 'R41本机事务测试']);
-    if ($changed < 1) throw new RuntimeException('本机样本缺少可切换的合作方分类事实');
     $date = (string)$sample['business_date'];
+    $expected = array_values(array_filter((new StoreDealPeopleQualificationServices())->qualifiedDays(
+        [(int)$sample['store_id']], ['start'=>$date, 'end'=>$date]),
+        static fn(array $event): bool => (string)$event['category_path'] === (string)$sample['category_path']));
+    if ($expected === []) throw new RuntimeException('本机样本缺少可核实的开启分类达标原单');
     $input = ['report' => 'partner_item_summary', 'start_date' => $date, 'end_date' => $date];
     $report = new StoreUnifiedReportServices();
     $summary = $report->query([(int)$sample['store_id']], $input);
@@ -52,7 +48,7 @@ try {
             $count += (int)$row['member_count'];
         }
     }
-    if ($count !== 1 || $export['summary_row']['member_count'] !== $summary['summary_row']['member_count']) {
+    if ($count !== count($expected) || $export['summary_row']['member_count'] !== $summary['summary_row']['member_count']) {
         throw new RuntimeException('合作方分类汇总和导出未按唯一达标原单计数');
     }
     $detail = $report->query([(int)$sample['store_id']], [
@@ -60,8 +56,10 @@ try {
         'category_path_exact' => (string)$sample['category_path'],
         'start_date' => $date, 'end_date' => $date,
     ]);
-    if ((int)$detail['total'] !== 1 || (int)$detail['summary_row']['member_count'] !== 1
-        || (string)$detail['records'][0]['order_no'] !== (string)$sample['order_no_snapshot']) {
+    $actualOrders = array_column($detail['records'], 'order_no'); sort($actualOrders);
+    $expectedOrders = array_column($expected, 'order_no_snapshot'); sort($expectedOrders);
+    if ((int)$detail['total'] !== count($expected) || (int)$detail['summary_row']['member_count'] !== count($expected)
+        || $actualOrders !== $expectedOrders) {
         throw new RuntimeException('合作方人数下钻与汇总未对齐原销售单');
     }
     echo "PASS R41 partner summary, detail and export\n";
