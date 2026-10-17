@@ -95,9 +95,10 @@ class UnifiedReport extends AuthController
     }
     private function inputRules(): array
     {
+        // 仅透传统一固定列筛选，字段白名单和统计后裁剪由报表服务负责。
         // Exact path only narrows a grouped report drilldown; free category search keeps its prefix semantics.
         // 薪资单号筛选及分类/指标下钻使用服务端列键和稳定 ID，门店权限仍二次裁剪。
-        return [['report','partner_item_summary'],['start_date',''],['end_date',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['category_path_exact',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['day_of_month',0],['employee_name',''],['document_no',''],['salary_employee_id',0],['salary_store_id',0],['salary_category_key',''],['salary_metric_key',''],['page',1],['limit',20]];
+        return [['report','partner_item_summary'],['start_date',''],['end_date',''],['row_filters',''],['dataset','sale'],['metric','cash_performance'],['item_id',''],['payment_method',''],['operator_id',0],['channel_id',0],['customer_segment','all'],['consumption_metric','cash'],['sleep_months',3],['year',0],['category_id',0],['category_path',''],['category_path_exact',''],['product_type',''],['partner_name',''],['salesperson_id',0],['sales_manager_id',0],['guide_id',0],['craftsman_id',0],['day_of_month',0],['employee_name',''],['document_no',''],['salary_employee_id',0],['salary_store_id',0],['salary_category_key',''],['salary_metric_key',''],['page',1],['limit',20]];
     }
 
     private function isPlatformOnlyReport(string $report): bool

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 $backendRoot = getenv('CASHIER_V3_BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
+require $backendRoot . '/app/services/report/StoreReportGuestDisplayServices.php';
 require $backendRoot . '/app/services/report/StoreReportResultRowFilterServices.php';
 
 use app\services\report\StoreReportResultRowFilterServices;
@@ -40,6 +41,25 @@ checkResultRowFilter(array_column($filter([$condition('month','eq','2026-10')]),
 checkResultRowFilter(array_column($filter([$condition('store_summary','contains','扬州')]), 'hidden_id') === [1,2], 'text contains uses displayed column');
 checkResultRowFilter(array_column($filter([$condition('month','eq','2026-10'), $condition('store_summary','contains','扬州')]), 'hidden_id') === [2], 'conditions combine with AND');
 checkResultRowFilter($rows[1]['sale_amount'] === '2086', 'source rows remain unchanged');
+
+// Guest display and fixed-field filtering must agree without changing source rows.
+$guestColumns = StoreReportResultRowFilterServices::declareDimensions([
+    ['key'=>'member_name'], ['key'=>'customer_name'],
+], ['member_name','customer_name']);
+$guestRows = [
+    ['member_id'=>0,'member_name'=>'','customer_name'=>'旧游客姓名','amount'=>100],
+    ['member_id'=>'0','member_name'=>'历史姓名','customer_name'=>'','amount'=>200],
+    ['member_id'=>42,'member_name'=>'张女士','customer_name'=>'张女士','amount'=>300],
+    ['member_id'=>null,'member_name'=>'','customer_name'=>'','amount'=>400],
+    ['member_name'=>'','customer_name'=>'','amount'=>500],
+];
+foreach (['member_name','customer_name'] as $nameKey) {
+    $matchedGuests = StoreReportResultRowFilterServices::filter($guestRows, $guestColumns,
+        json_encode([$condition($nameKey,'contains','游客')], JSON_UNESCAPED_UNICODE));
+    checkResultRowFilter($matchedGuests === array_slice($guestRows, 0, 2), $nameKey . ' matches visible guests and preserves original identities and amounts');
+}
+checkResultRowFilter(StoreReportResultRowFilterServices::filter($guestRows, $guestColumns,
+    json_encode([$condition('member_name','contains','历史姓名')], JSON_UNESCAPED_UNICODE)) === [], 'hidden guest snapshot does not match visible-name filter');
 
 foreach ([
     [$condition('hidden_id','eq','1'), 'hidden identifier'],

@@ -404,12 +404,13 @@ const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => i
 const isPhaseSixReport = computed(() => PHASE_SIX_REPORT_CODES.includes(activeReport.value))
 const usesNaturalMonthFilter = computed(() => ['six_dimension_performance_distribution', 'operations_beauty_item'].includes(activeReport.value))
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
-// 门店数据报表只展示后端声明的静态固定维度，不能根据显示值猜测统计字段。
-const resultFilterColumns = computed(() => !isPlatformRuntimeRoute() && STORE_REPORT_TABS.some((tab) => tab.code === activeReport.value)
+// 两端共有报表只展示后端声明的静态固定维度；平台组织范围仍由原权限控件控制。
+const isSharedStoreReport = computed(() => STORE_REPORT_TABS.some((tab) => tab.code === activeReport.value))
+const resultFilterColumns = computed(() => isSharedStoreReport.value
   ? columns.value.filter((column) => ['month', 'text'].includes(column?.filter?.type))
   : [])
 function encodedResultFilters() {
-  if (isPlatformRuntimeRoute() || !STORE_REPORT_TABS.some((tab) => tab.code === activeReport.value)) return ''
+  if (!isSharedStoreReport.value) return ''
   // 深链首次加载时列元数据尚未返回；服务端仍按当前报表的声明字段校验。
   const conditions = Object.entries(resultRowFilters.value).flatMap(([key, raw]) => {
     const value = String(raw ?? '').trim()
@@ -1953,7 +1954,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
         <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
       </template>
-      <label v-for="field in isPlatformReport ? filterSchema : []" :key="field.key">
+      <label v-for="field in isPlatformReport && !isSharedStoreReport ? filterSchema : []" :key="field.key">
         <!-- 报表可隐藏重复的可见标题，输入控件仍通过 aria-label 保留可访问语义。 -->
         <span v-if="field.show_label !== false">{{ field.label || field.name || field.key }}</span>
         <select v-if="['select', 'category_tree'].includes(field.type)" v-model="dynamicFilters[field.key]">

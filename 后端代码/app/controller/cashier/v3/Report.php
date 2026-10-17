@@ -186,8 +186,9 @@ class Report extends AuthController
 
     private function inputRules(): array
     {
+        // 结果行筛选仅缩小已授权报表结果，不能替代门店权限或改变事实聚合。
         return [
-            ['report', 'partner_item_summary'], ['start_date', ''], ['end_date', ''], ['format', ''],
+            ['report', 'partner_item_summary'], ['start_date', ''], ['end_date', ''], ['format', ''], ['row_filters', ''],
             ['dataset', 'sale'], ['metric', 'cash_performance'],
             // Operations popups share server-validated metric and row keys
             // with the platform report; these values cannot expand store scope.

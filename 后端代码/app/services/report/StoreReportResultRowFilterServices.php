@@ -80,12 +80,18 @@ final class StoreReportResultRowFilterServices
         }
         if ($compiled === []) return $rows;
 
-        return array_values(array_filter($rows, static function (array $row) use ($compiled): bool {
+        // Match the same guest name shown by query/export, while returning original
+        // rows so identity keys, historical snapshots and metric inputs stay intact.
+        $visibleRows = StoreReportGuestDisplayServices::project([
+            'columns' => array_map(static fn(array $condition): array => ['key' => $condition[0]], $compiled),
+            'records' => $rows,
+        ])['records'];
+        return array_values(array_filter($rows, static function (array $row, $index) use ($compiled, $visibleRows): bool {
             foreach ($compiled as [$key, $operator, $type, $value]) {
-                if (!self::matches($row[$key] ?? null, $operator, $type, $value)) return false;
+                if (!self::matches($visibleRows[$index][$key] ?? null, $operator, $type, $value)) return false;
             }
             return true;
-        }));
+        }, ARRAY_FILTER_USE_BOTH));
     }
 
     /** Validate a visible fixed-dimension value, never a fact amount. */
