@@ -1027,6 +1027,12 @@
               </RadioGroup>
               <div class="card-rule-summary" v-if="cardRuleSummary">{{ cardRuleSummary }}</div>
             </FormItem>
+            <FormItem v-if="formData.product_type == 5" label="统计类型：" key="card_statistics_type">
+              <RadioGroup v-model="formData.card_statistics_type">
+                <Radio :label="0">普通卡</Radio>
+                <Radio :label="1">体验卡</Radio>
+              </RadioGroup>
+            </FormItem>
             <FormItem v-if="formData.product_type == 5" label="图片：" required>
               <div class="pictrueBox inline-block" @click="attrPicTap()">
                 <div class="pictrue" v-if="formData.attr.pic">
@@ -4069,6 +4075,8 @@ export default {
       this.$set(formData, 'card_num', this.formData.card_num);
       this.$set(formData, 'card_num_type', this.formData.card_num_type);
       this.$set(formData, 'card_rule_type', this.formData.card_rule_type);
+      // 统计类型是卡项商品配置值，独立于卡项规则；编辑和复制均保留所选值。
+      this.$set(formData, 'card_statistics_type', Number(this.formData.card_statistics_type));
       this.$set(formData, 'card_rule_version', this.formData.card_rule_version || 0);
       this.$set(formData, 'card_choice_limit', this.formData.card_choice_limit || 0);
       this.$set(formData, 'card_shared_times', this.formData.card_shared_times || 0);

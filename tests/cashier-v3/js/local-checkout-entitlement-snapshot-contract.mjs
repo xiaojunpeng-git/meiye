@@ -44,6 +44,31 @@ assert.equal(guard({ lines: [
   benefit('a', 1, 1),
   benefit('b', 12, 12, { entitlementSourceDetailId: 'detail-2' })
 ] }), null)
+// 任选次数卡的不同项目共享同一张卡的 2 次；两项可用，第三项必须阻止。
+const shared = (id, detailId, groupNo = 0, overrides = {}) => benefit(id, 1, 2, {
+  entitlementSourceDetailId: detailId,
+  projectId: `project-${detailId}`,
+  amountCalculationVersion: 'shared-card-purchase-amount-whole-yuan-floor-final-remainder-v1',
+  displaySnapshot: { combinationGroupNo: groupNo },
+  ...overrides
+})
+assert.equal(guard({ lines: [shared('a', 'detail-1'), shared('b', 'detail-2')] }), null)
+assert.deepEqual(guard({ lines: [
+  shared('a', 'detail-1'), shared('b', 'detail-2'), shared('c', 'detail-3')
+] }), {
+  code: 'CHECKOUT_ENTITLEMENT_TIMES_EXCEEDED',
+  message: '卡号 Z003S6Z 的共享项目当前剩余可用 2 次，本次已选择 3 次，超出 1 次，请调整后再结账。'
+})
+assert.match(guard({ lines: [
+  shared('a', 'detail-1'),
+  shared('b', 'detail-2', 0, { availableTimes: 1 })
+] })?.message || '', /共享项目当前剩余可用 1 次，本次已选择 2 次/)
+// 组合卡各组独立，替换生成的独立权益也不占原共享池。
+assert.equal(guard({ lines: [shared('a', 'detail-1', 1), shared('b', 'detail-2', 1), shared('c', 'detail-3', 2)] }), null)
+assert.equal(guard({ lines: [
+  shared('a', 'detail-1'), shared('b', 'detail-2'),
+  benefit('c', 1, 1, { entitlementSourceDetailId: 'replacement', projectId: 'replacement' })
+] }), null)
 assert.match(guard({ lines: [benefit('gift', 2, 1, {
   entitlementInstanceType: 'independent_gift', fullCardNo: '',
   sourceCodeSnapshot: 'GIFT-01'

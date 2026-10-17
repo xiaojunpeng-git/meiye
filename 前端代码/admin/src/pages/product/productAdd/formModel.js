@@ -8,6 +8,7 @@ export const defaultObj = {
   card_num: 0,
   card_num_type: 0,
   card_rule_type: 'normal',
+  card_statistics_type: 0, // 卡项统计类型：0 普通卡、1 体验卡；目前仅保存配置。
   card_rule_version: 0,
   card_choice_limit: 0,
   card_shared_times: 0,

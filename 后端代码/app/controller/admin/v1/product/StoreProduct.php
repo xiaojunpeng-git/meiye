@@ -598,6 +598,7 @@ class StoreProduct extends AuthController
             ['card_num', 0],
             ['card_num_type', 0],
             ['card_rule_type', ''],
+            ['card_statistics_type', null],//卡项统计类型：0普通卡、1体验卡；缺省由服务层保留旧值
             ['card_rule_version', 0],
             ['card_choice_limit', 0],
             ['card_shared_times', 0],

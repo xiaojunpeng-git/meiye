@@ -54,7 +54,7 @@ const cashierToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai
 const keyword = ref('')
 // 游客开单优先展示项目；选中会员后切回卡项，便于先办理会员卡。
 // 实际目录仍由后端按当前门店权限返回。
-const preferredCatalogTypeOrder = ['卡项', '定制卡', '产品', '项目']
+const preferredCatalogTypeOrder = ['卡项', '定制卡', '项目', '产品']
 const selectedType = ref('项目')
 const selectedCategory = ref('')
 const areCategoriesExpanded = ref(false)
@@ -456,6 +456,12 @@ const productTypes = computed(() => {
   const other = available.filter((type) => !preferredCatalogTypeOrder.includes(type))
   return [...known, ...other]
 })
+function catalogTypeDisplayLabel(type) {
+  // 仅替换收银筛选按钮的用户名称；目录类型仍用后端原值筛选和办理业务。
+  if (type === '卡项') return '疗程卡'
+  if (type === '项目') return '单次项目'
+  return type
+}
 const categories = computed(() => [
   '全部',
   ...(Array.isArray(catalog.value.categories) ? catalog.value.categories : [])
@@ -5342,8 +5348,8 @@ function entitlementLineMaximum(line = {}) {
 }
 
 function localCheckoutEntitlementAvailabilityFailure(snapshot = {}) {
-  // “立即结账”只可使用已经展示在本页的权益快照。按卡、权益明细和项目
-  // 汇总数量，避免同一权益被拆成多行后绕过当前页面的可用次数。
+  // “立即结账”只可使用已经展示在本页的权益快照。任选次数卡按整卡或
+  // 组合组共享一池；普通卡和独立替换项目仍按具体权益明细计次。
   // 这里绝不重新读取权益，也不向服务端发起校验请求；最终确认收款仍由同一
   // 快照随唯一的 submit-checkout 命令进入结算事务。
   const usageBySource = new Map()
@@ -5353,29 +5359,43 @@ function localCheckoutEntitlementAvailabilityFailure(snapshot = {}) {
     const holderId = String(line.entitlementInstanceId || line.cardHolderId || '').trim()
     const detailId = String(line.entitlementSourceDetailId || line.memberBenefitPoolId || '').trim()
     const projectId = String(line.projectId || '').trim()
+    const calculationVersion = String(line.amountCalculationVersion || line.displaySnapshot?.amountCalculationVersion || '')
+    const sharedPool = calculationVersion.startsWith('shared-card-purchase-amount-')
+    const groupNo = Number(line.combinationGroupNo ?? line.displaySnapshot?.combinationGroupNo ?? 0)
     const availableTimes = Math.floor(Number(line.availableTimes))
     const quantity = Math.floor(Number(line.quantity || 0))
-    if (!holderId || !detailId || !projectId || !Number.isInteger(availableTimes) || availableTimes < 0 || quantity < 1) {
+    if (!holderId || !detailId || !projectId || (sharedPool && (!Number.isInteger(groupNo) || groupNo < 0))
+      || !Number.isInteger(availableTimes) || availableTimes < 0 || quantity < 1) {
       return {
         code: 'CHECKOUT_ENTITLEMENT_SNAPSHOT_INCOMPLETE',
         message: '当前页面的权益快照不完整，请返回购物车重新选择权益。'
       }
     }
-    const key = `${line.entitlementInstanceType || 'card_holder'}:${holderId}:${detailId}:${projectId}`
+    // 每个共享项目都展示相同的整卡可用次数，不能把三条不同项目各当作
+    // 独立的 2 次。独立替换权益即使同卡号，也不得并入原共享池。
+    const key = JSON.stringify(sharedPool
+      ? [line.entitlementInstanceType || 'card_holder', holderId, 'shared', groupNo]
+      : [line.entitlementInstanceType || 'card_holder', holderId, detailId, projectId])
     const current = usageBySource.get(key) || {
       availableTimes,
+      availableByDetail: new Map(),
       quantity: 0,
+      sharedPool,
       sourceLabel: String(line.entitlementInstanceType || 'card_holder') === 'independent_gift' ? '赠送记录' : '卡号',
       sourceCode: '',
       projectName: ''
     }
-    // 同一权益在本次快照中的可用次数必须一致；不接受混合不同投影的数据。
-    if (current.availableTimes !== availableTimes) {
+    // 同一明细不能带两份不同投影。共享卡跨明细可能因各自占用而显示
+    // 不同可用数，采用其中较小值作为页面前置上限，最终仍以事务复核。
+    if ((current.availableByDetail.has(detailId) && current.availableByDetail.get(detailId) !== availableTimes)
+      || (!sharedPool && current.availableTimes !== availableTimes)) {
       return {
         code: 'CHECKOUT_ENTITLEMENT_SNAPSHOT_INCONSISTENT',
         message: '当前页面的权益快照不一致，请返回购物车重新选择权益。'
       }
     }
+    current.availableByDetail.set(detailId, availableTimes)
+    if (sharedPool) current.availableTimes = Math.min(current.availableTimes, availableTimes)
     // The rejected source must be identifiable without another lookup; labels
     // come from the same immutable checkout row snapshot as its available count.
     if (!current.sourceCode) {
@@ -5391,7 +5411,7 @@ function localCheckoutEntitlementAvailabilityFailure(snapshot = {}) {
     if (source.quantity > source.availableTimes) {
       return {
         code: 'CHECKOUT_ENTITLEMENT_TIMES_EXCEEDED',
-        message: `${source.sourceLabel} ${source.sourceCode || '未载入'} 的项目「${source.projectName || '未命名项目'}」当前剩余可用 ${source.availableTimes} 次，本次已选择 ${source.quantity} 次，超出 ${source.quantity - source.availableTimes} 次，请调整后再结账。`
+        message: `${source.sourceLabel} ${source.sourceCode || '未载入'} 的${source.sharedPool ? '共享项目' : `项目「${source.projectName || '未命名项目'}」`}当前剩余可用 ${source.availableTimes} 次，本次已选择 ${source.quantity} 次，超出 ${source.quantity - source.availableTimes} 次，请调整后再结账。`
       }
     }
   }
@@ -7781,7 +7801,7 @@ onBeforeUnmount(() => {
               :class="{ 'filter-chip--active': selectedType === type }"
               @click="selectCatalogType(type)"
             >
-              {{ type }}
+              {{ catalogTypeDisplayLabel(type) }}
             </button>
             <button
               v-if="isAwaitingCustomCardUpgradeTarget && isCustomCardEntryVisible"

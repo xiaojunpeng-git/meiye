@@ -330,6 +330,10 @@ class StoreProductServices extends BaseServices
      */
     public function setShow(array $ids, int $is_show)
     {
+        // The balance project is a reporting identity, never a sellable catalog item.
+        if ($is_show && in_array((new SystemBalanceProjectServices())->productId(), $ids, true)) {
+            throw new AdminException('系统余额项目不能上架');
+        }
         $storeProductIds = $this->dao->getColumn(['pid' => $ids], 'id');
         /** @var StoreCatalogWriteLockGuard $catalogGuard */
         $catalogGuard = app()->make(StoreCatalogWriteLockGuard::class);
@@ -343,6 +347,9 @@ class StoreProductServices extends BaseServices
 
     public function setShowInGuard(StoreCatalogWriteLease $catalogLease, array $ids, int $is_show)
     {
+        if ($is_show && in_array((new SystemBalanceProjectServices())->productId(), $ids, true)) {
+            throw new AdminException('系统余额项目不能上架');
+        }
         if ($is_show == 0) {
             //下架检测是否有参与活动商品
 //            $this->checkActivity($ids);
@@ -393,6 +400,9 @@ class StoreProductServices extends BaseServices
      */
     public function setBatchShow(array $ids, int $is_show, $redisKey, $queueId)
     {
+        if ($is_show && in_array((new SystemBalanceProjectServices())->productId(), $ids, true)) {
+            throw new AdminException('系统余额项目不能上架');
+        }
         $res = $this->dao->batchUpdate($ids, ['is_show' => $is_show]);
         /** @var StoreProductRelationServices $storeProductRelationServices */
         $storeProductRelationServices = app()->make(StoreProductRelationServices::class);
@@ -529,6 +539,11 @@ class StoreProductServices extends BaseServices
         $productInfo = $this->dao->get($id, ['*'], ['coupons']);
         if ($productInfo) $productInfo = $productInfo->toArray();
         else throw new ValidateException('商品不存在');
+        // 单选项使用数字标签，编辑回显必须返回数值而不是驱动返回的字符串。
+        $productInfo['card_statistics_type'] = (int)($productInfo['card_statistics_type'] ?? 0);
+        // 系统业务身份由独立绑定表决定，管理端只用它展示受限的分类编辑界面。
+        $productInfo['system_business_key'] = (new SystemBalanceProjectServices())->isProtected($id)
+            ? SystemBalanceProjectServices::KEY : '';
 //        $data['tempList'] = $this->getTemp((int)$productInfo['type'], (int)$productInfo['relation_id']);
 //        $data['cateList'] = $storeCatecoryService->cascaderList();
         $productInfo['sale_time_data'] = $productInfo['reservation_times'] = [];
@@ -1093,7 +1108,33 @@ class StoreProductServices extends BaseServices
      */
     public function saveData(int $id, array $data, int $type = 0, int $relation_id = 0, int $adminId = 0)
     {
+        if ($id > 0 && (new SystemBalanceProjectServices())->isProtected($id)) {
+            // The ordinary edit form carries SKU, price and sale fields. Accept only
+            // the selected platform category so they cannot turn this identity into a sale.
+            $categoryIds = array_values(array_unique(array_map('intval', (array)($data['cate_id'] ?? []))));
+            // One system project maps to one report category; multiple IDs would make grouping ambiguous.
+            if (count($categoryIds) !== 1 || in_array(0, $categoryIds, true)) throw new AdminException('系统余额项目只能选择一个商品分类');
+            $validCount = Db::name('store_product_category')->whereIn('id', $categoryIds)
+                ->where('type', 0)->where('relation_id', 0)->count();
+            if ($validCount !== count($categoryIds)) throw new AdminException('系统余额项目只能选择平台商品分类');
+            Db::name('store_product')->where('id', $id)->update(['cate_id' => implode(',', $categoryIds)]);
+            $this->dao->cacheTag()->clear();
+            return ['product_id' => $id, 'duplicated' => false];
+        }
         $productType = (int)($data['product_type'] ?? 0);
+        // 统计类型只记录卡项商品配置，不改变已售卡权益与统计事实。
+        // 旧客户端编辑不带字段时保留既有值；新卡和历史卡默认普通卡。
+        if ($productType === 5) {
+            $statisticsType = $data['card_statistics_type'] ?? ($id > 0
+                ? Db::name('store_product')->where('id', $id)->value('card_statistics_type') : 0);
+            if (!in_array($statisticsType, [0, 1, '0', '1'], true)) {
+                throw new AdminException('卡项统计类型不正确');
+            }
+            $data['card_statistics_type'] = (int)$statisticsType;
+        } else {
+            // 非卡项商品不受这一新字段的输入影响，也不能被标记为体验卡。
+            $data['card_statistics_type'] = 0;
+        }
         // 旧客户端编辑时不清除既有配置；非卡项不能携带欠款核销策略。
         $debtWriteoffSetting = $data['block_writeoff_on_debt'] ?? ($id > 0
             ? Db::name('store_product')->where('id', $id)->value('block_writeoff_on_debt') : 0);
@@ -1764,6 +1805,7 @@ class StoreProductServices extends BaseServices
     public function del(int $id, bool $is_batch = false, int $is_del = 0)
     {
         if (!$id) throw new AdminException('参数不正确');
+        if ((new SystemBalanceProjectServices())->isProtected($id)) throw new AdminException('系统余额项目不能删除');
         $productInfo = $this->dao->get($id);
         if (!$productInfo) throw new AdminException('商品数据不存在');
         $msg = '';
@@ -1849,6 +1891,7 @@ class StoreProductServices extends BaseServices
     public function delProduct(int $id)
     {
         if (!$id) throw new AdminException('参数不正确');
+        if ((new SystemBalanceProjectServices())->isProtected($id)) throw new AdminException('系统余额项目不能删除');
         $productInfo = $this->dao->get($id);
         if (!$productInfo) throw new AdminException('商品数据不存在');
         //查询门店商品
