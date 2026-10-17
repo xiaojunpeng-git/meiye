@@ -19,7 +19,7 @@ use think\facade\Db;
 final class MemberManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'member_management_dashboard';
-    public const METRIC_VERSION = 'member-management-dashboard-actual-v6';
+    public const METRIC_VERSION = 'member-management-dashboard-actual-v7';
 
     /** @return array<string,mixed> */
     public function dashboard(array $context, array $input = []): array
@@ -31,15 +31,25 @@ final class MemberManagementDashboardServices
         $services = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryId);
         $historicalServices = $this->historicalServiceLastRows($scope['tenant_id'], $scope['store_ids'], $range['end'], $categoryId);
 
-        $consuming = $this->memberSet($cash, true);
+        $consuming = $this->memberSet($cash);
         $serviceMembers = $this->memberSet($services);
         $sleeping = $this->sleepingMembers(StoreCustomerVisitEligibility::filter($historicalServices), $range['end'], 90);
         $cashAmount = $this->sum($cash, 'amount_cents');
+        // Consumption and the main tier table count the same unique subjects:
+        // a member ID or, where no member exists, one traceable guest order.
+        $tierRows = $this->tiers($cash, $scope['tenant_id']);
+        $tierTotals = [
+            'member' => $this->tierTotal($tierRows['member']),
+            'new_customer' => $this->tierTotal($tierRows['new_customer']),
+        ];
+        if ($tierTotals['member']['amount_cents'] !== $cashAmount) {
+            throw new \RuntimeException('消费分层实际业绩与概况金额不一致');
+        }
         // Service counts follow completed-service dates; money follows the registered
         // actual-performance business date, so a later service does not rebook a sale.
         $serviceAmount = $cashAmount;
         $projectCount = $this->projectCount($services);
-        $peopleCount = count($consuming);
+        $peopleCount = $tierTotals['member']['people'];
         $servicePeopleCount = count($serviceMembers);
 
         $categories = $this->categories();
@@ -75,7 +85,7 @@ final class MemberManagementDashboardServices
             ],
             'table_layout' => ['fixed' => true, 'vertical_scroll' => true, 'horizontal_scroll' => false],
             'columns' => [
-                ['key' => 'member.consuming_members', 'label' => '消费会员数', 'source' => '完整实际业绩正向事实，会员 ID 去重'],
+                ['key' => 'member.consuming_members', 'label' => '消费会员数', 'source' => '有实际业绩事实的会员 ID 去重，含仅有退款记录的会员'],
                 ['key' => 'member.service_members', 'label' => '服务会员数', 'source' => '有效服务事实，会员 ID 去重'],
                 ['key' => 'service.amount', 'label' => '实际业绩', 'source' => '同业务日期的实际业绩事实净额；服务人数按服务完成日另计'],
                 ['key' => 'consumption.amount', 'label' => '实际业绩', 'source' => '实际业绩事实净额（现金业绩减现金退款）'],
@@ -85,14 +95,14 @@ final class MemberManagementDashboardServices
             'tier_settings' => ['route' => '/platform/six-dimension/consumption-tiers', 'permission' => 'setting-shop-six-dimension-consumption-tier'],
             'customer_overview' => [
                 'member' => [
-                    'consuming_members' => $this->metric(count($consuming), '完整实际业绩正向事实关联的消费会员数，按会员 ID 去重。'),
+                    'consuming_members' => $this->metric(count($consuming), '有实际业绩事实的消费会员数，按会员 ID 去重；游客单据另计入消费人数。'),
                     'service_members' => $this->metric($servicePeopleCount, '有效完成服务的会员数，按会员 ID 去重。'),
                     'sleeping_members' => $this->metric(count($sleeping), '最后一次有效服务距查询结束日达到 90 天及以上，按会员 ID 去重。'),
                 ],
                 'consumption' => [
-                    'people' => $this->metric($peopleCount, '完整实际业绩正向事实关联的消费会员数。'),
+                    'people' => $this->metric($peopleCount, '实际业绩关联顾客数：会员按 ID 去重，游客按可追溯单据计数，含负向净额。'),
                     'amount' => $this->moneyMetric($cashAmount, '完整实际业绩净额，包含体验销售及独立调整；退款在事实业务日抵减。'),
-                    'average' => $this->moneyMetric($this->ratio($cashAmount, $peopleCount), '实际业绩净额除以消费人数，分母为零显示 -。'),
+                    'average' => $this->moneyMetric($this->ratio($cashAmount, $peopleCount), '实际业绩净额除以会员与游客单据合计人数，分母为零显示 -。'),
                 ],
                 'service' => [
                     'people' => $this->metric($servicePeopleCount, '有效服务会员数，按会员 ID 去重。'),
@@ -104,7 +114,7 @@ final class MemberManagementDashboardServices
                 ],
             ],
             'consumption' => [
-                'people' => $this->metric($peopleCount, '完整实际业绩正向事实关联的消费会员数。'),
+                'people' => $this->metric($peopleCount, '会员按 ID、游客按单据去重后的实际业绩关联顾客数。'),
                 'amount' => $this->moneyMetric($cashAmount, '完整实际业绩净额。'),
                 'average' => $this->moneyMetric($this->ratio($cashAmount, $peopleCount), '实际业绩净额除以消费人数。'),
                 'categories' => $categoryCards,
@@ -116,7 +126,8 @@ final class MemberManagementDashboardServices
                 ],
             ],
             'visit_bands' => $this->visitBands($services, $historicalServices, $range['start'], $range['end']),
-            'tiers' => $this->tiers($cash, $scope['tenant_id']),
+            'tiers' => $tierRows,
+            'tier_totals' => $tierTotals,
             'metric_version' => self::METRIC_VERSION,
             'data_as_of' => date('Y-m-d H:i:s'),
             'aggregation_caught_up' => true,
@@ -263,59 +274,80 @@ final class MemberManagementDashboardServices
     private function tiers(array $cash, string $tenant): array
     {
         $tiers = $this->tierConfig($tenant);
-        $members = $this->tierMembers($cash, $this->sourceAIds());
+        $subjects = $this->tierSubjects($cash, $this->sourceAIds());
         return [
-            'member' => $this->buildExclusiveTierRows($tiers, $members, false),
-            'new_customer' => $this->buildExclusiveTierRows($tiers, $members, true),
+            'member' => $this->buildExclusiveTierRows($tiers, $subjects, false),
+            'new_customer' => $this->buildExclusiveTierRows($tiers, $subjects, true),
         ];
     }
 
     /**
-     * Keep the overview's positive-fact member population, then assign each
-     * member the full signed actual-performance net for the selected period.
-     * Refund-only members must not make the lowest tier exceed the overview count.
+     * Every signed actual-performance row belongs to one traceable subject.
+     * Members have a durable ID; guests have no durable identity, so their
+     * stable order is the narrowest defensible counting and refund boundary.
+     * A fact without either identity is kept under its own immutable fact key.
      */
-    private function tierMembers(array $cash, array $sourceAIds): array
+    private function tierSubjects(array $cash, array $sourceAIds): array
     {
-        $eligibleIds = $this->memberSet($cash, true);
-        $members = [];
+        $subjects = [];
         foreach ($cash as $row) {
             $id = (int)($row['member_id'] ?? 0);
-            if (!isset($eligibleIds[$id])) continue;
-            $members[$id]['amount'] = (int)($members[$id]['amount'] ?? 0) + (int)$row['amount_cents'];
+            $orderId = trim((string)($row['order_id'] ?? ''));
+            $factId = '';
+            foreach (['sale_fact_id', 'fact_id', 'id'] as $factKey) {
+                $factId = trim((string)($row[$factKey] ?? ''));
+                if ($factId !== '') break;
+            }
+            if ($id <= 0 && $orderId === '' && $factId === '') {
+                throw new \RuntimeException('游客实际业绩缺少可追溯单据或事实身份');
+            }
+            $subjectKey = $id > 0 ? 'member:' . $id
+                : 'guest:' . (int)($row['store_id'] ?? 0) . ':' . ($orderId !== '' ? 'order:' . $orderId : 'fact:' . $factId);
+            $subjects[$subjectKey]['amount'] = (int)($subjects[$subjectKey]['amount'] ?? 0) + (int)$row['amount_cents'];
             $sourceId = (int)($row['business_source_primary_id'] ?? 0);
-            $members[$id]['source_a'] = in_array($sourceId, $sourceAIds, true)
+            $subjects[$subjectKey]['source_a'] = in_array($sourceId, $sourceAIds, true)
                 || (string)($row['business_source_label_snapshot'] ?? '') === 'A'
-                || (bool)($members[$id]['source_a'] ?? false);
+                || (bool)($subjects[$subjectKey]['source_a'] ?? false);
         }
-        return $members;
+        return $subjects;
     }
 
-    /** Each member's net belongs to exactly one configured [lower, upper) tier. */
-    private function buildExclusiveTierRows(array $tiers, array $members, bool $excludeSourceA): array
+    /** Server-owned totals use the already exclusive rows; the UI never re-adds rounded yuan. */
+    private function tierTotal(array $rows): array
     {
-        $eligible = array_filter($members, static fn(array $member): bool => !$excludeSourceA || !$member['source_a']);
+        $people = array_sum(array_column($rows, 'people'));
+        $amount = array_sum(array_column($rows, 'amount_cents'));
+        return ['people' => $people, 'amount_cents' => $amount,
+            'member_share' => $people > 0 ? 100.0 : null,
+            'amount_share' => $amount !== 0 ? 100.0 : null,
+            'average_cents' => $this->ratio($amount, $people)];
+    }
+
+    /** Each member or guest order's signed net belongs to exactly one configured [lower, upper) tier. */
+    private function buildExclusiveTierRows(array $tiers, array $subjects, bool $excludeSourceA): array
+    {
+        $eligible = array_filter($subjects, static fn(array $subject): bool => !$excludeSourceA || !$subject['source_a']);
         $totalPeople = count($eligible);
         $totalAmount = array_sum(array_column($eligible, 'amount'));
         $rows = array_map(static fn(array $tier): array => [
             'name' => $tier['name'], 'people' => 0, 'amount_cents' => 0,
         ], $tiers);
-        // Match once per member, so even an unexpectedly overlapping config
-        // cannot duplicate either the person or the signed performance net.
-        foreach ($eligible as $member) {
-            // A negative refund-adjusted net stays in the zero tier so its
-            // member and signed amount remain visible exactly once.
-            $net = max(0, (int)$member['amount']);
+        // Match once per subject, so even overlapping config cannot duplicate
+        // either the counted subject or its signed performance net.
+        foreach ($eligible as $subject) {
+            // Negative refund-adjusted net stays in the zero tier while its
+            // signed amount remains visible exactly once.
+            $net = max(0, (int)$subject['amount']);
             $matched = false;
             foreach ($tiers as $index => $tier) {
                 if ($net < (int)$tier['lower']
                     || ($tier['upper'] !== null && $net >= (int)$tier['upper'])) continue;
                 $rows[$index]['people']++;
-                $rows[$index]['amount_cents'] += (int)$member['amount'];
+                $rows[$index]['amount_cents'] += (int)$subject['amount'];
                 $matched = true;
                 break;
             }
-            if (!$matched) throw new \RuntimeException('消费分层区间未覆盖会员实际业绩');
+            if (!$matched) throw new \RuntimeException('消费分层区间未覆盖顾客实际业绩');
         }
         foreach ($rows as &$row) {
             $row['member_share'] = $totalPeople ? ($row['people'] / $totalPeople) * 100 : null;
@@ -393,12 +425,12 @@ final class MemberManagementDashboardServices
     private function fieldExplanations(): array
     {
         return [
-            'member.consuming_members' => '查询期间完整实际业绩正向事实关联的会员，按会员 ID 去重。',
+            'member.consuming_members' => '查询期间有实际业绩事实的会员，按会员 ID 去重；含仅有负向记录的会员，不含游客单据。',
             'member.service_members' => '查询期间完成有效服务的会员，按会员 ID 去重；取消、拒绝、爽约、作废和未完成不计入。',
             'member.sleeping_members' => '截至查询结束日最后一次非体验有效服务距今 90 天及以上且历史有符合条件到店记录的会员，按会员 ID 去重；人员开关不参与。',
-            'consumption.people' => '完整实际业绩正向事实关联的消费会员数，按会员 ID 去重。',
+            'consumption.people' => '查询期间实际业绩关联的顾客数：会员按 ID 去重，游客因无长期身份按门店单据计数；仅有退款的会员或游客单据也计入，且与会员分层人数合计相等。',
             'consumption.amount' => '查询期间完整实际业绩净额；体验销售和独立调整均计入，退款及作废按事实业务日抵减。',
-            'consumption.average' => '完整实际业绩净额除以消费会员数；分母为零显示 -。',
+            'consumption.average' => '完整实际业绩净额除以会员和游客单据的合计人数；分母为零显示 -。',
             'service.people' => '查询期间有效服务会员数，按会员 ID 去重。',
             'service.amount' => '与服务人数同日期范围的完整实际业绩净额；收款、退款按各自业务日期统计，服务完成日只决定服务人数和项目数。',
             'service.projects' => '有效服务事实逐条计数，不按会员去重，不将 quantity 乘入次数。',
@@ -418,12 +450,12 @@ final class MemberManagementDashboardServices
             'ranking.consumption_amount.average' => '第二排行人均金额为实际业绩净额除以同期购买人头。',
             'visit.recency' => '截至查询结束日最后一次非体验有效服务距今达到 30/60/90/180/360 天的会员数，按累计区间统计；人员开关不参与。',
             'visit.frequency' => '按非体验有效服务事实统计每个会员每月到店次数；全年按各月份会员频次桶合计，人员开关不参与。',
-            'tier.people' => '查询期间有正向实际业绩事实的会员，按个人实际业绩净额归入唯一金额区间；负净额归入最低档，会员 ID 去重。',
-            'tier.amount' => '该档会员查询期间的完整实际业绩净额，每名会员只归入一个区间，跨档金额不重复；未关联会员或仅有零、负向记录的金额不进入分层，因此分层合计可能与概况总金额不同。',
-            'tier.member_share' => '该档人数除以本列去重会员总人数；各档人数占比可合计。',
-            'tier.amount_share' => '该档实际业绩净额除以本列会员实际业绩净额；各档金额占比可合计。',
-            'tier.average' => '该档会员实际业绩净额除以该档人数；分母为零显示 -。',
-            'tier.new_customer' => '新客分层同样将每名会员归入唯一金额区间，但排除来源 A 的会员。',
+            'tier.people' => '会员按 ID、游客按门店单据各归入唯一金额区间，负净额归最低档；会员分层总人数与概况消费人数一致。',
+            'tier.amount' => '先按会员或游客单据汇总查询期间完整实际业绩净额，再把净额归入唯一层级；六档金额合计等于概况实际业绩。',
+            'tier.member_share' => '该档人数除以本列顾客或游客单据总数；各档人数占比可合计。',
+            'tier.amount_share' => '该档实际业绩净额除以本列实际业绩净额；负向档金额占比可能为负。',
+            'tier.average' => '该档实际业绩净额除以该档人数；分母为零显示 -。',
+            'tier.new_customer' => '新客分层同样将会员或游客单据归入唯一金额区间，但排除来源 A 的对象。',
         ];
     }
 }
