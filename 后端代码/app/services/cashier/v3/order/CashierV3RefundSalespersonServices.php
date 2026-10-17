@@ -8,6 +8,8 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
+use app\services\cashier\v3\member\CashierV3QueryEntitySelectorServices;
 use think\facade\Db;
 
 /**
@@ -50,8 +52,15 @@ final class CashierV3RefundSalespersonServices
             $active = $this->unreversed($rows, $scope->tenantId());
             foreach ($active as $row) {
                 $employeeId = (int)$row['employee_id'];
-                if (!isset($byEmployee[$employeeId])) continue;
-                $person = $byEmployee[$employeeId];
+                if ($employeeId <= 0) continue;
+                // A cross-store sale keeps its original employee attribution.
+                // The write path will revalidate the group identity under lock.
+                $person = $byEmployee[$employeeId] ?? [
+                    'staffId' => CashierV3PersonnelIdentity::organizationStaffId($employeeId),
+                    'employeeId' => $employeeId,
+                    'name' => (string)($row['employee_name_snapshot'] ?? ''),
+                    'personnelSource' => 'other',
+                ];
                 $selected[$employeeId] = $person + [
                     'allocationWeight' => (int)$row['allocation_weight_numerator'],
                     'isPreSale' => str_ends_with((string)$row['role_snapshot'], ':presale'),
@@ -249,14 +258,37 @@ final class CashierV3RefundSalespersonServices
         $candidates = $this->candidates($operator);
         $byStaff = [];
         foreach ($candidates as $candidate) $byStaff[(int)$candidate['staffId']] = $candidate;
-        $out = []; $seen = []; $weights = [];
+        $out = []; $seen = []; $seenEmployees = []; $weights = [];
         foreach ($rows as $row) {
             if (!is_array($row)) throw self::fail('退款销售人分配无效。');
             $staffId = (int)($row['staffId'] ?? $row['id'] ?? 0);
             $weight = (int)($row['allocationWeight'] ?? 0);
+            if (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+                if (($row['personnelSource'] ?? '') !== 'other') throw self::fail('其他销售人来源无效，请重新选择。');
+                $authority = (new CashierV3QueryEntitySelectorServices())->lockOrganizationSalesperson($staffId, $operator);
+                if ($authority === []) throw self::fail('其他销售人已不属于当前集团或已离职，请重新选择。');
+                $byStaff[$staffId] = [
+                    'staffId' => $staffId, 'employeeId' => (int)$authority['employee_id'],
+                    'name' => (string)$authority['employee_name'],
+                    'employeeTypeCode' => (string)$authority['employment_type_code'],
+                    'employeeTypeAuthorityVersion' => (int)$authority['employment_type_version'],
+                    // 集团其他销售人的直属岗位已经在当前退款事务中锁定读取；
+                    // 退款必须沿用同一独立核算组，不能再降级为普通 100% 组。
+                    'positionId' => ($positionId = (int)($authority['position_id'] ?? 0)),
+                    'positionName' => trim((string)($authority['position_name'] ?? '')) ?: '在职员工',
+                    'performanceIndependent' => ($independent = (int)($authority['performance_independent'] ?? 0) === 1),
+                    'allocationGroupKey' => $independent
+                        ? 'independent:' . ($positionId > 0 ? $positionId : $staffId)
+                        : 'normal',
+                    'personnelSource' => 'other',
+                ];
+            }
             if (!isset($byStaff[$staffId]) || isset($seen[$staffId]) || $weight <= 0 || $weight > 100) throw self::fail('退款销售人或分配比例无效。');
             $seen[$staffId] = true;
             $candidate = $byStaff[$staffId];
+            $employeeId = (int)$candidate['employeeId'];
+            if (isset($seenEmployees[$employeeId])) throw self::fail('同一销售人不能重复分配。');
+            $seenEmployees[$employeeId] = true;
             if (!in_array($candidate['employeeTypeCode'], ['internal', 'partner', 'outsourced'], true)
                 || (int)$candidate['employeeTypeAuthorityVersion'] <= 0) throw self::fail('退款销售人人员类型无效。');
             $manual = !empty($row['performanceAmountManual']);

@@ -386,7 +386,36 @@ function equalWeights(records) {
   syncComputedPerformanceAmounts(records)
 }
 
+function refreshSalespersonAllocationMetadata(records) {
+  if (!Array.isArray(records)) return false
+  const candidatesById = new Map(
+    [...(Array.isArray(props.salespersonCandidates) ? props.salespersonCandidates : []),
+      ...(Array.isArray(props.otherSalespersonCandidates) ? props.otherSalespersonCandidates : [])]
+      .map((candidate) => [recordId(candidate), candidate])
+      .filter(([id]) => id)
+  )
+  let groupChanged = false
+  records.forEach((record) => {
+    const candidate = candidatesById.get(recordId(record))
+    if (!candidate) return
+    const previousGroup = allocationGroupKey(record)
+    record.positionId = Number(candidate.positionId ?? candidate.position_id ?? record.positionId ?? 0)
+    record.position = candidate.positionName || candidate.position || candidate.jobTitle || record.position
+    if (hasPerformanceIndependentMetadata(candidate)) {
+      record.performanceIndependent = performanceIndependent(candidate)
+    }
+    if (Object.prototype.hasOwnProperty.call(candidate, 'allocationGroupKey')) {
+      record.allocationGroupKey = String(candidate.allocationGroupKey || '').trim()
+    }
+    // 搜索返回的是服务端最新岗位权威值。分组变化时必须重做默认比例，
+    // 否则旧浏览器草稿中的 50% 会继续显示并掩盖已开启的独立核算。
+    if (allocationGroupKey(record) !== previousGroup) groupChanged = true
+  })
+  return groupChanged
+}
+
 function salespersonDefaultWeights(records) {
+  refreshSalespersonAllocationMetadata(records)
   defaultSalespersonWeights(records)
   syncComputedPerformanceAmounts(records)
 }
@@ -545,6 +574,15 @@ watch(
   // Search results must not erase a newly added salesperson before Confirm.
   ([candidates, selected]) => { salespeople.value = mergeWithLocalSelections(candidates, selected, salespeople.value, 'salespeople') },
   { immediate: true, deep: true }
+)
+watch(
+  () => props.otherSalespersonCandidates,
+  () => {
+    if (!refreshSalespersonAllocationMetadata(salespeople.value)) return
+    defaultSalespersonWeights(salespeople.value)
+    syncComputedPerformanceAmounts(salespeople.value)
+  },
+  { deep: true }
 )
 
 const normalizedKeyword = computed(() => keyword.value.trim().toLowerCase())

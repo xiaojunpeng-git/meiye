@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ProjectLaborDefault;
 use app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault;
 use app\services\cashier\v3\CashierV3ResultCode;
+use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\checkout\provider\CashierV3EntitlementProviderContracts;
 use app\services\organization\OrganizationScopeService;
 use think\facade\Db;
@@ -26,6 +27,8 @@ final class CashierV3QueryEntitySelectorServices
         // 可被收银临时加入手艺人分配的当前门店在职人员；不要求
         // cashier_craftsman_enabled，结账仍由统一事实链路记录其分配。
         'cashier_other_craftsmen' => false,
+        // 集团其他销售人沿用组织员工身份，不放宽当前门店订单的操作权限。
+        'cashier_other_salespeople' => false,
         'reservation_craftsmen' => false,
         'member_exclusive_service_staff' => false,
         // Group attribution selectors deliberately use employee identity, not
@@ -109,8 +112,13 @@ final class CashierV3QueryEntitySelectorServices
         if ($selectorScope === 'group_attributions') {
             return $this->queryGroupAttributions($keyword, $page, $pageSize, $operatorScope);
         }
-        if ($selectorScope === 'cashier_other_craftsmen') {
-            return $this->queryOrganizationCraftsmen($keyword, $page, $pageSize, $operatorScope);
+        if (in_array($selectorScope, ['cashier_other_craftsmen', 'cashier_other_salespeople'], true)) {
+            if (mb_strlen($keyword) < 2) {
+                return ['records' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize,
+                    'isLoading' => false, 'requiresKeyword' => true];
+            }
+            return $this->queryOrganizationCraftsmen($keyword, $page, $pageSize, $operatorScope,
+                $selectorScope === 'cashier_other_salespeople');
         }
         $requiresEmploymentType = self::PERSON_SCOPES[$selectorScope];
         $projectId = (int)($selectorContext['projectId'] ?? $selectorContext['project_id'] ?? 0);
@@ -378,7 +386,7 @@ final class CashierV3QueryEntitySelectorServices
         return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
     }
 
-    private function queryOrganizationCraftsmen(string $keyword, int $page, int $pageSize, CashierV3OperatorScope $operatorScope): array
+    private function queryOrganizationCraftsmen(string $keyword, int $page, int $pageSize, CashierV3OperatorScope $operatorScope, bool $salesperson = false): array
     {
         $organizationId = (int)$operatorScope->organizationId();
         if ($organizationId <= 0) {
@@ -413,9 +421,10 @@ final class CashierV3QueryEntitySelectorServices
             ->where('e.id', '>', 0)
             // 与结账锁内员工档案校验一致，未建立类型版本的组织员工不能先进入可选列表。
             ->where('e.employment_type_version', '>', 0)
-            ->where(function ($subQuery) {
-                $subQuery->whereIn('e.employment_type_code', CashierV3EntitlementProviderContracts::staffTypes())
-                    ->whereNull('e.employment_type_code', 'OR');
+            ->where(function ($subQuery) use ($salesperson) {
+                $subQuery->whereIn('e.employment_type_code', CashierV3EntitlementProviderContracts::staffTypes());
+                // 手艺人沿用历史空类型兼容；销售人写入业绩事实时必须有有效类型。
+                if (!$salesperson) $subQuery->whereNull('e.employment_type_code', 'OR');
             });
         if ($keyword !== '') {
             $like = '%' . addcslashes($keyword, '%_') . '%';
@@ -433,11 +442,18 @@ final class CashierV3QueryEntitySelectorServices
             ->page($page, $pageSize)
             ->select()
             ->toArray();
+        $directPositions = $salesperson
+            ? $this->organizationDirectPositionMap(array_column($rows, 'employee_id'))
+            : [];
         $records = [];
         foreach ($rows as $row) {
             $employeeId = (int)($row['employee_id'] ?? 0);
             $name = trim((string)($row['employee_name'] ?? ''));
             if ($employeeId <= 0 || $name === '') continue;
+            $position = $directPositions[$employeeId] ?? [];
+            $positionId = (int)($position['position_id'] ?? 0);
+            $positionName = trim((string)($position['position_name'] ?? ''));
+            $performanceIndependent = (int)($position['performance_independent'] ?? 0) === 1;
             $records[] = [
                 'id' => CashierV3PersonnelIdentity::organizationStaffId($employeeId),
                 'staffId' => CashierV3PersonnelIdentity::organizationStaffId($employeeId),
@@ -447,11 +463,17 @@ final class CashierV3QueryEntitySelectorServices
                 'staffName' => $name,
                 'staffNo' => '',
                 'storeName' => '组织：' . trim((string)($row['organization_name'] ?? '')),
+                'positionId' => $positionId,
+                'positionName' => $positionName !== '' ? $positionName : '在职员工',
+                'performanceIndependent' => $performanceIndependent,
+                'allocationGroupKey' => $performanceIndependent
+                    ? 'independent:' . $positionId
+                    : 'normal',
                 'employeeTypeCode' => (string)($row['employment_type_code'] ?? 'internal'),
                 'employeeTypeAuthorityVersion' => (int)$row['employment_type_version'],
                 'partnerDefaultRatio' => 0,
-                'salespersonEligible' => false,
-                'craftsmanEligible' => true,
+                'salespersonEligible' => $salesperson,
+                'craftsmanEligible' => !$salesperson,
                 'personnelSource' => 'other',
                 'craftsmanPerformanceType' => 'commission_labor',
                 'laborDefaultFeeCents' => 0,
@@ -461,5 +483,91 @@ final class CashierV3QueryEntitySelectorServices
             ];
         }
         return ['records' => $records, 'total' => $total, 'page' => $page, 'pageSize' => $pageSize, 'isLoading' => false, 'requiresKeyword' => false];
+    }
+
+    /**
+     * 集团直属员工的岗位以 staff_job_position.staff_id=0 为权威来源。
+     * 收银一个销售人只能落入一个核算组；存在多条有效直属岗位时优先独立核算岗位，
+     * 同类岗位按最早关系 ID 稳定选择，避免查询、刷新和结账重校验产生不同结果。
+     *
+     * @param array<int,mixed> $employeeIds
+     * @return array<int,array{position_id:int,position_name:string,performance_independent:int}>
+     */
+    private function organizationDirectPositionMap(array $employeeIds, bool $lock = false): array
+    {
+        $employeeIds = array_values(array_unique(array_filter(array_map('intval', $employeeIds), static function (int $id): bool {
+            return $id > 0;
+        })));
+        if ($employeeIds === []) return [];
+
+        $query = Db::name('staff_job_position')->alias('j')
+            ->join('position p', 'p.id=j.position_id')
+            ->whereIn('j.employee_id', $employeeIds)
+            ->where('j.staff_id', 0)
+            ->where('j.status', 1)
+            ->where('j.is_del', 0)
+            ->where('j.end_time', 0)
+            ->where('p.status', 1)
+            ->field('j.id,j.employee_id,j.position_id,p.name as position_name,p.performance_independent')
+            ->order('j.employee_id', 'asc')
+            ->order('p.performance_independent', 'desc')
+            ->order('j.id', 'asc');
+        if ($lock) $query->lock(true);
+
+        $result = [];
+        foreach ($query->select()->toArray() as $row) {
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            if ($employeeId <= 0 || isset($result[$employeeId])) continue;
+            $result[$employeeId] = [
+                'position_id' => (int)($row['position_id'] ?? 0),
+                'position_name' => trim((string)($row['position_name'] ?? '')),
+                'performance_independent' => (int)($row['performance_independent'] ?? 0) === 1 ? 1 : 0,
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Resolve an organisation salesperson again inside the write transaction.
+     * The browser's virtual id and source marker are not proof of employment.
+     * Return a fact-compatible row while keeping the sale's store as the business owner.
+     */
+    public function lockOrganizationSalesperson(int $staffId, CashierV3OperatorScope $operatorScope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('organizationSalesperson');
+        $employeeId = CashierV3PersonnelIdentity::employeeIdFromStaffId($staffId);
+        $organizationId = (int)$operatorScope->organizationId();
+        if ($employeeId <= 0 || $organizationId <= 0) return [];
+        $rootId = $organizationId;
+        for ($i = 0; $i < 64; $i++) {
+            $parentId = (int)Db::name('organization')->where('id', $rootId)->value('pid');
+            if ($parentId <= 0 || $parentId === $rootId) break;
+            $rootId = $parentId;
+        }
+        $organizationIds = app()->make(OrganizationScopeService::class)->getOrgIds($rootId, true);
+        if ($organizationIds === []) return [];
+        $row = Db::name('organization_employee')->alias('oe')
+            ->join('employee e', 'e.id=oe.employee_id')
+            ->where('oe.employee_id', $employeeId)->whereIn('oe.org_id', $organizationIds)
+            ->where('oe.status', 1)->where('oe.is_del', 0)
+            ->where('e.status', 1)->where('e.is_del', 0)
+            ->where('e.employment_type_version', '>', 0)
+            ->whereIn('e.employment_type_code', CashierV3EntitlementProviderContracts::staffTypes())
+            ->field('e.id as employee_id,e.name as employee_name,e.employment_type_code,e.employment_type_version')
+            ->lock(true)->find();
+        $row = (array)$row;
+        if ($row === [] || trim((string)($row['employee_name'] ?? '')) === '') return [];
+        // 必须在同一结账事务内重读直属岗位，不能相信浏览器缓存或草稿中的
+        // positionId/performanceIndependent，否则不同浏览器会写出不同核算事实。
+        $position = $this->organizationDirectPositionMap([$employeeId], true)[$employeeId] ?? [];
+        return ['id' => $staffId, 'employee_id' => $employeeId,
+            'store_id' => $operatorScope->storeId(), 'staff_name' => (string)$row['employee_name'],
+            'name' => (string)$row['employee_name'], 'employee_name' => (string)$row['employee_name'],
+            'employment_type_code' => (string)$row['employment_type_code'],
+            'employment_type_version' => (int)$row['employment_type_version'],
+            'position_id' => (int)($position['position_id'] ?? 0),
+            'position_name' => (string)($position['position_name'] ?? ''),
+            'performance_independent' => (int)($position['performance_independent'] ?? 0),
+            'personnel_source' => 'other'];
     }
 }

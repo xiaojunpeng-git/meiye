@@ -394,6 +394,9 @@ final class CashierV3CheckoutDraftAuthorityRebuilder
                     || !empty($row['is_presale'])
                     || !empty($row['marked']),
             ];
+            if (($row['personnelSource'] ?? 'store') === 'other') {
+                $resultRow['personnelSource'] = 'other';
+            }
             if (array_key_exists('performanceAmountCents', $row)
                 || array_key_exists('performance_amount_cents', $row)) {
                 $amount = (int)($row['performanceAmountCents'] ?? $row['performance_amount_cents'] ?? -1);

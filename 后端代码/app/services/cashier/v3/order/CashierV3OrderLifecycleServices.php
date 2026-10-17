@@ -7,6 +7,8 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
+use app\services\cashier\v3\member\CashierV3QueryEntitySelectorServices;
 use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
@@ -345,6 +347,7 @@ final class CashierV3OrderLifecycleServices
             $groupCounts = [];
             foreach ($facts as $factIndex => $fact) {
                 $staffRow = $eligibleByStaffId[(int)($fact['employee_id'] ?? 0)] ?? [];
+                if ((int)($staffRow['cashier_salesperson_enabled'] ?? 0) !== 1) $staffRow = [];
                 $positionId = (int)($staffRow['position_id'] ?? 0);
                 $independent = (int)($staffRow['performance_independent'] ?? 0) === 1;
                 $groupKey = $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
@@ -362,6 +365,11 @@ final class CashierV3OrderLifecycleServices
                 $amount = abs((int)($fact['amount_cents'] ?? 0));
                 $staffId = (int)($fact['employee_id'] ?? 0);
                 $staffRow = $eligibleByStaffId[$staffId] ?? [];
+                if ((int)($staffRow['cashier_salesperson_enabled'] ?? 0) !== 1) $staffRow = [];
+                // Sales facts retain employee identity, not the selector staff ID.
+                // Rebuild the group identity when the employee has no local staff row.
+                $selectionStaffId = (int)($staffRow['id'] ?? 0)
+                    ?: ($staffId > 0 ? CashierV3PersonnelIdentity::organizationStaffId($staffId) : 0);
                 $positionId = (int)($staffRow['position_id'] ?? 0);
                 $independent = (int)($staffRow['performance_independent'] ?? 0) === 1;
                 $groupKey = $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
@@ -378,7 +386,10 @@ final class CashierV3OrderLifecycleServices
                 $allocatedByGroup[$groupKey] = ($allocatedByGroup[$groupKey] ?? 0) + $allocationWeight;
                 $salespeople[$lineId][] = [
                     'factId' => (string)($fact['fact_id'] ?? ''),
+                    'id' => $selectionStaffId,
+                    'staffId' => $selectionStaffId,
                     'employeeId' => (int)$fact['employee_id'],
+                    'personnelSource' => $staffRow === [] ? 'other' : 'store',
                     'name' => (string)$fact['employee_name_snapshot'],
                     'roleSnapshot' => $roleSnapshot,
                     'isPreSale' => str_ends_with(strtolower($roleSnapshot), ':presale'),
@@ -1081,6 +1092,7 @@ final class CashierV3OrderLifecycleServices
         // 一个明细/角色下，同一名员工只能出现一次。除了给前端明确的
         // 业务错误外，这也保证调整事实的唯一键不会因重复分配而冲突。
         $seenStaffIds = [];
+        $seenEmployeeIds = [];
         foreach ($input['personnel'] as $item) {
             $staffId = (int)($item['staffId'] ?? 0);
             if ($staffId <= 0 || isset($seenStaffIds[$staffId])) {
@@ -1100,19 +1112,14 @@ final class CashierV3OrderLifecycleServices
                     throw self::failure('personnel_adjustment_salesperson_weight_invalid');
                 }
                 $staffId = (int)($item['staffId'] ?? 0);
-                $staff = (array)Db::name('system_store_staff')->alias('s')
-                    ->join('employee e', 'e.id=s.employee_id')
-                    ->leftJoin('staff_job_position sjp', 'sjp.staff_id = s.id AND sjp.status = 1 AND sjp.is_del = 0 AND sjp.end_time = 0')
-                    ->leftJoin('position p', 'p.id = sjp.position_id AND p.status = 1')
-                    ->where('s.id', $staffId)->where('s.store_id', $operator->storeId())
-                    ->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)
-                    ->where('s.cashier_salesperson_enabled', 1)
-                    ->field('s.id,s.employee_id,s.staff_name,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')
-                    ->lock(true)->find();
+                $staff = $this->lockAdjustmentSalesperson($staffId, $item, $operator);
                 if (!$staff || !in_array((string)($staff['employment_type_code'] ?? ''), ['internal', 'partner', 'outsourced'], true)
                     || (int)($staff['employment_type_version'] ?? 0) <= 0) {
                     throw self::failure('personnel_adjustment_staff_ineligible');
                 }
+                $employeeId = (int)$staff['employee_id'];
+                if (isset($seenEmployeeIds[$employeeId])) throw self::failure('personnel_adjustment_duplicate_staff');
+                $seenEmployeeIds[$employeeId] = true;
                 $positionId = max(0, (int)($staff['position_id'] ?? 0));
                 $independent = (int)($staff['performance_independent'] ?? 0) === 1;
                 $groupKey = $independent && $positionId > 0 ? 'independent:' . $positionId : 'normal';
@@ -1150,7 +1157,9 @@ final class CashierV3OrderLifecycleServices
                 throw self::failure('personnel_adjustment_line_ineligible');
             }
             $facts = $this->effectivePersonnelFactsForLine($scope->tenantId(), $source['sourceId'], $lineId, $factType);
-            $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.id', $staffId)->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->lock(true)->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code,e.employment_type_version')->find();
+            $staff = $role === 'salesperson'
+                ? $this->lockAdjustmentSalesperson($staffId, $item, $operator)
+                : (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.id', $staffId)->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->lock(true)->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code,e.employment_type_version')->find();
             if (!$staff || ($role === 'salesperson' && (int)$staff['cashier_salesperson_enabled'] !== 1) || ($role === 'craftsman' && (int)$staff['cashier_craftsman_enabled'] !== 1)) throw self::failure('personnel_adjustment_staff_ineligible');
             if ($role === 'salesperson' && is_array($salespersonState)) {
                 continue;
@@ -1177,7 +1186,7 @@ final class CashierV3OrderLifecycleServices
             $amounts = $this->adjustedSalespersonAmounts((int)$salespersonState['total'], $input['personnel']);
             foreach ($input['personnel'] as $index => $item) {
                 $staffId = (int)($item['staffId'] ?? 0);
-                $staff = (array)Db::name('system_store_staff')->alias('s')->join('employee e', 'e.id=s.employee_id')->where('s.id', $staffId)->where('s.store_id', $operator->storeId())->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)->lock(true)->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code,e.employment_type_version')->find();
+                $staff = $this->lockAdjustmentSalesperson($staffId, $item, $operator);
                 if (!$staff || (int)$staff['cashier_salesperson_enabled'] !== 1) throw self::failure('personnel_adjustment_staff_ineligible');
                 $this->insertAdjustedPerformance($salespersonState['template'], $operationId, $commandKey, $event, $operator, $now, $businessDate, $staff, 'salesperson', 'sales_performance_allocated', (int)$amounts[$index], $targetLineId, !empty($item['isPreSale']), $staffId, !empty($item['performanceAmountManual']));
             }
@@ -1531,6 +1540,27 @@ final class CashierV3OrderLifecycleServices
         }
         if (trim(str_replace(['-', '.', '0'], '', $value)) === '') return '0';
         return $value[0] === '-' ? substr($value, 1) : '-' . $value;
+    }
+
+    /** Recheck either store staff or a group employee; client position/source text never determines the fact. */
+    private function lockAdjustmentSalesperson(int $staffId, array $item, CashierV3OperatorScope $operator): array
+    {
+        if (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+            if (($item['personnelSource'] ?? '') !== 'other') return [];
+            $staff = (new CashierV3QueryEntitySelectorServices())->lockOrganizationSalesperson($staffId, $operator);
+            if ($staff !== []) $staff['cashier_salesperson_enabled'] = 1;
+            return $staff;
+        }
+        if (($item['personnelSource'] ?? 'store') !== 'store') return [];
+        return (array)Db::name('system_store_staff')->alias('s')
+            ->join('employee e', 'e.id=s.employee_id')
+            ->leftJoin('staff_job_position sjp', 'sjp.staff_id=s.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
+            ->leftJoin('position p', 'p.id=sjp.position_id AND p.status=1')
+            ->where('s.id', $staffId)->where('s.store_id', $operator->storeId())
+            ->where('s.status', 1)->where('s.is_del', 0)->where('e.status', 1)->where('e.is_del', 0)
+            ->where('s.cashier_salesperson_enabled', 1)
+            ->field('s.id,s.employee_id,s.staff_name,s.cashier_salesperson_enabled,s.cashier_craftsman_enabled,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')
+            ->lock(true)->find();
     }
 
     private function insertAdjustedPerformance(array $template, string $operationId, string $commandKey, array $event, CashierV3OperatorScope $operator, int $now, string $businessDate, array $staff, string $role, string $factType, int $amount, string $lineId, bool $marked, int $staffId, bool $manualAmount = false, int $laborFeeCents = 0, ?string $projectCount = null, string $craftsmanType = ''): void

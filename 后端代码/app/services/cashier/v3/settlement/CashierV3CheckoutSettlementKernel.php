@@ -972,6 +972,9 @@ final class CashierV3CheckoutSettlementKernel
                     if (!empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked'])) {
                         $normalizedPerson['isPreSale'] = true;
                     }
+                    if (($person['personnelSource'] ?? 'store') === 'other') {
+                        $normalizedPerson['personnelSource'] = 'other';
+                    }
                     $hasPerformanceAmount = array_key_exists('performanceAmountCents', $person)
                         || array_key_exists('performance_amount_cents', $person);
                     $hasPerformanceAmountManual = array_key_exists('performanceAmountManual', $person)

@@ -12,6 +12,7 @@ use app\services\cashier\v3\CashierV3CheckoutWorkspaceIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\member\CashierV3QueryEntitySelectorServices;
 use app\services\activity\coupon\StoreCouponOrderRule;
 use think\facade\Db;
 
@@ -1243,6 +1244,7 @@ final class CashierV3CashierWorkspaceServices
                     'staffId' => (int)($person['staffId'] ?? $person['id'] ?? 0),
                     'allocationWeight' => (int)($person['allocationWeight'] ?? 0),
                     'isPreSale' => !empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked']),
+                    'personnelSource' => (string)($person['personnelSource'] ?? 'store'),
                 ];
                 if (array_key_exists('performanceAmountCents', $person)) {
                     $selection['performanceAmountCents'] = (int)$person['performanceAmountCents'];
@@ -1301,6 +1303,7 @@ final class CashierV3CashierWorkspaceServices
                     'staffId' => (int)($person['staffId'] ?? $person['id'] ?? 0),
                     'allocationWeight' => (int)($person['allocationWeight'] ?? 0),
                     'isPreSale' => !empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked']),
+                    'personnelSource' => (string)($person['personnelSource'] ?? 'store'),
                 ];
                 if (array_key_exists('performanceAmountCents', $person)) {
                     $selection['performanceAmountCents'] = (int)$person['performanceAmountCents'];
@@ -2375,6 +2378,7 @@ final class CashierV3CashierWorkspaceServices
         $presaleByStaff = [];
         $requestedPerformanceAmounts = [];
         $requestedPerformanceAmountManual = [];
+        $otherStaffIds = [];
         foreach ($selections as $selection) {
             $staffId = is_array($selection) ? (int)($selection['staffId'] ?? 0) : 0;
             $weight = is_array($selection) ? (int)($selection['allocationWeight'] ?? 0) : 0;
@@ -2382,6 +2386,15 @@ final class CashierV3CashierWorkspaceServices
                 throw $this->incompleteLineSettings('', 'salesperson_selection_invalid');
             }
             $weights[$staffId] = $weight;
+            // Virtual group identities must carry their source and are re-read
+            // under the same transaction as the sale allocation.
+            $source = trim((string)($selection['personnelSource'] ?? 'store'));
+            if (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+                if ($source !== 'other') throw $this->incompleteLineSettings('', 'salesperson_source_invalid');
+                $otherStaffIds[] = $staffId;
+            } elseif ($source !== 'store') {
+                throw $this->incompleteLineSettings('', 'salesperson_source_invalid');
+            }
             $presaleByStaff[$staffId] = !empty($selection['isPreSale'])
                 || !empty($selection['is_presale']) || !empty($selection['marked']);
             if (array_key_exists('performanceAmountCents', (array)$selection)
@@ -2391,9 +2404,9 @@ final class CashierV3CashierWorkspaceServices
                     || !empty($selection['performance_amount_manual']);
             }
         }
-        $staffIds = array_keys($weights);
+        $staffIds = array_values(array_diff(array_keys($weights), $otherStaffIds));
         sort($staffIds, SORT_NUMERIC);
-        $rows = Db::name('system_store_staff')->alias('ss')
+        $rows = $staffIds === [] ? [] : Db::name('system_store_staff')->alias('ss')
             ->join('employee e', 'e.id = ss.employee_id')
             ->leftJoin(
                 'staff_job_position sjp',
@@ -2415,8 +2428,18 @@ final class CashierV3CashierWorkspaceServices
         if (is_object($rows) && method_exists($rows, 'toArray')) {
             $rows = $rows->toArray();
         }
+        $otherAuthority = new CashierV3QueryEntitySelectorServices();
+        foreach ($otherStaffIds as $staffId) {
+            $other = $otherAuthority->lockOrganizationSalesperson($staffId, $operatorScope);
+            if ($other === []) throw $this->incompleteLineSettings('', 'salesperson_not_active_in_group');
+            $rows[] = $other;
+        }
         $byId = [];
+        $seenEmployeeIds = [];
         foreach ((array)$rows as $row) {
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            if (isset($seenEmployeeIds[$employeeId])) throw $this->incompleteLineSettings('', 'salesperson_employee_duplicate');
+            $seenEmployeeIds[$employeeId] = true;
             $byId[(int)($row['id'] ?? 0)] = $row;
         }
         if (count($byId) !== count($selections)) {
@@ -2453,6 +2476,7 @@ final class CashierV3CashierWorkspaceServices
                 'positionName' => $positionName,
                 'performanceIndependent' => $performanceIndependent,
                 'allocationGroupKey' => $allocationGroupKey,
+                'personnelSource' => in_array($staffId, $otherStaffIds, true) ? 'other' : 'store',
             ];
             if (array_key_exists($staffId, $requestedPerformanceAmounts)) {
                 $salesperson['performanceAmountCents'] = $requestedPerformanceAmounts[$staffId];
