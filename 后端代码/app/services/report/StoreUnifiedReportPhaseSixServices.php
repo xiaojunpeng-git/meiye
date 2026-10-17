@@ -77,7 +77,7 @@ final class StoreUnifiedReportPhaseSixServices
                     ? $this->headquartersDetail($stores, $range, $input)
                     : $this->headquarters($stores, $range);
                 break;
-            case 'phase_six_other_multi_payment': $result = $this->multiPayment($stores, $range); break;
+            case 'phase_six_other_multi_payment': $result = $this->multiPayment($stores, $range, $input); break;
             case 'phase_six_salary_summary': $result = $this->salarySummary($stores, $range, $input); break;
             case 'phase_six_salary_detail': $result = $this->salaryDetail($stores, $range, $input); break;
             case 'phase_six_training_employee': $result = $this->trainingV2($stores, $range); break;
@@ -941,7 +941,7 @@ final class StoreUnifiedReportPhaseSixServices
         return $result;
     }
 
-    private function multiPayment(array $stores, array $range): array
+    private function multiPayment(array $stores, array $range, array $input): array
     {
         // 已提交的结账方式决定入表资格，包括零金额；收款方式是订单级选择，
         // 商品行金额必须按结账时的应收减欠款基础分摊，不能在每行重复整笔金额。
@@ -969,12 +969,10 @@ final class StoreUnifiedReportPhaseSixServices
         unset($fact);
         $otherAmounts = $this->otherCollectionAmountsBySaleFact($facts);
         $rows = [];
-        $receivableBySale = [];
         foreach ($facts as $fact) {
             // 历史实际收款延用原分摊键，保留已录入的手动值；无分摊的新口径按结账方式和销售明细建稳定键。
             $allocationId = trim((string)($fact['allocation_id'] ?? ''));
             $rowKey = $allocationId !== '' ? $allocationId : (string)$fact['payment_draft_id'] . ':' . (string)$fact['sale_fact_id'];
-            $receivableBySale[(string)$fact['sale_fact_id']] = (int)$fact['sale_amount_cents'];
             $rows[] = [
                 'store_id' => (int)$fact['store_id'], 'source_line_id' => (string)$fact['source_line_id'],
                 'annotation_subject_type' => 'phase_six_row',
@@ -986,10 +984,10 @@ final class StoreUnifiedReportPhaseSixServices
                 'receivable_amount' => $this->money((int)$fact['sale_amount_cents']),
                 'other_collection_amount' => $this->money((int)($fact['allocated_amount_cents']
                     ?? $otherAmounts[(string)$fact['payment_draft_id']][(string)$fact['sale_fact_id']] ?? 0)),
-                'row_key' => $rowKey,
+                'row_key' => $rowKey, 'sale_fact_id' => (string)$fact['sale_fact_id'],
             ];
         }
-        $result = $this->result('其他多收款业绩表', [
+        $columns = StoreReportResultRowFilterServices::declareDimensions([
             $this->column('company_name','分公司','这笔销售结账时所属的分公司。',false,true),
             $this->column('store_name','门店','这笔销售结账时所属的门店。',false,true),
             $this->column('business_date','日期','这笔订单的结账业务日期。'),
@@ -1003,7 +1001,12 @@ final class StoreUnifiedReportPhaseSixServices
             $this->manualColumn('领取日期','领取日期','由有权限的人员填写商品实际领取日期。'),
             $this->manualColumn('领取数量','领取数量','由有权限的人员填写商品实际领取数量。'),
             $this->manualColumn('备注','备注','由有权限的人员填写这条商品的补充说明。'),
-        ], $rows, $range);
+        ], ['company_name','store_name','business_date','customer_name','employee_name','category','item_name']);
+        // 同一商品可有多笔其他收款；筛后应收合计仍按销售事实去重。
+        $rows = StoreReportResultRowFilterServices::filter($rows, $columns, (string)($input['row_filters'] ?? ''));
+        $result = $this->result('其他多收款业绩表', $columns, $rows, $range);
+        $receivableBySale = [];
+        foreach ($rows as $row) $receivableBySale[(string)$row['sale_fact_id']] = $this->cents((string)$row['receivable_amount']);
         // 展示粒度是收款方式×商品，商品应收的合计粒度仍是商品，不能按收款笔数重复累计。
         $result['summary_row']['receivable_amount'] = $this->money(array_sum($receivableBySale));
         return $result;
@@ -1147,7 +1150,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('labor_fee','手工费','该笔服务最终分配给员工的手工费；后续人员调整按有效结果显示，作废后不再统计。',true),
             $this->manualColumn('备注','备注','有权限的用户手动填写，保存后刷新页面仍会显示。')
         ]);
-        return $this->salaryResult('员工薪资明细月报表',$columns,$rows,$range,$employeeName,$categoryKey!=='',$documentNo,true);
+        return $this->salaryResult('员工薪资明细月报表',$columns,$rows,$range,$employeeName,$categoryKey!=='',$documentNo,true,$input);
     }
 
     /**
@@ -1318,7 +1321,7 @@ final class StoreUnifiedReportPhaseSixServices
             ];
             $columns[]=$categoryColumn;
         }
-        return $this->salaryResult('员工薪资汇总月报表',$columns,array_values($rows),$range,$employeeName);
+        return $this->salaryResult('员工薪资汇总月报表',$columns,array_values($rows),$range,$employeeName,false,'',false,$input);
     }
 
     /** Employee-name filtering always uses the immutable fact snapshot shown in the result. */
@@ -1396,8 +1399,13 @@ final class StoreUnifiedReportPhaseSixServices
     }
 
     /** Add the shared text filter contract without making the frontend infer it from report names. */
-    private function salaryResult(string $title,array $columns,array $records,array $range,string $employeeName,bool $categoryDrilldown=false,string $documentNo='',bool $documentFilter=false): array
+    private function salaryResult(string $title,array $columns,array $records,array $range,string $employeeName,bool $categoryDrilldown=false,string $documentNo='',bool $documentFilter=false,array $input=[]): array
     {
+        $dimensionKeys = $categoryDrilldown || $documentFilter
+            ? ['business_date','company_name','store_name','employee_name','position_name','member_name','document_no','performance_category','detail']
+            : ['company_name','store_name','employee_name','position_name'];
+        $columns = StoreReportResultRowFilterServices::declareDimensions($columns, $dimensionKeys);
+        $records = StoreReportResultRowFilterServices::filter($records, $columns, (string)($input['row_filters'] ?? ''));
         $result=$this->result($title,$columns,$records,$range);
         if($categoryDrilldown){
             // Money is rounded only for display; the clicked category's total stays cent-accurate internally.

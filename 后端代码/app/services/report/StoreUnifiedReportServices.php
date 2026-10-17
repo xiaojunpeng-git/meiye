@@ -70,7 +70,32 @@ class StoreUnifiedReportServices extends BaseServices
             'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail',
             'store_salesperson_performance', 'store_salesperson_performance_detail',
         ], true)) {
-            $result = array_merge($meta, $this->operationsReport($report, $storeId, $range, $input));
+            $filterPayload = (string)($input['row_filters'] ?? '');
+            // 有结果筛选才沿用既有完整导出读取路径；普通查询仍使用原数据库分页。
+            $readInput = $filterPayload === '' ? $input : array_merge($input, ['_internal_all' => true]);
+            $result = array_merge($meta, $this->operationsReport($report, $storeId, $range, $readInput));
+            $result['columns'] = StoreReportResultRowFilterServices::declareFixedDimensions($result['columns']);
+            // 非冻结但固定的文字列由报表所有者点名；动态分类和数值指标不推断为筛选项。
+            $extraDimensions = [
+                'partner_item_detail' => ['original_sale_no','experience_project','medical_elevation','medical_followup','deal_project','expert_name','partner_label','remark'],
+                'member_consumption_detail' => ['sales_manager_name','guide_names','salesperson_names','member_source','experience_payment_method'],
+                'store_craftsman_consumption_detail' => ['business_status'],
+                'store_salesperson_performance_detail' => ['original_no','member_name'],
+            ][$report] ?? [];
+            $result['columns'] = StoreReportResultRowFilterServices::declareDimensions($result['columns'], $extraDimensions);
+            if ($filterPayload !== '') {
+                $rows = StoreReportResultRowFilterServices::filter($result['records'], $result['columns'], $filterPayload);
+                $result['summary_row'] = $this->filteredOperationsSummary($report, $result['columns'], $rows, $result['summary_row'] ?? []);
+                $result['total'] = count($rows);
+                $paginated = in_array($report, [
+                    'partner_item_detail', 'member_consumption_detail',
+                    'store_craftsman_consumption_detail', 'store_salesperson_performance_detail',
+                ], true);
+                $result['records'] = $paginated && empty($input['_internal_all'])
+                    ? array_slice($rows, ($this->page($input)-1)*$this->limit($input), $this->limit($input))
+                    : $rows;
+                $result['page_size'] = $paginated ? $this->limit($input) : count($rows);
+            }
             if ($report === 'store_item_analysis') {
                 // 本报表按完整门店行集裁剪全零指标列；门店识别列、事实和导出仍共用同一结果。
                 $metricKeys = array_column(array_filter(
@@ -87,6 +112,37 @@ class StoreUnifiedReportServices extends BaseServices
         if ($report === 'items') return array_merge($meta, $this->items($storeId, $range, $input));
         if ($report === 'channels') return array_merge($meta, $this->channels($storeId, $range, $input));
         throw new \InvalidArgumentException('不支持的报表类型');
+    }
+
+    /**
+     * Rebuild only displayed totals from the selected, already-calculated rows.
+     * Original fact aggregation, cents precision and non-additive blank cells stay untouched.
+     */
+    private function filteredOperationsSummary(string $report, array $columns, array $rows, array $original): array
+    {
+        if ($report === 'partner_item_summary') return $this->partnerItemSummaryRow($columns, $rows);
+        $summary = $original;
+        foreach ($columns as $column) {
+            $key = (string)($column['key'] ?? '');
+            if ($key === '' || !isset($summary[$key]) || !is_numeric($summary[$key])) continue;
+            if (in_array($key, ['member_count', 'experience_count', 'quantity'], true)) {
+                $summary[$key] = (int)array_sum(array_map(static fn(array $row): float => (float)($row[$key] ?? 0), $rows));
+                continue;
+            }
+            $cents = 0;
+            foreach ($rows as $row) $cents += $this->displayAmountCents($row[$key] ?? '0');
+            $summary[$key] = $this->money($cents);
+        }
+        return $summary;
+    }
+
+    /** Parse the original two-decimal report value without float rounding. */
+    private function displayAmountCents($value): int
+    {
+        $text = trim((string)$value);
+        if (!preg_match('/^(-?)(\d+)(?:\.(\d{1,2}))?$/', $text, $match)) return 0;
+        $cents = ((int)$match[2] * 100) + (int)str_pad($match[3] ?? '', 2, '0');
+        return $match[1] === '-' ? -$cents : $cents;
     }
 
     public function export($storeId, array $input)
@@ -406,6 +462,12 @@ class StoreUnifiedReportServices extends BaseServices
         ];
         foreach ($columns as &$column) {
             $column['source_explanation'] = $explanations[$column['key']];
+            // 只声明固定维度列；动态或数值指标列不进入本报表的筛选契约。
+            if ($column['key'] === 'month') {
+                $column['filter'] = ['type'=>'month','operators'=>['eq']];
+            } elseif (in_array((string)$column['key'], ['division_name','store_summary','performance_type'], true)) {
+                $column['filter'] = ['type'=>'text','operators'=>['contains']];
+            }
             if (!in_array((string)$column['key'], ['experience_count','member_count','consumption_amount','labor_amount','sale_amount'], true)) continue;
             $column['drilldown'] = ['report'=>'partner_item_detail',
                 'params'=>$column['key'] === 'member_count' ? ['metric_code'=>'member_count'] : [],
@@ -419,13 +481,20 @@ class StoreUnifiedReportServices extends BaseServices
             'title'=>'合作方品项汇总','metric_version'=>'partner-item-order-first-crossing-v8','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
-            'summary_row'=>$this->summaryRow($columns, [
-                'month'=>'合计', 'experience_count'=>array_sum(array_column($rows, 'experience_count')),
-                'member_count'=>array_sum(array_column($rows, 'member_count')), 'consumption_amount'=>$this->money(array_sum(array_column($rows, 'consumption_amount_cents'))),
-                'labor_amount'=>$this->money(array_sum(array_column($rows, 'labor_amount_cents'))),
-                'sale_amount'=>$this->money(array_sum(array_column($rows, 'sale_amount_cents'))),
-            ]),
+            'summary_row'=>$this->partnerItemSummaryRow($columns, $rows),
         ];
+    }
+
+    /** Rebuild only the visible total from retained rows; amounts still sum original cents before display rounding. */
+    private function partnerItemSummaryRow(array $columns, array $rows): array
+    {
+        return $this->summaryRow($columns, [
+            'month'=>'合计', 'experience_count'=>array_sum(array_column($rows, 'experience_count')),
+            'member_count'=>array_sum(array_column($rows, 'member_count')),
+            'consumption_amount'=>$this->money(array_sum(array_column($rows, 'consumption_amount_cents'))),
+            'labor_amount'=>$this->money(array_sum(array_column($rows, 'labor_amount_cents'))),
+            'sale_amount'=>$this->money(array_sum(array_column($rows, 'sale_amount_cents'))),
+        ]);
     }
 
     /** 只让原单达标主品项在合作方筛选范围内的人数进入汇总；补交日期不限制原销售日。 */

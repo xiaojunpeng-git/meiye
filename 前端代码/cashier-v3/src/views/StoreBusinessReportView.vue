@@ -12,7 +12,7 @@ import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import Network from '@lucide/vue/dist/esm/icons/network.mjs'
 import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
-import { formatMoney, requestCashierV3Action } from '@/services/cashierV3Bridge'
+import { formatMoney } from '@/services/cashierV3Bridge'
 import ReportDetailDialog from '@/components/reports/ReportDetailDialog.vue'
 import {
   PHASE_FOUR_ANNUAL_REPORT_CODES,
@@ -26,7 +26,6 @@ import {
   queryStoreBusinessReport,
   queryStoreBusinessReportCatalog,
   queryStoreBusinessReportScope,
-  queryStoreBusinessReportPersonnel,
   queryStoreBusinessReportCategories,
   saveStoreBusinessReportAnnotation,
   STORE_BUSINESS_REPORT_RUNTIME
@@ -84,13 +83,6 @@ const STORE_REPORT_TABS = Object.freeze([
   ...PHASE_FOUR_CROSS_END_REPORT_TABS,
   ...PHASE_SIX_CROSS_END_REPORT_TABS
 ].filter((tab, index, all) => all.findIndex((item) => item.code === tab.code) === index))
-const PERSON_FILTERS = Object.freeze([
-  ['salesperson_id', '销售人编号'],
-  ['sales_manager_id', '销售经理编号'],
-  ['guide_id', '导购编号'],
-  ['craftsman_id', '手艺人编号']
-])
-
 const route = useRoute()
 const router = useRouter()
 const catalog = ref([])
@@ -121,18 +113,9 @@ const productType = ref('')
 const partnerName = ref('')
 const personFilters = ref({})
 const dynamicFilters = ref({})
+const resultRowFilters = ref({})
 const categoryOptions = ref([])
 const isAdvancedFiltersOpen = ref(false)
-const personnelPicker = ref({
-  open: false,
-  role: '',
-  label: '',
-  scope: '',
-  keyword: '',
-  loading: false,
-  records: [],
-  error: ''
-})
 const scopePicker = ref({ open: false, loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] })
 const expandedScopeKeys = ref(new Set())
 const page = ref(1)
@@ -421,6 +404,19 @@ const isPhaseFourReport = computed(() => PHASE_FOUR_REPORT_TABS.some((item) => i
 const isPhaseSixReport = computed(() => PHASE_SIX_REPORT_CODES.includes(activeReport.value))
 const usesNaturalMonthFilter = computed(() => ['six_dimension_performance_distribution', 'operations_beauty_item'].includes(activeReport.value))
 const columns = computed(() => Array.isArray(result.value.columns) ? result.value.columns : [])
+// 门店数据报表只展示后端声明的静态固定维度，不能根据显示值猜测统计字段。
+const resultFilterColumns = computed(() => !isPlatformRuntimeRoute() && STORE_REPORT_TABS.some((tab) => tab.code === activeReport.value)
+  ? columns.value.filter((column) => ['month', 'text'].includes(column?.filter?.type))
+  : [])
+function encodedResultFilters() {
+  if (isPlatformRuntimeRoute() || !STORE_REPORT_TABS.some((tab) => tab.code === activeReport.value)) return ''
+  // 深链首次加载时列元数据尚未返回；服务端仍按当前报表的声明字段校验。
+  const conditions = Object.entries(resultRowFilters.value).flatMap(([key, raw]) => {
+    const value = String(raw ?? '').trim()
+    return value ? [{ key, op: ['month', 'award_month', 'accrual_month'].includes(key) ? 'eq' : 'contains', value }] : []
+  })
+  return conditions.length ? JSON.stringify(conditions) : ''
+}
 const filterSchema = computed(() => {
   const schema = result.value.filter_schema || result.value.filterSchema
   return (Array.isArray(schema) ? schema : []).filter((field) => {
@@ -882,6 +878,7 @@ function reportParams(overrides = {}) {
     partner_name: partnerName.value,
     ...personFilters.value,
     ...dynamicFilters.value,
+    row_filters: encodedResultFilters(),
     ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(',') } : {}),
     page: page.value,
     limit: DEFAULT_LIMIT,
@@ -1058,9 +1055,12 @@ function formatCell(value, column) {
 
 function syncActiveReportFromRoute() {
   const requested = requestedReportCode()
+  const previousReport = activeReport.value
   activeReport.value = allowedReportTabs.value.some((item) => item.code === requested)
     ? requested
     : String(allowedReportTabs.value[0]?.code || '')
+  // 每张报表首次进入均收起高级筛选；同一报表仅修改查询条件时保留用户当前展开状态。
+  if (activeReport.value !== previousReport) isAdvancedFiltersOpen.value = false
   // 每次导航重建默认值，禁止上一个报表的筛选泄漏到无日期的新入口；单边日期按单日处理。
   const defaults = defaultReportDateRange()
   startDate.value = String(route.query?.start_date || route.query?.end_date || defaults.start)
@@ -1084,19 +1084,25 @@ function syncFiltersFromRoute() {
   if (storeIds.length) {
     scopePicker.value = { ...scopePicker.value, selectedStoreIds: storeIds, label: String(query.scope_label || '下钻范围') }
   }
-  const reserved = new Set(['start_date', 'end_date', 'month', 'year', 'store_ids', 'scope_label', 'salary_report_return_to'])
+  const reserved = new Set(['start_date', 'end_date', 'month', 'year', 'store_ids', 'scope_label', 'salary_report_return_to', 'row_filters'])
   dynamicFilters.value = Object.fromEntries(Object.entries(query)
     .filter(([key, value]) => !reserved.has(key) && value !== undefined && value !== '')
     .map(([key, value]) => [key, String(value)]))
+  // 深链保留字段键，实际允许范围由当前报表的后端列契约校验。
+  try {
+    const restored = JSON.parse(String(query.row_filters || '[]'))
+    resultRowFilters.value = Array.isArray(restored)
+      ? Object.fromEntries(restored.filter((entry) => entry && typeof entry.key === 'string' && typeof entry.value === 'string')
+        .map((entry) => [entry.key, String(entry.value ?? '')]))
+      : {}
+  } catch (_) {
+    resultRowFilters.value = {}
+  }
 }
 
 function clearAdvancedFilters() {
-  categoryId.value = ''
-  categoryPath.value = ''
-  productType.value = ''
-  partnerName.value = ''
-  personFilters.value = {}
-  dynamicFilters.value = {}
+  // Legacy URL conditions can carry a drilldown context; clearing visible filters must not erase it.
+  resultRowFilters.value = {}
 }
 
 function loadReportScope() {
@@ -1188,70 +1194,6 @@ function chooseAllScope() {
   scopePicker.value = { ...scopePicker.value, selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [], open: false }
   page.value = 1
   syncCurrentFiltersToRoute()
-}
-
-function openPersonnelPicker(role, label, scope) {
-  personnelPicker.value = {
-    open: true,
-    role,
-    label,
-    scope,
-    keyword: '',
-    loading: false,
-    records: [],
-    error: ''
-  }
-}
-
-async function searchPersonnel() {
-  const picker = personnelPicker.value
-  const keyword = String(picker.keyword || '').trim()
-  if (keyword.length < 2) {
-    personnelPicker.value = { ...picker, records: [], error: '请输入至少 2 个字符后搜索。' }
-    return
-  }
-  personnelPicker.value = { ...picker, loading: true, records: [], error: '' }
-  try {
-    let payload
-    if (isPlatformReport.value) {
-      payload = await queryStoreBusinessReportPersonnel({
-        role: picker.role,
-        keyword,
-        store_ids: scopePicker.value.selectedStoreIds.join(','),
-        page: 1,
-        limit: 20
-      }, reportRuntime.value)
-    } else {
-      const response = await requestCashierV3Action('query-query-entities', {
-        entityType: 'person',
-        selectorEntry: 'cashier',
-        selectorContext: { scope: picker.scope },
-        keyword,
-        page: 1,
-        pageSize: 20,
-        silent: true
-      })
-      payload = response?.data?.data || response?.data || {}
-    }
-    const normalized = payload || {}
-    const records = Array.isArray(normalized.records) ? normalized.records : []
-    personnelPicker.value = { ...personnelPicker.value, loading: false, records }
-  } catch (error) {
-    personnelPicker.value = {
-      ...personnelPicker.value,
-      loading: false,
-      records: [],
-      error: error?.message || '人员搜索失败，请稍后重试。'
-    }
-  }
-}
-
-function choosePersonnel(record) {
-  const picker = personnelPicker.value
-  const id = String(record?.employeeId || record?.id || '').trim()
-  if (!id) return
-  personFilters.value = { ...personFilters.value, [picker.role]: id }
-  personnelPicker.value = { ...picker, open: false }
 }
 
 function rowKey(row) {
@@ -1930,7 +1872,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 </script>
 
 <template>
-  <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout }" :aria-label="isSixDimensionReport ? '六维数据中心报表' : isPhaseFourReport ? '运营中心数据报表' : isPhaseSixReport ? '其他报表' : '门店运营报表'">
+  <main class="store-business-report" :class="{ 'store-business-report--market-detail': activeReport === 'market_detail', 'store-business-report--fixed-table': usesFixedTableLayout, 'store-business-report--advanced-open': isAdvancedFiltersOpen && resultFilterColumns.length, 'store-business-report--platform': isPlatformReport }" :aria-label="isSixDimensionReport ? '六维数据中心报表' : isPhaseFourReport ? '运营中心数据报表' : isPhaseSixReport ? '其他报表' : '门店运营报表'">
     <div v-if="!isPlatformReport" class="store-business-report__tabs-shell" :class="{ 'store-business-report__tabs-shell--expanded': tabsExpanded }">
       <nav ref="tabsElement" class="store-business-report__tabs" aria-label="门店运营报表功能">
         <button
@@ -2011,7 +1953,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
         <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
       </template>
-      <label v-for="field in filterSchema" :key="field.key">
+      <label v-for="field in isPlatformReport ? filterSchema : []" :key="field.key">
         <!-- 报表可隐藏重复的可见标题，输入控件仍通过 aria-label 保留可访问语义。 -->
         <span v-if="field.show_label !== false">{{ field.label || field.name || field.key }}</span>
         <select v-if="['select', 'category_tree'].includes(field.type)" v-model="dynamicFilters[field.key]">
@@ -2031,7 +1973,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
           :aria-label="field.aria_label || field.label || field.name || field.key"
         />
       </label>
-      <button v-if="isFirstPhaseReport" type="button" class="button button--secondary" @click="isAdvancedFiltersOpen = !isAdvancedFiltersOpen">{{ isAdvancedFiltersOpen ? '收起筛选' : '更多筛选' }}</button>
+      <button v-if="resultFilterColumns.length" type="button" class="button button--secondary" @click="isAdvancedFiltersOpen = !isAdvancedFiltersOpen">{{ isAdvancedFiltersOpen ? '收起筛选' : '更多筛选' }}</button>
       <button type="button" class="button button--primary" :disabled="loading" @click="query">{{ loading ? '查询中' : '查询' }}</button>
       <div class="store-business-report__query-actions" aria-label="报表操作">
         <button type="button" class="button button--secondary" @click="isFieldGuideOpen = true">
@@ -2046,21 +1988,15 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
       </div>
     </section>
 
-    <section v-if="isFirstPhaseReport && isAdvancedFiltersOpen" class="store-business-report__filters store-business-report__filters--advanced" aria-label="报表高级筛选">
-      <label>商品分类编号<input v-model.trim="categoryId" inputmode="numeric" placeholder="由分类选择器带入" /></label>
-      <label>分类路径<input v-model.trim="categoryPath" placeholder="例如：六维 / 自营" /></label>
-      <label>商品类型
-        <select v-model="productType"><option value="">全部类型</option><option value="card">卡项</option><option value="project">项目</option><option value="product">产品</option></select>
-      </label>
-      <label>合作方<input v-model.trim="partnerName" placeholder="合作方名称" /></label>
-      <label v-for="entry in PERSON_FILTERS" :key="entry[0]">{{ entry[1] }}
-        <button
-          type="button"
-          class="store-business-report__person-picker-trigger"
-          @click="openPersonnelPicker(entry[0], entry[1], entry[0] === 'sales_manager_id' ? 'group_sales_managers' : entry[0] === 'guide_id' ? 'group_guides' : 'sales_performance_assignees')"
-        >{{ personFilters[entry[0]] || '搜索并选择' }}</button>
-      </label>
-      <button type="button" class="button button--secondary" @click="clearAdvancedFilters">清空筛选</button>
+    <section v-if="resultFilterColumns.length && isAdvancedFiltersOpen" class="store-business-report__filters store-business-report__filters--advanced" aria-label="报表高级筛选">
+      <div v-if="resultFilterColumns.length" class="store-business-report__result-filters">
+        <label v-for="column in resultFilterColumns" :key="column.key">{{ column.label }}
+          <input v-model.trim="resultRowFilters[column.key]" :type="column.filter.type === 'month' ? 'month' : 'text'" :aria-label="`${column.label}筛选`" />
+        </label>
+      </div>
+      <div class="store-business-report__result-filter-actions">
+        <button type="button" class="button button--secondary" @click="clearAdvancedFilters">清空筛选</button>
+      </div>
     </section>
 
     <p v-if="currentReportDescription" class="store-business-report__description">{{ currentReportDescription }}</p>
@@ -2164,32 +2100,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <p v-else class="store-business-report__empty">请先完成查询后查看列名取值来源。</p>
       </section>
     </div>
-    <div v-if="personnelPicker.open" class="store-business-report__modal" role="dialog" aria-modal="true" :aria-label="personnelPicker.label">
-      <section class="store-business-report__modal-card">
-        <header>
-          <strong>搜索{{ personnelPicker.label }}</strong>
-          <button type="button" class="store-business-report__modal-close" aria-label="关闭" @click="personnelPicker.open = false">×</button>
-        </header>
-        <div class="store-business-report__person-search">
-          <input v-model.trim="personnelPicker.keyword" type="search" placeholder="输入姓名、工号后搜索" @keyup.enter="searchPersonnel" />
-          <button type="button" class="button button--primary" :disabled="personnelPicker.loading" @click="searchPersonnel">{{ personnelPicker.loading ? '搜索中' : '搜索' }}</button>
-        </div>
-        <p v-if="personnelPicker.error" class="store-business-report__error" role="alert">{{ personnelPicker.error }}</p>
-        <div v-if="!personnelPicker.loading && personnelPicker.records.length" class="store-business-report__person-results">
-          <button v-for="record in personnelPicker.records" :key="`${record.employeeId || record.id}-${record.storeId || ''}`" type="button" @click="choosePersonnel(record)">
-            <span>{{ record.name || record.staffName || '-' }}</span>
-            <small>{{ record.storeName || '集团人员' }} · {{ record.staffNo || record.employeeId || record.id }}</small>
-          </button>
-        </div>
-        <p v-else-if="!personnelPicker.loading && !personnelPicker.error" class="store-business-report__empty">输入关键词后搜索，默认不加载人员。</p>
-      </section>
-    </div>
   </main>
 </template>
 
 <style scoped>
 .store-business-report { display: grid; align-content: start; gap: 14px; min-width: 0; min-height: 0; height: 100%; box-sizing: border-box; padding: 20px; overflow: auto; background: #f5f7fa; color: #252a34; }
 .store-business-report--market-detail, .store-business-report--fixed-table { grid-template-rows: auto auto minmax(0, 1fr); align-content: stretch; overflow: hidden; }
+.store-business-report--fixed-table.store-business-report--advanced-open { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.store-business-report--fixed-table.store-business-report--advanced-open.store-business-report--platform { grid-template-rows: auto auto minmax(0, 1fr); }
 .store-business-report h1, .store-business-report h2, .store-business-report p { margin: 0; }
 .store-business-report__tabs-shell { display: flex; align-items: flex-start; min-width: 0; border-bottom: 1px solid #d9e1eb; background: #fff; }
 .store-business-report__tabs { display: flex; flex: 1; flex-wrap: wrap; min-width: 0; max-height: 43px; gap: 0 2px; overflow: hidden; padding: 0 12px; }
@@ -2226,23 +2144,20 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
 .store-business-report__query-actions .button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; }
 .store-business-report__salary-return { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; max-width: 100%; text-align: left; }
 .store-business-report__salary-return svg { flex: none; }
-.store-business-report__filters--advanced { border-top: 0; border-radius: 0 0 8px 8px; padding-top: 2px; }
+.store-business-report__filters--advanced { min-height: 0; max-height: min(38vh, 340px); overflow-y: auto; border-top: 0; border-radius: 0 0 8px 8px; padding-top: 2px; }
+.store-business-report__result-filters { display: flex; width: 100%; flex-wrap: wrap; align-items: end; gap: 8px; }
+.store-business-report__result-filters label { flex: 0 1 180px; }
+.store-business-report__result-filters input { width: 100%; }
+.store-business-report__result-filter-actions { display: flex; align-items: end; }
 .store-business-report__filters label { display: grid; gap: 5px; min-width: 140px; color: #687586; font-size: 12px; }
 .store-business-report__period-picker { flex: 0 1 260px; width: 260px; min-width: 230px; }
 .store-business-report__filters .store-business-report__date-field { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: #526174; font-size: 13px; }
 .store-business-report__date-field input { width: 116px; }
 .store-business-report__filters input, .store-business-report__filters select { min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; background: #fff; color: #252a34; font: inherit; }
-.store-business-report__person-picker-trigger { min-height: 34px; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; background: #fff; color: #1769aa; text-align: left; font: inherit; cursor: pointer; }
 .store-business-report__modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(24, 39, 58, .38); }
 .store-business-report__modal-card { width: min(520px, 100%); max-height: min(620px, 90vh); overflow: auto; border-radius: 10px; padding: 18px; background: #fff; box-shadow: 0 16px 50px rgba(24, 39, 58, .2); }
 .store-business-report__modal-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .store-business-report__modal-close { border: 0; background: transparent; color: #657386; font-size: 24px; cursor: pointer; }
-.store-business-report__person-search { display: flex; gap: 8px; }
-.store-business-report__person-search input { flex: 1; min-height: 34px; box-sizing: border-box; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; font: inherit; }
-.store-business-report__person-results { display: grid; gap: 6px; margin-top: 12px; }
-.store-business-report__person-results button { display: flex; justify-content: space-between; gap: 12px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; background: #fff; color: #283548; text-align: left; cursor: pointer; }
-.store-business-report__person-results button:hover { border-color: #1769aa; background: #f7fbff; }
-.store-business-report__person-results small { color: #7a8798; }
 .store-business-report__filters .button { min-height: 34px; }
 .store-business-report__error { border: 1px solid #ffcaca; border-radius: 7px; padding: 10px 14px; background: #fff5f5; color: #b42318; font-size: 13px; }
 .store-business-report__coverage-notice { border: 1px solid #f0d79e; border-radius: 7px; padding: 10px 14px; background: #fff9ec; color: #815c13; font-size: 13px; }

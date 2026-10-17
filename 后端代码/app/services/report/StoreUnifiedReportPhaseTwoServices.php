@@ -518,6 +518,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             foreach ($columns as &$column) if ($column['key'] === $key) { $column['fixed'] = 'left'; $column['fixed_width'] = $width; break; }
             unset($column);
         }
+        // 本表另有会员日专用合计，必须与通用分页和导出使用同一筛后行集。
+        if ((string)($input['row_filters'] ?? '') !== '') {
+            $columns = StoreReportResultRowFilterServices::declareFixedDimensions($columns);
+            $columns = StoreReportResultRowFilterServices::declareDimensions($columns, $this->extraStaticDimensionKeys('市场明细表'));
+            $rows = StoreReportResultRowFilterServices::filter($rows, $columns, (string)$input['row_filters']);
+        }
         $result = $this->result('市场明细表', $columns, $rows, $input, [], ['amount_cents'=>$this->sumField($rows,'amount_cents')]);
         $result['summary_row'] = $this->marketDetailSummaryRow($rows);
         if ($this->participantEmployeeId > 0) $result['editable_fields'] = [];
@@ -2717,6 +2723,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         if(in_array($title,['新客明细表','新客汇总表'],true))$columns=$this->newCustomerColumnExplanations($columns);
         $this->appendDimensionFiltersToColumns($columns);
         $this->appendDimensionFiltersToRows($records);
+        // 先按原事实口径生成完整行，再以已声明的固定维度筛选；分页、合计和导出共用筛后行集。
+        $columns=StoreReportResultRowFilterServices::declareFixedDimensions($columns);
+        $columns=StoreReportResultRowFilterServices::declareDimensions($columns,$this->extraStaticDimensionKeys($title));
+        $records=StoreReportResultRowFilterServices::filter($records,$columns,(string)($input['row_filters']??''));
         $visible=!empty($input['_internal_all'])?$records:array_slice($records,($page-1)*$limit,$limit);
         // 未付清订单入表改变两张新客表的资格和统计时间，不能复用旧口径版本。
         $metricVersion=$title==='新客汇总表'?'new-customer-first-sale-grouped-v7':($title==='新客明细表'?'new-customer-first-sale-v6':'store-operations-phase-two-v1');
@@ -2739,6 +2749,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         $result=['title'=>$title,'columns'=>$columns,'records'=>$visible,'total'=>count($records),'page'=>$page,'page_size'=>$limit,'totals'=>$totals,'drilldown_keys'=>['organization_id','store_id','dimension_code','payment_method_code','metric_code','start_date','end_date'],'table_layout'=>['fixed'=>true,'sticky_header'=>true,'sticky_summary'=>true,'result_scroll'=>true],'metric_version'=>$metricVersion,'service_customer_rule_version'=>null,'data_as_of'=>date('Y-m-d H:i:s'),'aggregation_status'=>'reconciled'];
         $summary=$this->summaryRow($title,$columns,$records);if($summary)$result['summary_row']=$summary;
         if($groups)$result['column_groups']=$groups;
+        if($title==='异业收客汇总表'&&(string)($input['row_filters']??'')!==''){
+            $totals['first_500_total']=$this->money(array_sum(array_map(fn(array $row):int=>$this->decimalCents($row['first_500']??'0'),$records)));
+            $totals['reached_2400_total']=$this->money(array_sum(array_map(fn(array $row):int=>$this->decimalCents($row['reached_2400']??'0'),$records)));
+        }
         $metadata=$this->metadataForTitle($title,$totals);
         if (in_array($title, ['新客明细表', '新客汇总表'], true)) {
             $metadata['filter_schema'][] = [
@@ -2938,6 +2952,21 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         ];
         foreach($columns as &$column){$key=(string)($column['key']??'');if(isset($maps[$title][$key])&&empty($column['fixed'])){$column['fixed']='left';$column['fixed_width']=$maps[$title][$key];}}unset($column);
         return$columns;
+    }
+    /** Stable text/date fields outside the frozen identity columns; generated metric groups are excluded. */
+    private function extraStaticDimensionKeys(string $title):array
+    {
+        return [
+            '市场明细表'=>['registered_date','reviewer','reviewed_at','creator_name','created_at'],
+            '会员进店分析表'=>['source'],
+            '地推拓客明细表'=>['card_sale_date','remark'],
+            '地推拓客汇总表'=>['first_visit_date','remark'],
+            '异业收客明细表'=>['remark'],
+            '异业收客汇总表'=>['card_name','first_visit_at'],
+            '新客明细表'=>['source','care_project','craftsman','care_duration','remark'],
+            '销售人生美大单统计表'=>['beauty_category','tier','accrual_month','installment'],
+            '院店退款台账'=>['phone','salesperson','guide','sales_manager','category','refund_items','original_sale_date','refund_remark'],
+        ][$title]??[];
     }
     private function summaryRow(string $title,array $columns,array $records):array
     {

@@ -261,8 +261,8 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
         unset($row);
         // 新老客只看六维购买历史；原单门槛只限制成交人数，欠款余额不随期间重算。
         $columns = [
-            $this->pathColumn('company_name', '分公司', '按业务门店所属分公司展示；没有配置分公司时显示“未配置分公司”。', ['分公司'], false, true, 130),
-            $this->pathColumn('store_name', '门店', '显示发生六维服务、收款或欠款的门店名称。', ['门店'], false, true, 140),
+            $this->pathColumn('company_name', '分公司', '按业务门店所属分公司展示；没有配置分公司时显示“未配置分公司”。', ['分公司'], false, true, 130, [], '', 'text'),
+            $this->pathColumn('store_name', '门店', '显示发生六维服务、收款或欠款的门店名称。', ['门店'], false, true, 140, [], '', 'text'),
             $this->pathColumn('new_visit_people', '新客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内还没有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '新客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('old_visit_people', '老客人数', '所选期间在本店完成所选六维分类的体验服务，且截至服务当天在当前可查看范围内已有该分类付费购买记录的会员，按会员去重计人数。', ['见诊人数', '老客人数'], true, false, 110, [], '见诊人数', 'integer'),
             $this->pathColumn('total_visit_people', '合计见诊人数', '本店新客见诊人数加老客见诊人数。同一会员如果在所选期间先后符合两种身份，会分别计入两列。', ['合计见诊人数'], true, false, 120, [], '', 'integer'),
@@ -4949,6 +4949,11 @@ final class StoreUnifiedReportPhaseFourServices extends BaseServices
     private function result(string $title, array $columns, array $records, array $range, array $input, array $filters = []): array
     {
         $page = max(1, (int)($input['page'] ?? 1)); $limit = min(100, max(10, (int)($input['limit'] ?? 20)));
+        if ($title === '六维数据分析表') {
+            // 跨端门店报表沿用已计算完成的行，固定维度筛选不能改变原六维事实口径。
+            $columns = StoreReportResultRowFilterServices::declareFixedDimensions($columns);
+            $records = StoreReportResultRowFilterServices::filter($records, $columns, (string)($input['row_filters'] ?? ''));
+        }
         $visible = !empty($input['_internal_all']) ? $records : array_slice($records, ($page - 1) * $limit, $limit);
         $summary = []; foreach ($columns as $column) $summary[(string)$column['key']] = '-'; if ($columns) $summary[(string)$columns[0]['key']] = '合计';
         foreach ($columns as $column) {
