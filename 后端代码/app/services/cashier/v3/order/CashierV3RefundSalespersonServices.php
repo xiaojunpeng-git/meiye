@@ -50,6 +50,11 @@ final class CashierV3RefundSalespersonServices
                 ->where('performance_type', 'sales_performance_allocated')->where('status', 'effective')
                 ->where('fact_direction', 'forward')->order('id asc')->select()->toArray();
             $active = $this->unreversed($rows, $scope->tenantId());
+            // 跨店原销售人也必须按写入端使用的直属岗位分组，不能降级到普通组。
+            $otherIds = array_values(array_filter(array_column($active, 'employee_id'),
+                static fn($id): bool => (int)$id > 0 && !isset($byEmployee[(int)$id])));
+            $positions = (new CashierV3QueryEntitySelectorServices())->organizationDirectPositionMap($otherIds);
+            $sourceFacts = [];
             foreach ($active as $row) {
                 $employeeId = (int)$row['employee_id'];
                 if ($employeeId <= 0) continue;
@@ -60,15 +65,67 @@ final class CashierV3RefundSalespersonServices
                     'employeeId' => $employeeId,
                     'name' => (string)($row['employee_name_snapshot'] ?? ''),
                     'personnelSource' => 'other',
+                    'positionId' => ($positionId = (int)($positions[$employeeId]['position_id'] ?? 0)),
+                    'positionName' => (string)($positions[$employeeId]['position_name'] ?? ''),
+                    'performanceIndependent' => ($independent = !empty($positions[$employeeId]['performance_independent'])),
+                    'allocationGroupKey' => $independent
+                        ? 'independent:' . ($positionId > 0 ? $positionId : CashierV3PersonnelIdentity::organizationStaffId($employeeId))
+                        : 'normal',
                 ];
                 $selected[$employeeId] = $person + [
-                    'allocationWeight' => (int)$row['allocation_weight_numerator'],
                     'isPreSale' => str_ends_with((string)$row['role_snapshot'], ':presale'),
                 ];
+                $sourceFacts[$employeeId] = $row;
             }
+            $selected = $this->sourcePercentages($selected, $sourceFacts);
         }
         return ['sourceSalesOrderId' => $source['orderId'], 'sourceSalesLineId' => $source['lineId'],
             'salespeople' => $candidates, 'currentSalespeople' => array_values($selected)];
+    }
+
+    /**
+     * 只转换退款默认草稿，不回写原事实。正常结账按原分子/分母换算；人员调整
+     * 事实把每人金额同时写为分子和分母，已不含组内比例，沿用订单编辑器的
+     * 有效金额权重。各当前核算组独立归整到100%，尾差归稳定顺序最后一名正权重者。
+     * 零权重不凭空分配业绩；不足1%的结果仍交既有提交校验要求用户明确调整。
+     */
+    private function sourcePercentages(array $people, array $facts): array
+    {
+        $groups = [];
+        foreach ($people as $id => $person) $groups[(string)$person['allocationGroupKey']][] = $id;
+        foreach ($groups as $ids) {
+            $amountWeights = false;
+            foreach ($ids as $id) {
+                if (strpos((string)($facts[$id]['rule_code_snapshot'] ?? ''), 'ORDER-PERSONNEL-ADJUST') === 0) {
+                    $amountWeights = true;
+                }
+            }
+            // BCMath保留精确有理权重，避免浮点误差把50/50变成49/51。
+            $weights = []; $totalNumerator = '0'; $totalDenominator = '1'; $last = null;
+            foreach ($ids as $id) {
+                $fact = $facts[$id];
+                $n = $amountWeights ? abs((int)$fact['amount_cents']) : (int)$fact['allocation_weight_numerator'];
+                $d = $amountWeights ? 1 : (int)$fact['allocation_weight_denominator'];
+                if ($n < 0 || $d <= 0 || (!$amountWeights && $n > $d)) {
+                    throw self::fail('原单销售人权重无效，请核对原单人员分配。');
+                }
+                $weights[$id] = [(string)$n, (string)$d];
+                $totalNumerator = bcadd(bcmul($totalNumerator, (string)$d, 0), bcmul((string)$n, $totalDenominator, 0), 0);
+                $totalDenominator = bcmul($totalDenominator, (string)$d, 0);
+                $people[$id]['allocationWeight'] = 0;
+                if ($n > 0) $last = $id;
+            }
+            if ($last === null) continue;
+            $allocated = 0;
+            foreach ($ids as $id) {
+                [$n, $d] = $weights[$id];
+                $weight = $id === $last ? 100 - $allocated : (int)bcdiv(
+                    bcmul(bcmul($n, $totalDenominator, 0), '100', 0), bcmul($d, $totalNumerator, 0), 0);
+                $people[$id]['allocationWeight'] = $weight;
+                $allocated += $weight;
+            }
+        }
+        return $people;
     }
 
     /** 编辑页以退款主表版本和保存的分配快照为准，历史原单人员不再回流。 */

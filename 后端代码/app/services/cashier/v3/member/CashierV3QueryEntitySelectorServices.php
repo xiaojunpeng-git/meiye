@@ -489,11 +489,12 @@ final class CashierV3QueryEntitySelectorServices
      * 集团直属员工的岗位以 staff_job_position.staff_id=0 为权威来源。
      * 收银一个销售人只能落入一个核算组；存在多条有效直属岗位时优先独立核算岗位，
      * 同类岗位按最早关系 ID 稳定选择，避免查询、刷新和结账重校验产生不同结果。
+     * 服务端退款草稿可复用此投影；调用方必须先限定可读员工，返回岗位不授予人员选择权限。
      *
      * @param array<int,mixed> $employeeIds
      * @return array<int,array{position_id:int,position_name:string,performance_independent:int}>
      */
-    private function organizationDirectPositionMap(array $employeeIds, bool $lock = false): array
+    public function organizationDirectPositionMap(array $employeeIds, bool $lock = false): array
     {
         $employeeIds = array_values(array_unique(array_filter(array_map('intval', $employeeIds), static function (int $id): bool {
             return $id > 0;

@@ -1,0 +1,270 @@
+diff --git a/后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php b/后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php
+--- a/后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php
++++ b/后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php
+@@ -489,11 +489,12 @@ final class CashierV3QueryEntitySelectorServices
+      * 集团直属员工的岗位以 staff_job_position.staff_id=0 为权威来源。
+      * 收银一个销售人只能落入一个核算组；存在多条有效直属岗位时优先独立核算岗位，
+      * 同类岗位按最早关系 ID 稳定选择，避免查询、刷新和结账重校验产生不同结果。
++     * 服务端退款草稿可复用此投影；调用方必须先限定可读员工，返回岗位不授予人员选择权限。
+      *
+      * @param array<int,mixed> $employeeIds
+      * @return array<int,array{position_id:int,position_name:string,performance_independent:int}>
+      */
+-    private function organizationDirectPositionMap(array $employeeIds, bool $lock = false): array
++    public function organizationDirectPositionMap(array $employeeIds, bool $lock = false): array
+     {
+         $employeeIds = array_values(array_unique(array_filter(array_map('intval', $employeeIds), static function (int $id): bool {
+             return $id > 0;
+diff --git a/后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php b/后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php
+--- a/后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php
++++ b/后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php
+@@ -50,6 +50,11 @@ final class CashierV3RefundSalespersonServices
+                 ->where('performance_type', 'sales_performance_allocated')->where('status', 'effective')
+                 ->where('fact_direction', 'forward')->order('id asc')->select()->toArray();
+             $active = $this->unreversed($rows, $scope->tenantId());
++            // 跨店原销售人也必须按写入端使用的直属岗位分组，不能降级到普通组。
++            $otherIds = array_values(array_filter(array_column($active, 'employee_id'),
++                static fn($id): bool => (int)$id > 0 && !isset($byEmployee[(int)$id])));
++            $positions = (new CashierV3QueryEntitySelectorServices())->organizationDirectPositionMap($otherIds);
++            $sourceFacts = [];
+             foreach ($active as $row) {
+                 $employeeId = (int)$row['employee_id'];
+                 if ($employeeId <= 0) continue;
+@@ -60,17 +65,69 @@ final class CashierV3RefundSalespersonServices
+                     'employeeId' => $employeeId,
+                     'name' => (string)($row['employee_name_snapshot'] ?? ''),
+                     'personnelSource' => 'other',
++                    'positionId' => ($positionId = (int)($positions[$employeeId]['position_id'] ?? 0)),
++                    'positionName' => (string)($positions[$employeeId]['position_name'] ?? ''),
++                    'performanceIndependent' => ($independent = !empty($positions[$employeeId]['performance_independent'])),
++                    'allocationGroupKey' => $independent
++                        ? 'independent:' . ($positionId > 0 ? $positionId : CashierV3PersonnelIdentity::organizationStaffId($employeeId))
++                        : 'normal',
+                 ];
+                 $selected[$employeeId] = $person + [
+-                    'allocationWeight' => (int)$row['allocation_weight_numerator'],
+                     'isPreSale' => str_ends_with((string)$row['role_snapshot'], ':presale'),
+                 ];
++                $sourceFacts[$employeeId] = $row;
+             }
++            $selected = $this->sourcePercentages($selected, $sourceFacts);
+         }
+         return ['sourceSalesOrderId' => $source['orderId'], 'sourceSalesLineId' => $source['lineId'],
+             'salespeople' => $candidates, 'currentSalespeople' => array_values($selected)];
+     }
+ 
++    /**
++     * 只转换退款默认草稿，不回写原事实。正常结账按原分子/分母换算；人员调整
++     * 事实把每人金额同时写为分子和分母，已不含组内比例，沿用订单编辑器的
++     * 有效金额权重。各当前核算组独立归整到100%，尾差归稳定顺序最后一名正权重者。
++     * 零权重不凭空分配业绩；不足1%的结果仍交既有提交校验要求用户明确调整。
++     */
++    private function sourcePercentages(array $people, array $facts): array
++    {
++        $groups = [];
++        foreach ($people as $id => $person) $groups[(string)$person['allocationGroupKey']][] = $id;
++        foreach ($groups as $ids) {
++            $amountWeights = false;
++            foreach ($ids as $id) {
++                if (strpos((string)($facts[$id]['rule_code_snapshot'] ?? ''), 'ORDER-PERSONNEL-ADJUST') === 0) {
++                    $amountWeights = true;
++                }
++            }
++            // BCMath保留精确有理权重，避免浮点误差把50/50变成49/51。
++            $weights = []; $totalNumerator = '0'; $totalDenominator = '1'; $last = null;
++            foreach ($ids as $id) {
++                $fact = $facts[$id];
++                $n = $amountWeights ? abs((int)$fact['amount_cents']) : (int)$fact['allocation_weight_numerator'];
++                $d = $amountWeights ? 1 : (int)$fact['allocation_weight_denominator'];
++                if ($n < 0 || $d <= 0 || (!$amountWeights && $n > $d)) {
++                    throw self::fail('原单销售人权重无效，请核对原单人员分配。');
++                }
++                $weights[$id] = [(string)$n, (string)$d];
++                $totalNumerator = bcadd(bcmul($totalNumerator, (string)$d, 0), bcmul((string)$n, $totalDenominator, 0), 0);
++                $totalDenominator = bcmul($totalDenominator, (string)$d, 0);
++                $people[$id]['allocationWeight'] = 0;
++                if ($n > 0) $last = $id;
++            }
++            if ($last === null) continue;
++            $allocated = 0;
++            foreach ($ids as $id) {
++                [$n, $d] = $weights[$id];
++                $weight = $id === $last ? 100 - $allocated : (int)bcdiv(
++                    bcmul(bcmul($n, $totalDenominator, 0), '100', 0), bcmul($d, $totalNumerator, 0), 0);
++                $people[$id]['allocationWeight'] = $weight;
++                $allocated += $weight;
++            }
++        }
++        return $people;
++    }
++
+     /** 编辑页以退款主表版本和保存的分配快照为准，历史原单人员不再回流。 */
+     public function entry(array $payload, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+     {
+diff --git a/tests/cashier-v3/php/r90-refund-source-percentages.php b/tests/cashier-v3/php/r90-refund-source-percentages.php
+new file mode 100644
+index 00000000..c391fd9a
+--- /dev/null
++++ b/tests/cashier-v3/php/r90-refund-source-percentages.php
+@@ -0,0 +1,67 @@
++<?php
++declare(strict_types=1);
++
++// Pure production-method regression. No application boot, SQL, refund command or historical writes.
++$backend = getenv('CASHIER_BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
++require $backend . '/vendor/autoload.php';
++
++use app\services\cashier\v3\order\CashierV3RefundSalespersonServices;
++
++$service = new CashierV3RefundSalespersonServices();
++$convert = new ReflectionMethod($service, 'sourcePercentages');
++$convert->setAccessible(true);
++$allocate = new ReflectionMethod($service, 'allocate');
++$allocate->setAccessible(true);
++$checks = [];
++$run = static function (string $name, array $ratios, array $expected, array $groups = [], bool $adjusted = false) use ($service, $convert, &$checks): array {
++    $people = []; $facts = [];
++    foreach ($ratios as $i => $ratio) {
++        $id = $i + 1;
++        $group = $groups[$i] ?? 'normal';
++        $people[$id] = ['staffId' => $id, 'employeeId' => $id, 'name' => 'fixture-' . $id,
++            'allocationGroupKey' => $group, 'performanceIndependent' => $group !== 'normal',
++            'isPreSale' => $i === 0, 'performanceAmountManual' => false];
++        $facts[$id] = ['allocation_weight_numerator' => $ratio[0], 'allocation_weight_denominator' => $ratio[1],
++            'amount_cents' => $ratio[2] ?? $ratio[0],
++            'rule_code_snapshot' => $adjusted ? 'ORDER-PERSONNEL-ADJUST-MANUAL-AMOUNT-V1' : 'SALES-CASH-COLLECTED-V1'];
++    }
++    $before = serialize([$people, $facts]);
++    $result = $convert->invoke($service, $people, $facts);
++    if (array_column($result, 'allocationWeight') !== $expected || serialize([$people, $facts]) !== $before) {
++        throw new RuntimeException($name . ': wrong proportions or source mutated');
++    }
++    foreach ($result as $id => $person) {
++        unset($person['allocationWeight']);
++        if ($person !== $people[$id]) throw new RuntimeException($name . ': personnel/group metadata changed');
++    }
++    $checks[] = $name;
++    return array_values($result);
++};
++$run('original 30/70 retained despite rounded amounts', [[30,100,0],[70,100,100]], [30,70]);
++$run('large equal weights', [[580000,1160000],[580000,1160000]], [50,50]);
++$run('unequal money-denominated weights', [[200000,580000],[380000,580000]], [34,66]);
++$run('thirds stable final remainder', [[1,3],[1,3],[1,3]], [33,33,34]);
++$run('different denominators', [[1,2],[1,3],[1,6]], [50,33,17]);
++$run('no floating precision loss', [[1,10],[2,10],[7,10]], [10,20,70]);
++$run('independent groups never halved', [[580000,580000],[580000,580000]], [100,100], ['independent:10','normal']);
++$people = $run('adjusted original screenshot', [[580000,580000],[580000,580000]], [100,100], ['independent:10','normal'], true);
++if ($allocate->invoke($service, $people, 580000) !== [580000,580000]) throw new RuntimeException('Independent allocation changed');
++$checks[] = 'existing independent deduction calculation unchanged';
++$run('adjusted same group uses saved amounts', [[200000,200000],[380000,380000]], [34,66], [], true);
++$run('two independent groups with multiple people', [[1,3],[2,3],[1,4],[3,4]], [33,67,25,75], ['normal','normal','independent:10','independent:10']);
++$run('zero remains zero', [[0,100],[100,100],[0,100]], [0,100,0]);
++$run('all zero does not invent allocation', [[0,100],[0,100]], [0,0]);
++$run('adjusted all zero remains zero', [[0,1,0],[0,1,0]], [0,0], [], true);
++$run('tiny weight not silently boosted', [[1,1000],[999,1000]], [0,100]);
++$run('large integers no overflow', [[PHP_INT_MAX-1,PHP_INT_MAX],[1,PHP_INT_MAX]], [99,1]);
++$run('empty selection retained', [], []);
++$people = $run('normal integer amount tail', [[33,100],[67,100]], [33,67]);
++if ($allocate->invoke($service, $people, 10100) !== [3300,6800]) throw new RuntimeException('Integer tail changed');
++$checks[] = 'existing whole-yuan final remainder unchanged';
++if ($allocate->invoke($service, $people, 0) !== [0,0]) throw new RuntimeException('Zero cash allocation changed');
++$checks[] = 'zero cash does not create deduction';
++foreach ([[1,0],[-1,100],[101,100]] as $ratio) {
++    try { $run('invalid', [$ratio], [100]); throw new RuntimeException('Invalid ratio accepted'); }
++    catch (\app\services\cashier\v3\CashierV3CommandException $error) { $checks[] = 'invalid source ratio rejected'; }
++}
++echo json_encode(['status'=>'PASS','count'=>count($checks),'checks'=>$checks], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), PHP_EOL;
+diff --git a/tests/cashier-v3/php/r90-refund-source-readonly.php b/tests/cashier-v3/php/r90-refund-source-readonly.php
+new file mode 100644
+index 00000000..c3e566c6
+--- /dev/null
++++ b/tests/cashier-v3/php/r90-refund-source-readonly.php
+@@ -0,0 +1,88 @@
++<?php
++declare(strict_types=1);
++
++// Local mirror only, with a database-enforced read-only transaction. Never dispatch a refund.
++$backend = getenv('CASHIER_BACKEND_ROOT') ?: dirname(__DIR__, 3) . '/后端代码';
++require $backend . '/vendor/autoload.php';
++use app\services\cashier\v3\CashierV3DataScopeContext;
++use app\services\cashier\v3\CashierV3OperatorScope;
++use app\services\cashier\v3\order\CashierV3RefundSalespersonServices;
++use think\facade\Db;
++
++$app = new think\App($backend . '/');
++$app->initialize();
++if (!is_file('/.dockerenv') || config('database.connections.mysql.hostname') !== 'mysql') {
++    throw new RuntimeException('Only the local Docker mirror is allowed');
++}
++Db::execute('SET SESSION TRANSACTION READ ONLY');
++Db::startTrans();
++try {
++    $service = new CashierV3RefundSalespersonServices();
++    $normalize = new ReflectionMethod($service, 'normalize');
++    $normalize->setAccessible(true);
++    $rows = Db::name('cashier_v3_performance_fact')->where('performance_type','sales_performance_allocated')
++        ->where('fact_direction','forward')->where('status','effective')->where('allocation_weight_numerator','>',100)
++        ->order('id desc')->limit(200)->select()->toArray();
++    // Include independent-position orders, not only the most recent ordinary-personnel rows.
++    $independentRows = Db::name('cashier_v3_performance_fact')->alias('f')
++        ->join('system_store_staff s','s.employee_id=f.employee_id AND s.store_id=f.store_id')
++        ->join('staff_job_position j','j.staff_id=s.id')
++        ->join('position p','p.id=j.position_id')
++        ->where('j.status',1)->where('j.is_del',0)->where('j.end_time',0)
++        ->where('p.status',1)->where('p.performance_independent',1)
++        ->where('s.status',1)->where('s.is_del',0)->where('s.cashier_salesperson_enabled',1)
++        ->where('f.performance_type','sales_performance_allocated')->where('f.fact_direction','forward')
++        ->where('f.status','effective')->order('f.id desc')->limit(30)->field('f.*')->select()->toArray();
++    $rows = array_merge($independentRows, $rows);
++    $seen = []; $results = []; $cardChecks = 0; $validated = 0;
++    foreach ($rows as $fact) {
++        $key = $fact['order_id'] . '|' . $fact['source_line_id'];
++        if (isset($seen[$key])) continue;
++        $seen[$key] = true;
++        $line = Db::name('cashier_v3_sales_order_line')->where('tenant_id',$fact['tenant_id'])
++            ->where('order_id',$fact['order_id'])->where('order_line_id',$fact['source_line_id'])->find();
++        if (!$line || (int)$line['member_id'] <= 0) continue;
++        $staff = Db::name('system_store_staff')->alias('s')->join('organization_store os','os.store_id=s.store_id')
++            ->where('s.store_id',(int)$fact['store_id'])->where('s.status',1)->where('s.is_del',0)
++            ->where('s.level',0)->field('s.*,os.org_id')->find();
++        if (!$staff) continue;
++        $store = (int)$fact['store_id']; $tenant = (string)$fact['tenant_id'];
++        $operator = new CashierV3OperatorScope($store,(int)$staff['id'],(string)$staff['org_id'],$tenant);
++        $scope = new CashierV3DataScopeContext((int)$staff['id'],(int)$staff['id'],$store,$tenant,
++            (string)$staff['org_id'],[$store],CashierV3DataScopeContext::MODE_STORES,[],false,
++            '', 'r90-readonly', ['cashier.v3.order_center','cashier.v3.order.refund'], $staff);
++        $original = Db::name('cashier_v3_performance_fact')->where('tenant_id',$tenant)
++            ->where('order_id',$fact['order_id'])->order('id')->select()->toArray();
++        $entry = $service->selection(['mode'=>'document','memberId'=>(int)$line['member_id'],
++            'lineId'=>$line['order_line_id']],$operator,$scope);
++        $people = $entry['currentSalespeople'];
++        if (!$people) continue;
++        $groups = []; $localPositive = true;
++        foreach ($people as $person) {
++            $weight = $person['allocationWeight'];
++            if (!is_int($weight) || $weight < 0 || $weight > 100) throw new RuntimeException('Invalid percentage');
++            $groups[$person['allocationGroupKey']] = ($groups[$person['allocationGroupKey']] ?? 0) + $weight;
++            if ($weight === 0 || ($person['personnelSource'] ?? '') === 'other') $localPositive = false;
++        }
++        foreach ($groups as $total) if (!in_array($total,[0,100],true)) throw new RuntimeException('Group total drift');
++        if ($localPositive) { $normalize->invoke($service,$people,$operator); $validated++; }
++        $receipt = Db::name('cashier_v3_card_purchase_receipt')->where('tenant_id',$tenant)
++            ->where('sales_order_id',$fact['order_id'])->where('sales_order_line_id',$line['order_line_id'])
++            ->where('status','completed')->find();
++        if ($receipt) {
++            $card = $service->selection(['mode'=>'card','memberId'=>(int)$line['member_id'],
++                'holderId'=>(int)$receipt['card_holder_id']],$operator,$scope);
++            if ($card['currentSalespeople'] !== $people) throw new RuntimeException('Card/document defaults differ');
++            $cardChecks++;
++        }
++        $after = Db::name('cashier_v3_performance_fact')->where('tenant_id',$tenant)
++            ->where('order_id',$fact['order_id'])->order('id')->select()->toArray();
++        if ($original !== $after) throw new RuntimeException('Historical facts changed');
++        $results[] = ['store'=>$store,'groups'=>$groups,'weights'=>array_column($people,'allocationWeight')];
++        if (count($results) >= 10) break;
++    }
++    if (!$results || !$validated) throw new RuntimeException('No usable local fixtures');
++    echo json_encode(['status'=>'PASS','documentChecks'=>count($results),'cardChecks'=>$cardChecks,
++        'existingValidatorChecks'=>$validated,'historicalFactsUnchanged'=>true,'refundsExecuted'=>0,
++        'results'=>$results],JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),PHP_EOL;
++} finally { Db::rollback(); }

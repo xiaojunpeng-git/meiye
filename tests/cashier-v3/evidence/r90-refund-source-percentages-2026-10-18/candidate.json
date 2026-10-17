@@ -1,0 +1,230 @@
+{
+  "round": 90,
+  "status": "开发与本地自测完成，待产品经理固定版本验收；未提交/部署/push",
+  "baselineHead": "7c5dcced8731d403b783d9b5a7cd4a01f66b19ca",
+  "baselineFileSha256": [
+    "57ecc2f27c5d73a00a585187c3f162602f3b90afce3e0f29593ecdac35803230",
+    "afcf4ace30fc6a634be70dcd99cd02b9b2579f11cacbce44ba43ac50d9b8595d"
+  ],
+  "patchSha256": "ade0ff9b818f636d9c6bb3d2cac817814070d776f1add99e691426129f7339a6",
+  "files": [
+    {
+      "path": "后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php",
+      "sha256": "1f62ed814eca107195799771182e24c0f0d3a5201d1af96912b1ea6ab4aabd17"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php",
+      "sha256": "22438756995cdbe6847b5e5243cd5b4e3884427a6df6d6db239a30605f40b29e"
+    },
+    {
+      "path": "tests/cashier-v3/php/r90-refund-source-percentages.php",
+      "sha256": "c21c026815a1c87581d7c6b6e189e257941b7056a9c970cc961a87bfbec3196c"
+    },
+    {
+      "path": "tests/cashier-v3/php/r90-refund-source-readonly.php",
+      "sha256": "41fc48cc9c2bc805bf0027d0e5039f261affc878f7db0511ab18d56caad56f0b"
+    }
+  ],
+  "scope": "退款默认销售人：正常原单分子/分母换算；人员调整事实按有效金额恢复组内权重；各独立组100%，整数尾差归稳定末位；跨店复用既有直属岗位。",
+  "preserved": "原销售事实、已存退款快照、权限、资格重验、独立组规则、退款金额分配/事务/幂等/冲销写入和页面不变。",
+  "unrelated": "退款服务原有balance兼容未提交差异保留，并排除在r90-only.patch之外；其他任务不回退不暂存。",
+  "architecture": {
+    "authority": "有效且未冲销的原销售人员事实；退款默认草稿",
+    "grain": "原销售明细/员工/当前组",
+    "events": "无",
+    "transactions": "既有写命令不变",
+    "history": "无写入/迁移/改库",
+    "permissions": "既有scope及事务资格校验不变；岗位查询只接收原单已读人员",
+    "performance": "本店无额外SQL，跨店岗位批量查询",
+    "reconciliation": "PHP7.4纯方法及数据库强制只读事务验证"
+  },
+  "categories": {
+    "frontend": [],
+    "backend": [
+      "后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php",
+      "后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php"
+    ],
+    "migrations": [],
+    "tests": [
+      "tests/cashier-v3/php/r90-refund-source-percentages.php",
+      "tests/cashier-v3/php/r90-refund-source-readonly.php"
+    ],
+    "engineeringScripts": [],
+    "evidence": [
+      "tests/cashier-v3/evidence/r90-refund-source-percentages-2026-10-18"
+    ]
+  },
+  "commentsUpdated": [
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php",
+    "后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php"
+  ],
+  "remote": {
+    "applicable": false,
+    "productionConnection": false,
+    "deploy": false,
+    "push": false,
+    "refundsExecuted": 0
+  },
+  "limitations": [
+    "未验证截图对应生产原单的新状态，未执行线上退款。",
+    "零权重或小于1%归整结果不强造1%，沿用既有提交校验要求明确调整。",
+    "旧r42-imported-refund-salesperson-contract.mjs断言未含balance而失败；当前HEAD前端已含balance且本轮无前端diff，属于既有测试缺口，未修改。"
+  ],
+  "results": {
+    "tests/cashier-v3/php/r90-refund-source-percentages.php": {
+      "status": "PASS",
+      "count": 23,
+      "checks": [
+        "original 30/70 retained despite rounded amounts",
+        "large equal weights",
+        "unequal money-denominated weights",
+        "thirds stable final remainder",
+        "different denominators",
+        "no floating precision loss",
+        "independent groups never halved",
+        "adjusted original screenshot",
+        "existing independent deduction calculation unchanged",
+        "adjusted same group uses saved amounts",
+        "two independent groups with multiple people",
+        "zero remains zero",
+        "all zero does not invent allocation",
+        "adjusted all zero remains zero",
+        "tiny weight not silently boosted",
+        "large integers no overflow",
+        "empty selection retained",
+        "normal integer amount tail",
+        "existing whole-yuan final remainder unchanged",
+        "zero cash does not create deduction",
+        "invalid source ratio rejected",
+        "invalid source ratio rejected",
+        "invalid source ratio rejected"
+      ]
+    },
+    "tests/cashier-v3/php/r90-refund-source-readonly.php": {
+      "status": "PASS",
+      "documentChecks": 10,
+      "cardChecks": 6,
+      "existingValidatorChecks": 8,
+      "historicalFactsUnchanged": true,
+      "refundsExecuted": 0,
+      "results": [
+        {
+          "store": 133,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            100,
+            100
+          ]
+        },
+        {
+          "store": 140,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            100,
+            100
+          ]
+        },
+        {
+          "store": 133,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            50,
+            50,
+            50,
+            50
+          ]
+        },
+        {
+          "store": 22,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            100,
+            100
+          ]
+        },
+        {
+          "store": 22,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            100,
+            100
+          ]
+        },
+        {
+          "store": 22,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            100,
+            100
+          ]
+        },
+        {
+          "store": 164,
+          "groups": {
+            "independent:67": 100,
+            "normal": 0
+          },
+          "weights": [
+            100,
+            0
+          ]
+        },
+        {
+          "store": 164,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            100,
+            100
+          ]
+        },
+        {
+          "store": 140,
+          "groups": {
+            "normal": 0
+          },
+          "weights": [
+            0
+          ]
+        },
+        {
+          "store": 140,
+          "groups": {
+            "independent:67": 100,
+            "normal": 100
+          },
+          "weights": [
+            100,
+            100
+          ]
+        }
+      ]
+    },
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php": "No syntax errors detected in /var/www/html/app/services/cashier/v3/order/CashierV3RefundSalespersonServices.php",
+    "后端代码/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php": "No syntax errors detected in /var/www/html/app/services/cashier/v3/member/CashierV3QueryEntitySelectorServices.php",
+    "r34-unified-refund-other-salesperson-contract.mjs": "PASS R34 new-refund group salesperson entry and payload contract",
+    "r42-refund-attribution-contract.mjs": "PASS R42 refund attribution contract",
+    "r26-refund-page-gateway-contract.mjs": "PASS R26 refund browser gateway contract",
+    "r33-other-salesperson-contract.mjs": "PASS R33 other salesperson selection, snapshot and write guards"
+  }
+}
