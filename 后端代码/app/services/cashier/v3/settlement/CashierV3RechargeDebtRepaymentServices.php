@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
+use app\services\cashier\v3\CashierV3PersonnelIdentity;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
@@ -16,6 +17,7 @@ use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactIdFactory;
 use app\services\cashier\v3\fact\CashierV3CheckoutFactPlanV1;
 use app\services\cashier\v3\fact\ThinkPhpCashierV3CheckoutFactRepository;
+use app\services\cashier\v3\member\CashierV3QueryEntitySelectorServices;
 use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use app\services\user\UserBalanceAtomicServices;
@@ -257,13 +259,20 @@ final class CashierV3RechargeDebtRepaymentServices
         if ($amount <= 0 || $amount % 100 !== 0 || count($allocations) > 20) {
             throw self::failure('recharge_repayment_salespeople_invalid');
         }
-        $requested = [];
+        $requested = []; $otherStaffIds = [];
         foreach ($allocations as $index => $row) {
+            if (!is_array($row)) throw self::failure('recharge_repayment_salespeople_invalid');
             $staffId = (int)($row['staffId'] ?? 0);
             $weight = (int)($row['allocationWeight'] ?? 0);
             if ($staffId <= 0 || $weight <= 0 || $weight > 100 || isset($requested[$staffId])) {
                 throw self::failure('recharge_repayment_salespeople_invalid');
             }
+            // 充值补交与销售补交使用同一选择器，虚拟工号必须在落账事务中按集团任职复核。
+            $source = trim((string)($row['personnelSource'] ?? 'store'));
+            if (CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) {
+                if ($source !== 'other') throw self::failure('recharge_repayment_salesperson_source_invalid');
+                $otherStaffIds[] = $staffId;
+            } elseif ($source !== 'store') throw self::failure('recharge_repayment_salesperson_source_invalid');
             [$performanceAmountManual, $performanceAmountCents] = self::manualPerformanceAmount($row);
             $requested[$staffId] = [
                 'allocationWeight' => $weight,
@@ -273,17 +282,30 @@ final class CashierV3RechargeDebtRepaymentServices
                 'sequence' => $index + 1,
             ];
         }
-        $ids = array_keys($requested);
+        $ids = array_values(array_diff(array_keys($requested), $otherStaffIds));
         sort($ids, SORT_NUMERIC);
-        $rows = Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
+        $rows = $ids === [] ? [] : Db::name('system_store_staff')->alias('ss')->join('employee e', 'e.id=ss.employee_id')
             ->leftJoin('staff_job_position sjp', 'sjp.staff_id=ss.id AND sjp.status=1 AND sjp.is_del=0 AND sjp.end_time=0')
             ->leftJoin('position p', 'p.id=sjp.position_id AND p.status=1')
             ->whereIn('ss.id', $ids)->where('ss.store_id', $operator->storeId())->where('ss.status', 1)->where('ss.is_del', 0)
             ->where('ss.cashier_salesperson_enabled', 1)->where('e.status', 1)->where('e.is_del', 0)
             ->field('ss.id,ss.staff_name,ss.employee_id,e.name,e.employment_type_code,e.employment_type_version,sjp.position_id,p.name as position_name,p.performance_independent')
             ->lock(true)->select()->toArray();
-        if (count($rows) !== count($requested)) throw self::failure('recharge_repayment_salesperson_ineligible');
-        $by = []; foreach ($rows as $row) $by[(int)$row['id']] = $row;
+        if (count($rows) !== count($ids)) throw self::failure('recharge_repayment_salesperson_ineligible');
+        $otherAuthority = new CashierV3QueryEntitySelectorServices();
+        foreach ($otherStaffIds as $staffId) {
+            $other = $otherAuthority->lockOrganizationSalesperson($staffId, $operator);
+            if ($other === []) throw self::failure('recharge_repayment_salesperson_ineligible');
+            $rows[] = $other;
+        }
+        $by = []; $seenEmployeeIds = [];
+        foreach ($rows as $row) {
+            $employeeId = (int)($row['employee_id'] ?? 0);
+            if ($employeeId <= 0 || isset($seenEmployeeIds[$employeeId])) throw self::failure('recharge_repayment_salesperson_duplicate');
+            $seenEmployeeIds[$employeeId] = true;
+            $by[(int)$row['id']] = $row;
+        }
+        if (count($by) !== count($requested)) throw self::failure('recharge_repayment_salesperson_ineligible');
         $result = []; $groups = []; $amountYuan = intdiv($amount, 100);
         foreach ($requested as $staffId => $selection) {
             $row = $by[$staffId] ?? null;

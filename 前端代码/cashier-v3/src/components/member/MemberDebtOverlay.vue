@@ -50,6 +50,9 @@ const attributionCandidates = ref({ guides: [], salesManagers: [] })
 const attributionSearchLoading = ref(false)
 const attributionSearchError = ref('')
 const salespersonCandidates = ref([])
+const otherSalespersonCandidates = ref([])
+const otherSalespersonSearchLoading = ref(false)
+const otherSalespersonSearchError = ref('')
 const isSalespersonSelectorOpen = ref(false)
 const isSalespersonLoading = ref(false)
 const salespersonLoadError = ref('')
@@ -61,6 +64,7 @@ const repaymentSourceSecondaryId = ref(0)
 const repaymentRewardAmountCents = ref(0)
 const isRepaymentRewardOpen = ref(false)
 let repaymentSourceLoadToken = 0
+let otherSalespersonSearchToken = 0
 // 欠款补交使用同一套记账收款代码；这里只提供可选项，落账权限和事实由最终提交重验。
 const paymentMethods = [
   { code: 'cash', label: '现金' },
@@ -137,6 +141,7 @@ watch(records, (nextRecords) => {
   repayAmount.value = ''
   paymentLines.value = []
   salespersonAllocations.value = []
+  otherSalespersonCandidates.value = []
   guideSelections.value = []
   salesManagerSelections.value = []
   repaymentSourcePrimaryId.value = 0
@@ -183,6 +188,7 @@ function selectRepayment(record) {
   repaymentBusinessDate.value = String(props.businessDate || '')
   paymentLines.value = [{ id: nextPaymentLineId(), paymentMethod: 'unionpay', amount: wholeYuanString(remainingAmount(record)), collectionReference: '', remark: '' }]
   salespersonAllocations.value = []
+  otherSalespersonCandidates.value = []
   guideSelections.value = Array.isArray(record.originalGuideSelections) ? record.originalGuideSelections.map((item) => ({ ...item })) : []
   salesManagerSelections.value = Array.isArray(record.originalSalesManagerSelections) ? record.originalSalesManagerSelections.map((item) => ({ ...item })) : []
   // 原单快照仅作默认选择。历史导入欠款可能没有来源，此时必须由操作员明确选择。
@@ -293,7 +299,9 @@ function submitRepayment() {
       // 独立核算由服务端按员工当前职位权威判定；保留前端元数据只用于
       // 同一选择器在本次会话中的展示，不能用浏览器标志突破职位配置。
       performanceIndependent: Boolean(item.performanceIndependent),
-      allocationGroupKey: String(item.allocationGroupKey || '')
+      allocationGroupKey: String(item.allocationGroupKey || ''),
+      // 跨店销售人的虚拟工号必须带来源，服务端才会在事务内重新核验集团任职。
+      ...(item.personnelSource === 'other' ? { personnelSource: 'other' } : {})
     })),
     guideSelections: guideSelections.value.map((item) => ({
       staffId: Number(item.employeeId || item.staffId || item.id || 0),
@@ -329,6 +337,11 @@ function addPaymentLine(method) {
 function removePaymentLine(id) { if (paymentLines.value.length <= 1) return; paymentLines.value = paymentLines.value.filter((item) => item.id !== id) }
 async function openSalespersonSelector() {
   isSalespersonSelectorOpen.value = true
+  // 新弹窗的查询批次与上次隔离，避免关闭后重新打开仍收到旧搜索结果。
+  otherSalespersonSearchToken += 1
+  otherSalespersonCandidates.value = []
+  otherSalespersonSearchLoading.value = false
+  otherSalespersonSearchError.value = ''
   isSalespersonLoading.value = true
   salespersonLoadError.value = ''
   const records = []
@@ -355,6 +368,44 @@ async function openSalespersonSelector() {
     salespersonLoadError.value = error instanceof Error ? error.message : '当前门店销售人加载失败，请重试。'
   } finally {
     isSalespersonLoading.value = false
+  }
+}
+async function searchOtherSalespeople({ scope, keyword, target } = {}) {
+  const search = String(keyword || '').trim()
+  if (scope !== 'cashier_other_salespeople' || target !== 'otherSalespeople' || search.length < 2) return
+  const token = ++otherSalespersonSearchToken
+  const debtId = selectedDebtId.value
+  otherSalespersonSearchLoading.value = true
+  otherSalespersonSearchError.value = ''
+  try {
+    const people = []
+    let page = 1
+    let total = 0
+    do {
+      const response = await requestCashierV3Action('query-query-entities', {
+        entityType: 'person', selectorEntry: 'cashier',
+        selectorContext: { scope: 'cashier_other_salespeople' },
+        keyword: search, page, pageSize: 20, silent: true
+      })
+      const envelope = response?.data?.result ? response.data : response
+      const data = envelope?.data || {}
+      if (!['success', 'succeeded'].includes(String(envelope?.result?.status || '')) || !Array.isArray(data.records)) {
+        throw new Error(envelope?.result?.message || '其他销售人搜索失败，请重试。')
+      }
+      people.push(...data.records)
+      total = Math.max(0, Number(data.total) || people.length)
+      page += 1
+    } while (people.length < total && page <= 20)
+    // 旧搜索或切换欠款后的响应不得覆盖当前选择器的人选。
+    if (token === otherSalespersonSearchToken && isSalespersonSelectorOpen.value && debtId === selectedDebtId.value) {
+      otherSalespersonCandidates.value = people
+    }
+  } catch (error) {
+    if (token === otherSalespersonSearchToken && isSalespersonSelectorOpen.value && debtId === selectedDebtId.value) {
+      otherSalespersonSearchError.value = error instanceof Error ? error.message : '其他销售人搜索失败，请重试。'
+    }
+  } finally {
+    if (token === otherSalespersonSearchToken) otherSalespersonSearchLoading.value = false
   }
 }
 function confirmSalespeople(result = {}) {
@@ -573,11 +624,16 @@ async function searchAttributions({ scope, keyword, target } = {}) {
       :show-salespeople="true"
       :craftsmen-candidates="[]"
       :salesperson-candidates="salespersonCandidates"
+      :allow-other-salespeople="true"
+      :other-salesperson-candidates="otherSalespersonCandidates"
       :selected-craftsmen="[]"
       :selected-salespeople="salespersonAllocations"
       :performance-base-amount-cents="Number(repayAmount || 0) * 100"
       :loading="isSalespersonLoading"
       :load-error="salespersonLoadError"
+      :attribution-search-loading="otherSalespersonSearchLoading"
+      :attribution-search-error="otherSalespersonSearchError"
+      @search-personnel="searchOtherSalespeople"
       @close="isSalespersonSelectorOpen = false"
       @confirm="confirmSalespeople"
       @retry="openSalespersonSelector"
