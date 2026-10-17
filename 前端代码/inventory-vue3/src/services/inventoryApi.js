@@ -371,6 +371,7 @@ export function createPlatformInventoryApi(options = {}) {
       usage: '/v3/salon-usage',
       stock: '/v3/batch-stock',
       platformLocations: '/v3/locations',
+      organizationScope: '/v3/organization-scope',
       warehouseSettings: '/v3/warehouse-settings',
       recipe: '/recipe/list',
       ...(options.listPaths || {})
