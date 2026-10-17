@@ -8,6 +8,7 @@ import Users from '@lucide/vue/dist/esm/icons/users.mjs'
 import HeartPulse from '@lucide/vue/dist/esm/icons/heart-pulse.mjs'
 import CircleDollarSign from '@lucide/vue/dist/esm/icons/circle-dollar-sign.mjs'
 import Tags from '@lucide/vue/dist/esm/icons/tags.mjs'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import { queryMemberDashboard, queryMemberDashboardScope } from '@/services/memberDashboardApi'
 
 const route = useRoute()
@@ -16,10 +17,8 @@ const loading = ref(false)
 const errorMessage = ref('')
 const dashboard = ref(null)
 const period = ref('today')
-const customStart = ref(today())
-const customEnd = ref(today())
+const customRange = ref({ min: today(), max: today() })
 const rankModes = ref({ consumption: 'projects', consumptionAmount: 'projects' })
-const categoryId = ref('')
 const scopePicker = ref({ open: false, loading: false, tree: [], selectedStoreIds: [], label: '当前权限范围', selectedOrganizationKey: '', selectedOrganizationName: '', stores: [] })
 const expandedScopeKeys = ref(new Set())
 const showFieldGuide = ref(false)
@@ -37,13 +36,13 @@ function rangeForPeriod() {
   if (period.value === 'today') return { start_date: end, end_date: end }
   if (period.value === 'month') return { start_date: `${end.slice(0, 7)}-01`, end_date: end }
   if (period.value === 'year') return { start_date: `${end.slice(0, 4)}-01-01`, end_date: end }
-  return { start_date: customStart.value, end_date: customEnd.value }
+  return { start_date: customRange.value.min, end_date: customRange.value.max }
 }
 
 function money(cents) {
   if (cents === null || cents === undefined || cents === '') return '-'
   const value = Number(cents)
-  return Number.isFinite(value) ? `¥${(value / 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}` : '-'
+  return Number.isFinite(value) ? `¥${(value / 100).toLocaleString('zh-CN', { maximumFractionDigits: 0 })}` : '-'
 }
 
 function number(value) {
@@ -76,14 +75,15 @@ function previewDashboard() {
   ].map(([name, people, amount_cents], index) => ({ id: index + 1, name, people, amount_cents, average_cents: Math.round(amount_cents / people), share: [27.3, 22.2, 17, 13, 10.4, 10.1][index] }))
   const projects = ['深层头疗', '面部护理', '肩颈舒缓', '身体调理', '基础剪护'].map((name, index) => ({ name, cash_income_cents: [3280000, 2860000, 2510000, 2240000, 1850000][index], orders: [116, 104, 96, 83, 79][index], people: [98, 87, 82, 72, 68][index], average_cents: [33469, 32874, 30610, 31111, 27206][index] }))
   const products = ['修护精华', '头皮护理套装', '补水面膜', '护发洗护', '身体精油'].map((name, index) => ({ name, cash_income_cents: [1780000, 1540000, 1320000, 1080000, 920000][index], orders: [62, 48, 76, 51, 39][index], people: [58, 43, 64, 45, 34][index], average_cents: [30690, 35814, 20625, 24000, 27059][index] }))
-  const consumptionProjects = projects.map((row, index) => ({ name: row.name, consumption_cents: [2640000, 2260000, 1940000, 1680000, 1410000][index], people: [102, 91, 76, 65, 58][index], average_cents: [25882, 24835, 25526, 25846, 24310][index] }))
-  const consumptionProducts = products.map((row, index) => ({ name: row.name, consumption_cents: [1460000, 1250000, 1060000, 870000, 740000][index], people: [54, 42, 61, 40, 32][index], average_cents: [27037, 29762, 17377, 21750, 23125][index] }))
+  // Preview figures obey the same actual-performance source as the live ranking panels.
+  const consumptionProjects = projects.map((row) => ({ ...row, consumption_cents: row.cash_income_cents }))
+  const consumptionProducts = products.map((row) => ({ ...row, consumption_cents: row.cash_income_cents }))
   return {
     title: '会员看板', data_as_of: '前端布局预览', scope: { label: '当前权限范围' },
     customer_overview: {
       member: { consuming_members: { value: 2680 }, service_members: { value: 943 }, sleeping_members: { value: 116 } },
       consumption: { people: { value: 1820 }, amount: { value_cents: 28600000 }, average: { value_cents: 15714 } },
-      service: { people: { value: 1314 }, amount: { value_cents: 19500000 }, projects: { value: 4820 }, average_amount: { value_cents: 14840 }, average_items: { value: 3.67 }, unit_amount: { value_cents: 4046 } }
+      service: { people: { value: 1314 }, amount: { value_cents: 28600000 }, projects: { value: 4820 }, average_amount: { value_cents: 21766 }, average_items: { value: 3.67 }, unit_amount: { value_cents: 5934 } }
     },
     consumption: { people: { value: 1820 }, amount: { value_cents: 28600000 }, average: { value_cents: 15714 }, categories: categories.map((category) => ({ ...category, rankings: { projects, products, consumption_projects: consumptionProjects, consumption_products: consumptionProducts } })), rankings: { projects, products, consumption_projects: consumptionProjects, consumption_products: consumptionProducts } },
     visit_bands: { recency: [30, 60, 90, 180, 360].map((days, index) => ({ label: `${days}天到店`, value: [1320, 1018, 774, 428, 192][index] })), frequency: [1, 2, 3, 4, 5].map((count, index) => ({ label: count === 5 ? '月服务超4次' : `月服务到店${count}次`, value: [782, 504, 326, 188, 96][index] })) },
@@ -93,11 +93,17 @@ function previewDashboard() {
 
 const overview = computed(() => dashboard.value?.customer_overview || {})
 const consumption = computed(() => dashboard.value?.consumption || {})
-const categories = computed(() => Array.isArray(consumption.value.categories) ? consumption.value.categories : [])
+// The backend owns configured category order; service-only rankings cannot make
+// an empty cash category visible in this consumption section.
+const categories = computed(() => (Array.isArray(consumption.value.categories) ? consumption.value.categories : []).filter((category) => {
+  const ranks = category?.rankings || {}
+  return String(category?.name || '').trim()
+    && (Number(category?.amount_cents) !== 0
+      || ['projects', 'products'].some((key) => Array.isArray(ranks[key]) && ranks[key].length > 0))
+}))
 const rankings = computed(() => consumption.value.rankings || {})
 const visitBands = computed(() => dashboard.value?.visit_bands || {})
 const tiers = computed(() => dashboard.value?.tiers || {})
-const categoryOptions = computed(() => Array.isArray(dashboard.value?.filter_schema?.categories) ? dashboard.value.filter_schema.categories : [])
 const fieldExplanations = computed(() => dashboard.value?.field_explanations || {})
 const fieldExplanationLabels = {
   'member.consuming_members': '会员·消费会员数',
@@ -107,29 +113,29 @@ const fieldExplanationLabels = {
   'consumption.amount': '消费·金额',
   'consumption.average': '消费·人均',
   'service.people': '服务·人数',
-  'service.amount': '服务·金额',
+  'service.amount': '服务·同期实际业绩',
   'service.projects': '服务·项目数',
-  'service.average_amount': '服务·人均金额',
+  'service.average_amount': '服务·人均实际业绩',
   'service.average_items': '服务·人均项',
-  'service.unit_amount': '服务·项目单耗',
+  'service.unit_amount': '服务·项目均实际业绩',
   'category.people': '分类·消费会员数',
-  'category.amount': '分类·消费金额',
-  'category.average': '分类·人均消费',
+  'category.amount': '分类·实际业绩',
+  'category.average': '分类·人均实际业绩',
   'category.share': '分类·金额占比',
-  'ranking.consumption.cash_income': '消费排行·现金收入',
+  'ranking.consumption.cash_income': '消费排行·实际业绩',
   'ranking.consumption.orders': '消费排行·成交单数',
   'ranking.consumption.people': '消费排行·购买人头',
-  'ranking.consumption.average': '消费排行·人均消费',
-  'ranking.consumption_amount.amount': '消耗排行·消耗金额',
-  'ranking.consumption_amount.people': '消耗排行·服务人头',
-  'ranking.consumption_amount.average': '消耗排行·人均消耗',
+  'ranking.consumption.average': '消费排行·人均实际业绩',
+  'ranking.consumption_amount.amount': '实际业绩排行·金额',
+  'ranking.consumption_amount.people': '实际业绩排行·购买人头',
+  'ranking.consumption_amount.average': '实际业绩排行·人均实际业绩',
   'visit.recency': '到店波段·累计到店顾客数',
   'visit.frequency': '到店波段·月服务频次',
-  'tier.people': '消费层级·顾客人数',
-  'tier.amount': '消费层级·消费金额',
-  'tier.member_share': '消费层级·会员占比',
-  'tier.amount_share': '消费层级·金额占比',
-  'tier.average': '消费层级·人均消费',
+  'tier.people': '消费层级·累计达标人数',
+  'tier.amount': '消费层级·达标会员实际业绩',
+  'tier.member_share': '消费层级·累计达标人数占比',
+  'tier.amount_share': '消费层级·累计达标金额占比',
+  'tier.average': '消费层级·达标会员人均实际业绩',
   'tier.new_customer': '新客分层·排除来源 A'
 }
 function fieldExplanationLabel(key) {
@@ -221,8 +227,7 @@ function chooseAllScope() {
 
 function scopeFilters() {
   return {
-    ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(',') } : {}),
-    ...(categoryId.value ? { category_id: categoryId.value } : {})
+    ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(',') } : {})
   }
 }
 
@@ -251,6 +256,11 @@ function load() {
 function selectPeriod(value) {
   period.value = value
   if (value !== 'custom') load()
+}
+
+function applyCustomRange(value) {
+  // The date picker edits the pending range; the explicit query action applies it.
+  customRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
 }
 
 function loadScope() {
@@ -286,13 +296,25 @@ onBeforeUnmount(() => {
 <template>
   <main class="member-dashboard" aria-label="会员看板">
     <header class="member-dashboard__header"><h1>{{ dashboard?.title || '会员看板' }}</h1></header>
-    <section class="member-dashboard__filters" aria-label="查询条件"><div class="member-dashboard__scope-picker"><button type="button" class="member-dashboard__scope-trigger" :disabled="scopePicker.loading" @click="scopePicker.open = !scopePicker.open"><Funnel :size="15" aria-hidden="true" />{{ scopePicker.loading ? '读取权限范围' : scopePicker.label }}</button><section v-if="scopePicker.open" class="member-dashboard__scope-panel" aria-label="组织和门店权限范围"><header>组织 / 门店</header><div class="member-dashboard__scope-body"><div class="member-dashboard__scope-tree"><div v-for="option in scopeTreeOptions" :key="option.key" class="member-dashboard__scope-row" :style="{ paddingLeft: `${8 + option.depth * 16}px` }"><button v-if="option.hasChildren" type="button" class="member-dashboard__scope-toggle" :aria-expanded="option.isExpanded" @click="toggleScopeNode(option)">{{ option.isExpanded ? '−' : '+' }}</button><span v-else class="member-dashboard__scope-toggle-placeholder"></span><button type="button" class="member-dashboard__scope-option" :class="{ 'is-selected': scopePicker.selectedOrganizationKey === option.key }" @click="selectScopeNode(option)">{{ option.node?.title || option.node?.name || option.node?.label || '-' }}</button></div></div><div class="member-dashboard__scope-stores"><strong>{{ scopePicker.selectedOrganizationName || '选择组织后查看下级门店' }}</strong><button v-for="store in scopePicker.stores" :key="store.id" type="button" :class="{ 'is-active': scopePicker.selectedStoreIds.length === 1 && scopePicker.selectedStoreIds[0] === Number(store.id) }" @click="selectScopeStore(store)">{{ store.name }}</button><span v-if="!scopePicker.stores.length">请选择组织或门店。</span></div></div><footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>组织选择会包含下级门店；门店选择只查询该门店。</span></footer></section></div><nav class="member-dashboard__periods"><button v-for="item in [['today', '今天'], ['month', '本月'], ['year', '全年'], ['custom', '自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="selectPeriod(item[0])">{{ item[1] }}</button></nav><label v-if="period === 'custom'" class="member-dashboard__date">从 <input v-model="customStart" type="date" /></label><label v-if="period === 'custom'" class="member-dashboard__date">至 <input v-model="customEnd" type="date" /></label><label class="member-dashboard__category-filter">分类 <select v-model="categoryId"><option value="">全部分类</option><option v-for="category in categoryOptions" :key="category.id" :value="String(category.id)">{{ category.name }}</option></select></label><div class="member-dashboard__actions"><button type="button" class="button button--primary" :disabled="loading" @click="load">查询</button><button type="button" class="button button--secondary" :disabled="loading" @click="load"><RefreshCw :size="15" aria-hidden="true" />刷新</button></div></section>
+    <section class="member-dashboard__filters" aria-label="查询条件"><div class="member-dashboard__scope-picker"><button type="button" class="member-dashboard__scope-trigger" :disabled="scopePicker.loading" @click="scopePicker.open = !scopePicker.open"><Funnel :size="15" aria-hidden="true" />{{ scopePicker.loading ? '读取权限范围' : scopePicker.label }}</button><section v-if="scopePicker.open" class="member-dashboard__scope-panel" aria-label="组织和门店权限范围"><header>组织 / 门店</header><div class="member-dashboard__scope-body"><div class="member-dashboard__scope-tree"><div v-for="option in scopeTreeOptions" :key="option.key" class="member-dashboard__scope-row" :style="{ paddingLeft: `${8 + option.depth * 16}px` }"><button v-if="option.hasChildren" type="button" class="member-dashboard__scope-toggle" :aria-expanded="option.isExpanded" @click="toggleScopeNode(option)">{{ option.isExpanded ? '−' : '+' }}</button><span v-else class="member-dashboard__scope-toggle-placeholder"></span><button type="button" class="member-dashboard__scope-option" :class="{ 'is-selected': scopePicker.selectedOrganizationKey === option.key }" @click="selectScopeNode(option)">{{ option.node?.title || option.node?.name || option.node?.label || '-' }}</button></div></div><div class="member-dashboard__scope-stores"><strong>{{ scopePicker.selectedOrganizationName || '选择组织后查看下级门店' }}</strong><button v-for="store in scopePicker.stores" :key="store.id" type="button" :class="{ 'is-active': scopePicker.selectedStoreIds.length === 1 && scopePicker.selectedStoreIds[0] === Number(store.id) }" @click="selectScopeStore(store)">{{ store.name }}</button><span v-if="!scopePicker.stores.length">请选择组织或门店。</span></div></div><footer><button type="button" @click="chooseAllScope">当前权限范围</button><span>组织选择会包含下级门店；门店选择只查询该门店。</span></footer></section></div><nav class="member-dashboard__periods"><button v-for="item in [['today', '今天'], ['month', '本月'], ['year', '全年'], ['custom', '自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="selectPeriod(item[0])">{{ item[1] }}</button></nav><div v-if="period === 'custom'" class="member-dashboard__custom-period"><UnifiedQueryDateRange :model-value="customRange" :allow-clear="false" label="会员看板自定义周期" @change="applyCustomRange" /></div><div class="member-dashboard__actions"><button type="button" class="button button--primary" :disabled="loading" @click="load">查询</button><button type="button" class="button button--secondary" :disabled="loading" @click="load"><RefreshCw :size="15" aria-hidden="true" />刷新</button></div></section>
     <p v-if="errorMessage" class="member-dashboard__state member-dashboard__state--error">{{ errorMessage }}</p><p v-else-if="loading" class="member-dashboard__state">正在加载会员看板...</p>
     <template v-if="dashboard">
-      <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>顾客概况</h2><span>人数按会员 ID 去重，服务次数按有效服务事实统计</span></div><button type="button" class="member-dashboard__guide" @click="showFieldGuide = true"><BookOpen :size="15" aria-hidden="true" />字段说明</button></div><div class="member-dashboard__overview-grid"><article class="member-panel member-panel--member"><header><Users :size="18" aria-hidden="true" /><h3>会员</h3></header><div class="member-panel__rows"><div><span>消费</span><strong>{{ number(overview.member?.consuming_members?.value) }}</strong><small>消费会员数，去重</small></div><div><span>服务</span><strong>{{ number(overview.member?.service_members?.value) }}</strong><small>服务会员数，去重</small></div><div><span>沉睡</span><strong>{{ number(overview.member?.sleeping_members?.value) }}</strong><small>沉睡会员数，去重</small></div></div></article><article class="member-panel member-panel--consumption"><header><CircleDollarSign :size="18" aria-hidden="true" /><h3>消费</h3></header><div class="member-panel__rows"><div><span>人数</span><strong>{{ number(overview.consumption?.people?.value) }}</strong><small>非体验标签的人数</small></div><div><span>金额</span><strong>{{ money(overview.consumption?.amount?.value_cents) }}</strong><small>现金业绩</small></div><div><span>人均</span><strong>{{ money(overview.consumption?.average?.value_cents) }}</strong><small>金额 / 人数</small></div></div></article><article class="member-panel member-panel--service"><header><HeartPulse :size="18" aria-hidden="true" /><h3>服务</h3></header><div class="member-panel__service-grid"><div><span>人数</span><strong>{{ number(overview.service?.people?.value) }}</strong><small>服务人数</small></div><div><span>金额</span><strong>{{ money(overview.service?.amount?.value_cents) }}</strong><small>服务耗卡金额</small></div><div><span>项目数</span><strong>{{ number(overview.service?.projects?.value) }}</strong><small>服务项目数</small></div><div><span>人均金额</span><strong>{{ money(overview.service?.average_amount?.value_cents) }}</strong><small>耗卡金额 / 服务人数</small></div><div><span>人均项</span><strong>{{ number(overview.service?.average_items?.value) }}</strong><small>项目数 / 人数</small></div><div><span>项目单耗</span><strong>{{ money(overview.service?.unit_amount?.value_cents) }}</strong><small>耗卡金额 / 项目数</small></div></div></article></div></section>
-      <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>消费顾客分析</h2><span>分类读取当前启用的一级商品分类；每个分类独立展示排行</span></div></div><div class="member-dashboard__summary-row"><div><span>消费顾客数</span><strong>{{ number(consumption.people?.value) }}</strong></div><div><span>消费金额</span><strong>{{ money(consumption.amount?.value_cents) }}</strong></div><div><span>人均消费金额</span><strong>{{ money(consumption.average?.value_cents) }}</strong></div></div><div class="member-dashboard__category-grid" :style="{ '--category-count': Math.max(categories.length, 1) }"><div v-for="category in categories" :key="category.id" class="category-column"><article class="category-panel"><header><Tags :size="16" aria-hidden="true" /><strong>{{ category.name }}</strong></header><div><span>消费会员数</span><b>{{ number(category.people) }}</b></div><div><span>消费金额</span><b>{{ money(category.amount_cents) }}</b></div><div><span>人均消费</span><b>{{ money(category.average_cents) }}</b></div><div><span>金额占比</span><b>{{ percent(category.share) }}</b></div></article><article class="ranking-panel category-ranking-panel"><header><div><h3>消费排行</h3><span>项目 / 产品 · 前五名</span></div><div class="member-dashboard__segmented"><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumption') === 'projects' }" @click="setCategoryRankMode(category, 'consumption', 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumption') === 'products' }" @click="setCategoryRankMode(category, 'consumption', 'products')">产品</button></div></header><div v-for="(row, index) in categoryRankRows(category, 'consumption')" :key="row.name" :class="['ranking-compact__row', row.__empty ? 'ranking-compact__row--empty' : `ranking-compact__row--rank-${index + 1}`]" :aria-hidden="row.__empty ? 'true' : undefined"><em class="ranking-compact__rank">{{ row.__empty ? '' : index + 1 }}</em><strong>{{ row.__empty ? '' : row.name }}</strong><span>{{ row.__empty ? '' : money(row.cash_income_cents) }}</span><small>{{ row.__empty ? '' : `${number(row.orders)}单 · ${number(row.people)}人 · 人均 ${money(row.average_cents)}` }}</small></div></article><article class="ranking-panel category-ranking-panel"><header><div><h3>消耗排行</h3><span>项目 / 产品 · 前五名</span></div><div class="member-dashboard__segmented"><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumptionAmount') === 'projects' }" @click="setCategoryRankMode(category, 'consumptionAmount', 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumptionAmount') === 'products' }" @click="setCategoryRankMode(category, 'consumptionAmount', 'products')">产品</button></div></header><div v-for="(row, index) in categoryRankRows(category, 'consumptionAmount')" :key="row.name" :class="['ranking-compact__row', row.__empty ? 'ranking-compact__row--empty' : `ranking-compact__row--rank-${index + 1}`]" :aria-hidden="row.__empty ? 'true' : undefined"><em class="ranking-compact__rank">{{ row.__empty ? '' : index + 1 }}</em><strong>{{ row.__empty ? '' : row.name }}</strong><span>{{ row.__empty ? '' : money(row.consumption_cents) }}</span><small>{{ row.__empty ? '' : `${number(row.people)}人 · 人均 ${money(row.average_cents)}` }}</small></div></article></div><div v-if="!categories.length" class="member-dashboard__empty">暂无商品分类数据</div></div></section>
+      <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>顾客概况</h2><span>人数按会员 ID 去重，服务次数按有效服务事实统计</span></div><button type="button" class="member-dashboard__guide" @click="showFieldGuide = true"><BookOpen :size="15" aria-hidden="true" />字段说明</button></div><div class="member-dashboard__overview-grid"><article class="member-panel member-panel--member"><header><Users :size="18" aria-hidden="true" /><h3>会员</h3></header><div class="member-panel__rows"><div><span>消费</span><strong>{{ number(overview.member?.consuming_members?.value) }}</strong><small>消费会员数，去重</small></div><div><span>服务</span><strong>{{ number(overview.member?.service_members?.value) }}</strong><small>服务会员数，去重</small></div><div><span>沉睡</span><strong>{{ number(overview.member?.sleeping_members?.value) }}</strong><small>沉睡会员数，去重</small></div></div></article><article class="member-panel member-panel--consumption"><header><CircleDollarSign :size="18" aria-hidden="true" /><h3>消费</h3></header><div class="member-panel__rows"><div><span>人数</span><strong>{{ number(overview.consumption?.people?.value) }}</strong><small>非体验标签的人数</small></div><div><span>金额</span><strong>{{ money(overview.consumption?.amount?.value_cents) }}</strong><small>实际业绩</small></div><div><span>人均</span><strong>{{ money(overview.consumption?.average?.value_cents) }}</strong><small>实际业绩 / 人数</small></div></div></article><article class="member-panel member-panel--service"><header><HeartPulse :size="18" aria-hidden="true" /><h3>服务</h3></header><div class="member-panel__service-grid"><div><span>人数</span><strong>{{ number(overview.service?.people?.value) }}</strong><small>服务人数</small></div><div><span>金额</span><strong>{{ money(overview.service?.amount?.value_cents) }}</strong><small>同期实际业绩</small></div><div><span>项目数</span><strong>{{ number(overview.service?.projects?.value) }}</strong><small>服务项目数</small></div><div><span>人均金额</span><strong>{{ money(overview.service?.average_amount?.value_cents) }}</strong><small>实际业绩 / 服务人数</small></div><div><span>人均项</span><strong>{{ number(overview.service?.average_items?.value) }}</strong><small>项目数 / 人数</small></div><div><span>项目均业绩</span><strong>{{ money(overview.service?.unit_amount?.value_cents) }}</strong><small>实际业绩 / 项目数</small></div></div></article></div></section>
+      <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>消费顾客分析</h2><span>分类读取当前启用的一级商品分类；每个分类独立展示排行</span></div></div><div class="member-dashboard__summary-row"><div><span>消费顾客数</span><strong>{{ number(consumption.people?.value) }}</strong></div><div><span>实际业绩</span><strong>{{ money(consumption.amount?.value_cents) }}</strong></div><div><span>人均实际业绩</span><strong>{{ money(consumption.average?.value_cents) }}</strong></div></div><div class="member-dashboard__category-grid"><div v-for="category in categories" :key="category.id" class="category-column"><article class="category-panel"><header><Tags :size="16" aria-hidden="true" /><strong>{{ category.name }}</strong></header><div><span>消费会员数</span><b>{{ number(category.people) }}</b></div><div><span>实际业绩</span><b>{{ money(category.amount_cents) }}</b></div><div><span>人均实际业绩</span><b>{{ money(category.average_cents) }}</b></div><div><span>金额占比</span><b>{{ percent(category.share) }}</b></div></article><article class="ranking-panel category-ranking-panel"><header><div><h3>消费排行</h3><span>项目 / 产品 · 前五名</span></div><div class="member-dashboard__segmented"><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumption') === 'projects' }" @click="setCategoryRankMode(category, 'consumption', 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumption') === 'products' }" @click="setCategoryRankMode(category, 'consumption', 'products')">产品</button></div></header><div v-for="(row, index) in categoryRankRows(category, 'consumption')" :key="row.name" :class="['ranking-compact__row', row.__empty ? 'ranking-compact__row--empty' : `ranking-compact__row--rank-${index + 1}`]" :aria-hidden="row.__empty ? 'true' : undefined"><em class="ranking-compact__rank">{{ row.__empty ? '' : index + 1 }}</em><strong>{{ row.__empty ? '' : row.name }}</strong><span>{{ row.__empty ? '' : money(row.cash_income_cents) }}</span><small>{{ row.__empty ? '' : `${number(row.orders)}单 · ${number(row.people)}人 · 人均 ${money(row.average_cents)}` }}</small></div></article><article class="ranking-panel category-ranking-panel"><header><div><h3>实际业绩排行</h3><span>项目 / 产品 · 前五名</span></div><div class="member-dashboard__segmented"><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumptionAmount') === 'projects' }" @click="setCategoryRankMode(category, 'consumptionAmount', 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankMode(category, 'consumptionAmount') === 'products' }" @click="setCategoryRankMode(category, 'consumptionAmount', 'products')">产品</button></div></header><div v-for="(row, index) in categoryRankRows(category, 'consumptionAmount')" :key="row.name" :class="['ranking-compact__row', row.__empty ? 'ranking-compact__row--empty' : `ranking-compact__row--rank-${index + 1}`]" :aria-hidden="row.__empty ? 'true' : undefined"><em class="ranking-compact__rank">{{ row.__empty ? '' : index + 1 }}</em><strong>{{ row.__empty ? '' : row.name }}</strong><span>{{ row.__empty ? '' : money(row.consumption_cents) }}</span><small>{{ row.__empty ? '' : `${number(row.people)}人 · 人均 ${money(row.average_cents)}` }}</small></div></article></div><div v-if="!categories.length" class="member-dashboard__empty">暂无商品分类数据</div></div></section>
       <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>到店波段</h2><span>累计统计；满足 360 天条件的会员同时计入前序波段</span></div></div><template v-if="(visitBands.recency || []).length || (visitBands.frequency || []).length"><div class="visit-grid"><div v-for="item in visitBands.recency || []" :key="item.label" class="visit-card"><span>{{ item.label }}</span><strong>{{ number(item.value) }}</strong><small>顾客数</small></div></div><div class="visit-grid visit-grid--frequency"><div v-for="item in visitBands.frequency || []" :key="item.label" class="visit-card visit-card--frequency"><span>{{ item.label }}</span><strong>{{ number(item.value) }}</strong><small>顾客数</small></div></div></template><p v-else class="member-dashboard__empty-inline">暂无到店波段数据</p></section>
-      <section class="member-dashboard__section"><div class="member-dashboard__section-title"><div><h2>会员消费层级</h2><span>左侧会员分层；右侧新客分层，不统计来源 A</span></div></div><div class="tier-grid"><article v-for="key in ['member', 'new_customer']" :key="key" class="tier-panel"><header><div><h3>{{ key === 'member' ? '会员分层' : '新客分层（不统计来源 A）' }}</h3><span>按现金业绩净额匹配区间</span></div><button type="button" class="member-dashboard__guide" @click="openTierSettings"><BookOpen :size="14" aria-hidden="true" />区间设置</button></header><div v-if="(tiers[key] || []).length" class="tier-table"><div class="tier-table__head"><span>层级</span><span>顾客人数</span><span>消费金额</span><span>会员占比</span><span>金额占比</span><span>人均消费</span></div><div v-for="row in tiers[key] || []" :key="row.name" class="tier-table__row"><strong>{{ row.name }}</strong><span>{{ number(row.people) }}</span><span>{{ money(row.amount_cents) }}</span><span>{{ percent(row.member_share) }}</span><span>{{ percent(row.amount_share) }}</span><span>{{ money(row.average_cents) }}</span></div></div><p v-else class="member-dashboard__empty-inline">暂无消费层级数据</p></article></div></section>
+      <section class="member-dashboard__section">
+        <div class="member-dashboard__section-title"><div><h2>会员消费层级</h2><span>累计达标：达到高档也计入低档，各档不可相加</span></div></div>
+        <div class="tier-grid">
+          <article v-for="key in ['member', 'new_customer']" :key="key" class="tier-panel">
+            <header><div><h3>{{ key === 'member' ? '会员分层' : '新客分层（不统计来源 A）' }}</h3><span>按实际业绩净额达到各档下限</span></div><button type="button" class="member-dashboard__guide" @click="openTierSettings"><BookOpen :size="14" aria-hidden="true" />区间设置</button></header>
+            <div v-if="(tiers[key] || []).length" class="tier-table">
+              <div class="tier-table__head"><span>层级</span><span>达标人数</span><span>实际业绩</span><span>人数占比</span><span>金额占比</span><span>人均实际业绩</span></div>
+              <div v-for="row in tiers[key] || []" :key="row.name" class="tier-table__row"><strong>{{ row.name }}</strong><span>{{ number(row.people) }}</span><span>{{ money(row.amount_cents) }}</span><span>{{ percent(row.member_share) }}</span><span>{{ percent(row.amount_share) }}</span><span>{{ money(row.average_cents) }}</span></div>
+            </div>
+            <p v-else class="member-dashboard__empty-inline">暂无消费层级数据</p>
+          </article>
+        </div>
+      </section>
     </template>
     <div v-if="showFieldGuide" class="member-dashboard__modal-backdrop" @click.self="showFieldGuide = false"><section class="member-dashboard__modal" role="dialog" aria-modal="true" aria-label="字段说明"><header><h2>字段说明</h2><button type="button" aria-label="关闭字段说明" @click="showFieldGuide = false">×</button></header><div class="member-dashboard__explanations"><div v-for="(text, key) in fieldExplanations" :key="key"><strong>{{ fieldExplanationLabel(key) }}</strong><span>{{ text }}</span></div></div></section></div>
     <div v-if="showTierGuide" class="member-dashboard__modal-backdrop" @click.self="showTierGuide = false"><section class="member-dashboard__modal" role="dialog" aria-modal="true" aria-label="消费层级说明"><header><h2>消费层级设置</h2><button type="button" aria-label="关闭消费层级说明" @click="showTierGuide = false">×</button></header><p>消费区间复用集团统一消费分级配置，保存、排序、版本冲突和审计沿用既有消费分级接口。</p><p>当前看板只读展示服务端已启用区间；需要修改时请进入“消费分级设置”页面。</p><button type="button" class="button button--primary member-dashboard__tier-settings" @click="goTierSettings">进入消费分级设置</button></section></div>
@@ -323,7 +345,7 @@ onBeforeUnmount(() => {
 .ranking-compact__row small { grid-column: 2 / -1; color: #8997a5; font-size: 10px; }
 .ranking-compact__row--empty { pointer-events: none; }
 @media(max-width:1180px){.member-dashboard__category-grid{grid-template-columns:repeat(var(--category-count),minmax(235px,1fr))}.category-column{min-width:235px}}
-html.member-dashboard-document,html.member-dashboard-document body,html.member-dashboard-document #app{min-width:0;width:100%;overflow-x:hidden}
+:global(html.member-dashboard-document),:global(html.member-dashboard-document body),:global(html.member-dashboard-document #app){min-width:0;width:100%;overflow-x:hidden}
 .member-dashboard__category-grid{grid-template-columns:repeat(var(--category-count),minmax(0,1fr));overflow-x:hidden}
 .category-column{min-width:0}
 .ranking-compact__row{min-width:0}
@@ -372,4 +394,17 @@ main.member-dashboard > section.member-dashboard__section:nth-of-type(2) .member
 .visit-card--frequency{border-top-color:#357a72}
 .tier-panel:first-child{border-top:3px solid #3b78a5}
 .tier-panel:last-child{border-top:3px solid #357a72}
+.member-dashboard__custom-period{min-width:210px}
+.member-dashboard__category-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px;overflow:visible}
+@media(max-width:760px){.member-dashboard__category-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:950px){
+  .member-dashboard__filters{flex-wrap:wrap;overflow-x:visible;white-space:normal}
+  .member-dashboard__actions{margin-left:0}
+  .member-dashboard__overview-grid,.member-dashboard__summary-row{grid-template-columns:minmax(0,1fr)}
+  .member-panel__service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:600px){
+  .member-panel__service-grid{grid-template-columns:minmax(0,1fr)}
+  .member-panel__service-grid>div:nth-child(odd){border-right:0}
+}
 </style>

@@ -1777,8 +1777,8 @@ final class RegisteredMetricReadServices
 
     /**
      * Registered category-card projection.  The dashboard provides only its
-     * active taxonomy labels; category membership, cash amount and item
-     * ranking are all calculated from one registered category population.
+     * active taxonomy labels; category membership, registered amount and item
+     * ranking are all calculated from one metric-specific population.
      * Non-merchandise cash stays in category totals but has no product name
      * and therefore cannot enter the item rankings.
      *
@@ -1786,10 +1786,13 @@ final class RegisteredMetricReadServices
      */
     public function categoryDashboardCards(string $metricCode, string $tenantId, array $stores, array $range, array $roots, array $children, array $categoryIds = []): array
     {
-        $rows = array_values(array_filter(
-            $this->categoryRows($metricCode, $tenantId, $stores, $range, $categoryIds),
-            static function (array $row): bool { return (int)($row['amount_cents'] ?? 0) > 0; }
-        ));
+        // Net actual performance must retain signed refund/reversal rows; the
+        // positive cash metric keeps its existing positive-only card behavior.
+        $rows = $this->categoryRows($metricCode, $tenantId, $stores, $range, $categoryIds);
+        if ($metricCode !== 'actual_performance') {
+            $rows = array_values(array_filter($rows,
+                static fn(array $row): bool => (int)($row['amount_cents'] ?? 0) > 0));
+        }
         $total = $this->categoryAggregate($rows, 'amount_cents');
         $cards = [];
         $categorized = 0;
@@ -1804,7 +1807,8 @@ final class RegisteredMetricReadServices
             $amount = $this->categoryAggregate($matched, 'amount_cents');
             $categorized = $this->add($categorized, $amount);
             $cards[] = [
-                'category_id' => $rootId, 'name' => $name, 'cash_performance_cents' => $amount,
+                'category_id' => $rootId, 'name' => $name, 'metric_code' => $metricCode,
+                'amount_cents' => $amount, 'cash_performance_cents' => $amount,
                 'share' => $total === 0 ? null : round($amount / $total * 100, 1),
                 'drilldown' => ['metric_code' => $metricCode, 'category_id' => $rootId],
                 'project_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
@@ -1813,7 +1817,9 @@ final class RegisteredMetricReadServices
                 'product_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
                     return (string)($row['product_type_snapshot'] ?? '') === 'product';
                 })), 'item_name', '产品'),
-                'source_explanation' => '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入，排行榜按卡内项目商品名称展示。',
+                'source_explanation' => $metricCode === 'actual_performance'
+                    ? '当前启用一级商品分类及全部下级分类的实际业绩净额；现金退款在退款业务日抵减，卡项按卡内项目分类和分摊金额归入。'
+                    : '当前启用一级商品分类及全部下级分类的现金业绩；卡项按卡内项目分类和分摊金额归入，排行榜按卡内项目商品名称展示。',
             ];
         }
         $unclassified = $this->add($total, -$categorized);
@@ -1825,7 +1831,8 @@ final class RegisteredMetricReadServices
                 return $categoryId <= 0 || !isset($classified[$categoryId]);
             }));
             $cards[] = [
-                'category_id' => 0, 'name' => '未分类', 'cash_performance_cents' => $unclassified,
+                'category_id' => 0, 'name' => '未分类', 'metric_code' => $metricCode,
+                'amount_cents' => $unclassified, 'cash_performance_cents' => $unclassified,
                 'share' => $total === 0 ? null : round($unclassified / $total * 100, 1),
                 'drilldown' => ['metric_code' => $metricCode],
                 'project_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
@@ -1834,7 +1841,9 @@ final class RegisteredMetricReadServices
                 'product_rankings' => $this->categoryTop(array_values(array_filter($matched, static function (array $row): bool {
                     return (string)($row['product_type_snapshot'] ?? '') === 'product';
                 })), 'item_name', '产品'),
-                'source_explanation' => '未能匹配当前启用一级商品分类的现金业绩；保留在独立未分类卡中，确保分类合计与现金业绩一致。排行榜仅展示可核实商品名称的项目或产品。',
+                'source_explanation' => $metricCode === 'actual_performance'
+                    ? '未能匹配当前启用一级分类的实际业绩净额；退款同样抵减，未分类单列以保持合计守恒。'
+                    : '未能匹配当前启用一级商品分类的现金业绩；保留在独立未分类卡中，确保分类合计与现金业绩一致。排行榜仅展示可核实商品名称的项目或产品。',
             ];
         }
         return $cards;
@@ -2070,7 +2079,9 @@ final class RegisteredMetricReadServices
         if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
         $amount = $mode === 'refund' ? '-p.amount_cents' : 'p.amount_cents';
         // 原销售事实与合作方快照只用于明细定位；金额和统计日期仍属于本笔收款分摊。
-        $rows = $direct->fieldRaw("p.id,s.fact_id sale_fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,s.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.partner_name_snapshot")
+        // Keep the sale kind on the registered row so product-income consumers
+        // can exclude card sales without reopening payment facts or changing cash scope.
+        $rows = $direct->fieldRaw("p.id,s.fact_id sale_fact_id,s.source_type sale_source_type,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,s.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.partner_name_snapshot")
             ->select()->toArray();
 
         $cardBase = (clone $base)->where('s.source_type', 'card');
@@ -2081,7 +2092,7 @@ final class RegisteredMetricReadServices
                 ->where('metric_experience.is_experience', $filters['is_experience']);
         });
         $cards = $cardBase
-            ->fieldRaw("p.id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,s.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,s.fact_id sale_fact_id")
+            ->fieldRaw("p.id,s.source_type sale_source_type,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,s.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,s.fact_id sale_fact_id")
             ->select()->toArray();
 
         $populationFilters = $filters;
@@ -3117,14 +3128,14 @@ final class RegisteredMetricReadServices
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
         call_user_func($this->normalFacts, $query, 'p.tenant_id', 'p.order_id');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementAllocations($query, 'p');
-        // Reversal allocations inherit the original receipt's method. Exclude
-        // both sides of an other-collection event, including imported history.
-        // The allocation snapshot also covers legacy rows without a payment fact.
-        $query->whereRaw("(p.payment_method IS NULL OR p.payment_method <> 'other_collection')");
+        // Reversal allocations inherit the original receipt's method. Neither
+        // other collection nor old-card entry is cash, including legacy rows
+        // whose only method snapshot is on the allocation itself.
+        $query->whereRaw("(p.payment_method IS NULL OR (p.payment_method <> 'other_collection' AND p.payment_method <> 'old_card_entry'))");
         $query->whereNotExists(function ($receipt): void {
             $receipt->name('cashier_v3_payment_fact')->alias('excluded_cash_method')
                 ->whereRaw('excluded_cash_method.tenant_id=p.tenant_id AND excluded_cash_method.fact_id=COALESCE(original.payment_fact_id,p.payment_fact_id)')
-                ->where('excluded_cash_method.payment_method', 'other_collection');
+                ->whereIn('excluded_cash_method.payment_method', ['other_collection', 'old_card_entry']);
         });
         return $query;
     }

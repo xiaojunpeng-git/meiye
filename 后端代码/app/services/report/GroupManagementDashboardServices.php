@@ -16,7 +16,7 @@ use think\facade\Db;
 final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
-    public const METRIC_VERSION = 'group-management-market-member-day-v5';
+    public const METRIC_VERSION = 'group-management-actual-below-cards-v6';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -113,7 +113,7 @@ final class GroupManagementDashboardServices
         );
         $monthTargets = $goalProgress['month_targets'];
         $categoryCards = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()->categoryDashboardCards(
-            'cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
+            'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
         );
         $currentTarget = array_sum($monthTargets);
         $yearTarget = array_sum($goalProgress['year_targets']);
@@ -265,7 +265,7 @@ final class GroupManagementDashboardServices
         return array_values($result);
     }
 
-    /** Signed net-cash rows with current platform category and frozen component cash weights. @return array<int,array<string,mixed>> */
+    /** Signed actual-performance rows with current category and frozen component weights. @return array<int,array<string,mixed>> */
     private function cashRows(string $tenantId, array $stores, array $range, array $categoryIds): array
     {
         return \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()
@@ -366,9 +366,9 @@ final class GroupManagementDashboardServices
         foreach ($configured as $source) {
             $sourceId = (int)$source['id'];
             $name = (string)$source['name'];
+            // Signed actual-performance rows keep a refund on its own business date.
             $matches = array_values(array_filter($cashRows, static function (array $row) use ($sourceId): bool {
-                return (int)($row['business_source_primary_id'] ?? 0) === $sourceId
-                    && (int)($row['amount_cents'] ?? 0) > 0;
+                return (int)($row['business_source_primary_id'] ?? 0) === $sourceId;
             }));
             $services = array_values(array_filter($serviceRows, static function (array $row) use ($sourceId): bool {
                 return (int)($row['business_source_primary_id'] ?? 0) === $sourceId;
@@ -381,7 +381,7 @@ final class GroupManagementDashboardServices
             if ($code === 'A') $item['active_customer_count'] = count($activeMembers);
             $out[] = $item;
         }
-        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按门店、业务日、来源、会员去重，A 来源当日净收款满1,000元、其他来源满500元计1人，同日合并、多日累计，游客不计；旧导入及旧卡录入原单补交不计人数，普通补交计入。筛选商品分类时还要求该分类当日净收款为正。成交金额仍按正向成功收款及卡内项目分摊统计。'];
+        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按门店、业务日、来源、会员去重，A 来源当日净收款满1,000元、其他来源满500元计1人，同日合并、多日累计，游客不计；旧导入及旧卡录入原单补交不计人数，普通补交计入。筛选商品分类时还要求该分类当日净收款为正。实际业绩金额按成功现金收款减现金退款，分别归属各自业务日期。'];
     }
 
     private function rankings(array $stores, array $targets, array $actual, string $asOfDate): array

@@ -32,10 +32,13 @@ $assert(str_contains($service, "\$card['metric_code']") && str_contains($service
 $assert(str_contains($service, "'metric_version'"), '接口必须返回指标版本');
 $assert(str_contains($service, "'aggregation_caught_up'"), '接口必须返回聚合追平状态');
 $assert(str_contains($service, 'RegisteredMetricReadServices::withCurrentReportProductCategory()')
-    && str_contains($service, "\$reader->summary('cash_performance'")
+    && str_contains($service, "\$reader->summary('actual_performance'")
     && str_contains($service, "\$reader->summary('consume_amount'")
-    && str_contains($service, "\$reader->categorySummary('cash_performance'")
-    && str_contains($service, "\$reader->categorySummary('consume_amount'"), '商品看板三期摘要必须只读统一销售和消耗指标');
+    && str_contains($service, "\$reader->categorySummary('actual_performance'")
+    && str_contains($service, "\$reader->categorySummary('consume_amount'")
+    && str_contains($service, "\$read(\$group['current'], 'actual_performance')")
+    && str_contains($service, "\$read(\$group['yoy'], 'actual_performance')")
+    && str_contains($service, "\$read(\$group['mom'], 'actual_performance')"), '商品看板三期销售业绩必须读取统一实际业绩指标');
 $assert(str_contains($groupService, "!empty(\$input['summary_only'])") && str_contains($groupService, "\$reader->summary('cash_performance'") && str_contains($groupService, "\$reader->summary('consume_amount'"), '商品看板摘要必须走统一指标 Reader 的轻量汇总查询');
 $assert(str_contains($service, "'data_as_of'"), '接口必须返回数据截至时间');
 $assert(str_contains($service, 'inventory_batch_movement_fact'), '库存必须从批次库存事实读取');

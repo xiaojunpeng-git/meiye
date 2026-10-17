@@ -16,7 +16,7 @@ use app\services\query\metric\RegisteredMetricReadServices;
 final class ProductManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'product_management_dashboard';
-    public const METRIC_VERSION = 'product-management-current-category-v4';
+    public const METRIC_VERSION = 'product-management-current-category-v5';
 
     public function dashboard(array $context, array $input): array
     {
@@ -37,17 +37,17 @@ final class ProductManagementDashboardServices
         $group = [];
         $reader = RegisteredMetricReadServices::withCurrentReportProductCategory();
         foreach ($periods as $key => $period) {
-            // Match the group dashboard's registered reader and category scope,
-            // but skip its unused refund/actual cards and detail projections.
+            // Sales use the registered actual-performance metric for every period;
+            // inventory and completed-service consumption keep their own facts.
             if ($categoryIds === []) {
-                $sales = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $period);
+                $sales = $reader->summary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $period);
                 $consumption = $reader->summary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $period);
             } else {
-                $sales = $reader->categorySummary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $period, $categoryIds);
+                $sales = $reader->categorySummary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $period, $categoryIds);
                 $consumption = $reader->categorySummary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $period, $categoryIds);
             }
             $group[$key] = ['cards' => [
-                ['metric_code' => 'cash_performance', 'value_cents' => $sales],
+                ['metric_code' => 'actual_performance', 'value_cents' => $sales],
                 ['metric_code' => 'consumption_performance', 'value_cents' => $consumption],
             ]];
         }
@@ -93,10 +93,10 @@ final class ProductManagementDashboardServices
             }
             return 0;
         };
-        $currentSales = $read($group['current'], 'cash_performance');
+        $currentSales = $read($group['current'], 'actual_performance');
         $currentConsumption = $read($group['current'], 'consumption_performance');
-        $yoySales = $read($group['yoy'], 'cash_performance');
-        $momSales = $read($group['mom'], 'cash_performance');
+        $yoySales = $read($group['yoy'], 'actual_performance');
+        $momSales = $read($group['mom'], 'actual_performance');
         $yoyConsumption = $read($group['yoy'], 'consumption_performance');
         $momConsumption = $read($group['mom'], 'consumption_performance');
         // 项目成本必须来自核销时的冻结成本快照。当前历史事实尚未完整覆盖
@@ -340,7 +340,14 @@ final class ProductManagementDashboardServices
             $id = (int)$row['id']; $pid = (int)$row['pid'];
             $parents[$id] = $pid;
             $children[$pid][] = $id;
-            if ($pid <= 0 && (int)$row['statistics_enabled'] === 1) $roots[] = ['id' => $id, 'name' => (string)$row['cate_name']];
+        }
+        // Match the group dashboard: an enabled category whose parent is gone
+        // is still a root, while disabled child switches do not erase facts.
+        foreach ($rows as $row) {
+            $pid = (int)$row['pid'];
+            if ($pid > 0 && isset($parents[$pid])) continue;
+            if ((int)$row['statistics_enabled'] !== 1) continue;
+            $roots[] = ['id' => (int)$row['id'], 'name' => (string)$row['cate_name']];
         }
         // Child switches do not remove historical amounts from an enabled parent's card.
         foreach ($roots as $root) {
@@ -422,22 +429,19 @@ final class ProductManagementDashboardServices
         return $out;
     }
 
-    /** Direct product payment allocations. Project revenue uses service completion facts instead. */
+    /** Direct product cash follows the registered net reader; card sales and non-sale cash stay outside product income. */
     private function productRevenueRows(array $scope, array $range, array $categoryIds): array
     {
-        $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('p')
-            ->leftJoin('cashier_v3_payment_sale_allocation_fact original', 'original.tenant_id=p.tenant_id AND original.allocation_fact_id=p.reversal_of')
-            ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=COALESCE(original.sale_fact_id,p.sale_fact_id)')
-            ->join('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
-            ->where('p.tenant_id', $scope['tenant_id'])->whereIn('p.store_id', $scope['store_ids'])
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->where('p.status', 'effective')->where('s.source_type', '<>', 'card')
-            ->whereIn('d.product_type_snapshot', ['product', 'goods']);
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
-        (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementAllocations($query, 'p');
-        $rows = $query->fieldRaw('p.id,p.store_id,p.source_line_id item_line_id,p.amount_cents,d.item_id,d.item_name_snapshot item_name,d.category_id_snapshot category_id')
-            ->group('p.id')->select()->toArray();
-        return $this->currentProductCategoryRows($rows, $categoryIds);
+        $rows = RegisteredMetricReadServices::withCurrentReportProductCategory()
+            ->categoryRows('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+        $products = [];
+        foreach ($rows as $row) {
+            if ((string)($row['sale_fact_id'] ?? '') === '' || (string)($row['sale_source_type'] ?? '') === 'card') continue;
+            if (!in_array((string)($row['product_type_snapshot'] ?? ''), ['product', 'goods'], true)) continue;
+            $row['item_line_id'] = (string)($row['source_line_id'] ?? '');
+            $products[] = $row;
+        }
+        return $products;
     }
 
     /** Project revenue is recognised when a service is completed, not when a card is sold. */
@@ -482,7 +486,7 @@ final class ProductManagementDashboardServices
     private function fieldExplanations(): array
     {
         return [
-            'summary.sales' => '已生效销售业绩，按业务日期和当前权限范围汇总；关闭分类统计不改写整体业绩',
+            'summary.sales' => '实际业绩＝现金业绩－现金退款业绩；成功事实按各自业务日期进入本期、同比和环比，关闭分类统计不改写整体业绩',
             'summary.consumption' => '已完成服务形成的消耗业绩，按业务日期汇总',
             'profit.project_cost' => '项目缺少完整的核销成本快照时显示“-”，不使用当前商品设置成本补算',
             'profit.product_cost' => '产品使用实际出库批次成本；无法完整关联成本时显示“-”',

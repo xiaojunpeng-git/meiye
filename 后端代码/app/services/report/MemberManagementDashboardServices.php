@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace app\services\report;
 
 use app\services\query\metric\StoreCustomerVisitEligibility;
+use app\services\query\metric\RegisteredMetricReadServices;
 use think\facade\Db;
 
 /**
@@ -18,7 +19,7 @@ use think\facade\Db;
 final class MemberManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'member_management_dashboard';
-    public const METRIC_VERSION = 'member-management-dashboard-facts-v3';
+    public const METRIC_VERSION = 'member-management-dashboard-actual-v4';
 
     /** @return array<string,mixed> */
     public function dashboard(array $context, array $input = []): array
@@ -28,13 +29,15 @@ final class MemberManagementDashboardServices
         $categoryId = (int)($input['category_id'] ?? 0);
         $cash = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryId);
         $services = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryId);
-        $historicalServices = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], ['start' => '1970-01-01', 'end' => $range['end']], $categoryId);
+        $historicalServices = $this->historicalServiceLastRows($scope['tenant_id'], $scope['store_ids'], $range['end'], $categoryId);
 
         $consuming = $this->memberSet($this->withoutExperience($cash), true);
         $serviceMembers = $this->memberSet($services);
         $sleeping = $this->sleepingMembers(StoreCustomerVisitEligibility::filter($historicalServices), $range['end'], 90);
         $cashAmount = $this->sum($this->withoutExperience($cash), 'amount_cents');
-        $serviceAmount = $this->performanceAmount($scope['tenant_id'], $scope['store_ids'], $range, $categoryId);
+        // Service counts follow completed-service dates; money follows the registered
+        // actual-performance business date, so a later service does not rebook a sale.
+        $serviceAmount = $cashAmount;
         $projectCount = $this->projectCount($services);
         $peopleCount = count($consuming);
         $servicePeopleCount = count($serviceMembers);
@@ -57,8 +60,8 @@ final class MemberManagementDashboardServices
                 'rankings' => [
                     'projects' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => !$this->isProduct($r))), 'consumption'),
                     'products' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => $this->isProduct($r))), 'consumption'),
-                    'consumption_projects' => $this->serviceRanking($scope['tenant_id'], $scope['store_ids'], $range, (int)$category['id']),
-                    'consumption_products' => $this->productConsumptionRanking(array_values(array_filter($categoryRows, fn(array $r): bool => $this->isProduct($r)))),
+                    'consumption_projects' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => !$this->isProduct($r))), 'consumption'),
+                    'consumption_products' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => $this->isProduct($r))), 'consumption'),
                 ],
             ];
         }
@@ -73,10 +76,10 @@ final class MemberManagementDashboardServices
             ],
             'table_layout' => ['fixed' => true, 'vertical_scroll' => true, 'horizontal_scroll' => false],
             'columns' => [
-                ['key' => 'member.consuming_members', 'label' => '消费会员数', 'source' => '现金业绩事实，排除体验标签，会员 ID 去重'],
+                ['key' => 'member.consuming_members', 'label' => '消费会员数', 'source' => '实际业绩对应销售事实，排除体验标签，会员 ID 去重'],
                 ['key' => 'member.service_members', 'label' => '服务会员数', 'source' => '有效服务事实，会员 ID 去重'],
-                ['key' => 'service.amount', 'label' => '服务耗卡金额', 'source' => '消耗业绩事实净额'],
-                ['key' => 'consumption.amount', 'label' => '消费金额', 'source' => '现金业绩事实净额'],
+                ['key' => 'service.amount', 'label' => '实际业绩', 'source' => '同业务日期的实际业绩事实净额；服务人数按服务完成日另计'],
+                ['key' => 'consumption.amount', 'label' => '实际业绩', 'source' => '实际业绩事实净额（现金业绩减现金退款）'],
             ],
             'drilldown' => ['enabled' => false, 'reason' => '会员看板当前提供指标展示，暂无已确认的精确明细下钻契约。'],
             'export' => ['enabled' => false, 'reason' => '会员看板当前无已确认的导出列契约。'],
@@ -89,28 +92,28 @@ final class MemberManagementDashboardServices
                 ],
                 'consumption' => [
                     'people' => $this->metric($peopleCount, '非体验标签的消费会员数。'),
-                    'amount' => $this->moneyMetric($cashAmount, '成功收款现金业绩净额，退款、作废和调整按实际发生日期形成反向影响。'),
-                    'average' => $this->moneyMetric($this->ratio($cashAmount, $peopleCount), '现金业绩除以消费人数，分母为零显示 -。'),
+                    'amount' => $this->moneyMetric($cashAmount, '实际业绩净额，现金收款减现金退款；仅统计非体验销售及其调整。'),
+                    'average' => $this->moneyMetric($this->ratio($cashAmount, $peopleCount), '实际业绩净额除以消费人数，分母为零显示 -。'),
                 ],
                 'service' => [
                     'people' => $this->metric($servicePeopleCount, '有效服务会员数，按会员 ID 去重。'),
-                    'amount' => $this->moneyMetric($serviceAmount, '有效服务形成的消耗业绩净额，不使用现金业绩代替。'),
+                    'amount' => $this->moneyMetric($serviceAmount, '同业务日期、同权限范围的非体验销售实际业绩净额；与服务完成次数不是同一事实。'),
                     'projects' => $this->metric($projectCount, '有效服务项目事实次数，不按会员去重。'),
-                    'average_amount' => $this->moneyMetric($this->ratio($serviceAmount, $servicePeopleCount), '服务耗卡金额除以服务人数。'),
+                    'average_amount' => $this->moneyMetric($this->ratio($serviceAmount, $servicePeopleCount), '同期实际业绩净额除以服务人数；收款日与服务日可能不同。'),
                     'average_items' => $this->metric($this->ratio($projectCount, $servicePeopleCount), '服务项目数除以服务人数。'),
-                    'unit_amount' => $this->moneyMetric($this->ratio($serviceAmount, $projectCount), '服务耗卡金额除以服务项目数。'),
+                    'unit_amount' => $this->moneyMetric($this->ratio($serviceAmount, $projectCount), '同期实际业绩净额除以服务项目数；收款日与服务日可能不同。'),
                 ],
             ],
             'consumption' => [
                 'people' => $this->metric($peopleCount, '非体验标签的消费会员数。'),
-                'amount' => $this->moneyMetric($cashAmount, '现金业绩净额。'),
-                'average' => $this->moneyMetric($this->ratio($cashAmount, $peopleCount), '金额除以人数。'),
+                'amount' => $this->moneyMetric($cashAmount, '非体验销售对应的实际业绩净额。'),
+                'average' => $this->moneyMetric($this->ratio($cashAmount, $peopleCount), '实际业绩净额除以消费人数。'),
                 'categories' => $categoryCards,
                 'rankings' => [
                     'projects' => $this->ranking(array_values(array_filter($this->withoutExperience($cash), fn(array $r): bool => !$this->isProduct($r))), 'consumption'),
                     'products' => $this->ranking(array_values(array_filter($this->withoutExperience($cash), fn(array $r): bool => $this->isProduct($r))), 'consumption'),
-                    'consumption_projects' => [],
-                    'consumption_products' => $this->productConsumptionRanking(array_values(array_filter($this->withoutExperience($cash), fn(array $r): bool => $this->isProduct($r)))),
+                    'consumption_projects' => $this->ranking(array_values(array_filter($this->withoutExperience($cash), fn(array $r): bool => !$this->isProduct($r))), 'consumption'),
+                    'consumption_products' => $this->ranking(array_values(array_filter($this->withoutExperience($cash), fn(array $r): bool => $this->isProduct($r))), 'consumption'),
                 ],
             ],
             'visit_bands' => $this->visitBands($services, $historicalServices, $range['start'], $range['end']),
@@ -153,17 +156,18 @@ final class MemberManagementDashboardServices
     /** @return array<int,array<string,mixed>> */
     private function cashRows(string $tenant, array $stores, array $range, int $categoryId = 0): array
     {
-        $query = Db::name('cashier_v3_payment_sale_allocation_fact')->alias('p')
-            ->join('cashier_v3_sale_fact s', 's.tenant_id=p.tenant_id AND s.fact_id=p.sale_fact_id')
-            ->leftJoin('cashier_v3_report_sale_dimension_fact d', 'd.tenant_id=s.tenant_id AND d.sale_fact_id=s.fact_id')
-            ->where('p.tenant_id', $tenant)->whereIn('p.store_id', $stores)->where('p.status', 'effective')
-            ->whereBetween('p.business_date', [$range['start'], $range['end']])
-            ->fieldRaw('p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,p.amount_cents,s.checkout_request_id,s.source_type,s.business_source_primary_id,s.business_source_label_snapshot,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.is_experience');
-        $normal = new StoreReportNormalDataScopeServices();
-        $normal->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
-        $normal->excludeVoidedSupplementAllocations($query, 'p');
-        $rows = $this->currentCategoryRows($query->select()->toArray(), 'item_id', 0);
-        $rows = $this->customCardProjectRows($rows, $tenant);
+        // The registered cash reader owns payment-method exclusion, reversal joins and
+        // card-component allocation. Member consumption keeps its sale-only,
+        // non-experience scope; recharge and unallocated repayment are not purchases.
+        $rows = RegisteredMetricReadServices::withCurrentReportProductCategory()
+            ->categoryRows('actual_performance', $tenant, $stores, $range, [], ['is_experience' => 0]);
+        $rows = array_values(array_filter($rows, static fn(array $row): bool => (string)($row['sale_fact_id'] ?? '') !== ''));
+        $rows = $this->currentCategoryRows($rows, 'item_id', 0);
+        foreach ($rows as &$row) {
+            $row['is_experience'] = 0;
+            $row['business_source_label_snapshot'] = (string)($row['source_label'] ?? '');
+        }
+        unset($row);
         return $categoryId === 0 ? $rows : array_values(array_filter($rows,
             static fn(array $row): bool => (int)$row['category_id'] === $categoryId));
     }
@@ -179,169 +183,55 @@ final class MemberManagementDashboardServices
         return $this->currentCategoryRows($query->select()->toArray(), 'project_id', $categoryId);
     }
 
-    private function performanceAmount(string $tenant, array $stores, array $range, int $categoryId = 0): int
+    /** Historical recency and dormancy need only each member's latest eligible service date, not every service line. */
+    private function historicalServiceLastRows(string $tenant, array $stores, string $end, int $categoryId): array
     {
-        $query = Db::name('cashier_v3_performance_fact')->alias('p')->where('p.tenant_id', $tenant)->whereIn('p.store_id', $stores)
-            ->where('performance_type', 'consumption_performance_recorded')->where('status', 'effective')
-            ->whereBetween('p.business_date', [$range['start'], $range['end']]);
-        if ($categoryId > 0) $query->join('cashier_v3_entitlement_service_fact s', 's.tenant_id=p.tenant_id AND s.checkout_request_id=p.checkout_request_id AND s.source_line_id=p.source_line_id')->where('s.service_status', 'completed');
-        $normal = new StoreReportNormalDataScopeServices();
-        $normal->excludeVoidedSalesOrderFacts($query, 'p.tenant_id', 'p.order_id');
-        $normal->excludeVoidedSalesOrderServices($query, 'p');
-        if ($categoryId === 0) {
-            $row = $query->fieldRaw('COALESCE(SUM(p.amount_cents),0) amount')->find();
-            return (int)($row['amount'] ?? 0);
-        }
-        // Category selection is applied after resolving the linked platform item; performance cents stay on their original facts.
-        $rows = $query->fieldRaw('p.store_id,p.amount_cents,s.project_id')->select()->toArray();
-        return $this->sum($this->currentCategoryRows($rows, 'project_id', $categoryId), 'amount_cents');
-    }
-
-    /** @return array<int,array<string,mixed>> */
-    private function serviceRanking(string $tenant, array $stores, array $range, int $categoryId, bool $products = false): array
-    {
-        $query = Db::name('cashier_v3_performance_fact')->alias('p')
-            ->join('cashier_v3_entitlement_service_fact s', 's.tenant_id=p.tenant_id AND s.checkout_request_id=p.checkout_request_id AND s.source_line_id=p.source_line_id')
-            ->where('p.tenant_id', $tenant)->whereIn('p.store_id', $stores)->where('p.performance_type', 'consumption_performance_recorded')->where('p.status', 'effective')
-            ->where('s.service_status', 'completed')->whereBetween('p.business_date', [$range['start'], $range['end']]);
+        $query = Db::name('cashier_v3_entitlement_service_fact')->alias('s')
+            ->where('s.tenant_id', $tenant)->whereIn('s.store_id', $stores)
+            ->where('s.service_status', 'completed')->where('s.member_id', '>', 0)
+            ->whereBetween('s.business_date', ['1970-01-01', $end]);
+        StoreCustomerVisitEligibility::apply($query, 's');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderServices($query, 's');
-        $rows = $query->fieldRaw('p.store_id,p.amount_cents,s.project_id item_id,s.project_name_snapshot item_name,s.member_id')->select()->toArray();
-        $rows = $this->currentCategoryRows($rows, 'item_id', $categoryId);
-        $groups = [];
-        foreach ($rows as $row) {
-            $key = (int)$row['item_id'] . ':' . (string)$row['item_name'];
-            if (!isset($groups[$key])) $groups[$key] = ['name' => (string)$row['item_name'], 'amount' => 0, 'members' => []];
-            $groups[$key]['amount'] += (int)$row['amount_cents'];
+        if ($categoryId === 0) {
+            return $query->fieldRaw('s.member_id,MAX(s.business_date) business_date,0 is_experience')
+                ->group('s.member_id')->select()->toArray();
+        }
+
+        // Legacy category-filter callers still resolve the current platform item before
+        // choosing the latest date; a member can have services in several categories.
+        $rows = $query->fieldRaw('s.store_id,s.member_id,s.project_id,MAX(s.business_date) business_date,0 is_experience')
+            ->group('s.store_id,s.member_id,s.project_id')->select()->toArray();
+        $latest = [];
+        foreach ($this->currentCategoryRows($rows, 'project_id', $categoryId) as $row) {
             $memberId = (int)$row['member_id'];
-            if ($memberId > 0) $groups[$key]['members'][$memberId] = true;
+            if (!isset($latest[$memberId]) || $row['business_date'] > $latest[$memberId]['business_date']) {
+                $latest[$memberId] = $row;
+            }
         }
-        $ranked = [];
-        foreach ($groups as $group) {
-            $people = count($group['members']);
-            $ranked[] = ['name' => $group['name'], 'consumption_cents' => $group['amount'], 'people' => $people, 'average_cents' => $this->ratio($group['amount'], $people)];
-        }
-        usort($ranked, static fn(array $a, array $b): int => $b['consumption_cents'] <=> $a['consumption_cents']);
-        return array_slice($ranked, 0, 5);
+        return array_values($latest);
     }
 
     /** Project category grouping through platform product IDs only, then apply the dashboard's first-level category filter. */
     private function currentCategoryRows(array $rows, string $itemKey, int $categoryId): array
     {
         $links = [];
-        foreach ($rows as $index => $row) $links[$index] = ['store_id' => (int)$row['store_id'], 'product_id' => (int)($row[$itemKey] ?? 0)];
+        // Resolve each store/product identity once: historical fact counts can be
+        // much larger than the catalog, while category identity is the same.
+        foreach ($rows as $row) {
+            $storeId = (int)$row['store_id'];
+            $productId = (int)($row[$itemKey] ?? 0);
+            $links[$storeId . ':' . $productId] = ['store_id' => $storeId, 'product_id' => $productId];
+        }
         $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
         $result = [];
-        foreach ($rows as $index => $row) {
-            $category = $categories[$index] ?? [];
+        foreach ($rows as $row) {
+            $key = (int)$row['store_id'] . ':' . (int)($row[$itemKey] ?? 0);
+            $category = $categories[$key] ?? [];
             $row['category_id'] = (int)($category['root_id'] ?? 0);
             $row['category_path'] = (string)($category['path'] ?? '');
             if ($categoryId === 0 || $row['category_id'] === $categoryId) $result[] = $row;
         }
         return $result;
-    }
-
-    /**
-     * A custom card's generic sale product is not its project classification. Resolve its immutable
-     * sale-line configuration to current platform project categories, splitting cash cents by the
-     * configured component amounts. Missing/incomplete configurations retain the original fact row.
-     * @return array<int,array<string,mixed>>
-     */
-    private function customCardProjectRows(array $rows, string $tenant): array
-    {
-        $checkoutIds = [];
-        foreach ($rows as $row) {
-            if ((string)($row['source_type'] ?? '') !== 'card') continue;
-            $checkoutId = (string)($row['checkout_request_id'] ?? '');
-            if ($checkoutId !== '') $checkoutIds[$checkoutId] = true;
-        }
-        if ($checkoutIds === []) return $rows;
-
-        $configurations = [];
-        foreach (array_chunk(array_keys($checkoutIds), 300) as $chunk) {
-            $records = Db::name('cashier_v3_custom_card_configuration')
-                ->where('tenant_id', $tenant)->whereIn('checkout_request_id', $chunk)
-                ->where('status', 'settled')->field('sales_order_line_id,store_id,configuration_snapshot_json')
-                ->select()->toArray();
-            foreach ($records as $record) $configurations[(string)$record['sales_order_line_id']] = $record;
-        }
-        if ($configurations === []) return $rows;
-
-        $links = [];
-        $componentsByLine = [];
-        foreach ($configurations as $lineId => $record) {
-            $snapshot = json_decode((string)$record['configuration_snapshot_json'], true);
-            $components = is_array($snapshot) ? ($snapshot['components'] ?? null) : null;
-            if (!is_array($components) || $components === []) continue;
-            foreach ($components as $index => $component) {
-                if (!is_array($component)) { unset($componentsByLine[$lineId]); break; }
-                $key = $lineId . ':' . $index;
-                $componentsByLine[$lineId][$key] = $component;
-                $links[$key] = ['store_id' => (int)$record['store_id'], 'product_id' => (int)($component['productId'] ?? 0)];
-            }
-        }
-        $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
-        $result = [];
-        foreach ($rows as $row) {
-            if ((string)($row['source_type'] ?? '') !== 'card') { $result[] = $row; continue; }
-            $lineId = (string)($row['source_line_id'] ?? '');
-            if (isset($configurations[$lineId])
-                && (int)$configurations[$lineId]['store_id'] !== (int)$row['store_id']) {
-                $result[] = $row;
-                continue;
-            }
-            $components = $componentsByLine[$lineId] ?? [];
-            $totalWeight = 0;
-            foreach ($components as $key => $component) {
-                $weight = (int)($component['configuredAmountCents'] ?? 0);
-                if ($weight < 0 || !isset($categories[$key])) { $components = []; break; }
-                $totalWeight += $weight;
-            }
-            if ($components === [] || $totalWeight <= 0) { $result[] = $row; continue; }
-
-            // Give the last funded project any cent remainder; zero-priced projects never receive cash.
-            $remaining = abs((int)$row['amount_cents']);
-            $sign = (int)$row['amount_cents'] < 0 ? -1 : 1;
-            $lastPositiveKey = null;
-            foreach ($components as $key => $component) {
-                if ((int)$component['configuredAmountCents'] > 0) $lastPositiveKey = $key;
-            }
-            foreach ($components as $key => $component) {
-                $weight = (int)$component['configuredAmountCents'];
-                $share = $key === $lastPositiveKey ? $remaining
-                    : intdiv(abs((int)$row['amount_cents']) * $weight, $totalWeight);
-                $remaining -= $share;
-                $category = $categories[$key];
-                $part = $row;
-                $part['item_id'] = (int)$component['productId'];
-                $part['item_name'] = (string)($component['nameSnapshot'] ?? $row['item_name']);
-                $part['category_id'] = (int)$category['root_id'];
-                $part['category_path'] = (string)$category['path'];
-                $part['amount_cents'] = $sign * $share;
-                $result[] = $part;
-            }
-        }
-        return $result;
-    }
-
-    /** Product consumption is the confirmed product purchase amount per the dashboard rule. */
-    private function productConsumptionRanking(array $rows): array
-    {
-        $groups = [];
-        foreach ($rows as $row) {
-            $key = (string)($row['item_id'] ?? $row['item_name'] ?? '');
-            if ($key === '') continue;
-            if (!isset($groups[$key])) $groups[$key] = ['name' => (string)($row['item_name'] ?? '-'), 'amount' => 0, 'people' => []];
-            $groups[$key]['amount'] += (int)($row['amount_cents'] ?? 0);
-            $member = (int)($row['member_id'] ?? 0);
-            if ($member > 0) $groups[$key]['people'][$member] = true;
-        }
-        $out = [];
-        foreach ($groups as $group) {
-            $people = count($group['people']);
-            $out[] = ['name' => $group['name'], 'consumption_cents' => $group['amount'], 'people' => $people, 'average_cents' => $this->ratio($group['amount'], $people)];
-        }
-        usort($out, static fn(array $a, array $b): int => $b['consumption_cents'] <=> $a['consumption_cents']);
-        return array_slice($out, 0, 5);
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -355,17 +245,58 @@ final class MemberManagementDashboardServices
             $groups[$key]['orders'][(string)($row['order_id'] ?? '')] = true;
             $member = (int)($row['member_id'] ?? 0); if ($member > 0) $groups[$key]['people'][$member] = true;
         }
-        $out = []; foreach ($groups as $group) { $people = count($group['people']); $out[] = ['name' => $group['name'], 'cash_income_cents' => $group['amount'], 'orders' => count(array_filter(array_keys($group['orders']))), 'people' => $people, 'average_cents' => $this->ratio($group['amount'], $people)]; }
+        // Both visible ranking panels retain their existing response keys, but
+        // money comes only from the same registered actual-performance rows.
+        $out = []; foreach ($groups as $group) { $people = count($group['people']); $out[] = ['name' => $group['name'], 'cash_income_cents' => $group['amount'], 'consumption_cents' => $group['amount'], 'orders' => count(array_filter(array_keys($group['orders']))), 'people' => $people, 'average_cents' => $this->ratio($group['amount'], $people)]; }
         usort($out, static fn(array $a, array $b): int => $b['cash_income_cents'] <=> $a['cash_income_cents']); return array_slice($out, 0, 5);
     }
 
     /** @return array<string,array<int,array<string,mixed>>> */
     private function tiers(array $cash, string $tenant): array
     {
-        $tiers = $this->tierConfig($tenant); $members = []; $sourceAIds = $this->sourceAIds();
-        foreach ($this->withoutExperience($cash) as $row) { $id = (int)($row['member_id'] ?? 0); if ($id > 0) { $members[$id]['amount'] = (int)($members[$id]['amount'] ?? 0) + (int)$row['amount_cents']; $sourceId = (int)($row['business_source_primary_id'] ?? 0); $members[$id]['source_a'] = in_array($sourceId, $sourceAIds, true) || (string)($row['business_source_label_snapshot'] ?? '') === 'A' || (bool)($members[$id]['source_a'] ?? false); } }
-        $build = function (bool $excludeSourceA) use ($tiers, $members): array { $rows = []; $totalPeople = 0; $totalAmount = 0; foreach ($members as $member) { if ($excludeSourceA && $member['source_a']) continue; $totalPeople++; $totalAmount += (int)$member['amount']; } foreach ($tiers as $tier) { $people = 0; $amount = 0; foreach ($members as $member) { if ($excludeSourceA && $member['source_a']) continue; $value = max(0, (int)$member['amount']); $upper = $tier['upper']; if ($value >= $tier['lower'] && ($upper === null || $value < $upper)) { $people++; $amount += (int)$member['amount']; } } $rows[] = ['name' => $tier['name'], 'people' => $people, 'amount_cents' => $amount, 'member_share' => $totalPeople ? ($people / $totalPeople) * 100 : null, 'amount_share' => $totalAmount ? ($amount / $totalAmount) * 100 : null, 'average_cents' => $this->ratio($amount, $people)]; } return $rows; };
-        return ['member' => $build(false), 'new_customer' => $build(true)];
+        $tiers = $this->tierConfig($tenant);
+        $members = [];
+        $sourceAIds = $this->sourceAIds();
+        foreach ($this->withoutExperience($cash) as $row) {
+            $id = (int)($row['member_id'] ?? 0);
+            if ($id <= 0) continue;
+            $members[$id]['amount'] = (int)($members[$id]['amount'] ?? 0) + (int)$row['amount_cents'];
+            $sourceId = (int)($row['business_source_primary_id'] ?? 0);
+            $members[$id]['source_a'] = in_array($sourceId, $sourceAIds, true)
+                || (string)($row['business_source_label_snapshot'] ?? '') === 'A'
+                || (bool)($members[$id]['source_a'] ?? false);
+        }
+        return [
+            'member' => $this->buildCumulativeTierRows($tiers, $members, false),
+            'new_customer' => $this->buildCumulativeTierRows($tiers, $members, true),
+        ];
+    }
+
+    /** A higher-tier member also reaches every lower threshold; row amounts and shares are not additive across tiers. */
+    private function buildCumulativeTierRows(array $tiers, array $members, bool $excludeSourceA): array
+    {
+        $eligible = array_filter($members, static fn(array $member): bool => !$excludeSourceA || !$member['source_a']);
+        $totalPeople = count($eligible);
+        $totalAmount = array_sum(array_column($eligible, 'amount'));
+        $rows = [];
+        foreach ($tiers as $tier) {
+            $people = 0;
+            $amount = 0;
+            foreach ($eligible as $member) {
+                if (max(0, (int)$member['amount']) < (int)$tier['lower']) continue;
+                $people++;
+                $amount += (int)$member['amount'];
+            }
+            $rows[] = [
+                'name' => $tier['name'],
+                'people' => $people,
+                'amount_cents' => $amount,
+                'member_share' => $totalPeople ? ($people / $totalPeople) * 100 : null,
+                'amount_share' => $totalAmount ? ($amount / $totalAmount) * 100 : null,
+                'average_cents' => $this->ratio($amount, $people),
+            ];
+        }
+        return $rows;
     }
 
     /** Primary source A is identified by the configured source name prefix. */
@@ -407,9 +338,18 @@ final class MemberManagementDashboardServices
     /** @return array<int,array{id:int,name:string}> */
     private function categories(): array
     {
-        // The statistics switch controls category panels and filter choices, not historical facts or overview totals.
-        try { $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)->where('pid', 0)->where('statistics_enabled', 1)->field('id,cate_name')->order('id')->select()->toArray(); } catch (\Throwable $e) { $rows = []; }
-        return array_map(static fn(array $r): array => ['id' => (int)$r['id'], 'name' => (string)$r['cate_name']], $rows);
+        // Use the group dashboard's platform taxonomy, including an enabled
+        // orphan root; a disabled child does not erase its parent's facts.
+        $rows = Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name,statistics_enabled,sort')->order('pid', 'asc')->order('sort', 'desc')->order('id', 'desc')->select()->toArray();
+        $ids = array_fill_keys(array_map(static fn(array $row): int => (int)$row['id'], $rows), true);
+        $roots = [];
+        foreach ($rows as $row) {
+            if ((int)$row['pid'] > 0 && isset($ids[(int)$row['pid']])) continue;
+            if ((int)$row['statistics_enabled'] !== 1) continue;
+            $roots[] = ['id' => (int)$row['id'], 'name' => (string)$row['cate_name']];
+        }
+        return $roots;
     }
 
     private function isExperience(array $row): bool { return (int)($row['is_experience'] ?? 0) === 1; }
@@ -426,37 +366,37 @@ final class MemberManagementDashboardServices
     private function fieldExplanations(): array
     {
         return [
-            'member.consuming_members' => '购买过卡项或项目并形成成功现金业绩、排除体验标签的会员，按会员 ID 去重。',
+            'member.consuming_members' => '非体验销售形成实际业绩事实的会员，按会员 ID 去重。',
             'member.service_members' => '查询期间完成有效服务的会员，按会员 ID 去重；取消、拒绝、爽约、作废和未完成不计入。',
             'member.sleeping_members' => '截至查询结束日最后一次非体验有效服务距今 90 天及以上且历史有符合条件到店记录的会员，按会员 ID 去重；人员开关不参与。',
             'consumption.people' => '非体验标签的消费会员数，按会员 ID 去重。',
-            'consumption.amount' => '查询期间成功收款现金业绩净额；退款、作废和调整按实际发生日期形成反向影响。',
-            'consumption.average' => '消费金额除以消费会员数；分母为零显示 -。',
+            'consumption.amount' => '查询期间非体验销售的实际业绩净额，即现金业绩减现金退款；作废和调整按事实日期反向影响。',
+            'consumption.average' => '非体验销售实际业绩净额除以消费会员数；分母为零显示 -。',
             'service.people' => '查询期间有效服务会员数，按会员 ID 去重。',
-            'service.amount' => '查询期间有效服务形成的消耗业绩净额，不使用现金业绩代替。',
+            'service.amount' => '与服务人数同日期范围的非体验销售实际业绩净额；收款、退款按各自业务日期统计，服务完成日只决定服务人数和项目数。',
             'service.projects' => '有效服务事实逐条计数，不按会员去重，不将 quantity 乘入次数。',
-            'service.average_amount' => '服务耗卡金额除以服务人数；分母为零显示 -。',
+            'service.average_amount' => '同期实际业绩净额除以服务人数；两者来自不同业务事实，分母为零显示 -。',
             'service.average_items' => '服务项目数除以服务人数；分母为零显示 -。',
-            'service.unit_amount' => '服务耗卡金额除以服务项目数；分母为零显示 -。',
+            'service.unit_amount' => '同期实际业绩净额除以服务项目数；两者来自不同业务事实，分母为零显示 -。',
             'category.people' => '按商品关联的平台商品当前一级分类归组；定制卡按卡内项目分类，跨分类按项目配置金额比例分摊。该分类下非体验标签消费会员数按会员 ID 去重，不按同名商品猜测分类。',
-            'category.amount' => '该一级商品分类下现金业绩净额；定制卡按卡内项目配置金额比例分摊到项目分类。退款、作废和调整按实际发生日期反向影响。',
-            'category.average' => '分类现金业绩除以分类消费会员数；分母为零显示 -。',
-            'category.share' => '分类现金业绩除以全部消费现金业绩。',
-            'ranking.consumption.cash_income' => '消费排行现金收入：该项目或产品在查询期间形成的成功收款现金业绩净额。',
+            'category.amount' => '该一级商品分类下非体验销售的实际业绩净额；定制卡按卡内项目配置金额比例分摊到项目分类。退款、作废和调整按事实日期反向影响。',
+            'category.average' => '分类实际业绩净额除以分类消费会员数；分母为零显示 -。',
+            'category.share' => '分类实际业绩净额除以全部非体验销售实际业绩净额。',
+            'ranking.consumption.cash_income' => '消费排行实际业绩：该项目或产品在查询期间形成的非体验销售实际业绩净额。',
             'ranking.consumption.orders' => '消费排行成交单数：排除体验标签后，该项目或产品关联的有效成交订单数。',
             'ranking.consumption.people' => '消费排行购买人头：排除体验标签后购买该项目或产品的会员数，按会员 ID 去重。',
-            'ranking.consumption.average' => '消费排行人均消费：该项目或产品现金收入除以购买人头。',
-            'ranking.consumption_amount.amount' => '消耗排行消耗金额：项目有效服务形成的消耗业绩，产品使用购买金额按看板特殊规则归集。',
-            'ranking.consumption_amount.people' => '消耗排行服务人头：该项目或产品关联的服务会员数，按会员 ID 去重。',
-            'ranking.consumption_amount.average' => '消耗排行人均消耗：消耗金额除以服务人头。',
+            'ranking.consumption.average' => '消费排行人均实际业绩：该项目或产品实际业绩净额除以购买人头。',
+            'ranking.consumption_amount.amount' => '第二排行金额同样读取项目或产品的实际业绩净额，按收款及退款业务日期归属；不把服务核销业绩当作实际业绩。',
+            'ranking.consumption_amount.people' => '第二排行人数为该项目或产品在同期实际业绩销售记录中的会员数，按会员 ID 去重。',
+            'ranking.consumption_amount.average' => '第二排行人均金额为实际业绩净额除以同期购买人头。',
             'visit.recency' => '截至查询结束日最后一次非体验有效服务距今达到 30/60/90/180/360 天的会员数，按累计区间统计；人员开关不参与。',
             'visit.frequency' => '按非体验有效服务事实统计每个会员每月到店次数；全年按各月份会员频次桶合计，人员开关不参与。',
-            'tier.people' => '按查询期间会员现金业绩净额匹配集团消费层级后，按会员 ID 去重。',
-            'tier.amount' => '该消费层级会员的现金业绩净额合计。',
-            'tier.member_share' => '层级顾客人数除以消费顾客总人数。',
-            'tier.amount_share' => '层级消费金额除以全部消费金额。',
-            'tier.average' => '层级消费金额除以层级顾客人数；分母为零显示 -。',
-            'tier.new_customer' => '新客分层沿用会员分层金额规则，但排除来源 A 的会员。',
+            'tier.people' => '达到该档金额下限的会员按会员 ID 去重；达到高档时也计入所有已达到的低档。',
+            'tier.amount' => '达到该档的会员完整实际业绩净额合计；跨档重复展示，不可将各档相加。',
+            'tier.member_share' => '该档累计达标人数除以本列去重顾客总人数；各档占比不可相加。',
+            'tier.amount_share' => '该档达标会员完整实际业绩净额除以本列顾客实际业绩净额；各档占比不可相加。',
+            'tier.average' => '该档达标会员完整实际业绩净额除以该档达标人数；分母为零显示 -。',
+            'tier.new_customer' => '新客分层同样按金额下限累计达标，但排除来源 A 的会员。',
         ];
     }
 }

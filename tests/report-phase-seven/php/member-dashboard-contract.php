@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__, 3);
 $service = file_get_contents($root . '/后端代码/app/services/report/MemberManagementDashboardServices.php');
+$cashReader = file_get_contents($root . '/后端代码/app/services/query/metric/RegisteredMetricReadServices.php');
+$checkoutPlan = file_get_contents($root . '/后端代码/app/services/cashier/v3/fact/CashierV3CheckoutFactPlanV1.php');
 $controller = file_get_contents($root . '/后端代码/app/controller/admin/v1/report/UnifiedReport.php');
 $route = file_get_contents($root . '/后端代码/route/admin.php');
 $view = file_get_contents($root . '/前端代码/cashier-v3/src/views/MemberDashboardView.vue');
@@ -18,8 +20,22 @@ $checks = [
         && str_contains($service, "'consuming_members'")
         && str_contains($service, "'service_members'")
         && str_contains($service, "'sleeping_members'"),
-    'cash and consumption facts' => str_contains($service, 'cashier_v3_payment_sale_allocation_fact')
-        && str_contains($service, 'consumption_performance_recorded'),
+    'registered actual performance and service-count facts' => str_contains($service, "categoryRows('actual_performance'")
+        && str_contains($service, "['is_experience' => 0]")
+        && str_contains($service, "'sale_fact_id'")
+        && !str_contains($service, 'customCardProjectRows(')
+        && str_contains($service, "Db::name('cashier_v3_entitlement_service_fact')"),
+    'all member monetary fields use actual performance' => str_contains($service, '$serviceAmount = $cashAmount;')
+        && str_contains($service, "'consumption_projects' => \$this->ranking(")
+        && str_contains($service, "'consumption_products' => \$this->ranking(")
+        && !str_contains($service, 'consumption_performance_recorded')
+        && !str_contains($service, 'serviceRanking(')
+        && str_contains($view, '按实际业绩净额达到各档下限'),
+    'cash excludes non-cash methods and follows reversals' => str_contains($cashReader, "p.payment_method <> 'other_collection'")
+        && str_contains($cashReader, "p.payment_method <> 'old_card_entry'")
+        && str_contains($cashReader, "['other_collection', 'old_card_entry']")
+        && str_contains($cashReader, 'COALESCE(original.sale_fact_id,p.sale_fact_id)')
+        && str_contains($checkoutPlan, 'old_card_entry_payment_fact_forbidden'),
     'dynamic categories and rankings' => str_contains($service, 'store_product_category')
         && str_contains($service, "'projects'")
         && str_contains($service, "'products'")
@@ -28,6 +44,9 @@ $checks = [
     'visit bands and tiers' => str_contains($service, "[30, 60, 90, 180, 360]")
         && str_contains($service, "'new_customer'")
         && str_contains($service, 'metric_version'),
+    'both tier columns are cumulative' => str_contains($service, "'member' => \$this->buildCumulativeTierRows(\$tiers, \$members, false)")
+        && str_contains($service, "'new_customer' => \$this->buildCumulativeTierRows(\$tiers, \$members, true)")
+        && str_contains($view, '累计达标：达到高档也计入低档，各档不可相加'),
     'experience and frequency scope' => str_contains($service, '$this->memberSet($this->withoutExperience($cash), true)')
         && str_contains($service, '$startMonth = substr($start, 0, 7)'),
     'business field explanation labels' => str_contains($service, "ranking.consumption.cash_income")
@@ -36,6 +55,10 @@ $checks = [
     'frontend uses backend response' => str_contains($api, '/adminapi/report/member-dashboard')
         && str_contains($view, 'queryMemberDashboard({ ...rangeForPeriod(), ...scopeFilters() })')
         && str_contains($view, 'customer_overview'),
+    'period control and no category filter' => str_contains($view, 'UnifiedQueryDateRange')
+        && !str_contains($view, 'categoryId = ref(')
+        && !str_contains($view, 'member-dashboard__category-filter"')
+        && str_contains($service, "->order('sort', 'desc')->order('id', 'desc')"),
     'no horizontal category overflow' => str_contains($view, 'member-dashboard__category-grid')
         && str_contains($view, 'overflow-x:hidden'),
     'headquarters menu is idempotent' => str_contains($menuSql, "unique_auth`='admin-index-index'")

@@ -48,13 +48,14 @@ try {
         if ((int)$record['deal_count'] !== ($expectedBySource[$sourceId] ?? 0)) {
             throw new RuntimeException('Unfiltered source people differ from market qualifying member-days');
         }
-        // The requested people change must not alter the original positive-cash amount or visit metric.
-        $positive = array_filter($cash, static function (array $row) use ($sourceId): bool {
-            return (int)$row['business_source_primary_id'] === $sourceId && (int)$row['amount_cents'] > 0;
+        // Source money now follows signed actual performance; visit and
+        // qualifying-person counts remain independent of that amount.
+        $matching = array_filter($cash, static function (array $row) use ($sourceId): bool {
+            return (int)$row['business_source_primary_id'] === $sourceId;
         });
         $expectedAmount = array_sum(array_map(static function (array $row): int {
             return (int)$row['amount_cents'];
-        }, $positive));
+        }, $matching));
         $visits = StoreCustomerVisitEligibility::filter(array_values(array_filter($services,
             static function (array $row) use ($sourceId): bool {
                 return (int)$row['business_source_primary_id'] === $sourceId;
@@ -97,7 +98,7 @@ try {
     if (strpos($filtered['source_explanation'], 'A 来源当日净收款满1,000元') === false) {
         throw new RuntimeException('Dashboard source explanation omits the shared threshold');
     }
-    echo 'PASS group dashboard source people, category net, unchanged amount and visits', PHP_EOL;
+    echo 'PASS group dashboard source people, signed actual amount and visits', PHP_EOL;
 } finally {
     Db::rollback();
 }
