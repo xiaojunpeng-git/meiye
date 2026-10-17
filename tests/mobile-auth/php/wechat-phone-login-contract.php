@@ -42,13 +42,15 @@ $client = file_get_contents($root . '/前端代码/mobile-vue3/src/shared/api/mo
 $route = file_get_contents($root . '/后端代码/route/api-mobile.php');
 $contract = json_decode((string)file_get_contents($root . '/前端代码/mobile-vue3/src/shared/contracts/mobile-merchant-v1.contract.json'), true);
 $assert(strpos($page, 'open-type="getPhoneNumber"') !== false && strpos($page, 'enterMerchantWithPassword') !== false, 'WeChat and password buttons remain available');
-$assert(strpos($page, 'v-if="passwordLoginVisible" class="password-fields"') !== false
-    && strpos($page, "if (code.length == 0) { choosePasswordLogin(") !== false
-    && strpos($page, "if (!result.ok) { choosePasswordLogin(") !== false
-    && strpos($page, 'function choosePasswordLogin(reason : string)') !== false,
-    'refusal and unresolved WeChat identity open the account-password form');
-$assert(strpos($page, 'open-type="getPhoneNumber"') < strpos($page, 'v-if="passwordLoginVisible" class="password-fields"'),
-    'the account-password view retains a WeChat authorization button');
+$assert(strpos($page, '<view class="password-fields">') !== false
+    && strpos($page, 'passwordLoginVisible') === false
+    && strpos($page, "if (code.length == 0) { message.value =") !== false
+    && strpos($page, 'if (!result.ok) { message.value =') !== false,
+    'the account form stays available after refusal or unmatched WeChat phone');
+$assert(strpos($page, "'账号登录'") !== false
+    && strpos($page, '登录并进入商家端') === false
+    && strpos($page, 'class="login-command"') < strpos($page, 'open-type="getPhoneNumber"'),
+    'account login is named and displayed before WeChat authorization');
 $assert(strpos($client, "'/mobile/merchant/wechat-phone-login'") !== false && strpos($client, 'phoneCode: code') !== false, 'client sends provider code, not a user-entered phone');
 $assert(strpos($route, "Route::post('wechat-phone-login'") !== false && strpos($route, 'MobileMerchantWechatPhoneMiddleware::class') !== false, 'public WeChat login route');
 $assert(($contract['endpoints']['wechatPhoneLogin']['authentication'] ?? '') === 'WECHAT_SERVER_VERIFIED_PHONE_AND_UNIQUE_ACTIVE_EMPLOYEE_WITH_CURRENT_MOBILE_AUTHORIZATION', 'contract preserves employee authorization');
