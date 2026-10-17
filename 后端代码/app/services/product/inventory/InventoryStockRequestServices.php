@@ -235,7 +235,7 @@ final class InventoryStockRequestServices
         return $this->transitionForHeadquarters($adminInfo, $hqLocationId, $requestId, $input, 'TERMINATE');
     }
 
-    /** 门店供货方只可作废从未生成调拨的请货单；关联库存保持原样。 */
+    /** 门店只可作废其可见且从未生成调拨的请货单；关联库存保持原样。 */
     public function voidForStore(int $storeId, int $operatorId, int $requestId, array $input): array
     {
         $command = $this->normalizeLifecycle($input, 'VOID');
@@ -263,14 +263,20 @@ final class InventoryStockRequestServices
     {
         $document = Db::name('inventory_stock_request_document')->where('id', $requestId)->lock(true)->find();
         if (!$document || (string)$document['tenant_id'] !== (string)$scope['tenantId']) throw new \RuntimeException('inventory_stock_request_not_found');
-        // 供货主体是请货作废的权限锚点；同一组织根之外的单据不可凭门店 ID 越权。
+        // 门店端按列表可见主体授权；平台端仍以供货主体授权。同一组织根之外的单据
+        // 不可凭门店 ID 越权，且后续关联调拨与履约事实仍是作废的硬边界。
         $documentRoot = explode('/', trim((string)$document['organization_path'], '/'))[0] ?? '';
         $scopeRoot = explode('/', trim((string)$scope['organizationPath'], '/'))[0] ?? '';
         if ($documentRoot === '' || $documentRoot !== $scopeRoot) throw new \RuntimeException('inventory_stock_request_not_found');
         $supplierType = strtoupper((string)$document['supply_party_type']);
         $supplierId = (int)$document['supply_party_id'];
         if ((string)$scope['requestPartyType'] === 'STORE') {
-            if ($supplierType !== 'STORE' || $supplierId !== (int)$scope['storeId']) throw new \RuntimeException('inventory_stock_request_void_supplier_denied');
+            $legacyRequester = (int)($document['store_id'] ?? 0) > 0 && (int)($document['request_party_id'] ?? 0) === 0;
+            $requesterType = $legacyRequester ? 'STORE' : strtoupper((string)($document['request_party_type'] ?? 'STORE'));
+            $requesterId = $legacyRequester ? (int)$document['store_id'] : (int)($document['request_party_id'] ?? 0);
+            $visibleAsRequester = $requesterType === 'STORE' && $requesterId === (int)$scope['storeId'];
+            $visibleAsSupplier = $supplierType === 'STORE' && $supplierId === (int)$scope['storeId'];
+            if (!$visibleAsRequester && !$visibleAsSupplier) throw new \RuntimeException('inventory_stock_request_void_supplier_denied');
         } elseif ($supplierType === 'HQ') {
             if ($supplierId !== 0) throw new \RuntimeException('inventory_stock_request_void_supplier_denied');
         } elseif ($supplierType !== 'STORE' || ($supplierId <= 0 || (empty($scope['isSuperAdmin']) && !in_array($supplierId, (array)$scope['allowedStoreIds'], true)))) {

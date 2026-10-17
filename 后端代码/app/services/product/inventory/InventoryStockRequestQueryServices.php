@@ -135,6 +135,11 @@ final class InventoryStockRequestQueryServices
                     ->whereNotIn('document_status', ['CANCELLED', 'REVERSED'])
                     ->value('id');
             $hasTransfer = $this->hasLinkedTransfer((int)$row['id']);
+            // 门店能看到的请货单都可进入“转调拨”；真正保存时仍以锁定原单的
+            // 供货方、请货方和剩余明细为准，不能借列表能力扩大库存主体。
+            $transferSourceReady = ((string)$row['supply_party_type'] === 'HQ' && (int)$row['supply_party_id'] === 0 && (int)$row['supply_location_id'] > 0)
+                || ((string)$row['supply_party_type'] === 'STORE' && (int)$row['supply_party_id'] > 0);
+            $row['can_transfer'] = $transferSourceReady && in_array($documentStatus, ['APPLIED', 'PARTIAL'], true);
             $row['can_cancel'] = $documentStatus === 'APPLIED' && !$hasTransfer;
             $row['can_terminate'] = $documentStatus === 'PARTIAL' && !$hasTransfer;
             $row['can_void'] = $this->canVoidForStore((int)$row['id'], $documentStatus, $storeId, $hasTransfer);
@@ -194,16 +199,26 @@ final class InventoryStockRequestQueryServices
                 && !array_filter($lines, static fn(array $line): bool => (int)$line['fulfilled_transfer_id'] > 0),
             'can_cancel' => (string)$document['document_status'] === 'APPLIED' && !$everTransfer,
             'can_terminate' => (string)$document['document_status'] === 'PARTIAL' && !$everTransfer,
+            'can_transfer' => (((string)$document['supply_party_type'] === 'HQ' && (int)$document['supply_party_id'] === 0 && (int)$document['supply_location_id'] > 0)
+                || ((string)$document['supply_party_type'] === 'STORE' && (int)$document['supply_party_id'] > 0))
+                && in_array((string)$document['document_status'], ['APPLIED', 'PARTIAL'], true),
             'can_void' => $this->canVoidForStore($requestId, (string)$document['document_status'], $storeId, $everTransfer),
         ];
     }
 
-    /** 作废仅开放给供货门店且从未生成调拨的请货；历史取消调拨仍算已生成。 */
+    /** 门店可作废其可见的请货单；历史取消调拨仍算已生成并关闭作废。 */
     private function canVoidForStore(int $requestId, string $status, int $storeId, ?bool $hasTransfer = null): bool
     {
         if (!in_array($status, ['APPLIED', 'PARTIAL', 'DONE'], true)) return false;
-        $supplier = Db::name('inventory_stock_request_document')->where('id', $requestId)->field('supply_party_type,supply_party_id')->find();
-        if (!$supplier || (string)$supplier['supply_party_type'] !== 'STORE' || (int)$supplier['supply_party_id'] !== $storeId) return false;
+        $document = Db::name('inventory_stock_request_document')->where('id', $requestId)
+            ->field('store_id,request_party_type,request_party_id,supply_party_type,supply_party_id')->find();
+        if (!$document) return false;
+        $legacyRequester = (int)$document['store_id'] > 0 && (int)$document['request_party_id'] === 0;
+        $requesterStoreId = $legacyRequester ? (int)$document['store_id']
+            : (strtoupper((string)$document['request_party_type']) === 'STORE' ? (int)$document['request_party_id'] : 0);
+        $isRequester = $requesterStoreId === $storeId;
+        $isSupplier = strtoupper((string)$document['supply_party_type']) === 'STORE' && (int)$document['supply_party_id'] === $storeId;
+        if (!$isRequester && !$isSupplier) return false;
         return !($hasTransfer ?? $this->hasLinkedTransfer($requestId));
     }
 

@@ -20,6 +20,8 @@ async function html(active, mode, status = 'ready', rows = true, capabilities = 
   const key = groupedDetailKey(row)
   return renderToString(Vue.createSSRApp({ render, setup: () => ({
     active, mode, groupedDetailColumns, groupedDetailKey, groupedLineCells,
+    transferStatusDisplay: (detail) => detail?.status_name || '-',
+    selectedTransferIds: [], transferBatchPreparing: false, transferActionSubmitting: false,
     currentPage: { title: '入库管理', columns: ['单号'] },
     listLoading: status === 'list-loading', currentRows: rows ? [['document-1']] : [], sourceRows: [row],
     groupedDetails: { [key]: { status, message: 'scope-denied', detail: {}, lines: status === 'empty' ? [] : [{ id: 1, product_name: 'shared-product', product_name_snapshot: 'shared-product', sku_name: 'default', quantity: '2', stock_unit: 'box', unit_cost_cents: null, cost_amount_cents: null }] } },
@@ -40,5 +42,5 @@ for (const page of Object.keys(groupedDetailColumns)) {
 const transfer = await html('transfer', 'platform', 'ready', true, true)
 for (const action of ['编辑', '删除', '发货', '收货']) assert.ok(transfer.includes(`>${action}<`))
 assert.ok((await html('request', 'platform', 'ready', true, true)).includes('>转调拨<'))
-assert.ok(!(await html('request', 'store', 'ready', true, true)).includes('>转调拨<'))
+assert.ok((await html('request', 'store', 'ready', true, true)).includes('>转调拨<'))
 console.log('SHARED_DOCUMENT_REAL_RENDER_OK: 5 pages, identical rows, cost redaction, capabilities and async states')

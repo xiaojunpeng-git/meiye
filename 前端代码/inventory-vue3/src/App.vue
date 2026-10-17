@@ -816,9 +816,9 @@ function openCurrentQuerySettings() {
   if (active.value === 'statistics') statisticsQueryToolbar.value?.openSettings()
 }
 
-/** Carry only the request identity; the transfer editor reloads permitted remaining lines. */
+/** Carry only the request identity; both terminals reload the server-authorized direction and remaining lines. */
 function openRequestTransfer(row) {
-  if (mode.value !== 'platform' || !row?.can_transfer) return
+  if (!row?.can_transfer) return
   selectPage('transfer')
   if (row.supply_party_type === 'HQ' && Number(row.supply_location_id) > 0) platformHqLocationId.value = Number(row.supply_location_id)
   openEditor('transfer', { transfer_request_id: Number(row.id), transfer_source_type: row.supply_party_type, transfer_source_id: Number(row.supply_party_id || 0), transfer_source_location_id: Number(row.supply_location_id || 0) })
@@ -2154,7 +2154,7 @@ onBeforeUnmount(() => {
                       <button v-if="groupedDetails[groupedDetailKey(sourceRows[index])]?.detail?.remark_editable" class="text-button" @click="openRemarkEditor(active, sourceRows[index])">编辑备注</button>
                       <button v-if="active === 'inbound'" class="text-button" @click="openInboundOutboundDetails(sourceRows[index])">出库明细</button>
                       <button v-if="active === 'request' && mode === 'platform' && sourceRows[index].can_bind_supply" class="text-button" @click="legacyRequestSupplyRow = sourceRows[index]; warehouseChoice = ''; warehouseChoiceKind = 'request-supply'">确认供货仓</button>
-                      <button v-if="active === 'request' && mode === 'platform' && sourceRows[index].can_transfer" class="text-button" @click="openRequestTransfer(sourceRows[index])">转调拨</button>
+                      <button v-if="active === 'request' && sourceRows[index].can_transfer" class="text-button" @click="openRequestTransfer(sourceRows[index])">转调拨</button>
                       <button v-if="active === 'request' && sourceRows[index].can_edit" class="text-button" @click="openRequestEditor(sourceRows[index])">编辑</button>
                       <button v-if="active === 'transfer' && sourceRows[index].can_edit" class="text-button" @click="openTransferEditor(sourceRows[index])">编辑</button>
                       <button v-if="active === 'transfer' && sourceRows[index].can_delete" class="text-button text-button--danger" @click="requestDeleteTransferDraft(sourceRows[index])">删除</button>

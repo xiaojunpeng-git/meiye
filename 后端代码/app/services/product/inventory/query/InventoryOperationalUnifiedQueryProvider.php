@@ -285,7 +285,7 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
                     $supplier->where('d.supply_party_type', 'STORE')->where('d.supply_party_id', $storeId);
                 });
             })
-            ->field('d.id,d.request_no,d.request_no order_sn,d.document_status status_name,d.store_id requester_store_id,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.location_id request_location_id,s.name request_store_name,d.supply_party_type,d.supply_party_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.operator_name_snapshot operator_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
+            ->field('d.id,d.request_no,d.request_no order_sn,d.document_status status_name,d.store_id requester_store_id,d.business_date,d.recorded_at add_time,d.recorded_at operation_at,d.location_id request_location_id,s.name request_store_name,d.supply_party_type,d.supply_party_id,d.supply_location_id,d.supply_party_name_snapshot supply_party_name,d.acceptance_party_id,d.acceptance_party_name_snapshot acceptance_party_name,d.operator_name_snapshot operator_name,COUNT(l.id) detail_count,SUM((l.requested_quantity_units*l.reference_unit_cost_cents)/POW(10,l.quantity_scale)) estimated_amount_cents')
             ->group('d.id')->order('d.id desc')->limit(UnifiedQueryExecutionServices::MAX_SOURCE_ROWS + 1)->select()->toArray();
         foreach ($rows as &$row) {
             $status = (string)$row['status_name'];
@@ -300,9 +300,14 @@ abstract class InventoryOperationalUnifiedQueryProvider implements UnifiedQueryP
                     ->value('id');
             // 只要曾生成调拨（包括后来取消/冲销），请货单即锁定所有关闭入口。
             $linkedTransfer = Db::name('inventory_cross_transfer_document')->where('request_document_id', (int)$row['id'])->value('id');
+            // 列表可见即允许进入绑定原单的调拨草稿；服务端保存时重新锁定
+            // 原供货方、请货方和剩余数量，不能改造成任意仓库调拨。
+            $transferSourceReady = ((string)$row['supply_party_type'] === 'HQ' && (int)$row['supply_party_id'] === 0 && (int)$row['supply_location_id'] > 0)
+                || ((string)$row['supply_party_type'] === 'STORE' && (int)$row['supply_party_id'] > 0);
+            $row['can_transfer'] = ($isRequester || $isSupplier) && $transferSourceReady && in_array($status, ['APPLIED', 'PARTIAL'], true);
             $row['can_cancel'] = $isRequester && $status === 'APPLIED' && !$linkedTransfer;
             $row['can_terminate'] = $isRequester && $status === 'PARTIAL' && !$linkedTransfer;
-            $row['can_void'] = $isSupplier && in_array($status, ['APPLIED', 'PARTIAL', 'DONE'], true) && !$linkedTransfer;
+            $row['can_void'] = ($isRequester || $isSupplier) && in_array($status, ['APPLIED', 'PARTIAL', 'DONE'], true) && !$linkedTransfer;
             if (!$canViewCost) $row['estimated_amount_cents'] = null;
         }
         unset($row);

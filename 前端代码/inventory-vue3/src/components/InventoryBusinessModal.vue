@@ -236,6 +236,8 @@ const primarySubmitLabel = computed(() => {
 })
 const requestDetailLines = computed(() => Array.isArray(props.detail?.lines) ? props.detail.lines : [])
 const transferDetailLines = computed(() => Array.isArray(props.detail?.lines) ? props.detail.lines : [])
+const selectedIncomingRequest = computed(() => incomingRequests.value.find((item) => Number(item.id) === Number(requestDocumentId.value)) || null)
+const requestLinkedTransfer = computed(() => props.pageKey === 'transfer' && Number(requestDocumentId.value) > 0)
 const modalScopeName = computed(() => {
   if (props.pageKey === 'warehouse') return props.warehouseOptions.find(item => Number(item.id) === Number(warehouseStoreId.value))?.organization_name_snapshot || '总部仓'
   if (props.pageKey === 'request' && isPlatformHeadquarters.value) return requestPartyOptions.value.find(item => item.key === requestPartySelection.value)?.name || props.scopeName
@@ -249,8 +251,21 @@ const transferSourceOptions = computed(() => {
     .map((location) => ({ key: `STORE:${Number(location.store_id)}`, type: 'STORE', id: Number(location.store_id), name: String(location.store_name_snapshot || location.store_name || `门店${location.store_id}`) }))
   return [...props.warehouseOptions.filter((item) => item.location_type === 'HQ' && item.location_status !== 'INACTIVE').map((item) => ({ key: 'HQ:' + Number(item.id), type: 'HQ', id: 0, name: item.location_name })), ...stores.filter((item, index, list) => list.findIndex((candidate) => candidate.key === item.key) === index)]
 })
-const transferTargetOptions = computed(() => transferCounterparties.value
-  .map((item) => ({ key: warehouseSelection(String(item?.party_type || 'STORE').toUpperCase(), item.id || item.store_id, item.location_id), type: String(item?.party_type || 'STORE').toUpperCase(), id: Number(item.id || item.store_id || 0), name: String(item.name || item.store_name || '') })))
+const transferTargetOptions = computed(() => {
+  const options = transferCounterparties.value
+    .map((item) => ({ key: warehouseSelection(String(item?.party_type || 'STORE').toUpperCase(), item.id || item.store_id, item.location_id), type: String(item?.party_type || 'STORE').toUpperCase(), id: Number(item.id || item.store_id || 0), name: String(item.name || item.store_name || '') }))
+  const request = selectedIncomingRequest.value
+  if (!request) return options
+  const type = String(request.request_party_type || 'STORE').toUpperCase()
+  const id = Number(request.request_party_id || request.store_id || 0)
+  const key = warehouseSelection(type, id, request.location_id)
+  if (!options.some((item) => item.key === key)) options.unshift({ key, type, id, name: String(request.request_party_name_snapshot || request.request_store_name || '总部仓') })
+  return options
+})
+// 门店从请货单进入时，调出方由原单锁定；页面只展示快照名称，不能改为当前门店。
+const transferSourceDisplayName = computed(() => requestLinkedTransfer.value
+  ? String(selectedIncomingRequest.value?.supply_party_name_snapshot || props.detail?.supply_party_name || '原供货方')
+  : props.scopeName)
 
 function formatQuantity(units, scale = 0) {
   const divisor = 10 ** Number(scale || 0)
@@ -1424,13 +1439,13 @@ function submitPrimaryEditor() {
                   <input ref="countFileInput" class="count-file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" @change="importCountRows" />
                   <button class="modal-secondary" :disabled="countLoading || submitting" @click="loadAllCountProducts">{{ countLoading ? '加载中…' : '加载全部商品' }}</button>
                 </template>
-                <button class="modal-secondary" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span>
+                <button class="modal-secondary" :disabled="pageKey === 'transfer' && requestLinkedTransfer" @click="openCatalogPicker"><Search :size="16" />选择商品</button><button v-if="['inbound', 'outbound'].includes(pageKey)" class="modal-secondary" @click="openScanner"><QrCode :size="16" />扫码添加</button><button class="modal-secondary" :disabled="!selectedLineIndexes.length" @click="bulkEditorVisible = !bulkEditorVisible">批量填写</button><button class="modal-danger" :disabled="!selectedLineIndexes.length" @click="removeSelectedRows"><Trash2 :size="15" />批量删除</button><span class="line-submit-actions"><button class="modal-secondary" :disabled="submitting" @click="close">取消</button><template v-if="pageKey === 'count'"><button class="modal-secondary" :disabled="submitting || countLoading || !selectedRows.length" @click="saveCountDraft">{{ submitting ? '保存中' : '保存草稿' }}</button><button class="modal-primary" :disabled="submitting || countLoading || !selectedRows.length" @click="submitCount">{{ submitting ? '提交中' : '完成盘点' }}</button></template><button v-else class="modal-primary" :disabled="primarySubmitDisabled" @click="submitPrimaryEditor">{{ primarySubmitLabel }}</button></span>
               </div>
             </header>
             <!-- An existing draft has one locked source and one receiving party; keep both with its lines. -->
             <div v-if="pageKey === 'transfer'" class="transfer-line-parties">
-              <label>调出方<InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" :disabled="isTransferEdit" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="scopeName" disabled /></label>
-              <label>调入方<InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" searchable :disabled="isTransferEdit && requestDocumentId > 0" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
+              <label>调出方<InventoryStoreSelector v-if="isPlatformHeadquarters" v-model="transferSourceSelection" :options="transferSourceOptions" :disabled="isTransferEdit" placeholder="总部仓（可切换门店）" @update:modelValue="onTransferSourceChanged" /><input v-else :value="transferSourceDisplayName" disabled /></label>
+              <label>调入方<InventoryStoreSelector v-model="transferTargetSelection" :options="transferTargetOptions" searchable :disabled="requestLinkedTransfer" placeholder="请选择调入方（门店或总部仓）" @update:modelValue="onTransferTargetChanged" /></label>
             </div>
             <p v-if="catalogError" class="catalog-error">{{ catalogError }}</p><p v-if="pageKey === 'count' && countProgress" class="count-progress">{{ countProgress }}</p>
             <section v-if="scannerVisible" class="scanner-entry"><Barcode :size="17" /><label>扫描条码<input v-model="scannerCode" autofocus placeholder="请扫描或输入商品条码" @keyup.enter="addScannedProduct" /></label><button class="modal-secondary" @click="scannerVisible = false">取消</button><button class="modal-primary" :disabled="!scannerCode.trim() || scannerLoading" @click="addScannedProduct">{{ scannerLoading ? '添加中' : '添加' }}</button></section>
