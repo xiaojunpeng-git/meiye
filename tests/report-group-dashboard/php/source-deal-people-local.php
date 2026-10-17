@@ -95,8 +95,8 @@ try {
             throw new RuntimeException('Category source people differ from positive-net qualifying member-days');
         }
     }
-    if (strpos($filtered['source_explanation'], 'A 来源当日净收款满1,000元') === false) {
-        throw new RuntimeException('Dashboard source explanation omits the shared threshold');
+    if (strpos($filtered['source_explanation'], '平台设置的来源门槛') === false) {
+        throw new RuntimeException('Dashboard source explanation omits the configurable shared threshold');
     }
     echo 'PASS group dashboard source people, signed actual amount and visits', PHP_EOL;
 } finally {

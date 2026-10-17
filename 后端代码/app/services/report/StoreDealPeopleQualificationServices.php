@@ -12,6 +12,8 @@ use think\facade\Db;
 final class StoreDealPeopleQualificationServices
 {
     private const TENANT_ID = CashierV3ScopeResolver::TENANT_SCOPE_ID;
+    // V3 checkout writes its original cash receipt as cashier_snapshot; older writers use sales_order.
+    private const SALE_PAYMENT_SOURCE_TYPES = ['sales_order', 'cashier_snapshot'];
 
     /**
      * 先在当前独立实例全部门店完成会员日去重，再裁剪获授权门店。
@@ -73,7 +75,7 @@ final class StoreDealPeopleQualificationServices
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('p.fact_type', 'payment_collected')
             ->where('p.fact_direction', 'forward')->where('p.amount_cents', '>', 0)
-            ->whereIn('p.source_document_type', ['sales_order', 'debt_repayment'])
+            ->whereIn('p.source_document_type', array_merge(self::SALE_PAYMENT_SOURCE_TYPES, ['debt_repayment']))
             ->whereNotIn('p.payment_method', ['other_collection', 'old_card_entry'])
             ->fieldRaw("DISTINCT CASE WHEN p.source_document_type='debt_repayment' THEN r.sales_order_id ELSE p.order_id END sales_order_id")
             ->select()->toArray();
@@ -116,7 +118,7 @@ final class StoreDealPeopleQualificationServices
         $receipts = [];
         foreach (array_chunk(array_keys($orders), 500) as $chunk) {
             $salePayments = $this->baseReceiptQuery()
-                ->where('p.source_document_type', 'sales_order')->whereIn('p.order_id', $chunk)
+                ->whereIn('p.source_document_type', self::SALE_PAYMENT_SOURCE_TYPES)->whereIn('p.order_id', $chunk)
                 ->field('p.fact_id,p.order_id,p.business_date,p.settled_at,p.amount_cents,p.payment_method,p.natural_key')
                 ->select()->toArray();
             foreach ($salePayments as $payment) {
