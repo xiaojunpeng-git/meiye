@@ -2090,8 +2090,7 @@ class StoreUnifiedReportServices extends BaseServices
             $this->applyOrganizationDimensions($row);
             $row['_market_group_key'] = (string)$row['fact_id'];
             $isRefund = (string)$row['performance_type'] === 'refund_sales_deduction';
-            $row['business_type'] = $isRefund ? '退款冲减'
-                : ((string)$row['fact_direction'] === 'reversal' ? '人员调整冲销' : '销售分配');
+            $row['business_type'] = $isRefund ? '退款冲减' : '销售分配';
             $row['document_no'] = $isRefund ? (string)$row['refund_no'] : (string)$row['order_no_snapshot'];
             $row['original_no'] = $isRefund ? (string)$row['original_no'] : '';
             $row['performance_amount'] = $this->money((int)$row['amount_cents']);
@@ -2099,11 +2098,11 @@ class StoreUnifiedReportServices extends BaseServices
         unset($row);
         $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
             ['key'=>'business_date','label'=>'业务日期'],
-            ['key'=>'business_type','label'=>'业绩类型','source_explanation'=>'正向销售分配、人员调整冲销及有效退款冲减逐笔列示；冲销按负数抵减，原始事实不改写。'],
+            ['key'=>'business_type','label'=>'业绩类型','source_explanation'=>'当前有效销售分配及有效退款冲减逐笔列示；被后续人员调整冲销的旧分配仅保留审计，不重复进入报表。'],
             ['key'=>'document_no','label'=>'业务单号','source_explanation'=>'销售分配显示原销售单号，退款冲减显示退款单号。'],
             ['key'=>'original_no','label'=>'原销售单号','source_explanation'=>'退款对应的原销售单号；无可信关联时留空。'],
             ['key'=>'member_name','label'=>'会员'], ['key'=>'employee_name','label'=>'销售人'],
-            ['key'=>'performance_amount','label'=>'销售业绩','value_type'=>'integer','source_explanation'=>'逐人销售分配、人员调整冲销及退款冲减的有符号净额；同一查询范围与汇总、导出一致。'],
+            ['key'=>'performance_amount','label'=>'销售业绩','value_type'=>'integer','source_explanation'=>'逐人最终有效销售分配及退款冲减净额；同一查询范围与汇总、明细、导出一致。'],
         ]), ['business_date'=>104,'business_type'=>96,'document_no'=>160,'employee_name'=>104]);
         return [
             'title'=>'销售人业绩明细','columns'=>$columns,'records'=>$rows,

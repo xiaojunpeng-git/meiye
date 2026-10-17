@@ -6,8 +6,8 @@ use app\services\cashier\v3\CashierV3ScopeResolver;
 use think\facade\Db;
 
 /**
- * 门店销售人净业绩只读投影。正向销售和有效退款各读一次人员事实；
- * 作废退款、被人员改派冲销的旧退款事实不进入正常报表。
+ * 门店销售人净业绩只读投影。销售分配读取未被后续冲销的最终正向事实，
+ * 有效退款按退款日读取一次；人员改派历史链只用于审计，不重复进入经营报表。
  */
 final class StoreSalespersonNetReadServices
 {
@@ -22,7 +22,19 @@ final class StoreSalespersonNetReadServices
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('p.status', 'effective')->where('p.employee_id', '>', 0)
             ->where(function ($kind): void {
-                $kind->where('p.performance_type', 'sales_performance_allocated')
+                $kind->where(function ($sale): void {
+                    $sale->where('p.performance_type', 'sales_performance_allocated')
+                        ->where('p.fact_direction', 'forward')
+                        // 反向事实可能晚于查询日期；仍须全时间查找，避免原销售日
+                        // 同时读到旧分配和 R47 搬回原日期后的最终分配。
+                        ->whereNotExists(function ($reversal): void {
+                            $reversal->name('cashier_v3_performance_fact')->alias('sales_reversal')
+                                ->whereRaw('sales_reversal.tenant_id=p.tenant_id')
+                                ->whereRaw('sales_reversal.reversal_of=p.fact_id')
+                                ->where('sales_reversal.fact_direction', 'reversal')
+                                ->where('sales_reversal.status', 'effective');
+                        });
+                })
                     ->whereOr(function ($refund): void {
                         $refund->where('p.performance_type', 'refund_sales_deduction')
                             ->where('p.fact_direction', 'forward')
@@ -78,16 +90,33 @@ final class StoreSalespersonNetReadServices
 
     /** 明细与汇总共享事实谓词；日期序号沿用汇总在跨月范围的分组方式。 */
     public function detail(array $stores, array $range, array $employeeIds, int $day, int $page, int $limit,
-        bool $exportAll = false): array
+        bool $exportAll = false, array $filters = []): array
     {
         if ($stores === []) return ['records' => [], 'total' => 0, 'amount_cents' => 0];
         $query = $this->facts($stores, $range, $employeeIds);
         if ($day > 0) $query->whereRaw('DAY(p.business_date)=?', [$day]);
+        // Text search only narrows the authorized fact cohort; it never selects a store or employee.
+        foreach (['member', 'order'] as $key) {
+            $value = $filters[$key] ?? '';
+            if (!is_scalar($value)) throw new \InvalidArgumentException('明细筛选条件无效');
+            $term = trim((string)$value);
+            if (strlen($term) > 120 || preg_match('/[\r\n\x00-\x1F]/', $term)) throw new \InvalidArgumentException('明细筛选条件无效');
+            if ($term === '') continue;
+            $pattern = '%' . addcslashes($term, '\\%_') . '%';
+            if ($key === 'member') $query->whereLike('p.member_name_snapshot', $pattern);
+            else $query->where(function ($number) use ($pattern): void {
+                $number->whereLike('p.order_no_snapshot', $pattern)
+                    // ThinkORM treats a dotted alias passed to whereOrLike as an
+                    // operator token; bind the pattern explicitly to keep filtering safe.
+                    ->whereOrRaw('refund_operation.operation_no LIKE ?', [$pattern]);
+            });
+        }
         $total = (int)(clone $query)->count('p.id');
         $summary = (clone $query)->fieldRaw('COALESCE(SUM(p.amount_cents),0) amount_cents')->find() ?: [];
         $rowsQuery = $query->fieldRaw('p.fact_id,p.store_id,p.organization_id,p.organization_path_snapshot,'
                 . 'p.business_date,p.employee_id,p.employee_name_snapshot employee_name,p.member_name_snapshot member_name,'
-                . 'p.order_id,p.order_no_snapshot,p.source_line_id,p.performance_type,p.amount_cents,'
+                . 'p.order_id,p.order_no_snapshot,p.source_line_id,p.performance_type,p.fact_direction,'
+                . 'p.amount_cents,'
                 . 'refund_operation.operation_no refund_no,refund_operation.source_order_no_snapshot original_no')
             ->order('p.business_date', 'desc')->order('p.id', 'desc');
         if (!$exportAll) $rowsQuery->page($page, $limit);
