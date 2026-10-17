@@ -20,6 +20,16 @@ $summary = $report->query([18], $scope + [
     'page' => 1,
     'limit' => 100,
 ]);
+// 首年合计与十二个月份应共用整数元展示声明，金额原值留给导出和下钻对账。
+$summaryColumns = array_column($summary['columns'], null, 'key');
+foreach (array_merge(['annual_total'], array_map(static function (int $month): string {
+    return 'month_' . $month;
+}, range(1, 12))) as $key) {
+    if (($summaryColumns[$key]['value_type'] ?? '') !== 'money'
+        || ($summaryColumns[$key]['display_precision'] ?? null) !== 0) {
+        throw new RuntimeException('Field acquisition summary money column lacks whole-yuan display metadata: ' . $key);
+    }
+}
 // 无会员的零额 E 销售仍保留原始订单，但不能成为两张按会员归行的报表记录。
 foreach ($summary['records'] as $row) {
     if ((int)($row['member_id'] ?? 0) <= 0) {
@@ -33,6 +43,15 @@ $ordinaryDetail = $report->query([18], $scope + [
     'page' => 1,
     'limit' => 100,
 ]);
+// 金额列只声明页面整数元精度；明细和导出仍保留原始收款金额供对账。
+$moneyColumns = ['labor_fee', 'cash_none', 'cash_1', 'cash_2', 'cash_3'];
+$columnsByKey = array_column($ordinaryDetail['columns'], null, 'key');
+foreach ($moneyColumns as $key) {
+    if (($columnsByKey[$key]['value_type'] ?? '') !== 'money'
+        || ($columnsByKey[$key]['display_precision'] ?? null) !== 0) {
+        throw new RuntimeException('Field acquisition money column lacks whole-yuan display metadata: ' . $key);
+    }
+}
 foreach ($ordinaryDetail['records'] as $row) {
     if ((int)($row['member_id'] ?? 0) <= 0) {
         throw new RuntimeException('Unbound sale leaked into field acquisition detail');

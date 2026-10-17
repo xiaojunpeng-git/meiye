@@ -1050,6 +1050,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         }
         foreach(['labor_fee'=>'手工费','cash_none'=>'无轮次现金业绩','cash_1'=>'第一次现金业绩','cash_2'=>'第二次现金业绩','cash_3'=>'第三次现金业绩','fourth_and_above'=>'四次及以上','remark'=>'备注']as$key=>$label){
             $column=['key'=>$key,'label'=>$label];
+            // 金额事实及导出继续保留分精度；页面按统一报表规则显示四舍五入的整数元。
+            if(in_array($key,['labor_fee','cash_none','cash_1','cash_2','cash_3'],true)){
+                $column['value_type']='money';
+                $column['display_precision']=0;
+            }
             if($key==='cash_none'){
                 $column['source_explanation']=$receiptPeriod
                     ? '本次选中的收款月份内，未选择导购轮次的 E 地推销售收款或 E 来源补交实际分摊的现金；补交按自身业务日独立成行。'
@@ -1118,6 +1123,11 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
         ];
         foreach($columns as &$column){
             $key=(string)$column['key'];
+            // 月额与首年合计按原始分额守恒计算和下钻，仅页面展示按整数元四舍五入。
+            if($key==='annual_total'||preg_match('/^month_(?:[1-9]|1[0-2])$/',$key)){
+                $column['value_type']='money';
+                $column['display_precision']=0;
+            }
             $column['source_explanation']=isset($explanations[$key])?$explanations[$key]:
                 (preg_match('/^month_(\d{1,2})$/',$key,$match)?$match[1].'月 E 地推销售普通收款与 E 来源补交实际分摊的有效现金；补交按自身收款月份独立计入，其他来源补交不计。':'');
         }unset($column);
