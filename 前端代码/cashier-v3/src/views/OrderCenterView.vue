@@ -310,7 +310,9 @@ const ORDER_TABS = [
       field('detail_remark', '明细备注', 'text', { defaultVisible: false }),
       field('store', '服务门店', 'store'), field('craftsman', '手艺人（类型，业绩，手工、项目数）', 'person'),
       field('labor_performance_type', '服务业绩类型'),
-      field('labor_performance_ratio', '业绩比例'), field('labor_performance_amount', '消耗业绩', 'money'),
+      // 门店消耗来自项目核销，劳动业绩允许独立调整；两列必须保持各自的事实口径。
+      field('labor_performance_ratio', '业绩比例'), field('consumption_performance_amount', '消耗业绩', 'money'),
+      field('labor_performance_amount', '劳动业绩', 'money'),
       field('operator', '操作人', 'person'),
       field('service_status', '状态', 'status'), field('service_completed_at', '服务完成时间', 'date'),
       field('voided_at', '作废时间', 'date'), field('void_reason', '作废原因'), field('void_operator', '作废操作人', 'person')
@@ -427,6 +429,7 @@ const FIELD_ALIASES = {
   labor_fee_amount: ['laborFeeAmount', 'manualLaborFeeAmount'],
   labor_performance_type: ['laborPerformanceTypeLabel', 'laborPerformanceType'],
   labor_performance_ratio: ['laborPerformanceRatio'],
+  consumption_performance_amount: ['consumptionPerformanceAmount'],
   labor_performance_amount: ['laborPerformanceAmount'], service_status: ['serviceStatus'],
   project_count: ['projectCount'],
   detail_remark: ['detailRemark'],
