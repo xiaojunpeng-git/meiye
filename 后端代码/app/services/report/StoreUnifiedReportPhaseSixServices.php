@@ -122,6 +122,13 @@ final class StoreUnifiedReportPhaseSixServices
         if (in_array($report, ['phase_six_other_multi_payment', 'phase_six_salary_summary', 'phase_six_salary_detail'], true)) {
             $result['metric_version'] .= ':product-category-r2';
         }
+        if ($report === 'phase_six_salary_summary') {
+            // 只裁剪工资汇总中整列为零的数值指标；员工身份列、明细与事实聚合不变。
+            $metricKeys = array_column(array_filter(
+                $result['columns'], static fn(array $column): bool => !empty($column['summable'])
+            ), 'key');
+            $result = StoreReportZeroColumnVisibilityServices::hideAllZeroColumns($result, $metricKeys);
+        }
         return $result;
     }
 

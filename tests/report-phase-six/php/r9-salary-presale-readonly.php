@@ -25,9 +25,10 @@ foreach ($columns as $index => $key) {
         break;
     }
 }
-if ($presaleIndex === false || $categoryIndex !== $presaleIndex + 1
+// 单人筛选后分类均为零时整列不展示；售前非零列仍须保留。
+if ($presaleIndex === false || $categoryIndex !== null
     || ($summary['columns'][$presaleIndex]['label'] ?? '') !== '售前业绩') {
-    throw new RuntimeException('presale column must stand alone immediately before product categories');
+    throw new RuntimeException('presale-only result must keep presale and hide all-zero categories');
 }
 $rows = array_values(array_filter($summary['records'], static function (array $row) use ($employeeId): bool {
     return (int)$row['employee_id'] === $employeeId;
@@ -72,10 +73,13 @@ if (count($serviceRows) !== 1 || $serviceRows[0]['performance_category'] === '�
 
 $ordinary = $service->query('phase_six_salary_summary', [$storeId], $range,
     ['employee_name' => '彭菲']);
+$ordinaryColumns = array_column($ordinary['columns'], 'key');
 $ordinaryRows = array_values(array_filter($ordinary['records'], static function (array $row): bool {
     return (int)$row['employee_id'] === 663;
 }));
-if (count($ordinaryRows) !== 1 || $ordinaryRows[0][$presaleKey] !== '0'
+if (count($ordinaryRows) !== 1 || in_array($presaleKey, $ordinaryColumns, true)
+    || !in_array('salary_category_cash_26321', $ordinaryColumns, true)
+    || $ordinaryRows[0][$presaleKey] !== '0'
     || (int)($ordinaryRows[0]['salary_category_cash_26321'] ?? 0) <= 0) {
     throw new RuntimeException('unmarked salesperson must remain in the product category');
 }

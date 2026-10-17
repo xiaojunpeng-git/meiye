@@ -70,7 +70,15 @@ class StoreUnifiedReportServices extends BaseServices
             'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail',
             'store_salesperson_performance', 'store_salesperson_performance_detail',
         ], true)) {
-            return array_merge($meta, $this->operationsReport($report, $storeId, $range, $input));
+            $result = array_merge($meta, $this->operationsReport($report, $storeId, $range, $input));
+            if ($report === 'store_item_analysis') {
+                // 本报表按完整门店行集裁剪全零指标列；门店识别列、事实和导出仍共用同一结果。
+                $metricKeys = array_column(array_filter(
+                    $result['columns'], static fn(array $column): bool => empty($column['fixed'])
+                ), 'key');
+                $result = StoreReportZeroColumnVisibilityServices::hideAllZeroColumns($result, $metricKeys);
+            }
+            return $result;
         }
         if ($report === 'overview') return array_merge($meta, $this->overview($storeId, $range, $input));
         if ($report === 'sales') return array_merge($meta, $this->sales($storeId, $range, $input));
