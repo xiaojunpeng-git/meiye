@@ -1370,6 +1370,7 @@ function canSummaryReceiptDrilldown(row, column) {
   // full-year document set; only a concrete month can open their popup.
   if (target === 'operations_service_fact_detail') return false
   return [...SOURCE_PRE_SALE_DETAIL_REPORTS, 'operations_cash_fact_detail', 'operations_service_fact_detail',
+    'store_item_analysis_detail',
     'phase_six_monthly_featured_item'].includes(target) && canDrilldown(row, column)
 }
 
@@ -1442,6 +1443,7 @@ function bdeghDetailParams(pageNumber = 1) {
     detail_category_path: bdeghDetail.value.categoryPath,
     member_id: bdeghDetail.value.memberId,
     detail_store_id: bdeghDetail.value.storeId,
+    detail_store_key: bdeghDetail.value.storeKey || '',
     company_dimension_id: bdeghDetail.value.companyId,
     team_key: bdeghDetail.value.teamKey,
     metric_code: bdeghDetail.value.metric,
@@ -1538,6 +1540,26 @@ function openOperationsServiceDetail(row, column) {
   loadBdeghDetail(1)
 }
 
+/** The server-declared metric key and row key preserve the clicked report cell,
+ * while the report endpoint validates both again under the current data scope. */
+function openItemAnalysisDetail(row, column) {
+  const key = String(column.key || '')
+  const metric = key.match(/^item_analysis_(cash|share|actual|consume)_(today|cumulative)$/)
+  const category = key.match(/^item_analysis_category_\d+_(cash|after_split|consume)$/)
+  const title = metric
+    ? ({ cash: '现金业绩', share: '分成业绩', actual: '分成后业绩', consume: '消耗业绩' }[metric[1]] + (metric[2] === 'today' ? ' · 当日' : ' · 累计'))
+    : `${String(drilldownConfig(row, column)?.params?.category_label || '分类')} · ${String(column.label || '品项')}`
+  if (!metric && !category) return
+  detailMemberFilter.value = ''
+  detailOrderFilter.value = ''
+  bdeghDetail.value = { open: true, loading: false, detailReport: 'store_item_analysis_detail',
+    parentReport: 'store_item_analysis', storeKey: String(row?.item_analysis_store_key || ''),
+    itemId: '', itemGroupKey: '', categoryPath: '', memberId: '', storeId: '', companyId: '', teamKey: '',
+    metric: key, label: title, month: '', actualStart: '', actualEnd: '', page: 1,
+    total: 0, memberCount: 0, records: [], columns: [], amount: '-', error: '' }
+  loadBdeghDetail(1)
+}
+
 /** The clicked employee and store IDs are stable fact keys; the backend reapplies permission and date scope. */
 function openSalespersonPerformanceDetail(row, column) {
   const config = drilldownConfig(row, column)
@@ -1562,6 +1584,7 @@ const detailPopupOpeners = {
   operations_referral_beautician_pre_sale_detail: openBdeghDetail,
   operations_cash_fact_detail: openOperationsCashDetail,
   operations_service_fact_detail: openOperationsServiceDetail,
+  store_item_analysis_detail: openItemAnalysisDetail,
   store_salesperson_performance_detail: openSalespersonPerformanceDetail,
   phase_six_monthly_featured_item: openFeaturedDetail,
   phase_six_headquarters_acquisition: openHeadquartersDetail,
@@ -1570,6 +1593,11 @@ const detailPopupOpeners = {
 }
 
 function receiptDetailPeriod() {
+  if (bdeghDetail.value.detailReport === 'store_item_analysis_detail' && bdeghDetail.value.actualStart) {
+    return bdeghDetail.value.actualStart === bdeghDetail.value.actualEnd
+      ? bdeghDetail.value.actualStart
+      : `${bdeghDetail.value.actualStart} 至 ${bdeghDetail.value.actualEnd}`
+  }
   if (['operations_cash_fact_detail', 'operations_service_fact_detail'].includes(bdeghDetail.value.detailReport) && bdeghDetail.value.actualStart) {
     return bdeghDetail.value.actualStart.slice(0, 7) === bdeghDetail.value.actualEnd.slice(0, 7)
       ? bdeghDetail.value.actualStart.slice(0, 7)
@@ -1581,6 +1609,7 @@ function receiptDetailPeriod() {
 }
 
 function receiptAmountLabel() {
+  if (bdeghDetail.value.detailReport === 'store_item_analysis_detail') return bdeghDetail.value.label
   if (bdeghDetail.value.detailReport === 'store_salesperson_performance_detail') return '销售业绩'
   if (isAcquisitionReceiptDetail.value) return bdeghDetail.value.metric === 'amount' ? '收款金额' : '人数'
   if (isHeadquartersReceiptDetail.value) return bdeghDetail.value.metric.endsWith('_count') ? '人数' : '现金业绩'
@@ -1596,6 +1625,7 @@ function receiptAmountLabel() {
 }
 
 function receiptDetailUnit() {
+  if (bdeghDetail.value.detailReport === 'store_item_analysis_detail') return '条'
   if (isAcquisitionReceiptDetail.value) return bdeghDetail.value.metric === 'amount' ? '笔' : '人'
   if (isHeadquartersReceiptDetail.value) return bdeghDetail.value.metric.endsWith('_count') ? '人' : '笔'
   if (isFeaturedReceiptDetail.value) return isFeaturedCountMetric.value ? '条' : '笔'

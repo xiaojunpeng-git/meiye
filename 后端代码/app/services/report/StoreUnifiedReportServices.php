@@ -29,6 +29,7 @@ class StoreUnifiedReportServices extends BaseServices
             ['folder' => '门店运营', 'code' => 'partner_item_detail', 'name' => '合作方品项明细'],
             ['folder' => '门店运营', 'code' => 'member_consumption_detail', 'name' => '会员消费明细'],
             ['folder' => '门店运营', 'code' => 'store_item_analysis', 'name' => '门店品项分析'],
+            ['folder' => '门店运营', 'code' => 'store_item_analysis_detail', 'name' => '门店品项明细', 'hidden' => true],
             ['folder' => '门店运营', 'code' => 'store_craftsman_consumption', 'name' => '门店手艺人消耗'],
             // 明细只通过“门店手艺人消耗”中的受控下钻进入，不能单独作为导航入口。
             ['folder' => '门店运营', 'code' => 'store_craftsman_consumption_detail', 'name' => '手艺人消耗明细', 'hidden' => true],
@@ -67,10 +68,12 @@ class StoreUnifiedReportServices extends BaseServices
         }
         if (in_array($report, [
             'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
-            'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail',
+            'store_item_analysis', 'store_item_analysis_detail', 'store_craftsman_consumption', 'store_craftsman_consumption_detail',
             'store_salesperson_performance', 'store_salesperson_performance_detail',
         ], true)) {
-            $filterPayload = (string)($input['row_filters'] ?? '');
+            // The detail replays parent row filters inside its own scoped
+            // query; applying them again to fact rows would discard matches.
+            $filterPayload = $report === 'store_item_analysis_detail' ? '' : (string)($input['row_filters'] ?? '');
             // 有结果筛选才沿用既有完整导出读取路径；普通查询仍使用原数据库分页。
             $readInput = $filterPayload === '' ? $input : array_merge($input, ['_internal_all' => true]);
             $result = array_merge($meta, $this->operationsReport($report, $storeId, $range, $readInput));
@@ -89,7 +92,7 @@ class StoreUnifiedReportServices extends BaseServices
                 $result['total'] = count($rows);
                 $paginated = in_array($report, [
                     'partner_item_detail', 'member_consumption_detail',
-                    'store_craftsman_consumption_detail', 'store_salesperson_performance_detail',
+                    'store_item_analysis_detail', 'store_craftsman_consumption_detail', 'store_salesperson_performance_detail',
                 ], true);
                 $result['records'] = $paginated && empty($input['_internal_all'])
                     ? array_slice($rows, ($this->page($input)-1)*$this->limit($input), $this->limit($input))
@@ -130,7 +133,13 @@ class StoreUnifiedReportServices extends BaseServices
                 continue;
             }
             $cents = 0;
-            foreach ($rows as $row) $cents += $this->displayAmountCents($row[$key] ?? '0');
+            foreach ($rows as $row) {
+                // Item analysis retains exact per-store cents for filtered
+                // footers; summing each displayed integer yuan loses tails.
+                $cents += $report === 'store_item_analysis' && isset($row['_item_analysis_metric_cents'][$key])
+                    ? (int)$row['_item_analysis_metric_cents'][$key]
+                    : $this->displayAmountCents($row[$key] ?? '0');
+            }
             $summary[$key] = $this->money($cents);
         }
         return $summary;
@@ -187,6 +196,7 @@ class StoreUnifiedReportServices extends BaseServices
             case 'partner_item_detail': return $this->partnerItemDetail($storeId, $range, $input);
             case 'member_consumption_detail': return $this->memberConsumptionDetail($storeId, $range, $input);
             case 'store_item_analysis': return $this->storeItemAnalysis($storeId, $range, $input);
+            case 'store_item_analysis_detail': return $this->storeItemAnalysisDetail($storeId, $range, $input);
             case 'store_craftsman_consumption': return $this->craftsmanConsumption($storeId, $range, $input);
             case 'store_craftsman_consumption_detail': return $this->craftsmanConsumptionDetail($storeId, $range, $input);
             case 'store_salesperson_performance': return $this->salespersonPerformance($storeId, $range, $input);
@@ -1506,11 +1516,14 @@ class StoreUnifiedReportServices extends BaseServices
                         'city_manager' => (string)$store['city_manager'],
                         'city_manager_dimension_id' => (string)$store['city_manager_dimension_id'],
                         'store_name' => $store['store_name'],
+                        'store_id' => (int)$store['store_id'],
+                        'item_analysis_store_key' => (string)$storeIdKey,
                     ];
                 }
             }
         }
         foreach ($rows as &$row) {
+            $row['_item_analysis_metric_cents'] = [];
             foreach (['cash', 'share', 'actual', 'consume'] as $metric) {
                 $row['item_analysis_' . $metric . '_today'] = '0';
                 $row['item_analysis_' . $metric . '_cumulative'] = '0';
@@ -1528,9 +1541,13 @@ class StoreUnifiedReportServices extends BaseServices
                 $cash = (int)$store['cash_cents'];
                 $share = (int)$store['share_cents'];
                 $rows[$storeIdKey]['item_analysis_cash_' . $suffix] = $this->money($cash);
+                $rows[$storeIdKey]['_item_analysis_metric_cents']['item_analysis_cash_' . $suffix] = $cash;
                 $rows[$storeIdKey]['item_analysis_share_' . $suffix] = $this->money($share);
+                $rows[$storeIdKey]['_item_analysis_metric_cents']['item_analysis_share_' . $suffix] = $share;
                 $rows[$storeIdKey]['item_analysis_actual_' . $suffix] = $this->money($cash - $share);
+                $rows[$storeIdKey]['_item_analysis_metric_cents']['item_analysis_actual_' . $suffix] = $cash - $share;
                 $rows[$storeIdKey]['item_analysis_consume_' . $suffix] = $this->money((int)$store['consume_cents']);
+                $rows[$storeIdKey]['_item_analysis_metric_cents']['item_analysis_consume_' . $suffix] = (int)$store['consume_cents'];
             }
         }
         foreach ($period['categories'] as $storeIdKey => $categories) {
@@ -1539,8 +1556,11 @@ class StoreUnifiedReportServices extends BaseServices
                 if (!isset($definitions[$categoryKey])) continue;
                 $base = $definitions[$categoryKey]['key'];
                 $rows[$storeIdKey][$base . '_cash'] = $this->money((int)$amounts['cash_cents']);
+                $rows[$storeIdKey]['_item_analysis_metric_cents'][$base . '_cash'] = (int)$amounts['cash_cents'];
                 $rows[$storeIdKey][$base . '_after_split'] = $this->money($this->itemAnalysisAfterSplitCents($amounts));
+                $rows[$storeIdKey]['_item_analysis_metric_cents'][$base . '_after_split'] = $this->itemAnalysisAfterSplitCents($amounts);
                 $rows[$storeIdKey][$base . '_consume'] = $this->money((int)$amounts['consume_cents']);
+                $rows[$storeIdKey]['_item_analysis_metric_cents'][$base . '_consume'] = (int)$amounts['consume_cents'];
             }
         }
         uasort($rows, static function (array $left, array $right): int {
@@ -1573,7 +1593,8 @@ class StoreUnifiedReportServices extends BaseServices
                 $timeLogic = $periodLabel[0] === 'today'
                     ? '只看查询结束日当天。'
                     : '从 2026-08-10 累计到查询结束日。';
-                $columns[] = ['key' => $key, 'label' => $periodLabel[1], 'logic' => $logic . $timeLogic];
+                $columns[] = ['key' => $key, 'label' => $periodLabel[1], 'logic' => $logic . $timeLogic,
+                    'drilldown' => ['report' => 'store_item_analysis_detail']];
             }
             $groups[] = ['label' => $label, 'column_keys' => $keys, 'tone' => $tone];
         }
@@ -1594,7 +1615,9 @@ class StoreUnifiedReportServices extends BaseServices
             foreach ($metricExplanations as $metric) {
                 $key = $definition['key'] . '_' . $metric[0];
                 $keys[] = $key;
-                $columns[] = ['key' => $key, 'label' => $metric[1], 'logic' => $metric[2]];
+                $columns[] = ['key' => $key, 'label' => $metric[1], 'logic' => $metric[2],
+                    'drilldown' => ['report' => 'store_item_analysis_detail',
+                        'params' => ['category_label' => $definition['label']]]];
             }
             $groups[] = ['label' => $definition['label'], 'column_keys' => $keys, 'tone' => 'category'];
         }
@@ -1789,6 +1812,182 @@ class StoreUnifiedReportServices extends BaseServices
         return compact('stores', 'categories');
     }
 
+    /**
+     * A clicked item-analysis number is an additive ledger of its registered
+     * cash, sale-linked refund, frozen partner-share and service facts. The
+     * parent result is rebuilt first, including row filters and permissions;
+     * a request cannot invent a metric, store row or amount by changing params.
+     */
+    private function storeItemAnalysisDetail($storeId, array $range, array $input): array
+    {
+        $metricKey = trim((string)($input['metric_code'] ?? ''));
+        $summaryMetric = preg_match('/^item_analysis_(cash|share|actual|consume)_(today|cumulative)$/', $metricKey, $matches) === 1;
+        $categoryMetric = !$summaryMetric && preg_match('/^item_analysis_category_(\d+)_(cash|after_split|consume)$/', $metricKey, $matches) === 1;
+        if (!$summaryMetric && !$categoryMetric) throw new \InvalidArgumentException('无效的品项分析指标');
+        $kind = $summaryMetric ? $matches[1] : $matches[2];
+        $categoryId = $categoryMetric ? (string)(int)$matches[1] : null;
+        $detailRange = $summaryMetric
+            ? ($matches[2] === 'today' ? ['start' => $range['end'], 'end' => $range['end']]
+                : ['start' => self::COVERAGE_START, 'end' => $range['end']])
+            : $range;
+        $definitions = $this->itemAnalysisCategoryDefinitions($storeId);
+        if ($categoryMetric && !isset($definitions[$categoryId])) throw new \InvalidArgumentException('无效的品项分类');
+
+        // This query applies the same authenticated participant/store scope,
+        // organization filters, result-row filters and hidden-column contract.
+        $parent = $this->query($storeId, array_merge($input, ['report' => 'store_item_analysis']));
+        if (!in_array($metricKey, array_column($parent['columns'], 'key'), true)) {
+            throw new \InvalidArgumentException('当前筛选下该指标不可下钻');
+        }
+        $rowKey = trim((string)($input['detail_store_key'] ?? ''));
+        $allowedRows = [];
+        foreach ($parent['records'] as $row) $allowedRows[(string)($row['item_analysis_store_key'] ?? '')] = $row;
+        if ($rowKey !== '' && !isset($allowedRows[$rowKey])) throw new \InvalidArgumentException('门店明细不在当前授权结果中');
+        $expected = $rowKey === '' ? ($parent['summary_row'][$metricKey] ?? '0') : ($allowedRows[$rowKey][$metricKey] ?? '0');
+        $stores = is_array($storeId) ? array_values(array_unique(array_filter(array_map('intval', $storeId)))) : [(int)$storeId];
+        $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
+        $records = [];
+        if ($stores !== [] && $allowedRows !== []) {
+            $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
+            $filters = $this->itemAnalysisMetricFilters($input);
+            $categoryIds = (int)($input['category_id'] ?? 0) > 0 ? [(int)$input['category_id']] : [];
+            $needCash = in_array($kind, ['cash', 'actual', 'after_split'], true);
+            $needShare = in_array($kind, ['share', 'actual', 'after_split'], true);
+            $needConsume = $kind === 'consume';
+            if ($needCash) {
+                $positive = $this->participantEmployeeId > 0
+                    ? $reader->categoryRowsForParticipant('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $detailRange, $categoryIds, $filters, $this->participantEmployeeId)
+                    : $reader->categoryRows('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $detailRange, $categoryIds, $filters);
+                foreach ($positive as $entry) $this->itemAnalysisAppendDetail($records, $entry, (int)$entry['amount_cents'],
+                    '现金收款', $definitions, $categoryId, $allowedRows, $rowKey);
+                $refunds = $reader->categoryRowsWithoutStandaloneRefunds(CashierV3ScopeResolver::TENANT_SCOPE_ID,
+                    $stores, $detailRange, $categoryIds, $filters, $this->participantEmployeeId);
+                foreach ($refunds as $entry) $this->itemAnalysisAppendDetail($records, $entry, -(int)$entry['amount_cents'],
+                    '销售退款', $definitions, $categoryId, $allowedRows, $rowKey);
+            }
+            if ($needShare) {
+                $shareSources = $this->operationSaleQuery($stores, $detailRange, $input, false)
+                    ->fieldRaw('s.fact_id sale_fact_id,s.source_type,s.store_id,s.store_name_snapshot,s.organization_id,s.organization_path_snapshot,s.business_date,s.member_id,s.source_line_id,s.order_no_snapshot,s.member_name_snapshot,d.item_name_snapshot item_name,d.item_id product_id,d.partner_share_amount_cents')
+                    ->select()->toArray();
+                $shareCategories = (new StoreReportSaleCategoryServices())->resolve($shareSources);
+                foreach ($shareSources as $index => $source) {
+                    foreach ($shareCategories[$index] ?? [] as $sourceCategory) {
+                        if (((int)($input['category_id'] ?? 0) > 0 || !empty($input['category_path']) || !empty($input['category_path_exact']))
+                            && !StoreReportSaleCategoryServices::matches([$sourceCategory], $input)) continue;
+                        $entry = array_merge($source, ['category_id' => (int)$sourceCategory['id'],
+                            'category_path' => (string)$sourceCategory['path']]);
+                        $amount = (int)$sourceCategory['partner_share_amount_cents'];
+                        $this->itemAnalysisAppendDetail($records, $entry, $kind === 'share' ? $amount : -$amount,
+                            '成交分成', $definitions, $categoryId, $allowedRows, $rowKey);
+                    }
+                }
+            }
+            if ($needCash || $needShare) {
+                $refundReader = new StoreMemberConsumptionRefundReadServices();
+                $refundQuery = $refundReader->query($stores, $detailRange, $input, $this->participantEmployeeId);
+                $refundIds = array_column((clone $refundQuery)->field('refund_operation.id')->select()->toArray(), 'id');
+                foreach (array_chunk($refundIds, 500) as $batch) {
+                    foreach ($refundReader->rows($refundQuery, $batch, false) as $entry) {
+                        $itemCategories = $entry['_current_categories'] ?? [];
+                        if ($itemCategories === []) $itemCategories = [['id' => 0, 'path' => '', 'weight_cents' => 0]];
+                        $standalone = in_array((string)$entry['source_document_type'], ['manual_refund', 'imported_card_refund'], true);
+                        if ($needCash && $standalone) {
+                            $split = self::allocateRefundCategoryCents((int)$entry['amount_cents'], $itemCategories);
+                            foreach ($itemCategories as $index => $sourceCategory) {
+                                $part = array_merge($entry, ['category_id' => (int)$sourceCategory['id'],
+                                    'category_path' => (string)$sourceCategory['path']]);
+                                $this->itemAnalysisAppendDetail($records, $part, (int)$split[$index], '独立退款',
+                                    $definitions, $categoryId, $allowedRows, $rowKey);
+                            }
+                        }
+                        if ($needShare && (int)$entry['partner_share_cents'] !== 0) {
+                            $sourceCategory = count($itemCategories) === 1 ? $itemCategories[0] : ['id' => 0, 'path' => ''];
+                            $part = array_merge($entry, ['category_id' => (int)$sourceCategory['id'],
+                                'category_path' => (string)$sourceCategory['path']]);
+                            $share = (int)$entry['partner_share_cents'];
+                            $this->itemAnalysisAppendDetail($records, $part, $kind === 'share' ? $share : -$share,
+                                '退款分成冲减', $definitions, $categoryId, $allowedRows, $rowKey);
+                        }
+                    }
+                }
+            }
+            if ($needConsume) {
+                $consumption = $this->participantEmployeeId > 0
+                    ? $reader->categoryRowsForParticipant('consume_amount', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $detailRange, $categoryIds, $filters, $this->participantEmployeeId)
+                    : $reader->categoryRows('consume_amount', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $detailRange, $categoryIds, $filters);
+                foreach ($consumption as $entry) $this->itemAnalysisAppendDetail($records, $entry, (int)$entry['amount_cents'],
+                    '服务消耗', $definitions, $categoryId, $allowedRows, $rowKey);
+            }
+        }
+        $totalCents = array_sum(array_column($records, 'amount_cents'));
+        if ((string)$this->money($totalCents) !== (string)$expected) {
+            // Never show a plausible but irreconcilable popup when a source
+            // projection diverges from the parent report's current version.
+            throw new \RuntimeException('品项明细与汇总未对齐，请刷新报表后重试');
+        }
+        $member = trim((string)($input['detail_member'] ?? ''));
+        $order = trim((string)($input['detail_order_no'] ?? ''));
+        if ($member !== '' || $order !== '') $records = array_values(array_filter($records, static function (array $record) use ($member, $order): bool {
+            return ($member === '' || mb_stripos((string)$record['member_name'], $member) !== false)
+                && ($order === '' || mb_stripos((string)$record['order_no'], $order) !== false);
+        }));
+        usort($records, static function (array $left, array $right): int {
+            return strcmp((string)$right['business_date'], (string)$left['business_date'])
+                ?: strcmp((string)$right['order_no'], (string)$left['order_no'])
+                ?: strcmp((string)$left['fact_key'], (string)$right['fact_key']);
+        });
+        $sum = array_sum(array_column($records, 'amount_cents'));
+        $columns = $this->fixedColumns([
+            ['key' => 'business_date', 'label' => '业务日期', 'source_explanation' => '按所点指标的经营归属日期显示。'],
+            ['key' => 'store_name', 'label' => '门店', 'source_explanation' => '只显示当前报表授权且命中筛选条件的门店。'],
+            ['key' => 'order_no', 'label' => '单据号', 'source_explanation' => '原业务单号；无单号的服务事实显示其请求或事实编号。'],
+            ['key' => 'member_name', 'label' => '会员', 'source_explanation' => '业务事实保存的会员姓名快照。'],
+            ['key' => 'item_name', 'label' => '商品/项目', 'source_explanation' => '销售、退款或服务事实关联的商品或项目。'],
+            ['key' => 'category_name', 'label' => '分类', 'source_explanation' => '按当前平台商品分类投影；无法核实的归入未分类。'],
+            ['key' => 'fact_type', 'label' => '业务类型', 'source_explanation' => '正负收款、分成、退款冲减或服务消耗分别列示；分成后业绩以现金减分成。'],
+            ['key' => 'receipt_amount', 'label' => '本列金额', 'value_type' => 'money',
+                'source_explanation' => '所点列在本笔事实上的正负贡献；合计按分精度汇总后展示整数元。'],
+        ], ['business_date' => 112, 'store_name' => 140, 'order_no' => 165, 'member_name' => 100,
+            'item_name' => 160, 'category_name' => 130, 'fact_type' => 110]);
+        return ['title' => '门店品项明细', 'metric_version' => 'store-item-analysis-detail-v1',
+            'columns' => $columns, 'records' => !empty($input['_internal_all']) ? $records
+                : array_slice($records, ($this->page($input) - 1) * $this->limit($input), $this->limit($input)),
+            'total' => count($records), 'page' => $this->page($input), 'page_size' => $this->limit($input),
+            'filter_schema' => $this->organizationDimensionFilterSchema($detailRange), 'table_layout' => ['fixed' => true],
+            'summary_row' => $this->summaryRow($columns, ['fact_type' => '合计', 'receipt_amount' => $this->money($sum)]),
+            'scope' => ['date_range' => $detailRange]];
+    }
+
+    /** Project one already scoped fact into the exact parent store/category row; cents remain internal. */
+    private function itemAnalysisAppendDetail(array &$records, array $entry, int $cents, string $type,
+        array $definitions, ?string $categoryId, array $allowedRows, string $rowKey): void
+    {
+        if ($cents === 0) return;
+        $entry['category_id_snapshot'] = (int)($entry['category_id'] ?? $entry['category_id_snapshot'] ?? 0);
+        $entry['category_path_snapshot'] = (string)($entry['category_path'] ?? $entry['category_path_snapshot'] ?? '');
+        $this->applyOrganizationDimensions($entry);
+        $scratch = [];
+        $key = $this->itemAnalysisStore($scratch, $entry);
+        if (!isset($allowedRows[$key]) || ($rowKey !== '' && $key !== $rowKey)) return;
+        $category = $this->itemAnalysisConfiguredCategory($definitions,
+            (int)$entry['category_id_snapshot'], (string)$entry['category_path_snapshot']);
+        if ($categoryId !== null && (string)($category['id'] ?? '') !== $categoryId) return;
+        $orderNo = trim((string)($entry['order_no_snapshot'] ?? ''));
+        if ($orderNo === '') $orderNo = trim((string)($entry['checkout_request_id'] ?? $entry['order_id'] ?? $entry['fact_id'] ?? ''));
+        $records[] = [
+            'business_date' => (string)($entry['business_date'] ?? ''),
+            'store_name' => (string)($entry['store_name_snapshot'] ?? $entry['store_name'] ?? ''),
+            'order_no' => $orderNo,
+            'member_id' => (int)($entry['member_id'] ?? 0),
+            'member_name' => (int)($entry['member_id'] ?? 0) === 0 ? '游客'
+                : (string)($entry['member_name_snapshot'] ?? $entry['member_name'] ?? ''),
+            'item_name' => (string)($entry['item_name_snapshot'] ?? $entry['item_name'] ?? $entry['target_name_snapshot'] ?? '—'),
+            'category_name' => (string)($category['label'] ?? '未分类'),
+            'fact_type' => $type, 'receipt_amount' => $this->money($cents), 'amount_cents' => $cents,
+            'fact_key' => (string)($entry['fact_id'] ?? $entry['sale_fact_id'] ?? $entry['id'] ?? $entry['source_line_id'] ?? ''),
+        ];
+    }
+
     private function itemAnalysisMetricFilters(array $input): array
     {
         $filters = [];
@@ -1815,6 +2014,7 @@ class StoreUnifiedReportServices extends BaseServices
         if (!isset($stores[$key])) {
             $stores[$key] = [
                 'store_name' => (string)($entry['store_name_snapshot'] ?? $entry['store_name'] ?? ''),
+                'store_id' => (int)($entry['store_id'] ?? 0),
                 'division_name' => (string)($entry['division_name'] ?? ''),
                 'company_dimension_id' => (string)($entry['company_dimension_id'] ?? ''),
                 'city_manager' => (string)($entry['city_manager'] ?? ''),

@@ -192,7 +192,7 @@ class Report extends AuthController
             ['dataset', 'sale'], ['metric', 'cash_performance'],
             // Operations popups share server-validated metric and row keys
             // with the platform report; these values cannot expand store scope.
-            ['item_id', ''], ['detail_store_id', 0], ['detail_category_path', ''], ['item_group_key', ''],
+            ['item_id', ''], ['detail_store_id', 0], ['detail_store_key', ''], ['detail_category_path', ''], ['item_group_key', ''],
             ['parent_report', ''], ['team_key', ''], ['drill_month', ''], ['metric_code', ''],
             ['company_dimension_id', ''], ['payment_method', ''], ['operator_id', 0],
             ['channel_id', 0], ['customer_segment', 'all'],

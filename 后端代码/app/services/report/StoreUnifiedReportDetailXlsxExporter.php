@@ -22,6 +22,7 @@ final class StoreUnifiedReportDetailXlsxExporter
         'phase_six_headquarters_acquisition' => '总部拓客明细',
         'phase_six_acquisition_source' => '客户来源明细',
         'store_salesperson_performance_detail' => '销售人业绩明细',
+        'store_item_analysis_detail' => '门店品项明细',
     ];
 
     public static function supports(string $report): bool

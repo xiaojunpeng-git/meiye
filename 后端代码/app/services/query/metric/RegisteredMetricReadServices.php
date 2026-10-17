@@ -1790,6 +1790,15 @@ final class RegisteredMetricReadServices
         return $this->categoryReportBucketsWithParticipant('refund_performance', $tenantId, $stores, $range, $categoryIds, $filters, $participantEmployeeId, true);
     }
 
+    /** The item-analysis detail must expose the same sale-linked refund facts as its buckets;
+     * standalone card refunds are resolved by the report's verified original-item reader. */
+    public function categoryRowsWithoutStandaloneRefunds(string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId = 0): array
+    {
+        if ($participantEmployeeId < 0) $this->fail('METRIC_SOURCE_SCOPE_INVALID');
+        return $this->categoryRowsWithParticipant('refund_performance', $tenantId, $stores, $range,
+            $categoryIds, $filters, $participantEmployeeId, true);
+    }
+
     /** @return array<int,array<string,mixed>> */
     private function categoryReportBucketsWithParticipant(string $metricCode, string $tenantId, array $stores, array $range, array $categoryIds, array $filters, int $participantEmployeeId, bool $excludeStandaloneRefunds = false): array
     {
@@ -2407,7 +2416,7 @@ final class RegisteredMetricReadServices
         if ($categoryIds !== []) $query->whereIn('sv.project_category_id_snapshot', $categoryIds);
         $this->applyServiceFilters($query, $filters, 'p', 'sv');
         // 消耗业绩在服务完成时已落到项目级事实，商品目标只按服务事实的项目 ID 收敛。
-        return $query->fieldRaw("p.fact_id,p.store_id,p.member_id,p.order_id,p.checkout_request_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot,sv.project_id item_id,sv.project_category_id_snapshot category_id,sv.project_category_id_snapshot,sv.project_category_path_snapshot,COALESCE(NULLIF(sv.project_category_path_snapshot,''),sv.project_category_name_snapshot) category_path_snapshot")
+        return $query->fieldRaw("p.fact_id,p.store_id,p.member_id,p.member_name_snapshot,p.order_id,p.order_no_snapshot,p.checkout_request_id,p.source_line_id,p.business_date,p.amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot,sv.project_id item_id,sv.project_name_snapshot item_name,sv.project_category_id_snapshot category_id,sv.project_category_id_snapshot,sv.project_category_path_snapshot,COALESCE(NULLIF(sv.project_category_path_snapshot,''),sv.project_category_name_snapshot) category_path_snapshot")
             ->select()->toArray();
     }
 

@@ -33,7 +33,7 @@ class UnifiedReport extends AuthController
 {
     private const STORE_OPERATION_REPORTS = [
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
-        'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail', 'store_salesperson_performance',
+        'store_item_analysis', 'store_item_analysis_detail', 'store_craftsman_consumption', 'store_craftsman_consumption_detail', 'store_salesperson_performance',
         'store_salesperson_performance_detail',
         'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_detail', 'member_visit_annual_summary',
         'field_acquisition_detail', 'field_acquisition_summary', 'cross_industry_customer_detail',
@@ -837,7 +837,7 @@ class UnifiedReport extends AuthController
             // Fact popup identifiers only narrow the authorized report scope;
             // the report service revalidates the parent metric and row key.
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''], ['source_code', ''], ['parent_report', ''], ['team_key', ''],
-            ['detail_store_id', 0], ['detail_category_path', ''], ['item_group_key', ''],
+            ['detail_store_id', 0], ['detail_store_key', ''], ['detail_category_path', ''], ['item_group_key', ''],
             ['company_dimension_id', ''], ['city_manager_dimension_id', ''],
             ['dimension_as_of', ''], ['drill_month', ''], ['six_dimension_only', 0],
             ['tier_id', ''], ['month', ''],
