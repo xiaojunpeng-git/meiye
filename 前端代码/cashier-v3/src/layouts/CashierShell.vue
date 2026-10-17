@@ -496,11 +496,11 @@ const headerlessPageNames = new Set([
   'cashier-v3-member',
   'cashier-v3-care',
   'cashier-v3-order-center',
+  'cashier-v3-staff-list',
   'cashier-v3-store-business-reports',
   'cashier-v3-store-target-dashboard'
 ])
 const isHeaderlessPage = computed(() => headerlessPageNames.has(route.name))
-const isStaffPage = computed(() => route.name === 'cashier-v3-staff-list')
 const isManagementCenterPage = computed(() => route.name === 'cashier-v3-management-center')
 const isBusinessDashboardPage = computed(() => route.name === 'cashier-v3-business-dashboard')
 const isStoreBusinessReportPage = computed(() => route.name === 'cashier-v3-store-business-reports')
@@ -634,7 +634,7 @@ const hasMatchingRoomAssignmentSnapshot = computed(() => {
 const operatorLabel = computed(() => state.operator.roleName
   ? `${state.operator.name} · ${state.operator.roleName}`
   : state.operator.name)
-const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports', 'cashier-v3-store-target-dashboard'].includes(route.name))
+const hasPageHelp = computed(() => ['cashier-v3-cashier', 'cashier-v3-writeoff', 'cashier-v3-replacement', 'cashier-v3-room', 'cashier-v3-reservation', 'cashier-v3-member', 'cashier-v3-care', 'cashier-v3-hang', 'cashier-v3-order-center', 'cashier-v3-management-center', 'cashier-v3-business-dashboard', 'cashier-v3-store-business-reports', 'cashier-v3-store-target-dashboard'].includes(route.name))
 watch(
   () => route.name,
   (routeName) => {
@@ -815,10 +815,6 @@ async function requestTopAction(action, payload = {}) {
     return { result: { status: 'failed', code: 'TOP_ACTION_NOT_ALLOWED', message: '该顶部操作未进入前端允许清单。' } }
   }
   return requestCashierV3Action(action, payload)
-}
-
-function openStaffCreator() {
-  window.dispatchEvent(new CustomEvent('cashier-v3:open-staff-creator'))
 }
 
 async function openCashierMemberTopAction(action) {
@@ -2899,15 +2895,7 @@ onBeforeUnmount(() => {
 
         <div class="cashier-main__header-center" />
 
-        <div v-if="isStaffPage" class="cashier-header-actions">
-          <button type="button" class="button button--primary" @click="openStaffCreator">
-            新增员工
-          </button>
-          <button type="button" class="button button--help" @click="isOperationHelpOpen = true">
-            页面说明
-          </button>
-        </div>
-        <div v-else-if="hasPageHelp" class="cashier-header-actions">
+        <div v-if="hasPageHelp" class="cashier-header-actions">
           <button type="button" class="button button--help" @click="isOperationHelpOpen = true">
             页面说明
           </button>
