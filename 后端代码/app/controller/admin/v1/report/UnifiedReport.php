@@ -8,6 +8,9 @@ use app\Request;
 use app\services\organization\OrganizationScopeService;
 use app\services\organization\EmployeeDataScopeServices;
 use app\services\report\StoreUnifiedReportServices;
+use app\services\report\StoreReportGuestDisplayServices;
+use app\services\report\StoreItemAnalysisXlsxExporter;
+use app\services\report\StoreUnifiedReportDetailXlsxExporter;
 use app\services\report\StoreOperationsReportAnnotationServices;
 use app\services\report\StoreReportParticipantScopeServices;
 use app\services\report\StoreUnifiedReportPhaseThreeFoundationServices;
@@ -31,6 +34,7 @@ class UnifiedReport extends AuthController
     private const STORE_OPERATION_REPORTS = [
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
         'store_item_analysis', 'store_craftsman_consumption', 'store_craftsman_consumption_detail', 'store_salesperson_performance',
+        'store_salesperson_performance_detail',
         'market_performance', 'market_detail', 'member_visit_analysis', 'member_visit_detail', 'member_visit_annual_summary',
         'field_acquisition_detail', 'field_acquisition_summary', 'cross_industry_customer_detail',
         'cross_industry_customer_summary', 'new_customer_analysis', 'new_customer_analysis_summary',
@@ -45,7 +49,7 @@ class UnifiedReport extends AuthController
 
     /** 第四阶段除六维数据分析表外均只允许平台端访问。 */
     private const PHASE_FOUR_REPORTS = [
-        'operations_pre_sale_bdegh', 'operations_customer_status_bdegh', 'operations_referral_beautician_pre_sale',
+        'operations_pre_sale_bdegh', 'operations_pre_sale_bdegh_detail', 'operations_referral_beautician_pre_sale_detail', 'operations_cash_fact_detail', 'operations_service_fact_detail', 'operations_customer_status_bdegh', 'operations_referral_beautician_pre_sale',
         'operations_performance_comparison', 'operations_health_data', 'operations_beauty_item',
         'operations_annual_member_consumption', 'six_dimension_analysis', 'marketing_acquisition_pre_sale',
         'marketing_referral_pre_sale', 'marketing_post_sale_performance', 'marketing_health_data',
@@ -560,7 +564,7 @@ class UnifiedReport extends AuthController
         try {
             $input = $request->getMore($this->inputRules());
             $report = trim((string)($input['report'] ?? ''));
-            if (!$this->canAccessReport($report)) {
+            if (!$this->canAccessReport($report, trim((string)($input['parent_report'] ?? '')))) {
                 return app('json')->fail('当前账号未配置该报表权限');
             }
             $reportScope = $this->reportAuthorization();
@@ -620,7 +624,29 @@ class UnifiedReport extends AuthController
                     ];
                 }
             } else {
+                if ($export && $report === 'store_item_analysis' && (string)($input['format'] ?? '') === 'xlsx') {
+                    $file = $services->exportItemAnalysisXlsx($storeIds, $input);
+                    // 文件内容先由相同权限范围的统一服务生成，不能让下载入口扩大筛选范围。
+                    return \think\Response::create($file['content'], 'html')->header([
+                        'Content-Type' => StoreItemAnalysisXlsxExporter::MIME_TYPE,
+                        'Content-Disposition' => 'attachment; filename="store-item-analysis.xlsx"; filename*=UTF-8\'\'' . rawurlencode($file['filename']),
+                        'Cache-Control' => 'no-store',
+                    ]);
+                }
                 $result = $export ? $services->export($storeIds, $input) : $services->query($storeIds, $input);
+            }
+            // 授权查询与导出共用游客姓名投影，保留汇总和历史事实。
+            $result = StoreReportGuestDisplayServices::project($result);
+            if ($export && (string)($input['format'] ?? '') === 'xlsx' && StoreUnifiedReportDetailXlsxExporter::supports($report)) {
+                // Reuse the same menu/data authorization and complete result as the visible detail; no extra export permission.
+                $exporter = new StoreUnifiedReportDetailXlsxExporter();
+                $content = $exporter->render($report, $result);
+                return \think\Response::create($content, 'html')->header([
+                    'Content-Type' => StoreUnifiedReportDetailXlsxExporter::MIME_TYPE,
+                    'Content-Disposition' => 'attachment; filename="report-detail.xlsx"; filename*=UTF-8\'\'' . rawurlencode($exporter->filename($report)),
+                    'Cache-Control' => 'no-store',
+                    'X-Content-Type-Options' => 'nosniff',
+                ]);
             }
             return app('json')->success($result);
         } catch (\InvalidArgumentException $e) {
@@ -646,6 +672,7 @@ class UnifiedReport extends AuthController
         // second permission that could be omitted from existing roles.
         $permissionReport = [
             'store_craftsman_consumption_detail' => 'store_craftsman_consumption',
+            'store_salesperson_performance_detail' => 'store_salesperson_performance',
             'member_visit_detail' => 'member_visit_analysis',
         ][$report] ?? $report;
         $expected = 'admin-report-store-operations-' . $permissionReport;
@@ -688,12 +715,21 @@ class UnifiedReport extends AuthController
         ];
     }
 
-    private function canAccessReport(string $report): bool
+    private function canAccessReport(string $report, string $parentReport = ''): bool
     {
         if (in_array($report, self::CUSTOMER_ANALYTICS_REPORTS, true)) return $this->canAccessCustomerAnalytics($report);
         if (in_array($report, self::SIX_DIMENSION_REPORTS, true)) return $this->canAccessSixDimensionReport($report);
         if (in_array($report, self::PHASE_SIX_REPORTS, true)) return $this->hasMenuPermission('admin-report-phase-six-' . $report);
-        if (in_array($report, self::PHASE_FOUR_REPORTS, true)) return $this->hasMenuPermission('admin-report-phase-four-' . $report);
+        if (in_array($report, self::PHASE_FOUR_REPORTS, true)) {
+            // Hidden receipt details inherit only their explicit parent menu
+            // permission; the service separately validates the metric whitelist.
+            if (in_array($report, ['operations_cash_fact_detail', 'operations_service_fact_detail'], true)
+                && !in_array($parentReport, self::PHASE_FOUR_REPORTS, true)) return false;
+            $permissionReport = $report === 'operations_pre_sale_bdegh_detail' ? 'operations_pre_sale_bdegh'
+                : ($report === 'operations_referral_beautician_pre_sale_detail' ? 'operations_referral_beautician_pre_sale'
+                : (in_array($report, ['operations_cash_fact_detail', 'operations_service_fact_detail'], true) ? $parentReport : $report));
+            return $this->hasMenuPermission('admin-report-phase-four-' . $permissionReport);
+        }
         if (in_array($report, self::STORE_OPERATION_REPORTS, true)) return $this->canAccessStoreOperationReport($report);
         return true;
     }
@@ -787,19 +823,24 @@ class UnifiedReport extends AuthController
     private function inputRules(): array
     {
         return [
-            ['report', 'overview'], ['start_date', ''], ['end_date', ''], ['dataset', 'sale'], ['metric', 'cash_performance'],
+            ['report', 'overview'], ['start_date', ''], ['end_date', ''], ['dataset', 'sale'], ['metric', 'cash_performance'], ['format', ''],
             // Drilldown carries the frozen full path without changing the prefix behavior of category search.
             ['item_id', ''], ['payment_method', ''], ['operator_id', 0], ['channel_id', 0], ['customer_segment', 'all'], ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0], ['category_id', 0], ['category_path', ''], ['category_path_exact', ''], ['product_type', ''], ['partner_name', ''], ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['day_of_month', 0], ['page', 1], ['limit', 20],
             ['org_id', 0], ['store_id', 0], ['store_ids', ''],
             // 平台与门店共用异业下钻口径；会员条件必须经查询/导出白名单透传，组织门店权限仍由服务端裁剪。
             // 平台与门店共用地推现金月份下钻，会员和时间范围仍由服务端权限收紧。
-            // 会员进店次数与现金金额下钻透传稳定会员 ID、月份和指标，沿用汇总报表权限。
+            // 会员进店次数与现金金额下钻透传稳定会员 ID、月份和指标，沿用汇总报表的权限。
             ['member_id', 0], ['visit_month', 0], ['visit_metric', 'visits'], ['include_followup_cash', 0], ['receipt_period', 0],
-            ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
+            // Shared detail search only narrows already-authorized rows; it never changes the parent metric or scope.
+            ['detail_member', ''], ['detail_order_no', ''],
+            // Fact popup identifiers only narrow the authorized report scope;
+            // the report service revalidates the parent metric and row key.
+            ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''], ['source_code', ''], ['parent_report', ''], ['team_key', ''],
+            ['detail_store_id', 0], ['detail_category_path', ''], ['item_group_key', ''],
             ['company_dimension_id', ''], ['city_manager_dimension_id', ''],
             ['dimension_as_of', ''], ['drill_month', ''], ['six_dimension_only', 0],
             ['tier_id', ''], ['month', ''],
-            ['target_amount', ''], ['target_count', ''], ['visit_count', ''], ['unit_price_min', ''], ['unit_price_max', ''],
+            ['target_amount', ''], ['target_count', ''], ['visit_count', ''],
             // 薪资单号筛选及分类/指标下钻仍按平台权限裁剪稳定员工、门店 ID。
             ['employee_name', ''], ['document_no', ''], ['salary_employee_id', 0], ['salary_store_id', 0], ['salary_category_key', ''], ['salary_metric_key', ''],
             ['mode', 'count'],

@@ -4,6 +4,7 @@ namespace app\controller\store\report;
 use app\controller\store\AuthController;
 use app\Request;
 use app\services\report\StoreUnifiedReportServices;
+use app\services\report\StoreReportGuestDisplayServices;
 use app\services\report\StoreUnifiedReportPhaseFourServices;
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
@@ -29,7 +30,14 @@ class UnifiedReport extends AuthController
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         $input = $request->getMore($this->inputRules());
         if ($this->isPlatformOnlyReport((string)($input['report'] ?? ''))) return app('json')->fail('该报表仅支持平台端访问');
-        try { $report = (string)($input['report'] ?? ''); return $this->success($phaseSix->supports($report) ? $phaseSix->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $input) : ($phaseFour->supports($report) ? $phaseFour->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $input) : $services->query((int)$this->storeId, $input))); }
+        try {
+            $report = (string)($input['report'] ?? '');
+            $result = $phaseSix->supports($report) ? $phaseSix->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $input)
+                : ($phaseFour->supports($report) ? $phaseFour->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $input)
+                : $services->query((int)$this->storeId, $input));
+            // 门店查询在权限裁剪后才换展示姓名；不能改变汇总金额或历史事实。
+            return $this->success(StoreReportGuestDisplayServices::project($result));
+        }
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
     public function export(Request $request, StoreUnifiedReportServices $services, StoreUnifiedReportPhaseFourServices $phaseFour, StoreUnifiedReportPhaseSixServices $phaseSix)
@@ -37,7 +45,16 @@ class UnifiedReport extends AuthController
         if ((int)$this->storeId <= 0) return app('json')->fail('门店未登录');
         $input = $request->getMore($this->inputRules());
         if ($this->isPlatformOnlyReport((string)($input['report'] ?? ''))) return app('json')->fail('该报表仅支持平台端访问');
-        try { $report = (string)($input['report'] ?? ''); if ($phaseSix->supports($report) || $phaseFour->supports($report)) { $result = ($phaseSix->supports($report) ? $phaseSix : $phaseFour)->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], array_merge($input, ['_internal_all' => true])); return $this->success(['filename' => '统一数据报表-' . date('YmdHis') . '.csv', 'columns' => $result['columns'], 'records' => $result['records'], 'summary_row' => $result['summary_row'], 'column_groups' => $result['column_groups'], 'metric_version' => $result['metric_version']]); } return $this->success($services->export((int)$this->storeId, $input)); }
+        try {
+            $report = (string)($input['report'] ?? '');
+            if ($phaseSix->supports($report) || $phaseFour->supports($report)) {
+                $result = ($phaseSix->supports($report) ? $phaseSix : $phaseFour)->query($report, [(int)$this->storeId], ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], array_merge($input, ['_internal_all' => true]));
+                // 完整导出和分页查询共用游客投影，不能让 CSV 重新出现空姓名。
+                $result = StoreReportGuestDisplayServices::project($result);
+                return $this->success(['filename' => '统一数据报表-' . date('YmdHis') . '.csv', 'columns' => $result['columns'], 'records' => $result['records'], 'summary_row' => $result['summary_row'], 'column_groups' => $result['column_groups'], 'metric_version' => $result['metric_version']]);
+            }
+            return $this->success(StoreReportGuestDisplayServices::project($services->export((int)$this->storeId, $input)));
+        }
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 

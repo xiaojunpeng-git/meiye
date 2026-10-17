@@ -221,6 +221,7 @@ final class StoreUnifiedReportPhaseSixServices
             if ($eventIndex !== null) $matchedEvents[$eventIndex] = true;
             $rows[] = [
                 'company_name' => (string)$fact['company_name'], 'store_name' => (string)$fact['store_name'],
+                'member_id' => (int)$fact['member_id'],
                 'member_name' => (string)$fact['member_name'], 'salesperson_name' => (string)$fact['salesperson_name'],
                 'partner_name' => (string)$fact['partner_name'], 'experience_people' => (int)$fact['is_experience'],
                 'deal_people' => $eventIndex === null ? 0 : 1,
@@ -243,6 +244,7 @@ final class StoreUnifiedReportPhaseSixServices
             $rowKey = 'actual:' . $id;
             $rows[] = [
                 'company_name' => (string)($company['name'] ?? ''), 'store_name' => (string)$actual['store_name'],
+                'member_id' => (int)$actual['member_id'],
                 'member_name' => (string)$actual['member_name'], 'salesperson_name' => '',
                 'partner_name' => (string)($actual['partner_name_snapshot'] ?? ''),
                 'experience_people' => 0, 'deal_people' => 0,
@@ -262,6 +264,7 @@ final class StoreUnifiedReportPhaseSixServices
             $rowKey = 'deal:' . (string)$event['fact_id'];
             $rows[] = [
                 'company_name' => (string)($company['name'] ?? ''), 'store_name' => (string)$event['store_name_snapshot'],
+                'member_id' => (int)$event['member_id'],
                 'member_name' => (string)$event['member_name_snapshot'], 'salesperson_name' => '',
                 'partner_name' => '', 'experience_people' => 0, 'deal_people' => 1,
                 'item_name' => (string)($event['item_name'] ?? ''), 'quantity' => 0,
@@ -590,6 +593,7 @@ final class StoreUnifiedReportPhaseSixServices
         $records = [];
         foreach ($visible as $fact) {
             $records[] = [
+                'member_id' => (int)$fact['member_id'],
                 'member_name' => (string)$fact['member_name'],
                 'member_phone' => (string)($phones[(int)$fact['member_id']] ?? ''),
                 'business_date' => (string)$fact['business_date'],
@@ -915,6 +919,7 @@ final class StoreUnifiedReportPhaseSixServices
         $records = [];
         foreach ($visible as $fact) {
             $records[] = [
+                'member_id' => (int)$fact['member_id'],
                 'member_name' => trim((string)$fact['member_name']) ?: ((int)$fact['member_id'] <= 0 ? '游客' : '-'),
                 'member_phone' => (string)($phones[(int)$fact['member_id']] ?? ''),
                 'business_date' => (string)$fact['business_date'],
@@ -957,7 +962,7 @@ final class StoreUnifiedReportPhaseSixServices
             ->where('p.draft_status', 'committed')->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->where('so.order_status', 'settled')
             ->where('so.order_direction', 'forward')->whereBetween('so.business_date', [$range['start'], $range['end']])
-            ->field("p.payment_draft_id,COALESCE(c.amount_cents,p.amount_cents) tender_amount_cents,s.fact_id sale_fact_id,s.source_line_id,s.sale_amount_cents,s.debt_amount_cents,so.store_id,so.business_date,so.member_name_snapshot customer_name,s.organization_name_snapshot company_name,s.store_name_snapshot store_name,s.quantity,s.source_type,d.item_id,d.category_path_snapshot category,s.item_name_snapshot item_name,a.allocation_fact_id allocation_id,a.amount_cents allocated_amount_cents,(SELECT GROUP_CONCAT(DISTINCT employee_name_snapshot ORDER BY id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact sales_person WHERE sales_person.tenant_id=s.tenant_id AND sales_person.source_line_id=s.source_line_id AND sales_person.performance_type='sales_performance_allocated' AND sales_person.status='effective') employee_name")
+            ->field("p.payment_draft_id,COALESCE(c.amount_cents,p.amount_cents) tender_amount_cents,s.fact_id sale_fact_id,s.source_line_id,s.sale_amount_cents,s.debt_amount_cents,so.store_id,so.business_date,so.member_id,so.member_name_snapshot customer_name,s.organization_name_snapshot company_name,s.store_name_snapshot store_name,s.quantity,s.source_type,d.item_id,d.category_path_snapshot category,s.item_name_snapshot item_name,a.allocation_fact_id allocation_id,a.amount_cents allocated_amount_cents,(SELECT GROUP_CONCAT(DISTINCT employee_name_snapshot ORDER BY id SEPARATOR ', ') FROM eb_cashier_v3_performance_fact sales_person WHERE sales_person.tenant_id=s.tenant_id AND sales_person.source_line_id=s.source_line_id AND sales_person.performance_type='sales_performance_allocated' AND sales_person.status='effective') employee_name")
             ->order('p.id', 'asc')->order('s.id', 'asc')->order('a.id', 'asc');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSalesOrderFacts($query, 'so.tenant_id', 'so.order_id');
         $facts = $query->select()->toArray();
@@ -978,7 +983,8 @@ final class StoreUnifiedReportPhaseSixServices
                 'annotation_subject_type' => 'phase_six_row',
                 'annotation_subject_key' => 'phase_six:payment:' . $rowKey,
                 'company_name' => $fact['company_name'], 'store_name' => $fact['store_name'],
-                'business_date' => $fact['business_date'], 'customer_name' => $fact['customer_name'],
+                // 传递销售事实的会员身份，供公共展示层识别真正的游客。
+                'business_date' => $fact['business_date'], 'member_id' => (int)$fact['member_id'], 'customer_name' => $fact['customer_name'],
                 'employee_name' => $fact['employee_name'], 'category' => $fact['category'],
                 'item_name' => $fact['item_name'], 'quantity' => (int)$fact['quantity'],
                 'receivable_amount' => $this->money((int)$fact['sale_amount_cents']),
@@ -1109,6 +1115,7 @@ final class StoreUnifiedReportPhaseSixServices
             $detailRow = [
                 'business_date' => $f['business_date'], 'company_name' => $f['company_name'],
                 'store_name' => $f['store_name'], 'employee_name' => $f['employee_name'], 'position_name' => $f['position_name'],
+                'member_id' => (int)$f['member_id'],
                 'member_name' => $f['member_name'],
                 'document_no' => (string)($orderReference['number']??'-'),
                 'document_order_id' => (string)($orderReference['id']??''),
@@ -1132,7 +1139,7 @@ final class StoreUnifiedReportPhaseSixServices
             $this->column('store_name','门店','该笔业务实际发生的门店。',false,true),
             $this->column('employee_name','员工','该笔项目的服务员工，或销售/退款业绩分配到的员工；显示业务记账时记录的姓名。',false,true),
             $this->column('position_name','岗位','显示该员工目前在这家门店的有效岗位；已无有效岗位时显示“-”。岗位只供查看，不重新分配历史业绩。',false,true),
-            $this->column('member_name','会员','显示该笔服务或销售记录中的会员、顾客姓名；未记录姓名时显示“-”。'),
+            $this->column('member_name','会员','显示该笔服务或销售记录中的会员、顾客姓名；游客显示“游客”，已建档会员未记录姓名时显示“-”。'),
             $this->column('document_no','单据号','显示订单中心对应的订单编号；点击可查看该订单详情。没有对应订单时显示“-”。',false,false,180,[
                 'report'=>'order_center_order_detail','param_map'=>['order_id'=>'document_order_id','order_no'=>'document_no'],
             ]),
@@ -1563,6 +1570,7 @@ final class StoreUnifiedReportPhaseSixServices
                 ?(trim((string)$fact['document_no_snapshot'])?:trim((string)$fact['service_record_no']))
                 :(trim((string)$fact['order_no'])?:trim((string)$fact['order_id']));
             $records[]=['member_name'=>trim((string)$fact['member_name'])?:($memberId>0?'-':'游客'),
+                'member_id'=>$memberId,
                 'member_phone'=>(string)($phones[$memberId]??''),'business_date'=>(string)$fact['business_date'],
                 'store_name'=>(string)$fact['store_name'],'order_no'=>$document,
                 'receipt_amount'=>$isCount?1:$this->money((int)$fact['amount_cents'])];

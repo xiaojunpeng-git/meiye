@@ -5,6 +5,9 @@ namespace app\controller\cashier\v3;
 use app\controller\cashier\AuthController;
 use app\Request;
 use app\services\report\StoreUnifiedReportServices;
+use app\services\report\StoreReportGuestDisplayServices;
+use app\services\report\StoreItemAnalysisXlsxExporter;
+use app\services\report\StoreUnifiedReportDetailXlsxExporter;
 use app\services\report\StoreUnifiedReportPhaseFourServices;
 use app\services\report\StoreUnifiedReportPhaseSixServices;
 use app\services\report\StoreOperationsReportAnnotationServices;
@@ -137,11 +140,33 @@ class Report extends AuthController
             }
             if (!$storeIds) return app('json')->fail('当前账号没有可查看的门店范围');
             $report = (string)($input['report'] ?? '');
+            if ($export && $report === 'store_item_analysis' && (string)($input['format'] ?? '') === 'xlsx') {
+                $file = $services->exportItemAnalysisXlsx($storeIds, $input);
+                // 门店登录身份和个人数据权限先裁剪 storeIds，再生成可下载工作簿。
+                return \think\Response::create($file['content'], 'html')->header([
+                    'Content-Type' => StoreItemAnalysisXlsxExporter::MIME_TYPE,
+                    'Content-Disposition' => 'attachment; filename="store-item-analysis.xlsx"; filename*=UTF-8\'\'' . rawurlencode($file['filename']),
+                    'Cache-Control' => 'no-store',
+                ]);
+            }
             $result = $phaseSix->supports($report)
                 ? $phaseSix->query($report, $storeIds, ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $export ? array_merge($input, ['_internal_all' => true]) : $input)
                 : ($phaseFour->supports($report)
                 ? $phaseFour->query($report, $storeIds, ['start' => (string)($input['start_date'] ?? ''), 'end' => (string)($input['end_date'] ?? '')], $export ? array_merge($input, ['_internal_all' => true]) : $input)
                 : ($export ? $services->export($storeIds, $input) : $services->query($storeIds, $input)));
+            // 授权查询与导出共用游客姓名投影，保留汇总和历史事实。
+            $result = StoreReportGuestDisplayServices::project($result);
+            if ($export && (string)($input['format'] ?? '') === 'xlsx' && StoreUnifiedReportDetailXlsxExporter::supports($report)) {
+                // The existing report/data-scope check above also governs download; no separate feature permission is introduced.
+                $exporter = new StoreUnifiedReportDetailXlsxExporter();
+                $content = $exporter->render($report, $result);
+                return \think\Response::create($content, 'html')->header([
+                    'Content-Type' => StoreUnifiedReportDetailXlsxExporter::MIME_TYPE,
+                    'Content-Disposition' => 'attachment; filename="report-detail.xlsx"; filename*=UTF-8\'\'' . rawurlencode($exporter->filename($report)),
+                    'Cache-Control' => 'no-store',
+                    'X-Content-Type-Options' => 'nosniff',
+                ]);
+            }
             return $this->success('ok', $result);
         } catch (\InvalidArgumentException $exception) {
             return app('json')->fail($exception->getMessage());
@@ -162,21 +187,27 @@ class Report extends AuthController
     private function inputRules(): array
     {
         return [
-            ['report', 'partner_item_summary'], ['start_date', ''], ['end_date', ''],
+            ['report', 'partner_item_summary'], ['start_date', ''], ['end_date', ''], ['format', ''],
             ['dataset', 'sale'], ['metric', 'cash_performance'],
-            ['item_id', ''], ['payment_method', ''], ['operator_id', 0],
+            // Operations popups share server-validated metric and row keys
+            // with the platform report; these values cannot expand store scope.
+            ['item_id', ''], ['detail_store_id', 0], ['detail_category_path', ''], ['item_group_key', ''],
+            ['parent_report', ''], ['team_key', ''], ['drill_month', ''], ['metric_code', ''],
+            ['company_dimension_id', ''], ['payment_method', ''], ['operator_id', 0],
             ['channel_id', 0], ['customer_segment', 'all'],
-            ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0],
+            // 月度大单查询/导出共用明确月份；门店权限仍从登录上下文注入。
+            ['consumption_metric', 'cash'], ['sleep_months', 3], ['year', 0], ['month', ''],
             // Exact path is reserved for a grouped row's drilldown; ordinary category_path remains prefix-searchable.
             ['category_id', 0], ['category_path', ''], ['category_path_exact', ''], ['product_type', ''], ['partner_name', ''],
             ['salesperson_id', 0], ['sales_manager_id', 0], ['guide_id', 0], ['craftsman_id', 0], ['day_of_month', 0],
             ['store_ids', ''],
             // 异业汇总下钻必须保留会员和后续收款条件；只缩小已授权门店范围，不能在入口丢失后变为全店明细。
             // 地推汇总下钻只对指定会员按收款业务日展示原 E 销售明细；不能把筛选参数丢成全店查询。
-            // 会员进店次数与现金金额按稳定会员 ID、月份和指标下钻，权限仍由服务端裁剪。
+            // 会员进店次数与现金金额下钻用稳定会员 ID、月份和指标缩小范围，权限仍在服务端裁剪。
             ['member_id', 0], ['visit_month', 0], ['visit_metric', 'visits'], ['include_followup_cash', 0], ['receipt_period', 0],
+            // Shared detail search only narrows already-authorized rows; it never changes the parent metric or scope.
+            ['detail_member', ''], ['detail_order_no', ''],
             ['dimension_code', ''], ['payment_method_code', ''], ['metric_code', ''],
-            ['unit_price_min', ''], ['unit_price_max', ''],
             // 薪资筛选和指标下钻保留原单号与稳定人员/门店 ID；权限范围仍由服务端裁剪。
             ['employee_name', ''], ['document_no', ''], ['salary_employee_id', 0], ['salary_store_id', 0], ['salary_category_key', ''], ['salary_metric_key', ''],
             ['mode', 'count'],

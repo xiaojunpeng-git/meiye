@@ -17,7 +17,7 @@ final class StoreUnifiedReportDetailFilter
         if ($member === '' && $order === '') return $rows;
 
         return array_values(array_filter($rows, static function (array $row) use ($member, $order, $orderNumber): bool {
-            $name = (string)($row['member_name'] ?? '');
+            $name = StoreReportGuestDisplayServices::memberName($row);
             $number = $orderNumber ? (string)$orderNumber($row) : (string)($row['order_no'] ?? '');
             return ($member === '' || stripos($name, $member) !== false)
                 && ($order === '' || stripos($number, $order) !== false);
