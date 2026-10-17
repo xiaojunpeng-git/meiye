@@ -16,7 +16,7 @@ use think\facade\Db;
 final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
-    public const METRIC_VERSION = 'group-management-current-category-v4';
+    public const METRIC_VERSION = 'group-management-market-member-day-v5';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -129,7 +129,7 @@ final class GroupManagementDashboardServices
             'cards' => $cards,
             'trend' => $this->trend($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds),
             'categories' => $categoryCards,
-            'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows),
+            'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows, $categoryIds),
             'goals' => [
                 'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, '只比较本月已设置全店实际业绩目标的门店；完成值来自相同门店的统一事实，不随商品分类筛选改变。'),
                 'year' => $this->goalProjection('本年目标进度', $yearTarget, $yearActual, '全年目标汇总已配置月份；完成值只统计这些门店和月份截至所选日期的统一事实。'),
@@ -340,9 +340,28 @@ final class GroupManagementDashboardServices
         return $out;
     }
 
-    private function sources(array $stores, array $range, array $cashRows, array $serviceRows): array
+    /** 来源成交人数复用市场报表的达标会员日；分类筛选只缩小人数，不重算门槛。 */
+    private function sources(array $stores, array $range, array $cashRows, array $serviceRows, array $categoryIds): array
     {
         $configured = Db::name('cashier_v3_business_source')->where('parent_id', 0)->where('status', 1)->order('sort', 'asc')->order('id', 'asc')->field('id,name')->select()->toArray();
+        $market = new StoreUnifiedReportPhaseTwoServices();
+        $qualifiedDays = $market->marketQualifiedMemberDays($stores, $range);
+        $categoryNetByDay = [];
+        if ($categoryIds !== []) {
+            // Only count a qualifying member-day when the selected category has positive signed net cash.
+            // Excluded historical/old-card repayments remain in amount metrics but cannot create a person.
+            foreach (StoreReportImportedRepaymentCountScope::exclude($cashRows, $stores) as $row) {
+                if ((int)($row['member_id'] ?? 0) <= 0) continue;
+                $key = $market->marketEffectiveMemberDayKey($row);
+                $categoryNetByDay[$key] = ($categoryNetByDay[$key] ?? 0) + (int)($row['amount_cents'] ?? 0);
+            }
+        }
+        $dealCounts = [];
+        foreach ($qualifiedDays as $key => $day) {
+            if ($categoryIds !== [] && ($categoryNetByDay[$key] ?? 0) <= 0) continue;
+            $sourceId = (int)$day['business_source_primary_id'];
+            $dealCounts[$sourceId] = ($dealCounts[$sourceId] ?? 0) + 1;
+        }
         $out = [];
         foreach ($configured as $source) {
             $sourceId = (int)$source['id'];
@@ -356,14 +375,13 @@ final class GroupManagementDashboardServices
             }));
             // 来源维度的进店数与 A 来源活客均是门店到店指标；体验服务不取得资格。
             $services = \app\services\query\metric\StoreCustomerVisitEligibility::filter($services);
-            $orders = []; foreach ($matches as $row) if (trim((string)($row['order_id'] ?? '')) !== '') $orders[(string)$row['order_id']] = true;
             $activeMembers = []; foreach ($services as $row) if ((int)($row['member_id'] ?? 0) > 0) $activeMembers[(int)$row['member_id']] = true;
             $code = strtoupper(substr(trim($name), 0, 1));
-            $item = ['source_id' => $sourceId, 'name' => $name, 'source_code' => $code, 'visit_count' => count($services), 'deal_count' => count($orders), 'deal_amount_cents' => $this->sum($matches, 'amount_cents')];
+            $item = ['source_id' => $sourceId, 'name' => $name, 'source_code' => $code, 'visit_count' => count($services), 'deal_count' => $dealCounts[$sourceId] ?? 0, 'deal_amount_cents' => $this->sum($matches, 'amount_cents')];
             if ($code === 'A') $item['active_customer_count'] = count($activeMembers);
             $out[] = $item;
         }
-        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交数按成功成交订单去重，金额按正向成功收款及卡内项目分摊统计。'];
+        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按门店、业务日、来源、会员去重，A 来源当日净收款满1,000元、其他来源满500元计1人，同日合并、多日累计，游客不计；旧导入及旧卡录入原单补交不计人数，普通补交计入。筛选商品分类时还要求该分类当日净收款为正。成交金额仍按正向成功收款及卡内项目分摊统计。'];
     }
 
     private function rankings(array $stores, array $targets, array $actual, string $asOfDate): array

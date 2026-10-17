@@ -53,8 +53,11 @@ try {
         $denied = true;
     }
     if (!$denied) throw new RuntimeException('Requested store escaped backend scope');
-    $categoryId = (int)Db::name('store_product_category')->where('type', 0)
-        ->where('relation_id', 0)->order('id', 'asc')->value('id');
+    // Use the same enabled platform category population exposed by the dashboard.
+    $categoriesMethod = new ReflectionMethod($service, 'categories');
+    $categoriesMethod->setAccessible(true);
+    $visibleCategories = $categoriesMethod->invoke($service);
+    $categoryId = (int)($visibleCategories['roots'][0]['id'] ?? 0);
     if ($categoryId > 0) {
         $filtered = $service->dashboard(['tenant_id' => '0', 'store_ids' => [$stores[0]]], [
             'start_date' => $range['start'], 'end_date' => $range['end'],

@@ -11,6 +11,7 @@ import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import TrendingDown from '@lucide/vue/dist/esm/icons/trending-down.mjs'
 import TrendingUp from '@lucide/vue/dist/esm/icons/trending-up.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import {
   queryGroupManagementDashboard,
@@ -28,9 +29,7 @@ const targetLoading = ref(false)
 const errorMessage = ref('')
 const targetError = ref('')
 const period = ref('today')
-const selectedCategoryId = ref(0)
-const customStart = ref(today())
-const customEnd = ref(today())
+const customRange = ref({ min: today(), max: today() })
 const fieldGuideOpen = ref(false)
 const fieldGuideFocus = ref('')
 const targetDrawerOpen = ref(false)
@@ -84,17 +83,13 @@ function currentQuery() {
       ? { start_date: monthStart(end), end_date: end }
       : period.value === 'year'
         ? { start_date: yearStart(end), end_date: end }
-        : { start_date: customStart.value, end_date: customEnd.value }
+        : { start_date: customRange.value.min, end_date: customRange.value.max }
   return {
     ...range,
-    category_id: selectedCategoryId.value || 0,
     ...(scopePicker.value.selectedStoreIds.length ? { store_ids: scopePicker.value.selectedStoreIds.join(',') } : {})
   }
 }
 
-const filterSchema = computed(() => Array.isArray(dashboard.value?.filter_schema) ? dashboard.value.filter_schema : [])
-const categoryOptions = computed(() => filterSchema.value.find((field) => field.key === 'category_id')?.options || [])
-const selectedCategoryLabel = computed(() => categoryOptions.value.find((item) => Number(item.value) === Number(selectedCategoryId.value))?.label || '全部商品')
 const scopeLabel = computed(() => scopePicker.value.label || dashboard.value?.scope?.label || dashboard.value?.scope?.scope_label || '当前权限范围')
 const cards = computed(() => Array.isArray(dashboard.value?.cards) ? dashboard.value.cards : [])
 const categories = computed(() => Array.isArray(dashboard.value?.categories) ? dashboard.value.categories : [])
@@ -231,7 +226,7 @@ async function showDrilldown(drill, label = '') {
     conditions: {
       开始日期: scope.range?.start || currentQuery().start_date,
       截止日期: scope.range?.end || currentQuery().end_date,
-      商品分类: drill.category_id ? categories.value.find((item) => Number(item.category_id) === Number(drill.category_id))?.name || '-' : selectedCategoryLabel.value
+      商品分类: drill.category_id ? categories.value.find((item) => Number(item.category_id) === Number(drill.category_id))?.name || '-' : '全部商品'
     },
     records: []
   }
@@ -271,7 +266,6 @@ async function loadDashboard() {
   errorMessage.value = ''
   try {
     dashboard.value = await queryGroupManagementDashboard(currentQuery())
-    if (!categoryOptions.value.some((item) => Number(item.value) === Number(selectedCategoryId.value))) selectedCategoryId.value = 0
   } catch (error) {
     dashboard.value = null
     errorMessage.value = error?.message || '集团管理看板加载失败。'
@@ -294,6 +288,11 @@ function loadScope() {
 async function selectPeriod(value) {
   period.value = value
   if (value !== 'custom') await loadDashboard()
+}
+
+/** 周期弹窗确认后只更新待查询范围；查询按钮仍负责提交当前权限范围和日期。 */
+function applyCustomRange(value) {
+  customRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
 }
 
 async function toggleFullscreen() {
@@ -384,9 +383,7 @@ onBeforeUnmount(() => {
         @change="changeScope"
       />
       <nav class="group-dashboard__periods" aria-label="日期范围"><button v-for="item in [['today','今天'], ['month','本月'], ['year','本年'], ['custom','自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="selectPeriod(item[0])">{{ item[1] }}</button></nav>
-      <label v-if="period === 'custom'" class="dashboard-date">从 <input v-model="customStart" type="date" /></label>
-      <label v-if="period === 'custom'" class="dashboard-date">至 <input v-model="customEnd" type="date" /></label>
-      <label class="dashboard-category-label">商品分类<select v-model.number="selectedCategoryId"><option v-for="item in categoryOptions" :key="item.value" :value="Number(item.value)">{{ item.label }}</option></select></label>
+      <div v-if="period === 'custom'" class="group-dashboard__custom-period"><UnifiedQueryDateRange :model-value="customRange" :allow-clear="false" label="集团管理看板自定义周期" @change="applyCustomRange" /></div>
       <div class="group-dashboard__actions"><button type="button" class="button button--primary" :disabled="loading" @click="loadDashboard">查询</button><button type="button" class="button button--secondary" :disabled="loading" @click="loadDashboard"><RefreshCw :size="16" aria-hidden="true" />刷新</button><button type="button" class="button button--secondary" @click="toggleFullscreen"><Expand :size="16" aria-hidden="true" />{{ presentationMode ? '退出全屏' : '全屏' }}</button></div>
     </section>
 
@@ -398,7 +395,7 @@ onBeforeUnmount(() => {
 
       <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>分类业绩</h2><span>当前启用一级商品分类，默认显示项目业绩前五名</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('categories')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="group-dashboard__category-grid"><article v-for="(category, index) in categoryCards" :key="category.category_id" class="dashboard-category-panel" :class="`dashboard-category-panel--${categoryTone(index)}`"><div class="dashboard-card-wrap"><button type="button" class="dashboard-category-card" @click="showDrilldown(category.drilldown, `${category.name}现金业绩`)"><span>{{ category.name }}</span><strong>{{ formatMoney(category.cash_performance_cents) }}</strong><small>分类现金业绩</small><span class="dashboard-category-pie" :class="{ 'is-empty': category.share === null }" :style="{ '--category-progress': category.share || 0 }"><b>{{ formatRate(category.share) }}</b></span></button><button type="button" class="dashboard-card-guide" :aria-label="`${category.name}列名取值来源`" @click="openFieldGuide('categories')"><BookOpen :size="14" aria-hidden="true" /></button></div><div class="dashboard-category-rank__header"><strong>{{ categoryRankType(category) === 'projects' ? '项目业绩排行' : '产品业绩排行' }}</strong><div class="dashboard-category-rank__toggle" role="tablist"><button type="button" :class="{ 'is-active': categoryRankType(category) === 'projects' }" @click="setCategoryRankType(category, 'projects')">项目</button><button type="button" :class="{ 'is-active': categoryRankType(category) === 'products' }" @click="setCategoryRankType(category, 'products')">产品</button></div></div><div v-for="(item, rank) in categoryRankings(category)" :key="`${item.name}-${rank}`" class="dashboard-category-rank__row"><em>{{ rank + 1 }}</em><span>{{ item.name }}</span><b>{{ formatMoney(item.amount_cents) }}</b></div><p v-if="!categoryRankings(category).length" class="dashboard-category-rank__empty">暂无项目或产品排行</p></article></div></section>
 
-      <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>今日客情</h2><span>按实际启用来源动态展示，只有来源 A 显示活客数</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('sources')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="dashboard-source-grid"><button v-for="source in sources" :key="source.source_id || source.name" type="button" class="dashboard-source-card" @click="showConditions('今日客情统计条件', { 来源: source.name }, dashboard?.sources?.source_explanation)"><strong>{{ source.name }}</strong><span class="source-metric source-metric--visits">进店数 <b>{{ source.visit_count ?? '-' }}</b></span><span v-if="String(source.source_code).toUpperCase() === 'A'" class="source-metric source-metric--active">活客数 <b>{{ source.active_customer_count ?? '-' }}</b></span><span class="source-metric source-metric--deals">成交数 <b>{{ source.deal_count ?? '-' }}</b></span><span class="source-metric source-metric--amount">成交金额 <b>{{ formatMoney(source.deal_amount_cents) }}</b></span></button></div><p v-if="!sources.length" class="dashboard-empty">当前没有启用的业务来源。</p></section>
+      <section class="group-dashboard__section"><div class="group-dashboard__section-title"><div><h2>今日客情</h2><span>按实际启用来源动态展示，只有来源 A 显示活客数</span></div><button type="button" class="dashboard-guide" @click="openFieldGuide('sources')"><BookOpen :size="15" aria-hidden="true" />列名取值来源</button></div><div class="dashboard-source-grid"><button v-for="source in sources" :key="source.source_id || source.name" type="button" class="dashboard-source-card" @click="showConditions('今日客情统计条件', { 来源: source.name }, dashboard?.sources?.source_explanation)"><strong>{{ source.name }}</strong><span class="source-metric source-metric--visits">进店数 <b>{{ source.visit_count ?? '-' }}</b></span><span v-if="String(source.source_code).toUpperCase() === 'A'" class="source-metric source-metric--active">活客数 <b>{{ source.active_customer_count ?? '-' }}</b></span><span class="source-metric source-metric--deals">成交人数 <b>{{ source.deal_count ?? '-' }}</b></span><span class="source-metric source-metric--amount">成交金额 <b>{{ formatMoney(source.deal_amount_cents) }}</b></span></button></div><p v-if="!sources.length" class="dashboard-empty">当前没有启用的业务来源。</p></section>
 
       <section class="group-dashboard__target-progress-grid" aria-label="本月与本年目标进度"><article v-for="card in targetProgressCards" :key="card.key" class="dashboard-target-progress-panel"><header><div><h2>{{ card.title }}</h2><span>{{ card.subtitle }}</span></div><button type="button" class="dashboard-link" @click="openTargetDrawer">查看明细</button></header><div class="dashboard-target-progress-panel__body"><div class="dashboard-target-progress-panel__metrics"><article v-for="metric in card.metrics" :key="metric.key" :class="`goal-summary-card goal-summary-card--${metric.tone}`"><component :is="metric.icon" :size="17" aria-hidden="true" /><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></article></div><div class="dashboard-target-donut" :style="{ '--target-rate': Math.max(0, Math.min(Number(card.rate) || 0, 100)) }"><div><strong>{{ formatRate(card.rate) }}</strong><span>达成率</span></div></div></div></article></section>
 
@@ -558,4 +555,6 @@ onBeforeUnmount(() => {
 .dashboard-drilldown__state{padding:28px 12px;color:#72859a;text-align:center;font-size:13px}
 .dashboard-drilldown__state--error{color:#b44b4b}
 @media(max-width:700px){.dashboard-drilldown__conditions{grid-template-columns:1fr}.dashboard-drilldown__body{padding:14px}}
+.group-dashboard__filters>.group-dashboard__custom-period{flex:0 1 290px;min-width:210px;max-width:100%}
+@media(max-width:760px){.group-dashboard__filters>.group-dashboard__custom-period{flex:1 1 100%;min-width:0}}
 </style>
