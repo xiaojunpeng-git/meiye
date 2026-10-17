@@ -221,7 +221,8 @@
             <Divider type="vertical" />
             <a @click="receive(row)">领取记录</a>
             <Divider type="vertical" />
-            <Dropdown @on-click="changeMenu(row, $event, index)">
+            <!-- 固定操作列位于表格滚动层内，菜单挂到 body 才不会被横向滚动条和分页区域裁掉。 -->
+            <Dropdown transfer @on-click="changeMenu(row, $event, index)">
               <a href="javascript:void(0)">
                 更多
                 <Icon type="ios-arrow-down"></Icon>

@@ -180,6 +180,7 @@ export default {
       name: `${pre}orderCenter`,
       meta: {
         auth: [
+          'admin-store-order-center-all',
           'admin-store-order-center-sales',
           'admin-store-order-center-recharge',
           'admin-store-order-center-refund',

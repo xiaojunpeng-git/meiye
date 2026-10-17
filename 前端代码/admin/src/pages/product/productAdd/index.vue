@@ -17,6 +17,24 @@
       </PageHeader>
     </div>
     <Card :bordered="false" dis-hover class="ivu-mt">
+      <Form v-if="isSystemBalanceProject" class="formData mt20" :label-width="170" label-position="right" @submit.native.prevent>
+        <FormItem label="商品名称：">
+          <Input value="余额" readonly v-width="'50%'" />
+        </FormItem>
+        <FormItem label="商品分类：">
+          <el-cascader
+            v-model="systemBalanceCategory"
+            :options="systemCategoryOptions"
+            :props="{ emitPath: false, checkStrictly: true }"
+            placeholder="请选择商品分类"
+            size="mini"
+            filterable
+            clearable
+            v-width="'50%'"
+          />
+        </FormItem>
+      </Form>
+      <template v-else>
       <Alert v-if="specificationMissing" type="warning" show-icon>
         商品规格资料缺失，请补全后保存。
       </Alert>
@@ -1592,6 +1610,7 @@
           ></vipPriceBrokerageSet>
         </div>
       </Form>
+      </template>
     </Card>
     <Card
       :bordered="false"
@@ -1600,11 +1619,11 @@
       :style="{ left: `${!menuCollapse ? '200px' : isMobile ? '0' : '80px'}` }"
     >
       <div class="flex-center">
-        <Button v-if="currentTab !== '1'" @click="upTab">上一步</Button>
+        <Button v-if="!isSystemBalanceProject && currentTab !== '1'" @click="upTab">上一步</Button>
         <Button
           type="primary"
           class="submission"
-          v-if="currentTab !== '6'"
+          v-if="!isSystemBalanceProject && currentTab !== '6'"
           @click="downTab('formData')"
           >下一步</Button
         >
@@ -1613,8 +1632,8 @@
           :disabled="openSubimit || saveSubmitting"
           :loading="saveSubmitting"
           class="submission"
-          @click="handleSubmit()"
-          v-if="$route.params.id || currentTab === '6'"
+          @click="isSystemBalanceProject ? saveSystemBalanceCategory() : handleSubmit()"
+          v-if="isSystemBalanceProject || $route.params.id || currentTab === '6'"
           >{{ saveSubmitting ? '正在保存…' : '保存' }}</Button
         >
       </div>
@@ -1709,6 +1728,7 @@ import {
   productGetTemplateApi,
   ruleAddApi,
   productBrokerage,
+  cascaderListApi,
 } from '@/api/product';
 import { arraysEqual } from '@/utils';
 import { erpConfig } from '@/api/erp';
@@ -1804,6 +1824,10 @@ export default {
       spinShow: false,
       openSubimit: false,
       saveSubmitting: false,
+      // The system balance project edits only its category; ordinary product fields must never be submitted.
+      isSystemBalanceProject: false,
+      systemBalanceCategory: null,
+      systemCategoryOptions: [],
       // 读取缺失规格只提示并保留编辑机会，不在打开页面时补建SKU或恢复回收站商品。
       specificationMissing: false,
       ruleList: [],
@@ -3186,7 +3210,12 @@ export default {
         .then(async (res) => {
           let data = res.data.productInfo;
           this.infoData(data);
-          if (Number(data.product_type) === 6) {
+          this.isSystemBalanceProject = data.system_business_key === 'member_balance';
+          if (this.isSystemBalanceProject) {
+            this.systemBalanceCategory = Array.isArray(data.cate_id) && data.cate_id.length
+              ? Number(data.cate_id[0]) : null;
+            this.loadSystemCategoryOptions();
+          } else if (Number(data.product_type) === 6) {
             this.loadPerformanceRule(data.id || this.$route.params.id);
           }
           // 生成规格
@@ -3198,6 +3227,33 @@ export default {
           // 本地装配异常是Error而非接口响应，不能把undefined传给消息组件再次抛错。
           this.$Message.error((res && (res.msg || res.message)) || '商品资料加载失败，请重试。');
         });
+    },
+    loadSystemCategoryOptions() {
+      cascaderListApi({ type: 0, relation_id: 0 }).then((res) => {
+        this.systemCategoryOptions = res.data || [];
+      }).catch((error) => {
+        this.$Message.error((error && error.msg) || '商品分类读取失败');
+      });
+    },
+    async saveSystemBalanceCategory() {
+      if (this.saveSubmitting) return;
+      if (!this.systemBalanceCategory) {
+        this.$Message.error('请选择商品分类');
+        return;
+      }
+      this.saveSubmitting = true;
+      try {
+        await productAddApi({
+          id: Number(this.$route.params.id),
+          cate_id: [this.systemBalanceCategory],
+        });
+        this.$Message.success('保存成功');
+        this.$router.push({ path: `${this.roterPre}/product/product_list` });
+      } catch (error) {
+        this.$Message.error((error && error.msg) || '保存失败');
+      } finally {
+        this.saveSubmitting = false;
+      }
     },
     loadPerformanceRule(id) {
       if (!id || Number(this.formData.product_type) !== 6) return;

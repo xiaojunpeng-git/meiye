@@ -11,7 +11,7 @@
 
 <script>
 const VALID_TABS = new Set([
-  'sales', 'recharge', 'refund', 'debt',
+  'all', 'sales', 'recharge', 'refund', 'debt',
   'service', 'supplement', 'gift', 'card_operation'
 ])
 
