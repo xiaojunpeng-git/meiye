@@ -11,6 +11,24 @@ use think\facade\Db;
  */
 final class StoreReportCurrentProductCategoryServices
 {
+    /** Resolve a catalog SKU through its owning store product, including soft-deleted historical items. */
+    public function resolveSkus(array $links): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(static function (array $link): int {
+            return (int)($link['sku_id'] ?? 0);
+        }, $links))));
+        $products = [];
+        foreach (array_chunk($ids, 300) as $chunk) {
+            foreach (Db::name('store_product_attr_value')->alias('sku')
+                ->join('store_product p', 'p.id=sku.product_id AND p.type=1')
+                ->whereIn('sku.id', $chunk)->where('sku.type', 0)
+                ->field('sku.id,sku.product_id')->select()->toArray() as $sku) $products[(int)$sku['id']] = (int)$sku['product_id'];
+        }
+        foreach ($links as &$link) $link['product_id'] = $products[(int)($link['sku_id'] ?? 0)] ?? 0;
+        unset($link);
+        return $this->resolve($links);
+    }
+
     /**
      * Link each store product to its platform product and current platform category.
      * A caller may pass the category tree it already read for this report request;

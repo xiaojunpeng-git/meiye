@@ -65,14 +65,16 @@ final class StoreOperationsReportAnnotationServices
         'product_monetization_beauty_performance_total' => ['target_amount'],
         'product_monetization_beauty_market_distribution' => ['target_amount'],
         'product_monetization_six_dimension_performance' => ['target_amount'],
-        'product_monetization_six_dimension_efficiency' => ['visit_count', 'new_visit_count'],
+        // Historical manual consultation entries remain audited, but this report now reads completed experience facts.
+        'product_monetization_six_dimension_efficiency' => [],
         'product_monetization_six_dimension_market_distribution' => ['target_amount'],
         'product_monetization_haomei_performance' => ['target_amount'],
         'product_monetization_private_performance' => ['target_amount'],
         'product_monetization_private_efficiency' => ['visit_count', 'new_visit_count'],
         'product_monetization_private_market_distribution' => ['target_amount'],
         'phase_six_garden_item_analysis' => ['expert_name'],
-        'phase_six_monthly_featured_item' => ['target_amount'],
+        'phase_six_monthly_featured_item' => ['target_amount', 'target_holiday_2_amount',
+            'target_holiday_3_amount', 'post_sale_visit_target'],
         // 单价已从此报表移除；历史补充记录保留审计，但不再允许新写入。
         'phase_six_other_multi_payment' => ['领取日期', '领取数量', '备注'],
         'phase_six_salary_detail' => ['备注'],
@@ -90,6 +92,9 @@ final class StoreOperationsReportAnnotationServices
         'visit_over_one_hour' => 'integer',
         'complaint_count' => 'nonnegative_integer',
         'target_amount' => 'integer_cents',
+        'target_holiday_2_amount' => 'integer_cents',
+        'target_holiday_3_amount' => 'integer_cents',
+        'post_sale_visit_target' => 'nonnegative_integer',
         'target_count' => 'nonnegative_integer',
         'visit_count' => 'nonnegative_integer',
         'new_visit_count' => 'nonnegative_integer',
@@ -150,6 +155,14 @@ final class StoreOperationsReportAnnotationServices
         $value = (string)($payload['field_value'] ?? '');
         $valueType = $this->fieldType($fieldKey);
         $this->validateFieldValue($valueType, $value);
+        if ($reportCode === 'phase_six_monthly_featured_item') {
+            // Targets are planning values, not signed business facts; reject negative inputs without changing other reports.
+            if ($value !== '' && (int)$value < 0) throw new \InvalidArgumentException('月主推目标不能小于 0');
+            if ($subjectType !== 'phase_six_row' || !preg_match('/^phase_six:featured:([1-9]\d*):\d{4}-(0[1-9]|1[0-2])$/D', $subjectKey, $parts)
+                || (int)$parts[1] !== (int)($payload['store_id'] ?? 0)) {
+                throw new \InvalidArgumentException('月主推目标必须绑定当前门店和自然月');
+            }
+        }
         if ($reportCode === 'market_detail' && $fieldKey === 'walk_in' && $value !== '' && (int)$value < 0) {
             throw new \InvalidArgumentException('进店数不能小于 0');
         }
@@ -180,6 +193,31 @@ final class StoreOperationsReportAnnotationServices
                 $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
             );
             if ($resolved === null) throw new \InvalidArgumentException('地推补交记录不存在或无权编辑');
+            $storeId = (int)$resolved['store_id'];
+            $sourceFactId = (int)$resolved['source_fact_id'];
+            $sourceOrderId = (string)$resolved['source_order_id'];
+            $sourceLineId = (string)$resolved['source_line_id'];
+        } elseif ($reportCode === 'partner_item_detail' && $subjectType === 'business_event_line') {
+            // 独立服务的手动字段必须绑定真实服务事实，不能借客户端传入的门店或其他销售行保存。
+            if (strpos($subjectKey, 'service:') !== 0) throw new \InvalidArgumentException('合作方独立服务行键无效');
+            $serviceFactId = substr($subjectKey, strlen('service:'));
+            $service = Db::name('cashier_v3_entitlement_service_fact')
+                ->where('tenant_id', $scope['tenant_id'])->where('service_fact_id', $serviceFactId)
+                ->field('store_id,business_date')->find();
+            if (!is_array($service)) throw new \InvalidArgumentException('合作方独立服务记录不存在或无权编辑');
+            $visible = (new StorePartnerIndependentServiceFacts())->read(
+                [(int)$service['store_id']],
+                ['start'=>(string)$service['business_date'], 'end'=>(string)$service['business_date']],
+                [], $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
+            );
+            if (!in_array($subjectKey, array_column($visible, 'annotation_subject_key'), true)) {
+                throw new \InvalidArgumentException('合作方独立服务记录不存在或无权编辑');
+            }
+            $resolved = (new StoreReportParticipantScopeServices())->resolveSubject(
+                $scope['tenant_id'], $subjectType, $subjectKey,
+                $scope['authorization_mode'] === 'self_participant' ? $scope['participant_employee_id'] : 0
+            );
+            if ($resolved === null) throw new \InvalidArgumentException('合作方独立服务记录不存在或无权编辑');
             $storeId = (int)$resolved['store_id'];
             $sourceFactId = (int)$resolved['source_fact_id'];
             $sourceOrderId = (string)$resolved['source_order_id'];

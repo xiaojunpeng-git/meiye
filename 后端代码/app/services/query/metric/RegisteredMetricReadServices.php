@@ -7,6 +7,7 @@ use app\services\report\StoreReportNormalDataScopeServices;
 use app\services\report\StoreReportParticipantScopeServices;
 use app\services\report\StoreReportCurrentProductCategoryServices;
 use app\services\report\StoreUnifiedReportOrganizationDimensionServices;
+use app\services\product\product\SystemBalanceProjectServices;
 use think\facade\Db;
 
 /** Executes only server-registered metric contracts. No metric-code branch is allowed here. */
@@ -69,6 +70,56 @@ final class RegisteredMetricReadServices
         $handler = $handlers[$contract['reader_strategy']] ?? null;
         if (!$handler) $this->fail('METRIC_QUERY_SHAPE_UNAVAILABLE');
         return $handler();
+    }
+
+    /**
+     * Read the four authoritative net-cash populations for an already authorized
+     * member cohort. Sale allocations, recharge, unallocated debt and standalone
+     * refunds are disjoint; signed reversals remain visible for drilldown.
+     * The caller owns cohort selection, while this reader owns cash inclusion.
+     */
+    public function cashFactsForMembers(string $tenantId, array $stores, array $range, array $memberIds): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        $memberIds = array_values(array_unique(array_filter(array_map('intval', $memberIds), static fn(int $id): bool => $id > 0)));
+        if ($memberIds === []) return [];
+        $facts = [];
+        foreach (array_chunk($memberIds, 500) as $ids) {
+            $sources = [
+                ['sale', $this->saleCashQuery($tenantId, $stores, $range)->whereIn('s.member_id', $ids),
+                    "p.allocation_fact_id fact_id,s.member_id,p.order_id,p.order_no_snapshot order_no,p.business_date,p.amount_cents,s.member_name_snapshot member_name,s.store_name_snapshot store_name"],
+                ['recharge', $this->rechargeCashQuery($tenantId, $stores, $range)->whereIn('p.member_id', $ids),
+                    "p.fact_id,p.member_id,p.order_id,p.order_no_snapshot order_no,p.source_document_type,p.business_date,p.amount_cents,p.member_name_snapshot member_name,p.store_name_snapshot store_name"],
+                ['debt_repayment', $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range)->whereIn('p.member_id', $ids),
+                    "p.fact_id,p.member_id,p.order_id,p.order_no_snapshot order_no,p.business_date,p.amount_cents,p.member_name_snapshot member_name,p.store_name_snapshot store_name"],
+                ['refund', $this->importedCardRefundCashQuery($tenantId, $stores, $range)->whereIn('p.member_id', $ids),
+                    "p.fact_id,p.member_id,p.order_id,p.order_no_snapshot order_no,p.business_date,p.amount_cents,p.member_name_snapshot member_name,p.store_name_snapshot store_name"],
+            ];
+            foreach ($sources as [$kind, $query, $fields]) {
+                foreach ($query->fieldRaw($fields)->select()->toArray() as $fact) {
+                    $fact['cash_kind'] = $kind;
+                    $fact['allocation_fact_id'] = $kind . ':' . (string)$fact['fact_id'];
+                    $facts[] = $fact;
+                }
+            }
+        }
+        return $facts;
+    }
+
+    /**
+     * Report projection of eligible recharge cash at payment-fact grain.
+     * Keeping this on the registered reader gives monthly totals and receipt
+     * drilldowns the same void, repayment and payment-method guards.
+     */
+    public function rechargeCashFacts(string $tenantId, array $stores, array $range, int $participantEmployeeId = 0): array
+    {
+        $this->assertScope($tenantId, $stores, $range);
+        $query = $this->rechargeCashQuery($tenantId, $stores, $range);
+        if ($participantEmployeeId > 0) {
+            $this->applyParticipantScope($query, ['participant_employee_id' => $participantEmployeeId], 'order');
+        }
+        return $query->fieldRaw('p.id,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.source_line_id,p.business_date,p.amount_cents,p.member_name_snapshot member_name,p.store_name_snapshot store_name,p.organization_id,p.organization_path_snapshot,p.business_source_label_snapshot business_source_label')
+            ->select()->toArray();
     }
 
     /**
@@ -2019,7 +2070,7 @@ final class RegisteredMetricReadServices
         if ($categoryIds !== []) $direct->whereIn('d.category_id_snapshot', $categoryIds);
         $amount = $mode === 'refund' ? '-p.amount_cents' : 'p.amount_cents';
         // 原销售事实与合作方快照只用于明细定位；金额和统计日期仍属于本笔收款分摊。
-        $rows = $direct->fieldRaw("p.id,s.fact_id sale_fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.partner_name_snapshot")
+        $rows = $direct->fieldRaw("p.id,s.fact_id sale_fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,s.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,d.item_id,d.item_name_snapshot item_name,d.product_type_snapshot,d.category_id_snapshot category_id,d.category_path_snapshot category_path,d.partner_name_snapshot")
             ->select()->toArray();
 
         $cardBase = (clone $base)->where('s.source_type', 'card');
@@ -2030,12 +2081,17 @@ final class RegisteredMetricReadServices
                 ->where('metric_experience.is_experience', $filters['is_experience']);
         });
         $cards = $cardBase
-            ->fieldRaw("p.id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,s.fact_id sale_fact_id")
+            ->fieldRaw("p.id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,s.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,s.organization_path_snapshot,s.store_name_snapshot store_name,s.business_source_primary_id,s.business_source_label_snapshot source_label,s.fact_id sale_fact_id")
             ->select()->toArray();
 
         $populationFilters = $filters;
         unset($populationFilters['participant_employee_id']);
+        // Current-category filtering runs after the item ID is resolved. A
+        // category path must not suppress migration-era repayments before
+        // their verified card projects can be projected into that path.
+        if ($this->currentReportProductCategory) unset($populationFilters['category_path']);
         if ($categoryIds === [] && $populationFilters === []) {
+            $balanceProjectId = (new SystemBalanceProjectServices())->productId();
             $recharge = $this->rechargeCashQuery($tenantId, $stores, $range);
             $unallocatedDebtRepayment = $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range);
             $importedCardRefund = $this->importedCardRefundCashQuery($tenantId, $stores, $range);
@@ -2051,13 +2107,13 @@ final class RegisteredMetricReadServices
             $this->applyCashDirection($unallocatedDebtRepayment, $mode, 'p.amount_cents');
             $this->applyCashDirection($importedCardRefund, $mode, 'p.amount_cents');
             $rows = array_merge($rows, $recharge->fieldRaw(
-                "CONCAT('recharge-payment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='recharge' THEN '充值' ELSE '充值欠款补交' END item_name,'recharge' product_type_snapshot,0 category_id,'' category_path"
+                "CONCAT('recharge-payment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,{$balanceProjectId} item_id,'余额' item_name,'recharge' product_type_snapshot,0 category_id,'' category_path"
             )->select()->toArray());
             // Historical cards without a V3 sale line can still have verified
             // priced component products. Keep the payment grain and amount;
             // only the current report-category projection may split its display.
             $debtPayments = $unallocatedDebtRepayment->fieldRaw(
-                "CONCAT('sales-debt-repayment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'销售欠款补交（未关联原销售明细）' item_name,'sales_debt_repayment_unallocated' product_type_snapshot,0 category_id,'' category_path"
+                "CONCAT('sales-debt-repayment:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,'销售欠款补交（未关联原销售明细）' item_name,'sales_debt_repayment_unallocated' product_type_snapshot,0 category_id,'' category_path"
             )->select()->toArray();
             $rows = array_merge($rows, $this->currentReportProductCategory
                 ? $this->projectHistoricalCardRepaymentComponents($debtPayments, $tenantId)
@@ -2065,9 +2121,31 @@ final class RegisteredMetricReadServices
             // A migrated-card refund likewise has no defensible sale category; keep it in
             // unfiltered cash/refund totals without fabricating an item allocation.
             if (!$excludeStandaloneRefunds) {
-                $rows = array_merge($rows, $importedCardRefund->fieldRaw(
-                    "CONCAT('manual-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='manual_refund' THEN '卡项或单据退款' ELSE '旧卡退款' END item_name,p.source_document_type product_type_snapshot,0 category_id,'' category_path"
-                )->select()->toArray());
+                $refundRows = $importedCardRefund->fieldRaw(
+                    "CONCAT('manual-refund:',p.fact_id) id,p.fact_id,p.store_id,p.member_id,p.order_id,p.order_no_snapshot,p.member_name_snapshot,p.source_line_id,p.business_date,{$amount} amount_cents,p.organization_id,p.organization_path_snapshot,p.store_name_snapshot store_name,p.business_source_primary_id,p.business_source_label_snapshot source_label,0 item_id,CASE WHEN p.source_document_type='manual_refund' THEN '卡项或单据退款' ELSE '旧卡退款' END item_name,p.source_document_type product_type_snapshot,0 category_id,'' category_path"
+                )->select()->toArray();
+                // Only wallet refunds use the balance project. Other manual refunds
+                // keep their own original-item classification and signed cash facts.
+                $operationIds = array_values(array_unique(array_filter(array_map(static function (array $row): string {
+                    return $row['product_type_snapshot'] === 'manual_refund' ? (string)$row['order_id'] : '';
+                }, $refundRows))));
+                $balanceOperations = [];
+                foreach (array_chunk($operationIds, 500) as $batch) {
+                    foreach (Db::name('cashier_v3_order_lifecycle_operation')->where('tenant_id', $tenantId)
+                        ->whereIn('store_id', $stores)->whereIn('operation_id', $batch)
+                        ->where('operation_type', 'refund')->where('source_type', 'balance')
+                        ->where('status', 'succeeded')->field('store_id,operation_id')->select()->toArray() as $operation) {
+                        $balanceOperations[(int)$operation['store_id'] . ':' . (string)$operation['operation_id']] = true;
+                    }
+                }
+                foreach ($refundRows as &$refundRow) {
+                    if (isset($balanceOperations[(int)$refundRow['store_id'] . ':' . (string)$refundRow['order_id']])) {
+                        $refundRow['item_id'] = $balanceProjectId;
+                        $refundRow['item_name'] = '余额';
+                    }
+                }
+                unset($refundRow);
+                $rows = array_merge($rows, $refundRows);
             }
         }
         if ($cards === []) return $rows;
@@ -3039,6 +3117,15 @@ final class RegisteredMetricReadServices
             ->whereBetween('p.business_date', [$range['start'], $range['end']])->where('p.status', 'effective');
         call_user_func($this->normalFacts, $query, 'p.tenant_id', 'p.order_id');
         (new StoreReportNormalDataScopeServices())->excludeVoidedSupplementAllocations($query, 'p');
+        // Reversal allocations inherit the original receipt's method. Exclude
+        // both sides of an other-collection event, including imported history.
+        // The allocation snapshot also covers legacy rows without a payment fact.
+        $query->whereRaw("(p.payment_method IS NULL OR p.payment_method <> 'other_collection')");
+        $query->whereNotExists(function ($receipt): void {
+            $receipt->name('cashier_v3_payment_fact')->alias('excluded_cash_method')
+                ->whereRaw('excluded_cash_method.tenant_id=p.tenant_id AND excluded_cash_method.fact_id=COALESCE(original.payment_fact_id,p.payment_fact_id)')
+                ->where('excluded_cash_method.payment_method', 'other_collection');
+        });
         return $query;
     }
 
@@ -3048,6 +3135,7 @@ final class RegisteredMetricReadServices
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)->where('p.status', 'effective')
             ->where('p.fact_type', 'payment_collected')->whereIn('p.source_document_type', ['recharge', 'recharge_debt_repayment'])
             ->whereIn('p.payment_method', CashierV3CheckoutFactPlanV1::paymentMethods())
+            ->where('p.payment_method', '<>', 'other_collection')
             ->whereBetween('p.business_date', [$range['start'], $range['end']]);
         $query->where(function ($kind): void {
             $kind->where('p.source_document_type', 'recharge')->whereOr(function ($supplement): void {
@@ -3081,6 +3169,7 @@ final class RegisteredMetricReadServices
             ->where('p.tenant_id', $tenantId)->whereIn('p.store_id', $stores)->where('p.status', 'effective')
             ->where('p.fact_type', 'payment_collected')->where('p.source_document_type', 'debt_repayment')
             ->whereIn('p.payment_method', CashierV3CheckoutFactPlanV1::paymentMethods())
+            ->where('p.payment_method', '<>', 'other_collection')
             ->whereBetween('p.business_date', [$range['start'], $range['end']])
             ->whereNotExists(function ($allocation): void {
                 $allocation->name('cashier_v3_payment_sale_allocation_fact')->alias('debt_payment_allocation')

@@ -4,8 +4,10 @@ namespace app\services\report;
 
 use app\services\BaseServices;
 use app\services\cashier\v3\CashierV3ScopeResolver;
+use app\services\cashier\v3\cashier\CashierV3MemberDebtProjectionServices;
 use app\services\cashier\v3\order\CashierV3SupplementAttributionServices;
 use app\services\metric\MetricDictionaryServices;
+use app\services\product\product\SystemBalanceProjectServices;
 use think\facade\Db;
 
 /**
@@ -142,8 +144,10 @@ class StoreUnifiedReportServices extends BaseServices
         // category. The member-consumption table intentionally keeps one row
         // per sold card, then aggregates its component shares in PHP.
         if ($expandCardCategories) {
-            $query->leftJoin('cashier_v3_card_sale_category_allocation_fact c',
-                "c.tenant_id=s.tenant_id AND c.store_id=s.store_id AND c.sale_fact_id=s.fact_id AND c.status='effective'");
+            $query->leftJoin('cashier_v3_card_sale_item_allocation_fact c',
+                "c.tenant_id=s.tenant_id AND c.store_id=s.store_id AND c.sale_fact_id=s.fact_id AND c.status='effective'")
+                ->leftJoin('cashier_v3_card_sale_category_allocation_fact cc',
+                    "cc.tenant_id=c.tenant_id AND cc.store_id=c.store_id AND cc.sale_fact_id=c.sale_fact_id AND cc.card_receipt_id=c.card_receipt_id AND cc.category_id_snapshot=c.category_id_snapshot AND cc.status='effective'");
         }
         if (is_array($storeId)) $query->whereIn('s.store_id', array_values(array_unique(array_map('intval', $storeId))));
         else $query->where('s.store_id', (int)$storeId);
@@ -207,7 +211,7 @@ class StoreUnifiedReportServices extends BaseServices
         return $this->organizationDimensions()->filterSchema($range);
     }
 
-    private function operationFilters($query, array $input, bool $expandCardCategories = true): void
+    private function operationFilters($query, array $input, bool $expandCardCategories = true, bool $supplement = false): void
     {
         $categoryId = (int)($input['category_id'] ?? 0);
         $path = trim((string)($input['category_path'] ?? ''));
@@ -215,56 +219,23 @@ class StoreUnifiedReportServices extends BaseServices
         $type = trim((string)($input['product_type'] ?? ''));
         $partner = trim((string)($input['partner_name'] ?? ''));
         if ($categoryId > 0 || $path !== '' || $exactPath !== '') {
-            // Resolve candidates from this scoped fact population, then filter SQL by immutable
-            // product IDs. A historical category predicate would hide newly reclassified facts.
-            $candidateItem = $expandCardCategories ? 'COALESCE(c.component_product_id,d.item_id)' : 'd.item_id';
-            $candidates = (clone $query)->fieldRaw("s.fact_id,s.store_id,{$candidateItem} item_id")->select()->toArray();
-            $links = [];
-            $owners = [];
-            foreach ($candidates as $candidate) {
-                $links[] = ['store_id' => (int)$candidate['store_id'], 'product_id' => (int)$candidate['item_id']];
-                $owners[] = (string)$candidate['fact_id'];
-            }
             if (!$expandCardCategories) {
-                $saleIds = array_values(array_unique(array_filter(array_column($candidates, 'fact_id'))));
-                $candidateStores = array_values(array_unique(array_map('intval', array_column($candidates, 'store_id'))));
-                foreach (array_chunk($saleIds, 300) as $chunk) {
-                    foreach (Db::name('cashier_v3_card_sale_category_allocation_fact')->whereIn('sale_fact_id', $chunk)
-                        ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-                        ->whereIn('store_id', $candidateStores)->where('status', 'effective')
-                        ->field('sale_fact_id,store_id,component_product_id')->select()->toArray() as $component) {
-                        $links[] = ['store_id' => (int)$component['store_id'], 'product_id' => (int)$component['component_product_id']];
-                        $owners[] = (string)$component['sale_fact_id'];
-                    }
-                }
-            }
-            $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);
-            $productIds = [];
-            $matchingFacts = [];
-            foreach ($links as $index => $link) {
-                $category = $resolved[$index] ?? [];
-                $currentPath = (string)($category['path'] ?? '');
-                if ($categoryId > 0 && (int)($category['id'] ?? 0) !== $categoryId) continue;
-                if ($path !== '' && strpos($currentPath, $path) !== 0) continue;
-                if ($exactPath !== '' && $currentPath !== $exactPath) continue;
-                if ((int)$link['product_id'] > 0) {
-                    $productIds[(int)$link['product_id']] = true;
-                    $matchingFacts[$owners[$index]] = true;
-                }
-            }
-            if ($productIds === []) $query->whereRaw('1=0');
-            elseif ($expandCardCategories) {
-                $query->whereRaw('COALESCE(c.component_product_id,d.item_id) IN ('
-                    . implode(',', array_fill(0, count($productIds), '?')) . ')', array_keys($productIds));
+                $this->filterSaleRowCategories($query, $input, $supplement);
             } else {
-                // The source fact IDs were already narrowed by authorized store/date and
-                // current product classification; this indexed predicate avoids a per-row EXISTS scan.
-                $query->whereIn('s.fact_id', array_keys($matchingFacts));
+                $candidates = (clone $query)->fieldRaw("s.store_id,CASE WHEN s.source_type='card' THEN COALESCE(c.component_product_id,0) ELSE d.item_id END product_id")->select()->toArray();
+                $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($candidates);
+                $productIds = [];
+                foreach ($resolved as $key => $category) {
+                    if (StoreReportSaleCategoryServices::matches([$category], $input)) $productIds[(int)$candidates[$key]['product_id']] = true;
+                }
+                if ($productIds === []) $query->whereRaw('1=0');
+                else $query->whereRaw("(CASE WHEN s.source_type='card' THEN COALESCE(c.component_product_id,0) ELSE d.item_id END) IN ("
+                    . implode(',', array_fill(0, count($productIds), '?')) . ')', array_keys($productIds));
             }
         }
         if ($expandCardCategories) {
-            if ($type !== '') $query->whereRaw('COALESCE(c.product_type_snapshot,d.product_type_snapshot)=?', [$type]);
-            if ($partner !== '') $query->whereRaw('COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)=?', [$partner]);
+            if ($type !== '') $query->whereRaw('COALESCE(cc.product_type_snapshot,d.product_type_snapshot)=?', [$type]);
+            if ($partner !== '') $query->whereRaw('COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot)=?', [$partner]);
         } else {
             if ($type !== '') $query->where(function ($sub) use ($type) {
                 $sub->where('d.product_type_snapshot', $type)->whereExists(function ($card) use ($type) {
@@ -289,6 +260,33 @@ class StoreUnifiedReportServices extends BaseServices
         });
         if ((int)($input['sales_manager_id'] ?? 0) > 0) $query->whereExists(function ($sub) use ($input) {
             $sub->name('cashier_v3_sales_manager_fact')->whereRaw('order_id=s.order_id')->where('sales_manager_employee_id', (int)$input['sales_manager_id'])->where('status', 'effective');
+        });
+    }
+
+    /** Category filters must resolve the same card components/debt identities as displayed rows. */
+    private function filterSaleRowCategories($query, array $input, bool $supplement): void
+    {
+        $extra = $supplement ? ',repayment.debt_id,repayment_payment.order_id repayment_id' : '';
+        $store = $supplement ? 'repayment_payment.store_id' : 's.store_id';
+        $rows = (clone $query)->fieldRaw("s.fact_id sale_fact_id,{$store} store_id,s.source_type,d.item_id product_id{$extra}")->select()->toArray();
+        $resolved = (new StoreReportSaleCategoryServices())->resolve($rows);
+        $debtIds = [];
+        foreach ($rows as $row) if ($supplement && empty($row['sale_fact_id'])) $debtIds[] = (int)$row['debt_id'];
+        $debts = $debtIds ? (new CashierV3MemberDebtProjectionServices())->currentCategoriesForDebts($debtIds) : [];
+        $facts = $repayments = [];
+        foreach ($rows as $key => $row) {
+            $categories = $supplement && empty($row['sale_fact_id']) ? ($debts[(int)$row['debt_id']] ?? []) : ($resolved[$key] ?? []);
+            if (!StoreReportSaleCategoryServices::matches($categories, $input)) continue;
+            if (!empty($row['sale_fact_id'])) $facts[(string)$row['sale_fact_id']] = true;
+            elseif ($supplement) $repayments[(string)$row['repayment_id']] = true;
+        }
+        // Unallocated historical repayments have no s.fact_id; filter by their own identity.
+        $query->where(function ($filter) use ($facts, $repayments): void {
+            $filter->whereRaw('1=0');
+            if ($facts) $filter->whereOr('s.fact_id', 'in', array_keys($facts));
+            if ($repayments) $filter->whereOr(function ($debt) use ($repayments): void {
+                $debt->whereNull('s.fact_id')->whereIn('repayment_payment.order_id', array_keys($repayments));
+            });
         });
     }
 
@@ -366,15 +364,15 @@ class StoreUnifiedReportServices extends BaseServices
         ]), ['month'=>88, 'division_name'=>130, 'city_manager'=>130, 'store_summary'=>132, 'performance_type'=>220]);
         // 汇总逐列解释实际分组和计数边界，不能把体验数量说成去重人数；只更新说明，不改变指标。
         $explanations = [
-            'month'=>'销售按成交日、补交按收款日、合作方退款按退款业务日归入月份。只统计所选日期范围内的记录。',
+            'month'=>'销售按成交日、补交按收款日、退款按退款业务日、独立服务手工费按服务日归入月份。只统计所选日期范围内的记录。',
             'division_name'=>'这家门店当前所属的分公司；没有配置时显示“未配置分公司”。',
             'store_summary'=>'本行汇总的门店名称，使用业务发生时记录的名称。不同门店分别列示。',
             'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；同一门店、月份和分类汇总为一行。平台改分类后，历史行的分类归属会更新，金额事实不变。',
-            'experience_count'=>'查询日期内销售时记为体验的明细，按购买数量累计。例如一条体验明细购买2份，记2；不是按会员去重的人数。补交欠款不增加体验人次。',
-            'member_count'=>'查询日期内本门店、本月份、本分类成交过的会员人数；同一会员重复成交只算1人，未关联会员的销售不计入。补交欠款不增加人数。一个会员可能出现在多行，因此合计栏显示“-”，不直接相加。',
-            'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交欠款不增加消耗业绩。',
-            'labor_amount'=>'查询日期内销售明细对应的有效手艺人分配记录，累计其中的手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
-            'sale_amount'=>'查询日期内已记账并分配到本分类的现金业绩净额；原成交可核实合作方归属的退款按实际退款金额在退款日负向冲减。不含未收欠款、余额支付和无法关联原成交分类的旧卡退款。',
+            'experience_count'=>'查询日期内销售时记为体验的明细，按购买数量累计。例如一条体验明细购买2份，记2；不是按会员去重的人数。补交及独立服务手工费行不增加体验人次。',
+            'member_count'=>'查询日期内本门店、本月份、本分类成交过的会员人数；同一会员重复成交只算1人，未关联会员的销售不计入。补交和独立服务手工费行不增加人数。一个会员可能出现在多行，因此合计栏显示“-”，不直接相加。',
+            'consumption_amount'=>'查询日期内销售明细对应的已完成服务，按本分类累计消耗业绩金额；只购买、未完成服务不产生消耗。补交和新增的独立服务手工费行不增加此销售消耗指标。',
+            'labor_amount'=>'销售明细对应的有效手艺人分配，以及没有同源销售行的独立服务分配，累计其手工费金额；不是劳动业绩金额。补交欠款不增加手工费。',
+            'sale_amount'=>'查询日期内本分类已记账的现金业绩净额；销售按成交日、补交按收款日、退款按退款日计算。独立服务手工费行不增加成交业绩。旧单能核实卡内项目但不能核实原合作方时，金额仍冲减项目分类，合作方名称留空；无法核实项目时列为未分类。',
         ];
         foreach ($columns as &$column) {
             $column['source_explanation'] = $explanations[$column['key']];
@@ -386,7 +384,7 @@ class StoreUnifiedReportServices extends BaseServices
         }
         unset($column);
         return [
-            'title'=>'合作方品项汇总','metric_version'=>'partner-item-current-category-v3','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
+            'title'=>'合作方品项汇总','metric_version'=>'partner-item-current-category-v6','columns'=>$columns, 'records'=>$rows,'total'=>count($rows),'page'=>1,'page_size'=>count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, [
@@ -401,6 +399,7 @@ class StoreUnifiedReportServices extends BaseServices
     /**
      * 合作方汇总、明细及导出共用的只读行集。原销售活动保留数量、消耗和手工费，
      * 金额仅来自统一现金指标；跨日补交追加到收款日，不能被原销售日期筛掉。
+     * 没有同源销售行的服务单另占一行，只承载其有效手工费，不能强行归到其他会员的销售或补交。
      * 同一销售行/日期/完整分类合并多笔收款，不重复统计原成交活动。
      */
     private function partnerItemFacts($storeId, array $range, array $input): array
@@ -410,9 +409,9 @@ class StoreUnifiedReportServices extends BaseServices
         $sales = $this->operationSaleQuery($stores, $range, $input)
             // 原销售活动也要固定租户，不能只给现金行做隔离而让其他实例活动污染数量。
             ->where('s.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
-            ->whereRaw("COALESCE(c.partner_name_snapshot,d.partner_name_snapshot)<>''")
+            ->whereRaw("COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot)<>''")
             ->leftJoin('user u', 'u.uid=s.member_id')
-            ->fieldRaw("s.fact_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.store_name_snapshot AS store_name,s.order_id,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,COALESCE(c.component_product_id,d.item_id,0) current_product_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(c.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,COALESCE(d.is_experience,0) AS is_experience,s.source_line_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
+            ->fieldRaw("s.fact_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.store_name_snapshot AS store_name,s.order_id,s.order_no_snapshot,s.member_id,s.member_name_snapshot,u.phone AS member_phone,s.item_name_snapshot,s.source_type,s.quantity,CASE WHEN s.source_type='card' THEN COALESCE(c.component_product_id,0) ELSE COALESCE(d.item_id,0) END current_product_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(cc.product_type_snapshot,d.product_type_snapshot) AS product_type_snapshot,COALESCE(cc.partner_name_snapshot,d.partner_name_snapshot) AS partner_name_snapshot,COALESCE(d.is_experience,0) AS is_experience,s.source_line_id,(SELECT COALESCE(SUM(pf.labor_fee_amount_cents),0) FROM eb_cashier_v3_performance_fact pf WHERE pf.source_line_id=s.source_line_id AND pf.performance_type='labor_performance_allocated' AND pf.status='effective') AS labor_amount_cents")
             ->select()->toArray();
         $this->projectSaleCategories($sales, 'current_product_id', 'category_id_snapshot', 'category_path_snapshot');
         $consume = $this->metricSourceLineCategoryTotals('consume_amount', $stores, $range, $input, array_column($sales, 'source_line_id'));
@@ -429,10 +428,21 @@ class StoreUnifiedReportServices extends BaseServices
         $cash = $this->participantEmployeeId > 0
             ? $reader->categoryRowsForParticipant('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range, $categories, $filters, $this->participantEmployeeId)
             : $reader->categoryRows('cash_performance', CashierV3ScopeResolver::TENANT_SCOPE_ID, $stores, $range, $categories, $filters);
+        $refundReader = new StoreMemberConsumptionRefundReadServices();
+        $refundQuery = $refundReader->query($stores, $range, $input, $this->participantEmployeeId);
+        $refundIds = (clone $refundQuery)->column('refund_operation.id');
+        $refundRows = $refundReader->rows($refundQuery, array_map('intval', $refundIds));
+        $refundOperations = array_fill_keys(array_map('strval', array_column($refundRows, 'order_id')), true);
         $exact = trim((string)($input['category_path_exact'] ?? ''));
-        // 不给充值或未关联原销售分类的历史补交臆造合作方；精确下钻在后端再收窄。
-        $cash = array_values(array_filter($cash, static function (array $row) use ($exact): bool {
-            return (string)($row['partner_name_snapshot'] ?? '') !== ''
+        // Refund reversals already occur in the metric reader. Their operation
+        // rows below replace that display grain, so the same cash cannot count twice.
+        $cash = array_values(array_filter($cash, static function (array $row) use ($exact, $refundOperations, $input): bool {
+            $historicalProjectRepayment = in_array((string)($row['product_type_snapshot'] ?? ''),
+                ['card_component', 'card_component_unnamed'], true)
+                && (int)($row['category_id'] ?? 0) > 0
+                && trim((string)($input['partner_name'] ?? '')) === '';
+            return ((string)($row['partner_name_snapshot'] ?? '') !== '' || $historicalProjectRepayment)
+                && !((int)($row['amount_cents'] ?? 0) < 0 && isset($refundOperations[(string)($row['order_id'] ?? '')]))
                 && ($exact === '' || (string)($row['category_path'] ?? '') === $exact);
         }));
         $saleIds = array_values(array_unique(array_column($cash, 'sale_fact_id')));
@@ -446,6 +456,18 @@ class StoreUnifiedReportServices extends BaseServices
         }
         foreach ($cash as $payment) {
             $source = $metadata[(string)($payment['sale_fact_id'] ?? '')] ?? null;
+            if ($source === null && in_array((string)($payment['product_type_snapshot'] ?? ''),
+                ['card_component', 'card_component_unnamed'], true)) {
+                // Verified historical card repayments have no V3 sale fact.
+                // Their project category is known, but partner attribution is not.
+                $source = [
+                    'fact_id' => '', 'order_id' => (string)$payment['order_id'],
+                    'order_no_snapshot' => (string)$payment['order_no_snapshot'],
+                    'member_name_snapshot' => (string)$payment['member_name_snapshot'],
+                    'item_name_snapshot' => (string)$payment['item_name'],
+                    'source_type' => 'supplement', 'member_phone' => '',
+                ];
+            }
             if ($source === null) throw new \RuntimeException('合作方收款缺少原销售明细，请联系管理员核对。');
             $entry = array_merge($payment, $source, [
                 'store_name_snapshot'=>(string)$payment['store_name'],
@@ -457,33 +479,80 @@ class StoreUnifiedReportServices extends BaseServices
             }
             $rows[$key]['sale_amount_cents'] += (int)$payment['amount_cents'];
         }
-        // A refund is its own dated negative business fact. Only a verified
-        // original partner allocation can attribute it to a partner category.
-        $refundReader = new StoreMemberConsumptionRefundReadServices();
-        $refundQuery = $refundReader->query($stores, $range, $input, $this->participantEmployeeId);
-        $refundIds = (clone $refundQuery)->column('refund_operation.id');
-        foreach ($refundReader->rows($refundQuery, array_map('intval', $refundIds)) as $refund) {
-            if ((int)$refund['partner_category_id_snapshot'] <= 0
-                || trim((string)$refund['partner_name_snapshot']) === '') continue;
-            $row = $refund + [
-                '_sale_activity' => false, 'quantity' => 0, 'is_experience' => 0,
-                'labor_amount_cents' => 0, 'consumption_amount_cents' => 0,
-            ];
-            $row['store_name'] = (string)$refund['store_name_snapshot'];
-            $row['source_type'] = 'refund';
-            $row['order_no_snapshot'] = (string)$refund['order_no_snapshot'];
-            $row['category_id_snapshot'] = (int)$refund['current_category_id'];
-            $row['sale_amount_cents'] = (int)$refund['amount_cents'];
-            $row['_market_group_key'] = 'refund:' . (string)$refund['order_id'];
-            $rows[$row['_market_group_key']] = $row;
+        // A refund is its own dated negative business fact. Current product
+        // classification may be recovered from IDs even when a historical
+        // partner allocation cannot; the latter must remain visibly blank.
+        foreach ($refundRows as $refund) {
+            $categories = $refund['_current_categories'] ?? [];
+            // A missing item link still keeps the real refund visible as an
+            // unclassified adjustment; it must not disappear from cash totals.
+            if ($categories === []) $categories = [['id' => 0, 'path' => '', 'weight_cents' => 0]];
+            $amounts = self::allocateRefundCategoryCents((int)$refund['amount_cents'], $categories);
+            $exactPath = trim((string)($input['category_path_exact'] ?? ''));
+            foreach ($categories as $index => $category) {
+                if ((int)($input['category_id'] ?? 0) > 0 && (int)$category['id'] !== (int)$input['category_id']) continue;
+                $prefix = trim((string)($input['category_path'] ?? ''));
+                if ($prefix !== '' && strpos((string)$category['path'], $prefix) !== 0) continue;
+                if ($exactPath !== '' && (string)$category['path'] !== $exactPath) continue;
+                $row = $refund + [
+                    '_sale_activity' => false, 'quantity' => 0, 'is_experience' => 0,
+                    'labor_amount_cents' => 0, 'consumption_amount_cents' => 0,
+                ];
+                $row['store_name'] = (string)$refund['store_name_snapshot'];
+                $row['source_type'] = 'refund';
+                $row['order_no_snapshot'] = (string)$refund['order_no_snapshot'];
+                $row['category_id_snapshot'] = (int)$category['id'];
+                $row['category_path_snapshot'] = (string)$category['path'];
+                $row['sale_amount_cents'] = (int)$amounts[$index];
+                $row['_market_group_key'] = 'refund:' . (string)$refund['order_id'] . ':' . $index;
+                unset($row['_current_categories']);
+                $rows[$row['_market_group_key']] = $row;
+            }
+        }
+        // 独立服务有自己的服务单号和业务日期；共用此行集使列表、汇总、下钻与导出同口径。
+        foreach ((new StorePartnerIndependentServiceFacts())->read($stores, $range, $input, $this->participantEmployeeId) as $service) {
+            $rows['service:' . (string)$service['fact_id']] = $service;
         }
         $rows = array_values($rows);
+        // 历史补交可能能核实项目分类，却没有原合作方快照。统一行集显式保留空值，
+        // 让汇总、明细及导出共享完整契约；不得猜测合作方或丢弃对应收款事实。
+        foreach ($rows as &$row) {
+            $row['partner_name_snapshot'] = (string)($row['partner_name_snapshot'] ?? '');
+        }
+        unset($row);
         usort($rows, static function (array $left, array $right): int {
             return strcmp((string)$right['business_date'], (string)$left['business_date'])
                 ?: strcmp((string)$right['order_no_snapshot'], (string)$left['order_no_snapshot'])
                 ?: strcmp((string)$left['category_path_snapshot'], (string)$right['category_path_snapshot']);
         });
         return $rows;
+    }
+
+    /**
+     * Split a single negative refund across verified project prices without
+     * duplicating cash. New whole-yuan refunds split in yuan; legacy fractional
+     * facts retain cent precision. Unverified multi-project prices remain in
+     * one unclassified row rather than assigning a false category share.
+     */
+    private static function allocateRefundCategoryCents(int $amount, array &$categories): array
+    {
+        if (count($categories) <= 1) return [$amount];
+        $weights = array_map(static fn(array $category): int => (int)($category['weight_cents'] ?? 0), $categories);
+        $totalWeight = array_sum($weights);
+        if ($totalWeight <= 0 || count(array_filter($weights, static fn(int $weight): bool => $weight <= 0)) > 0) {
+            $categories = [['id' => 0, 'path' => '', 'weight_cents' => 0]];
+            return [$amount];
+        }
+        $unit = $amount % 100 === 0 ? 100 : 1;
+        $units = intdiv(abs($amount), $unit);
+        $remaining = $units;
+        $split = [];
+        foreach ($weights as $index => $weight) {
+            $part = $index === count($weights) - 1 ? $remaining : intdiv($units * $weight, $totalWeight);
+            $remaining -= $part;
+            $split[] = ($amount < 0 ? -1 : 1) * $part * $unit;
+        }
+        return $split;
     }
 
     /** 收款按稳定的原销售行、业务日、门店和完整分类合并，不能靠显示名称定位单据。 */
@@ -523,34 +592,34 @@ class StoreUnifiedReportServices extends BaseServices
         unset($row);
         foreach ($rows as &$row) { $this->applyOrganizationDimensions($row); $row['member_phone'] = (string)($row['member_phone'] ?? ''); $row['performance_type'] = (string)$row['category_path_snapshot']; $row['experience_project'] = $row['experience']; $row['deal_project'] = $row['item_name_snapshot']; $row['consumption'] = $row['consumption_amount'] ?? '0'; $row['consumption_amount'] = $row['consumption_amount'] ?? '0'; $row['labor_fee'] = $row['labor_amount'] ?? '0'; $row['deal_amount'] = $row['sale_amount']; $row['partner_label'] = $row['partner_name_snapshot']; }
         unset($row);
-        // 原销售与补交保留原单号；退款行显示退款单号，另列原销售单号便于追查。
+        // 销售与补交保留原单号；退款显示退款单号，独立服务显示服务记录号。
         $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
             ['key'=>'store_name_snapshot','label'=>'门店'],['key'=>'member_name_snapshot','label'=>'会员'],['key'=>'member_phone','label'=>'手机'],
-            ['key'=>'order_no_snapshot','label'=>'业务单号','source_explanation'=>'成交及补交显示原销售单号；退款显示独立退款单号。'],
+            ['key'=>'order_no_snapshot','label'=>'业务单号','source_explanation'=>'成交及补交显示原销售单号；退款显示退款单号；独立服务显示服务记录号。'],
             ['key'=>'original_sale_no','label'=>'原销售单号','source_explanation'=>'退款对应的原销售单号；无法核实原单时留空。'],
             ['key'=>'performance_type','label'=>'业绩类型','source_explanation'=>'按商品或卡内项目关联的平台商品当前分类显示，与合作方品项汇总使用同一分类口径。'],['key'=>'business_date','label'=>'日期'],['key'=>'experience_project','label'=>'体验项目'],['key'=>'medical_elevation','label'=>'复诊'],['key'=>'medical_followup','label'=>'类型'],['key'=>'deal_project','label'=>'成交项目'],['key'=>'consumption','label'=>'消耗'],['key'=>'consumption_amount','label'=>'消耗金额'],['key'=>'labor_fee','label'=>'手工费'],['key'=>'quantity','label'=>'数量'],['key'=>'deal_amount','label'=>'成交金额'],['key'=>'expert_name','label'=>'专家姓名'],['key'=>'partner_label','label'=>'合作方'],['key'=>'remark','label'=>'备注'],
         ]), ['division_name'=>130, 'city_manager'=>130, 'store_name_snapshot'=>126, 'member_name_snapshot'=>88, 'member_phone'=>116, 'order_no_snapshot'=>165, 'performance_type'=>220, 'business_date'=>104]);
         // 本表逐列解释实际取值，不能用通用套话代替业务口径；这里只改说明，不改统计或人工字段规则。
         $explanations = [
             'division_name'=>'这家门店当前所属的分公司；没有配置时显示“未配置分公司”。',
-            'store_name_snapshot'=>'办理原销售单据的门店名称，使用销售时记录的名称。',
-            'member_name_snapshot'=>'原销售单据上的会员姓名，使用销售时记录的姓名。',
+            'store_name_snapshot'=>'销售或独立服务发生门店的业务快照名称。',
+            'member_name_snapshot'=>'销售或独立服务事实中的会员姓名快照。',
             'member_phone'=>'会员档案中当前保存的手机号；没有手机号时显示“-”。',
-            'order_no_snapshot'=>'成交及补交显示原销售单号；退款显示独立退款单号。',
+            'order_no_snapshot'=>'成交及补交显示原销售单号；退款显示独立退款单号；独立服务显示服务记录号。',
             'original_sale_no'=>'退款对应的原销售单号；无法核实原单时留空。',
             'performance_type'=>'按商品或卡内项目关联的平台商品当前分类显示；平台改分类后，历史行的分类归属随之更新。',
-            'business_date'=>'销售显示成交日期，补交显示补交收款日期，退款显示退款业务日期。',
-            'experience_project'=>'销售时记为体验的明细显示“是”，其余显示“否”；单独补交欠款的记录不重复计为体验。',
+            'business_date'=>'销售显示成交日期，补交显示补交收款日期，退款显示退款业务日期，独立服务显示服务日期。',
+            'experience_project'=>'销售或独立服务事实中记为体验的项目显示“是”，其余显示“否”；补交欠款不重复计为体验。',
             'medical_elevation'=>'人工填写的复诊信息，系统不自动判断；未填写时显示“-”。',
             'medical_followup'=>'人工填写的业务类型，系统不自动分类；未填写时显示“-”。',
-            'deal_project'=>'原销售单据中的商品、项目或卡项名称，使用销售时记录的名称。',
-            'consumption'=>'这里显示消耗金额，不是次数，与“消耗金额”列相同；单独补交欠款不重复计入消耗。',
-            'consumption_amount'=>'本条销售明细在查询日期内完成服务后，按本分类计算的消耗金额；只购买、未完成服务不产生消耗，单独补交欠款也不增加消耗。',
-            'labor_fee'=>'本条销售明细对应的有效手艺人手工费合计；单独补交欠款不增加手工费。',
-            'quantity'=>'原销售明细的购买数量；补交和退款调整行显示0，不重复改变成交数量。',
-            'deal_amount'=>'本行在查询日期内已记账的现金业绩；退款按实际退款日以负数冲减。未核实原销售合作方归属的退款不分配到合作方分类。',
+            'deal_project'=>'销售行使用销售商品、项目或卡项名称；独立服务行使用服务项目事实中的名称快照。',
+            'consumption'=>'这里显示消耗金额，不是次数，与“消耗金额”列相同；补交及新增的独立服务手工费行不重复计入销售消耗。',
+            'consumption_amount'=>'本条销售明细在查询日期内完成服务后，按本分类计算的消耗金额；只购买、未完成服务不产生消耗。补交及新增的独立服务手工费行显示0，不重复计入销售消耗。',
+            'labor_fee'=>'本条销售或独立服务对应的当前有效手艺人手工费合计；单独补交欠款不增加手工费。',
+            'quantity'=>'原销售明细的购买数量；补交、退款和独立服务行显示0，不重复改变成交数量。',
+            'deal_amount'=>'本行在查询日期内已记账的现金业绩；退款按退款业务日以负数冲减，独立服务手工费行显示0。能核实卡内项目但无法核实原合作方的旧单仍按当前项目分类显示，合作方名称留空；多项目只按可对账的原项目金额分摊。',
             'expert_name'=>'人工填写的专家姓名；未填写时显示“-”，不会自动取销售人或手艺人的姓名。',
-            'partner_label'=>'销售时商品或卡内项目分类对应的合作方名称；之后修改分类或合作方配置，不改变这里的历史名称。',
+            'partner_label'=>'原销售时保存的合作方名称；无法核实原销售归属的历史补交、退款或独立服务留空，不能用当前配置推算旧分成。',
             'remark'=>'人工填写的本条明细备注；未填写时显示“-”，备注不改变金额和统计结果。',
         ];
         foreach ($columns as &$column) {
@@ -558,7 +627,7 @@ class StoreUnifiedReportServices extends BaseServices
         }
         unset($column);
         return [
-            'title'=>'合作方品项明细','metric_version'=>'partner-item-current-category-v3','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
+            'title'=>'合作方品项明细','metric_version'=>'partner-item-current-category-v6','columns'=>$columns, 'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, [
@@ -571,15 +640,18 @@ class StoreUnifiedReportServices extends BaseServices
         ];
     }
 
-    /** 补交只从成功收款及原销售分摊事实入表，按补交业务日而非原销售日筛选。 */
+    /**
+     * 销售欠款补交以成功收款事实为入表门槛。原商品分摊只用于展示商品粒度，
+     * 不能反向决定补交是否存在；历史迁移单没有分摊时仍须保留真实补交单。
+     */
     private function memberConsumptionSupplementQuery($storeId, array $range, array $input)
     {
         $query = Db::name('cashier_v3_payment_fact')->alias('repayment_payment')
             ->join('cashier_v3_debt_repayment repayment',
                 "repayment.tenant_id=repayment_payment.tenant_id AND repayment.repayment_id=repayment_payment.order_id AND repayment.status='succeeded'")
-            ->join('cashier_v3_payment_sale_allocation_fact allocation',
+            ->leftJoin('cashier_v3_payment_sale_allocation_fact allocation',
                 "allocation.tenant_id=repayment_payment.tenant_id AND allocation.payment_fact_id=repayment_payment.fact_id AND allocation.status='effective' AND allocation.fact_direction='forward'")
-            ->join('cashier_v3_sale_fact s',
+            ->leftJoin('cashier_v3_sale_fact s',
                 "s.tenant_id=allocation.tenant_id AND s.fact_id=allocation.sale_fact_id AND s.status='effective' AND s.fact_direction='forward'")
             ->leftJoin('cashier_v3_report_sale_dimension_fact d',
                 'd.tenant_id=s.tenant_id AND d.store_id=s.store_id AND d.sale_fact_id=s.fact_id')
@@ -590,6 +662,8 @@ class StoreUnifiedReportServices extends BaseServices
             ->whereBetween('repayment_payment.business_date', [$range['start'], $range['end']]);
         if (is_array($storeId)) $query->whereIn('repayment_payment.store_id', array_values(array_unique(array_map('intval', $storeId))));
         else $query->where('repayment_payment.store_id', (int)$storeId);
+        $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query,
+            'repayment_payment.tenant_id', 'repayment_payment.store_id', 'repayment_payment.order_id');
         $this->normalDataScope()->excludeVoidedSupplementAllocations($query, 'allocation');
         $this->normalDataScope()->excludeVoidedSalesOrderFacts($query, 's.tenant_id', 's.order_id');
         $this->organizationDimensions()->applyFilters($query, 'repayment_payment', $input, $range);
@@ -598,28 +672,63 @@ class StoreUnifiedReportServices extends BaseServices
             (new StoreReportParticipantScopeServices())->applySupplement($query,
                 'repayment_payment.order_id', $this->participantEmployeeId);
         }
-        $this->operationFilters($query, $input, false);
+        $this->operationFilters($query, $input, false, true);
         return $query;
     }
 
-    /** 本笔补交按原销售明细分摊展示，人员读取补交自身最新版本。 */
+    /**
+     * 有分摊时按原销售明细展示；无分摊时必须沿欠款项目关联还原商品，
+     * 与订单中心共用同一欠款投影，不能因支付事实缺少销售分摊而丢失真实项目。
+     */
     private function memberConsumptionSupplementRows($query, array $entryIds, $storeId, array $partnerDefinitions): array
     {
         if ($entryIds === []) return [];
-        $repaymentIds = $saleFactIds = [];
+        $repaymentIds = [];
         foreach ($entryIds as $entryId) {
-            [$repaymentId, $saleFactId] = array_pad(explode('|', (string)$entryId, 2), 2, '');
-            if ($repaymentId !== '' && $saleFactId !== '') {
-                $repaymentIds[] = $repaymentId;
-                $saleFactIds[] = $saleFactId;
-            }
+            $repaymentId = (string)(explode('|', (string)$entryId, 2)[0] ?? '');
+            if ($repaymentId !== '') $repaymentIds[] = $repaymentId;
         }
         if ($repaymentIds === []) return [];
         $raw = (clone $query)->whereIn('repayment_payment.order_id', array_values(array_unique($repaymentIds)))
-            ->whereIn('allocation.sale_fact_id', array_values(array_unique($saleFactIds)))
-            ->fieldRaw('repayment_payment.order_id repayment_id,repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.store_name_snapshot,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.business_date,repayment_payment.business_source_label_snapshot,repayment_payment.payment_method,allocation.sale_fact_id,allocation.amount_cents,repayment.repayment_no,s.item_name_snapshot,d.item_id current_product_id,d.category_path_snapshot')
+            ->fieldRaw('repayment_payment.order_id repayment_id,repayment_payment.tenant_id,repayment_payment.store_id,repayment_payment.organization_id,repayment_payment.organization_path_snapshot,repayment_payment.store_name_snapshot,repayment_payment.member_id,repayment_payment.member_name_snapshot,repayment_payment.business_date,repayment_payment.business_source_label_snapshot,repayment_payment.payment_method,COALESCE(allocation.sale_fact_id,\'\') sale_fact_id,COALESCE(allocation.amount_cents,repayment_payment.amount_cents) amount_cents,repayment.repayment_no,repayment.debt_id,COALESCE(s.item_name_snapshot,\'\') item_name_snapshot,s.source_type,COALESCE(d.item_id,0) current_product_id,COALESCE(d.category_path_snapshot,\'\') category_path_snapshot')
             ->select()->toArray();
-        $this->projectSaleCategories($raw, 'current_product_id', 'current_category_id', 'category_path_snapshot');
+        $unallocatedDebtIds = [];
+        foreach ($raw as $item) {
+            if ((string)$item['sale_fact_id'] === '' && (int)$item['debt_id'] > 0) {
+                $unallocatedDebtIds[(int)$item['debt_id']] = true;
+            }
+        }
+        $debtNames = $debtCategories = $debtProducts = [];
+        if ($unallocatedDebtIds !== []) {
+            $debtIds = array_keys($unallocatedDebtIds);
+            $projection = new CashierV3MemberDebtProjectionServices();
+            $debtNames = $projection->summariesForDebts($debtIds);
+            $debtCategories = $projection->categorySummariesForDebts($debtIds);
+            $debtProducts = $this->memberConsumptionUniqueDebtProducts($debtIds);
+            foreach ($raw as &$item) {
+                if ((string)$item['sale_fact_id'] !== '') continue;
+                $debtId = (int)$item['debt_id'];
+                $item['item_name_snapshot'] = (string)($debtNames[$debtId] ?? '');
+                $item['current_product_id'] = (int)($debtProducts[$debtId] ?? 0);
+            }
+            unset($item);
+        }
+        $saleLinks = [];
+        foreach ($raw as $key => $item) $saleLinks[$key] = array_merge($item, ['product_id' => (int)$item['current_product_id']]);
+        $saleCategories = (new StoreReportSaleCategoryServices())->resolve($saleLinks);
+        foreach ($raw as $key => &$item) $item['category_path_snapshot'] = StoreReportSaleCategoryServices::label($saleCategories[$key] ?? []);
+        unset($item);
+        foreach ($raw as &$item) {
+            if ((string)$item['sale_fact_id'] !== '') continue;
+            // Card debts can resolve through their issued projects rather than the card shell.
+            // Use the shared debt projection's current category summary so this report and
+            // the order center cannot disagree about the same repayment.
+            $debtId = (int)$item['debt_id'];
+            if (isset($debtCategories[$debtId])) {
+                $item['category_path_snapshot'] = (string)$debtCategories[$debtId];
+            }
+        }
+        unset($item);
         $selectedEntries = array_fill_keys($entryIds, true);
         $byEntry = [];
         foreach ($raw as $item) {
@@ -688,10 +797,298 @@ class StoreUnifiedReportServices extends BaseServices
         return $byEntry;
     }
 
+    /**
+     * A single debt item is an exact product link and may be returned as the row identity.
+     * Multi-item debts keep their shared summary but must not invent one product ID.
+     * @return array<int,int> debt ID => product ID
+     */
+    private function memberConsumptionUniqueDebtProducts(array $debtIds): array
+    {
+        $debtIds = array_values(array_unique(array_filter(array_map('intval', $debtIds))));
+        if ($debtIds === []) return [];
+        $items = Db::name('store_debt_item')->whereIn('debt_id', $debtIds)
+            ->field('debt_id,product_id')->order('id')->select()->toArray();
+        $byDebt = [];
+        foreach ($items as $item) $byDebt[(int)$item['debt_id']][] = (int)$item['product_id'];
+        $products = [];
+        foreach ($byDebt as $debtId => $ids) {
+            $ids = array_values(array_unique(array_filter($ids)));
+            if (count($ids) === 1) $products[(int)$debtId] = (int)$ids[0];
+        }
+        return $products;
+    }
+
+    /**
+     * 充值单由 user_recharge 决定业务存在性，收款金额只从不可变支付事实读取。
+     * 使用左连接是为了保留纯赠送充值；已退款或作废的充值由权威生命周期操作移出正常报表。
+     */
+    private function memberConsumptionRechargeQuery($storeId, array $range, array $input)
+    {
+        $tenant = CashierV3ScopeResolver::TENANT_SCOPE_ID;
+        $query = Db::name('user_recharge')->alias('recharge')
+            ->leftJoin('cashier_v3_payment_fact recharge_payment',
+                "recharge_payment.tenant_id='" . addslashes($tenant) . "'"
+                . " AND recharge_payment.order_id=CONCAT('RCH:',recharge.id)"
+                . " AND recharge_payment.source_document_type='recharge'"
+                . " AND recharge_payment.fact_direction='forward' AND recharge_payment.status='effective'")
+            ->leftJoin('user recharge_member', 'recharge_member.uid=recharge.uid')
+            ->leftJoin('system_store recharge_store', 'recharge_store.id=recharge.store_id')
+            ->where('recharge.paid', 1)->where('recharge.terminal_action', 0)
+            ->where('recharge.refund_price', '<=', 0)
+            ->whereBetween('recharge.business_date', [$range['start'], $range['end']])
+            ->whereNotExists(function ($operation): void {
+                $operation->name('cashier_v3_order_lifecycle_operation')->alias('member_recharge_terminal')
+                    ->where('member_recharge_terminal.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->whereRaw('member_recharge_terminal.source_order_id=recharge.id')
+                    ->where('member_recharge_terminal.source_type', 'recharge')
+                    ->whereIn('member_recharge_terminal.operation_type', ['refund', 'void'])
+                    ->where('member_recharge_terminal.status', 'succeeded');
+            });
+        if (is_array($storeId)) $query->whereIn('recharge.store_id', array_values(array_unique(array_map('intval', $storeId))));
+        else $query->where('recharge.store_id', (int)$storeId);
+        $this->organizationDimensions()->applyFilters($query, 'recharge', $input, $range);
+        $orderExpression = "CONCAT('RCH:',recharge.id)";
+        if ($this->participantEmployeeId > 0) {
+            $this->memberConsumptionOrderParticipantFilter($query, $orderExpression, $this->participantEmployeeId);
+        }
+        $this->memberConsumptionStandaloneFilters($query, $input, $orderExpression, $storeId);
+        return $query;
+    }
+
+    /** 充值欠款补交是独立收款事件，不借原充值日期或金额重复入表。 */
+    private function memberConsumptionRechargeSupplementQuery($storeId, array $range, array $input)
+    {
+        $query = Db::name('cashier_v3_payment_fact')->alias('recharge_repayment_payment')
+            ->join('cashier_v3_recharge_debt_repayment recharge_repayment',
+                "recharge_repayment.tenant_id=recharge_repayment_payment.tenant_id"
+                . " AND recharge_repayment.repayment_id=recharge_repayment_payment.order_id"
+                . " AND recharge_repayment.status='succeeded'")
+            ->where('recharge_repayment_payment.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('recharge_repayment_payment.source_document_type', 'recharge_debt_repayment')
+            ->where('recharge_repayment_payment.fact_direction', 'forward')
+            ->where('recharge_repayment_payment.status', 'effective')
+            ->whereBetween('recharge_repayment_payment.business_date', [$range['start'], $range['end']]);
+        if (is_array($storeId)) $query->whereIn('recharge_repayment_payment.store_id', array_values(array_unique(array_map('intval', $storeId))));
+        else $query->where('recharge_repayment_payment.store_id', (int)$storeId);
+        $this->normalDataScope()->excludeVoidedSupplementPaymentFacts($query,
+            'recharge_repayment_payment.tenant_id', 'recharge_repayment_payment.store_id',
+            'recharge_repayment_payment.order_id');
+        $this->organizationDimensions()->applyFilters($query, 'recharge_repayment_payment', $input, $range);
+        if ($this->participantEmployeeId > 0) {
+            (new StoreReportParticipantScopeServices())->applySupplement($query,
+                'recharge_repayment_payment.order_id', $this->participantEmployeeId);
+        }
+        $this->memberConsumptionStandaloneFilters($query, $input,
+            'recharge_repayment_payment.order_id', $storeId);
+        return $query;
+    }
+
+    /**
+     * 充值事实不伪造销售明细，但必须使用数据库绑定的系统“余额”项目身份。
+     * 商品类筛选按该真实项目的当前资料判断；人员筛选继续按本笔订单的事实归属收窄。
+     */
+    private function memberConsumptionStandaloneFilters($query, array $input, string $orderExpression,
+        $storeId): void
+    {
+        $project = $this->memberConsumptionBalanceProject($storeId);
+        $categoryId = (int)($input['category_id'] ?? 0);
+        $path = trim((string)($input['category_path'] ?? ''));
+        $exactPath = trim((string)($input['category_path_exact'] ?? ''));
+        $productType = trim((string)($input['product_type'] ?? ''));
+        $partner = trim((string)($input['partner_name'] ?? ''));
+        if (($categoryId > 0 && (int)$project['category_id'] !== $categoryId)
+            || ($path !== '' && strpos((string)$project['category_path'], $path) !== 0)
+            || ($exactPath !== '' && (string)$project['category_path'] !== $exactPath)
+            || ($productType !== '' && (string)$project['product_type'] !== $productType)
+            || $partner !== '') {
+            $query->whereRaw('1=0');
+        }
+        foreach ([
+            ['salesperson_id', 'cashier_v3_performance_fact', 'employee_id'],
+            ['guide_id', 'cashier_v3_customer_guide_round_fact', 'guide_employee_id'],
+            ['sales_manager_id', 'cashier_v3_sales_manager_fact', 'sales_manager_employee_id'],
+        ] as [$inputKey, $table, $employeeField]) {
+            $employeeId = (int)($input[$inputKey] ?? 0);
+            if ($employeeId <= 0) continue;
+            $query->whereExists(function ($person) use ($orderExpression, $table, $employeeField, $employeeId): void {
+                $person->name($table)->alias('member_activity_person')
+                    ->whereRaw('member_activity_person.order_id=' . $orderExpression)
+                    ->where('member_activity_person.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                    ->where('member_activity_person.' . $employeeField, $employeeId)
+                    ->where('member_activity_person.status', 'effective');
+            });
+        }
+    }
+
+    /**
+     * The persisted system binding is the authoritative project identity for every recharge event.
+     * Recharge payment facts remain the amount authority; no synthetic sale line or name lookup is allowed.
+     * @return array{id:int,name:string,product_type:int,category_id:int,category_path:string}
+     */
+    private function memberConsumptionBalanceProject($storeId): array
+    {
+        $service = new SystemBalanceProjectServices();
+        $productId = $service->productId();
+        if ($productId <= 0) {
+            throw new \RuntimeException('系统余额项目未配置，无法生成充值消费明细');
+        }
+        $product = (array)Db::name('store_product')->where('id', $productId)
+            ->field('id,store_name,product_type')->find();
+        if ((int)($product['id'] ?? 0) !== $productId || trim((string)($product['store_name'] ?? '')) === '') {
+            throw new \RuntimeException('系统余额项目资料无效，无法生成充值消费明细');
+        }
+        $stores = is_array($storeId) ? array_values(array_unique(array_map('intval', $storeId))) : [(int)$storeId];
+        $category = $service->category((int)($stores[0] ?? 0));
+        return [
+            'id' => $productId,
+            'name' => (string)$product['store_name'],
+            'product_type' => (int)$product['product_type'],
+            'category_id' => (int)($category['id'] ?? 0),
+            'category_path' => (string)($category['path'] ?? ''),
+        ];
+    }
+
+    /** 个人视图只允许查看本人参与的充值单，表达式由服务端固定，不接受请求传入。 */
+    private function memberConsumptionOrderParticipantFilter($query, string $orderExpression, int $employeeId): void
+    {
+        $query->where(function ($participant) use ($orderExpression, $employeeId): void {
+            foreach ([
+                ['cashier_v3_performance_fact', 'employee_id'],
+                ['cashier_v3_customer_guide_round_fact', 'guide_employee_id'],
+                ['cashier_v3_sales_manager_fact', 'sales_manager_employee_id'],
+            ] as $index => [$table, $employeeField]) {
+                $logic = $index === 0 ? 'AND' : 'OR';
+                $participant->whereExists(function ($person) use ($orderExpression, $table, $employeeField, $employeeId): void {
+                    $person->name($table)->alias('member_scope_person')
+                        ->whereRaw('member_scope_person.order_id=' . $orderExpression)
+                        ->where('member_scope_person.tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+                        ->where('member_scope_person.' . $employeeField, $employeeId)
+                        ->where('member_scope_person.status', 'effective');
+                }, $logic);
+            }
+        });
+    }
+
+    /** 充值与充值补交共用收款列，但业务单号、人员归属和来源仍来自各自权威单据。 */
+    private function memberConsumptionStoredValueRows($query, array $entryIds, $storeId,
+        array $partnerDefinitions, bool $isSupplement): array
+    {
+        if ($entryIds === []) return [];
+        $balanceProject = $this->memberConsumptionBalanceProject($storeId);
+        $entryIds = array_values(array_unique(array_map('intval', $entryIds)));
+        if ($isSupplement) {
+            $raw = (clone $query)->whereIn('recharge_repayment.id', $entryIds)
+                ->fieldRaw('recharge_repayment.id entry_id,recharge_repayment_payment.order_id,recharge_repayment_payment.tenant_id,recharge_repayment_payment.store_id,recharge_repayment_payment.organization_id,recharge_repayment_payment.organization_path_snapshot,recharge_repayment_payment.store_name_snapshot,recharge_repayment_payment.member_id,recharge_repayment_payment.member_name_snapshot,recharge_repayment_payment.business_date,recharge_repayment_payment.business_source_label_snapshot,recharge_repayment_payment.payment_method,recharge_repayment_payment.amount_cents,recharge_repayment.repayment_no order_no_snapshot')
+                ->select()->toArray();
+        } else {
+            $raw = (clone $query)->whereIn('recharge.id', $entryIds)
+                ->fieldRaw("recharge.id entry_id,CONCAT('RCH:',recharge.id) order_id,recharge_payment.tenant_id,recharge.store_id,recharge_payment.organization_id,recharge_payment.organization_path_snapshot,COALESCE(NULLIF(recharge_payment.store_name_snapshot,''),recharge_store.name,'') store_name_snapshot,recharge.uid member_id,COALESCE(NULLIF(recharge_payment.member_name_snapshot,''),NULLIF(recharge_member.real_name,''),recharge_member.nickname,'') member_name_snapshot,recharge.business_date,COALESCE(NULLIF(recharge.business_source_label_snapshot,''),recharge_payment.business_source_label_snapshot,'') business_source_label_snapshot,recharge_payment.payment_method,recharge_payment.amount_cents,recharge.order_id order_no_snapshot")
+                ->select()->toArray();
+        }
+        $byEntry = [];
+        foreach ($raw as $item) {
+            $entryId = (int)$item['entry_id'];
+            if (!isset($byEntry[$entryId])) {
+                $this->applyOrganizationDimensions($item);
+                $item['consume_type'] = $isSupplement ? '补交' : '充值';
+                $item['member_name'] = (string)$item['member_name_snapshot'];
+                // 保存到数据库的系统业务项目绑定是项目身份；报表必须返回其真实 ID、资料名称与当前分类，
+                // 不能只把“余额”写成展示文字，也不能把充值伪造成一条销售商品明细。
+                $item['current_product_id'] = $balanceProject['id'];
+                $item['product_type_snapshot'] = $balanceProject['product_type'];
+                $item['category_id_snapshot'] = $balanceProject['category_id'];
+                $item['category_path_snapshot'] = $balanceProject['category_path'];
+                $item['consumption_detail'] = $balanceProject['name'];
+                $item['category'] = $balanceProject['category_path'];
+                $item['member_source'] = (string)$item['business_source_label_snapshot'];
+                $item['quantity'] = 0;
+                $item['experience_cash'] = '0';
+                $item['experience_payment_method'] = '';
+                $item['_payment_cents'] = [];
+                $byEntry[$entryId] = $item;
+            }
+            $method = trim((string)($item['payment_method'] ?? ''));
+            if ($method !== '') {
+                $byEntry[$entryId]['_payment_cents'][$method] = (int)($byEntry[$entryId]['_payment_cents'][$method] ?? 0)
+                    + (int)($item['amount_cents'] ?? 0);
+            }
+        }
+        $orderIds = array_values(array_unique(array_filter(array_map(static function ($row) {
+            return trim((string)($row['order_id'] ?? ''));
+        }, $byEntry))));
+        $people = $this->memberConsumptionOrderPeople($orderIds, $storeId, $isSupplement);
+        foreach ($byEntry as &$row) {
+            $receiptCents = 0;
+            foreach ($this->memberConsumptionPaymentMethods() as $method) {
+                $amount = (int)($row['_payment_cents'][$method['code']] ?? 0);
+                $row['payment_' . $method['code']] = $this->money($amount);
+                $receiptCents += $amount;
+            }
+            $row['receipt_total'] = $this->money($receiptCents);
+            $row['actual_cash_performance'] = $this->money($receiptCents);
+            $row['partner_performance'] = $this->money(0);
+            foreach ($partnerDefinitions as $definition) $row[$definition['key']] = $this->money(0);
+            $orderId = (string)$row['order_id'];
+            $row['salesperson_names'] = implode('、', $people[$orderId]['salesperson'] ?? []);
+            $row['sales_manager_name'] = implode('、', $people[$orderId]['sales_manager'] ?? []);
+            $row['guide_names'] = implode('、', $people[$orderId]['guide'] ?? []);
+            $rounds = $people[$orderId]['guide_round'] ?? [];
+            $row['guide_round_no'] = $rounds ? (max($rounds) > 0 ? max($rounds) : '无') : '';
+            unset($row['_payment_cents']);
+        }
+        unset($row);
+        return $byEntry;
+    }
+
+    /** @return array<string,array<string,array<int,mixed>>> */
+    private function memberConsumptionOrderPeople(array $orderIds, $storeId, bool $supplement): array
+    {
+        if ($orderIds === []) return [];
+        $people = [];
+        foreach ($this->withStoreScope(Db::name('cashier_v3_performance_fact'), $storeId)
+            ->whereIn('order_id', $orderIds)->where('performance_type', 'sales_performance_allocated')
+            ->where('fact_direction', 'forward')->where('status', 'effective')
+            ->field('order_id,employee_name_snapshot')->select()->toArray() as $person) {
+            $name = trim((string)$person['employee_name_snapshot']);
+            if ($name !== '') $people[(string)$person['order_id']]['salesperson'][] = $name;
+        }
+        if ($supplement) {
+            $attributions = (new CashierV3SupplementAttributionServices())->currentRows(
+                CashierV3ScopeResolver::TENANT_SCOPE_ID, $orderIds);
+            foreach ($attributions as $orderId => $rows) foreach ($rows as $person) {
+                $role = (string)$person['role'];
+                if ($role === 'guide') {
+                    $people[$orderId]['guide'][] = (string)$person['employee_name_snapshot'];
+                    $people[$orderId]['guide_round'][] = (int)($person['guide_round_no'] ?? 0);
+                } elseif ($role === 'sales_manager') {
+                    $people[$orderId]['sales_manager'][] = (string)$person['employee_name_snapshot'];
+                }
+            }
+        } else {
+            foreach ($this->withStoreScope(Db::name('cashier_v3_customer_guide_round_fact'), $storeId)
+                ->whereIn('order_id', $orderIds)->where('status', 'effective')
+                ->field('order_id,guide_round_no,guide_employee_name_snapshot')->select()->toArray() as $person) {
+                $orderId = (string)$person['order_id'];
+                $people[$orderId]['guide'][] = (string)$person['guide_employee_name_snapshot'];
+                $people[$orderId]['guide_round'][] = (int)($person['guide_round_no'] ?? 0);
+            }
+            foreach ($this->withStoreScope(Db::name('cashier_v3_sales_manager_fact'), $storeId)
+                ->whereIn('order_id', $orderIds)->where('status', 'effective')
+                ->field('order_id,sales_manager_name_snapshot')->select()->toArray() as $person) {
+                $people[(string)$person['order_id']]['sales_manager'][] = (string)$person['sales_manager_name_snapshot'];
+            }
+        }
+        foreach ($people as &$roles) foreach ($roles as &$names) $names = array_values(array_unique($names));
+        unset($roles, $names);
+        return $people;
+    }
+
     private function memberConsumptionDetail($storeId, array $range, array $input): array
     {
         $query = $this->operationSaleQuery($storeId, $range, $input, false);
         $supplementQuery = $this->memberConsumptionSupplementQuery($storeId, $range, $input);
+        $rechargeQuery = $this->memberConsumptionRechargeQuery($storeId, $range, $input);
+        $rechargeSupplementQuery = $this->memberConsumptionRechargeSupplementQuery($storeId, $range, $input);
         $stores = is_array($storeId) ? $storeId : [(int)$storeId];
         $stores = $this->organizationDimensions()->narrowStoreIds($stores, $input);
         $refundReader = new StoreMemberConsumptionRefundReadServices();
@@ -704,26 +1101,38 @@ class StoreUnifiedReportServices extends BaseServices
         $saleKeys = (clone $query)->fieldRaw("s.id entry_id,s.business_date,'sale' entry_kind")
             ->unionAll($refundKeys);
         $supplementKeys = (clone $supplementQuery)
-            ->fieldRaw("CONCAT(repayment_payment.order_id,'|',allocation.sale_fact_id) entry_id,repayment_payment.business_date,'supplement' entry_kind")
+            ->fieldRaw("CONCAT(repayment_payment.order_id,'|',COALESCE(allocation.sale_fact_id,'')) entry_id,repayment_payment.business_date,'supplement' entry_kind")
             ->group('repayment_payment.order_id,allocation.sale_fact_id,repayment_payment.business_date')->buildSql(false);
-        $saleKeys = $saleKeys->unionAll($supplementKeys)->buildSql();
+        $rechargeKeys = (clone $rechargeQuery)
+            ->fieldRaw("recharge.id entry_id,recharge.business_date,'recharge' entry_kind")
+            ->group('recharge.id,recharge.business_date')->buildSql(false);
+        $rechargeSupplementKeys = (clone $rechargeSupplementQuery)
+            ->fieldRaw("recharge_repayment.id entry_id,recharge_repayment_payment.business_date,'recharge_supplement' entry_kind")
+            ->group('recharge_repayment.id,recharge_repayment_payment.business_date')->buildSql(false);
+        $saleKeys = $saleKeys->unionAll($supplementKeys)->unionAll($rechargeKeys)
+            ->unionAll($rechargeSupplementKeys)->buildSql();
         $entries = Db::table([$saleKeys => 'member_activity']);
         $total = (int)(clone $entries)->count();
         $ordered = (clone $entries)->field('entry_id,entry_kind,business_date')
             ->order('business_date', 'desc')->order('entry_id', 'desc')->order('entry_kind', 'asc');
         if (empty($input['_internal_all'])) $ordered->page($this->page($input), $this->limit($input));
         $pageEntries = $ordered->select()->toArray();
-        $saleIds = $refundIds = $supplementEntryIds = [];
+        $saleIds = $refundIds = $supplementEntryIds = $rechargeIds = $rechargeSupplementIds = [];
         foreach ($pageEntries as $entry) {
             if ((string)$entry['entry_kind'] === 'refund') $refundIds[] = (int)$entry['entry_id'];
             elseif ((string)$entry['entry_kind'] === 'supplement') $supplementEntryIds[] = (string)$entry['entry_id'];
+            elseif ((string)$entry['entry_kind'] === 'recharge') $rechargeIds[] = (int)$entry['entry_id'];
+            elseif ((string)$entry['entry_kind'] === 'recharge_supplement') $rechargeSupplementIds[] = (int)$entry['entry_id'];
             else $saleIds[] = (int)$entry['entry_id'];
         }
         $partnerDefinitions = $this->partnerPerformanceDefinitions($storeId);
-        $summaryValues = $this->memberConsumptionSummaryValues($query, $supplementQuery, $storeId, $partnerDefinitions);
         $refundCents = $refundReader->amountCents($refundQuery);
         $allRefundIds = array_map('intval', (clone $refundQuery)->column('refund_operation.id'));
         $refundRows = $refundReader->rows($refundQuery, $allRefundIds);
+        $partnerProjection = $this->memberPartnerCategoryProjection($query, $refundRows, $partnerDefinitions);
+        $partnerDefinitions = $partnerProjection['definitions'];
+        $summaryValues = $this->memberConsumptionSummaryValues($query, $supplementQuery,
+            $rechargeQuery, $rechargeSupplementQuery, $storeId, $partnerDefinitions, $partnerProjection['totals']);
         $refundById = [];
         $refundShares = [];
         $verifiedRefundCents = 0;
@@ -732,9 +1141,9 @@ class StoreUnifiedReportServices extends BaseServices
             if ((string)($refund['original_sale_fact_id'] ?? '') !== '') {
                 $verifiedRefundCents += (int)$refund['amount_cents'];
             }
-            $categoryId = (int)$refund['partner_category_id_snapshot'];
-            if ($categoryId > 0) $refundShares[$categoryId] = (int)($refundShares[$categoryId] ?? 0)
-                + (int)$refund['partner_share_cents'];
+            foreach ($partnerProjection['refunds'][(int)$refund['id']] ?? [] as $categoryId => $cents) {
+                $refundShares[$categoryId] = (int)($refundShares[$categoryId] ?? 0) + $cents;
+            }
         }
         $refundShareCents = array_sum($refundShares);
         $summaryValues['payment_refund_adjustment'] = $this->money($refundCents);
@@ -751,12 +1160,15 @@ class StoreUnifiedReportServices extends BaseServices
         $rows = $saleIds === [] ? [] : (clone $query)->whereIn('s.id', $saleIds)
             ->fieldRaw("s.id,s.fact_id,s.tenant_id,s.store_id,s.business_date,s.organization_id,s.organization_path_snapshot,s.store_name_snapshot,s.order_no_snapshot,s.order_id,s.source_line_id,s.member_id,s.member_name_snapshot,s.item_name_snapshot,d.item_id current_product_id,d.category_path_snapshot,d.product_type_snapshot,s.source_type,s.quantity,s.sale_amount_cents,d.partner_category_id_snapshot,d.partner_category_path_snapshot,d.partner_share_amount_cents,s.business_source_label_snapshot,s.source_attribution_type_snapshot,d.is_experience")
             ->select()->toArray();
-        $this->projectSaleCategories($rows, 'current_product_id', 'current_category_id', 'category_path_snapshot');
-        $this->decorateMemberConsumptionRows($rows, $storeId, $partnerDefinitions, $this->cardPartnerSharesBySaleFact($rows, $storeId));
+        // The same full-result projection supplies page labels, partner columns and totals.
+        foreach ($rows as &$row) $row['category_path_snapshot'] = StoreReportSaleCategoryServices::label(
+            $partnerProjection['sales'][(string)$row['fact_id']]['categories'] ?? []);
+        unset($row);
+        $this->decorateMemberConsumptionRows($rows, $storeId, $partnerDefinitions, $partnerProjection['sales']);
         foreach ($rows as &$row) {
             $this->applyOrganizationDimensions($row);
             $row['sale_amount'] = $this->money((int)$row['sale_amount_cents']);
-            $row['consume_type'] = in_array((string)$row['source_type'], ['refund','void','cancel'], true) ? (string)$row['source_type'] : '正常';
+            $row['consume_type'] = '消费';
             $row['member_name'] = (string)$row['member_name_snapshot'];
             $row['consumption_detail'] = (string)$row['item_name_snapshot'];
             $row['category'] = (string)$row['category_path_snapshot'];
@@ -805,14 +1217,23 @@ class StoreUnifiedReportServices extends BaseServices
                 if ($method['code'] !== 'refund_adjustment') $refund['payment_' . $method['code']] = '0';
             }
             foreach ($partnerDefinitions as $definition) {
-                $refund[$definition['key']] = (int)$definition['category_id'] === (int)$refund['partner_category_id_snapshot']
-                    ? $this->money($partnerShare) : ($hasOriginalSale ? '0' : '');
+                $refund[$definition['key']] = $hasOriginalSale
+                    ? $this->money((int)($partnerProjection['refunds'][(int)$refund['id']][(int)$definition['category_id']] ?? 0)) : '';
             }
+            unset($refund['_current_categories']);
             $byEntry['refund:' . (int)$refund['id']] = $refund;
         }
         foreach ($this->memberConsumptionSupplementRows($supplementQuery, $supplementEntryIds,
             $storeId, $partnerDefinitions) as $entryId => $supplement) {
             $byEntry['supplement:' . $entryId] = $supplement;
+        }
+        foreach ($this->memberConsumptionStoredValueRows($rechargeQuery, $rechargeIds,
+            $storeId, $partnerDefinitions, false) as $entryId => $recharge) {
+            $byEntry['recharge:' . $entryId] = $recharge;
+        }
+        foreach ($this->memberConsumptionStoredValueRows($rechargeSupplementQuery, $rechargeSupplementIds,
+            $storeId, $partnerDefinitions, true) as $entryId => $supplement) {
+            $byEntry['recharge_supplement:' . $entryId] = $supplement;
         }
         $rows = [];
         foreach ($pageEntries as $entry) {
@@ -820,16 +1241,16 @@ class StoreUnifiedReportServices extends BaseServices
             if (isset($byEntry[$key])) $rows[] = $byEntry[$key];
         }
         $columns = array_merge($this->organizationDimensionColumns(), [
-            ['key'=>'business_date','label'=>'日期'], ['key'=>'order_no_snapshot','label'=>'业务单号','source_explanation'=>'成交显示原销售单号；补交显示补交单号；退款显示退款单号，分别按业务日期入表。'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
-            ['key'=>'consumption_detail','label'=>'消费明细'], ['key'=>'category','label'=>'分类','source_explanation'=>'按本行商品关联的平台商品当前分类显示；平台改分类后，历史明细分类同步更新，金额不变。'], ['key'=>'sales_manager_name','label'=>'销售经理','source_explanation'=>'成交显示原单经理；补交和退款显示本笔记录当前版本的销售经理，修改后不覆盖原单。'],
+            ['key'=>'business_date','label'=>'日期'], ['key'=>'order_no_snapshot','label'=>'业务单号','source_explanation'=>'消费、充值、补交和退款分别显示各自权威单号，并按各自业务日期入表。'], ['key'=>'consume_type','label'=>'消费类型'], ['key'=>'member_name','label'=>'姓名'],
+            ['key'=>'consumption_detail','label'=>'消费明细','source_explanation'=>'充值与充值欠款补交使用数据库绑定的系统“余额”项目；其他业务显示可核实的原商品，不能用文字猜造商品身份。'], ['key'=>'category','label'=>'分类','source_explanation'=>'销售、补交和退款统一按商品分类关联方法取值：SKU 或所有项目的 product_id 关联门店商品，再通过 pid 读取平台商品当前分类；卡项读取实际包含的项目，多分类并列显示，关联无法核实时不借用旧分类。'], ['key'=>'sales_manager_name','label'=>'销售经理','source_explanation'=>'消费显示原单经理；充值、补交和退款显示本笔记录的有效销售经理归属。'],
             ['key'=>'guide_round_no','label'=>'导购业绩次数','source_explanation'=>'成交显示原单导购轮次；补交显示本笔记录保存的轮次，仅作补交归属，不新增一次到店；退款不计轮次。'], ['key'=>'guide_names','label'=>'导购人员','source_explanation'=>'成交显示原单导购；补交和退款显示本笔记录当前版本的导购，修改后不覆盖原单。'], ['key'=>'salesperson_names','label'=>'销售'],
             ['key'=>'member_source','label'=>'会员来源'],
         ]);
         foreach ($this->memberConsumptionPaymentMethods() as $method) $columns[] = ['key'=>'payment_'.$method['code'],'label'=>$method['label'],'group_label'=>'支付现金业绩方式'];
-        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式','source_explanation'=>'成交行显示当次已分摊记账收款，补交行显示补交业务日分摊收款；退款在退款日显示负向调整。每笔收款只进一个业务日。'];
+        $columns[] = ['key'=>'receipt_total','label'=>'收款总金额','group_label'=>'支付现金业绩方式','source_explanation'=>'消费、充值和补交按各自业务日显示已成功记账收款；退款在退款日显示负向调整。每笔收款只进一个业务日。'];
         foreach ($partnerDefinitions as $definition) $columns[] = [
             'key'=>$definition['key'],'label'=>$definition['label'],'group_label'=>'合作方分成业绩',
-            'source_explanation'=>'成交使用保存的合作方分成快照；退款按原成交比例在退款日冲减，不能从当前分类配置倒推历史比例。',
+            'source_explanation'=>'金额保留原成交分成及退款冲减事实，按商品或卡内项目的平台当前分类归列；分类无法核实时计入未分类，不按当前比例重算历史分成。',
         ];
         foreach ([['partner_performance','合作方业绩'],['actual_cash_performance','分成后现金业绩'],['experience_cash','体验现金业绩'],['experience_payment_method','体验现金业绩支付方式']] as $column) $columns[] = ['key'=>$column[0],'label'=>$column[1]];
         foreach ($columns as &$column) {
@@ -844,7 +1265,7 @@ class StoreUnifiedReportServices extends BaseServices
             'consumption_detail'=>138, 'category'=>116,
         ]);
         return [
-            'title'=>'会员消费明细','metric_version'=>'member-consumption-supplement-attribution-v3','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
+            'title'=>'会员消费明细','metric_version'=>'member-consumption-current-category-v6','columns'=>$columns,'column_groups'=>$this->columnGroups($columns),'records'=>$rows,'total'=>$total,'page'=>$this->page($input),'page_size'=>$this->limit($input),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
             'table_layout'=>['fixed'=>true],
             'summary_row'=>$this->summaryRow($columns, array_merge(['business_date'=>'合计'], $summaryValues)),
@@ -956,11 +1377,11 @@ class StoreUnifiedReportServices extends BaseServices
             // “未分类”承接没有可信平台商品关联或平台分类失效的历史金额。
             $isUnclassified = (int)$definition['category_id'] === 0;
             $metricExplanations = $isUnclassified ? [
-                ['cash', '现金业绩', '所选日期内未关联有效平台分类，或历史卡补交无法核对原单项目的成功收款扣除同期间现金退款；不含余额支付和未补交的欠款。'],
+                ['cash', '现金业绩', '所选日期内无法核实商品、卡内项目或原金额分配的收款及退款归入此列；无法按名称猜分类，不含余额支付和未补交的欠款。'],
                 ['after_split', '分成后业绩', '上述未分类现金业绩减去成交时已记录、并随退款冲减的合作方分成金额。'],
                 ['consume', '消耗业绩', '所选日期内完成的服务或核销，项目未关联有效平台分类时归入此列；冲销按发生日扣回，原金额不变。'],
             ] : [
-                ['cash', '现金业绩', '所选日期内成功收款扣除现金退款，按商品或卡内项目的平台当前分类归入本列；可核对原单项目的历史卡补交也按卡内项目分类，不含余额支付和未补交的欠款。'],
+                ['cash', '现金业绩', '所选日期内成功收款扣除现金退款，按 SKU 或所有项目关联的平台商品当前分类归入本列；可对账的历史卡补交和退款也按项目分类，不含余额支付和未补交的欠款。'],
                 ['after_split', '分成后业绩', '本分类净现金业绩减去成交时记录、并随退款按原比例冲减的合作方分成金额。'],
                 ['consume', '消耗业绩', '所选日期内已完成服务或核销的消耗金额，按项目的平台当前分类归入本列；冲销按发生日扣回。'],
             ];
@@ -1004,7 +1425,7 @@ class StoreUnifiedReportServices extends BaseServices
         unset($column);
         $columns = $this->fixedColumns($columns, ['division_name'=>130, 'city_manager'=>130, 'store_name'=>140]);
         return [
-            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-historical-card-repayment-v4', 'columns' => $columns,
+            'title' => '门店品项分析', 'metric_version' => 'store-item-analysis-current-item-refund-v6', 'columns' => $columns,
             'column_groups' => $groups, 'records' => array_values($rows),
             'total' => count($rows), 'page' => 1, 'page_size' => count($rows),
             'filter_schema' => $this->organizationDimensionFilterSchema($range),
@@ -1025,10 +1446,19 @@ class StoreUnifiedReportServices extends BaseServices
         // source is read. They never act as a page-side post-filter.
         $authorizedStores = $this->organizationDimensions()->narrowStoreIds($authorizedStores, $input);
         if ($authorizedStores === []) return compact('stores', 'categories');
-        $shareRows = $this->operationSaleQuery($authorizedStores, $range, $input)
-            ->fieldRaw("s.store_id,s.store_name_snapshot,s.organization_id,s.organization_path_snapshot,s.business_date,s.source_line_id,COALESCE(c.component_product_id,d.item_id,0) current_product_id,COALESCE(c.category_id_snapshot,d.category_id_snapshot,0) AS category_id_snapshot,COALESCE(c.category_path_snapshot,d.category_path_snapshot) AS category_path_snapshot,COALESCE(c.partner_share_amount_cents,d.partner_share_amount_cents,0) AS share_cents")
+        $shareSources = $this->operationSaleQuery($authorizedStores, $range, $input, false)
+            ->fieldRaw('s.fact_id sale_fact_id,s.source_type,s.store_id,s.store_name_snapshot,s.organization_id,s.organization_path_snapshot,s.business_date,s.source_line_id,d.item_id product_id,d.partner_share_amount_cents')
             ->select()->toArray();
-        $this->projectSaleCategories($shareRows, 'current_product_id', 'category_id_snapshot', 'category_path_snapshot');
+        $shareCategories = (new StoreReportSaleCategoryServices())->resolve($shareSources);
+        $shareRows = [];
+        foreach ($shareSources as $key => $source) {
+            foreach ($shareCategories[$key] ?? [] as $category) {
+                if (((int)($input['category_id'] ?? 0)>0 || !empty($input['category_path']) || !empty($input['category_path_exact']))
+                    && !StoreReportSaleCategoryServices::matches([$category], $input)) continue;
+                $shareRows[] = array_merge($source, ['category_id_snapshot' => (int)$category['id'],
+                    'category_path_snapshot' => (string)$category['path'], 'share_cents' => (int)$category['partner_share_amount_cents']]);
+            }
+        }
         $categoryIds = (int)($input['category_id'] ?? 0) > 0 ? [(int)$input['category_id']] : [];
         $metricFilters = $this->itemAnalysisMetricFilters($input);
         $metricReader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
@@ -1106,13 +1536,30 @@ class StoreUnifiedReportServices extends BaseServices
                 $standalone = in_array((string)$entry['source_document_type'],
                     ['manual_refund', 'imported_card_refund'], true);
                 if ($standalone) $stores[$storeKey]['cash_cents'] += (int)$entry['amount_cents'];
-                $category = $this->itemAnalysisConfiguredCategory(
-                    $definitions, (int)$entry['current_category_id'], (string)$entry['category_path_snapshot']
-                );
-                if ($category === null) continue;
-                $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
-                $categories[$storeKey][$category['id']]['share_cents'] += $shareCents;
-                if ($standalone) $categories[$storeKey][$category['id']]['cash_cents'] += (int)$entry['amount_cents'];
+                $itemCategories = $entry['_current_categories'] ?? [];
+                if ($itemCategories === []) $itemCategories = [['id' => 0, 'path' => '', 'weight_cents' => 0]];
+                $split = self::allocateRefundCategoryCents((int)$entry['amount_cents'], $itemCategories);
+                foreach ($itemCategories as $index => $itemCategory) {
+                    $category = $this->itemAnalysisConfiguredCategory(
+                        $definitions, (int)$itemCategory['id'], (string)$itemCategory['path']
+                    );
+                    if ($category === null) continue;
+                    $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
+                    if ($standalone) $categories[$storeKey][$category['id']]['cash_cents'] += (int)$split[$index];
+                }
+                // A whole-card refund's historical partner share cannot be
+                // inferred from present-day project categories. Keep such a
+                // share in 未分类 while preserving the exact store-wide total.
+                if ($shareCents !== 0) {
+                    $shareCategory = count($itemCategories) === 1 ? $itemCategories[0] : ['id' => 0, 'path' => ''];
+                    $category = $this->itemAnalysisConfiguredCategory(
+                        $definitions, (int)$shareCategory['id'], (string)$shareCategory['path']
+                    );
+                    if ($category !== null) {
+                        $this->itemAnalysisCategoryAmount($categories, $storeKey, $category);
+                        $categories[$storeKey][$category['id']]['share_cents'] += $shareCents;
+                    }
+                }
             }
         }
         $consumeRows = $this->participantEmployeeId > 0
@@ -1519,13 +1966,16 @@ class StoreUnifiedReportServices extends BaseServices
         $details = $employeeIds === null
             ? ['records' => [], 'total' => 0, 'amount_cents' => 0]
             : (new StoreSalespersonNetReadServices())->detail($stores, $range, $employeeIds, $day,
-                $this->page($input), $this->limit($input), $exportAll);
+                $this->page($input), $this->limit($input), $exportAll, [
+                    'member' => $input['detail_member'] ?? '', 'order' => $input['detail_order_no'] ?? '',
+                ]);
         $rows = $details['records'];
         foreach ($rows as &$row) {
             $this->applyOrganizationDimensions($row);
             $row['_market_group_key'] = (string)$row['fact_id'];
             $isRefund = (string)$row['performance_type'] === 'refund_sales_deduction';
-            $row['business_type'] = $isRefund ? '退款冲减' : '销售分配';
+            $row['business_type'] = $isRefund ? '退款冲减'
+                : ((string)$row['fact_direction'] === 'reversal' ? '人员调整冲销' : '销售分配');
             $row['document_no'] = $isRefund ? (string)$row['refund_no'] : (string)$row['order_no_snapshot'];
             $row['original_no'] = $isRefund ? (string)$row['original_no'] : '';
             $row['performance_amount'] = $this->money((int)$row['amount_cents']);
@@ -1533,11 +1983,11 @@ class StoreUnifiedReportServices extends BaseServices
         unset($row);
         $columns = $this->fixedColumns(array_merge($this->organizationDimensionColumns(), [
             ['key'=>'business_date','label'=>'业务日期'],
-            ['key'=>'business_type','label'=>'业绩类型','source_explanation'=>'销售人正向分配或有效退款负向冲减；退款作废和人员改派的旧归属不显示。'],
+            ['key'=>'business_type','label'=>'业绩类型','source_explanation'=>'正向销售分配、人员调整冲销及有效退款冲减逐笔列示；冲销按负数抵减，原始事实不改写。'],
             ['key'=>'document_no','label'=>'业务单号','source_explanation'=>'销售分配显示原销售单号，退款冲减显示退款单号。'],
             ['key'=>'original_no','label'=>'原销售单号','source_explanation'=>'退款对应的原销售单号；无可信关联时留空。'],
             ['key'=>'member_name','label'=>'会员'], ['key'=>'employee_name','label'=>'销售人'],
-            ['key'=>'performance_amount','label'=>'销售业绩','source_explanation'=>'逐人有效销售分配金额及退款日负向冲减，金额在分精度求和后按元展示。'],
+            ['key'=>'performance_amount','label'=>'销售业绩','value_type'=>'integer','source_explanation'=>'逐人销售分配、人员调整冲销及退款冲减的有符号净额；同一查询范围与汇总、导出一致。'],
         ]), ['business_date'=>104,'business_type'=>96,'document_no'=>160,'employee_name'=>104]);
         return [
             'title'=>'销售人业绩明细','columns'=>$columns,'records'=>$rows,
@@ -1876,7 +2326,7 @@ class StoreUnifiedReportServices extends BaseServices
         if (!$rows) return $rows;
         $keys = [];
         foreach ($rows as $row) {
-            foreach (['source_line_id', 'order_id', 'business_source_primary_id'] as $field) {
+            foreach (['annotation_subject_key', 'source_line_id', 'order_id', 'business_source_primary_id'] as $field) {
                 $value = trim((string)($row[$field] ?? ''));
                 if ($value !== '') $keys[$value] = true;
             }
@@ -1886,7 +2336,9 @@ class StoreUnifiedReportServices extends BaseServices
         // and match keys in PHP.  This deliberately keeps the valid string
         // key "0" (the default source), which some SQL drivers coerce away
         // when it is passed through whereIn().
-        $query = Db::name('cashier_v3_report_annotation')->where('report_code', $reportCode);
+        $query = Db::name('cashier_v3_report_annotation')
+            ->where('tenant_id', CashierV3ScopeResolver::TENANT_SCOPE_ID)
+            ->where('report_code', $reportCode);
         if (is_array($storeId)) $query->whereIn('store_id', array_values(array_unique(array_map('intval', $storeId))));
         else $query->where('store_id', (int)$storeId);
         $annotations = $query->field('subject_key,field_key,field_value,version')->select()->toArray();
@@ -1901,7 +2353,8 @@ class StoreUnifiedReportServices extends BaseServices
             // when resolving editable market rows; array_filter's default
             // truthiness would otherwise drop it and hide saved annotations.
             $candidates = array_filter(
-                [(string)($row['source_line_id'] ?? ''), (string)($row['order_id'] ?? ''), (string)($row['business_source_primary_id'] ?? '')],
+                [(string)($row['annotation_subject_key'] ?? ''), (string)($row['source_line_id'] ?? ''),
+                    (string)($row['order_id'] ?? ''), (string)($row['business_source_primary_id'] ?? '')],
                 static fn(string $value): bool => $value !== ''
             );
             foreach ($candidates as $candidate) foreach ((array)($byKey[$candidate] ?? []) as $field => $value) {
@@ -1951,9 +2404,9 @@ class StoreUnifiedReportServices extends BaseServices
     }
 
     /**
-     * Column metadata follows the current category switches, while row values
-     * come only from the successful-checkout snapshots.  This deliberately
-     * keeps a later ratio/configuration edit from recalculating past orders.
+     * Configured zero columns follow current switches. Observed current categories
+     * are added by the member projection; only monetary values remain frozen.
+     * Later classification edits must never recalculate historical partner ratios.
      *
      * A configured root is shown only when none of its direct second-level
      * children is configured.  Once a second-level category is configured,
@@ -2061,29 +2514,68 @@ class StoreUnifiedReportServices extends BaseServices
         })));
     }
 
-    /** @return array<string,array<int,int>> sale fact id => partner category id => share cents */
-    private function cardPartnerSharesBySaleFact(array $rows, $storeId): array
+    /**
+     * Reclassify immutable partner cents without changing their recipient, ratio or business day.
+     * Keep configured zero columns and add current categories needed to explain historical amounts.
+     * A whole-card refund without a verified per-project share stays unclassified, never guessed.
+     */
+    private function memberPartnerCategoryProjection($query, array $refunds, array $definitions): array
     {
-        $saleFactIds = array_values(array_unique(array_filter(array_map(static function (array $row): string {
-            return (string)($row['source_type'] ?? '') === 'card' ? trim((string)($row['fact_id'] ?? '')) : '';
-        }, $rows))));
-        if ($saleFactIds === []) return [];
-
-        $facts = $this->withStoreScope(Db::name('cashier_v3_card_sale_category_allocation_fact'), $storeId)
-            ->whereIn('sale_fact_id', $saleFactIds)->where('status', 'effective')
-            ->field('sale_fact_id,partner_category_id_snapshot,partner_share_amount_cents')->select()->toArray();
-        $shares = [];
-        foreach ($facts as $fact) {
-            $saleFactId = trim((string)($fact['sale_fact_id'] ?? ''));
-            $categoryId = (int)($fact['partner_category_id_snapshot'] ?? 0);
-            if ($saleFactId === '' || $categoryId <= 0) continue;
-            $shares[$saleFactId][$categoryId] = (int)($shares[$saleFactId][$categoryId] ?? 0)
-                + (int)($fact['partner_share_amount_cents'] ?? 0);
+        $sales = (clone $query)->fieldRaw('s.fact_id sale_fact_id,s.store_id,s.source_type,d.item_id product_id,d.partner_share_amount_cents')
+            ->select()->toArray();
+        $resolved = (new StoreReportSaleCategoryServices())->resolve($sales);
+        $tree = [];
+        foreach (Db::name('store_product_category')->where('type', 0)->where('relation_id', 0)
+            ->field('id,pid,cate_name')->select()->toArray() as $node) $tree[(int)$node['id']] = $node;
+        $byId = [];
+        foreach ($definitions as $definition) $byId[(int)$definition['category_id']] = $definition;
+        $configured = $byId;
+        $target = function (array $category, int $cents) use (&$byId, $configured, $tree): int {
+            $chain = $this->partnerCategoryChain((int)($category['id'] ?? 0), $tree);
+            $id = 0; $path = '未分类';
+            if ($chain !== []) {
+                // Respect existing configured first/second-level columns; otherwise retain the current two-level path.
+                $node = $chain[min(1, count($chain) - 1)];
+                $id = (int)$node['id'];
+                foreach (array_reverse(array_slice($chain, 0, 2)) as $ancestor) {
+                    if (isset($configured[(int)$ancestor['id']])) { $id = (int)$ancestor['id']; break; }
+                }
+                $path = $this->partnerCategoryPathLabel($chain, $id);
+            }
+            if ($cents !== 0 && !isset($byId[$id])) $byId[$id] = [
+                'key' => 'partner_category_' . $id, 'category_id' => $id, 'category_path' => $path,
+                'label' => $path . '分成业绩'];
+            return $id;
+        };
+        $bySale = $totals = $byRefund = [];
+        foreach ($sales as $key => $sale) {
+            $shares = [];
+            foreach ($resolved[$key] ?? [] as $category) {
+                $cents = (int)$category['partner_share_amount_cents'];
+                $id = $target($category, $cents);
+                $shares[$id] = ($shares[$id] ?? 0) + $cents;
+                $totals[$id] = ($totals[$id] ?? 0) + $cents;
+            }
+            $bySale[(string)$sale['sale_fact_id']] = ['categories' => $resolved[$key] ?? [], 'shares' => $shares];
         }
-        return $shares;
+        foreach ($refunds as $refund) {
+            $cents = (int)$refund['partner_share_cents'];
+            $categories = [];
+            foreach ($refund['_current_categories'] ?? [] as $category) $categories[(int)$category['id']] = $category;
+            $category = count($categories) === 1 ? reset($categories) : ['id' => 0];
+            $id = $target($category, $cents);
+            $byRefund[(int)$refund['id']] = [$id => $cents];
+        }
+        uasort($byId, static function (array $left, array $right): int {
+            if ((int)$left['category_id'] === 0) return (int)$right['category_id'] === 0 ? 0 : 1;
+            if ((int)$right['category_id'] === 0) return -1;
+            return strcmp($left['category_path'], $right['category_path']) ?: ((int)$left['category_id'] <=> (int)$right['category_id']);
+        });
+        return ['definitions' => array_values($byId), 'sales' => $bySale, 'refunds' => $byRefund, 'totals' => $totals];
     }
 
-    private function decorateMemberConsumptionRows(array &$rows, $storeId, array $partnerDefinitions, array $cardPartnerSharesBySaleFact): void
+    /** Decorate visible sales with receipt/personnel facts and the shared full-result category projection. */
+    private function decorateMemberConsumptionRows(array &$rows, $storeId, array $partnerDefinitions, array $saleCategoryProjection): void
     {
         $orderIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['order_id'] ?? '')); }, $rows))));
         $saleFactIds = array_values(array_unique(array_filter(array_map(static function ($row) { return trim((string)($row['fact_id'] ?? '')); }, $rows))));
@@ -2160,25 +2652,11 @@ class StoreUnifiedReportServices extends BaseServices
             $line = trim((string)($row['source_line_id'] ?? ''));
             $row['salesperson_names'] = implode('、', $salespersonByLine[$line] ?? []);
             $row['member_source'] = (string)($row['business_source_label_snapshot'] ?? '');
-            $partnerCategoryCents = array_fill_keys(array_column($partnerDefinitions, 'key'), 0);
-            if ((string)($row['source_type'] ?? '') === 'card') {
-                foreach ((array)($cardPartnerSharesBySaleFact[(string)($row['fact_id'] ?? '')] ?? []) as $categoryId => $share) {
-                    foreach ($partnerDefinitions as $definition) {
-                        if ((int)$categoryId === (int)$definition['category_id']) {
-                            $partnerCategoryCents[(string)$definition['key']] += (int)$share;
-                            break;
-                        }
-                    }
-                }
-            } else {
-                $partnerCategoryId = (int)($row['partner_category_id_snapshot'] ?? 0);
-                $partnerShare = (int)($row['partner_share_amount_cents'] ?? 0);
-                foreach ($partnerDefinitions as $definition) {
-                    if ($partnerCategoryId === (int)$definition['category_id']) {
-                        $partnerCategoryCents[(string)$definition['key']] += $partnerShare;
-                        break;
-                    }
-                }
+            // Frozen shares move with their verified product category, never with an old category snapshot.
+            $partnerCategoryCents = [];
+            $shares = $saleCategoryProjection[(string)$row['fact_id']]['shares'] ?? [];
+            foreach ($partnerDefinitions as $definition) {
+                $partnerCategoryCents[$definition['key']] = (int)($shares[(int)$definition['category_id']] ?? 0);
             }
             $partnerPerformanceCents = 0;
             foreach ($partnerDefinitions as $definition) {
@@ -2199,7 +2677,8 @@ class StoreUnifiedReportServices extends BaseServices
      * respective columns; manual experience overrides intentionally remain a
      * row-level operating supplement and are not merged into a business total.
      */
-    private function memberConsumptionSummaryValues($query, $supplementQuery, $storeId, array $partnerDefinitions): array
+    private function memberConsumptionSummaryValues($query, $supplementQuery, $rechargeQuery,
+        $rechargeSupplementQuery, $storeId, array $partnerDefinitions, array $shareByCategory): array
     {
         $base = (clone $query)->fieldRaw('SUM(s.quantity) quantity')->find() ?: [];
         $paymentRows = (clone $query)
@@ -2211,27 +2690,26 @@ class StoreUnifiedReportServices extends BaseServices
         $payments = [];
         foreach ($paymentRows as $payment) $payments[(string)$payment['payment_method']] = (int)$payment['amount_cents'];
         // 全量补交汇总与补交行共用同一事实查询和权限范围，分页不会改变合计。
-        foreach ((clone $supplementQuery)->fieldRaw('repayment_payment.payment_method,SUM(allocation.amount_cents) amount_cents')
+        foreach ((clone $supplementQuery)->fieldRaw('repayment_payment.payment_method,SUM(COALESCE(allocation.amount_cents,repayment_payment.amount_cents)) amount_cents')
             ->group('repayment_payment.payment_method')->select()->toArray() as $payment) {
             $method = (string)$payment['payment_method'];
             $payments[$method] = (int)($payments[$method] ?? 0) + (int)$payment['amount_cents'];
         }
-
-        $shareByCategory = [];
-        foreach ((clone $query)->where('s.source_type', '<>', 'card')
-            ->fieldRaw('d.partner_category_id_snapshot,SUM(d.partner_share_amount_cents) amount_cents')
-            ->group('d.partner_category_id_snapshot')->select()->toArray() as $share) {
-            $shareByCategory[(int)$share['partner_category_id_snapshot']] = (int)$share['amount_cents'];
+        // 充值与充值补交各取自已收窄的事实查询；纯赠送充值保留明细行但不伪造现金。
+        foreach ((clone $rechargeQuery)->whereNotNull('recharge_payment.payment_method')
+            ->fieldRaw('recharge_payment.payment_method,SUM(recharge_payment.amount_cents) amount_cents')
+            ->group('recharge_payment.payment_method')->select()->toArray() as $payment) {
+            $method = (string)$payment['payment_method'];
+            $payments[$method] = (int)($payments[$method] ?? 0) + (int)$payment['amount_cents'];
         }
-        foreach ((clone $query)
-            ->join('cashier_v3_card_sale_category_allocation_fact cc', "cc.sale_fact_id=s.fact_id AND cc.status='effective'")
-            ->where('s.source_type', 'card')
-            ->fieldRaw('cc.partner_category_id_snapshot,SUM(cc.partner_share_amount_cents) amount_cents')
-            ->group('cc.partner_category_id_snapshot')->select()->toArray() as $share) {
-            $categoryId = (int)$share['partner_category_id_snapshot'];
-            $shareByCategory[$categoryId] = (int)($shareByCategory[$categoryId] ?? 0) + (int)$share['amount_cents'];
+        foreach ((clone $rechargeSupplementQuery)
+            ->fieldRaw('recharge_repayment_payment.payment_method,SUM(recharge_repayment_payment.amount_cents) amount_cents')
+            ->group('recharge_repayment_payment.payment_method')->select()->toArray() as $payment) {
+            $method = (string)$payment['payment_method'];
+            $payments[$method] = (int)($payments[$method] ?? 0) + (int)$payment['amount_cents'];
         }
 
+        // Full-result category amounts were resolved once before paging; no snapshot GROUP BY remains.
         $values = ['quantity'=>(int)($base['quantity'] ?? 0)];
         $receiptTotal = 0;
         foreach ($this->memberConsumptionPaymentMethods() as $method) {

@@ -4,6 +4,7 @@ namespace app\services\report;
 
 use app\services\cashier\v3\CashierV3ScopeResolver;
 use app\services\cashier\v3\order\CashierV3RefundAttributionServices;
+use app\services\product\product\SystemBalanceProjectServices;
 use think\facade\Db;
 
 /**
@@ -45,7 +46,7 @@ final class StoreMemberConsumptionRefundReadServices
             ->whereIn('refund_operation.store_id', $stores)
             ->whereBetween('refund_operation.business_date', [$range['start'], $range['end']])
             ->where('refund_operation.operation_type', 'refund')
-            ->whereIn('refund_operation.source_type', ['card', 'document', 'catalog', 'imported_card'])
+            ->whereIn('refund_operation.source_type', ['card', 'document', 'catalog', 'imported_card', 'balance'])
             ->where('refund_operation.status', 'succeeded')
             ->where('payment.amount_cents', '<', 0)
             ->where(function ($active): void {
@@ -63,21 +64,30 @@ final class StoreMemberConsumptionRefundReadServices
         $path = trim((string)($input['category_path'] ?? ''));
         $exact = trim((string)($input['category_path_exact'] ?? ''));
         if ($categoryId > 0 || $path !== '' || $exact !== '') {
-            $candidates = (clone $query)->fieldRaw('refund_operation.id,refund_operation.store_id,'
+            $candidates = (clone $query)->fieldRaw('refund_operation.id,refund_operation.operation_id,refund_operation.source_order_id,refund_operation.store_id,refund_operation.member_id,refund_operation.source_type,ra.card_holder_id refund_card_holder_id,ra.card_component_id,ra.catalog_item_id,'
                 . 'COALESCE(NULLIF(refund_cart.product_id,0),NULLIF(refund_sku.product_id,0),dimension.item_id,0) product_id')
                 ->select()->toArray();
-            $links = array_map(static function (array $row): array {
-                return ['store_id' => (int)$row['store_id'], 'product_id' => (int)$row['product_id']];
+            $balanceId = (new SystemBalanceProjectServices())->productId();
+            $links = array_map(static function (array $row) use ($balanceId): array {
+                return ['store_id' => (int)$row['store_id'], 'product_id' =>
+                    $row['source_type'] === 'balance' ? $balanceId
+                        : (in_array($row['source_type'], ['card', 'catalog'], true) ? 0 : (int)$row['product_id'])];
             }, $candidates);
             $resolved = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+            $refundCategories = (new StoreRefundCurrentCategoryServices())->resolve($candidates);
             $matches = [];
             foreach ($candidates as $index => $candidate) {
-                $category = $resolved[$index] ?? [];
-                $currentPath = (string)($category['path'] ?? '');
-                if ($categoryId > 0 && (int)($category['id'] ?? 0) !== $categoryId) continue;
-                if ($path !== '' && strpos($currentPath, $path) !== 0) continue;
-                if ($exact !== '' && $currentPath !== $exact) continue;
-                $matches[] = (int)$candidate['id'];
+                $categories = in_array($candidate['source_type'], ['card', 'catalog'], true)
+                    ? ($refundCategories[(string)$candidate['operation_id']] ?? [])
+                    : (isset($resolved[$index]) ? [$resolved[$index]] : []);
+                foreach ($categories as $category) {
+                    $currentPath = (string)($category['path'] ?? '');
+                    if ($categoryId > 0 && (int)($category['id'] ?? 0) !== $categoryId) continue;
+                    if ($path !== '' && strpos($currentPath, $path) !== 0) continue;
+                    if ($exact !== '' && $currentPath !== $exact) continue;
+                    $matches[] = (int)$candidate['id'];
+                    break;
+                }
             }
             if ($matches === []) $query->whereRaw('1=0');
             else $query->whereIn('refund_operation.id', array_values(array_unique($matches)));
@@ -137,11 +147,11 @@ final class StoreMemberConsumptionRefundReadServices
     {
         if ($ids === []) return [];
         $rows = (clone $query)->whereIn('refund_operation.id', $ids)
-            ->fieldRaw('refund_operation.id,refund_operation.operation_id order_id,refund_operation.operation_no order_no_snapshot,'
+            ->fieldRaw('refund_operation.id,refund_operation.source_type,refund_operation.operation_id order_id,refund_operation.operation_id,refund_operation.source_order_id,refund_operation.operation_no order_no_snapshot,'
                 . 'refund_operation.business_date,refund_operation.store_id,payment.organization_id,'
                 . 'payment.organization_path_snapshot,payment.store_name_snapshot,payment.member_id,'
                 . 'payment.member_name_snapshot,refund_member.phone member_phone,payment.business_source_label_snapshot,'
-                . 'ra.target_name_snapshot,ra.source_sales_line_id,ra.card_component_id,'
+                . 'ra.target_name_snapshot,ra.source_sales_line_id,ra.card_component_id,ra.card_holder_id refund_card_holder_id,ra.catalog_item_id,'
                 . 'sale.fact_id original_sale_fact_id,sale.order_no_snapshot original_sale_no,'
                 . 'COALESCE(NULLIF(refund_cart.product_id,0),NULLIF(refund_sku.product_id,0),dimension.item_id,0) current_product_id,'
                 . 'dimension.product_type_snapshot,dimension.partner_category_id_snapshot,'
@@ -168,10 +178,14 @@ final class StoreMemberConsumptionRefundReadServices
                 if (!array_key_exists($key, $cardPartners)) $cardPartners[$key] = $allocation;
             }
         }
-        $links = array_map(static function (array $row): array {
-            return ['store_id' => (int)$row['store_id'], 'product_id' => (int)$row['current_product_id']];
+        $balanceId = (new SystemBalanceProjectServices())->productId();
+        $links = array_map(static function (array $row) use ($balanceId): array {
+            return ['store_id' => (int)$row['store_id'], 'product_id' =>
+                $row['source_type'] === 'balance' ? $balanceId
+                    : (in_array($row['source_type'], ['card', 'catalog'], true) ? 0 : (int)$row['current_product_id'])];
         }, $rows);
         $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        $refundCategories = (new StoreRefundCurrentCategoryServices())->resolve($rows);
         $staffNames = [];
         if ($includeSalespeople) {
             $operationIds = array_values(array_unique(array_column($rows, 'order_id')));
@@ -194,9 +208,21 @@ final class StoreMemberConsumptionRefundReadServices
             }
         }
         foreach ($rows as $index => &$row) {
-            $row['current_category_id'] = (int)($categories[$index]['id'] ?? 0);
-            $row['category_path_snapshot'] = (string)($categories[$index]['path'] ?? '');
-            $row['item_name_snapshot'] = trim((string)($row['target_name_snapshot'] ?? '')) ?: '旧卡退款';
+            if ($row['source_type'] === 'balance') $row['current_product_id'] = $balanceId;
+            // Keep the verified platform identity for cross-store item reports;
+            // never interpret a catalog SKU ID as a platform product ID.
+            $itemCategories = in_array($row['source_type'], ['card', 'catalog'], true)
+                ? ($refundCategories[(string)$row['operation_id']] ?? [])
+                : (isset($categories[$index]) ? [$categories[$index]] : []);
+            // The partner report may split a whole-card refund by verified priced
+            // projects. Keep the component categories on this read model only;
+            // the persisted refund remains one operation and one payment fact.
+            $row['_current_categories'] = $itemCategories;
+            $row['platform_product_id'] = count($itemCategories) === 1 ? (int)$itemCategories[0]['platform_product_id'] : 0;
+            $row['current_category_id'] = count($itemCategories) === 1 ? (int)$itemCategories[0]['id'] : 0;
+            $row['category_path_snapshot'] = implode('、', array_values(array_unique(array_column($itemCategories, 'path'))));
+            $row['item_name_snapshot'] = $row['source_type'] === 'balance' ? '余额'
+                : (trim((string)($row['target_name_snapshot'] ?? '')) ?: '旧卡退款');
             $row['source_line_id'] = (string)$row['order_id'];
             if ((int)$row['card_component_id'] > 0) {
                 $key = (string)$row['original_sale_fact_id'] . ':' . (int)$row['current_product_id'];
