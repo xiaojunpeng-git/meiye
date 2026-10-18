@@ -54,7 +54,7 @@ class MemberUnifiedQueryContextFactory
             $dataScope->grantedFeatures(),
             ['cashier.v3.member']
         )));
-        return $this->core->make([
+        $context = $this->core->make([
             'tenant_id' => $operatorScope->tenantId(),
             'account_id' => $operatorScope->operatorId(),
             'operator_id' => $operatorScope->operatorId(),
@@ -72,6 +72,15 @@ class MemberUnifiedQueryContextFactory
             'share_tenant_fields' => $dataScope->isSuperAdmin(),
             'scope_dimensions' => [],
         ], $payload);
+        // 组织选店会话 ID 与 system_store_staff.id 分属不同表，数值可能碰撞。
+        // 在任务权限版本中保存服务端会话类别，让异步 worker 能回到同一权威
+        // 身份源重建范围；普通门店员工继续沿用原权限版本格式。
+        if (!empty($profile['_cashier_v3_organization'])) {
+            $context['permission_version'] = 'organization:' . $context['permission_version'];
+        } elseif (!empty($profile['_cashier_v3_delegated'])) {
+            $context['permission_version'] = 'delegated:' . $context['permission_version'];
+        }
+        return $context;
     }
 
     protected function organizationScopeIds($visibleStoreIds, string $currentOrganizationId): array

@@ -18,6 +18,7 @@ import {
   unifiedQueryActionMessage,
   unifiedQueryActionSucceeded
 } from '@/services/unifiedQueryContract'
+import { readStoreV3SessionToken } from '@/services/storeV3SessionToken'
 
 const state = useCashierV3State()
 const canCreateMember = computed(() => canUseCashierV3Operation('cashier.v3.member.create'))
@@ -617,6 +618,53 @@ async function openBatchAction() {
     selectedMemberIds: selectedMemberIds.value
   })
 }
+
+function memberExportDownloadFileName(value) {
+  const normalized = String(value || '会员列表.xlsx').replace(/[\\\\/:*?"<>|]+/g, '_').trim() || '会员列表.xlsx'
+  return /\.xlsx$/i.test(normalized) ? normalized : `${normalized}.xlsx`
+}
+
+async function downloadMemberExport({ url, fileName, task } = {}) {
+  const endpoint = new URL(String(url || ''), window.location.origin)
+  if (endpoint.origin !== window.location.origin) throw new Error('导出文件地址无效，请刷新后重试。')
+  const pageCode = String(task?.pageCode || MEMBER_QUERY_PAGE_CODE).trim()
+  if (pageCode !== MEMBER_QUERY_PAGE_CODE) throw new Error('导出任务页面信息无效，请重新创建导出任务。')
+  endpoint.searchParams.set('pageCode', pageCode)
+
+  // 会员列表不增加单独的导出权限：能执行当前查询即可导出该查询的完整命中结果。
+  // 下载接口仍需要当前登录令牌；普通链接缺少令牌会把失败 JSON 误存为 xlsx，因此落盘前还要校验 ZIP 文件头。
+  const token = readStoreV3SessionToken()
+  const response = await fetch(endpoint.href, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ...(token ? { Authorization: `Bearer ${token}`, 'Authori-zation': `Bearer ${token}` } : {})
+    }
+  })
+  const blob = await response.blob()
+  const type = String(response.headers.get('content-type') || '').toLowerCase()
+  if (!response.ok || type.includes('json')) {
+    const message = await blob.text().then((text) => {
+      const payload = JSON.parse(text)
+      return payload?.msg || payload?.message || ''
+    }).catch(() => '')
+    throw new Error(message || '导出文件下载失败，请稍后重试。')
+  }
+  const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+  if (blob.size < 4 || header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
+    throw new Error('导出文件格式无效，请重新创建导出任务。')
+  }
+
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = memberExportDownloadFileName(fileName)
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+}
 </script>
 
 <template>
@@ -651,6 +699,7 @@ async function openBatchAction() {
       :on-upgrade-saved-query-field-reference="unifiedQuery.upgradeSavedQueryFieldReference"
       :on-create-export="unifiedQuery.createExport"
       :on-query-export-task="unifiedQuery.queryExportTask"
+      :on-download-export="downloadMemberExport"
     >
       <template #primary-actions>
         <button v-if="canCreateMember" type="button" class="button button--primary" @click="openMemberCreator()">新增会员</button>
