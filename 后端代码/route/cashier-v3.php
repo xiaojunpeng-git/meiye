@@ -161,3 +161,27 @@ Route::group('cashierapi/v3/management/room-settings', function () {
     AllowOriginMiddleware::class,
     StationOpenMiddleware::class,
 ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');
+
+// 服务名称仅保存当前门店的独立基础资料，不接入房间、预约、收银或报表事实。
+// 写接口仍复用收银 V3 的会话门店与角色校验，客户端不能指定其他门店。
+Route::group('cashierapi/v3/management/service-names', function () {
+    Route::get('', 'store.system.ServiceNames/index')
+        ->option(['real_name' => 'V3服务名称列表']);
+    Route::post('', 'store.system.ServiceNames/create')
+        ->option(['real_name' => 'V3新增服务名称']);
+    Route::post('sort', 'store.system.ServiceNames/sort')
+        ->option(['real_name' => 'V3服务名称排序']);
+    Route::post('switch', 'store.system.ServiceNames/setSwitch')
+        ->option(['real_name' => 'V3服务名称总开关']);
+    Route::put(':id', 'store.system.ServiceNames/update')
+        ->option(['real_name' => 'V3编辑服务名称']);
+    Route::post(':id/status', 'store.system.ServiceNames/setStatus')
+        ->option(['real_name' => 'V3更新服务名称状态']);
+})->middleware([
+    AuthTokenMiddleware::class,
+    ForceStoreSessionMiddleware::class,
+    CashierCheckRoleMiddleware::class,
+    InstallMiddleware::class,
+    AllowOriginMiddleware::class,
+    StationOpenMiddleware::class,
+])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');

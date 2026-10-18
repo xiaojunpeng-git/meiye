@@ -61,3 +61,54 @@ export function sortRoomSettings(roomIds) {
   const token = requestToken()
   return request('/cashierapi/v3/management/room-settings/sort', { method: 'POST', requestToken: token, body: { room_ids: roomIds, request_token: token } })
 }
+
+export function queryServiceNames(query = {}) {
+  return request('/cashierapi/v3/management/service-names', { query })
+}
+
+// 服务名称是门店独立基础资料；所有写请求都同时提交幂等键和当前版本，
+// 前端不能通过这些接口传入门店，也不能借此触发房间、预约或收银业务。
+export function createServiceName(name) {
+  const token = requestToken()
+  return request('/cashierapi/v3/management/service-names', {
+    method: 'POST',
+    requestToken: token,
+    body: { name, expected_version: 0, request_token: token }
+  })
+}
+
+export function updateServiceName(id, name, expectedVersion) {
+  const token = requestToken()
+  return request(`/cashierapi/v3/management/service-names/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    requestToken: token,
+    body: { name, expected_version: Number(expectedVersion) || 0, request_token: token }
+  })
+}
+
+export function setServiceNameEnabled(id, enabled, expectedVersion) {
+  const token = requestToken()
+  return request(`/cashierapi/v3/management/service-names/${encodeURIComponent(id)}/status`, {
+    method: 'POST',
+    requestToken: token,
+    body: { enabled: enabled ? 1 : 0, expected_version: Number(expectedVersion) || 0, request_token: token }
+  })
+}
+
+export function sortServiceNames(items) {
+  const token = requestToken()
+  return request('/cashierapi/v3/management/service-names/sort', {
+    method: 'POST',
+    requestToken: token,
+    body: { items, request_token: token }
+  })
+}
+
+export function setServiceNameSwitch(enabled, expectedVersion) {
+  const token = requestToken()
+  return request('/cashierapi/v3/management/service-names/switch', {
+    method: 'POST',
+    requestToken: token,
+    body: { enabled: enabled ? 1 : 0, expected_version: Number(expectedVersion) || 0, request_token: token }
+  })
+}
