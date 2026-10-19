@@ -138,7 +138,7 @@ function avatarConnect(string $path, string $database, int $port): PDO
 }
 
 /** Bounded TLS-verified GET, no redirects; validate decoded image, not just HTTP 200. */
-function avatarImage(string $url): array
+function avatarDownload(string $url): string
 {
     if (avatarSourceUrl($url) !== $url) throw new RuntimeException('Portrait URL not approved');
     $bytes = '';
@@ -153,11 +153,82 @@ function avatarImage(string $url): array
     $ok = curl_exec($curl);
     $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
     curl_close($curl);
+    if (!$ok || $status !== 200) throw new RuntimeException('Portrait download failed');
+    avatarImageInfo($bytes);
+    return $bytes;
+}
+
+/** Validate the exact raster bytes, shared by network and immutable local snapshots. */
+function avatarImageInfo(string $bytes): array
+{
     $info = @getimagesizefromstring($bytes);
-    if (!$ok || $status !== 200 || !$info || $info[0] < 1 || $info[1] < 1
+    if (strlen($bytes) > 4 * 1024 * 1024 || !$info || $info[0] < 1 || $info[1] < 1
         || $info[0] > 8192 || $info[1] > 8192
         || !in_array($info['mime'], ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true)) throw new RuntimeException('Portrait unavailable or not a supported image');
     return ['sha256' => hash('sha256', $bytes), 'bytes' => strlen($bytes), 'width' => $info[0], 'height' => $info[1], 'mime' => $info['mime']];
+}
+
+/** Ordinary Meiyue CDN objects must still match the accepted network-byte digest. */
+function avatarImage(string $url): array
+{
+    return avatarImageInfo(avatarDownload($url));
+}
+
+/** Dynamic WeChat portraits are frozen once; later checks never silently refetch them. */
+function avatarFrozen(string $sourceUrl, ?array $fixed = null): array
+{
+    if (parse_url($sourceUrl, PHP_URL_HOST) !== 'thirdwx.qlogo.cn') throw new RuntimeException('Only the dynamic WeChat source requires freezing');
+    $dir = '/tmp/008-staff-avatar-frozen-20261019';
+    if ($fixed === null) {
+        $bytes = avatarDownload($sourceUrl);
+        $info = avatarImageInfo($bytes);
+        $ext = ['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','image/gif'=>'gif'][$info['mime']];
+        $name = $info['sha256'] . '.' . $ext;
+        $old = umask(0077);
+        try {
+            if (!is_dir($dir) && !mkdir($dir, 0700)) throw new RuntimeException('Cannot create private portrait directory');
+            $path = $dir . '/' . $name;
+            if (!is_file($path)) {
+                $f = fopen($path, 'x');
+                if (!$f) throw new RuntimeException('Cannot create frozen portrait');
+                try { if (fwrite($f, $bytes) !== strlen($bytes) || !fflush($f)) throw new RuntimeException('Frozen portrait write failed'); }
+                finally { fclose($f); }
+            }
+        } finally { umask($old); }
+        $fixed = ['source_url' => $sourceUrl, 'path' => $path, 'image' => $info,
+            'avatar' => 'https://008.cc3798.com/upload/staff_avatars/' . $name];
+    }
+    $info = $fixed['image'];
+    $ext = ['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','image/gif'=>'gif'][$info['mime']] ?? '';
+    $name = $info['sha256'] . '.' . $ext;
+    if (!preg_match('/^[a-f0-9]{64}\.(jpg|png|webp|gif)$/', $name)
+        || $fixed['source_url'] !== $sourceUrl || $fixed['path'] !== $dir . '/' . $name
+        || $fixed['avatar'] !== 'https://008.cc3798.com/upload/staff_avatars/' . $name
+        || !is_file($fixed['path']) || filesize($fixed['path']) > 4 * 1024 * 1024
+        || avatarImageInfo((string)file_get_contents($fixed['path'])) !== $info) throw new RuntimeException('Frozen portrait differs from accepted bytes');
+    return $fixed;
+}
+
+/** Publish a content-addressed 008 image only after backup, never replace an existing object. */
+function avatarPublishFrozen(array $fixed, string $root = '/www/wwwroot/008.cc3798.com/public'): array
+{
+    avatarFrozen($fixed['source_url'], $fixed);
+    $relative = parse_url($fixed['avatar'], PHP_URL_PATH);
+    $dir = $root . '/upload/staff_avatars';
+    if (!is_dir($dir) && !mkdir($dir, 0755, true)) throw new RuntimeException('Cannot create 008 portrait storage');
+    $dest = $root . $relative;
+    $created = false;
+    if (!file_exists($dest)) {
+        $f = fopen($dest, 'x');
+        if (!$f) throw new RuntimeException('Cannot publish 008 portrait');
+        $bytes = file_get_contents($fixed['path']);
+        try { if (fwrite($f, $bytes) !== strlen($bytes) || !fflush($f)) throw new RuntimeException('Portrait publication failed'); }
+        finally { fclose($f); }
+        chmod($dest, 0644);
+        $created = true;
+    }
+    if (!hash_equals($fixed['image']['sha256'], (string)hash_file('sha256', $dest))) throw new RuntimeException('008 stored portrait digest mismatch');
+    return ['path' => $dest, 'sha256' => $fixed['image']['sha256'], 'created' => $created];
 }
 
 /** Private atomic artifacts are rollback evidence, never a second business source. */
@@ -214,6 +285,9 @@ function avatarWrite(PDO $target, array $plan, string $commit, string $backupDir
             }
             $backupPath = $backupDir . '/before-' . $digest . '.json';
             $backupSha = avatarSave($backupPath, $snapshot);
+            $published = [];
+            // A rollback-only rehearsal must not publish files outside its DB transaction.
+            if (!$rehearse) foreach ($plan['entries'] as $entry) if (isset($entry['frozen'])) $published[] = avatarPublishFrozen($entry['frozen']);
             $now = time();
             foreach ($plan['entries'] as $index => $entry) {
                 $q = $target->prepare('UPDATE eb_employee SET avatar=?,avatar_type=3,update_time=? WHERE id=?');
@@ -231,7 +305,7 @@ function avatarWrite(PDO $target, array $plan, string $commit, string $backupDir
             }
             avatarVerify($target, $plan);
             if ($rehearse) $target->rollBack(); else $target->commit();
-            return ['employees' => count($plan['entries']), 'staff' => $staffCount, 'backup' => $backupPath, 'backup_sha256' => $backupSha, 'rehearsal' => $rehearse];
+            return ['employees' => count($plan['entries']), 'staff' => $staffCount, 'backup' => $backupPath, 'backup_sha256' => $backupSha, 'published' => $published, 'rehearsal' => $rehearse];
         } catch (Throwable $error) { if ($target->inTransaction()) $target->rollBack(); throw $error; }
     } finally { $target->query("SELECT RELEASE_LOCK('008_staff_avatar_repair')"); }
 }
@@ -267,10 +341,24 @@ function avatarMain(array $argv): void
         $target->exec('SET SESSION TRANSACTION READ ONLY'); $target->beginTransaction();
         $plan = avatarPlan(avatarState($source, $target));
         $target->rollBack();
+        $accepted = null;
+        if ($mode !== 'plan') {
+            $bytes = file_get_contents($argv[2]);
+            if (!hash_equals($argv[3], hash('sha256', $bytes))) throw new RuntimeException('Fixed plan file mismatch');
+            $accepted = array_column(json_decode($bytes, true, 512, JSON_THROW_ON_ERROR)['entries'], null, 'employee_id');
+        }
         $failed = 0;
         foreach ($plan['entries'] as $i => $entry) {
-            try { $plan['entries'][$i]['image'] = avatarImage($entry['avatar']); }
-            catch (Throwable $error) { unset($plan['entries'][$i]); $failed++; }
+            try {
+                if (parse_url($entry['avatar'], PHP_URL_HOST) === 'thirdwx.qlogo.cn') {
+                    // A fixed candidate must already contain its accepted local snapshot.
+                    $frozen = $accepted === null ? null : ($accepted[$entry['employee_id']]['frozen'] ?? []);
+                    $frozen = avatarFrozen($entry['avatar'], $frozen);
+                    $plan['entries'][$i]['avatar'] = $frozen['avatar'];
+                    $plan['entries'][$i]['frozen'] = $frozen;
+                    $plan['entries'][$i]['image'] = $frozen['image'];
+                } else $plan['entries'][$i]['image'] = avatarImage($entry['avatar']);
+            } catch (Throwable $error) { unset($plan['entries'][$i]); $failed++; }
         }
         $plan['entries'] = array_values($plan['entries']);
         if ($failed) $plan['skipped']['unavailable_image'] = $failed;

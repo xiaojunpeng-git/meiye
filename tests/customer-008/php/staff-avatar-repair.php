@@ -44,6 +44,38 @@ $cases = [
 ];
 foreach ($cases as $name => $mutate) { $s = $state; $mutate($s); avatarAssert(!avatarPlan($s)['entries'], $name . ' was not protected'); }
 echo "Planner/default/custom/identity/scope/URL tests: PASS\n";
+
+// A captured WeChat image is byte-pinned locally; no network or real webroot is used.
+$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxXcAAAAASUVORK5CYII=');
+$info = avatarImageInfo($png);
+$freezeDir = '/tmp/008-staff-avatar-frozen-20261019';
+$madeFreezeDir = !is_dir($freezeDir);
+if ($madeFreezeDir) mkdir($freezeDir,0700);
+$freezePath = $freezeDir . '/' . $info['sha256'] . '.png';
+avatarAssert(!file_exists($freezePath), 'Refusing an existing test snapshot');
+$testRoot = sys_get_temp_dir() . '/008-avatar-publish-test-' . bin2hex(random_bytes(6));
+mkdir($testRoot,0700);
+try {
+    file_put_contents($freezePath,$png); chmod($freezePath,0600);
+    $fixed = ['source_url'=>'https://thirdwx.qlogo.cn/fixture/0','path'=>$freezePath,'image'=>$info,
+        'avatar'=>'https://008.cc3798.com/upload/staff_avatars/' . $info['sha256'] . '.png'];
+    avatarAssert(avatarFrozen($fixed['source_url'],$fixed) === $fixed, 'Frozen image changed');
+    $published = avatarPublishFrozen($fixed,$testRoot);
+    avatarAssert($published['created'] && hash_file('sha256',$published['path']) === $info['sha256'], 'Publish did not preserve exact bytes');
+    avatarAssert(!avatarPublishFrozen($fixed,$testRoot)['created'], 'Identical object was overwritten');
+    file_put_contents($published['path'],'different');
+    $caught=false; try { avatarPublishFrozen($fixed,$testRoot); } catch (RuntimeException $e) { $caught=true; }
+    avatarAssert($caught && file_get_contents($published['path']) === 'different', 'Existing different object was overwritten');
+    file_put_contents($freezePath,'tampered');
+    $caught=false; try { avatarFrozen($fixed['source_url'],$fixed); } catch (RuntimeException $e) { $caught=true; }
+    avatarAssert($caught, 'Tampered private snapshot was accepted');
+    unlink($published['path']);
+    rmdir(dirname($published['path'])); rmdir($testRoot . '/upload');
+} finally {
+    unlink($freezePath); rmdir($testRoot);
+    if ($madeFreezeDir) rmdir($freezeDir);
+}
+echo "Frozen image byte pinning/tamper rejection/content-addressed publication/no overwrite: PASS\n";
 if (($argv[1] ?? '') !== '--mysql') exit(0);
 
 // This database is created only on the existing disposable MySQL 5.7 container.
