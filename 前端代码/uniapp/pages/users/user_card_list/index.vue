@@ -379,6 +379,8 @@
 
 .header {
 	display: flex;
+	flex-wrap: wrap;
+	row-gap: 24rpx;
 	align-items: center;
 	justify-content: space-between;
 	padding: 24rpx 32rpx 26rpx;
@@ -407,6 +409,9 @@
 
 .header-content {
 	flex: 1;
+	min-width: 0;
+	// 筛选独占下一行后，为返回按钮保留对称空间，避免标题偏移。
+	margin-right: 72rpx;
 	text-align: center;
 }
 
@@ -420,7 +425,9 @@
 .filter-tabs {
 	display: flex;
 	gap: 10rpx;
-	flex-shrink: 0;
+	// 固定占满页头第二行，不随标题长度回到第一行。
+	flex: 0 0 100%;
+	justify-content: flex-end;
 }
 
 .filter-tab {
