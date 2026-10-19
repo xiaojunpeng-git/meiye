@@ -21,6 +21,16 @@ final class CashierV3SaleCatalogServices
     private const MAX_CATALOG_ITEMS = 5000;
     private const MAX_QUANTITY = 1000000;
 
+    /** 配置只决定“定制卡”目录入口是否可见，不改变定制卡项目或历史订单能力。 */
+    public static function visibleCatalogTypes(): array
+    {
+        $types = ['项目', '产品', '卡项'];
+        if ((int)sys_config('cashier_custom_card_entry_switch', 1) === 1) {
+            $types[] = '定制卡';
+        }
+        return $types;
+    }
+
     /** @var CashierV3SaleCatalogAuthority */
     private $authority;
 
@@ -99,7 +109,7 @@ final class CashierV3SaleCatalogServices
             // 销售目录按用户可理解的结算品类展示。历史次卡、时间规则卡
             // 仍保留各自的 kindCode，不能据此改写既有订单／权益事实；它们
             // 在收银入口统一归入“卡项”。
-            'types' => ['项目', '产品', '卡项', '定制卡'],
+            'types' => self::visibleCatalogTypes(),
             'categories' => array_merge(['全部'], array_keys($categories)),
             'items' => $items,
             // 卡内组件独立投影；仓库中项目不能混入普通收银销售 items。

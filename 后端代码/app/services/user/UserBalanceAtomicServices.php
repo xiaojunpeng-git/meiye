@@ -50,6 +50,15 @@ class UserBalanceAtomicServices extends BaseServices
             'ledger_type' => 'manual_refund_credit', 'pm' => 1,
             'title' => '退款转入余额', 'mark' => '退款转入余额{%num%}元',
         ],
+        // 余额退款只扣会员钱包，本金优先；与手工登记的现金退款额分别记账。
+        'manual_refund_debit' => [
+            'ledger_type' => 'manual_refund_debit', 'pm' => 0,
+            'title' => '余额退款扣减', 'mark' => '余额退款扣减{%num%}元',
+        ],
+        'manual_refund_debit_void' => [
+            'ledger_type' => 'manual_refund_debit_void', 'pm' => 1,
+            'title' => '余额退款作废返还', 'mark' => '余额退款作废返还{%num%}元',
+        ],
         // 只扣回误录退款所入账的赠金，不挪用本金掩盖余额不足。
         'manual_refund_void' => [
             'ledger_type' => 'manual_refund_void', 'pm' => 0,
