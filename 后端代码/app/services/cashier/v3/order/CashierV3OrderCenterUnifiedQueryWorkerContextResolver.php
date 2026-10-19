@@ -4,6 +4,7 @@ namespace app\services\cashier\v3\order;
 
 use app\model\store\SystemStoreStaff;
 use app\services\cashier\v3\bootstrap\CashierV3Bootstrap;
+use app\services\cashier\v3\CashierV3PermissionSnapshotServices;
 use app\services\cashier\v3\CashierV3StoreLoginServices;
 use app\services\organization\EmployeeDataScopeServices;
 use app\services\query\UnifiedQueryException;
@@ -57,6 +58,11 @@ final class CashierV3OrderCenterUnifiedQueryWorkerContextResolver implements Uni
             ->where('status', 1)->where('is_del', 0)->find();
         if ($staff) {
             $profile = $staff->toArray();
+            // 导出任务创建路径已把岗位 ID 规范为整数。模型访问器返回字符串数组，
+            // worker 必须复用同一规范化口径，避免同一岗位生成不同权限版本。
+            $profile['roles'] = CashierV3PermissionSnapshotServices::normalizeRoleIds(
+                $profile['roles'] ?? []
+            );
             $employeeId = (int)($profile['employee_id'] ?? 0);
             if ($employeeId <= 0 || Db::name('employee')->where('id', $employeeId)
                 ->where('status', 1)->where('is_del', 0)->find()) $profiles[] = $profile;

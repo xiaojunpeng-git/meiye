@@ -254,15 +254,7 @@ class CashierV3PermissionSnapshotServices
      */
     protected function rebuildOperatorProfile(array $staff, array $sessionHint = [], string $internalAccount = ''): array
     {
-        $roles = $staff['roles'] ?? [];
-        if (is_string($roles)) {
-            $roles = $roles === '' ? [] : (strpos($roles, '[') === 0
-                ? (json_decode($roles, true) ?: array_filter(array_map('intval', explode(',', trim($roles, '[]')))))
-                : array_values(array_filter(array_map('intval', explode(',', $roles)))));
-        }
-        if (!is_array($roles)) {
-            $roles = [];
-        }
+        $roles = self::normalizeRoleIds($staff['roles'] ?? []);
 
         $profile = [
             'id' => (int)($staff['id'] ?? 0),
@@ -301,5 +293,30 @@ class CashierV3PermissionSnapshotServices
         }
 
         return $profile;
+    }
+
+    /**
+     * 岗位 ID 进入权限版本前统一为正整数列表。
+     *
+     * 数据库锁定行保存逗号字符串，SystemStoreStaff 模型访问器返回字符串数组；
+     * 两种读取方式必须产生同一权限版本，否则异步导出会把同一岗位误判为已变更。
+     *
+     * @param mixed $roles
+     * @return int[]
+     */
+    public static function normalizeRoleIds($roles): array
+    {
+        if (is_string($roles)) {
+            $roles = trim($roles);
+            $roles = $roles === '' ? [] : (strpos($roles, '[') === 0
+                ? (json_decode($roles, true) ?: explode(',', trim($roles, '[]')))
+                : explode(',', $roles));
+        }
+        if (!is_array($roles)) {
+            return [];
+        }
+        return array_values(array_filter(array_map('intval', $roles), static function (int $roleId): bool {
+            return $roleId > 0;
+        }));
     }
 }
