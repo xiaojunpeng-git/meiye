@@ -1,6 +1,6 @@
 <template>
 	<view class="">
-		<view v-if="tab != 2" style="height: 296rpx"></view>
+		<view v-if="tab != 2" style="height: 100rpx"></view>
 		<view v-if="tab != 2" class="pb-safe"></view>
 		<view :class="{
 			'bg--w111-fff': tab != 2,
@@ -20,7 +20,6 @@
 			</view>
 			<view class="pb-safe"></view>
 		</view>
-		<mainPageFooter></mainPageFooter>
 	</view>
 </template>
 
@@ -31,7 +30,6 @@
 	import {
 		toLogin
 	} from '@/libs/login.js';
-	import mainPageFooter from '@/components/pageFooter/index.vue';
 
 	export default {
 		props: {
@@ -40,7 +38,6 @@
 				default: 1,
 			},
 		},
-		components: { mainPageFooter },
 		data() {
 			return {
 				pageList: [],
@@ -105,7 +102,8 @@
 
 <style lang="scss" scoped>
 	.community-footer {
-		bottom: calc(184rpx + env(safe-area-inset-bottom));
+		/* 社区导航独占底部；返回商城后再由商城页面显示自己的导航。 */
+		bottom: 0;
 		border-top: 1rpx solid rgba(123, 41, 65, .08);
 		box-shadow: 0 -8rpx 22rpx rgba(83,45,54,.06);
 		color: #856b72;
