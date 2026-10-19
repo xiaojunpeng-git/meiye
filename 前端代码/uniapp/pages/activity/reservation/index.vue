@@ -18,7 +18,8 @@
 			   <text>预计服务时长</text>
 			   <text class="duration">{{ totalServiceDuration }} 分钟</text>
 		   </view>
-		   <view class="addon-add-btn" v-if="!historicalStorePicker" @click="openAddonPicker">+ 添加项目</view>
+		   <!-- 历史权益也可加项；候选与提交均按已选门店逐项校验本人权益。 -->
+		   <view class="addon-add-btn" @click="openAddonPicker">+ 添加项目</view>
 	   </view>
 
 	   <!-- 预约信息 -->
@@ -373,6 +374,7 @@
 						@click="switchAddonTab(1)"
 					>已购项目</view>
 					<view
+						v-if="!historicalStorePicker"
 						class="addon-picker-tab"
 						:class="{ active: addonPickerTab === 2 }"
 						@click="switchAddonTab(2)"
@@ -988,7 +990,12 @@ export default {
 				});
 				return;
 			}
-			getUserPurchasedRemainItems(this.buildBookUidParams({ store_id: this.storeId || 0 })).then(res => {
+			// 传主权益上下文而不是放宽普通已购接口的隐藏订单过滤。
+			const historicalContext = this.historicalStorePicker ? {
+				historical_order_id: this.orderId,
+				main_detail_id: this.cartInfoId,
+			} : {};
+			getUserPurchasedRemainItems(this.buildBookUidParams({ store_id: this.storeId || 0, ...historicalContext })).then(res => {
 				this.addonPickerOptions = this.parsePurchasedAddonOptions(res.data?.list || []);
 			}).catch(() => {
 				this.addonPickerOptions = [];
@@ -997,6 +1004,10 @@ export default {
 			});
 		},
 		openAddonPicker() {
+			// 历史权益的可用范围由门店决定，选店之前不展示跨范围候选。
+			if (this.historicalStorePicker && !Number(this.storeId)) {
+				return this.$util.Tips({ title: '请先选择预约门店' });
+			}
 			this.addonPickerTab = 1;
 			this.addonPickerSearch = '';
 			this.addonPickerSelected = this.addonItems.map(item => item._key);

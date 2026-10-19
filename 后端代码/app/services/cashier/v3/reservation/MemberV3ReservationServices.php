@@ -52,11 +52,8 @@ final class MemberV3ReservationServices
         }
         $historicalOrder = $systemDeleted === 1;
         if ($historicalOrder) {
-            // Historical rights may span old stores; each right must book on
-            // its own scope, so do not mix another order into this booking.
-            if ($this->decodeArray($input['addon_items'] ?? []) !== []) {
-                throw new ValidateException('历史权益请逐个项目预约。');
-            }
+            // Imported carriers are not ordinary deleted orders. Every main
+            // and added right must independently authorize the chosen store.
             $historicalStores = new ImportedEntitlementReservationStoreServices();
             $historicalStores->assertSelectedStore($uid, $orderId, $detailId, $storeId);
             if ($quantity > (int)$detail['write_surplus_times']) {
@@ -91,6 +88,7 @@ final class MemberV3ReservationServices
         $startClock = $this->clock((string)($slot['start'] ?? $start));
         $appointmentStart = strtotime($date . ' ' . $startClock . ':00');
         if (!$appointmentStart) throw new ValidateException('预约时间无效。');
+        $addonDetails = $this->addonDetails($uid, $detailId, $input['addon_items'] ?? [], $storeId, $historicalOrder);
         $duration = (int)($input['service_duration_minutes'] ?? 0);
         if ($duration <= 0 && !empty($slot['end'])) {
             $slotEnd = strtotime($date . ' ' . $this->clock((string)$slot['end']) . ':00');
@@ -105,6 +103,15 @@ final class MemberV3ReservationServices
             }
         }
         $duration = max(1, $duration);
+        $mainDuration = $duration;
+        if ($historicalOrder) {
+            // The browser cannot shorten a multi-project booking to bypass
+            // staff conflicts. Rebuild duration from live project settings.
+            $mainRight = (new ImportedEntitlementReservationStoreServices())
+                ->reservationDetail($uid, $detailId, $storeId, $appointmentStart);
+            $mainDuration = (int)$mainRight['_project_duration'];
+            $duration = $mainDuration + array_sum(array_column($addonDetails, '_duration'));
+        }
         $appointmentEnd = $appointmentStart + $duration * 60;
         $staffIds = $this->staffIds($input, $storeId);
         $user = Db::name('user')->where('uid', $uid)->field('nickname,real_name,phone')->find() ?: [];
@@ -123,13 +130,16 @@ final class MemberV3ReservationServices
         $formTitle = trim((string)($configuredForm['name'] ?? ''));
         $projectInfo = json_decode((string)($detail['cart_info'] ?? ''), true) ?: [];
         $projectName = trim((string)($projectInfo['productInfo']['store_name'] ?? '')) ?: '预约项目';
-        $addonDetails = $this->addonDetails($uid, $detailId, $input['addon_items'] ?? []);
+        $addonIdentity = array_column($addonDetails, 'id');
+        // Preserve ordinary booking keys; only the restored historical flow
+        // canonicalizes a selection so reordering does not create a new visit.
+        if ($historicalOrder) sort($addonIdentity, SORT_NUMERIC);
         $naturalKey = 'member-reservation-' . hash('sha256', json_encode([
             $uid, $orderId, $detailId, $storeId, $appointmentStart, $quantity,
-            array_column($addonDetails, 'id'), $staffIds, $duration,
+            $addonIdentity, $staffIds, $duration,
         ], JSON_UNESCAPED_UNICODE));
 
-        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey, $historicalOrder): array {
+        return Db::transaction(function () use ($uid, $orderId, $detailId, $quantity, $date, $appointmentStart, $appointmentEnd, $duration, $mainDuration, $staffIds, $tenantId, $organizationId, $storeId, $store, $name, $phone, $address, $formJson, $formTitle, $detail, $projectName, $addonDetails, $input, $naturalKey, $historicalOrder): array {
             $rootOperation = Db::name('cashier_v3_reservation_operation')->where('tenant_id', $tenantId)
                 ->where('command_idempotency_key', $naturalKey)->lock(true)->find();
             if ($rootOperation) {
@@ -147,24 +157,8 @@ final class MemberV3ReservationServices
                 $naturalKey .= ':attempt:' . (count($attempts) + 1);
             }
             if ($historicalOrder) {
-                // Recheck after the replay gate so an existing successful
-                // booking remains idempotent if rights later change. Lock the
-                // detail before writing so a concurrent write-off cannot leave
-                // this booking with more visits than the remaining balance.
-                (new ImportedEntitlementReservationStoreServices())
-                    ->assertSelectedStore($uid, $orderId, $detailId, $storeId);
-                $remaining = (int)Db::name('store_order_cart_info')->where('id', $detailId)
-                    ->where('oid', $orderId)->lock(true)->value('write_surplus_times');
-                $reserved = (int)Db::name('cashier_v3_reservation_line')->alias('l')
-                    ->join('cashier_v3_reservation r', 'r.id=l.reservation_id')
-                    ->where('l.tenant_id', $tenantId)->where('l.entitlement_source_detail_id', $detailId)
-                    ->where('r.member_id', $uid)
-                    ->where('r.lifecycle_generation', CashierV3ReservationLifecycleServices::GENERATION)
-                    ->whereIn('r.status', ['PENDING_CONFIRMATION', 'UNSTARTED', 'IN_SERVICE'])
-                    ->sum('l.quantity');
-                if ($quantity + $reserved > $remaining) {
-                    throw new ValidateException('预约次数超过剩余权益。');
-                }
+                $this->assertHistoricalBookingRightsInTx($uid, $storeId, $detail, $quantity,
+                    $addonDetails, $appointmentStart, $mainDuration);
             }
             $lifecycle = new CashierV3ReservationLifecycleServices();
             $lifecycle->assertStaffAvailabilityInTx($storeId, 0, $staffIds, $appointmentStart, $appointmentEnd);
@@ -233,7 +227,7 @@ final class MemberV3ReservationServices
                 'entitlement_source_detail_id' => $detailId,
                 'quantity' => $quantity,
                 'role_code' => 'MAIN',
-                'service_duration_minutes' => $duration,
+                'service_duration_minutes' => $mainDuration,
                 'artisan_staff_ids_json' => json_encode($staffIds, JSON_UNESCAPED_UNICODE),
                 'created_at' => $now,
                 'updated_at' => $now,
@@ -647,7 +641,7 @@ final class MemberV3ReservationServices
     }
 
     /** Purchased add-ons are entitlement lines in the same V3 reservation. */
-    private function addonDetails(int $uid, int $mainDetailId, $rawItems): array
+    private function addonDetails(int $uid, int $mainDetailId, $rawItems, int $storeId, bool $historicalOrder): array
     {
         $items = $this->decodeArray($rawItems);
         $details = [];
@@ -658,6 +652,13 @@ final class MemberV3ReservationServices
             if ($detailId <= 0) throw new ValidateException('增项服务必须从已购项目中选择。');
             if (isset($seen[$detailId])) throw new ValidateException('预约项目不能重复选择。');
             $seen[$detailId] = true;
+            if ($historicalOrder) {
+                // Ignore client-provided order, duration and source labels;
+                // the owned detail and store scope are the only authority.
+                $details[] = (new ImportedEntitlementReservationStoreServices())
+                    ->reservationDetail($uid, $detailId, $storeId);
+                continue;
+            }
             $detail = Db::name('store_order_cart_info')->alias('c')
                 ->join('store_order o', 'o.id=c.oid')
                 ->where('c.id', $detailId)->where('o.uid', $uid)
@@ -670,6 +671,35 @@ final class MemberV3ReservationServices
             $details[] = $detail;
         }
         return $details;
+    }
+
+    /**
+     * Lock all carrier orders then details in stable ID order. Recheck every
+     * right after the idempotency replay gate, including pending reservations;
+     * an unavailable add-on aborts the entire booking without consuming visits.
+     */
+    private function assertHistoricalBookingRightsInTx(int $uid, int $storeId, array $main,
+        int $quantity, array $addons, int $at, int $mainDuration): void
+    {
+        $rights = array_merge([$main], $addons);
+        $orderIds = array_unique(array_map('intval', array_column($rights, 'oid')));
+        sort($orderIds, SORT_NUMERIC);
+        foreach ($orderIds as $id) Db::name('store_order')->where('id', $id)->lock(true)->find();
+        usort($rights, static function (array $left, array $right): int { return (int)$left['id'] <=> (int)$right['id']; });
+        foreach ($rights as $right) Db::name('store_order_cart_info')->where('id', (int)$right['id'])->lock(true)->find();
+        $authority = new ImportedEntitlementReservationStoreServices();
+        foreach ($rights as $right) {
+            $id = (int)$right['id'];
+            $current = $authority->reservationDetail($uid, $id, $storeId, $at);
+            $isMain = $id === (int)$main['id'];
+            if (($isMain && (int)$current['_project_duration'] !== $mainDuration)
+                || (!$isMain && (int)$current['_duration'] !== (int)$right['_duration'])) {
+                throw new ValidateException('项目时长已变化，请重新选择预约时间。');
+            }
+            if ($authority->availableQuantity($uid, $current) < ($isMain ? $quantity : 1)) {
+                throw new ValidateException('预约次数超过剩余权益。');
+            }
+        }
     }
 
     private function clock(string $value): string

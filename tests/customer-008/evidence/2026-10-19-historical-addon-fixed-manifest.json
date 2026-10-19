@@ -1,0 +1,75 @@
+{
+  "head": "218be8846c122781487f348bda364967bb2557f5",
+  "files": [
+    {
+      "path": "前端代码/uniapp/pages/activity/reservation/index.vue",
+      "sha256": "7a843ab56d94c54f77a6f007880918ae80c1567eba6eb21bcf8d503234223e0a"
+    },
+    {
+      "path": "后端代码/app/controller/api/v1/order/StoreReservationOrder.php",
+      "sha256": "04e381b9a98de35d6aa7cb86cd30044ef67c37fc5aad928bebba3881d9fb4879"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/reservation/ImportedEntitlementReservationStoreServices.php",
+      "sha256": "fa0db13d1d1e4d6c6534a30b44259faf1f575723f3049b3441e1e94e12d4f781"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/reservation/MemberV3ReservationServices.php",
+      "sha256": "b5886f25bc92cd1848541ce5d1f598f71ec632da139218fe075019eb0df19d8d"
+    },
+    {
+      "path": "tests/customer-008/php/historical-reservation-store-isolated.php",
+      "sha256": "72c45b65a80656e124a84a32dda9467b0d1f6d4118f48f24225c7f41c03552af"
+    },
+    {
+      "path": "tests/member-reservation-v3/historical-addon-contract.cjs",
+      "sha256": "4b25c60169199c8083a20a2f2453ff17cacb0573620f486a9e01298bd6f464f3"
+    },
+    {
+      "path": "tests/member-reservation-v3/historical-addon-preview.cjs",
+      "sha256": "542b4f5f31fcc0ab83b561914b95ec9e076684f841da1bb7bb52214e8241b7bd"
+    }
+  ],
+  "patch_sha256": "b7f64b8c44f8eee3e9ca3330a963194a14bd9a2397edb941b21aa275f03bab91",
+  "build": {
+    "root": "/tmp/m008-historical-addon-h5-20261019",
+    "file_count": 503,
+    "manifest_sha256": "a14289d1d0a4b2deb493e43d18bacf6832cabbe772fbed20f7c888d9f2ba65ff",
+    "entries": [
+      {
+        "path": "index.html",
+        "bytes": 984,
+        "sha256": "48c0a7e57dc001ebf9bca13eff477e21a0f774a2930604aed10fa5da3acb1cbc"
+      },
+      {
+        "path": "static/js/index.2d2a7783.js",
+        "bytes": 639871,
+        "sha256": "63a1cde68545187f5e2d336aa2c4bca3afc2f18930041af2e0d3b02b5372e662"
+      },
+      {
+        "path": "static/js/pages-activity-reservation-index.f85f8ad8.js",
+        "bytes": 142002,
+        "sha256": "fdcf32734f242c63879d347f1b41d9ddeeac0758eaa5e3f82908ad895ab24661"
+      },
+      {
+        "path": "static/js/pages-activity-reservation-index~pages-activity-therapist_list-index.cf903474.js",
+        "bytes": 12611,
+        "sha256": "f12c90e6fb198f1ae3b9796d9eb227a35064be7311e94bced1f8e258428804c4"
+      },
+      {
+        "path": "static/js/pages-activity-reservation-index~pages-admin-agent-index~pages-admin-target-allocate-index~pages-adm~8106a162.35b6d8c1.js",
+        "bytes": 29871,
+        "sha256": "71eafb2b67dbd12e867e67870527f69067a9470d6e7bd7c62e7d19dbf33fbba1"
+      },
+      {
+        "path": "static/js/pages-activity-reservation-index~pages-admin-agent-index~pages-admin-user-index~pages-admin-yeji-sta~7d099914.555aacd5.js",
+        "bytes": 75823,
+        "sha256": "199eed59f7690bcaf1d9112d73099ae3218d16eed187406004fc01a3de7d7c13"
+      }
+    ]
+  },
+  "other_unaccepted_frontend_change": {
+    "path": "前端代码/uniapp/pages/users/user_card_list/index.vue",
+    "sha256": "0d790e34115aa16fe9c89bd4aa1c048b12f38f7c89df2ab3a55bc6cd4f220ae3"
+  }
+}

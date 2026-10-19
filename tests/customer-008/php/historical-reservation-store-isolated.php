@@ -36,7 +36,7 @@ $envName->setAccessible(true);
 $envName->setValue($app, 'historical_reservation_isolated_skip_dotenv_reload');
 $app->initialize();
 set_exception_handler(static function (Throwable $error): void {
-    fwrite(STDERR, $error->getMessage() . PHP_EOL);
+    file_put_contents('php://stderr', $error->getMessage() . PHP_EOL . $error->getTraceAsString() . PHP_EOL);
     exit(1);
 });
 Db::connect('mysql', true)->query('SELECT 1');
@@ -125,7 +125,132 @@ try {
 } finally {
     Db::rollback();
 }
+// Multi-project fixtures are derived only inside the disposable transaction.
+// No customer right is consumed: creating reservations merely occupies visits.
+Db::startTrans();
+try {
+    $baseDetail = Db::name('store_order_cart_info')->where('id', 13967)->find();
+    $newDetail = static function (array $changes = []) use ($baseDetail): int {
+        $row = array_merge($baseDetail, ['write_surplus_times' => 2, 'write_start' => 0, 'write_end' => 0], $changes);
+        unset($row['id']);
+        $row['unique'] = bin2hex(random_bytes(16));
+        return (int)Db::name('store_order_cart_info')->insertGetId($row);
+    };
+    $addonId = $newDetail(['write_surplus_times' => 1]);
+    $mainId = $newDetail();
+    $expectDenied = static function (callable $operation, string $reason): void {
+        try {
+            $operation();
+        } catch (ValidateException $expected) {
+            return;
+        }
+        throw new RuntimeException('Missing rejection: ' . $reason);
+    };
+    $options = $service->addonOptions(421, 5338, $mainId, 11);
+    $optionIds = [];
+    foreach ($options['list'] as $group) $optionIds = array_merge($optionIds, array_column($group['cart_info'], 'id'));
+    if (!in_array($addonId, array_map('intval', $optionIds), true)
+        || in_array($mainId, array_map('intval', $optionIds), true)) {
+        throw new RuntimeException('Historical addon picker omitted the available right or included the main right');
+    }
+    $expectDenied(static function () use ($service, $mainId): void {
+        $service->addonOptions(420, 5338, $mainId, 11);
+    }, 'foreign member main context');
+    $expectDenied(static function () use ($service, $mainId): void {
+        $service->addonOptions(421, 5338, $mainId, 22);
+    }, 'foreign organization store');
+    $expiredId = $newDetail(['write_end' => time() - 86400]);
+    $depletedId = $newDetail(['write_surplus_times' => 0]);
+    $input = [
+        'cart_num' => 1, 'cart_info_id' => $mainId, 'store_id' => 11,
+        'reservation_time' => date('Y-m-d', time() + 2 * 86400),
+        'reservation_start' => '10:00', 'reservation_end' => '10:01',
+        'service_duration_minutes' => 1,
+        'addon_items' => [['cart_info_id' => $addonId, 'addon_service_duration' => 1]],
+    ];
+    foreach ([$expiredId, $depletedId, $mainId] as $badId) {
+        $expectDenied(static function () use ($booking, $input, $badId): void {
+            $booking->create(421, 5338, array_merge($input, [
+                'addon_items' => [['cart_info_id' => $badId]],
+            ]));
+        }, 'expired, depleted or duplicate main addon');
+    }
+    $beforeCount = (int)Db::name('cashier_v3_reservation')->count();
+    $created = $booking->create(421, 5338, $input);
+    $header = Db::name('cashier_v3_reservation')->where('id', (int)$created['reservationId'])->find();
+    $lines = Db::name('cashier_v3_reservation_line')->where('reservation_id', (int)$created['reservationId'])
+        ->order('id asc')->select()->toArray();
+    $mainRight = $service->reservationDetail(421, $mainId, 11);
+    $addonRight = $service->reservationDetail(421, $addonId, 11);
+    $expectedMinutes = (int)$mainRight['_project_duration'] + (int)$addonRight['_duration'];
+    if (count($lines) !== 2 || (string)$lines[1]['role_code'] !== 'ADDON'
+        || (int)$lines[1]['entitlement_source_detail_id'] !== $addonId
+        || ((int)$header['appointment_end_at'] - (int)$header['appointment_start_at']) !== $expectedMinutes * 60
+        || array_sum(array_column($lines, 'service_duration_minutes')) !== $expectedMinutes) {
+        throw new RuntimeException('Historical multi-project lines or authoritative duration differ');
+    }
+    $replayed = $booking->create(421, 5338, $input);
+    if ($replayed['reservationId'] !== $created['reservationId']
+        || (int)Db::name('cashier_v3_reservation')->count() !== $beforeCount + 1) {
+        throw new RuntimeException('Historical multi-project replay duplicated a booking');
+    }
+    $expectDenied(static function () use ($booking, $input): void {
+        $booking->create(421, 5338, array_merge($input, ['reservation_start' => '14:00']));
+    }, 'addon already occupied by pending appointment');
+    if ((int)Db::name('cashier_v3_reservation')->count() !== $beforeCount + 1
+        || (int)Db::name('store_order_cart_info')->where('id', $addonId)->value('write_surplus_times') !== 1) {
+        throw new RuntimeException('Failed addon attempt left a partial booking or deducted a visit');
+    }
+    // A second source carrier belongs to an unrelated import scope, not to
+    // the selected store; knowing its detail ID never authorizes the addon.
+    $otherOrder = Db::name('store_order')->where('id', 5338)->find();
+    unset($otherOrder['id']);
+    $otherOrder['unique'] = bin2hex(random_bytes(16));
+    $otherOrder['order_id'] = 'LOCAL-ADDON-' . bin2hex(random_bytes(5));
+    $otherOid = (int)Db::name('store_order')->insertGetId($otherOrder);
+    $holder = Db::name('user_card_holder')->where('oid', 5338)->find();
+    $oldHolderId = (int)$holder['id'];
+    unset($holder['id']);
+    $holder['oid'] = $otherOid;
+    $holder['card_no'] = null;
+    $holderId = (int)Db::name('user_card_holder')->insertGetId($holder);
+    $scope = Db::name('migration_entitlement_scope')->where('card_holder_id', $oldHolderId)->find();
+    unset($scope['id']);
+    $scope['card_holder_id'] = $holderId;
+    $scope['owner_org_id'] = 2;
+    $scope['source_system'] = 'local-addon-test';
+    $scope['source_detail_id'] = $holderId;
+    Db::name('migration_entitlement_scope')->insert($scope);
+    $foreignScopeId = $newDetail(['oid' => $otherOid]);
+    $expectDenied(static function () use ($booking, $input, $foreignScopeId): void {
+        $booking->create(421, 5338, array_merge($input, [
+            'addon_items' => [['cart_info_id' => $foreignScopeId]],
+        ]));
+    }, 'addon scope must independently allow the chosen store');
+    Db::name('store_order')->where('id', $otherOid)->update(['uid' => 420]);
+    $expectDenied(static function () use ($booking, $input, $foreignScopeId): void {
+        $booking->create(421, 5338, array_merge($input, [
+            'addon_items' => [['cart_info_id' => $foreignScopeId]],
+        ]));
+    }, 'foreign member addon');
+    // An ordinary owned right at this store remains a valid add-on to a
+    // historical main project; hidden carriers alone require import policy.
+    Db::name('store_order')->where('id', $otherOid)->update([
+        'uid' => 421, 'is_system_del' => 0, 'store_id' => 11,
+    ]);
+    $mixed = $booking->create(421, 5338, array_merge($input, [
+        'reservation_start' => '15:00',
+        'addon_items' => [['cart_info_id' => $foreignScopeId]],
+    ]));
+    if ((int)Db::name('cashier_v3_reservation_line')->where('reservation_id', (int)$mixed['reservationId'])->count() !== 2) {
+        throw new RuntimeException('Owned ordinary add-on was not retained in historical booking');
+    }
+} finally {
+    Db::rollback();
+}
 echo json_encode(['ok' => true, 'visible_store_ids' => [11], 'cross_brand_denied' => true,
     'wrong_member_denied' => true, 'closed_store_denied' => true,
     'disabled_organization_denied' => true, 'booking_write_rolled_back' => true,
-    'replay_idempotent' => true, 'double_booking_denied' => true]) . PHP_EOL;
+    'replay_idempotent' => true, 'double_booking_denied' => true,
+    'historical_multi_project_rolled_back' => true, 'addon_scope_denied' => true,
+    'addon_quota_atomic' => true, 'server_duration_authoritative' => true]) . PHP_EOL;
