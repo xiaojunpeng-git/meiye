@@ -193,6 +193,11 @@
 	.staff-module__list--1 { width: 100%; flex-wrap: wrap; }
 	.staff-module__list--2 { width: 100%; flex-direction: column; }
 	.staff-module__card { position: relative; box-sizing: border-box; display: flex; align-items: center; min-width: 292rpx; margin-right: 16rpx; padding: 20rpx; border: 1rpx solid rgba(123,41,65,.07); box-shadow: 0 12rpx 28rpx rgba(80,44,52,.07); }
+	/* Stack only horizontal cards; keep a stable rail width and let information
+	   fill the middle so optional booking actions stay below the selected fields. */
+	.staff-module__list--0 .staff-module__card { flex: 0 0 292rpx; width: 292rpx; min-width: 0; flex-direction: column; text-align: center; }
+	.staff-module__list--0 .staff-module__info { width: 100%; margin: 14rpx 0 16rpx; }
+	.staff-module__list--0 .staff-module__button { max-width: 100%; box-sizing: border-box; }
 	.staff-module__card:last-child { margin-right: 0; }
 	.staff-module__list--1 .staff-module__card { width: calc(50% - 8rpx); min-width: 0; margin-bottom: 16rpx; }
 	.staff-module__list--1 .staff-module__card:nth-child(2n) { margin-right: 0; }

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>员工横向卡片本地验收</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f5f6;color:#292929;font-family:Arial,sans-serif;letter-spacing:0}header{padding:16px 20px;border-bottom:1px solid #ddd;background:#fff}h1{margin:0 0 12px;font-size:18px}label{display:inline-flex;align-items:center;gap:6px;margin:0 14px 8px 0;font-size:13px}main{display:flex;align-items:flex-start;flex-wrap:wrap;gap:28px;padding:24px}section{flex:none;max-width:100%}h2{font-size:14px;margin:0 0 12px}section>div{max-width:100%;background:#fff}.member-pane .staff-module__scroll{overflow-x:auto}.member-pane .staff-module__info span{display:block}.member-pane .staff-module__avatar{object-fit:cover}.member-pane .staff-module__button{cursor:pointer}output{display:block;margin-top:12px;max-width:375px;font-size:12px;overflow-wrap:anywhere}button{cursor:pointer}select{min-height:28px}
+</style></head>
+<body><div id="app">
+<header><h1>员工展示 · 本地候选</h1>
+<label>组件宽度<select v-model.number="width"><option :value="320">320</option><option :value="375">375</option></select></label>
+<label>展示样式<select v-model.number="config.styleConfig.tabVal"><option :value="0">横向滑动</option><option :value="1">双列卡片</option><option :value="2">列表</option></select></label>
+<label v-for="field in config.checkboxInfo.list" :key="field.id"><input type="checkbox" :value="field.id" v-model="config.checkboxInfo.type">{{field.name}}</label>
+</header><main>
+<section><h2>装修编辑器预览</h2><div class="preview-pane" :style="{width:width+'px'}"><preview :num="0"></preview></div></section>
+<section><h2>会员端组件</h2><div class="member-pane" :style="{width:width+'px','--rpx':(width/750)+'px'}"><member :data-config="config" :store-infor="{storeId:101,storeName:'本地测试门店'}"></member></div><button @click="scrollNext">下一组员工</button><output>{{receipt}}</output></section>
+</main></div>
+<script src="/vue.js"></script><script src="/source.js"></script>
+<script>
+const source=fixtureSources;
+const sheet=document.createElement('style');sheet.textContent=source.preview.css+'\n'+source.member.css;document.head.appendChild(sheet);
+const mapState=()=>({defaultArray(){return this.$store.state.admin.mobildConfig.defaultArray}});
+let vm;
+const uni={getStorageSync(){return 101},setStorageSync(key,value){vm.receipt=key+': '+JSON.stringify(value)},navigateTo({url}){vm.receipt+=' → '+url}};
+const preview=new Function('mapState','require',source.preview.script)(mapState,()=>'/avatar.png');preview.template=source.preview.template;
+const member=new Function('homeStaffList','uni',source.member.script)(()=>Promise.resolve({data:{list:source.people}}),uni);member.template=source.member.template;
+// Browser-only unit adapter mirrors uni-app rpx conversion, including inline
+// styles; leave computed business values and canonical source untouched.
+for(const [key,original] of Object.entries(member.computed)){member.computed[key]=function(){const convert=value=>typeof value==='string'?value.replace(/(-?[\d.]+)rpx/g,(_,n)=>Number(n)*this.$root.width/750+'px'):value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,convert(v)])):value;return convert(original.call(this))}};
+Vue.component('preview',preview);Vue.component('member',member);
+const config=source.config;
+Vue.prototype.$store={state:{admin:{mobildConfig:{defaultArray:[config]}}},commit(){throw Error('Unexpected decoration write')}};
+vm=new Vue({el:'#app',data:{config,width:375,receipt:''},methods:{scrollNext(){const rail=document.querySelector('.member-pane .staff-module__scroll');rail.scrollLeft+=250}}});
+</script></body></html>

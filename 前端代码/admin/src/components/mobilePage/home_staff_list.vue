@@ -246,6 +246,11 @@ export default {
 .staff-module__list--1 { flex-wrap: wrap; }
 .staff-module__list--2 { flex-direction: column; }
 .staff-module__card { position: relative; box-sizing: border-box; padding: 10px; min-width: 142px; display: flex; align-items: center; gap: 8px; box-shadow: 0 3px 12px rgba(0, 0, 0, .04); }
+/* Only the horizontal rail stacks avatar, selected information and booking.
+   A fixed track prevents long labels from resizing neighbouring staff cards. */
+.staff-module__list--0 .staff-module__card { flex: 0 0 142px; width: 142px; min-width: 0; flex-direction: column; text-align: center; }
+.staff-module__list--0 .staff-module__info { width: 100%; }
+.staff-module__list--0 .staff-module__button { max-width: 100%; box-sizing: border-box; }
 .staff-module__list--1 .staff-module__card { width: calc(50% - 4px); min-width: 0; }
 .staff-module__list--2 .staff-module__card { width: 100%; }
 .staff-module__avatar { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; flex: none; }
