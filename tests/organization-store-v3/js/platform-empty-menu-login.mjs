@@ -59,10 +59,27 @@ for (const access of [[], ['inventory-access']]) {
 }
 assert.equal(util.resolveDefaultMenuPath([]), '/admin/workspace');
 const menu = [{ path: '/stock', header: 'product', children: [{ path: '/stock/transfer', title: '调拨管理' }] }];
-const normal = await login(menu, ['transfer'], '');
+// 旧首页产生的 redirect 不能覆盖当前权限菜单的默认落地。
+const normal = await login(menu, ['transfer']);
 assert.equal(normal.destination, '/admin/stock/transfer');
 assert.equal(normal.state.get('admin/menu/setSider')[0].path, '/admin/stock/transfer');
+// 真实业务深链仍须保留。
 assert.equal((await login([{ path: '/stock', header: 'product' }], [], '/admin/stock/transfer')).destination, '/admin/stock/transfer');
+const ordered = await login([
+  {
+    path: '/first', header: 'first', children: [
+      { path: '/first/screen', target: '_blank' },
+      { path: '/first/group', children: [{ path: '/first/action', title: '第一个功能' }] },
+    ],
+  },
+  {
+    path: '/home', header: 'home', children: [
+      { path: '/home/', title: '概况', unique_auth: 'admin-index-index' },
+    ],
+  },
+], ['first-action']);
+assert.equal(ordered.destination, '/admin/first/action');
+assert.equal(ordered.state.get('admin/menu/setHeaderName'), 'first');
 // Empty arrays overwrite the previous account rather than inheriting its navigation.
 assert.equal((await login([], [])).state.get('admin/menu/setHeader').length, 0);
 assert.equal(storage.get('unique_auth'), '');
@@ -94,4 +111,4 @@ assert.ok(menusStore.includes("localStorage.setItem('unique_auth', access)"));
 assert.ok(menusStore.includes("await dispatch('admin/user/set'"));
 assert.ok(guard.includes("const refreshed = await store.dispatch('admin/menus/getMenusNavList')"));
 assert.ok(guard.includes('isPermission = includeArray(meta.auth, freshAccess)'));
-console.log('PASS empty menus + empty permissions, granted permissions + empty menus, current job-permission refresh, normal navigation, stale-state clearing, 403 session retention, three login methods');
+console.log('PASS first-category landing, legacy-home redirect bypass, business deep-link retention, empty menus + empty permissions, granted permissions + empty menus, current job-permission refresh, stale-state clearing, 403 session retention, three login methods');

@@ -68,13 +68,6 @@ util.makeMenu = function makeMenu(prefix, menus) {
   }
 };
 
-function isOverviewMenu(item) {
-  if (!item) return false;
-  return item.unique_auth === 'admin-index-index' ||
-    item.title === '概况' ||
-    item.menu_name === '概况';
-}
-
 /** 数据大屏等新开页，禁止作为登录/顶栏默认落地 */
 function isExternalOrScreenMenu(item) {
   if (!item) return false;
@@ -84,12 +77,13 @@ function isExternalOrScreenMenu(item) {
 }
 
 /**
- * 解析登录/顶栏默认落地路径：优先「概况」，避免菜单数组顺序把「组织架构」等排在前面时误进业务页。
+ * 解析登录/顶栏默认落地路径：严格沿服务端权限菜单顺序，进入第一个大类的
+ * 第一个站内叶子功能。菜单顺序就是管理员配置的业务顺序，不能再跨大类优先
+ * 寻找“概况”，也不能把外链或数据大屏当成登录后的当前页面。
  * @param {Array|Object} menus 顶层菜单数组，或单个带 children 的菜单节点
  * @returns {string}
  */
 util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
-  const fallback = `${Setting.roterPre}/home/`;
   // 空菜单不是首页授权；登录及刷新后的默认落地均保持业务内容为空。
   const emptyWorkspace = `${Setting.roterPre}/workspace`;
   if (!menus) return emptyWorkspace;
@@ -97,10 +91,13 @@ util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
   const pickLeaf = (node) => {
     if (!node) return '';
     if (node.children && node.children.length) {
-      const overviewChild = node.children.find(isOverviewMenu);
-      if (overviewChild) return pickLeaf(overviewChild);
-      const firstInApp = node.children.find((c) => c && !isExternalOrScreenMenu(c));
-      if (firstInApp) return pickLeaf(firstInApp);
+      // 某个菜单分组可能只含外链；继续检查同级后续菜单，避免误落空白页。
+      for (let i = 0; i < node.children.length; i++) {
+        const child = node.children[i];
+        if (!child || isExternalOrScreenMenu(child)) continue;
+        const path = pickLeaf(child);
+        if (path) return path;
+      }
       return '';
     }
     if (isExternalOrScreenMenu(node)) return '';
@@ -110,23 +107,13 @@ util.resolveDefaultMenuPath = function resolveDefaultMenuPath(menus) {
   if (Array.isArray(menus)) {
     if (!menus.length) return emptyWorkspace;
     for (let i = 0; i < menus.length; i++) {
-      const hit = (function findOverview(list) {
-        for (let j = 0; j < list.length; j++) {
-          const item = list[j];
-          if (isOverviewMenu(item)) return item;
-          if (item.children && item.children.length) {
-            const nested = findOverview(item.children);
-            if (nested) return nested;
-          }
-        }
-        return null;
-      })(menus[i].children && menus[i].children.length ? menus[i].children : [menus[i]]);
-      if (hit) return pickLeaf(hit) || fallback;
+      const path = pickLeaf(menus[i]);
+      if (path) return path;
     }
-    return pickLeaf(menus[0]) || fallback;
+    return emptyWorkspace;
   }
 
-  return pickLeaf(menus) || fallback;
+  return pickLeaf(menus) || emptyWorkspace;
 };
 
 /**

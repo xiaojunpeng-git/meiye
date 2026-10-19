@@ -4,6 +4,18 @@ import { getHeaderName, getHeaderSider, getMenuSider } from '@/libs/system';
 import { hasMoheAiManagementMenu } from '@/libs/moheAiManagementMenu';
 
 /**
+ * `/admin/home/` 是旧平台首页入口。未登录访问它时，路由守卫会把该地址写入
+ * redirect；登录成功后若原样回跳，就会覆盖权限菜单计算出的首个业务功能。
+ * 真实业务深链仍照常回跳，仅忽略这个默认首页地址。
+ */
+function resolvePostLoginPath(defaultPath, redirect) {
+  const redirectPath = String(redirect || '').trim();
+  const pathname = redirectPath.split(/[?#]/)[0].replace(/\/+$/, '');
+  const legacyHome = `${Setting.roterPre}/home`.replace(/\/+$/, '');
+  return redirectPath && pathname !== legacyHome ? redirectPath : defaultPath;
+}
+
+/**
  * 三种平台登录方式共用成功处理。后端已判断登录资格，菜单/权限为空不再次拒绝。
  * 每次覆盖旧账号的菜单与权限；空菜单进入无业务内容的工作区，不跳首页或旧深链。
  */
@@ -44,5 +56,8 @@ export async function finishPlatformLogin(vm, data) {
     version: data.version,
     newOrderAudioLink: data.newOrderAudioLink
   });
-  return vm.$router.replace({ path: menus.length ? (vm.$route.query.redirect || path) : path });
+  const destination = menus.length
+    ? resolvePostLoginPath(path, vm.$route.query.redirect)
+    : path;
+  return vm.$router.replace({ path: destination });
 }
