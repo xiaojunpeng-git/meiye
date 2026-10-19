@@ -45,7 +45,12 @@ $assert(str_contains($fuyou, "\$successAction === 'member_recharge'") && str_con
 $assert(str_contains($fuyou, 'hash_equals('), '富友回调没有使用常量时间签名比较');
 $assert(str_contains($fuyou, 'CURLOPT_SSL_VERIFYPEER => true'), '富友请求没有开启 TLS 证书校验');
 $assert(!str_contains($fuyou, 'CURLOPT_SSL_VERIFYPEER, false'), '富友请求仍关闭 TLS 证书校验');
-$assert(str_contains($fuyou, "\$settled = (bool)Event::until('pay.notify'") && str_contains($fuyou, 'return $settled;'), '本地入账失败时富友回调仍可能返回成功');
+// New member commerce uses the V3 settlement branch; legacy callbacks still
+// use the original event. Both return the actual local settlement result.
+$assert(str_contains($fuyou, "\$settled = \$successAction === 'member_commerce'")
+    && str_contains($fuyou, 'MemberCommerceServices())->paid(')
+    && str_contains($fuyou, ": (bool)Event::until('pay.notify'")
+    && str_contains($fuyou, 'return $settled;'), '本地入账失败时富友回调仍可能返回成功');
 $assert(str_contains($fuyou, 'reserveChannelOrderNo('), '发起支付前没有生成富友合规渠道单号');
 $assert(str_contains($fuyou, "Db::name('fuyou_payment_attempt')->insert"), '富友渠道单号与业务单号没有持久映射');
 $assert(str_contains($fuyou, 'resolveOrderId('), '富友回调没有通过渠道映射还原业务单号');

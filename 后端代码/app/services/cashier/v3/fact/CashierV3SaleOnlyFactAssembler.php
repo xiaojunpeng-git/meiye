@@ -972,6 +972,10 @@ final class CashierV3SaleOnlyFactAssembler
         if ($amount < 0 || $total <= 0 || $amount > $total) {
             throw self::failure('sale_only_fact_line_allocation_total_invalid');
         }
+        // The total is stored in cents but new facts are whole yuan. Perform
+        // remainder allocation in yuan, retaining cent-valued sale weights.
+        if ($amount % 100 !== 0) throw self::failure('sale_only_fact_whole_yuan_required');
+        $amount = intdiv($amount, 100);
 
         $result = [];
         $remainders = [];
@@ -1002,12 +1006,14 @@ final class CashierV3SaleOnlyFactAssembler
         for ($remaining = $amount - $allocated, $index = 0; $remaining > 0; $remaining--, $index++) {
             $result[$remainders[$index]['lineId']]++;
         }
-        return $result;
+        return array_map(static function (int $yuan): int { return $yuan * 100; }, $result);
     }
 
     /** @return array<int,int> */
     private static function allocateByWeights(int $amount, array $people): array
     {
+        if ($amount % 100 !== 0) throw self::failure('sale_only_fact_whole_yuan_required');
+        $amount = intdiv($amount, 100);
         $result = [];
         $remainders = [];
         $allocated = 0;
@@ -1027,7 +1033,7 @@ final class CashierV3SaleOnlyFactAssembler
             $result[$remainders[$index]['index']]++;
         }
         ksort($result, SORT_NUMERIC);
-        return $result;
+        return array_map(static function (int $yuan): int { return $yuan * 100; }, $result);
     }
 
     /** @return array<int,int> Allocate the full base independently for each performance group. */
@@ -1054,8 +1060,8 @@ final class CashierV3SaleOnlyFactAssembler
 
     /**
      * The personnel snapshot is authoritative: a manual amount is preserved
-     * exactly, while a ratio change recomputes that person's amount from the
-     * line's cash-performance base.  No cross-person total is inferred here.
+     * as whole yuan. Automatic default allocations conserve each independent
+     * group's base using stable integer-yuan remainder allocation.
      *
      * @return array<int,int>
      */
@@ -1066,12 +1072,44 @@ final class CashierV3SaleOnlyFactAssembler
         if ($amount === 0) {
             return array_fill(0, count($people), 0);
         }
+        if ($amount % 100 !== 0) throw self::failure('sale_only_performance_whole_yuan_required');
+        $hasManual = array_filter($people, static function (array $person): bool {
+            return !empty($person['performanceAmountManual']);
+        });
+        if (!$hasManual) {
+            $groups = [];
+            foreach ($people as $index => $person) $groups[(string)($person['allocationGroupKey'] ?? 'normal')][$index] = $person;
+            $result = array_fill(0, count($people), 0);
+            foreach ($groups as $group) {
+                $weightSum = array_sum(array_map(static function (array $person): int {
+                    return max(0, min(100, (int)($person['allocationWeight'] ?? 0)));
+                }, $group));
+                // Preserve intentionally unassigned weight; never normalize a
+                // partial/zero-weight group into an unintended full allocation.
+                $poolYuan = intdiv(intdiv($amount, 100) * $weightSum, 100);
+                $remainders = [];
+                $allocatedYuan = 0;
+                foreach ($group as $index => $person) {
+                    $product = intdiv($amount, 100) * max(0, min(100, (int)($person['allocationWeight'] ?? 0)));
+                    $share = intdiv($product, 100);
+                    $result[$index] = $share * 100;
+                    $allocatedYuan += $share;
+                    $remainders[] = ['index'=>$index,'remainder'=>$product % 100];
+                }
+                usort($remainders, static function (array $a, array $b): int {
+                    return $b['remainder'] <=> $a['remainder'] ?: $a['index'] <=> $b['index'];
+                });
+                for ($i = 0; $i < $poolYuan - $allocatedYuan; $i++) $result[$remainders[$i]['index']] += 100;
+            }
+            return $result;
+        }
         $result = [];
         foreach ($people as $index => $person) {
             $weight = max(0, min(100, (int)($person['allocationWeight'] ?? 0)));
             $result[$index] = !empty($person['performanceAmountManual'])
                 ? max(0, (int)($person['performanceAmountCents'] ?? 0))
-                : intdiv($amount * $weight, 100);
+                : intdiv(intdiv($amount, 100) * $weight, 100) * 100;
+            if ($result[$index] % 100 !== 0) throw self::failure('sale_only_performance_whole_yuan_required');
         }
         return $result;
     }

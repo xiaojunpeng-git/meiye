@@ -429,7 +429,10 @@ final class CashierV3CheckoutPreparationServices
         );
         if ($checkoutSnapshot !== null) {
             $snapshot['sourceDocument'] = [
-                'type' => 'cashier_snapshot',
+                // Only the server-created member scope can mark a self-service
+                // purchase. Browser snapshot fields never grant this identity.
+                'type' => (($dataScope->operatorProfile()['actor_type'] ?? '') === 'member')
+                    ? 'member_checkout' : 'cashier_snapshot',
                 'id' => $workspaceId,
                 'no' => $workspaceId,
             ];

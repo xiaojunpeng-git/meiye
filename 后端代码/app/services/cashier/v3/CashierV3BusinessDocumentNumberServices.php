@@ -36,7 +36,9 @@ final class CashierV3BusinessDocumentNumberServices
     /** Customer-visible sales receipts are XS + YYMMDD + five-digit sequence. */
     public static function isSalesOrderNo(string $value): bool
     {
-        return preg_match('/^XS[0-9]{11}$/D', trim($value)) === 1;
+        // Member receipts retain the same daily sequence; SJ identifies their
+        // entry channel without changing opaque order identities or old receipts.
+        return preg_match('/^(?:SJ-)?XS[0-9]{11}$/D', trim($value)) === 1;
     }
 
     public function allocateForSourceInTx(
@@ -45,7 +47,8 @@ final class CashierV3BusinessDocumentNumberServices
         string $sourceType,
         string $sourceId,
         string $businessDate,
-        int $now
+        int $now,
+        bool $memberChannel = false
     ): string {
         CashierV3TransactionGuard::assertInTransaction('cashierBusinessDocumentNumber.allocate');
         $tenantId = trim($tenantId);
@@ -94,7 +97,7 @@ final class CashierV3BusinessDocumentNumberServices
         // 服务记录是门店工作人员与会员共同使用的短单号：FW + MMDD + 五位流水。
         // 其他业务单据保持既有 YYMMDD 编号口径，避免改变已确认的销售、充值等规则。
         $datePart = $documentType === self::SERVICE ? $date->format('md') : $date->format('ymd');
-        $number = $prefix . $datePart . str_pad((string)$sequence, $sequenceWidth, '0', STR_PAD_LEFT);
+        $number = ($memberChannel ? 'SJ-' : '') . $prefix . $datePart . str_pad((string)$sequence, $sequenceWidth, '0', STR_PAD_LEFT);
         Db::name('cashier_v3_business_document_no')->insert([
             'tenant_id' => $tenantId,
             'source_type' => $sourceType,
@@ -115,7 +118,8 @@ final class CashierV3BusinessDocumentNumberServices
         string $tenantId,
         string $checkoutRequestId,
         string $businessDate,
-        int $now
+        int $now,
+        bool $memberChannel = false
     ): string {
         CashierV3TransactionGuard::assertInTransaction('cashierBusinessDocumentNumber.salesOrder');
         $existing = Db::name('cashier_v3_sales_order')
@@ -132,7 +136,8 @@ final class CashierV3BusinessDocumentNumberServices
             'checkout_request',
             $checkoutRequestId,
             $businessDate,
-            $now
+            $now,
+            $memberChannel
         );
     }
 

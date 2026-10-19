@@ -482,6 +482,18 @@ final class CashierV3SaleCatalogServices
         return $this->saleLineFromItem($this->normalizeAuthorityRow($row, false), $idempotencyKey);
     }
 
+    /** Member checkout freezes the complete server card definition, since the
+     * member UI cannot submit a cashier-owned card or price snapshot. */
+    public function memberSaleLineInTx(int $skuId, string $key, CashierV3OperatorScope $operator, CashierV3DataScopeContext $data): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('memberSaleCatalog');
+        $this->assertStoreScope($operator, $data);
+        $row = $this->authority->lockStoreItemBySkuId($operator->storeId(), $skuId);
+        if (!is_array($row)) throw self::notAvailable($skuId);
+        self::assertNewSaleAvailability($row, $skuId);
+        return $this->saleLineFromItem($this->normalizeAuthorityRow($row, true), $key);
+    }
+
     /** Final card issuance keeps snapshot price/definition but must not sell
      * a card that was taken off shelf before this transaction. */
     public function selectCheckoutSaleLineInTx(

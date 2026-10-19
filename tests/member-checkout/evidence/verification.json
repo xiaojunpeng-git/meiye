@@ -1,0 +1,370 @@
+{
+  "title": "第三轮：会员统一购买、充值与门店权益核销",
+  "createdAt": "2026-10-19T19:08:16.872Z",
+  "baselineHead": "d9c5849534c9313ded8cd587d27b40c7d0773afa",
+  "baselineScope": "Current canonical working tree; unrelated staged/unstaged work is present and not accepted by this verification.",
+  "remoteBaseline": "Not applicable: local development and local database only.",
+  "stagedDiffSha256": "33fe873c38db4dd2b8d9e57c6730539fdefa8795b78f5929dd8698427241d44c",
+  "entries": {
+    "member": "http://127.0.0.1:8081/pages/goods/order_list/index",
+    "store": "http://127.0.0.1:18091/view_cashier_v3/#/order-center",
+    "settings": "http://127.0.0.1:18081/admin/setting/shop/base"
+  },
+  "files": {
+    "frontend": [
+      {
+        "path": "前端代码/admin/src/pages/setting/shop/base.vue",
+        "sha256": "ac51d6bfac5559dc74854f82438fa3b17c39f5b0428044b3dbc3493a06d00860"
+      },
+      {
+        "path": "前端代码/uniapp/api/memberCommerce.js",
+        "sha256": "b18b301ded5fee299546bf60b6cbe256df3fd230ca6899f98065a7c98d6f5831"
+      },
+      {
+        "path": "前端代码/uniapp/components/memberCommerceOrders/index.vue",
+        "sha256": "9b8407fa20f35eb23f4852726a35bbfa8117278cdfc9f312fafa486e8aac955d"
+      },
+      {
+        "path": "前端代码/uniapp/pages/goods/member_checkout/index.vue",
+        "sha256": "d08a49b8721c6de3ce567af84e96a8d4c6fbceb96fcd2d24448654c2c47faec0"
+      },
+      {
+        "path": "前端代码/uniapp/pages/goods/order_confirm/index.vue",
+        "sha256": "608de3087379e5727bd9c7c462b32a2affd2f35339475fd6fc5fefd445b1fcc2"
+      },
+      {
+        "path": "前端代码/uniapp/pages/goods/order_list/index.vue",
+        "sha256": "4227ca23edbdb342bc05aa40a1b56a51d48ed52e03a6bb7a93b65e1791a56fe1"
+      },
+      {
+        "path": "前端代码/uniapp/pages/goods_details/index.vue",
+        "sha256": "a753b9968d0423428a4a5513819ffb6f20785d717d67f8e6e0fd45904e04c642"
+      },
+      {
+        "path": "前端代码/uniapp/pages/users/user_payment/index.vue",
+        "sha256": "1f0e95b740024c40e9fb8d7d33a27a161c7778e8310084145f25bcb0dafb3d70"
+      },
+      {
+        "path": "前端代码/uniapp/pages.json",
+        "sha256": "aa98f8df1b7482ba53f1c5490fff1059ac3d0d487aceadb9dae442aadcf02b8a"
+      }
+    ],
+    "backend": [
+      {
+        "path": "后端代码/app/controller/admin/v1/system/MemberCommerceSettings.php",
+        "sha256": "1c94afc45b13371bc7ba0b93e30acf5d7efdf444984c2a87af0ca4ae5ba3e89d"
+      },
+      {
+        "path": "后端代码/app/controller/api/v1/order/MemberCommerce.php",
+        "sha256": "8d7a80fc2fa1d460f774208d868aad68d0029f64efaed7806b5d834b40fdd22c"
+      },
+      {
+        "path": "后端代码/app/controller/api/v1/order/StoreOrder.php",
+        "sha256": "94ea2f421b874a3e28719c7cc1bca8cac058f183c76a06d1f77ae5cb4e728ee7"
+      },
+      {
+        "path": "后端代码/app/controller/api/v1/user/UserRecharge.php",
+        "sha256": "70a57cbad132a0e01ac102aef94e8a9dfe0df5d02b9ffbfa31ae99ede20eaef9"
+      },
+      {
+        "path": "后端代码/app/dao/order/StoreOrderDao.php",
+        "sha256": "91767cacdd3aab0939b7f893eed612090a9eb9d85df1e86e08dafceafc5f74b0"
+      },
+      {
+        "path": "后端代码/app/services/order/StoreOrderServices.php",
+        "sha256": "b4c48762415c7161df1dfcc9e638aed1227593fba210daaf6ec77c0265f6beb8"
+      },
+      {
+        "path": "后端代码/app/services/member/MemberCommerceServices.php",
+        "sha256": "ef964822d752e7a0f7519841871e64aef9abc157e6ecab70ebe4c5f7c2122ff7"
+      },
+      {
+        "path": "后端代码/app/services/member/MemberCommerceSettingsServices.php",
+        "sha256": "3b24ac77eb9694a3db9e00882a69606f4b3a8e7e6c0d75560a19c08d1615ca87"
+      },
+      {
+        "path": "后端代码/app/services/member/MemberCommerceScope.php",
+        "sha256": "0ca755bc7a3a8401d43332801d19d92cbc8d904b65f3ff7da3661bde78766613"
+      },
+      {
+        "path": "后端代码/app/services/member/MemberProjectEntitlementServices.php",
+        "sha256": "17194a3b91c5a470063db2d578386f118c7ffefcb9711c26be5f1b5f84721f98"
+      },
+      {
+        "path": "后端代码/app/services/member/MemberCommerceRechargeSettlement.php",
+        "sha256": "1b8fe5a521c50628269cf39292d528f27598fa120a8e790d2d13212d4ce88a78"
+      },
+      {
+        "path": "后端代码/app/services/member/MemberCommercePaymentServices.php",
+        "sha256": "29b2196d870ed29443f545e5aaef3356300ecf7487e265ebe2f5151f8e541b89"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/CashierV3BusinessDocumentNumberServices.php",
+        "sha256": "ae2754e95f0ad8c5d621c006426ac5281723eca49501bc5694b79f561581ce06"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php",
+        "sha256": "0523b71a9b7934b56f9fe8c8515533470b3d31d1088e98d96093725fbd877282"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php",
+        "sha256": "6bee25ebd956c647e73eb135672e955f7fa876ba4443b895747850dfd7ac9f76"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/member/CashierV3RechargeModule.php",
+        "sha256": "82041354f4ced5620b5e2e1d49543ce2115628e5796b3e81be8921c4bf8b461f"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/member/CashierV3RechargeGiftIssuanceServices.php",
+        "sha256": "46375f81112a3f7b3ca4349310b67f1028099b40c5e7ed03ce19ba5b0d629b54"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php",
+        "sha256": "25d64c78aef8c15122208bcb8d985af87259f687f8990e65c29dc3819af92750"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php",
+        "sha256": "1f5aa7160448f970f2bc2d91a53ceed6ae9a4a2a0f5b9538a892acf0c0fa7e39"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php",
+        "sha256": "9d26192dd89b3b38f3a1ce9d82e2e219ad484dcdf161d2e502261667be6d730c"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php",
+        "sha256": "1e9c21f5f19016d39241d823cfd802d8e4abbf919c7d0717863320943fc3200c"
+      },
+      {
+        "path": "后端代码/app/services/user/UserBalanceAtomicServices.php",
+        "sha256": "6be7ee5b7a1343e6e86f2713a8602b0c10892663fb25e56c42b6111a99299ca5"
+      },
+      {
+        "path": "后端代码/mohe/services/wechat/HwcPayService.php",
+        "sha256": "5f5e9d04156cf8bc9d007c361419c243ca26f02ea657a749371e10f1d0182b03"
+      },
+      {
+        "path": "后端代码/route/admin.php",
+        "sha256": "48c0d48a3bb4fd643de05927e3301c01fe997f30850f2afc8cdd729c86822f2a"
+      },
+      {
+        "path": "后端代码/route/api.php",
+        "sha256": "29049382e79d2eb49f79028b9cb2cbf4e570f82a301f7b8b4985f6295cefda79"
+      }
+    ],
+    "migration": [
+      {
+        "path": "后端代码/database/upgrades/2026-10-20-会员统一结账/01-schema.sql",
+        "sha256": "06e4914e99bc4ad78e58b21597d382b2d0cc5bc87d9e91f13c9dec2de90803d8"
+      }
+    ],
+    "tests": [
+      {
+        "path": "tests/member-checkout/local-install.php",
+        "sha256": "fd8ac565125f6035e116ed3d37de2c00336024a37978d8a7ee5f1975de2c17f2"
+      },
+      {
+        "path": "tests/member-checkout/local-probe.php",
+        "sha256": "eaf599bfd6c31cabaea014d9f13cf328fc7b14b3a87b553f6d3b8fa6e56b291e"
+      },
+      {
+        "path": "tests/member-checkout/local-contract.php",
+        "sha256": "4d9d25ecc8e130a5262d9f00c86e522c93db82472a04f40c31c5a8b393bd68a6"
+      },
+      {
+        "path": "tests/member-checkout/local-boundaries.php",
+        "sha256": "261663e3aeb4269b1c7117611b7d382ed4a6aa20c63cfb6c60ad55bfec76db80"
+      },
+      {
+        "path": "tests/member-checkout/local-acceptance-readonly.php",
+        "sha256": "0ad6f7ab991ae374d194bdc8ac71d4936d1063b4a21b38ef8dc8d37a9a23b8db"
+      },
+      {
+        "path": "tests/member-checkout/local-repair-test-card-number.php",
+        "sha256": "f5ac7895c6e4354933878f29cf687f0100d4b57f30a71155ef8f135a6e7d12bb"
+      },
+      {
+        "path": "tests/member-checkout/verify-local.mjs",
+        "sha256": "b1e4e8975023586a7aaad2e532341edd0c30323c81bcd1f181990a402943cf10"
+      },
+      {
+        "path": "tests/member-fuyou-payment/php/static-contract.php",
+        "sha256": "b98b0672cffa4b551064636ed4fdffcb53ea20c443da9c7909cf59fdef0535d9"
+      }
+    ]
+  },
+  "preservedExistingCapabilities": [
+    "V3 balance ledger and card issuance",
+    "store rights redemption and integer amount allocation",
+    "historical/activity payment callbacks",
+    "existing unpublished worktree changes"
+  ],
+  "retainedAcceptanceData": {
+    "balance": {
+      "uid": 913081,
+      "now_money": "996454.00",
+      "ben_money": "996454.00",
+      "give_money": "0.00",
+      "belong_store_id": 118,
+      "balance_version": 4
+    },
+    "orders": [
+      {
+        "publicId": "MC-0a900f2e21c7451db55dd5b0",
+        "documentNo": "SJ-XS26102000001",
+        "status": "paid",
+        "salesOrderId": "CSO-73ca9824ca5f9ddabb2d91b413c52c5f09a978d2",
+        "storeId": 118,
+        "balanceCents": 56600,
+        "sourceId": 17,
+        "holders": [
+          {
+            "holder": {
+              "id": 2076883,
+              "oid": 2327156,
+              "card_no": "5462483",
+              "card_name": "水美人",
+              "product_type": 6,
+              "write_times": 1,
+              "write_surplus_times": 0,
+              "is_del": 0
+            },
+            "details": [
+              {
+                "id": 4485553,
+                "product_id": 625196,
+                "write_times": 1,
+                "write_surplus_times": 0,
+                "is_writeoff": 1,
+                "writeoff_time": 0
+              }
+            ]
+          }
+        ],
+        "balanceFacts": [
+          {
+            "principal_delta_cents": -56600,
+            "bonus_delta_cents": 0,
+            "status": "effective"
+          }
+        ],
+        "performanceFacts": [
+          {
+            "performance_type": "sales_performance_allocated",
+            "employee_name_snapshot": "何盼盼",
+            "amount_cents": 0,
+            "allocation_weight_numerator": 50,
+            "allocation_weight_denominator": 100
+          },
+          {
+            "performance_type": "sales_performance_allocated",
+            "employee_name_snapshot": "潘金花",
+            "amount_cents": 0,
+            "allocation_weight_numerator": 50,
+            "allocation_weight_denominator": 100
+          },
+          {
+            "performance_type": "actual_performance_recorded",
+            "employee_name_snapshot": "",
+            "amount_cents": 0,
+            "allocation_weight_numerator": 1,
+            "allocation_weight_denominator": 1
+          }
+        ]
+      },
+      {
+        "publicId": "MC-930294f474759b501f96654a",
+        "documentNo": "SJ-XS26102000002",
+        "status": "paid",
+        "salesOrderId": "CSO-ada491d74615647a35579bee4c744d63f615bf22",
+        "storeId": 118,
+        "balanceCents": 298000,
+        "sourceId": 17,
+        "holders": [
+          {
+            "holder": {
+              "id": 2076884,
+              "oid": 2327157,
+              "card_no": "9932883",
+              "card_name": "菁春霜10次",
+              "product_type": 5,
+              "write_times": 10,
+              "write_surplus_times": 9,
+              "is_del": 0
+            },
+            "details": [
+              {
+                "id": 4485555,
+                "product_id": 91940,
+                "write_times": 10,
+                "write_surplus_times": 9,
+                "is_writeoff": 0,
+                "writeoff_time": 0
+              }
+            ]
+          }
+        ],
+        "balanceFacts": [
+          {
+            "principal_delta_cents": -298000,
+            "bonus_delta_cents": 0,
+            "status": "effective"
+          }
+        ],
+        "performanceFacts": [
+          {
+            "performance_type": "actual_performance_recorded",
+            "employee_name_snapshot": "",
+            "amount_cents": 0,
+            "allocation_weight_numerator": 1,
+            "allocation_weight_denominator": 1
+          }
+        ]
+      }
+    ],
+    "writeoffs": [
+      {
+        "writeoff_id": "EWO-85967ad71bd9370069c8a00ab5b7ba9cb613290f",
+        "checkout_request_id": "CKR-a3720bd4365f9a12ec24926b5ab03c62c4b6b9dd",
+        "source_line_id": "CKL-29d4ee220c4f2849f725285053389e4aaedeea0a",
+        "source_detail_id": 4485553,
+        "quantity": 1,
+        "actual_entitlement_amount_cents": 56600,
+        "status": "effective"
+      },
+      {
+        "writeoff_id": "EWO-5c8876b31aca383759b80a87b26f2a5ab6fad2ab",
+        "checkout_request_id": "CKR-c43a9713f571a677dc1865b64129ffd80dc20ca8",
+        "source_line_id": "CKL-797a2a19ebca8ed7181f817f23cea187a15a1f34",
+        "source_detail_id": 4485555,
+        "quantity": 1,
+        "actual_entitlement_amount_cents": 29800,
+        "status": "effective"
+      }
+    ],
+    "services": [
+      {
+        "service_record_no": "FW102000001",
+        "project_name_snapshot": "水美人",
+        "quantity": 1,
+        "service_status": "completed",
+        "checkout_request_id": "CKR-a3720bd4365f9a12ec24926b5ab03c62c4b6b9dd"
+      },
+      {
+        "service_record_no": "FW102000002",
+        "project_name_snapshot": "菁春霜",
+        "quantity": 1,
+        "service_status": "completed",
+        "checkout_request_id": "CKR-c43a9713f571a677dc1865b64129ffd80dc20ca8"
+      }
+    ],
+    "verification": "PASS: two UI purchases, two store redemptions, no second balance debit"
+  },
+  "limits": [
+    "No real Fuyou charge or refund was made; online callbacks were tested inside rollback transactions.",
+    "No customer payment credentials copied or production configuration/database changed.",
+    "Provider unknown attempts retain balance holds; cancellation only releases an intent never sent to provider.",
+    "No mini-program or APP device payment validation; H5 local UI is the completed real acceptance path.",
+    "No commit, deployment, push, review submission or mini-program upload. PM acceptance remains required."
+  ],
+  "patchFingerprint": "86a82225e18a25f4bd43a05cbd5a0240d125d0ff897de39c60766fe212c25805"
+}

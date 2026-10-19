@@ -272,7 +272,11 @@ class HwcPayService
             ? self::CALLBACK_EVENT_ALIPAY
             : self::CALLBACK_CHANNEL_WECHAT;
 
-        $settled = (bool)Event::until('pay.notify', [$notify, $eventChannel]);
+        // Member commerce settles through V3 authorities, never through the
+        // legacy product/recharge listener that would create a second ledger.
+        $settled = $successAction === 'member_commerce'
+            ? (new \app\services\member\MemberCommerceServices())->paid($orderId, (int)$data['order_amt'], $tradeNo, $channel)
+            : (bool)Event::until('pay.notify', [$notify, $eventChannel]);
         if ($settled) {
             Db::name('fuyou_payment_attempt')
                 ->where('channel_order_no', $channelOrderNo)
@@ -342,7 +346,7 @@ class HwcPayService
         if ($successAction === 'member_recharge') {
             $successAction = 'member';
         }
-        $allowed = ['product', 'user_recharge', 'member', 'debt_repay'];
+        $allowed = ['product', 'user_recharge', 'member', 'debt_repay', 'member_commerce'];
         if (!in_array($successAction, $allowed, true)) {
             throw new PayException('富友支付回调业务类型不支持');
         }
@@ -455,6 +459,10 @@ class HwcPayService
 
     private function amountMatchesOrder(string $successAction, string $orderId, string $amountInCents): bool
     {
+        if ($successAction === 'member_commerce') {
+            $amount = Db::name('member_commerce_order')->where('public_id', $orderId)->value('external_cents');
+            return $amount !== null && (string)$amount === $amountInCents;
+        }
         switch ($successAction) {
             case 'user_recharge':
                 $price = Db::name('user_recharge')->where('order_id', $orderId)->value('price');

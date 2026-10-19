@@ -75,6 +75,31 @@ final class CashierV3SalesOrderReversalServices
         if (count($receipts) !== $expectedCardCount) throw self::failure('sales_reversal_card_issuance_incomplete');
         $cards = [];
         foreach ($receipts as $receipt) $cards[] = $this->lockUnusedCard((array)$receipt, $source, $scope);
+        // Deferred member projects use the same holder/detail authority as card
+        // redemption. A whole-sale void must check occupation and retract these
+        // rights too; an ordinary financial refund deliberately keeps them.
+        $projectLines = Db::name('cashier_v3_sales_order_line')->where('tenant_id', $scope->tenantId())
+            ->where('order_id', (string)$source['sourceId'])->where('line_direction', 'forward')
+            ->where('line_status', 'settled')->where('item_type', 'project')->lock(true)->select()->toArray();
+        foreach ($projectLines as $projectLine) {
+            $technicalNo = 'v3p' . substr(hash('sha256', $projectLine['order_line_id']), 0, 28);
+            $carrier = Db::name('store_order')->where('order_id', $technicalNo)->lock(true)->find();
+            if (!$carrier) continue; // Store immediate-service sales have no deferred carrier.
+            $holders = Db::name('user_card_holder')->where('oid', (int)$carrier['id'])->lock(true)->select()->toArray();
+            $detail = Db::name('store_order_cart_info')->where('oid', (int)$carrier['id'])->where('cart_type', 2)->lock(true)->find();
+            $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
+            if (count($holders) !== 1 || ($snapshot['sourceType'] ?? '') !== 'member_v3_project_purchase'
+                || ($snapshot['salesOrderLineId'] ?? '') !== $projectLine['order_line_id']
+                || ($snapshot['salesOrderId'] ?? '') !== $source['sourceId']) {
+                throw self::failure('sales_reversal_member_project_mapping_invalid');
+            }
+            $cards[] = $this->lockUnusedCard([
+                'receipt_id' => 'MPR-' . substr(hash('sha256', $projectLine['order_line_id']), 0, 40),
+                'member_id' => (int)$source['memberId'], 'store_id' => (int)$source['storeId'],
+                'sales_order_line_id' => $projectLine['order_line_id'],
+                'card_holder_id' => (int)$holders[0]['id'], 'legacy_order_id' => (int)$carrier['id'],
+            ], $source, $scope);
+        }
 
         $paymentFacts = Db::name('cashier_v3_payment_fact')->where('tenant_id', $scope->tenantId())
             ->where('order_id', (string)$source['sourceId'])->where('fact_direction', 'forward')

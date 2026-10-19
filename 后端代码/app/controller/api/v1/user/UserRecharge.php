@@ -77,6 +77,12 @@ class UserRecharge
 	 */
     public function recharge(Request $request)
     {
+        // New member orders must freeze store/source and enter the common
+        // cashier transaction. Keep old payment/read callbacks for history,
+        // but never create a parallel source-less recharge after activation.
+        if (\app\services\member\MemberCommerceSettingsServices::configured()) {
+            return app('json')->fail('请更新页面后，从充值确认支付页面选择门店办理。');
+        }
         [$price, $recharId, $type, $from] = $request->postMore([
             ['price', 0],
             ['rechar_id', 0],

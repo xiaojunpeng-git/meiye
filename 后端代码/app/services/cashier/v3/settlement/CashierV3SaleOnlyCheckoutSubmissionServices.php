@@ -257,7 +257,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 $dataScope->tenantId(),
                 (string)$aggregate['request']['request_id'],
                 (string)$aggregate['request']['business_date'],
-                $now
+                $now,
+                (string)$aggregate['request']['source_document_type'] === 'member_checkout'
             );
             $businessSource = $this->businessSources->lockResolvedForSettlementInTx(
                 CashierV3CheckoutBusinessSourceSelectionServices::KIND_SALE,
@@ -487,7 +488,14 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             // completes service at successful settlement.  The service fact
             // references the transaction's committed checkout event; a later
             // failure rolls both facts back together.
-            $saleProjectServiceResult = (($entitlementCredit['operationType'] ?? '') === 'project_upgrade')
+            // Member purchases issue unused project rights. Service and labor
+            // facts belong to the later store redemption, never this payment.
+            $memberPurchase = (string)$order['source_document_type'] === 'member_checkout';
+            if ($memberPurchase) {
+                (new \app\services\member\MemberProjectEntitlementServices())
+                    ->issueInTx($salesPlan, $now);
+            }
+            $saleProjectServiceResult = ($memberPurchase || ($entitlementCredit['operationType'] ?? '') === 'project_upgrade')
                 ? ['services' => [], 'completedServiceCount' => 0]
                 : $this->saleProjectServices->completeInTx(
                     $salesPlan,

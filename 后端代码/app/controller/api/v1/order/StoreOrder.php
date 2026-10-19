@@ -248,6 +248,13 @@ class StoreOrder
         if (!$cartInfo) {
             return app('json')->fail('订单已过期或提交的商品不在送达区域,请刷新当前页面或重新选择商品下单!');
         }
+        // Historical payment/refund readers and distinct activity contracts
+        // remain compatible; new ordinary sales cannot bypass the member
+        // store/source/rights settlement through the legacy create endpoint.
+        if (\app\services\member\MemberCommerceSettingsServices::configured()
+            && !$combinationId && !$pinkId && !$seckill_id && !$collate_code_id && !$bargainId && !$newcomerId && !$discountId) {
+            return app('json')->fail('请更新页面后，从新的确认支付页面购买。');
+        }
         if(!empty($combinationId)){
             //判断是否是仅新用户可以购买
             $onlyNew=StoreCombination::where("id",$combinationId)->value("only_new");
@@ -623,6 +630,9 @@ class StoreOrder
         ]);
 
         $where['uid'] = $request->uid();
+        if (\app\services\member\MemberCommerceSettingsServices::configured()) {
+            $where['exclude_member_commerce_carriers_uid'] = (int)$request->uid();
+        }
         $where['is_del'] = 0;
         $where['is_system_del'] = 0;
         if (in_array($where['status'], [-1, -2, -3])) {

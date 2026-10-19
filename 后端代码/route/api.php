@@ -457,6 +457,14 @@ Route::group('api', function () {
 		Route::get('reservation/staff/conflicts', 'v1.reservation.ReservationStaff/staffConflicts')->name('reservationStaffConflictsAuth'); //手艺人预约冲突
 
         //订单类
+        // Member commerce validates the authenticated member before invoking shared V3 settlement.
+        Route::post('member/commerce/quote', 'v1.order.MemberCommerce/quote')->name('memberCommerceQuote');
+        Route::get('member/commerce/cart-entry', 'v1.order.MemberCommerce/cartEntry')->name('memberCommerceCartEntry');
+        Route::post('member/commerce/create', 'v1.order.MemberCommerce/create')->middleware(BlockerMiddleware::class)->name('memberCommerceCreate');
+        Route::get('member/commerce/list', 'v1.order.MemberCommerce/listing')->name('memberCommerceList');
+        Route::get('member/commerce/detail/:id', 'v1.order.MemberCommerce/detail')->name('memberCommerceDetail');
+        Route::post('member/commerce/pay/:id', 'v1.order.MemberCommerce/pay')->middleware(BlockerMiddleware::class)->name('memberCommercePay');
+        Route::post('member/commerce/cancel/:id', 'v1.order.MemberCommerce/cancel')->middleware(BlockerMiddleware::class)->name('memberCommerceCancel');
         Route::post('order/check_shipping', 'v1.order.StoreOrder/checkShipping')->name('checkShipping'); //检测是否显示快递和核销标签
         Route::post('order/confirm', 'v1.order.StoreOrder/confirm')->middleware(BlockerMiddleware::class)->name('orderConfirm'); //订单确认
         Route::post('order/computed/:key', 'v1.order.StoreOrder/computedOrder')->middleware(BlockerMiddleware::class)->name('computedOrder'); //计算订单金额

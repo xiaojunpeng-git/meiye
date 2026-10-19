@@ -727,7 +727,7 @@ final class CashierV3CheckoutProjectionServices
                 // Existing drafts predate this column and their fingerprint did
                 // not contain craftsmen. Preserve that immutable contract until
                 // a user action rewrites the draft with an explicit [] value.
-                if ((string)($request['source_document_type'] ?? '') === 'cashier_snapshot'
+                if (in_array((string)($request['source_document_type'] ?? ''), ['cashier_snapshot', 'member_checkout'], true)
                     || !CashierV3CheckoutCraftsmenSnapshot::isLegacyEmpty($craftsmenJson)) {
                     $fingerprintInput['craftsmen'] = $craftsmen;
                 }
@@ -751,7 +751,7 @@ final class CashierV3CheckoutProjectionServices
                 // are the canonical absence value and must stay omitted so a
                 // normal sale line does not drift merely because projection
                 // normalization materialized an empty array.
-                if ((string)($request['source_document_type'] ?? '') === 'cashier_snapshot'
+                if (in_array((string)($request['source_document_type'] ?? ''), ['cashier_snapshot', 'member_checkout'], true)
                     && $cardPurchaseSnapshot !== []) {
                     $fingerprintInput['cardPurchaseSnapshot'] = $cardPurchaseSnapshot;
                 }

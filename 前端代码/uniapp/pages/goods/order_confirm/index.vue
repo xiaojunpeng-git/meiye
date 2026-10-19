@@ -606,6 +606,7 @@
 	</view>
 </template>
 <script>
+	import { memberCommerceCartEntry } from '@/api/memberCommerce';
 	const CACHE_CITY = {};
 	let sysHeight = uni.getSystemInfoSync().statusBarHeight;
 	import dayjs from '@/plugin/dayjs/dayjs.min.js';
@@ -882,7 +883,19 @@
 				return dateText + timeText;
 			},
 		},
-		onLoad: function(options) {
+		onLoad: async function(options) {
+      if (!this.$store.getters.isLogin) { toLogin(); return; }
+      // The ordinary cart shares the member transaction boundary. Historical
+      // activity-specific checkouts retain their dedicated contracts.
+      if (options.cartId && !options.tableId) {
+        try {
+          const entry = await memberCommerceCartEntry(options.cartId);
+          if (entry.data.ordinary) {
+            uni.redirectTo({ url: '/pages/goods/member_checkout/index?cart_ids=' + encodeURIComponent(options.cartId) });
+            return;
+          }
+        } catch (error) { this.$util.Tips({title: error.msg || '购物车读取失败'}); return; }
+      }
       this.spid = options.spid || 0;
 			// #ifdef H5
 			this.from = this.$wechat.isWeixin() ? 'weixin' : 'weixinh5'

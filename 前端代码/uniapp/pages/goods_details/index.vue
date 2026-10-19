@@ -315,7 +315,7 @@
 								</view>
 							</view>
 							<view class="flex-between-center h-100 px-20" @tap="selecAttr"
-								v-if="attr.productAttr.length && diyProduct.showService.includes(1)">
+								v-if="![0,4,5,6].includes(Number(storeInfo.product_type)) && attr.productAttr.length && diyProduct.showService.includes(1)">
 								<view class="flex-y-center">
 									<text class="fs-26 text--w111-888">选择</text>
 									<view class="ml-32 text--w111-333 fs-26 w-560 line1">{{ attrValue }}</view>
@@ -519,10 +519,8 @@
 										<text class="fs-18">购物车</text>
 									</view>
 								</view>
-								<view class="flex-1 flex-y-center" v-if="storeInfo.product_type == 6 || storeInfo.product_type == 5">
-									<view v-if="storeInfo.stock>0 && storeInfo.product_type == 6 && mobileReservationOpen" @tap="selecAttr" class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26">立即预约</view>
-									<view v-else-if="storeInfo.stock>0" @tap="selecAttr" class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26">立即购买</view>
-									<view v-else class="w-full h-72 flex-center bg-hui rd-36px text--w111-fff fs-26">已售罄</view>
+								<view class="flex-1 flex-y-center" v-if="[0,4,5,6].includes(Number(storeInfo.product_type))">
+									<view @tap="memberPurchase" class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26">立即购买</view>
 								</view>
 								<view class="flex-1 grid-column-2 self-center grid-gap-16rpx"
 									v-else-if="attr.productSelect.stock <= 0 && storeInfo.cart_button && diyProduct.showCart">
@@ -1096,6 +1094,12 @@
 		},
 		// #endif
 		methods: {
+            // Single-SKU purchases go directly to a server-priced, store-bound
+            // confirmation. Service availability is checked at later booking/use.
+            memberPurchase() {
+                if (!this.isLogin) { toLogin(); return; }
+                uni.navigateTo({url: '/pages/goods/member_checkout/index?product_id=' + this.id});
+            },
 			// 获取配送方式
 			deliveryFun(e) {
 				this.delivery_type = e;

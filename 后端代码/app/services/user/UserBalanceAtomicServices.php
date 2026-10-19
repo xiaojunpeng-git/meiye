@@ -356,6 +356,14 @@ class UserBalanceAtomicServices extends BaseServices
         $afterBen = bcadd($before['ben_money'], $changeBen, 2);
         $afterGive = bcadd($before['give_money'], $changeGive, 2);
         $afterTotal = bcadd($before['now_money'], bcadd($changeBen, $changeGive, 2), 2);
+        // Online mixed payments reserve their balance portion until the
+        // provider outcome is authoritative. Other channels cannot spend it.
+        if ((int)$meta['pm'] === 0) {
+            $held = \app\services\member\MemberCommerceServices::heldBalanceCents((int)$before['uid']);
+            if (bccomp($afterTotal, bcdiv((string)$held, '100', 2), 2) < 0) {
+                throw new ValidateException('部分余额用于待确认的在线支付，可用余额不足。');
+            }
+        }
         $this->assertInvariant([
             'ben_money' => $afterBen,
             'give_money' => $afterGive,

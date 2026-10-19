@@ -49,6 +49,11 @@ class StoreOrderDao extends BaseDao
      */
     public function search(array $where = [])
     {
+        // Member V3 orders are rendered from their formal sale, not again from
+        // technical rights carriers. This filter is opt-in on member readers;
+        // store rights/refund/history queries must still see those carriers.
+        $memberCommerceUid = (int)($where['exclude_member_commerce_carriers_uid'] ?? 0);
+        unset($where['exclude_member_commerce_carriers_uid']);
         if (isset($where['real_name'])) {
             $where['real_name'] = trim($where['real_name']);
         }
@@ -95,7 +100,15 @@ class StoreOrderDao extends BaseDao
             $where['data_scope_participate_staff_ids'],
             $where['data_scope_participate_fields']
         );
-        return parent::search($where)->when(is_array($pidFilter), function ($query) use ($pidFilter) {
+        return parent::search($where)->when($memberCommerceUid > 0, function ($query) use ($memberCommerceUid) {
+            $query->where('channel_type','<>','member_v3')->whereNotIn('id', function ($carriers) use ($memberCommerceUid) {
+                $carriers->name('cashier_v3_card_purchase_receipt')->field('legacy_order_id')
+                    ->whereIn('sales_order_id', function ($sales) use ($memberCommerceUid) {
+                        $sales->name('member_commerce_order')->where('member_id',$memberCommerceUid)
+                            ->where('kind','purchase')->field('sales_order_id');
+                    });
+            });
+        })->when(is_array($pidFilter), function ($query) use ($pidFilter) {
             $query->whereIn('pid', $pidFilter);
         })->when($terminalAction !== null && $terminalAction !== '', function ($query) use ($terminalAction) {
             $query->where('terminal_action', (int)$terminalAction);

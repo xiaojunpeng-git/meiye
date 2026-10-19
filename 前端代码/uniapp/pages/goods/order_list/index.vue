@@ -41,6 +41,7 @@
 			</view>
 		</view>
 		<view class="px-20" :style="{'margin-top':marTop + 'px'}" v-show="!focus">
+            <member-commerce-orders :status="orderStatus" :keyword="keyword" :revision="commerceRevision" @count="commerceTotal = $event" />
 			<view class="order_card bg--w111-fff rd-24rpx pt-32 pb-32 pl-24 pr-24"
 			v-for="(item, index) in orderList" :key="index" @click="goOrderDetails(item.order_id)">
 				<view class="flex-between-center">
@@ -112,7 +113,7 @@
 				<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999"></text>
 			</view>
 		</view>
-		<block v-if="orderList.length == 0 && !loading">
+		<block v-if="orderList.length == 0 && commerceTotal === 0 && !loading">
 			<emptyPage title="暂无订单信息～" :src="keyword ? '/statics/images/noSearch.gif' : '/statics/images/noOrder.gif'"></emptyPage>
 		</block>
 		<view class="loadingicon flex-center" v-if="orderList.length > 0">
@@ -137,8 +138,10 @@
 	import emptyPage from '@/components/emptyPage.vue';
 	import colors from '@/mixins/color.js';
 	import Loading from '@/components/Loading/index.vue'
+    import MemberCommerceOrders from '@/components/memberCommerceOrders/index.vue';
 	export default {
 		components: {
+            MemberCommerceOrders,
 			Loading,
 			home,
 			emptyPage,
@@ -152,6 +155,8 @@
 				loadend: false, //是否加载完毕
 				loadTitle: '加载更多', //提示语
 				orderList: [], //订单数组
+                commerceRevision: 0,
+                commerceTotal: 0,
 				orderData: {}, //订单详细统计
 				orderStatus: '', //订单状态
 				m888edb9: '', //订单类型
@@ -185,6 +190,7 @@
 			}
 		},
 		onShow() {
+            this.commerceRevision++;
 			uni.removeStorageSync('form_type_cart');
 			this.page = 1;
 			this.loadend = false;

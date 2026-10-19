@@ -1,0 +1,83 @@
+{
+    "verification": "PASS: normal cashier card purchase and pure rights redemption retained",
+    "environment": "local mysql\/ruihao; no real payment gateway",
+    "order": {
+        "order_id": "CSO-6a781f1e7e594a40e8a69c1217d5dd800dfe39f5",
+        "order_no": "XS26102000003",
+        "store_id": 118,
+        "member_id": 913081,
+        "operator_id": 618,
+        "source_document_type": "cashier_snapshot",
+        "business_source_primary_id": 17,
+        "sale_amount_cents": 298000,
+        "order_status": "settled"
+    },
+    "payment": {
+        "fact_id": "CFP-b86a93799b1771a394d65aa210b80ef2136c6c40",
+        "status": "effective",
+        "payment_method": "cash",
+        "amount_cents": 298000
+    },
+    "salespeople": [
+        {
+            "status": "effective",
+            "employee_name_snapshot": "何盼盼",
+            "allocation_weight_numerator": 50,
+            "allocation_weight_denominator": 100,
+            "amount_cents": 149000
+        },
+        {
+            "status": "effective",
+            "employee_name_snapshot": "潘金花",
+            "allocation_weight_numerator": 50,
+            "allocation_weight_denominator": 100,
+            "amount_cents": 149000
+        }
+    ],
+    "holder": {
+        "id": 2076898,
+        "oid": 2327171,
+        "card_no": "2125552",
+        "card_name": "菁春霜10次",
+        "write_times": 10,
+        "write_surplus_times": 9,
+        "is_del": 0
+    },
+    "detail": {
+        "id": 4485570,
+        "oid": 2327171,
+        "product_id": 91940,
+        "write_times": 10,
+        "write_surplus_times": 9,
+        "is_writeoff": 0
+    },
+    "writeoffs": [
+        {
+            "writeoff_id": "EWO-14747625901a75da3885237ecb3a3f9b917e9189",
+            "checkout_request_id": "CKR-52567f4cd5834cac8f29a406be6db1cd34725597",
+            "holder_id": 2076898,
+            "source_detail_id": 4485570,
+            "quantity": 1,
+            "actual_entitlement_amount_cents": 29800,
+            "status": "effective"
+        }
+    ],
+    "services": [
+        {
+            "service_record_no": "FW102000003",
+            "project_name_snapshot": "菁春霜",
+            "quantity": 1,
+            "service_status": "completed",
+            "checkout_request_id": "CKR-52567f4cd5834cac8f29a406be6db1cd34725597"
+        }
+    ],
+    "balance": {
+        "uid": 913081,
+        "now_money": "996454.00",
+        "ben_money": "996454.00",
+        "give_money": "0.00",
+        "belong_store_id": 118,
+        "balance_version": 4
+    },
+    "uiObservation": "Sale result heading says payment succeeded, but cash child result still says pending confirmation; effective payment fact verified. No cashier UI changed."
+}

@@ -2259,6 +2259,10 @@
 					}
 				},
 				{
+					"path": "member_checkout/index",
+					"style": { "navigationBarTitleText": "确认支付" }
+				},
+				{
 					"path": "reservation_details/index",
 					"style": {
 						"navigationBarTitleText": "预约详情",

@@ -98,7 +98,16 @@ final class CashierV3RechargeModule
         $member = $this->lockedMember($input['memberId'], $operator, $dataScope);
         // 套餐金额和赠金必须在服务端按当前有效配置重算，不能信任页面
         // 在准备浮层时取得的历史数值。
-        $input = $this->resolveRechargeTerms($input, $member);
+        // Online callbacks settle terms already accepted before charging.
+        // Only the server-created member scope can supply these stored terms.
+        $memberTerms = $scope['member_recharge_terms'] ?? null;
+        if (is_array($memberTerms) && ($dataScope->operatorProfile()['actor_type'] ?? '') === 'member') {
+            if ((int)$dataScope->operatorProfile()['actor_member_id'] !== $input['memberId']) throw self::failure('recharge_member_actor_mismatch', '充值会员身份不匹配。');
+            $input['principalCents'] = (int)$memberTerms['principalCents'];
+            $input['bonusCents'] = (int)$memberTerms['bonusCents'];
+        } else {
+            $input = $this->resolveRechargeTerms($input, $member);
+        }
         if ($input['debtCents'] > $input['principalCents']) {
             throw self::failure('recharge_debt_exceeds_principal', '欠款金额不能超过本次充值本金。');
         }
@@ -130,13 +139,16 @@ final class CashierV3RechargeModule
             'recharge_command',
             (string)$scope['idempotency_key'],
             $input['businessDate'],
-            $now
+            $now,
+            ($dataScope->operatorProfile()['actor_type'] ?? '') === 'member'
         );
         $rechargeId = (int)Db::name('user_recharge')->insertGetId([
             'order_id' => $orderNo,
             'uid' => $input['memberId'],
             'store_id' => $operator->storeId(),
-            'staff_id' => $operator->operatorId(),
+            // A member UID is never an employee ID. The authenticated member
+            // actor remains in the commerce/event audit, not the staff foreign key.
+            'staff_id' => ($dataScope->operatorProfile()['actor_type'] ?? '') === 'member' ? 0 : $operator->operatorId(),
             'price' => $this->centsToMoney($input['principalCents']),
             'give_price' => $this->centsToMoney($input['bonusCents']),
             // 零本金充值没有收款事实，原因必须随充值主单持久保存供审计追溯。
@@ -145,7 +157,7 @@ final class CashierV3RechargeModule
             'recharge_type' => $input['principalCents'] === 0 ? 'bonus_only'
                 : (count($input['paymentLines']) === 1 ? $input['paymentLines'][0]['paymentMethod'] : 'debt'),
             'cash_choose' => 0,
-            'channel_type' => (string)($member['user_type'] ?? ''),
+            'channel_type' => (string)($scope['member_channel'] ?? $member['user_type'] ?? ''),
             'paid' => 1,
             'pay_time' => $now,
             // 业务日独立于真实收款时间，供订单更正和报表统一读取。
@@ -208,7 +220,8 @@ final class CashierV3RechargeModule
                 $dataScope,
                 $eventRecorder,
                 $eventExecution,
-                (array)($scope['event_contract'] ?? [])
+                (array)($scope['event_contract'] ?? []),
+                is_array($memberTerms) ? ($memberTerms['giftConfig'] ?? []) : null
             );
         }
 
@@ -318,8 +331,10 @@ final class CashierV3RechargeModule
         if (!$member || (int)($member['status'] ?? 0) !== 1 || (int)($member['is_del'] ?? 0) !== 0) {
             throw self::failure('recharge_member_unavailable', '该会员不存在或已停用，不能充值。');
         }
+        $selfService = ($dataScope->operatorProfile()['actor_type'] ?? '') === 'member'
+            && (int)($dataScope->operatorProfile()['actor_member_id'] ?? 0) === $memberId;
         if (!$dataScope->allowsStore($operator->storeId())
-            || !Db::name('store_user')->where('uid', $memberId)->where('store_id', $operator->storeId())->where('status', 1)->lock(true)->find()) {
+            || (!$selfService && !Db::name('store_user')->where('uid', $memberId)->where('store_id', $operator->storeId())->where('status', 1)->lock(true)->find())) {
             throw self::failure('recharge_member_scope_denied', '当前门店没有为该会员充值的权限。');
         }
         return $member;
@@ -336,7 +351,9 @@ final class CashierV3RechargeModule
         $ids = new CashierV3CheckoutFactIdFactory($secret);
         $store = (array)Db::name('system_store')->where('id', $operator->storeId())->field('name')->find();
         $memberName = trim((string)($member['real_name'] ?? '')) ?: trim((string)($member['nickname'] ?? ''));
-        $operatorName = (string)Db::name('system_store_staff')->where('id', $operator->operatorId())->value('staff_name');
+        $operatorName = ($dataScope->operatorProfile()['actor_type'] ?? '') === 'member'
+            ? (string)$dataScope->operatorProfile()['staff_name']
+            : (string)Db::name('system_store_staff')->where('id', $operator->operatorId())->value('staff_name');
         $paymentCents = $input['principalCents'] - $input['debtCents'];
         $paymentFacts = [];
         foreach ($input['paymentLines'] as $index => $payment) {
@@ -528,6 +545,17 @@ final class CashierV3RechargeModule
         // 结账阶段不再显示或修改历史日期原因。
         $input['businessDateReason'] = '';
         return $input;
+    }
+
+    /** Server-only member quote: use the same active package directory and
+     * minimum/bonus policy before collecting money; callbacks freeze its result. */
+    public function termsForMemberQuote(int $packageId, int $customCents, array $member): array
+    {
+        if ($customCents < 0 || $customCents % 100 !== 0 || $customCents > 9999999999) {
+            throw self::failure('recharge_payload_invalid', '充值金额超出支持范围或不是整数元。');
+        }
+        return $this->resolveRechargeTerms(['mode'=>$packageId > 0 ? 'package' : 'custom',
+            'packageId'=>$packageId,'principalCents'=>$customCents,'bonusCents'=>0], $member);
     }
 
     private function resolveRechargeTerms(array $input, array $member): array

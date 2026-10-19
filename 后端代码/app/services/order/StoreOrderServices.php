@@ -580,6 +580,9 @@ class StoreOrderServices extends BaseServices
      */
     public function getOrderData(int $uid = 0, int $store_id = -1, int $plat_type = -1, array $where = [])
     {
+        if ($uid > 0 && \app\services\member\MemberCommerceSettingsServices::configured()) {
+            $where['exclude_member_commerce_carriers_uid'] = $uid;
+        }
         $where = array_merge($where, ['pid' => 0, 'uid' => $uid, 'is_del' => 0, 'is_system_del' => 0, 'plat_type' => $plat_type]);
         $countWhere = $where;
         if ($store_id != -1) {

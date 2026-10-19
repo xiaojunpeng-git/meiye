@@ -64,7 +64,8 @@ final class CashierV3RechargeGiftIssuanceServices
         CashierV3DataScopeContext $dataScope,
         CashierV3BusinessEventRecorder $eventRecorder,
         CashierV3BusinessEventExecution $eventExecution,
-        array $eventContract
+        array $eventContract,
+        ?array $frozenConfig = null
     ): array {
         CashierV3TransactionGuard::assertInTransaction('rechargeGift.issueInTx');
         if ($rechargeId <= 0 || $packageId <= 0 || $memberId <= 0 || $commandIdempotencyKey === '') {
@@ -74,7 +75,9 @@ final class CashierV3RechargeGiftIssuanceServices
             throw self::failure('recharge_gift_scope_denied', '当前门店没有发放充值赠送的权限。');
         }
 
-        $config = app()->make(StoreGiftConfigServices::class)->getConfig(
+        // Stored online terms freeze gifts before charging. Cashier recharges
+        // continue to read the current package configuration.
+        $config = $frozenConfig ?? app()->make(StoreGiftConfigServices::class)->getConfig(
             StoreGiftConfigServices::GIFT_TYPE_RECHARGE,
             $packageId
         );
