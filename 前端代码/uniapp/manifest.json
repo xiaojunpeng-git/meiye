@@ -186,11 +186,17 @@
             "postcss" : true,
             "es6" : true
         },
-        /* 设计预览仅用于 H5，微信页面无引用；排除大图以满足正式上传的主包限制。 */
+        /* H5素材/预览壳不进入小程序；已编入WXSS的样式/字体源文件不重复上传。
+           iconfont.woff2仍由WXSS按路径引用，必须保留，不能排除整个iconfont目录。 */
         "packOptions" : {
             "ignore" : [
                 { "type" : "folder", "value" : "static/design-preview" },
-                { "type" : "folder", "value" : "static/design-system" }
+                { "type" : "folder", "value" : "static/design-system" },
+                { "type" : "folder", "value" : "static/mall" },
+                { "type" : "folder", "value" : "static/html" },
+                { "type" : "folder", "value" : "static/fonts" },
+                { "type" : "folder", "value" : "static/css" },
+                { "type" : "file", "value" : "static/iconfont/iconfont.css" }
             ]
         },
         "permission" : {

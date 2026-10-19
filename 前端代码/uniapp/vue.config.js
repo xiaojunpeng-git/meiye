@@ -9,6 +9,15 @@ module.exports = {
 		}))
 	},
 	configureWebpack: config => {
+		// WXSS imports stay inside each package and preserve the exact original
+		// rule sequence. Only Weixin production packaging uses this optimization.
+		if (process.env.UNI_PLATFORM === 'mp-weixin' && process.env.NODE_ENV === 'production') {
+			const path = require('path')
+			const cli = process.env.UNI_HBUILDERX_PLUGINS && path.join(process.env.UNI_HBUILDERX_PLUGINS, 'uniapp-cli')
+			const dependency = name => require(require.resolve(name, { paths: [__dirname, cli].filter(Boolean) }))
+			const { MemberMiniCssDedupePlugin } = require('../../scripts/build/member-mini-css-dedupe.cjs')
+			config.plugins.push(new MemberMiniCssDedupePlugin({ postcss: dependency('postcss'), valueParser: dependency('postcss-value-parser') }))
+		}
 		if (process.env.NODE_ENV === 'production') {
 			config.optimization.minimizer[0].options.terserOptions.compress.warnings = false
 			config.optimization.minimizer[0].options.terserOptions.compress.drop_console = true
