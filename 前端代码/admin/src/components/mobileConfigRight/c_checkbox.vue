@@ -55,6 +55,9 @@ export default {
     'configObj.storeStyleConfig.tabVal': {
       handler(nVal, oVal) {
         if (this.configData.storeType) {
+          // Store layouts replace their information choices; preserve the new
+          // name toggle without changing selection or other checkbox modules.
+          const nameOption = this.configData.list.find(item => Number(item.id) === 4);
           if (nVal == 1) {
             this.configData.list = [
               {
@@ -90,6 +93,7 @@ export default {
               }
             ];
           }
+          if (nameOption) this.configData.list.unshift(nameOption);
         }
       }
     }

@@ -10,6 +10,7 @@
 <script>
 import toolCom from '@/components/mobileConfigRight/index.js';
 import rightBtn from '@/components/rightBtn/index.vue';
+import { upgradeStoreListConfig } from '@/utils/diyStoreListConfig';
 import { mapState, mapMutations, mapActions } from 'vuex';
 export default {
   name: 'c_home_store_list',
@@ -279,7 +280,7 @@ export default {
   },
   watch: {
     num(nVal) {
-      this.configObj = this.$store.state.admin.mobildConfig.defaultArray[nVal];
+      this.loadConfig(nVal);
     },
     configObj: {
       handler(nVal, oVal) {
@@ -348,11 +349,15 @@ export default {
   },
   mounted() {
     this.$nextTick(() => {
-      const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[this.num]));
-      this.configObj = value;
+      this.loadConfig(this.num);
     });
   },
   methods: {
+    // Upgrade an editor draft, never a production decoration or source object.
+    loadConfig(num) {
+      const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[num]));
+      this.configObj = upgradeStoreListConfig(value);
+    },
     getRComContent(arr, type, type2, type3) {
       if (type == 0) {
         if (type2 == 0) {

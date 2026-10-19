@@ -24,7 +24,7 @@
 					</view>
 					<view class="picBox">
 						<view class="fs-30 text--w111-333 acea-row row-middle">
-							<text :style="[storeNameStyle]" class="name line1">{{item.name}}</text>
+							<text v-if="showStoreName" :style="[storeNameStyle]" class="name line1">{{item.name}}</text>
 							<view class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
 								<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-12" :style="[deliveryStyle]" v-if="item.delivery_type.includes('1')">快递</view>
 								<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[cityDeliveryStyle]" v-if="item.delivery_type.includes('3')">闪送</view>
@@ -65,7 +65,7 @@
 					:borderRadius="bgRadiusStore"></easy-loadimage>
 				</view>
 				<view class="fs-30 text--w111-333 mt-16 acea-row row-middle">
-					<text :style="[storeNameStyle]" class="name2 line1">{{item.name}}</text>
+					<text v-if="showStoreName" :style="[storeNameStyle]" class="name2 line1">{{item.name}}</text>
 					<view class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
 						<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-12" :style="[deliveryStyle]" v-if="item.delivery_type.includes('1')">配送</view>
 						<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[cityDeliveryStyle]" v-if="item.delivery_type.includes('3')">闪送</view>
@@ -80,7 +80,7 @@
 				</view>
 			</view>
 		</view>
-		<view class="bg--w111-fff pt-20" :style="[boxContentStyle]" v-else>
+		<view class="bg--w111-fff pt-20" :style="[boxContentStyle]" v-else-if="storeStyleConfig!=3">
 			<view class="store acea-row row-middle ml-20 mr-20" :style="[storeSpacing]" v-for="(item, index) in storeData" :key="index" @click="goStore(item)">
 				<view class="w-136 h-136 mr-16">
 					<easy-loadimage
@@ -91,7 +91,7 @@
 				</view>
 				<view class="flex-1">
 					<view class="fs-30 text--w111-333 fw-500 acea-row row-middle">
-						<text :style="[storeNameStyle]">{{item.name}}</text>
+						<text v-if="showStoreName" :style="[storeNameStyle]">{{item.name}}</text>
 						<view class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
 							<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-12" :style="[deliveryStyle]" v-if="item.delivery_type.includes('1')">配送</view>
 							<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[cityDeliveryStyle]" v-if="item.delivery_type.includes('3')">闪送</view>
@@ -104,6 +104,28 @@
 				</view>
 			</view>
 		</view>
+        <!-- A horizontal rail changes presentation only; API scope, ordering
+             and existing navigation/isolated-store rules remain authoritative. -->
+        <view v-else class="store-horizontal" :style="[boxContentStyle]">
+            <scroll-view scroll-x="true" :show-scrollbar="false" class="store-horizontal__scroll">
+                <view class="store-horizontal__track">
+                    <view class="store-horizontal__card" :style="[horizontalSpacing]" v-for="item in storeData" :key="item.id" @click="goStore(item)">
+                        <view class="store-horizontal__image">
+                            <easy-loadimage :image-src="item.image" width="100%" height="100%" :borderRadius="bgRadiusStore"></easy-loadimage>
+                        </view>
+                        <text v-if="showStoreName" class="store-horizontal__name" :style="[storeNameStyle]">{{item.name}}</text>
+                        <view v-if="checkboxInfo.includes(0)" class="store-horizontal__badges">
+                            <text v-if="item.delivery_type.includes('1')" :style="[deliveryStyle]">快递</text>
+                            <text v-if="item.delivery_type.includes('3')" :style="[cityDeliveryStyle]">闪送</text>
+                            <text v-if="item.delivery_type.includes('2')" :style="[storeStyle]">到店</text>
+                        </view>
+                        <view v-if="checkboxInfo.includes(1)" class="store-horizontal__meta">营业时间：{{item.day_time}}</view>
+                        <view v-if="checkboxInfo.includes(3)" class="store-horizontal__address">{{item.address}}{{item.detailed_address}}</view>
+                        <view v-if="checkboxInfo.includes(2) && storeDistance(item)!==null" class="store-horizontal__meta">距您{{storeDistance(item)}}km</view>
+                    </view>
+                </view>
+            </scroll-view>
+        </view>
 	</view>
 </template>
 
@@ -123,14 +145,28 @@
 		},
 		data() {
 			return {
-				storeStyleConfig: this.dataConfig.storeStyleConfig.tabVal,
-				checkboxInfo: this.dataConfig.checkboxInfo.type,
 				checkboxGoodsInfo: this.dataConfig.checkboxGoodsInfo.type,
 				storeData:[],
 				numberGoodsConfig: this.dataConfig.numberGoodsConfig.val,
 			};
 		},
 		computed:{
+            // Read display choices reactively; old decorations without the new
+            // name option retain the previous always-visible behaviour.
+            storeStyleConfig() {
+                return this.dataConfig.storeStyleConfig.tabVal;
+            },
+            checkboxInfo() {
+                return this.dataConfig.checkboxInfo.type;
+            },
+            showStoreName() {
+                const info = this.dataConfig.checkboxInfo;
+                return !(info.list || []).some(item => Number(item.id) === 4) || this.checkboxInfo.includes(4);
+            },
+            // The existing store spacing becomes column spacing in style four.
+            horizontalSpacing() {
+                return { marginRight: Math.max(0, Number(this.dataConfig.storeNumber.val) || 0) * 2 + 'rpx' };
+            },
 			goodsPrice(){
 				return {
 					color: this.dataConfig.toneConfig.tabVal ? this.dataConfig.goodsPriceColor.color[0].item : 'var(--view-theme)'
@@ -275,6 +311,13 @@
 			this.storeList();
 		},
 		methods: {
+            // A missing coordinate-derived distance is unknown, not zero/NaN.
+            // Keep the API's metre unit and do not synthesize a location.
+            storeDistance(item) {
+                if (item.distance === '' || item.distance === null || item.distance === undefined) return null;
+                const metres = Number(item.distance);
+                return Number.isFinite(metres) && metres >= 0 ? Math.round(metres / 100) / 10 : null;
+            },
 			goPage(url){
 				uni.reLaunch({
 					url: url
@@ -312,6 +355,17 @@
 	}
 </script>
 <style lang="scss" scoped>
+    .store-horizontal { max-width: 100%; overflow: hidden; }
+    .store-horizontal__scroll { width: 100%; }
+    .store-horizontal__track { display: inline-flex; min-width: 100%; box-sizing: border-box; align-items: stretch; padding: 20rpx 24rpx; }
+    .store-horizontal__card { display: flex; flex-direction: column; flex: 0 0 300rpx; width: 300rpx; min-width: 0; white-space: normal; }
+    .store-horizontal__card:last-child { margin-right: 0 !important; }
+    .store-horizontal__image { width: 100%; height: 220rpx; flex-shrink: 0; overflow: hidden; }
+    .store-horizontal__name { display: block; min-height: 42rpx; margin-top: 12rpx; font-size: 30rpx; line-height: 42rpx; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .store-horizontal__meta { margin-top: 6rpx; font-size: 22rpx; line-height: 32rpx; overflow-wrap: anywhere; }
+    .store-horizontal__address { display: -webkit-box; min-height: 64rpx; margin-top: 6rpx; font-size: 22rpx; line-height: 32rpx; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+    .store-horizontal__badges { display: flex; flex-wrap: wrap; gap: 8rpx; margin-top: 6rpx; }
+    .store-horizontal__badges text { padding: 2rpx 6rpx; border-radius: 4rpx; font-size: 18rpx; line-height: 26rpx; }
 	.store:last-child{
 		padding-bottom: 20rpx !important;
 	}

@@ -24,7 +24,7 @@
 				  </div>
 				  <div class="picBox">
 					  <div class="fs-15 text--w111-333 acea-row row-middle">
-						  <span :style="[storeNameStyle]">小米之家旗舰店</span>
+						  <span v-if="showStoreName" :style="[storeNameStyle]">小米之家旗舰店</span>
 						  <div class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
 							  <div class="w-26 h-13 rd-2px acea-row row-center-wrapper fs-9 ml-6" :style="[deliveryStyle]">快递</div>
 							  <div class="w-26 h-13 rd-2px acea-row row-center-wrapper fs-9 ml-4" :style="[cityDeliveryStyle]">闪送</div>
@@ -57,7 +57,7 @@
 				  <img class="w-65 h-50 block" src="../../assets/images/shan.png"/>
 			  </div>
 			  <div class="fs-15 text--w111-333 mt-8 acea-row row-middle">
-				  <span :style="[storeNameStyle]">小米之家旗舰店</span>
+				  <span v-if="showStoreName" :style="[storeNameStyle]">小米之家旗舰店</span>
 				  <div class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
 					  <div class="w-26 h-13 rd-2px acea-row row-center-wrapper fs-9 ml-6" :style="[deliveryStyle]">快递</div>
 					  <div class="w-26 h-13 rd-2px acea-row row-center-wrapper fs-9 ml-4" :style="[cityDeliveryStyle]">闪送</div>
@@ -72,14 +72,14 @@
 			  </div>
 		  </div>
 	  </div>
-	  <div class="bg--w111-fff pt-10" :style="[boxContentStyle]" v-else>
+	  <div class="bg--w111-fff pt-10" :style="[boxContentStyle]" v-else-if="storeStyleConfig!=3">
 		  <div class="store acea-row row-middle ml-10 mr-10" :style="[storeSpacing]" v-for="item in numberConfig">
 			  <div class="w-68 h-68 mr-8 bg-w111-F3F9FF acea-row row-center-wrapper" :style="[bgRadiusStore]">
 				  <img class="w-35 h-27 block" src="../../assets/images/shan.png"/>
 			  </div>
 			  <div class="flex-1">
 				  <div class="fs-15 text--w111-333 fw-500 acea-row row-middle">
-					  <span :style="[storeNameStyle]">小米之家旗舰店</span>
+					  <span v-if="showStoreName" :style="[storeNameStyle]">小米之家旗舰店</span>
 					  <div class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
 						  <div class="w-26 h-13 rd-2px acea-row row-center-wrapper fs-9 ml-6" :style="[deliveryStyle]">快递</div>
 						  <div class="w-26 h-13 rd-2px acea-row row-center-wrapper fs-9 ml-4" :style="[cityDeliveryStyle]">闪送</div>
@@ -92,6 +92,23 @@
 			  </div>
 		  </div>
 	  </div>
+      <!-- Style four is a horizontal store rail, not a different store query. -->
+      <div v-else class="store-horizontal" :style="[boxContentStyle]">
+        <div class="store-horizontal__track">
+          <div class="store-horizontal__card" :style="[horizontalSpacing]" v-for="item in numberConfig" :key="item">
+            <div class="store-horizontal__image bg-w111-F3F9FF acea-row row-center-wrapper" :style="[bgRadiusStore]">
+              <img class="w-35 h-27 block" src="../../assets/images/shan.png" alt="" />
+            </div>
+            <div v-if="showStoreName" class="store-horizontal__name" :style="[storeNameStyle]">小米之家旗舰店</div>
+            <div v-if="checkboxInfo.includes(0)" class="store-horizontal__badges">
+              <span :style="[deliveryStyle]">快递</span><span :style="[cityDeliveryStyle]">闪送</span><span :style="[storeStyle]">到店</span>
+            </div>
+            <div v-if="checkboxInfo.includes(1)" class="store-horizontal__meta">营业时间：10:00～23:00</div>
+            <div v-if="checkboxInfo.includes(3)" class="store-horizontal__address">西安市莲湖区子午大道尚林路万达广场B2</div>
+            <div v-if="checkboxInfo.includes(2)" class="store-horizontal__meta">距您12.8km</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -100,6 +117,7 @@
 import { mapState } from 'vuex';
 // import theme from "@/mixins/theme";
 import Setting from '@/setting';
+import { upgradeStoreListConfig } from '@/utils/diyStoreListConfig';
 export default {
   name: 'home_store_list',
   cname: '门店列表',
@@ -120,6 +138,14 @@ export default {
   },
   computed: {
     ...mapState('admin/mobildConfig', ['defaultArray']),
+    // Legacy/new editor drafts share one normalized checkbox contract.
+    showStoreName() {
+      return this.checkboxInfo.includes(4);
+    },
+    horizontalSpacing() {
+      // In a horizontal layout the existing store gap applies between columns.
+      return { marginRight: Math.max(0, Number(this.storeNumber) || 0) + 'px' };
+    },
     deliveryStyle() {
       return {
         background: this.deliveryBg,
@@ -321,7 +347,8 @@ export default {
 						    },
             {
 							  name: '样式三'
-            }
+            },
+            { name: '样式四' }
           ]
         },
         numberConfig: {
@@ -353,8 +380,9 @@ export default {
           title: '展示信息',
           name: 'checkboxInfo',
           storeType: 1,
-          type: [0, 1, 2, 3],
+          type: [0, 1, 2, 3, 4],
           list: [
+            { id: 4, name: '门店名称' },
             {
 							    id: 0,
 							    name: '配送方式'
@@ -812,6 +840,8 @@ export default {
     setConfig(data) {
       if (!data) return;
       if (data.mbConfig) {
+        // Add editor options once; preserve hidden names on subsequent edits.
+        upgradeStoreListConfig(data);
         this.imgUrl = data.imgConfig.url;
         this.imgBgUrl = data.imgBgConfig.url;
         this.imgColorUrl = data.imgColorConfig.url;
@@ -875,6 +905,16 @@ export default {
 </script>
 
 <style scoped lang="stylus">
+.store-horizontal { max-width: 100%; overflow-x: auto; }
+.store-horizontal__track { display: flex; width: max-content; min-width: 100%; box-sizing: border-box; align-items: stretch; padding: 10px 12px; }
+.store-horizontal__card { display: flex; flex-direction: column; flex: 0 0 150px; width: 150px; min-width: 0; white-space: normal; }
+.store-horizontal__card:last-child { margin-right: 0 !important; }
+.store-horizontal__image { width: 100%; height: 110px; flex-shrink: 0; overflow: hidden; }
+.store-horizontal__name { display: block; min-height: 21px; margin-top: 6px; font-size: 15px; line-height: 21px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.store-horizontal__meta { margin-top: 3px; font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
+.store-horizontal__address { display: -webkit-box; min-height: 32px; margin-top: 3px; font-size: 11px; line-height: 16px; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.store-horizontal__badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.store-horizontal__badges span { padding: 1px 3px; border-radius: 2px; font-size: 9px; line-height: 13px; }
 .store:last-child{
 	padding-bottom: 10px !important;
 }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>门店列表组件本地验证</title><link rel="stylesheet" href="/iview.css"><link rel="stylesheet" href="/utilities.css">
+<style>
+*{box-sizing:border-box;letter-spacing:0}body{margin:0;background:#f2f4f6;color:#303133;font:14px system-ui}main{max-width:1240px;margin:auto;padding:20px}h1{font-size:20px;margin-bottom:18px}h2{font-size:14px;margin:0 0 10px}.layout{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}.column{width:375px;max-width:100%;min-width:0}.phone{background:#fff;width:375px;max-width:100%;min-height:240px}.settings-pane{width:320px;max-width:100%;background:#fff;padding:12px 0}.c_radio{padding:0 12px;margin:8px 0 20px}.c_row-item{display:flex;align-items:flex-start}.color-box{width:100%;padding:0}.ivu-radio-wrapper{margin:8px 12px 0 0}.c_label{display:none}.checkboxs{padding:0 12px}.title-tips{font-size:13px;margin:12px 0 8px}.ivu-checkbox-group-item{margin:6px 12px 6px 0}.section-label{padding:12px;font-weight:600;border-top:1px solid #e8eaec}.tools{padding:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.tools input{width:60px;padding:5px}.tools button{padding:6px 12px;background:white;border:1px solid #ccc;border-radius:4px}.status{padding:0 12px 12px;min-height:20px;font-size:12px;color:#606266}.member-pane uni-view{display:block;box-sizing:border-box}.member-pane .test-scroll{overflow-x:auto;width:100%}.member-pane img{display:block}.member-pane .store-horizontal__track{white-space:normal}.editor-pane .store-horizontal__card img{max-width:100%}#app[v-cloak]{display:none}@media(max-width:600px){main{padding:12px}.layout{gap:20px}.settings-pane{width:100%}.column{width:100%}}
+</style>
+<main id="app" v-cloak><h1>门店列表组件本地验证</h1><div class="layout">
+<section class="column"><h2>编辑器预览</h2><div class="phone editor-pane" :style="{width:previewWidth+'px'}"><store-preview :num="0" :color-style="{theme:'#e84b35'}"></store-preview></div></section>
+<section class="column"><h2>会员端 H5</h2><div ref="memberPhone" class="phone member-pane" :style="{'--rpx':memberWidth/750+'px',width:previewWidth+'px'}"><store-member :data-config="config"></store-member></div></section>
+<section class="settings-pane"><h2 style="padding:0 12px">门店列表设置</h2><store-settings :num="0"></store-settings><div class="tools"><label>门店数量 <input aria-label="门店数量" type="number" min="1" max="4" v-model.number="config.numberConfig.val"></label><label>预览宽度 <input aria-label="预览宽度" type="number" min="280" max="375" v-model.number="previewWidth"></label><button @click="save">保存本地草稿</button></div><p class="status">{{status}}</p></section>
+</div></main>
+<script src="/vue.js"></script><script src="/iview.js"></script><script src="/source.js"></script>
+<script>
+// Real editor/member templates and methods; only store, transport and uni tags
+// are adapters. Saved data stays in a fixture-only localStorage key.
+const upgradeStoreListConfig=new Function(fixtureSources.upgrade+';return upgradeStoreListConfig;')();
+Vue.config.ignoredElements=['uni-view','uni-text'];
+const mapState=()=>({defaultArray(){return this.$store.state.admin.mobildConfig.defaultArray;}});
+const toolCom=new Proxy({}, {get:(_,name)=>({name})});
+let config=fixtureSources.config;const saved=localStorage.getItem('diy-store-list-synthetic-draft');if(saved)config=JSON.parse(saved);
+const store=Vue.observable({state:{admin:{mobildConfig:{defaultArray:{0:config}}}},commit(type,payload){Vue.set(this.state.admin.mobildConfig.defaultArray,payload.num,payload.val);}});
+Vue.prototype.$store=store;Vue.prototype.$util={Tips(data){document.querySelector('.status').textContent=String(data.title);}};
+const homeStoreList=async data=>({data:fixtureSources.stores.slice(0,data.limit)});
+const uni={getStorageSync(){return '';},navigateTo(data){document.querySelector('.status').textContent=data.url;},reLaunch(data){document.querySelector('.status').textContent=data.url;}};
+function component(key){const source=fixtureSources[key];const options=new Function('mapState','Setting','require','toolCom','rightBtn','upgradeStoreListConfig','homeStoreList','uni',source.script)(mapState,{apiBaseURL:'/adminapi'},name=>'/asset/'+name.split('/').pop(),toolCom,{template:'<div></div>'},upgradeStoreListConfig,homeStoreList,uni);const template=source.template.replace(/(<\/?)view(?=[\s>])/g,'$1uni-view').replace(/(<\/?)text(?=[\s>])/g,'$1uni-text').replaceAll('../../assets/images/','/asset/');return Object.assign(options,Vue.compile(template));}
+const preview=component('preview'),member=component('member'),settings=component('settings');
+// The real editor supplies a hydrated Vuex draft and theme before previewing.
+// Supply that context before the fixture's first paint as well.
+preview.beforeMount=function(){this.pageData=this.$store.state.admin.mobildConfig.defaultArray[this.num];this.setConfig(this.pageData);};
+// Convert only rpx style values; don't recreate component presentation logic.
+for(const [key,original] of Object.entries(member.computed)){member.computed[key]=function(){const convert=value=>typeof value==='string'?value.replace(/(-?[\d.]+)rpx/g,(_,n)=>Number(n)*this.$root.memberWidth/750+'px'):value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,convert(v)])):value;return convert(original.call(this));};}
+member.watch={numberConfig(){this.storeList();}};
+Vue.component('store-preview',preview);Vue.component('store-member',member);Vue.component('store-settings',settings);
+Vue.component('real-radio',component('radio'));Vue.component('real-checkbox',component('checkbox'));
+Vue.component('c_radio',{props:['configObj','configNme'],template:'<real-radio v-if="configNme===\'storeStyleConfig\'" :config-obj="configObj" :config-nme="configNme"></real-radio>'});
+Vue.component('c_checkbox',{props:['configObj','configNme'],template:'<real-checkbox v-if="configNme===\'checkboxInfo\'" :config-obj="configObj" :config-nme="configNme"></real-checkbox>'});
+Vue.component('c_title',{props:['configObj','configNme'],template:'<div class="section-label" v-if="configNme===\'titleStoreList\'||configNme===\'titleStore\'">{{configObj[configNme]}}</div>'});
+for(const key of ['c_set_up','c_upload_img','c_input_item','c_slider','c_bg_color','c_fillet'])Vue.component(key,{template:'<span></span>'});
+Vue.component('scroll-view',{template:'<div class="test-scroll"><slot></slot></div>'});
+Vue.component('easy-loadimage',{props:['imageSrc','width','height','borderRadius'],template:'<img :src="imageSrc" :style="{width,height,borderRadius,objectFit:\'cover\'}" alt="">'});
+new Vue({el:'#app',data:{memberWidth:375,previewWidth:375,status:''},computed:{config(){return store.state.admin.mobildConfig.defaultArray[0];}},mounted(){this.measure();this.observer=new ResizeObserver(this.measure);this.observer.observe(this.$refs.memberPhone);},methods:{measure(){this.memberWidth=this.$refs.memberPhone.clientWidth;},save(){localStorage.setItem('diy-store-list-synthetic-draft',JSON.stringify(this.config));this.status='本地草稿已保存';}}});
+</script></html>
