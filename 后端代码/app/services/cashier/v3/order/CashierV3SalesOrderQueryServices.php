@@ -7,6 +7,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\cashier\v3\settlement\CashierV3CheckoutCraftsmenSnapshot;
 use app\services\report\StoreReportNormalDataScopeServices;
+use app\services\report\StoreReportCurrentProductCategoryServices;
 use think\facade\Db;
 
 /**
@@ -779,8 +780,8 @@ final class CashierV3SalesOrderQueryServices
             elseif ($column === 'order_no') $value = "MIN(COALESCE(NULLIF(sf.service_record_no,''),sf.service_fact_id))";
             elseif ($column === 'order_version' || $column === 'entitlement_only') $value = '1';
             elseif (strpos($column, 'business_source_') === 0) {
-                // 纯权益没有销售资金单，但来源已随结账冻结；按同请求读取快照，
-                // 不用会员当前来源或配置名称覆盖历史选择，也不虚构销售事实。
+                // 纯权益没有销售资金单。普通结账以选择表为来源权威；预约直接完成
+                // 没有选择表，必须回退到服务事实自己的发生时快照，不能误显示为空来源。
                 $sourceColumns = [
                     'business_source_primary_id' => 'primary_source_id',
                     'business_source_secondary_id' => 'secondary_source_id',
@@ -789,7 +790,11 @@ final class CashierV3SalesOrderQueryServices
                     'business_source_label_snapshot' => 'source_label_snapshot',
                 ];
                 $fallback = substr($column, -3) === '_id' ? '0' : "''";
-                $value = 'COALESCE(MAX(bs.' . $sourceColumns[$column] . '),' . $fallback . ')';
+                $selectionColumn = $sourceColumns[$column];
+                $serviceColumn = 'sf.' . $column;
+                $value = substr($column, -3) === '_id'
+                    ? 'COALESCE(MAX(NULLIF(bs.' . $selectionColumn . ',0)),MAX(NULLIF(' . $serviceColumn . ',0)),' . $fallback . ')'
+                    : "COALESCE(NULLIF(MAX(bs.{$selectionColumn}),''),NULLIF(MAX({$serviceColumn}),''),{$fallback})";
             }
             elseif (in_array($column, ['original_amount_cents','discount_amount_cents','sale_amount_cents'], true)) $value = '0';
             elseif ($column === 'order_note') $value = "''";
@@ -1882,9 +1887,11 @@ final class CashierV3SalesOrderQueryServices
             $allVoided = $items !== [] && count(array_filter($items, static function (array $item): bool {
                 return !empty($item['voidedAt']);
             })) === count($items);
-            // 纯服务单按结账请求整组更正日期；来源属原选择快照，不开放编辑。
+            // 纯服务单按结账请求或预约完成事件整组更正，避免同次服务各行出现不同日期或来源。
             // 纯权益的导购改派走服务行事实，不误授销售主单的人员调整动作。
-            $mapped['availableActions'] = $allVoided ? [] : ['correct-service-order-date', 'correct-service-order-guide'];
+            $mapped['availableActions'] = $allVoided ? [] : [
+                'correct-service-order-date', 'correct-service-order-attribution', 'correct-service-order-guide',
+            ];
             $mapped['orderStatus'] = $mapped['order_status'] = $allVoided ? '已作废' : '正常';
         }
         // 列表与详情复用同一批已结算记账收款事实，避免前端按金额反推收款方式。
@@ -2051,6 +2058,8 @@ final class CashierV3SalesOrderQueryServices
             // 直接购买项目即使产生了服务记录，交易性质仍是购买，不标成权益。
             'businessTag' => '购买',
             'name' => (string)$line['item_name_snapshot'], 'purchaseSpec' => '', 'quantity' => $quantity,
+            '_categoryProductIds' => $this->categoryProductIdsForAuthorityLine($line),
+            '_categorySkuIds' => $this->categorySkuIdsForAuthorityLine($line),
             'unitPrice' => $quantity > 0 ? $this->moneyFromCents((int)$line['original_amount_cents']) / $quantity : null,
             'originalAmount' => $this->moneyFromCents((int)$line['original_amount_cents']),
             'priceChangeDiscountAmount' => $this->moneyFromCents(max(0, (int)($line['discount_amount_cents'] ?? 0) - (int)($line['coupon_discount_cents'] ?? 0))),
@@ -2129,6 +2138,9 @@ final class CashierV3SalesOrderQueryServices
             'itemType' => '项目',
             'businessTag' => '权益',
             'name' => (string)$serviceFact['project_name_snapshot'],
+            '_categoryProductIds' => array_filter([(int)($serviceFact['project_id'] ?? 0)]),
+            // 项目 ID 来自已授权服务事实；跨门店核销仍保留来源门店商品 ID。
+            '_categoryVerifiedFactItems' => true,
             // 卡名称和卡号只取本次核销冻结的卡来源；独立赠送不是卡，不能借用当前卡档冒充历史来源。
             'cardName' => (string)($serviceFact['entitlement_instance_type'] ?? '') === 'card_holder'
                 ? (string)($serviceFact['source_name_snapshot'] ?? '') : '',
@@ -2606,6 +2618,11 @@ final class CashierV3SalesOrderQueryServices
             'orderItemId' => (int)($line['id'] ?? 0),
             'itemType' => $type,
             'name' => $name,
+            '_categoryProductIds' => $type === '卡项'
+                ? $this->cardComponentProductIds($authority['card_purchase_snapshot_json'] ?? null)
+                : array_filter([(int)($v3Ready ? ($authority['item_id'] ?? 0) : ($line['product_id'] ?? 0))]),
+            '_categorySkuIds' => $type === '卡项'
+                ? $this->cardComponentSkuIds($authority['card_purchase_snapshot_json'] ?? null) : [],
             'purchaseSpec' => trim((string)($attr['suk'] ?? '')),
             'quantity' => $quantity,
             'unitPrice' => $v3Ready && $quantity > 0 ? $originalAmount / $quantity : null,
@@ -2640,9 +2657,120 @@ final class CashierV3SalesOrderQueryServices
         ];
     }
 
+    /** 卡项的分类只能来自购买时记录的内含项目 ID，不能使用卡项外壳的分类。 */
+    private function cardComponentProductIds($rawSnapshot): array
+    {
+        $snapshot = is_string($rawSnapshot) ? json_decode($rawSnapshot, true) : null;
+        if (!is_array($snapshot)) return [];
+        $ids = [];
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (!is_array($component)) continue;
+            $id = (int)($component['productId'] ?? 0);
+            if ($id > 0) $ids[$id] = $id;
+        }
+        return array_values($ids);
+    }
+
+    /**
+     * 旧自定义卡快照只冻结规格 ID；规格仍须回到所属商品再读取当前平台分类。
+     * 这里只接受成交行的服务端快照，不能把客户端传入的规格 ID 当作分类权限依据。
+     */
+    private function cardComponentSkuIds($rawSnapshot): array
+    {
+        $snapshot = is_string($rawSnapshot) ? json_decode($rawSnapshot, true) : null;
+        if (!is_array($snapshot)) return [];
+        $ids = [];
+        foreach ((array)($snapshot['components'] ?? []) as $component) {
+            if (!is_array($component)) continue;
+            $id = (int)($component['skuId'] ?? 0);
+            if ($id > 0) $ids[$id] = $id;
+        }
+        return array_values($ids);
+    }
+
+    /**
+     * An authority sale line identifies its current category through the
+     * purchased item, or through frozen inner-project IDs for a card. Refund
+     * lists reuse this identity rule so a card shell cannot become the category.
+     */
+    public function categoryProductIdsForAuthorityLine(array $line): array
+    {
+        return strtolower((string)($line['item_type'] ?? '')) === 'card'
+            ? $this->cardComponentProductIds($line['card_purchase_snapshot_json'] ?? null)
+            : array_values(array_filter([(int)($line['item_id'] ?? 0)]));
+    }
+
+    /** @return int[] Authoritative component SKU IDs used only when an old card snapshot has no product IDs. */
+    public function categorySkuIdsForAuthorityLine(array $line): array
+    {
+        return strtolower((string)($line['item_type'] ?? '')) === 'card'
+            ? $this->cardComponentSkuIds($line['card_purchase_snapshot_json'] ?? null)
+            : [];
+    }
+
+    /**
+     * 混合订单页的商品分类按已授权订单批量解析当前商品/项目档案。
+     * 只返回分类文本；内部来源 ID 不进入前端与导出合同。
+     */
+    public function attachCurrentItemCategories(array $records): array
+    {
+        $links = $verifiedFactLinks = $skuLinks = [];
+        foreach ($records as $record) {
+            $storeId = (int)($record['storeId'] ?? 0);
+            foreach ((array)($record['items'] ?? []) as $item) {
+                foreach ((array)($item['_categoryProductIds'] ?? []) as $productId) {
+                    $productId = (int)$productId;
+                    if ($storeId > 0 && $productId > 0) {
+                        $key = $storeId . ':' . $productId;
+                        $link = ['store_id' => $storeId, 'product_id' => $productId];
+                        if (!empty($item['_categoryVerifiedFactItems'])) $verifiedFactLinks[$key] = $link;
+                        else $links[$key] = $link;
+                    }
+                }
+                foreach ((array)($item['_categorySkuIds'] ?? []) as $skuId) {
+                    $skuId = (int)$skuId;
+                    if ($storeId > 0 && $skuId > 0) {
+                        $skuLinks[$storeId . ':' . $skuId] = ['store_id' => $storeId, 'sku_id' => $skuId];
+                    }
+                }
+            }
+        }
+        $resolver = new StoreReportCurrentProductCategoryServices();
+        $categories = $links ? $resolver->resolve($links) : [];
+        // 服务事实已经由执行门店和数据权限裁剪；跨门店权益必须按事实保存的来源商品身份解析。
+        $verifiedFactCategories = $verifiedFactLinks ? $resolver->resolveVerifiedFactItems($verifiedFactLinks) : [];
+        $skuCategories = $skuLinks ? $resolver->resolveSkus($skuLinks) : [];
+        foreach ($records as &$record) {
+            $storeId = (int)($record['storeId'] ?? 0);
+            if (!is_array($record['items'] ?? null)) continue;
+            foreach ($record['items'] as &$item) {
+                $paths = [];
+                foreach ((array)($item['_categoryProductIds'] ?? []) as $productId) {
+                    $source = !empty($item['_categoryVerifiedFactItems']) ? $verifiedFactCategories : $categories;
+                    $category = $source[$storeId . ':' . (int)$productId] ?? null;
+                    // A card component must itself be a project or ordinary product.
+                    if ($category === null || (($item['itemType'] ?? '') === '卡项'
+                        && in_array((int)$category['product_type'], [4, 5], true))) continue;
+                    $paths[(string)$category['path']] = true;
+                }
+                foreach ((array)($item['_categorySkuIds'] ?? []) as $skuId) {
+                    $category = $skuCategories[$storeId . ':' . (int)$skuId] ?? null;
+                    if ($category === null || (($item['itemType'] ?? '') === '卡项'
+                        && in_array((int)$category['product_type'], [4, 5], true))) continue;
+                    $paths[(string)$category['path']] = true;
+                }
+                $item['category'] = $paths ? implode('、', array_keys($paths)) : '未分类';
+                unset($item['_categoryProductIds'], $item['_categorySkuIds'], $item['_categoryVerifiedFactItems']);
+            }
+            unset($item);
+        }
+        unset($record);
+        return $records;
+    }
+
     /**
      * Map the immutable card-purchase snapshot to the small, display-only
-     * purchase-count contract consumed by the order detail.  This method
+     * purchase-count contract consumed by the order detail. This method
      * deliberately returns no current balance, remaining count, catalogue
      * identity or raw snapshot so this historical read model cannot be
      * mistaken for the live entitlement authority.

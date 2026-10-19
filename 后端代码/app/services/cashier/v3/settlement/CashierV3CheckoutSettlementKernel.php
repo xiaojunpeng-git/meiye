@@ -862,8 +862,10 @@ final class CashierV3CheckoutSettlementKernel
             );
             $isPresale = self::nonNegativeInt($line['isPresale'] ?? 0, 'saleLine.isPresale');
             $inventoryOutboundRequired = self::nonNegativeInt($line['inventoryOutboundRequired'] ?? 1, 'saleLine.inventoryOutboundRequired');
+            // A manual labor fee is persisted money. It follows the cashier
+            // whole-yuan boundary even though its transport unit is cents.
             $manualLaborFeeCents = array_key_exists('manualLaborFeeCents', $line)
-                ? self::nonNegativeInt($line['manualLaborFeeCents'], 'saleLine.manualLaborFeeCents')
+                ? self::money($line['manualLaborFeeCents'], 'saleLine.manualLaborFeeCents')
                 : null;
             $cardPurchaseSnapshot = self::normalizeCardPurchaseSnapshot(
                 $line['cardPurchaseSnapshot'] ?? [],
@@ -969,11 +971,12 @@ final class CashierV3CheckoutSettlementKernel
                     // Presale belongs to this salesperson's immutable sale-line choice,
                     // not to the catalog item or current employee profile.
                     $normalizedPerson = ['staffId' => $staffId, 'allocationWeight' => $allocation];
-                    if (!empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked'])) {
-                        $normalizedPerson['isPreSale'] = true;
-                    }
+                    // Preserve a cross-store employee source in the immutable checkout snapshot.
                     if (($person['personnelSource'] ?? 'store') === 'other') {
                         $normalizedPerson['personnelSource'] = 'other';
+                    }
+                    if (!empty($person['isPreSale']) || !empty($person['is_presale']) || !empty($person['marked'])) {
+                        $normalizedPerson['isPreSale'] = true;
                     }
                     $hasPerformanceAmount = array_key_exists('performanceAmountCents', $person)
                         || array_key_exists('performance_amount_cents', $person);
@@ -983,7 +986,7 @@ final class CashierV3CheckoutSettlementKernel
                         throw self::failure('sale_line_salespeople_snapshot_invalid', ['authorityKey' => $authorityKey]);
                     }
                     if ($hasPerformanceAmount) {
-                        $normalizedPerson['performanceAmountCents'] = self::nonNegativeInt(
+                        $normalizedPerson['performanceAmountCents'] = self::money(
                             $person['performanceAmountCents'] ?? $person['performance_amount_cents'],
                             'saleLine.salesperson.performanceAmountCents'
                         );
@@ -1144,8 +1147,7 @@ final class CashierV3CheckoutSettlementKernel
                 'quantity' => self::boundedQuantity($line['quantity'], 'entitlementLine.quantity'),
                 'actualEntitlementAmountCents' => self::money(
                     $line['actualEntitlementAmountCents'],
-                    'entitlementLine.actualEntitlementAmountCents',
-                    false
+                    'entitlementLine.actualEntitlementAmountCents'
                 ),
                 'sourceNameSnapshot' => self::text(
                     $line['sourceNameSnapshot'],
@@ -1204,7 +1206,9 @@ final class CashierV3CheckoutSettlementKernel
                 $normalized['entitlementInstanceType'] = $instanceType;
             }
             if (array_key_exists('manualLaborFeeCents', $line)) {
-                $normalized['manualLaborFeeCents'] = self::nonNegativeInt(
+                // Entitlement service fees are stored with the completion
+                // fact, so fractional-yuan input must fail before settlement.
+                $normalized['manualLaborFeeCents'] = self::money(
                     $line['manualLaborFeeCents'],
                     'entitlementLine.manualLaborFeeCents'
                 );
@@ -1289,7 +1293,7 @@ final class CashierV3CheckoutSettlementKernel
             if (!in_array($performanceType, ['commission', 'labor', 'commission_labor'], true)) {
                 throw self::failure('entitlement_craftsman_selection_performance_invalid', ['path' => $path, 'staffId' => $staffId]);
             }
-            $laborFeeCents = self::nonNegativeInt($row['laborFeeCents'] ?? 0, $path . '.laborFeeCents');
+            $laborFeeCents = self::money($row['laborFeeCents'] ?? 0, $path . '.laborFeeCents');
             $personnelSource = (string)($row['personnelSource'] ?? 'store');
             if (!in_array($personnelSource, ['store', 'other'], true)) {
                 throw self::failure('entitlement_craftsman_personnel_source_invalid', ['path' => $path, 'staffId' => $staffId]);
@@ -1316,7 +1320,7 @@ final class CashierV3CheckoutSettlementKernel
                 ]);
             }
             if ($hasPerformanceAmount) {
-                $result[count($result) - 1]['performanceAmountCents'] = self::nonNegativeInt(
+                $result[count($result) - 1]['performanceAmountCents'] = self::money(
                     $row['performanceAmountCents'] ?? $row['performance_amount_cents'],
                     $path . '.performanceAmountCents'
                 );

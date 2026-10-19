@@ -1595,6 +1595,11 @@ final class CashierV3CheckoutProjectionServices
                 'staffId' => $staffId,
                 'allocationWeight' => $allocation,
             ];
+            // The organization source is part of the immutable sale-line fingerprint.
+            // Omitting it here makes a newly prepared cross-store sale look modified.
+            if (($row['personnelSource'] ?? 'store') === 'other') {
+                $resultRow['personnelSource'] = 'other';
+            }
             // False was absent from older fingerprints; only persist a selected presale role.
             if (!empty($row['isPreSale']) || !empty($row['is_presale']) || !empty($row['marked'])) {
                 $resultRow['isPreSale'] = true;
