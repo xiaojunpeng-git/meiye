@@ -1,0 +1,93 @@
+{
+  "task": "M008-R3-001",
+  "status": "self-tested-awaiting-product-manager-fixed-version-acceptance",
+  "baseline": "4670768d6e055173e101a6c62f385af0fb538cbf",
+  "patchSha256": "fb9dcd13b92f58704d8075eb663759a88779f474ccf38cdcbbaa4abf8206f8b9",
+  "files": [
+    {
+      "file": "前端代码/uniapp/pages/index/components/homeComb.vue",
+      "sha256": "dfa8f383a5d8a1956b511d4f88bac502e2c77b52c679727ab35502d0db3d6eb5"
+    },
+    {
+      "file": "tests/diy-theme-follow/source-harness.cjs",
+      "sha256": "e372dbcf9de2988087e0ea7b7a76bddff29b2635dfa902fa118608fe593e487f"
+    },
+    {
+      "file": "tests/diy-theme-follow/contract.cjs",
+      "sha256": "812dda8576f28c32356ae4629196ac6e12918c7d3f784a3e0876cf6fee60e574"
+    },
+    {
+      "file": "tests/diy-theme-follow/browser.cjs",
+      "sha256": "3a0834537897a4bc62e06e23cb0b3905fdb0c182984baaa04ea025cff670816c"
+    }
+  ],
+  "requestedFix": "轮播搜索指示器跟随主题配置在会员端不生效",
+  "rootCause": "Editor handles toneConfig for indicators; member dotColor/dotBgColor always used custom values.",
+  "newBehavior": [
+    "theme active indicator inherits --view-theme; regular indicator #DDDDDD, matching editor",
+    "custom mode retains configured selected and unselected colors",
+    "missing legacy mode defaults to theme; numeric/string 0/1 supported"
+  ],
+  "retainedBehavior": [
+    "four indicator styles and positions",
+    "image/banner/search/background styles",
+    "image jumps, slide selection and progress widths",
+    "existing navigation outer margin, store names/layout4, stacked staff cards"
+  ],
+  "otherUnacceptedChanges": "Existing unrelated staged and dirty changes remain untouched; none included.",
+  "localBaseline": "The affected homeComb.vue and editor preview were clean at start; HEAD contains round2 accepted commits.",
+  "remoteBaseline": "Not applicable: local-only change; no production API/SSH/database access or deployment.",
+  "classification": {
+    "frontendSource": [
+      "前端代码/uniapp/pages/index/components/homeComb.vue"
+    ],
+    "automatedTests": [
+      "tests/diy-theme-follow/source-harness.cjs",
+      "tests/diy-theme-follow/contract.cjs",
+      "tests/diy-theme-follow/browser.cjs"
+    ],
+    "backend": [],
+    "databaseMigrations": [],
+    "engineeringScripts": [],
+    "generatedArtifacts": [],
+    "evidence": [
+      "tests/diy-theme-follow/evidence/browser-result.json",
+      "tests/diy-theme-follow/evidence/theme-320.png",
+      "tests/diy-theme-follow/evidence/theme-375.png"
+    ]
+  },
+  "tests": [
+    "contract PASS: four indicators; mode combinations; JSON roundtrip; unchanged templates/styles/non-color script",
+    "headless Chrome actual SFC fixture PASS: three theme colors; custom persistence; reactive switching; 320/375 widths; visible dots; slide jump; zero console/page errors",
+    "navigation spacing contract PASS",
+    "store list name/layout contract PASS",
+    "stacked staff component contract PASS",
+    "git diff --check PASS"
+  ],
+  "limitations": [
+    "Component SFC render fixture only; not a full admin/H5 release build or WeChat runtime acceptance.",
+    "The selected tone control applies to indicators, not component background or search bar.",
+    "No production decoration save, commit, deploy, push, or mini-program upload."
+  ],
+  "commentsUpdated": [
+    "前端代码/uniapp/pages/index/components/homeComb.vue",
+    "tests/diy-theme-follow/source-harness.cjs",
+    "tests/diy-theme-follow/contract.cjs",
+    "tests/diy-theme-follow/browser.cjs"
+  ],
+  "evidenceFingerprints": [
+    {
+      "file": "tests/diy-theme-follow/evidence/browser-result.json",
+      "sha256": "118c9e33ecb7d20d906cb858b04ae29b6c672b1bf7d8920171a6e60634733c8f"
+    },
+    {
+      "file": "tests/diy-theme-follow/evidence/theme-320.png",
+      "sha256": "055947319e830cebf1f208adf4ea31af9a581a7a18cf39320b16e9a951ce57a3"
+    },
+    {
+      "file": "tests/diy-theme-follow/evidence/theme-375.png",
+      "sha256": "f74a5625ec2b5c75433880da91a773ae4bf0889cd72247792fed185b9cd2a15d"
+    }
+  ],
+  "unrelatedStagingSha256": "33fe873c38db4dd2b8d9e57c6730539fdefa8795b78f5929dd8698427241d44c"
+}

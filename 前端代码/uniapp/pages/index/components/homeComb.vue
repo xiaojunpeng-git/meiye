@@ -242,13 +242,17 @@
 				};
 			},
 			dotBgColor() {
+				// 指示器色调与编辑器一致：主题模式不读取残留的自定义颜色；旧配置默认跟随主题。
 				return {
-					background: this.dataConfig.dotBgColor.color[0].item,
+					background: this.dataConfig.toneConfig && Number(this.dataConfig.toneConfig.tabVal) === 1
+						? this.dataConfig.dotBgColor.color[0].item : '#DDDDDD',
 				};
 			},
 			dotColor() {
+				// 继承首页的实时主题变量，四种指示器共用；不改变图片背景、搜索栏或保存的配色。
 				return {
-					background: this.dataConfig.dotColor.color[0].item,
+					background: this.dataConfig.toneConfig && Number(this.dataConfig.toneConfig.tabVal) === 1
+						? this.dataConfig.dotColor.color[0].item : 'var(--view-theme)',
 				};
 			},
 			imageStyle() {
