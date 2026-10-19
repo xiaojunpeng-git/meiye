@@ -1,0 +1,777 @@
+{
+  "baseline": "2c2cadfbcada44a31415373de315cd4be52a0dd5",
+  "result": "PASS",
+  "checks": 171,
+  "cases": [
+    {
+      "stores": [
+        23
+      ],
+      "seconds": 0.06,
+      "before": {
+        "normal_card": {
+          "sales_quantity": 7,
+          "cash_performance_cents": 8429200
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 11,
+          "cash_performance_cents": 399900
+        },
+        "product": {
+          "sales_quantity": 2,
+          "cash_performance_cents": 64700
+        }
+      },
+      "totals": {
+        "normal_card": {
+          "sales_quantity": 7,
+          "cash_performance_cents": 8429200
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 11,
+          "cash_performance_cents": 399900
+        },
+        "product": {
+          "sales_quantity": 2,
+          "cash_performance_cents": 64700
+        }
+      },
+      "categories": {
+        "26300": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26302": {
+          "normal_card": {
+            "sales_quantity": 6,
+            "cash_performance_cents": 7929200
+          },
+          "project": {
+            "sales_quantity": 9,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 2,
+            "cash_performance_cents": 64700
+          }
+        },
+        "26305": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 2,
+            "cash_performance_cents": 399900
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26306": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26307": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26315": {
+          "normal_card": {
+            "sales_quantity": 1,
+            "cash_performance_cents": 500000
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        }
+      }
+    },
+    {
+      "stores": [
+        68
+      ],
+      "seconds": 0.068,
+      "before": {
+        "normal_card": {
+          "sales_quantity": 9,
+          "cash_performance_cents": 850000
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "totals": {
+        "normal_card": {
+          "sales_quantity": 12,
+          "cash_performance_cents": 5860000
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "categories": {
+        "26300": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26302": {
+          "normal_card": {
+            "sales_quantity": 9,
+            "cash_performance_cents": 850000
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26305": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26306": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26307": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26315": {
+          "normal_card": {
+            "sales_quantity": 3,
+            "cash_performance_cents": 5010000
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        }
+      }
+    },
+    {
+      "stores": [
+        1
+      ],
+      "seconds": 0.066,
+      "before": {
+        "normal_card": {
+          "sales_quantity": 1,
+          "cash_performance_cents": 400000
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 1,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "totals": {
+        "normal_card": {
+          "sales_quantity": 5,
+          "cash_performance_cents": 3280000
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 1,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "categories": {
+        "26300": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26302": {
+          "normal_card": {
+            "sales_quantity": 4,
+            "cash_performance_cents": 1280000
+          },
+          "project": {
+            "sales_quantity": 1,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26305": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26306": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26307": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26315": {
+          "normal_card": {
+            "sales_quantity": 1,
+            "cash_performance_cents": 2000000
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        }
+      }
+    },
+    {
+      "stores": [
+        49
+      ],
+      "seconds": 0.071,
+      "before": {
+        "normal_card": {
+          "sales_quantity": 2,
+          "cash_performance_cents": 400000
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 11,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "totals": {
+        "normal_card": {
+          "sales_quantity": 15,
+          "cash_performance_cents": 3918000
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 11,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "categories": {
+        "26300": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26302": {
+          "normal_card": {
+            "sales_quantity": 13,
+            "cash_performance_cents": 2658000
+          },
+          "project": {
+            "sales_quantity": 6,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26305": {
+          "normal_card": {
+            "sales_quantity": 3,
+            "cash_performance_cents": 1260000
+          },
+          "project": {
+            "sales_quantity": 5,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26306": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26307": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26315": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        }
+      }
+    },
+    {
+      "stores": [
+        23,
+        68
+      ],
+      "seconds": 0.069,
+      "before": {
+        "normal_card": {
+          "sales_quantity": 16,
+          "cash_performance_cents": 9279200
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 11,
+          "cash_performance_cents": 399900
+        },
+        "product": {
+          "sales_quantity": 2,
+          "cash_performance_cents": 64700
+        }
+      },
+      "totals": {
+        "normal_card": {
+          "sales_quantity": 19,
+          "cash_performance_cents": 14289200
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 11,
+          "cash_performance_cents": 399900
+        },
+        "product": {
+          "sales_quantity": 2,
+          "cash_performance_cents": 64700
+        }
+      },
+      "categories": {
+        "26300": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26302": {
+          "normal_card": {
+            "sales_quantity": 15,
+            "cash_performance_cents": 8779200
+          },
+          "project": {
+            "sales_quantity": 9,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 2,
+            "cash_performance_cents": 64700
+          }
+        },
+        "26305": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 2,
+            "cash_performance_cents": 399900
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26306": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26307": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26315": {
+          "normal_card": {
+            "sales_quantity": 4,
+            "cash_performance_cents": 5510000
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        }
+      }
+    },
+    {
+      "stores": [
+        2147483647
+      ],
+      "seconds": 0.005,
+      "before": {
+        "normal_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "totals": {
+        "normal_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "experience_card": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "project": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        },
+        "product": {
+          "sales_quantity": 0,
+          "cash_performance_cents": 0
+        }
+      },
+      "categories": {
+        "26300": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26302": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26305": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26306": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26307": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        },
+        "26315": {
+          "normal_card": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "project": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          },
+          "product": {
+            "sales_quantity": 0,
+            "cash_performance_cents": 0
+          }
+        }
+      }
+    }
+  ],
+  "writes": 0
+}

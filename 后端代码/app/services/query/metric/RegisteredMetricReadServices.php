@@ -70,8 +70,9 @@ final class RegisteredMetricReadServices
 
     /**
      * The top sale-type cards and each first-level category share these exact
-     * sale/cash populations. Category rows only narrow by the sold item's current
-     * category (including descendants), never by card components or its label.
+     * sale/cash populations. Ordinary items use their current category. Custom
+     * cards use issued component products: each involved root counts the card
+     * once, while cash uses the registered, conserved component allocation.
      * Query once for all roots. Both display levels use normal cards, projects
      * and products; experience cards remain distinct in totals, never reassigned.
      */
@@ -111,7 +112,8 @@ final class RegisteredMetricReadServices
             $links[$storeId . ':' . $id] = ['product_id' => $id, 'store_id' => $storeId];
             if ((string)$row['source_type'] === 'card') $cardIds[$id] = true;
         }
-        $cardTypes = $this->dashboardCardStatisticsTypes(array_keys($cardIds));
+        $customIds = [];
+        $cardTypes = $this->dashboardCardStatisticsTypes(array_keys($cardIds), $customIds);
         $categories = $categoryIds === [] && $roots === [] ? [] : (new StoreReportCurrentProductCategoryServices())->resolve($links);
 
         foreach ([[$saleRows, 'sales_quantity'], [$cashRows, 'cash_performance_cents']] as [$rows, $field]) {
@@ -120,12 +122,17 @@ final class RegisteredMetricReadServices
                 $id = (int)($row['item_id'] ?? 0);
                 $storeId = (int)($row['store_id'] ?? 0);
                 $linkKey = $storeId . ':' . $id;
-                if ($categoryIds !== [] && !in_array((int)($categories[$linkKey]['id'] ?? 0), $categoryIds, true)) continue;
+                $custom = $sourceType === 'card' && isset($customIds[$id]);
+                // A custom shell is not a category. Unfiltered top totals still
+                // count its sale/payment once; scoped values are projected below.
+                if ($custom && $categoryIds !== []) continue;
+                if (!$custom && $categoryIds !== [] && !in_array((int)($categories[$linkKey]['id'] ?? 0), $categoryIds, true)) continue;
                 $key = $sourceType === 'card'
                     ? (($cardTypes[$id] ?? null) === 1 ? 'experience_card' : (($cardTypes[$id] ?? null) === 0 ? 'normal_card' : ''))
                     : $sourceType;
                 if (!isset($totals[$key])) continue;
                 $totals[$key][$field] = $this->add($totals[$key][$field], $this->integer($row['metric_value'] ?? null));
+                if ($custom) continue;
                 $rootId = $rootByCategory[(int)($categories[$linkKey]['id'] ?? 0)] ?? 0;
                 if (isset($categoryTotals[$rootId][$key])) {
                     $categoryTotals[$rootId][$key][$field] = $this->add(
@@ -134,12 +141,84 @@ final class RegisteredMetricReadServices
                 }
             }
         }
+        if ($customIds !== [] && ($roots !== [] || $categoryIds !== [])) {
+            $this->addDashboardCustomCardCategories($tenantId, $stores, $range, $customIds, $cardTypes,
+                $rootByCategory, $categoryIds, $totals, $categoryTotals);
+        }
         return ['totals' => $totals, 'categories' => $categoryTotals];
     }
 
-    /** Only actual catalog cards qualify; deleted products remain readable for historical sales. */
-    private function dashboardCardStatisticsTypes(array $ids): array
+    /**
+     * Read-only custom-card projection. Receipt identity deduplicates repeated
+     * projects within a root; different roots may each count the same card.
+     * Cash remains payment-dated (including later collections), quantities
+     * remain sale-dated. Missing component facts never fall back to shell labels.
+     */
+    private function addDashboardCustomCardCategories(string $tenantId, array $stores, array $range, array $customIds,
+        array $cardTypes, array $rootByCategory, array $categoryIds, array &$totals, array &$categoryTotals): void
     {
+        $rows = $this->factQuery(MetricDefinitionRegistry::get('sales_quantity')['source'], $tenantId, $stores, $range)
+            ->where('p.source_type', 'card')->whereIn('p.item_id', array_keys($customIds))
+            ->join('cashier_v3_card_sale_item_allocation_fact c', 'c.tenant_id=p.tenant_id AND c.sale_fact_id=p.fact_id')
+            ->where('c.status', 'effective')->where('p.quantity', '>', 0)
+            ->fieldRaw('p.fact_id,p.item_id card_product_id,p.store_id,c.card_receipt_id,c.component_product_id item_id')
+            ->select()->toArray();
+        $projector = clone $this;
+        $projector->currentReportProductCategory = true;
+        $rows = $projector->projectCurrentReportCategories($rows, $categoryIds, []);
+        $this->addDashboardCustomCardQuantities($rows, $cardTypes, $rootByCategory, $categoryIds !== [], $totals, $categoryTotals);
+        // Reuse the existing two-stage category/item allocator, including stable
+        // cent remainders. Restrict its SQL population before reading any rows.
+        foreach ([0 => 'normal_card', 1 => 'experience_card'] as $type => $key) {
+            $ids = array_keys(array_filter($customIds, static function ($unused, $id) use ($cardTypes, $type): bool {
+                return $cardTypes[$id] === $type;
+            }, ARRAY_FILTER_USE_BOTH));
+            if ($ids === []) continue;
+            $cash = $projector->cashCategoryRows($tenantId, $stores, $range, [], 'positive', [], false, $ids);
+            foreach ($projector->projectCurrentReportCategories($cash, $categoryIds, []) as $row) {
+                $amount = $this->integer($row['amount_cents']);
+                if ($categoryIds !== []) $totals[$key]['cash_performance_cents'] = $this->add($totals[$key]['cash_performance_cents'], $amount);
+                $root = $rootByCategory[(int)$row['category_id']] ?? 0;
+                if (isset($categoryTotals[$root][$key])) {
+                    $categoryTotals[$root][$key]['cash_performance_cents'] = $this->add($categoryTotals[$root][$key]['cash_performance_cents'], $amount);
+                }
+            }
+        }
+    }
+
+    /** Count projected receipt membership, never project rows or cash payments.
+     * Unfiltered top quantity is already supplied by the registered sale facts. */
+    private function addDashboardCustomCardQuantities(array $rows, array $cardTypes, array $rootByCategory,
+        bool $filtered, array &$totals, array &$categoryTotals): void
+    {
+        $seen = [];
+        foreach ($rows as $row) {
+            $receipt = (string)($row['card_receipt_id'] ?? '');
+            if ($receipt === '') continue;
+            $key = $cardTypes[(int)$row['card_product_id']] === 1 ? 'experience_card' : 'normal_card';
+            $identity = (string)$row['fact_id'] . ':' . $receipt;
+            $root = $rootByCategory[(int)$row['category_id']] ?? 0;
+            if ($filtered && !isset($seen['top'][$identity])) {
+                $totals[$key]['sales_quantity'] = $this->add($totals[$key]['sales_quantity'], 1);
+                $seen['top'][$identity] = true;
+            }
+            if (isset($categoryTotals[$root][$key]) && !isset($seen[$root][$identity])) {
+                $categoryTotals[$root][$key]['sales_quantity'] = $this->add($categoryTotals[$root][$key]['sales_quantity'], 1);
+                $seen[$root][$identity] = true;
+            }
+        }
+    }
+
+    /**
+     * Called only for authoritative sale facts whose source_type is card.
+     * Custom-card catalog identity follows CashierV3SaleCatalogServices::kind:
+     * platform item 8154 and its store copies retain the legacy project shell.
+     * Honor its card statistics setting without admitting other projects or
+     * matching display names. Deleted catalog rows remain readable historically.
+     */
+    private function dashboardCardStatisticsTypes(array $ids, array &$customIds = []): array
+    {
+        $customIds = [];
         $products = [];
         foreach (array_chunk($ids, 300) as $chunk) {
             foreach (call_user_func($this->queryFactory, 'store_product')->whereIn('id', $chunk)
@@ -163,9 +242,12 @@ final class RegisteredMetricReadServices
             $platform = $parents[(int)$row['pid']] ?? null;
             $configured = $platform && (int)$platform['type'] === 0 && (int)$platform['relation_id'] === 0
                 ? $platform : $row;
-            if ((int)$configured['product_type'] !== 5) continue;
+            $isCustomCard = ((int)$row['id'] === 8154 && (int)$row['type'] === 0 && (int)$row['relation_id'] === 0)
+                || ((int)$row['type'] === 1 && (int)$row['pid'] === 8154);
+            if ((int)$configured['product_type'] !== 5 && !$isCustomCard) continue;
             $type = (int)$configured['card_statistics_type'];
             if ($type === 0 || $type === 1) $types[$id] = $type;
+            if ($isCustomCard && isset($types[$id])) $customIds[$id] = true;
         }
         return $types;
     }
@@ -2200,11 +2282,16 @@ final class RegisteredMetricReadServices
         ];
     }
 
-    /** @return array<int,array<string,mixed>> */
-    private function cashCategoryRows(string $tenantId, array $stores, array $range, array $categoryIds, string $mode, array $filters, bool $excludeStandaloneRefunds = false): array
+    /**
+     * Optional card item IDs narrow the existing allocation population for
+     * dashboard custom-card projection; they never admit standalone cash rows.
+     * @return array<int,array<string,mixed>>
+     */
+    private function cashCategoryRows(string $tenantId, array $stores, array $range, array $categoryIds, string $mode, array $filters, bool $excludeStandaloneRefunds = false, array $cardItemIds = []): array
     {
         if (!in_array($mode, ['positive', 'refund', 'net'], true)) $this->fail('METRIC_SOURCE_TYPE_INVALID');
         $base = $this->saleCashQuery($tenantId, $stores, $range);
+        if ($cardItemIds !== []) $base->where('s.source_type', 'card')->whereIn('s.item_id', $cardItemIds);
         $this->applyParticipantScope($base, $filters, 'order');
         $this->applyCashDirection($base, $mode, 'p.amount_cents');
 
@@ -2237,7 +2324,7 @@ final class RegisteredMetricReadServices
         // category path must not suppress migration-era repayments before
         // their verified card projects can be projected into that path.
         if ($this->currentReportProductCategory) unset($populationFilters['category_path']);
-        if ($categoryIds === [] && $populationFilters === []) {
+        if ($cardItemIds === [] && $categoryIds === [] && $populationFilters === []) {
             $balanceProjectId = (new SystemBalanceProjectServices())->productId();
             $recharge = $this->rechargeCashQuery($tenantId, $stores, $range);
             $unallocatedDebtRepayment = $this->unallocatedSalesDebtRepaymentCashQuery($tenantId, $stores, $range);

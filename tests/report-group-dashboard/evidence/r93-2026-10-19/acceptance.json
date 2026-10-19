@@ -1,0 +1,13 @@
+{
+  "round": "R93",
+  "date": "2026-10-19",
+  "baselineHead": "2c2cadfbcada44a31415373de315cd4be52a0dd5",
+  "patchSha256": "13d4dc451ecc8d2224d97104925969a87842b8a937cac9458780a5bb471a4086",
+  "userAnswer": "确认验收通过，仅本地提交",
+  "questionCallId": "call_c07cb375bb0c4466947a98652227c42f",
+  "scope": "定制卡纳入疗程卡；跨大类分别计张数，顶部只计一次；现金按卡内项目分摊且不重复；原有总业绩、排行及下钻保持不变",
+  "precommitFingerprintMatch": true,
+  "deploymentAuthorized": false,
+  "pushAuthorized": false,
+  "historicalDataChangesAuthorized": false
+}
