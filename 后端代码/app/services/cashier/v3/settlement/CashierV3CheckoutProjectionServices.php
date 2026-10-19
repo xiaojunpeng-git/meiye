@@ -25,7 +25,7 @@ final class CashierV3CheckoutProjectionServices
         'douyin_voucher' => '抖音验券',
         'partner_collection' => '合作方收款',
         'other_collection' => '其他收款',
-        'old_card_entry' => '旧卡录入',
+        'old_card_entry' => '旧数据录入',
     ];
 
     /** @var CashierV3CheckoutRequestRepository */

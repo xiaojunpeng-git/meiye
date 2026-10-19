@@ -33,7 +33,7 @@ class JobPositionPolicyServices extends BaseServices
             ['id' => 301011, 'title' => '赠送', 'feature_code' => 'cashier.v3.cashier.gift'],
             ['id' => 301012, 'title' => '结账', 'feature_code' => 'cashier.v3.cashier.checkout'],
             // 历史卡项补录是独立的非现金结算权限，既有岗位不自动继承。
-            ['id' => 301050, 'title' => '旧卡录入', 'feature_code' => 'cashier.v3.cashier.old_card_entry'],
+            ['id' => 301050, 'title' => '旧数据录入', 'feature_code' => 'cashier.v3.cashier.old_card_entry'],
             ['id' => 301013, 'title' => '卡升级', 'feature_code' => 'cashier.v3.cashier.card.upgrade'],
             ['id' => 301014, 'title' => '卡延期', 'feature_code' => 'cashier.v3.cashier.card.extend'],
             ['id' => 301015, 'title' => '卡转让', 'feature_code' => 'cashier.v3.cashier.card.transfer'],

@@ -2659,7 +2659,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'douyin_voucher' => '抖音验券',
             'partner_collection' => '合作方收款',
             'other_collection' => '其他收款',
-            'old_card_entry' => '旧卡录入',
+            'old_card_entry' => '旧数据录入',
             'bank' => '银联刷卡',
             'yue' => '余额',
             'offline' => '线下记账',

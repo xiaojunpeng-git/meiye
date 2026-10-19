@@ -24,17 +24,30 @@ $drafts = [['payment_method' => 'old_card_entry', 'amount_cents' => 6000]];
 $check->invoke(null, $request, $order, $lines, $batch, [], $drafts);
 echo "PASS card historical value plus debt creates no collected amount\n";
 
+$productLines = $lines;
+$productLines[0]['item_type'] = 'product';
+$check->invoke(null, $request, $order, $productLines, $batch, [], $drafts);
+echo "PASS product historical entry creates no collected amount\n";
+
+$mixedLines = $lines;
+$mixedLines[0]['original_amount_cents'] = 4500;
+$mixedLines[0]['sale_amount_cents'] = 4500;
+$mixedLines[0]['debt_amount_cents'] = 1500;
+$mixedLines[] = array_merge($mixedLines[0], ['item_type' => 'product']);
+$check->invoke(null, $request, $order, $mixedLines, $batch, [], $drafts);
+echo "PASS mixed card and product historical entry remains one noncash settlement\n";
+
 $invalidLines = $lines;
-$invalidLines[0]['item_type'] = 'product';
+$invalidLines[0]['item_type'] = 'project';
 try {
     $check->invoke(null, $request, $order, $invalidLines, $batch, [], $drafts);
-    fwrite(STDERR, "FAIL product used historical card value\n");
+    fwrite(STDERR, "FAIL project used historical entry\n");
     exit(1);
 } catch (\Throwable $exception) {
     if (strpos($exception->getMessage(), 'sale_only_fact_old_card_entry_invalid') === false) {
         throw $exception;
     }
-    echo "PASS product cannot use historical card value\n";
+    echo "PASS project cannot use historical entry\n";
 }
 
 $cashRequest = $request;

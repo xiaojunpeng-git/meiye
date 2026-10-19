@@ -884,15 +884,15 @@ final class CashierV3SaleOnlyFactAssembler
                 $otherSettlementAmount += (int)$draft['amount_cents'];
             }
         }
-        // The historical card value pays the card sale without becoming cash.
-        // Recheck its exclusive shape where formal facts are assembled.
+        // Historical entry settles card or product sales without new cash.
+        // Recheck the exclusive route at the formal fact boundary as well.
         if ($legacyEntry && ($legacyAmount <= 0 || $collections !== [] || $balance !== 0
             || (string)$request['composition'] !== 'sale_only'
             || count($orderLines) === 0)) {
             throw self::failure('sale_only_fact_old_card_entry_invalid');
         }
         foreach ($legacyEntry ? $orderLines : [] as $line) {
-            if ((string)$line['item_type'] !== 'card') {
+            if (!in_array((string)$line['item_type'], ['card', 'product'], true)) {
                 throw self::failure('sale_only_fact_old_card_entry_invalid');
             }
         }

@@ -5447,12 +5447,12 @@ function localCheckoutPaymentMethods(lines = [], oldCardEnabled = false) {
     ['dianping_voucher', '大众验券'], ['douyin_voucher', '抖音验券'],
     ['partner_collection', '合作方收款'], ['other_collection', '其他收款']
   ].map(([id, name]) => ({ id, name, canAdd: true, cashPerformanceEligible: id !== 'other_collection' }))
-  // This is a card-only historical-value route, not an extra cash method.
+  // 历史补录仅用于卡项和产品销售；仍须单独结算且不形成现金业绩。
   if (oldCardEnabled && lines.length > 0
     && lines.every((line) => cartLineRole(line) === 'sale'
-      && (line.kind === '卡项' || isCustomCardPurchase(line)))
+      && (line.kind === '卡项' || isCustomCardPurchase(line) || isProductLine(line)))
     && canUseCashierV3Operation('cashier.v3.cashier.old_card_entry')) {
-    methods.push({ id: 'old_card_entry', name: '旧卡录入', canAdd: true, cashPerformanceEligible: false })
+    methods.push({ id: 'old_card_entry', name: '旧数据录入', canAdd: true, cashPerformanceEligible: false })
   }
   return methods
 }
@@ -6310,7 +6310,7 @@ async function enqueueCheckoutAction(event = {}) {
       const oldCardEntryConflict = lines.some((line) => checkoutLineRole(line) === 'payment'
         && (String(line.method || '') === 'old_card_entry' || String(method?.id || '') === 'old_card_entry'))
       if (!method || oldCardEntryConflict || lines.some((line) => String(line.method || '') === String(method.id))) {
-        const result = { result: { status: 'failed', message: oldCardEntryConflict ? '旧卡录入只能单独结算，不能组合收款。' : '请选择未重复的收款方式。' } }
+        const result = { result: { status: 'failed', message: oldCardEntryConflict ? '旧数据录入只能单独结算，不能组合收款。' : '请选择未重复的收款方式。' } }
         // This local-draft rejection has no server receipt. Emit the same
         // failed mutation result as an HTTP rejection so the overlay releases
         // the button's temporary “添加中…” state instead of leaving it locked.
@@ -6434,10 +6434,12 @@ async function enqueueCheckoutAction(event = {}) {
     // The final-confirmation screen reads the top-level checkout snapshot.
     // Keep that projection in lockstep with the payment rows which will be
     // submitted as this same browser snapshot. Balance payment is a separate
-    // settlement method and must not be included in cash performance.
+    // settlement method and must not be included in cash performance. Historical
+    // entry and other collection also settle without a new cash receipt.
     const checkoutPaymentLines = checkoutSnapshotPaymentLines(preview.lines || [])
     const cashPerformanceAmount = checkoutPaymentLines
-      .filter((line) => checkoutLineRole(line) === 'payment')
+      .filter((line) => checkoutLineRole(line) === 'payment'
+        && !['old_card_entry', 'other_collection'].includes(String(line.method || '')))
       .reduce(
       (total, line) => total + Math.max(0, Number(line.amount || 0)),
       0

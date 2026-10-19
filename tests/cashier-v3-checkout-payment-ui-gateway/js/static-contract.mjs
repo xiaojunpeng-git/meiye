@@ -404,7 +404,7 @@ check(
 )
 check(
   'frontend displays old-card entry as a disabled separate operation',
-  bridge.includes("{ id: 'old_card_entry', name: '旧卡录入', canAdd: false")
+  bridge.includes("{ id: 'old_card_entry', name: '旧数据录入', canAdd: false")
     && addPayment.includes('method.canAdd === false'),
 )
 check(

@@ -24,7 +24,7 @@ final class CashierV3CheckoutSettlementKernel
     public const COMPOSITION_MIXED = 'mixed';
 
     // 现金是实际收款方式；其他收款只结清本次应收、不产生到账事实。
-    // 旧卡录入仍走独立的卡项历史权益迁入流程。
+    // 旧数据录入沿用历史代码，卡项和产品都可走独立非现金结算。
     public const PAYMENT_CASH = 'cash';
     public const PAYMENT_UNIONPAY = 'unionpay';
     public const PAYMENT_WECHAT = 'wechat';
@@ -285,8 +285,8 @@ final class CashierV3CheckoutSettlementKernel
         $legacyEntryPayments = array_values(array_filter($snapshot['paymentDetails'], static function (array $payment): bool {
             return $payment['method'] === self::PAYMENT_OLD_CARD_ENTRY;
         }));
-        // Historical card value settles a card-only sale without creating a
-        // collected-payment or cash-performance amount. Debt remains separate.
+        // Historical card/product sales settle without collection or cash
+        // performance. Product inventory and other sale effects stay ordinary.
         if ($legacyEntryPayments && (count($snapshot['paymentDetails']) !== 1
             || count($snapshot['saleLines']) === 0
             || count($snapshot['entitlementLines']) !== 0
@@ -295,7 +295,7 @@ final class CashierV3CheckoutSettlementKernel
             throw self::failure('old_card_entry_card_only_independent_required');
         }
         foreach ($legacyEntryPayments ? $snapshot['saleLines'] : [] as $line) {
-            if ($line['sourceType'] !== 'card') {
+            if (!in_array($line['sourceType'], ['card', 'product'], true)) {
                 throw self::failure('old_card_entry_card_only_independent_required');
             }
         }

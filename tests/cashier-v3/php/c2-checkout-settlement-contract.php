@@ -1091,18 +1091,51 @@ checkoutAssert('mixed settlement counts only real tender as cash performance',
     && $mixedOtherDraft['totals']['cashPerformanceAmountCents'] === 2000
     && $mixedOtherDraft['totals']['balanced'] === true);
 
-// The noncash card route cannot be turned into a generic payment by changing
-// the selected line, adding a second method, or consuming stored balance.
+// Historical product entry keeps the ordinary sale/inventory selection, but
+// never becomes a collected payment or cash-performance amount.
 $oldCardProduct = $cardEntry;
 $oldCardProduct['saleLines'][0]['sourceType'] = 'product';
+$oldCardProduct['saleLines'][0]['cardPurchaseSnapshot'] = [];
+$oldCardProduct['saleLines'][0]['inventoryOutboundRequired'] = 1;
 checkoutResign($oldCardProduct);
-checkoutAssert('old card entry rejects product purchases',
-    checkoutReason(static function () use ($oldCardProduct, $secret): void {
+$oldCardProductDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 91),
+    $oldCardProduct, null, $secret
+);
+checkoutAssert('old data entry settles product without cash performance and keeps outbound choice',
+    $oldCardProductDraft['totals']['selectedPaymentAmountCents'] === 6000
+    && $oldCardProductDraft['totals']['cashPerformanceAmountCents'] === 0
+    && $oldCardProductDraft['totals']['debtAmountCents'] === 3000
+    && $oldCardProductDraft['lineDrafts'][0]['inventoryOutboundRequired'] === 1);
+$oldCardProductReady = CashierV3CheckoutSettlementKernel::prepareSubmission(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 91),
+    $oldCardProduct, null, $secret
+);
+checkoutAssert('old data product entry reaches final preparation with zero cash performance',
+    $oldCardProductReady['requestStatus'] === CashierV3CheckoutSettlementStateMachine::READY_FOR_SUBMIT
+    && $oldCardProductReady['totals']['cashPerformanceAmountCents'] === 0);
+$oldCardProductNoOutbound = $oldCardProduct;
+$oldCardProductNoOutbound['saleLines'][0]['inventoryOutboundRequired'] = 0;
+checkoutResign($oldCardProductNoOutbound);
+$oldCardProductNoOutboundDraft = CashierV3CheckoutSettlementKernel::saveDraft(
+    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 97),
+    $oldCardProductNoOutbound, null, $secret
+);
+checkoutAssert('old data entry also retains a product no-outbound selection',
+    $oldCardProductNoOutboundDraft['lineDrafts'][0]['inventoryOutboundRequired'] === 0
+    && $oldCardProductNoOutboundDraft['totals']['cashPerformanceAmountCents'] === 0);
+$oldCardProject = $oldCardProduct;
+$oldCardProject['saleLines'][0]['sourceType'] = 'project';
+$oldCardProject['saleLines'][0]['serviceObject'] = 'self';
+checkoutResign($oldCardProject);
+checkoutAssert('old data entry still rejects project purchases',
+    ($projectRejection = checkoutReason(static function () use ($oldCardProject, $secret): void {
         CashierV3CheckoutSettlementKernel::saveDraft(
-            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 91),
-            $oldCardProduct, null, $secret
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_SAVE_DRAFT, 96),
+            $oldCardProject, null, $secret
         );
-    }) === 'old_card_entry_card_only_independent_required');
+    })) === 'old_card_entry_card_only_independent_required', $projectRejection);
+// The noncash route cannot be combined with tender or stored balance.
 $oldCardCombined = $cardEntry;
 $oldCardCombined['paymentDetails'][] = [
     'paymentAuthorityKey' => 'payment:wechat-extra', 'method' => 'wechat',

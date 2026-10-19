@@ -1788,7 +1788,7 @@ final class CashierV3SalesOrderQueryServices
         $paymentNames = [];
         foreach ($snapshot['collections'] as $collection) $paymentNames[$this->paymentMethodName($collection)] = true;
         foreach ($nonCashEntries as $entry) {
-            $paymentNames[(string)$entry['payment_method'] === 'old_card_entry' ? '旧卡录入' : '其他收款'] = true;
+            $paymentNames[(string)$entry['payment_method'] === 'old_card_entry' ? '旧数据录入' : '其他收款'] = true;
         }
         if ($balanceCents > 0) $paymentNames['余额支付'] = true;
         if ($couponPaymentCents > 0) $paymentNames['抵用券抵付'] = true;
@@ -1910,7 +1910,7 @@ final class CashierV3SalesOrderQueryServices
             $method = (string)$entry['payment_method'];
             $mapped['paymentDetails'][] = [
                 'id' => (string)$entry['payment_draft_id'], 'paymentMethodCode' => $method,
-                'methodName' => $method === 'old_card_entry' ? '旧卡录入' : '其他收款',
+                'methodName' => $method === 'old_card_entry' ? '旧数据录入' : '其他收款',
                 'amount' => $this->moneyFromCents((int)$entry['amount_cents']),
                 'externalTransactionNo' => '', 'remark' => (string)$entry['remark'],
                 'occurredAt' => $this->formatTimestamp((int)$entry['operation_occurred_at'], 'Y-m-d H:i:s'),

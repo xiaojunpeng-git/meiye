@@ -264,7 +264,7 @@ const hasBalancePayment = computed(() => (
   selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'balance_payment')
 ))
 const hasNonBalancePayment = computed(() => selectedPaymentLines.value.some((line) => String(line?.lineRole || '') === 'payment'))
-// Historical card entry is a standalone settlement route, never a cash or balance combination.
+// Historical card/product entry is standalone, never a cash or balance combination.
 const hasOldCardEntry = computed(() => selectedPaymentLines.value.some((line) => String(line?.method || line?.paymentMethod || '') === 'old_card_entry'))
 const paymentMethodDisabled = (method) => method.canAdd === false
   || pendingPaymentMethodIds.value.has(String(method.id))
@@ -1413,7 +1413,7 @@ onBeforeUnmount(() => {
               type="button"
               class="payment-method-card"
               :disabled="paymentMethodDisabled(method)"
-              :title="paymentMethodDisabled(method) && (hasOldCardEntry || String(method.id) === 'old_card_entry') ? '旧卡录入只能单独结算' : (method.disabledReason || '')"
+              :title="paymentMethodDisabled(method) && (hasOldCardEntry || String(method.id) === 'old_card_entry') ? '旧数据录入只能单独结算' : (method.disabledReason || '')"
               @click="addPaymentMethod(method)"
             >
               {{ pendingPaymentMethodIds.has(String(method.id)) ? '添加中…' : method.name }}

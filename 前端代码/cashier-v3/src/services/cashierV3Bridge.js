@@ -711,7 +711,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
           { id: 'douyin_voucher', name: '抖音验券' },
           { id: 'partner_collection', name: '合作方收款' },
           { id: 'other_collection', name: '其他收款', cashPerformanceEligible: false },
-          { id: 'old_card_entry', name: '旧卡录入', canAdd: false, disabledReason: '旧卡录入需单独办理，不能与其他收款方式组合。', cashPerformanceEligible: false }
+          { id: 'old_card_entry', name: '旧数据录入', canAdd: false, disabledReason: '旧数据录入需单独办理，不能与其他收款方式组合。', cashPerformanceEligible: false }
         ],
         selectedLines: [
           { id: 'preview-payment-1', name: '微信', amount: 1300, status: '待收款', canEdit: true, canRemove: true, noteSummary: '未填写备注' }

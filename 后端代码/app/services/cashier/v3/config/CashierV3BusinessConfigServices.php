@@ -24,7 +24,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
         'other' => '其他',
     ];
     // 记账方式代码是结账、充值、欠款补交和事实层共享的业务口径；
-    // 旧卡录入保留在同一配置表中，但不属于可组合的现金收款事实。
+    // 历史补录沿用 old_card_entry 代码和权限，不属于现金收款事实。
     public const PAYMENT_METHODS = [
         'cash' => '现金',
         'unionpay' => '银联',
@@ -34,7 +34,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
         'douyin_voucher' => '抖音验券',
         'partner_collection' => '合作方收款',
         'other_collection' => '其他收款',
-        'old_card_entry' => '旧卡录入',
+        'old_card_entry' => '旧数据录入',
     ];
 
     public function sourceTree(bool $enabledOnly = false): array
@@ -464,7 +464,7 @@ final class CashierV3BusinessConfigServices extends BaseServices
         }
         return [
             'code' => $code,
-            'displayNameSnapshot' => (string)$row['display_name'],
+            'displayNameSnapshot' => self::paymentDisplayName($row),
             'configVersion' => (int)$row['version'],
         ];
     }
@@ -538,11 +538,19 @@ final class CashierV3BusinessConfigServices extends BaseServices
         return [
             'code' => $code,
             'defaultName' => self::PAYMENT_METHODS[$code] ?? (string)$row['default_name'],
-            'displayName' => (string)$row['display_name'],
+            'displayName' => self::paymentDisplayName($row),
             'status' => (int)$row['status'],
             'sort' => (int)$row['sort'],
             'version' => (int)$row['version'],
         ];
+    }
+
+    /** 已上线实例保留旧配置值；只把未自定义的旧名称映射为新展示名，不改历史快照。 */
+    private static function paymentDisplayName(array $row): string
+    {
+        $name = (string)$row['display_name'];
+        return (string)$row['code'] === 'old_card_entry' && $name === '旧卡录入'
+            ? '旧数据录入' : $name;
     }
 
     private function normalizeName($value): string
