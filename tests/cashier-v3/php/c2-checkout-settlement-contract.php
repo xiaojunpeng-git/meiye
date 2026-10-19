@@ -935,16 +935,15 @@ $fractionalEntitlement = $entitlementOnly;
 $fractionalEntitlement['entitlementLines'][0]['actualEntitlementAmountCents'] = 155333;
 $fractionalEntitlement['entitlementLines'][1]['actualEntitlementAmountCents'] = 4667;
 checkoutResign($fractionalEntitlement);
-$fractionalEntitlementResult = CashierV3CheckoutSettlementKernel::prepareSubmission(
-    checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 71),
-    $fractionalEntitlement,
-    null,
-    $secret
-);
-checkoutAssert('entitlement actual amounts may preserve fractional yuan allocation',
-    $fractionalEntitlementResult['composition'] === 'entitlement_only'
-        && $fractionalEntitlementResult['totals']['receivableAmountCents'] === 0
-        && $fractionalEntitlementResult['totals']['entitlementActualAmountCents'] === 160000);
+checkoutAssert('entitlement actual amounts must be whole yuan before persistence',
+    checkoutReason(static function () use ($fractionalEntitlement, $secret): void {
+        CashierV3CheckoutSettlementKernel::prepareSubmission(
+            checkoutCommand(CashierV3CheckoutSettlementKernel::OPERATION_PREPARE_SUBMISSION, 71),
+            $fractionalEntitlement,
+            null,
+            $secret
+        );
+    }) === 'money_whole_yuan_required');
 
 $legacyUnknownEntitlement = $entitlementOnly;
 $legacyUnknownEntitlement['entitlementLines'][0]['sourceKind'] = 'unknown';
