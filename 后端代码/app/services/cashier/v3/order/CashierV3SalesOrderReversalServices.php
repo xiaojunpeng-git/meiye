@@ -51,6 +51,11 @@ final class CashierV3SalesOrderReversalServices
             $total = $this->moneyToCents($debt['total_debt'] ?? null);
             $repaid = $this->moneyToCents($debt['repaid_debt'] ?? null);
             if ($repaid > 0) throw self::failure('sales_reversal_debt_already_repaid');
+            // 独立取消欠款（status=3）保留了单独的免除事实，必须先恢复欠款，
+            // 再由整单作废统一冲销；单独识别该状态才能给门店明确的处理路径。
+            if ((int)$debt['status'] === CashierV3DebtCancellationServices::CANCELLED_STATUS) {
+                throw self::failure('sales_reversal_debt_cancelled');
+            }
             if ((int)$debt['status'] !== 0 || $total <= 0) throw self::failure('sales_reversal_debt_state_invalid');
             // 补交作废后状态应变为 voided、欠款投影应回到 0；两者都须成立，
             // 避免投影异常时把仍有效的补交单留在已作废销售单下面。
@@ -638,9 +643,10 @@ final class CashierV3SalesOrderReversalServices
             'sales_refund_balance_direction_invalid' => '订单余额支付记录异常，操作未完成。',
             'sales_reversal_balance_restore_exceeds_source' => '退回余额超过原支付余额，操作未完成。',
             'sales_refund_balance_restore_exceeds_source' => '退回余额超过原支付余额，操作未完成。',
-            'sales_reversal_debt_already_repaid' => '订单欠款仍有补交金额，销售订单未作废。',
-            'sales_reversal_debt_repayment_active' => '订单欠款有未作废的补交单，销售订单未作废。',
-            'sales_reversal_debt_state_invalid' => '订单欠款状态已变化，销售订单未作废。',
+            'sales_reversal_debt_already_repaid' => '具体原因：订单欠款已有补交金额。需要怎么做：先作废对应补交单，确认欠款恢复为待还后，再作废销售订单。',
+            'sales_reversal_debt_repayment_active' => '具体原因：订单欠款仍有未作废的补交单。需要怎么做：先作废对应补交单，确认欠款恢复为待还后，再作废销售订单。',
+            'sales_reversal_debt_cancelled' => '具体原因：订单关联欠款已单独取消。需要怎么做：先到订单中心的欠款管理恢复欠款，再返回销售订单作废。',
+            'sales_reversal_debt_state_invalid' => '具体原因：订单关联欠款已结清或状态异常。需要怎么做：先到订单中心的欠款管理核对欠款和补交记录，恢复为待还后，再作废销售订单。',
             'sales_reversal_card_issuance_incomplete' => '订单卡项发放记录不完整，销售订单未作废。',
             'sales_reversal_cash_refund_exceeds_source' => '退款金额超过原收款金额，操作未完成。',
             'sales_refund_cash_refund_exceeds_collected' => '退款金额超过原收款金额，操作未完成。',

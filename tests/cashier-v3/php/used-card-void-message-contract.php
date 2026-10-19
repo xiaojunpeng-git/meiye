@@ -33,6 +33,7 @@ $failure = new ReflectionMethod(CashierV3SalesOrderReversalServices::class, 'fai
 $downstream = $failure->invoke(null, 'sales_reversal_card_downstream_use_exists');
 $repaid = $failure->invoke(null, 'sales_reversal_debt_already_repaid');
 $activeRepayment = $failure->invoke(null, 'sales_reversal_debt_repayment_active');
+$cancelledDebt = $failure->invoke(null, 'sales_reversal_debt_cancelled');
 $occupation = $failure->invoke(null, 'sales_reversal_card_active_occupation_exists');
 $other = $failure->invoke(null, 'sales_reversal_debt_state_invalid');
 $fallback = $failure->invoke(null, 'unexpected_reason');
@@ -41,12 +42,14 @@ $passed = $passed
     && $downstream->getMessage() === '卡项有未作废的核销记录，销售订单未作废。'
     && ($downstream->getDetail()['reason'] ?? '') === 'sales_reversal_card_downstream_use_exists'
     && $repaid instanceof CashierV3CommandException
-    && $repaid->getMessage() === '订单欠款仍有补交金额，销售订单未作废。'
+    && $repaid->getMessage() === '具体原因：订单欠款已有补交金额。需要怎么做：先作废对应补交单，确认欠款恢复为待还后，再作废销售订单。'
     && ($repaid->getDetail()['reason'] ?? '') === 'sales_reversal_debt_already_repaid'
-    && $activeRepayment->getMessage() === '订单欠款有未作废的补交单，销售订单未作废。'
+    && $activeRepayment->getMessage() === '具体原因：订单欠款仍有未作废的补交单。需要怎么做：先作废对应补交单，确认欠款恢复为待还后，再作废销售订单。'
+    && $cancelledDebt->getMessage() === '具体原因：订单关联欠款已单独取消。需要怎么做：先到订单中心的欠款管理恢复欠款，再返回销售订单作废。'
+    && ($cancelledDebt->getDetail()['reason'] ?? '') === 'sales_reversal_debt_cancelled'
     && $occupation->getMessage() === '卡项有未结束的预约或服务单，销售订单未作废。'
     && $other instanceof CashierV3CommandException
-    && $other->getMessage() === '订单欠款状态已变化，销售订单未作废。'
+    && $other->getMessage() === '具体原因：订单关联欠款已结清或状态异常。需要怎么做：先到订单中心的欠款管理核对欠款和补交记录，恢复为待还后，再作废销售订单。'
     && ($other->getDetail()['reason'] ?? '') === 'sales_reversal_debt_state_invalid'
     && $fallback instanceof CashierV3CommandException
     && $fallback->getMessage() === '订单相关记录异常，操作未完成。';
