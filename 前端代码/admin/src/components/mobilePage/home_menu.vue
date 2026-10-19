@@ -5,7 +5,9 @@
 		paddingTop:topConfig+'px',
 		paddingBottom:bottomConfig+'px',
 		paddingLeft:prConfig+'px',
-		paddingRight:prConfig+'px'
+		paddingRight:prConfig+'px',
+		marginLeft:outerMarginConfig+'px',
+		marginRight:outerMarginConfig+'px'
 	}">
 		<div :style="{
 			background: `linear-gradient(90deg,${bgColorLeft} 0%,${bgColorRight} 100%)`,
@@ -274,9 +276,15 @@ export default {
           min: 0
         },
         prConfig: {
-					    title: '左右边距',
+					    title: '左右内边距',
 					    val: 0,
 					    min: 0
+        },
+        // Whole-component gutters are independent of the existing icon padding.
+        outerMarginConfig: {
+          title: '左右外边距',
+          val: 0,
+          min: 0
         },
         // 页面间距
         mbConfig: {
@@ -402,6 +410,7 @@ export default {
       pointerBgColor: '',
       pageData: {},
       prConfig: 0,
+      outerMarginConfig: 0,
       menuStyleConfig: 0,
       showConfig: 0,
       filletImg: 0,
@@ -428,6 +437,7 @@ export default {
       const m = obj.map((key) => data[key]);
       return m;
     },
+    // Project saved navigation settings into the editor without mutating them.
     setConfig(data) {
       if (!data) return;
       if (data.mbConfig) {
@@ -445,6 +455,9 @@ export default {
         this.bottomBgColor = data.bottomBgColor.color[0].item;
         this.slider = data.mbConfig.val;
         this.prConfig = data.prConfig.val;
+        // Legacy decorations have no outer gutter; preserve their geometry.
+        const outerMargin = Number((data.outerMarginConfig || {}).val);
+        this.outerMarginConfig = Number.isFinite(outerMargin) ? Math.min(100, Math.max(0, outerMargin)) : 0;
         this.topConfig = data.topConfig.val;
         this.bottomConfig = data.bottomConfig.val;
         this.bgColorLeft = data.bgColor.color[0].item;

@@ -129,6 +129,10 @@ export default {
 					    configNme: 'prConfig'
         },
         {
+          components: toolCom.c_slider,
+          configNme: 'outerMarginConfig'
+        },
+        {
 					    components: toolCom.c_slider,
 					    configNme: 'mbConfig'
         },
@@ -145,8 +149,7 @@ export default {
   },
   watch: {
     num(nVal) {
-      const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[nVal]));
-      this.configObj = value;
+      this.loadConfig(nVal);
     },
     configObj: {
       handler(nVal, oVal) {
@@ -337,11 +340,23 @@ export default {
   },
   mounted() {
     this.$nextTick(() => {
-      const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[this.num]));
-      this.configObj = value;
+      this.loadConfig(this.num);
     });
   },
   methods: {
+    // Extend only the selected navigation draft. Missing fields default to zero,
+    // so old saved layouts are unchanged until the user adjusts and saves them.
+    loadConfig(num) {
+      const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[num]));
+      const outerMargin = Number((value.outerMarginConfig || {}).val);
+      value.outerMarginConfig = {
+        title: '左右外边距',
+        val: Number.isFinite(outerMargin) ? Math.min(100, Math.max(0, outerMargin)) : 0,
+        min: 0
+      };
+      value.prConfig.title = '左右内边距';
+      this.configObj = value;
+    },
     getConfig(data) {
 
     }

@@ -113,9 +113,15 @@
 				return this.dataConfig.showConfig.tabVal
 			},
 			boxStyle(){
+				// The outer gutter moves the complete component/background; prConfig
+				// remains icon padding. Missing legacy values must not shift layouts.
+				const outerMargin = Number((this.dataConfig.outerMarginConfig || {}).val);
+				const gutter = Number.isFinite(outerMargin) ? Math.min(100, Math.max(0, outerMargin)) : 0;
 				return {
 					padding: `${this.dataConfig.topConfig.val * 2}rpx ${this.dataConfig.prConfig.val * 2}rpx ${this.dataConfig.bottomConfig.val * 2}rpx`,
 					marginTop: `${this.dataConfig.mbConfig.val * 2}rpx`,
+					marginLeft: `${gutter * 2}rpx`,
+					marginRight: `${gutter * 2}rpx`,
 					background: this.dataConfig.bottomBgColor.color[0].item,
 				}
 			},
