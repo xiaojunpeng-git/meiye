@@ -25,11 +25,10 @@ $checks = [
         && str_contains($service, "'sale_fact_id'")
         && !str_contains($service, 'customCardProjectRows(')
         && str_contains($service, "Db::name('cashier_v3_entitlement_service_fact')"),
-    'all member monetary fields use actual performance' => str_contains($service, '$serviceAmount = $cashAmount;')
-        && str_contains($service, "'consumption_projects' => \$this->ranking(")
-        && str_contains($service, "'consumption_products' => \$this->ranking(")
-        && !str_contains($service, 'consumption_performance_recorded')
-        && !str_contains($service, 'serviceRanking(')
+    'overview retains actual performance while lower ranking uses project consumption' => str_contains($service, '$serviceAmount = $cashAmount;')
+        && str_contains($service, "categoryRows('consume_amount'")
+        && str_contains($service, "'consumption_projects' => \$consumptionRanks[")
+        && !str_contains($service, "'consumption_products'")
         && str_contains($view, '按会员实际业绩净额归入唯一金额区间'),
     'cash excludes non-cash methods and follows reversals' => str_contains($cashReader, "p.payment_method <> 'other_collection'")
         && str_contains($cashReader, "p.payment_method <> 'old_card_entry'")
@@ -39,11 +38,10 @@ $checks = [
     'dynamic categories and rankings' => str_contains($service, 'store_product_category')
         && str_contains($service, "'projects'")
         && str_contains($service, "'products'")
-        && str_contains($service, "'consumption_projects'")
-        && str_contains($service, "'consumption_products'"),
+        && str_contains($service, "'consumption_projects'"),
     'visit bands and tiers' => str_contains($service, "[30, 60, 90, 180, 360]")
         && str_contains($service, "'new_customer'")
-        && str_contains($service, "METRIC_VERSION = 'member-management-dashboard-actual-v6'")
+        && str_contains($service, "METRIC_VERSION = 'member-management-dashboard-consumption-ranking-v8'")
         && str_contains($service, 'metric_version'),
     'both tier columns are exclusive' => str_contains($service, "'member' => \$this->buildExclusiveTierRows(\$tiers, \$members, false)")
         && str_contains($service, "'new_customer' => \$this->buildExclusiveTierRows(\$tiers, \$members, true)")

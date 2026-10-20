@@ -19,7 +19,7 @@ use think\facade\Db;
 final class MemberManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'member_management_dashboard';
-    public const METRIC_VERSION = 'member-management-dashboard-actual-v7';
+    public const METRIC_VERSION = 'member-management-dashboard-consumption-ranking-v8';
 
     /** @return array<string,mixed> */
     public function dashboard(array $context, array $input = []): array
@@ -27,6 +27,9 @@ final class MemberManagementDashboardServices
         $scope = $this->scope($context, $input);
         $range = $this->range($input);
         $categoryId = (int)($input['category_id'] ?? 0);
+        // Consumption ranks are completed-project performance, not a second copy
+        // of cash/actual sales. Reduce them before loading the other populations.
+        $consumptionRanks = $this->consumptionRankings($scope, $range, $categoryId);
         $cash = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryId);
         $services = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryId);
         $historicalServices = $this->historicalServiceLastRows($scope['tenant_id'], $scope['store_ids'], $range['end'], $categoryId);
@@ -69,8 +72,7 @@ final class MemberManagementDashboardServices
                 'rankings' => [
                     'projects' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => $this->isProject($r))), 'consumption'),
                     'products' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => $this->isProduct($r))), 'consumption'),
-                    'consumption_projects' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => $this->isProject($r))), 'consumption'),
-                    'consumption_products' => $this->ranking(array_values(array_filter($categoryRows, fn(array $r): bool => $this->isProduct($r))), 'consumption'),
+                    'consumption_projects' => $consumptionRanks['categories'][(int)$category['id']] ?? [],
                 ],
             ];
         }
@@ -121,8 +123,7 @@ final class MemberManagementDashboardServices
                 'rankings' => [
                     'projects' => $this->ranking(array_values(array_filter($cash, fn(array $r): bool => $this->isProject($r))), 'consumption'),
                     'products' => $this->ranking(array_values(array_filter($cash, fn(array $r): bool => $this->isProduct($r))), 'consumption'),
-                    'consumption_projects' => $this->ranking(array_values(array_filter($cash, fn(array $r): bool => $this->isProject($r))), 'consumption'),
-                    'consumption_products' => $this->ranking(array_values(array_filter($cash, fn(array $r): bool => $this->isProduct($r))), 'consumption'),
+                    'consumption_projects' => $consumptionRanks['all'],
                 ],
             ],
             'visit_bands' => $this->visitBands($services, $historicalServices, $range['start'], $range['end']),
@@ -221,7 +222,7 @@ final class MemberManagementDashboardServices
     }
 
     /** Project category grouping through platform product IDs only, then apply the dashboard's first-level category filter. */
-    private function currentCategoryRows(array $rows, string $itemKey, int $categoryId): array
+    private function currentCategoryRows(array $rows, string $itemKey, int $categoryId, bool $verifiedServiceItems = false): array
     {
         $links = [];
         // Resolve each store/product identity once: historical fact counts can be
@@ -231,7 +232,11 @@ final class MemberManagementDashboardServices
             $productId = (int)($row[$itemKey] ?? 0);
             $links[$storeId . ':' . $productId] = ['store_id' => $storeId, 'product_id' => $productId];
         }
-        $categories = (new StoreReportCurrentProductCategoryServices())->resolve($links);
+        // Completed services can consume an entitlement sold at another store.
+        // Only the registered, execution-store-authorized service population may
+        // use that cross-store identity path; cash rows keep their existing guard.
+        $resolver = new StoreReportCurrentProductCategoryServices();
+        $categories = $verifiedServiceItems ? $resolver->resolveVerifiedFactItems($links) : $resolver->resolve($links);
         $result = [];
         foreach ($rows as $row) {
             $key = (int)$row['store_id'] . ':' . (int)($row[$itemKey] ?? 0);
@@ -264,10 +269,66 @@ final class MemberManagementDashboardServices
                 if ($member > 0) $groups[$key]['people'][$member] = true;
             }
         }
-        // Both visible ranking panels retain their existing response keys, but
-        // money comes only from the same registered actual-performance rows.
+        // The upper sales ranking retains its registered actual-performance
+        // amount and positive buyer/order semantics, independently of service use.
         $out = []; foreach ($groups as $group) { $people = count($group['people']); $out[] = ['name' => $group['name'], 'cash_income_cents' => $group['amount'], 'consumption_cents' => $group['amount'], 'orders' => count(array_filter(array_keys($group['orders']))), 'people' => $people, 'average_cents' => $this->ratio($group['amount'], $people)]; }
         usort($out, static fn(array $a, array $b): int => $b['cash_income_cents'] <=> $a['cash_income_cents']); return array_slice($out, 0, 5);
+    }
+
+    /** Bound the registered fact reader to disjoint seven-day windows. Keep
+     * only amounts and member sets across windows, never top-five subtotals:
+     * both cross-window member deduplication and the final ranking must be exact. */
+    private function consumptionRankings(array $scope, array $range, int $categoryId): array
+    {
+        $all = [];
+        $categories = [];
+        $reader = new RegisteredMetricReadServices();
+        $start = new \DateTimeImmutable($range['start']);
+        $end = new \DateTimeImmutable($range['end']);
+        while ($start <= $end) {
+            $until = min($start->modify('+6 days'), $end);
+            $rows = $reader->categoryRows('consume_amount', $scope['tenant_id'], $scope['store_ids'],
+                ['start' => $start->format('Y-m-d'), 'end' => $until->format('Y-m-d')]);
+            $rows = $this->currentCategoryRows($rows, 'item_id', $categoryId, true);
+            foreach ($rows as $row) {
+                $this->addConsumptionRow($all, $row);
+                $id = (int)($row['category_id'] ?? 0);
+                if (!isset($categories[$id])) $categories[$id] = [];
+                $this->addConsumptionRow($categories[$id], $row);
+            }
+            unset($rows);
+            $start = $until->modify('+1 day');
+        }
+        foreach ($categories as $id => $groups) $categories[$id] = $this->rankConsumptionGroups($groups);
+        return ['all' => $this->rankConsumptionGroups($all), 'categories' => $categories];
+    }
+
+    /** Project consumption uses signed performance and distinct served members,
+     * including zero-amount services. No sales/receipt condition establishes a
+     * service member, and guest rows retain money without inventing member IDs. */
+    private function addConsumptionRow(array &$groups, array $row): void
+    {
+        $name = trim((string)($row['item_name'] ?? ''));
+        if ($name === '') return;
+        if (!isset($groups[$name])) $groups[$name] = ['name' => $name, 'amount' => 0, 'people' => []];
+        $groups[$name]['amount'] += (int)($row['amount_cents'] ?? 0);
+        $member = (int)($row['member_id'] ?? 0);
+        if ($member > 0) $groups[$name]['people'][$member] = true;
+    }
+
+    /** Sort only after the complete authorized population has been reduced. */
+    private function rankConsumptionGroups(array $groups): array
+    {
+        $out = [];
+        foreach ($groups as $group) {
+            $people = count($group['people']);
+            $out[] = ['name' => $group['name'], 'consumption_cents' => $group['amount'],
+                'people' => $people, 'average_cents' => $this->ratio($group['amount'], $people)];
+        }
+        usort($out, static function (array $a, array $b): int {
+            return ($b['consumption_cents'] <=> $a['consumption_cents']) ?: strcmp($a['name'], $b['name']);
+        });
+        return array_slice($out, 0, 5);
     }
 
     /** @return array<string,array<int,array<string,mixed>>> */
@@ -445,9 +506,9 @@ final class MemberManagementDashboardServices
             'ranking.consumption.orders' => '消费排行成交单数：同名商品关联的有效成交订单数，按订单 ID 去重。',
             'ranking.consumption.people' => '消费排行购买人头：同名商品关联的会员数，按会员 ID 去重。',
             'ranking.consumption.average' => '消费排行人均实际业绩：该项目或产品实际业绩净额除以购买人头。',
-            'ranking.consumption_amount.amount' => '第二排行金额同样读取项目或产品的实际业绩净额，按收款及退款业务日期归属；不把服务核销业绩当作实际业绩。',
-            'ranking.consumption_amount.people' => '第二排行人数为该项目或产品同期实际业绩事实关联的会员数，按会员 ID 去重。',
-            'ranking.consumption_amount.average' => '第二排行人均金额为实际业绩净额除以同期购买人头。',
+            'ranking.consumption_amount.amount' => '仅统计已完成项目的有效消耗业绩，按消耗业绩业务日期归属，排除已作废服务；按金额由高到低显示前五名，不使用销售收款或劳动业绩。',
+            'ranking.consumption_amount.people' => '该项目有效消耗业绩对应的服务会员数，按会员 ID 去重；零金额服务仍计会员，游客金额保留但不虚构会员人数。',
+            'ranking.consumption_amount.average' => '项目消耗业绩除以对应的去重服务会员数，分母为零显示 -。',
             'visit.recency' => '截至查询结束日最后一次非体验有效服务距今达到 30/60/90/180/360 天的会员数，按累计区间统计；人员开关不参与。',
             'visit.frequency' => '按非体验有效服务事实统计每个会员每月到店次数；全年按各月份会员频次桶合计，人员开关不参与。',
             'tier.people' => '会员按 ID、游客按门店单据各归入唯一金额区间，负净额归最低档；会员分层总人数与概况消费人数一致。',

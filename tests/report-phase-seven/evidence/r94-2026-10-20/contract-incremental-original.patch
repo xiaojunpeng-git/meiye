@@ -1,0 +1,21 @@
+diff --git a/c2da223a02bf4b438368ae3298b7749346fadd54 b/d2ae1b3d4c01ac1beaef9cd467150538b6f37fe0
+index c2da223a..d2ae1b3d 100644
+--- a/c2da223a02bf4b438368ae3298b7749346fadd54
++++ b/d2ae1b3d4c01ac1beaef9cd467150538b6f37fe0
+@@ -28,5 +28,4 @@ $checks = [
+-    'all member monetary fields use actual performance' => str_contains($service, '$serviceAmount = $cashAmount;')
+-        && str_contains($service, "'consumption_projects' => \$this->ranking(")
+-        && str_contains($service, "'consumption_products' => \$this->ranking(")
+-        && !str_contains($service, 'consumption_performance_recorded')
+-        && !str_contains($service, 'serviceRanking(')
++    'overview retains actual performance while lower ranking uses project consumption' => str_contains($service, '$serviceAmount = $cashAmount;')
++        && str_contains($service, "categoryRows('consume_amount'")
++        && str_contains($service, "'consumption_projects' => \$consumptionRanks[")
++        && !str_contains($service, "'consumption_products'")
+@@ -42,2 +41 @@ $checks = [
+-        && str_contains($service, "'consumption_projects'")
+-        && str_contains($service, "'consumption_products'"),
++        && str_contains($service, "'consumption_projects'"),
+@@ -46 +44 @@ $checks = [
+-        && str_contains($service, "METRIC_VERSION = 'member-management-dashboard-actual-v7'")
++        && str_contains($service, "METRIC_VERSION = 'member-management-dashboard-consumption-ranking-v8'")
