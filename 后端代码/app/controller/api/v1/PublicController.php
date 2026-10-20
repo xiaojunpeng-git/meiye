@@ -134,7 +134,11 @@ class PublicController extends BaseController
      */
     public function menu_user(Request $request)
     {
-        $menusInfo = sys_data('routine_my_menus') ?? [];
+        // Optional legacy groups may be absent on independent installations.
+        // A missing definition must not resolve to unrelated gid=0 rows.
+        $memberGroups = app()->make(\app\services\system\config\SystemGroupServices::class);
+        $menusInfo = $memberGroups->value(['config_name' => 'routine_my_menus'], 'id')
+            ? (sys_data('routine_my_menus') ?? []) : [];
         $uid = 0;
         $userInfo = [];
         if ($request->hasMacro('user')) $userInfo = $request->user();
@@ -235,7 +239,8 @@ class PublicController extends BaseController
         /** @var SystemConfigServices $systemConfigServices */
         $systemConfigServices = app()->make(SystemConfigServices::class);
         $bannerInfo = $systemConfigServices->getSpreadBanner() ?? [];
-        $my_banner = sys_data('routine_my_banner');
+        $my_banner = $memberGroups->value(['config_name' => 'routine_my_banner'], 'id')
+            ? (sys_data('routine_my_banner') ?? []) : [];
         $routine_contact_type = sys_config('routine_contact_type', 0);
         /** @var DiyServices $diyServices */
         $diyServices = app()->make(DiyServices::class);

@@ -92,7 +92,9 @@ export default {
   },
   actions: {
     getMember({ commit, state }) {
-      getMember().then((res) => {
+      // Return the request so the editor cannot save its initial empty state
+      // after a failed load. Normalize both legacy uploads and icon-only menus.
+      return getMember().then((res) => {
         const merMenu = [];
         const storeMenu = [];
         const agentMenu = [];
@@ -101,7 +103,7 @@ export default {
           if (el.type == '2') {
             merMenu.push({
               name: el.name,
-              pic: el.pic[0],
+              pic: Array.isArray(el.pic) ? (el.pic[0] || '') : (el.pic || ''),
               url: el.url,
               icon: el.icon || '',
               type: el.type
@@ -109,7 +111,7 @@ export default {
           } else if (el.type == '3') {
 			  storeMenu.push({
 			    name: el.name,
-			    pic: el.pic[0],
+			    pic: Array.isArray(el.pic) ? (el.pic[0] || '') : (el.pic || ''),
 			    url: el.url,
 			    icon: el.icon || '',
 			    type: el.type
@@ -117,7 +119,7 @@ export default {
 		  } else if (el.type == '4') {
 			  agentMenu.push({
 			    name: el.name,
-			    pic: el.pic[0],
+			    pic: Array.isArray(el.pic) ? (el.pic[0] || '') : (el.pic || ''),
 			    url: el.url,
 			    icon: el.icon || '',
 			    type: el.type
@@ -125,7 +127,7 @@ export default {
 		  } else {
             myMenu.push({
               name: el.name,
-              pic: el.pic[0],
+              pic: Array.isArray(el.pic) ? (el.pic[0] || '') : (el.pic || ''),
               url: el.url,
               icon: el.icon || '',
               type: el.type
@@ -135,7 +137,7 @@ export default {
         const posterList = res.data.routine_my_banner.map((e) => {
           return {
             name: e.name,
-            pic: e.pic[0],
+            pic: Array.isArray(e.pic) ? (e.pic[0] || '') : (e.pic || ''),
             url: e.url
           };
         });

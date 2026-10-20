@@ -513,8 +513,20 @@ class DiyServices extends BaseServices
 		$systemGroupServices = app()->make(SystemGroupServices::class);
 		$menus_gid = $systemGroupServices->value(['config_name' => 'routine_my_menus'], 'id');
 		$banner_gid = $systemGroupServices->value(['config_name' => 'routine_my_banner'], 'id');
-		$routine_my_menus = $systemGroupDataServices->getGroupDataList(['gid' => $menus_gid]);
-		$routine_my_menus = $routine_my_menus['list'] ?? [];
+		// Independent instances may have the DIY document without legacy group
+		// definitions. Never query gid=0 or replace that document with empty rows.
+		$routine_my_menus = [];
+		if ($menus_gid) {
+			$routine_my_menus = $systemGroupDataServices->getGroupDataList(['gid' => $menus_gid])['list'] ?? [];
+		} else {
+			foreach (['menu' => 1, 'merMenu' => 2, 'storeMenu' => 3, 'agentMenu' => 4] as $section => $type) {
+				foreach ($member[$section]['list'] ?? [] as $item) {
+					$item['type'] = $type;
+					$item['pic'] = is_array($item['pic'] ?? null) ? $item['pic'] : [(string)($item['pic'] ?? '')];
+					$routine_my_menus[] = $item;
+				}
+			}
+		}
 		$url = ['/kefu/mobile_list', '/pages/admin/work/index', '/pages/admin/order_cancellation/index', '/pages/admin/distribution/index'];
 		$storeUrl = ['/pages/store_spread/index', '/pages/admin/work/store'];
 		foreach ($routine_my_menus as &$item) {
@@ -525,8 +537,15 @@ class DiyServices extends BaseServices
 
 		$data['member'] = $member;
 		$data['routine_my_menus'] = $routine_my_menus;
-		$routine_my_banner = $systemGroupDataServices->getGroupDataList(['gid' => $banner_gid]);
-		$routine_my_banner = $routine_my_banner['list'] ?? [];
+		$routine_my_banner = [];
+		if ($banner_gid) {
+			$routine_my_banner = $systemGroupDataServices->getGroupDataList(['gid' => $banner_gid])['list'] ?? [];
+		} else {
+			foreach ($member['poster']['list'] ?? [] as $item) {
+				$item['pic'] = is_array($item['pic'] ?? null) ? $item['pic'] : [(string)($item['pic'] ?? '')];
+				$routine_my_banner[] = $item;
+			}
+		}
 		$data['routine_my_banner'] = $routine_my_banner;
 		$data['h5_avatar'] = sys_config('h5_avatar', '');
 		return $data;
@@ -542,32 +561,35 @@ class DiyServices extends BaseServices
      */
     public function memberSaveData(array $data)
     {
-		$template_name = 'member';
-		$info = $this->dao->get(['template_name' => $template_name, 'type' => 3]);
-		$value = $data['member'];
-		$routine_my_banner = $data['routine_my_banner'] ?? [];
-		$routine_my_menus = $data['routine_my_menus'] ?? [];
-		$update['value'] = json_encode($value);
-		if ($info) {
-			$update['update_time'] = time();
-			if (!$this->dao->update($info['id'], $update)) {
-				throw new AdminException('编辑保存失败');
-			}
-			$data = array_merge($info->toArray(), $update);
-			$key = 'diy_data_member_3';
-		} else {
-			$update['name'] = '个人中心';
-			$update['title'] = '个人中心可视化';
-			$update['template_name'] = $template_name;
-			$update['type'] = 3;
-			$update['add_time'] = time();
-			$this->dao->save($update);
+		if (!is_array($data['member'] ?? null) || !$data['member']) {
+			throw new AdminException('请先加载个人中心配置');
 		}
+		// The DIY document is the member API's authority. Legacy mirrors, when
+		// installed, must commit with it; a failed mirror cannot erase live menus.
+		$this->transaction(function () use ($data) {
+			$info = $this->dao->get(['template_name' => 'member', 'type' => 3]);
+			$update = ['value' => json_encode($data['member'], JSON_THROW_ON_ERROR)];
+			if ($info) {
+				$update['update_time'] = time();
+				if (!$this->dao->update($info['id'], $update)) {
+					throw new AdminException('编辑保存失败');
+				}
+			} else {
+				$this->dao->save($update + [
+					'name' => '个人中心', 'title' => '个人中心可视化',
+					'template_name' => 'member', 'type' => 3, 'add_time' => time(),
+				]);
+			}
+			$groups = app()->make(SystemGroupServices::class);
+			$groupData = app()->make(SystemGroupDataServices::class);
+			foreach (['routine_my_banner', 'routine_my_menus'] as $name) {
+				// Missing optional groups are not synthesized or written with gid=0.
+				if ($groups->value(['config_name' => $name], 'id')) {
+					$groupData->saveAllData($data[$name] ?? [], $name);
+				}
+			}
+		});
 		$this->dao->cacheTag()->clear();
-		/** @var SystemGroupDataServices $systemGroupDataServices */
-		$systemGroupDataServices = app()->make(SystemGroupDataServices::class);
-		$systemGroupDataServices->saveAllData($routine_my_banner, 'routine_my_banner');
-		$systemGroupDataServices->saveAllData($routine_my_menus, 'routine_my_menus');
 		return true;
     }
 

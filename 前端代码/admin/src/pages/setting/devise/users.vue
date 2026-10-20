@@ -141,6 +141,7 @@
           type="primary"
           @click="submit"
           :loading="loadingExist"
+          :disabled="!configurationLoaded"
           >保存</Button
         >
       </div>
@@ -198,6 +199,7 @@ export default {
       orderStaticType: 2,
       menuType: 3,
       loadingExist: false,
+      configurationLoaded: false,
       current: 1,
       colorStyle: "",
       order: {},
@@ -232,10 +234,17 @@ export default {
 	},
   },
   created() {
-    this.$store.dispatch("admin/userTemplateConfig/getMember");
+    // Default preview data is not a loaded configuration and must never be
+    // submitted over an existing document when the GET request fails.
+    this.$store.dispatch("admin/userTemplateConfig/getMember").then(() => {
+      this.configurationLoaded = true;
+    }).catch(() => {
+      this.$Message.error('个人中心配置加载失败，请刷新后重试');
+    });
   },
   methods: {
     submit() {
+      if (!this.configurationLoaded || this.loadingExist) return;
       let reqData = {
         member: this.$store.state.admin.userTemplateConfig,
         routine_my_banner:
@@ -271,9 +280,10 @@ export default {
 		  	if(!menu[i].name){
 		  	   return this.$Message.error('请输入我的服务标题')
 		  	}
-		  	if(!menu[i].pic){
-		  	   return this.$Message.error('请输入我的服务图片')
-		  	}
+            // Existing iconfont entries deliberately have no uploaded image.
+            if (!menu[i].pic && !menu[i].icon) {
+              return this.$Message.error('请选择我的服务图标或图片');
+            }
 		  	if(!menu[i].url){
 		  	   return this.$Message.error('请输入我的服务链接')
 		  	}
@@ -300,8 +310,11 @@ export default {
 			}
 		}
 	  }
-      memberSave(reqData).then((res) => {
+      this.loadingExist = true;
+      return memberSave(reqData).then((res) => {
         this.$Message.success(res.msg);
+      }).finally(() => {
+        this.loadingExist = false;
       });
     },
     editMode(type) {

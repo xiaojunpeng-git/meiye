@@ -1,0 +1,133 @@
+{
+  "status": "PASS",
+  "records": [
+    {
+      "width": 375,
+      "menuCount": 13,
+      "layout": {
+        "width": 355,
+        "height": 410,
+        "viewport": 375,
+        "names": [
+          {
+            "name": "我的预约",
+            "width": 52
+          },
+          {
+            "name": "积分兑换",
+            "width": 52
+          },
+          {
+            "name": "中奖记录",
+            "width": 52
+          },
+          {
+            "name": "付费会员",
+            "width": 52
+          },
+          {
+            "name": "发票管理",
+            "width": 52
+          },
+          {
+            "name": "积分中心",
+            "width": 52
+          },
+          {
+            "name": "联系客服",
+            "width": 52
+          },
+          {
+            "name": "优惠券",
+            "width": 39
+          },
+          {
+            "name": "我的收藏",
+            "width": 52
+          },
+          {
+            "name": "地址信息",
+            "width": 52
+          },
+          {
+            "name": "我的余额",
+            "width": 52
+          },
+          {
+            "name": "我的卡包",
+            "width": 52
+          },
+          {
+            "name": "砍价记录",
+            "width": 52
+          }
+        ]
+      },
+      "refresh": "PASS"
+    },
+    {
+      "width": 320,
+      "menuCount": 13,
+      "layout": {
+        "width": 304,
+        "height": 345,
+        "viewport": 320,
+        "names": [
+          {
+            "name": "我的预约",
+            "width": 44
+          },
+          {
+            "name": "积分兑换",
+            "width": 44
+          },
+          {
+            "name": "中奖记录",
+            "width": 44
+          },
+          {
+            "name": "付费会员",
+            "width": 44
+          },
+          {
+            "name": "发票管理",
+            "width": 44
+          },
+          {
+            "name": "积分中心",
+            "width": 44
+          },
+          {
+            "name": "联系客服",
+            "width": 44
+          },
+          {
+            "name": "优惠券",
+            "width": 33
+          },
+          {
+            "name": "我的收藏",
+            "width": 44
+          },
+          {
+            "name": "地址信息",
+            "width": 44
+          },
+          {
+            "name": "我的余额",
+            "width": 44
+          },
+          {
+            "name": "我的卡包",
+            "width": 44
+          },
+          {
+            "name": "砍价记录",
+            "width": 44
+          }
+        ]
+      },
+      "refresh": "PASS"
+    }
+  ]
+}
