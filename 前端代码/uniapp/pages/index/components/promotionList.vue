@@ -178,6 +178,7 @@ export default {
           styleConfig: {
             tabVal: 1
           },
+          catalogTypes: this.activeValue.catalogTypes,
           goodsList: this.activeValue.goodsList,
           brandList: this.activeValue.brandConfig,
           classList: {
@@ -289,6 +290,7 @@ export default {
       styleConfig: {
         tabVal: 1
       },
+      catalogTypes: this.activeValue.catalogTypes,
       goodsList: this.activeValue.goodsList,
       brandList: this.activeValue.brandConfig,
       classList: {

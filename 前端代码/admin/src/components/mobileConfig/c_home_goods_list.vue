@@ -12,6 +12,7 @@ import { getCategory, getProduct } from '@/api/diy';
 import toolCom from '@/components/mobileConfigRight/index.js';
 import { mapState, mapMutations, mapActions } from 'vuex';
 import rightBtn from '@/components/rightBtn/index.vue';
+import { diyProductTypes } from '@/utils/diyProductTypes';
 export default {
   name: 'c_home_goods_list',
   componentsName: 'home_goods_list',
@@ -52,6 +53,10 @@ export default {
         {
           components: toolCom.c_title,
           configNme: 'titleGoods'
+        },
+        {
+          components: toolCom.c_catalog_types,
+          configNme: 'catalogTypes'
         },
         {
           components: toolCom.c_select,
@@ -243,7 +248,7 @@ export default {
     num(nVal) {
       const value = JSON.parse(JSON.stringify(this.$store.state.admin.mobildConfig.defaultArray[nVal]));
       this.configObj = value;
-      if (!value.selectConfig.list || !value.selectConfig.list[0].value) {
+      if (value.selectConfig && (!value.selectConfig.list || !value.selectConfig.list.length || !value.selectConfig.list[0].value)) {
         this.getCategory();
       }
     },
@@ -418,6 +423,7 @@ export default {
       // }
       const type = this.configObj.typeConfig.activeValue;
       const dataObj = {
+        catalog_types: JSON.stringify(diyProductTypes(this.configObj)),
         page: 1,
         limit: this.configObj.numberConfig.val,
         priceOrder: this.configObj.goodsSort.tabVal == 2 ? 'desc' : '',
@@ -433,11 +439,16 @@ export default {
       } else {
         dataObj.store_label_id = this.configObj.goodsLabel.activeValue;
       }
+      // The editor can switch types/components while a previous query is in flight.
+      const target = this.configObj;
+      const requestId = this.productRequestId = (this.productRequestId || 0) + 1;
       getProduct(dataObj).then(res => {
-        this.configObj.productList.list = res.data;
+        if (target === this.configObj && requestId === this.productRequestId) target.productList.list = res.data;
       });
     },
     getCategory() {
+      // New product selection uses classList; only legacy configs have selectConfig.
+      if (!this.configObj.selectConfig) return;
       getCategory().then(res => {
         this.$set(this.configObj.selectConfig, 'list', res.data);
       });

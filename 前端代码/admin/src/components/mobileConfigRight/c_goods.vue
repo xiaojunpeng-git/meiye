@@ -18,7 +18,7 @@
 		</div>
 
         <Modal v-model="modals" title="商品列表" footerHide  class="paymentFooter" scrollable width="900" @on-cancel="cancel">
-            <goods-list ref="goodslist" :ischeckbox="true" :isdiy="true" isType @getProductId="getProductId" v-if="modals"></goods-list>
+            <goods-list ref="goodslist" :catalogTypes="selectedCatalogTypes" :ischeckbox="true" :isdiy="true" isType @getProductId="getProductId" v-if="modals"></goods-list>
         </Modal>
     </div>
 </template>
@@ -26,6 +26,7 @@
 <script>
 import vuedraggable from 'vuedraggable';
 import goodsList from '@/components/goodsList';
+import { diyProductTypes } from '@/utils/diyProductTypes';
 export default {
   name: 'c_goods',
   props: {
@@ -36,6 +37,9 @@ export default {
   components: {
     goodsList,
     draggable: vuedraggable
+  },
+  computed: {
+    selectedCatalogTypes() { return diyProductTypes(this.defaults); }
   },
   watch: {
     configObj: {

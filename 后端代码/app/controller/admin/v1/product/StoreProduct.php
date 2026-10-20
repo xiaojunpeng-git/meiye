@@ -788,6 +788,8 @@ class StoreProduct extends AuthController
             ['product_type', ''],//商品类型0:普通商品，1：卡密，2：优惠券，3：虚拟商品,4：次卡商品,5:卡项商品6：预约商品
 			['choose_type', ''],//选择商品列表使用场景1：秒杀、2:砍价、3:拼团、4:积分、5:套餐、7:新人礼、8:抽奖、 90:卡项关联商品、91：添加门店同步商品、92优惠活动参与商品、93优惠活动赠送商品、94:库存选品
         ]);
+        // DIY narrows the existing picker query; special inventory scopes below still apply.
+        $where = \app\services\diy\DiyProductTypeFilter::apply($where, $this->request->get('catalog_types', null));
 //        $where['is_show'] = 1;
         $where['is_del'] = 0;
 		$where['is_verify'] = 1;

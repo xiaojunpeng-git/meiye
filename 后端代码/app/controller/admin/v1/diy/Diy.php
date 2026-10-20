@@ -17,6 +17,7 @@ use app\services\activity\newcomer\StoreNewcomerServices;
 use app\services\activity\video\VideoServices;
 use app\services\article\ArticleServices;
 use app\services\diy\DiyServices;
+use app\services\diy\DiyProductTypeFilter;
 use app\services\other\CacheServices;
 use app\services\product\category\StoreProductCategoryServices;
 use app\services\product\product\StoreProductServices;
@@ -133,6 +134,9 @@ class Diy extends AuthController
         $infoDiy = $id ? $this->services->get($id, ['is_diy']) : [];
 		foreach ($value as $key => &$item) {
 			if ($item['name'] === 'goodList') {
+                if (isset($item['catalogTypes'])) {
+                    $item['catalogTypes']['type'] = DiyProductTypeFilter::normalize($item['catalogTypes']['type'] ?? []);
+                }
 				if (isset($item['selectConfig']['list'])) {
 					unset($item['selectConfig']['list']);
 				}
@@ -152,6 +156,9 @@ class Diy extends AuthController
 				if (isset($item['tabConfig']['list']) && $item['tabConfig']['list']) {
 					$list = $item['tabConfig']['list'];
 					foreach ($list as &$tabValue) {
+                        if (isset($tabValue['catalogTypes'])) {
+                            $tabValue['catalogTypes']['type'] = DiyProductTypeFilter::normalize($tabValue['catalogTypes']['type'] ?? []);
+                        }
 						if (isset($tabValue['goodsList']['list']) && is_array($tabValue['goodsList']['list'])) {
 							$limitMax = config('database.page.limitMax', 50);
 							if (isset($tabValue['numConfig']['val']) && isset($tabValue['tabConfig']['tabVal']) && $tabValue['tabConfig']['tabVal'] == 0 && $tabValue['numConfig']['val'] > $limitMax) {
@@ -221,9 +228,9 @@ class Diy extends AuthController
 					switch ($item['name']) {
 						case 'goodList'://商品列表
 							$typeConfig = $item['typeConfig']['activeValue'] ?? 0;
-							$where = [];
+							$where = DiyProductTypeFilter::apply([], $item['catalogTypes']['type'] ?? null);
 							$num = $item['numberConfig']['val'] ?? $limitMax;
-							$sort = $item['goodsSort']['type'] ?? 0;
+							$sort = $item['goodsSort']['tabVal'] ?? ($item['goodsSort']['type'] ?? 0);
 							if ($sort == 1) {
 								$where['salesOrder'] = 'desc';
 							} elseif ($sort == 2) {
@@ -236,30 +243,29 @@ class Diy extends AuthController
 							$where['is_verify'] = 1;
 							switch ($typeConfig){
 								case 1://指定商品
-									$where['ids'] = $item['goodsList']['ids'] ?? [];
-									$item['goodsList']['list'] = $services->getSearchList($where, 0, 0, ['id,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
+                                    // Empty manual selection must not fall back to the full catalog.
+									$where['ids'] = ($item['goodsList']['ids'] ?? []) ?: [-1];
+									$item['goodsList']['list'] = $services->getSearchList($where, 0, 0, ['id,product_type,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
 									break;
 								case 2://指定品牌
 									$where['brand_id'] = $item['brandList']['brandVal'] ?? [];
-									$item['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
+									$item['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,product_type,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
 									break;
 								case 3://指定分类
 									$cateIds = $item['classList']['classVal'] ?? [];
 									if ($cateIds) {
-//										$ids = $storeCategoryServices->getColumn(['pid' => $cateIds], 'id');
-//										if ($ids) {
-//											$cateIds = array_unique(array_merge($cateIds, $ids));
-											$where['cate_id'] = $cateIds;
-//										}
+                                        // Match the live editor/member query's category-child scope.
+                                        $ids = $storeCategoryServices->getColumn(['pid' => $cateIds], 'id');
+                                        $where['cate_id'] = array_unique(array_merge($cateIds, $ids));
 									}
-									$item['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
+									$item['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,product_type,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
 									break;
 								case 4://商品标签
 									$storeLabelIds = $item['goodsLabel']['activeValue'] ?? [];
 									if ($storeLabelIds) {
 										$where['store_label_id'] = $storeLabelIds;
 									}
-									$item['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
+									$item['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,product_type,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
 									break;
 							}
 							break;
@@ -274,7 +280,7 @@ class Diy extends AuthController
 							if (isset($item['tabConfig']['list']) && $item['tabConfig']['list']) {
 								$list = $item['tabConfig']['list'];
 								foreach ($list as &$tabValue) {
-									$where = [];
+									$where = DiyProductTypeFilter::apply([], $tabValue['catalogTypes']['type'] ?? null);
 									$where['type'] = [0, 2];
 									$where['is_show'] = 1;
 									$where['is_del'] = 0;
@@ -290,33 +296,31 @@ class Diy extends AuthController
 									}
 									if ($selectValue == 1 && isset($tabValue['goodsList']['ids']) && count($tabValue['goodsList']['ids'])) {//手动选商品
 										$where['ids'] = $tabValue['goodsList']['ids'];
-										$tabValue['goodsList']['list'] = $services->getSearchList($where, 0, 0, ['id,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
+										$tabValue['goodsList']['list'] = $services->getSearchList($where, 0, 0, ['id,product_type,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
 									} else {//选分类 、标签
 										switch ($selectValue) {
 											case 1://指定商品
-												$where['ids'] = $item['goodsList']['ids'] ?? [];
+												$where['ids'] = ($tabValue['goodsList']['ids'] ?? []) ?: [-1];
 												break;
 											case 2://指定品牌
-												$where['brand_id'] = $item['brandList']['brandVal'] ?? [];
+                                                // Conditions belong to this tab, not the outer component.
+												$where['brand_id'] = $tabValue['brandConfig']['brandVal'] ?? [];
 												break;
 											case 3://指定分类
-												$cateIds = $item['classList']['classVal'] ?? [];
+												$cateIds = $tabValue['selectConfig']['activeValue'] ?? [];
 												if ($cateIds) {
 													$ids = $storeCategoryServices->getColumn(['pid' => $cateIds], 'id');
-													if ($ids) {
-														$cateIds = array_unique(array_merge($cateIds, $ids));
-														$where['cate_id'] = $cateIds;
-													}
+                                                $where['cate_id'] = array_unique(array_merge($cateIds, $ids));
 												}
 												break;
 											case 4://商品标签
-												$storeLabelIds = $item['goodsLabel']['activeValue'] ?? [];
+												$storeLabelIds = $tabValue['goodsLabel']['activeValue'] ?? [];
 												if ($storeLabelIds) {
 													$where['store_label_id'] = $storeLabelIds;
 												}
 												break;
 										}
-										$tabValue['goodsList']['list'] = $tabValue['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
+										$tabValue['goodsList']['list'] = $tabValue['productList']['list'] = $services->getSearchList($where, 0, $num, ['id,product_type,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
 									}
 								}
 								$item['tabConfig']['list'] = $list;
@@ -429,6 +433,9 @@ class Diy extends AuthController
 			['ids', ''],//商品ID
 			['brand_id', ''],//品牌ID
         ]);
+        $where = DiyProductTypeFilter::apply($where, $this->request->get('catalog_types', null));
+        // Manual selection may be submitted as a query string; DAO ordering requires IDs.
+        $where['ids'] = is_array($where['ids']) ? $where['ids'] : stringToIntArray($where['ids']);
 		$cateId = $where['id'];
         $where['is_show'] = 1;
         $where['is_del'] = 0;
@@ -457,7 +464,7 @@ class Diy extends AuthController
         [$page, $limit] = $this->services->getPageValue();
         /** @var StoreProductServices $productService */
         $productService = app()->make(StoreProductServices::class);
-        $list = $productService->getSearchList($where, $page, $limit, ['id,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
+        $list = $productService->getSearchList($where, $page, $limit, ['id,product_type,store_name,cate_id,image,IFNULL(sales, 0) + IFNULL(ficti, 0) as sales,price,stock,activity,ot_price,spec_type,recommend_image,unit_name,is_vip,vip_price'], '', []);
         return $this->success($list);
     }
 

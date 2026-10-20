@@ -9,6 +9,7 @@
 // | Author: MOHE Team <admin@mohe.com>
 // +----------------------------------------------------------------------
 namespace app\controller\api\v1\product;
+use app\services\diy\DiyProductTypeFilter;
 
 use app\Request;
 use app\services\activity\coupon\StoreCouponIssueServices;
@@ -70,6 +71,7 @@ class StoreProduct
 			['coupon_id', ''],//优惠券id
 			['coupon_issue_type', ''],//优惠券来源
         ]);
+        $where = DiyProductTypeFilter::apply($where, $request->get('catalog_types', null));
         if ($where['selectId'] && (!$where['sid'] || !$where['cid'])) {
             if ($services->value(['id' => $where['selectId']], 'pid')) {
                 $where['sid'] = $where['selectId'];

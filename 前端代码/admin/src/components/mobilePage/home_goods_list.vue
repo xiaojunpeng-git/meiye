@@ -248,6 +248,7 @@
 <script>
 import { mapState } from 'vuex';
 // import theme from "@/mixins/theme";
+import { createDiyProductTypes, filterDiyProducts } from '@/utils/diyProductTypes';
 export default {
   name: 'home_goods_list',
   cname: '商品列表',
@@ -334,6 +335,7 @@ export default {
             }
           ]
         },
+        catalogTypes: createDiyProductTypes(),
         typeConfig: {
 					  title: '选择方式',
 					  activeValue: 1,
@@ -743,10 +745,11 @@ export default {
         this.bgRadius = fillet ? valList[0].val + 'px ' + valList[1].val + 'px ' + valList[3].val + 'px ' + valList[2].val + 'px' : filletVal + 'px';
         this.bgRadius2 = fillet ? '0 0 ' + valList[3].val + 'px ' + valList[2].val + 'px' : '0 0 ' + filletVal + 'px ' + filletVal + 'px';
         if (data.typeConfig.activeValue == 1) {
-          this.list = data.goodsList.list.length ? data.goodsList.list : 4;
+          this.list = filterDiyProducts(data.goodsList.list, data);
         } else {
-          this.list = data.productList.list.length ? data.productList.list : 4;
+          this.list = filterDiyProducts(data.productList.list, data);
         }
+        if (!data.catalogTypes && !this.list.length) this.list = 4;
       }
     }
   }

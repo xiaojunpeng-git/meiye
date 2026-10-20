@@ -104,6 +104,8 @@ import { liveGoods } from '@/api/live';
 export default {
   name: 'index',
   props: {
+    // Only DIY opts in. Other picker consumers keep their existing contract.
+    catalogTypes: { type: Array, default: null },
     goodsType: {
 	  type: Number,
 	  default: 0
@@ -407,7 +409,9 @@ export default {
     if (this.isCommunity) {
       this.formValidate.is_community = 1;
     }
-        changeListApi(this.formValidate)
+        const params = { ...this.formValidate };
+        if (this.catalogTypes !== null) params.catalog_types = JSON.stringify(this.catalogTypes);
+        changeListApi(params)
           .then(async (res) => {
             let data = res.data;
             this.tableList = data.list;

@@ -38,6 +38,7 @@
 									</div>
 								</div>
 							</div>
+							<catalog-types :configObj="item" @getConfig="catalogTypesChange" />
 							<div class="c_row-item">
 							    <Col class="c_label">
 							        选择方式
@@ -163,7 +164,7 @@
 		  <storeLabelList ref="storeLabel" @activeData="activeStoreData" @close="storeLabelClose"></storeLabelList>
 		</Modal>
 		<Modal v-model="modals" title="商品列表" footerHide  class="paymentFooter" scrollable width="900" @on-cancel="cancel">
-		    <goods-list ref="goodslist" :ischeckbox="true" :isdiy="true" isType @getProductId="getProductId" v-if="modals"></goods-list>
+		    <goods-list ref="goodslist" :catalogTypes="selectedCatalogTypes" :ischeckbox="true" :isdiy="true" isType @getProductId="getProductId" v-if="modals"></goods-list>
 		</Modal>
 		<Modal v-model="modalPic" width="960px" scrollable  footer-hide closable :title="configData.header?configData.header:'上传图片'" :mask-closable="false" :z-index="1">
 		    <uploadPictures :isChoice="isChoice" @getPic="getPic" :gridBtn="gridBtn" :gridPic="gridPic" v-if="modalPic"></uploadPictures>
@@ -177,6 +178,8 @@ import storeLabelList from '@/components/storeLabelList';
 import goodsList from '@/components/goodsList';
 import uploadPictures from '@/components/uploadPictures';
 import { brandList, cascaderListApi } from '@/api/product';
+import catalogTypes from './c_catalog_types.vue';
+import { createDiyProductTypes, diyProductTypes } from '@/utils/diyProductTypes';
 export default {
   name: 'c_promotion',
   props: {
@@ -191,6 +194,7 @@ export default {
     }
   },
   components: {
+    catalogTypes,
     draggable: vuedraggable,
     storeLabelList,
     goodsList,
@@ -243,6 +247,11 @@ export default {
       tabIndex: 1
     };
   },
+  computed: {
+    selectedCatalogTypes() {
+      return diyProductTypes(this.configData.list && this.configData.list[this.configData.tabCur]);
+    }
+  },
   mounted() {
     this.$nextTick(() => {
       this.defaults = this.configObj;
@@ -262,6 +271,8 @@ export default {
     }
   },
   methods: {
+    // Each tab owns its type filter; changing one never rewrites another tab.
+    catalogTypesChange() { this.$emit('getConfig', { name: 'catalogTypes' }); },
     // 点击图文封面
     modalPicTap(title) {
 			    this.modalPic = true;
@@ -351,6 +362,7 @@ export default {
         this.itemObj.chiild[0].val = '首发新品';
         this.itemObj.chiild[1].val = '最新出炉';
         this.itemObj.tabVal = 0;
+        this.itemObj.catalogTypes = createDiyProductTypes();
         this.itemObj.selectConfig.activeValue = [];
         this.itemObj.goodsLabel.activeValue = [];
         this.itemObj.goodsLabel.list = [];
@@ -366,6 +378,7 @@ export default {
           obj.chiild[1].val = '';
         }
         obj.tabVal = 0;
+        obj.catalogTypes = createDiyProductTypes();
         obj.selectConfig.activeValue = [];
         obj.goodsLabel.activeValue = [];
         obj.goodsLabel.list = [];

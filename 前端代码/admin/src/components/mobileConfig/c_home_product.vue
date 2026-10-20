@@ -12,6 +12,7 @@ import toolCom from '@/components/mobileConfigRight/index.js';
 import { mapState, mapMutations, mapActions } from 'vuex';
 import rightBtn from '@/components/rightBtn/index.vue';
 import { getProduct } from '@/api/diy';
+import { diyProductTypes } from '@/utils/diyProductTypes';
 export default {
   name: 'c_home_product',
   componentsName: 'home_product',
@@ -363,8 +364,9 @@ export default {
       // }
       const type = configObj.tabVal;
       const dataObj = {
+        catalog_types: JSON.stringify(diyProductTypes(configObj)),
         page: 1,
-        limit: data.values || configObj.numConfig.val,
+        limit: configObj.numConfig.val,
         priceOrder: configObj.goodsSort == 2 ? 'desc' : '',
         salesOrder: configObj.goodsSort == 1 ? 'desc' : ''
       };
@@ -378,8 +380,12 @@ export default {
       } else {
         dataObj.store_label_id = configObj.goodsLabel.activeValue;
       }
+      // Per-tab tokens prevent another tab or an older filter response leaking in.
+      if (!this.productRequests) this.productRequests = new WeakMap();
+      const requestId = (this.productRequests.get(configObj) || 0) + 1;
+      this.productRequests.set(configObj, requestId);
       getProduct(dataObj).then(res => {
-				    configObj.productList.list = res.data;
+        if (this.productRequests.get(configObj) === requestId) configObj.productList.list = res.data;
       });
     }
   }

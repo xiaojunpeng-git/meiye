@@ -1,0 +1,33 @@
+{
+  "status": "PASS",
+  "scope": "Canonical Vue SFC fixture; transport/uni-app adapters; backend real MySQL tested separately",
+  "cases": [
+    "list-single-project",
+    "list-multiple-card-project",
+    "list-save-refresh",
+    "375-and-320-component-widths",
+    "independent-tab-types",
+    "explicit-empty",
+    "tab-empty-save-refresh"
+  ],
+  "layout": {
+    "images": true,
+    "pageWidth": 1280,
+    "phones": [
+      {
+        "scrollWidth": 375,
+        "width": 375
+      },
+      {
+        "scrollWidth": 375,
+        "width": 375
+      }
+    ],
+    "scrollWidth": 1265,
+    "selected": [
+      false,
+      false,
+      true
+    ]
+  }
+}

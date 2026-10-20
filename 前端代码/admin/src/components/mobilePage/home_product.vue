@@ -82,6 +82,7 @@
 <script>
 import { mapState } from 'vuex';
 // import theme from "@/mixins/theme";
+import { createDiyProductTypes, filterDiyProducts } from '@/utils/diyProductTypes';
 export default {
   name: 'home_product',
   cname: '商品选项卡',
@@ -197,6 +198,7 @@ export default {
 		                    pla: '选填，不超过四个字'
 		                }
 		            ],
+              catalogTypes: createDiyProductTypes(),
               image: '',
 		            tabVal: 1,
               brandConfig: {
@@ -496,10 +498,11 @@ export default {
         this.tabCur = data.tabConfig.tabCur || 0;
 		  const goods = data.tabConfig.list[this.tabCur];
 		  if (goods.tabVal == 1) {
-		    this.list = goods.goodsList.list.length ? goods.goodsList.list : 2;
+		    this.list = filterDiyProducts(goods.goodsList.list, goods);
 		  } else {
-		    this.list = goods.productList.list.length ? goods.productList.list : 2;
+		    this.list = filterDiyProducts(goods.productList.list, goods);
 		  }
+        if (!goods.catalogTypes && !this.list.length) this.list = 2;
       }
     }
   }

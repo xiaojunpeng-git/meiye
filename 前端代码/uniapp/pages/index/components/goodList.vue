@@ -440,6 +440,7 @@ export default {
   data() {
     return {
       tempArr: [],
+      productRequestId: 0,
       type:0,
       attr: {
         cartAttr: false,
@@ -510,8 +511,9 @@ export default {
         this.waterFall();
       }
     },
-    dataConfig() {
-      this.productslist();
+    dataConfig: {
+      handler() { this.productslist(); },
+      deep: true
     }
   },
   computed:{
@@ -647,9 +649,15 @@ export default {
       });
     },
     productslist() {
+      // Invalidate old tab/type queries even when the new selection is empty.
+      const requestId = ++this.productRequestId;
       let limit = this.$config.LIMIT;
       let data = {};
       if (this.typeConfig == 1) {
+        if (!this.dataConfig.goodsList.ids || !this.dataConfig.goodsList.ids.length) {
+          this.tempArr = [];
+          return;
+        }
         data = {
           ids: this.dataConfig.goodsList.ids.join(','),
         };
@@ -663,8 +671,10 @@ export default {
           limit: this.numberConfig
         };
       }
+      // Missing remains legacy/unrestricted; [] must not become a full catalog.
+      if (this.dataConfig.catalogTypes) data.catalog_types = JSON.stringify(this.dataConfig.catalogTypes.type);
       getProductslist(data).then(res => {
-        this.tempArr = res.data;
+        if (requestId === this.productRequestId) this.tempArr = res.data;
       });
     },
     goDetail(item) {
