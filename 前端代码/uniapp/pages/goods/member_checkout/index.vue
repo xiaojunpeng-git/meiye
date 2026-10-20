@@ -72,7 +72,27 @@
             </view>
             <text class="goods-price">¥{{ yuan(item.amountCents) }}</text>
           </view>
-          <view class="summary-row total-row"><text>商品合计</text><text class="amount">¥{{ yuan(quote.amountCents) }}</text></view>
+          <view class="summary-row total-row"><text>商品合计</text><text class="amount">¥{{ yuan(quote.grossAmountCents) }}</text></view>
+        </view>
+
+        <view v-if="kind === 'purchase'" class="checkout-card benefit-card">
+          <view class="choice-row benefit-row" @click="openCoupons">
+            <text>优惠券</text>
+            <view class="choice-value">
+              <text class="choice-text" :class="{'secondary-text': !couponId}">{{ couponSummary }}</text>
+              <text class="iconfont icon-ic_rightarrow choice-arrow"></text>
+            </view>
+          </view>
+          <view class="benefit-row integral-row">
+            <view>
+              <text>积分抵扣</text>
+              <text class="payment-note">可用 {{ quote.integralAvailable || 0 }} 积分</text>
+            </view>
+            <switch :checked="useIntegral" :disabled="!quote.integralEnabled || !quote.integralMaxUsable" :color="themeColor" @change="changeIntegral" />
+          </view>
+          <view v-if="quote.couponDiscountCents" class="summary-row benefit-summary"><text>优惠券</text><text>-¥{{ yuan(quote.couponDiscountCents) }}</text></view>
+          <view v-if="quote.integralDiscountCents" class="summary-row benefit-summary"><text>积分抵扣</text><text>-¥{{ yuan(quote.integralDiscountCents) }}</text></view>
+          <view class="summary-row benefit-payable"><text>优惠后金额</text><text class="amount">¥{{ yuan(quote.amountCents) }}</text></view>
         </view>
 
         <view v-if="kind === 'purchase'" class="checkout-card">
@@ -140,6 +160,27 @@
         <view class="safe-bottom"></view>
       </view>
     </baseDrawer>
+
+    <baseDrawer :visible="couponVisible" mode="bottom" backgroundColor="transparent" @close="closeCoupons">
+      <view class="sales-drawer">
+        <view class="drawer-header">
+          <text class="drawer-action" @click="selectCoupon(0)">不使用</text>
+          <text class="drawer-title">选择优惠券</text>
+          <text class="drawer-action confirm-action" @click="closeCoupons">完成</text>
+        </view>
+        <scroll-view scroll-y class="sales-list">
+          <view v-for="coupon in quote.coupons || []" :key="coupon.id" class="coupon-row" @click="selectCoupon(coupon.id)">
+            <view class="coupon-copy">
+              <text class="coupon-name">{{ coupon.name }}</text>
+              <text class="payment-note">优惠 ¥{{ yuan(coupon.discountCents) }}</text>
+            </view>
+            <radio :checked="couponId === coupon.id" :color="themeColor" />
+          </view>
+          <view v-if="!(quote.coupons || []).length" class="empty-sales">暂无可用优惠券</view>
+        </scroll-view>
+        <view class="safe-bottom"></view>
+      </view>
+    </baseDrawer>
   </view>
 </template>
 
@@ -155,6 +196,7 @@ export default {
       sysHeight: uni.getSystemInfoSync().statusBarHeight || 0,
       kind: 'purchase', items: [], cartIds: '', price: '0', packageId: 0,
       storeId: 0, salespeople: [], salespeopleVisible: false,
+      couponId: 0, couponVisible: false, useIntegral: false,
       paymentMode: 'balance', externalMethod: 'wechat', balanceYuan: '', quote: {},
       order: null, error: '', loading: false, submitting: false, paying: false,
       commandKey: '', quoteRevision: 0
@@ -173,6 +215,10 @@ export default {
     pendingOrder() { return this.order && ['pending', 'payment_requested', 'payment_unknown'].indexOf(this.order.status) !== -1; },
     canChangeQuantity() { return this.kind === 'purchase' && !this.cartIds && this.items.length === 1; },
     purchaseQuantity() { return this.canChangeQuantity ? Number(this.items[0].quantity || 1) : 1; },
+    couponSummary() {
+      const coupon = (this.quote.coupons || []).find(item => item.id === this.couponId);
+      return coupon ? coupon.name + ' -¥' + this.yuan(coupon.discountCents) : '请选择';
+    },
     salespeopleSummary() {
       if (!this.salespeople.length) return '选填';
       const names = (this.quote.salespeople || []).filter(person => this.salespeople.indexOf(person.id) !== -1).map(person => person.name);
@@ -202,6 +248,8 @@ export default {
       return {
         kind: this.kind, store_id: this.storeId, items: this.items, cart_ids: this.cartIds,
         price: this.price, package_id: this.packageId, salespeople: this.salespeople,
+        coupon_id: this.kind === 'purchase' ? this.couponId : 0,
+        use_integral: this.kind === 'purchase' && this.useIntegral ? 1 : 0,
         payment_mode: this.paymentMode, balance_yuan: this.balanceYuan || '0',
         external_method: this.externalMethod, idempotency_key: this.commandKey,
         fingerprint: this.quote.fingerprint
@@ -230,6 +278,8 @@ export default {
       if (!store) return;
       this.storeId = store.id;
       this.salespeople = [];
+      this.couponId = 0;
+      this.useIntegral = false;
       this.newIntent();
       this.loadQuote();
     },
@@ -240,6 +290,8 @@ export default {
       const quantity = Math.max(1, Math.min(1000, this.purchaseQuantity + delta));
       if (quantity === this.purchaseQuantity) return;
       this.$set(this.items[0], 'quantity', quantity);
+      this.couponId = 0;
+      this.useIntegral = false;
       this.newIntent();
       this.loadQuote();
     },
@@ -255,6 +307,20 @@ export default {
     // included in a fresh server quote so submission cannot reuse a stale fact.
     changeSalespeople(event) {
       this.salespeople = event.detail.value.map(Number);
+      this.newIntent();
+      this.loadQuote();
+    },
+    openCoupons() { this.couponVisible = true; },
+    closeCoupons() { this.couponVisible = false; },
+    selectCoupon(id) {
+      if (this.couponId === Number(id)) { this.closeCoupons(); return; }
+      this.couponId = Number(id);
+      this.closeCoupons();
+      this.newIntent();
+      this.loadQuote();
+    },
+    changeIntegral(event) {
+      this.useIntegral = !!event.detail.value;
       this.newIntent();
       this.loadQuote();
     },
@@ -335,6 +401,9 @@ export default {
 .quantity-button { width: 58rpx; height: 48rpx; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: #333; line-height: 48rpx; font-size: 24rpx; }
 .quantity-button::after { border: 0; }.quantity-button[disabled] { color: #bbb; opacity: 1; }.quantity-value { min-width: 58rpx; text-align: center; font-size: 26rpx; }
 .summary-row { margin-top: 28rpx; }.total-row { padding-top: 24rpx; border-top: 1rpx solid #eee; }
+.benefit-card { padding-top: 8rpx; padding-bottom: 20rpx; }.benefit-row { min-height: 92rpx; border-bottom: 1rpx solid #eee; }
+.integral-row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
+.benefit-summary { margin-top: 18rpx; color: #666; }.benefit-payable { padding-top: 20rpx; border-top: 1rpx solid #eee; }
 .section-title { margin-bottom: 8rpx; font-weight: 500; }.payment-row { min-height: 96rpx; border-bottom: 1rpx solid #eee; }
 .payment-note { display: block; color: #999; font-size: 22rpx; margin-top: 8rpx; }.external-methods { display: block; margin-top: 12rpx; }
 .split-row { padding-top: 28rpx; }.split-input { display: flex; align-items: center; gap: 8rpx; }.split-input input { width: 180rpx; text-align: right; border-bottom: 1rpx solid #ddd; height: 56rpx; }
@@ -347,6 +416,8 @@ export default {
 .drawer-header { height: 108rpx; padding: 0 32rpx; display: flex; align-items: center; justify-content: space-between; border-bottom: 1rpx solid #eee; }
 .drawer-title { font-size: 32rpx; font-weight: 500; }.drawer-action { min-width: 80rpx; color: #666; }.confirm-action { color: var(--view-theme); text-align: right; }
 .sales-list { max-height: 650rpx; }.sales-row { min-height: 96rpx; margin: 0 32rpx; display: flex; align-items: center; justify-content: space-between; border-bottom: 1rpx solid #eee; }
+.coupon-row { min-height: 112rpx; margin: 0 32rpx; display: flex; align-items: center; justify-content: space-between; gap: 20rpx; border-bottom: 1rpx solid #eee; }
+.coupon-copy { min-width: 0; display: flex; flex-direction: column; }.coupon-name { overflow-wrap: anywhere; }
 .empty-sales { padding: 80rpx 32rpx; color: #999; text-align: center; }.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 .result-card { display: flex; flex-direction: column; align-items: center; gap: 18rpx; }.result-title { font-size: 36rpx; font-weight: 600; }.order-number { overflow-wrap: anywhere; color: #666; }
 .result-actions button { height: 76rpx; margin-top: 18rpx; border-radius: 38rpx; font-size: 28rpx; }.primary-button { background: var(--view-theme); color: #fff; }.plain-button { background: #f5f5f5; color: #333; }

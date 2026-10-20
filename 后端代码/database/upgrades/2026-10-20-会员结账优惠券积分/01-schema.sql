@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `eb_member_commerce_benefit` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `commerce_id` bigint unsigned NOT NULL,
+  `member_id` int unsigned NOT NULL,
+  `coupon_user_id` bigint unsigned NOT NULL DEFAULT 0,
+  `coupon_cents` bigint unsigned NOT NULL DEFAULT 0,
+  `integral_used` int unsigned NOT NULL DEFAULT 0,
+  `integral_discount_cents` bigint unsigned NOT NULL DEFAULT 0,
+  `status` varchar(24) NOT NULL,
+  `sales_order_id` varchar(64) NOT NULL DEFAULT '',
+  `snapshot_json` text NOT NULL,
+  `created_at` int unsigned NOT NULL,
+  `updated_at` int unsigned NOT NULL,
+  `refunded_at` int unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `commerce_id` (`commerce_id`),
+  KEY `member_status` (`member_id`,`status`,`id`),
+  KEY `coupon_status` (`coupon_user_id`,`status`),
+  KEY `sales_order_status` (`sales_order_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -46,9 +46,10 @@ final class MemberCommerceServices
                 'items' => [], 'salespeople' => [], 'amountCents' => 0, 'canSubmit' => false];
             if ($storeId === 0) return $result;
             $scope = MemberCommerceScope::create($uid, $storeId);
-            $built = $this->buildInTx($uid, $input, $scope);
+            $built = $this->buildInTx($uid, $input, $scope, false);
             $result['items'] = $built['items'];
             $result['amountCents'] = $built['amountCents'];
+            $result = array_merge($result, (array)$built['benefitQuote']);
             $result['salespeople'] = array_map(static function (array $row): array {
                 return ['id' => (int)$row['staffId'], 'name' => (string)$row['name']];
             }, $this->people($scope, 0));
@@ -68,6 +69,8 @@ final class MemberCommerceServices
         $intent = ['store' => (int)($input['store_id'] ?? 0), 'kind' => (string)($input['kind'] ?? 'purchase'),
             'items' => $input['items'] ?? [], 'cart_ids' => (string)($input['cart_ids'] ?? ''),
             'salespeople' => array_values((array)($input['salespeople'] ?? [])),
+            'coupon_id' => (int)($input['coupon_id'] ?? 0),
+            'use_integral' => !empty($input['use_integral']) ? 1 : 0,
             'payment_mode' => (string)($input['payment_mode'] ?? ''),
             'external_method' => (string)($input['external_method'] ?? 'wechat'),
             'balance_yuan' => (string)($input['balance_yuan'] ?? '0'),
@@ -82,7 +85,7 @@ final class MemberCommerceServices
                 return $this->publicOrder($existing);
             }
             $scope = MemberCommerceScope::create($uid, $intent['store']);
-            $built = $this->buildInTx($uid, $input, $scope);
+            $built = $this->buildInTx($uid, $input, $scope, true);
             if ($intent['cart_ids'] !== '') {
                 $wanted = array_filter(array_map('intval',explode(',',$intent['cart_ids'])));
                 // The same user row serializes intent creation and callbacks.
@@ -115,6 +118,8 @@ final class MemberCommerceServices
                 'channel' => $channel, 'lines' => $built['lines'], 'items' => $built['items'],
                 'storeName' => (string)$scope['store']['name'], 'cartIds' => (string)($input['cart_ids'] ?? ''),
                 'businessSource' => $source, 'bonusCents' => $built['bonusCents'],
+                'grossAmountCents' => $built['grossAmountCents'],
+                'benefits' => $built['benefitSelection'],
                 'packageId' => (int)($input['package_id'] ?? 0), 'businessDate' => date('Y-m-d'),
                 'giftConfig' => $built['giftConfig'] ?? [],
                 'paymentMethod' => ($input['external_method'] ?? '') === 'alipay' ? 'alipay' : 'wechat'];
@@ -127,6 +132,7 @@ final class MemberCommerceServices
                 'status' => $amount === $balance ? 'settling' : 'pending', 'result_json' => '{}',
                 'created_at' => $now, 'updated_at' => $now]);
             $row = Db::name('member_commerce_order')->where('id', $id)->find();
+            (new MemberCommerceBenefitsServices())->reserveInTx($id, $uid, (array)$built['benefitSelection']);
             if ($amount === $balance) $row = $this->settleInTx($row, '');
             return $this->publicOrder($row);
         });
@@ -152,6 +158,7 @@ final class MemberCommerceServices
                 throw new ValidateException('支付请求已发出，请先核对支付结果，不能直接取消。');
             }
             Db::name('member_commerce_order')->where('id', $row['id'])->update(['status'=>'cancelled','updated_at'=>time()]);
+            (new MemberCommerceBenefitsServices())->releaseInTx((int)$row['id']);
             $row['status'] = 'cancelled';
             return $this->publicOrder($row);
         });
@@ -245,6 +252,11 @@ final class MemberCommerceServices
             $submitted = $response['data']['checkoutSubmission'];
             $result = ['orderId' => $submitted['salesOrder']['orderId'],
                 'orderNo' => $submitted['salesOrder']['orderNo'], 'submission' => $submitted];
+            // Coupon consumption is performed by the shared V3 settlement.
+            // Integral consumption follows in this same transaction and is
+            // linked to the resulting sales order for full-void restoration.
+            (new MemberCommerceBenefitsServices())->consumeInTx((int)$row['id'],
+                (int)$row['member_id'], (string)$result['orderId']);
         }
         // A cart is consumed only after the shared settlement succeeds, in the
         // same transaction; transport retries cannot create a second purchase.
@@ -261,7 +273,7 @@ final class MemberCommerceServices
     }
 
     /** Shared catalog resolution ignores all browser prices and SKU choices. */
-    private function buildInTx(int $uid, array $input, array $scope): array
+    private function buildInTx(int $uid, array $input, array $scope, bool $lockBenefits): array
     {
         $kind = (string)($input['kind'] ?? 'purchase');
         if ($kind === 'recharge') {
@@ -292,7 +304,7 @@ final class MemberCommerceServices
                 }, $carts);
             }
             if (!$requested || count($requested) > 100) throw new ValidateException('请选择购买商品。');
-            $lines = $items = [];
+            $lines = $items = $benefitLines = [];
             $amount = $bonus = 0;
             $catalog = new CashierV3SaleCatalogServices();
             foreach ($requested as $index => $item) {
@@ -326,14 +338,29 @@ final class MemberCommerceServices
                     'inventoryOutboundRequired' => (int)$product['product_type'] === 0 ? 1 : 0];
                 $items[] = ['productId' => (int)$product['id'], 'name' => $product['store_name'],
                     'image' => $product['image'], 'quantity' => $quantity, 'amountCents' => $lineAmount];
+                $categoryIds = array_values(array_unique(array_filter(array_map('intval', array_merge(
+                    explode(',', (string)($product['cate_id'] ?? '')),
+                    explode(',', (string)($product['store_cate_id'] ?? ''))
+                )))));
+                $benefitLines[] = ['index' => $index, 'productId' => (int)$product['id'],
+                    'masterProductId' => $masterId, 'categoryIds' => $categoryIds,
+                    'brandId' => (int)($product['brand_id'] ?? 0), 'amountCents' => $lineAmount];
                 $amount += $lineAmount;
             }
         } else throw new ValidateException('交易类型无效。');
         // Match the common cashier amount envelope before a provider request,
         // so an oversized quote can never be collected then rejected on callback.
         if ($amount > 9999999999 || $bonus > 9999999999) throw new ValidateException('交易金额超出支持范围。');
-        $fingerprint = hash('sha256', json_encode([$uid, (int)$scope['store']['id'], $kind, $lines, $amount, $bonus, $giftConfig ?? []]));
-        return compact('kind','lines','items','amount','bonus','fingerprint') + ['amountCents' => $amount, 'bonusCents' => $bonus, 'giftConfig' => $giftConfig ?? []];
+        $built = compact('kind','lines','items','amount','bonus') + [
+            'amountCents' => $amount, 'grossAmountCents' => $amount,
+            'bonusCents' => $bonus, 'giftConfig' => $giftConfig ?? [],
+            'benefitLines' => $benefitLines ?? [],
+        ];
+        $built = (new MemberCommerceBenefitsServices())->applyInTx($uid,
+            (int)$scope['store']['id'], $built, $input, $lockBenefits);
+        $built['fingerprint'] = hash('sha256', json_encode([$uid, (int)$scope['store']['id'], $kind,
+            $built['lines'], $built['amountCents'], $bonus, $built['benefitSelection'], $giftConfig ?? []]));
+        return $built;
     }
 
     private function people(array $scope, int $productId): array
@@ -393,7 +420,12 @@ final class MemberCommerceServices
         return ['id' => $row['public_id'], 'status' => $row['status'], 'kind' => $row['kind'],
             'orderNo' => $row['document_no'], 'storeId' => (int)$row['store_id'],
             'storeName' => (string)($snapshot['storeName'] ?? Db::name('system_store')->where('id', $row['store_id'])->value('name')),
-            'amountCents' => (int)$row['amount_cents'], 'balanceCents' => (int)$row['balance_cents'],
+            'amountCents' => (int)$row['amount_cents'],
+            'grossAmountCents' => (int)($snapshot['grossAmountCents'] ?? $row['amount_cents']),
+            'couponDiscountCents' => (int)($snapshot['benefits']['couponDiscountCents'] ?? 0),
+            'integralDiscountCents' => (int)($snapshot['benefits']['integralDiscountCents'] ?? 0),
+            'integralUsed' => (int)($snapshot['benefits']['integralUsed'] ?? 0),
+            'balanceCents' => (int)$row['balance_cents'],
             'externalCents' => (int)$row['external_cents'], 'items' => $snapshot['items'], 'createdAt' => (int)$row['created_at']];
     }
 

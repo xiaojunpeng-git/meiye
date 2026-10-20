@@ -10,6 +10,7 @@ use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
+use app\services\member\MemberCommerceBenefitsServices;
 use app\services\user\UserBalanceAtomicServices;
 use think\exception\ValidateException;
 use think\facade\Db;
@@ -135,6 +136,13 @@ final class CashierV3SalesOrderReversalServices
         $coupons = $action === 'void-sales-order'
             ? $this->lockConsumedCoupons($source, $scope)
             : [];
+        // Member self-checkout points are an audited price discount rather
+        // than a fabricated payment method. Only a whole-sale void restores
+        // them; financial refunds intentionally leave the original fact intact.
+        $memberBenefit = $action === 'void-sales-order'
+            ? (new MemberCommerceBenefitsServices())->prepareVoidInTx(
+                (string)$source['sourceId'], (int)$source['memberId'])
+            : [];
 
         return [
             'balanceFacts' => $balanceFacts, 'principalPaidCents' => $principalPaid, 'bonusPaidCents' => $bonusPaid,
@@ -145,6 +153,7 @@ final class CashierV3SalesOrderReversalServices
             'entitlementCreditCents' => $entitlementCreditCents, 'nonCashSettlementCents' => $nonCashSettlement,
             'economicReversalCents' => $economicReversal,
             'coupons' => $coupons,
+            'memberBenefit' => $memberBenefit,
         ];
     }
 
@@ -269,9 +278,13 @@ final class CashierV3SalesOrderReversalServices
             $this->revokeCard((array)$card, $source, $action, $operationId, $commandKey, $operator, $scope, $now);
         }
         $this->restoreCoupons((array)($prepared['coupons'] ?? []), $source, $operationId, $now);
+        (new MemberCommerceBenefitsServices())->restoreVoidInTx(
+            (array)($prepared['memberBenefit'] ?? []),
+            (string)$source['sourceId'], (int)$source['memberId']);
         return ['balance' => $balance, 'restoredPrincipalCents' => (int)$prepared['restorePrincipalCents'],
             'restoredBonusCents' => (int)$prepared['restoreBonusCents'], 'cancelledDebtCents' => (int)$prepared['cancelledDebtCents'],
-            'revokedCardCount' => count((array)$prepared['cards'])];
+            'revokedCardCount' => count((array)$prepared['cards']),
+            'restoredIntegral' => (int)($prepared['memberBenefit']['integral_used'] ?? 0)];
     }
 
     /** @return array<string,mixed> */

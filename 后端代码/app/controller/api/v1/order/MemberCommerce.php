@@ -10,7 +10,8 @@ final class MemberCommerce
     private function input(Request $request): array
     {
         return $request->postMore([['store_id',0], ['kind','purchase'], ['items',[]], ['cart_ids',''],
-            ['salespeople',[]], ['payment_mode',''], ['balance_yuan','0'], ['price','0'],
+            ['salespeople',[]], ['coupon_id',0], ['use_integral',0],
+            ['payment_mode',''], ['balance_yuan','0'], ['price','0'],
             ['package_id',0], ['fingerprint',''], ['idempotency_key',''], ['external_method','wechat']]);
     }
 

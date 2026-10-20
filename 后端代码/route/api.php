@@ -462,9 +462,15 @@ Route::group('api', function () {
         Route::get('member/commerce/cart-entry', 'v1.order.MemberCommerce/cartEntry')->name('memberCommerceCartEntry');
         Route::post('member/commerce/create', 'v1.order.MemberCommerce/create')->middleware(BlockerMiddleware::class)->name('memberCommerceCreate');
         Route::get('member/commerce/list', 'v1.order.MemberCommerce/listing')->name('memberCommerceList');
-        Route::get('member/commerce/detail/:id', 'v1.order.MemberCommerce/detail')->name('memberCommerceDetail');
-        Route::post('member/commerce/pay/:id', 'v1.order.MemberCommerce/pay')->middleware(BlockerMiddleware::class)->name('memberCommercePay');
-        Route::post('member/commerce/cancel/:id', 'v1.order.MemberCommerce/cancel')->middleware(BlockerMiddleware::class)->name('memberCommerceCancel');
+        // Public member-commerce IDs contain hyphens. Declare the route
+        // boundary explicitly so MC-* detail, payment and cancellation paths
+        // reach the controller instead of being rejected as numeric IDs.
+        Route::get('member/commerce/detail/:id', 'v1.order.MemberCommerce/detail')
+            ->pattern(['id' => '[A-Za-z0-9-]+'])->name('memberCommerceDetail');
+        Route::post('member/commerce/pay/:id', 'v1.order.MemberCommerce/pay')
+            ->pattern(['id' => '[A-Za-z0-9-]+'])->middleware(BlockerMiddleware::class)->name('memberCommercePay');
+        Route::post('member/commerce/cancel/:id', 'v1.order.MemberCommerce/cancel')
+            ->pattern(['id' => '[A-Za-z0-9-]+'])->middleware(BlockerMiddleware::class)->name('memberCommerceCancel');
         Route::post('order/check_shipping', 'v1.order.StoreOrder/checkShipping')->name('checkShipping'); //检测是否显示快递和核销标签
         Route::post('order/confirm', 'v1.order.StoreOrder/confirm')->middleware(BlockerMiddleware::class)->name('orderConfirm'); //订单确认
         Route::post('order/computed/:key', 'v1.order.StoreOrder/computedOrder')->middleware(BlockerMiddleware::class)->name('computedOrder'); //计算订单金额
