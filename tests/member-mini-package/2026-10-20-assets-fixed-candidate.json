@@ -1,0 +1,257 @@
+{
+  "task": "M008-R4-MINI-ASSETS",
+  "status": "LOCAL_SELF_TEST_PASS_PENDING_PM_ACCEPTANCE",
+  "baseline": "35195f2a89bd84280ff01766c58609ef77e3eabf",
+  "files": [
+    {
+      "file": "前端代码/uniapp/App.vue",
+      "sha256": "260d779c1973ae1e637d454c3933c264c0824e2d2d1018ef4e580f8c4cc65320"
+    },
+    {
+      "file": "前端代码/uniapp/components/easy-loadimage/easy-loadimage.vue",
+      "sha256": "a590d403cf4e8038a512bd3033e0571ec21f26ec2c2da449daaa6746dfacfe67"
+    },
+    {
+      "file": "前端代码/uniapp/manifest.json",
+      "sha256": "dcd47a62af9f18f3fa309dee31ceb82884f334bf8a6db820f378c077e2574d95"
+    },
+    {
+      "file": "前端代码/uniapp/static/iconfont/iconfont.css",
+      "sha256": "ceaf704df2992c63f9a9b5c37e38e2e9eb0ba298f83633d5dfd04f7d620fb56f"
+    },
+    {
+      "file": "前端代码/uniapp/utils/memberAssetUrl.js",
+      "sha256": "7901f5815bccee033d4a30c30bf29df5e9f222c7277c1d35036c1b29c7e3248b"
+    },
+    {
+      "file": "前端代码/uniapp/utils/memberIconFont.js",
+      "sha256": "086967084c8ce0e848876172a77e5e35b30309458b793eca7898bf26aa96296e"
+    },
+    {
+      "file": "scripts/build/member-008-round4-mini.cjs",
+      "sha256": "8c90909e9e56a874109d67f694a708f0226e0158ce2eddca71a531aa43f25545"
+    },
+    {
+      "file": "tests/member-mini-package/assets-contract.cjs",
+      "sha256": "fbce0e1997a18f8a64341639725e10b54729d1fd10e44f44889d7fa5d54fe09e"
+    },
+    {
+      "file": "tests/member-mini-package/round4-runtime-contract.cjs",
+      "sha256": "9b2203e266ddcc3b841cb6286b27f47d26b1a4c1865f6af9a1e3b722c1bd5fd8"
+    }
+  ],
+  "evidence": [
+    {
+      "file": "tests/member-mini-package/evidence/round4-assets/home.png",
+      "sha256": "0eca15105b24e020167b21c3e2e0f10371d5610c34d5d74d65b26f8a95d6a939"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/round4-assets/home-ax.txt",
+      "sha256": "4d65469eda4d3e1761619a12a6dee4ccaaf1dba62abed405a8b80e8d0fc08d57"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/round4-assets/product.png",
+      "sha256": "cec6d785658cdce706682e1680a5780aed12dc02ffc8460ed8472d1fd183497f"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/round4-assets/product-ax.txt",
+      "sha256": "8757a0b66ba1bc4643e82b13767874b5facd3776b25855d821593b8b62d31d99"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/round4-assets/login.png",
+      "sha256": "6d902b1c68041dda803f6d7753111935d0a21989f95eaab9346ca9e31e50588d"
+    }
+  ],
+  "fixedFingerprint": "f700931a16b7794c528def4c267c9f353acbe437ce03f1b981d8a1d0d3812275",
+  "verification": {
+    "result": "PASS",
+    "commit": "35195f2a89bd84280ff01766c58609ef77e3eabf",
+    "sourceFilesVerified": 916,
+    "compared": 1886,
+    "outputFiles": 1886,
+    "scriptsParsed": 423,
+    "stylesRestored": 398,
+    "mutableLoaderOptionsIsolated": true,
+    "nativeComponentMountNotApplication": true,
+    "apiOrigin": "https://008.cc3798.com",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "packages": {
+      "main": 2051371,
+      "pages/admin": 1797360,
+      "pages/behalf": 190173,
+      "pages/discover": 206663,
+      "pages/merchant": 203225,
+      "pages/goods": 1943974,
+      "pages/activity": 470225,
+      "pages/users": 1644676,
+      "pages/annex": 958834,
+      "pages/store": 421694,
+      "pages/work": 17442,
+      "pages/short_video": 304939,
+      "pages/extension": 71298,
+      "pages/columnGoods": 98915
+    },
+    "artifactSha256": "44b45a89cc4bcb7c9bad6083d5c4111d440930eeca050b945d316418c4f87398"
+  },
+  "candidate": "/private/tmp/m008-round4-mini-20261020-assets-final/008-member",
+  "target": {
+    "customer": "渼约008",
+    "terminal": "Vue2 uniapp会员端",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com",
+    "proposedVersion": "3.0.4"
+  },
+  "scope": [
+    "Only Weixin resolves imported /static/mall/ images against the configured current customer origin; cached DIY values remain unchanged.",
+    "Weixin loads the exact canonical iconfont globally from that customer's HTTPS origin; H5/APP retain their existing local font delivery.",
+    "Exclude the now-unused Weixin package-local font copy. No image recompression, font subsetting, page removal or routing changes."
+  ],
+  "groups": {
+    "frontend": [
+      {
+        "file": "前端代码/uniapp/App.vue",
+        "sha256": "260d779c1973ae1e637d454c3933c264c0824e2d2d1018ef4e580f8c4cc65320"
+      },
+      {
+        "file": "前端代码/uniapp/components/easy-loadimage/easy-loadimage.vue",
+        "sha256": "a590d403cf4e8038a512bd3033e0571ec21f26ec2c2da449daaa6746dfacfe67"
+      },
+      {
+        "file": "前端代码/uniapp/manifest.json",
+        "sha256": "dcd47a62af9f18f3fa309dee31ceb82884f334bf8a6db820f378c077e2574d95"
+      },
+      {
+        "file": "前端代码/uniapp/static/iconfont/iconfont.css",
+        "sha256": "ceaf704df2992c63f9a9b5c37e38e2e9eb0ba298f83633d5dfd04f7d620fb56f"
+      },
+      {
+        "file": "前端代码/uniapp/utils/memberAssetUrl.js",
+        "sha256": "7901f5815bccee033d4a30c30bf29df5e9f222c7277c1d35036c1b29c7e3248b"
+      },
+      {
+        "file": "前端代码/uniapp/utils/memberIconFont.js",
+        "sha256": "086967084c8ce0e848876172a77e5e35b30309458b793eca7898bf26aa96296e"
+      }
+    ],
+    "backend": [],
+    "databaseMigrations": [],
+    "scripts": [
+      {
+        "file": "scripts/build/member-008-round4-mini.cjs",
+        "sha256": "8c90909e9e56a874109d67f694a708f0226e0158ce2eddca71a531aa43f25545"
+      }
+    ],
+    "tests": [
+      {
+        "file": "tests/member-mini-package/assets-contract.cjs",
+        "sha256": "fbce0e1997a18f8a64341639725e10b54729d1fd10e44f44889d7fa5d54fe09e"
+      },
+      {
+        "file": "tests/member-mini-package/round4-runtime-contract.cjs",
+        "sha256": "9b2203e266ddcc3b841cb6286b27f47d26b1a4c1865f6af9a1e3b722c1bd5fd8"
+      }
+    ],
+    "generated": "Immutable candidate under /private/tmp; not editable business source.",
+    "evidence": [
+      {
+        "file": "tests/member-mini-package/evidence/round4-assets/home.png",
+        "sha256": "0eca15105b24e020167b21c3e2e0f10371d5610c34d5d74d65b26f8a95d6a939"
+      },
+      {
+        "file": "tests/member-mini-package/evidence/round4-assets/home-ax.txt",
+        "sha256": "4d65469eda4d3e1761619a12a6dee4ccaaf1dba62abed405a8b80e8d0fc08d57"
+      },
+      {
+        "file": "tests/member-mini-package/evidence/round4-assets/product.png",
+        "sha256": "cec6d785658cdce706682e1680a5780aed12dc02ffc8460ed8472d1fd183497f"
+      },
+      {
+        "file": "tests/member-mini-package/evidence/round4-assets/product-ax.txt",
+        "sha256": "8757a0b66ba1bc4643e82b13767874b5facd3776b25855d821593b8b62d31d99"
+      },
+      {
+        "file": "tests/member-mini-package/evidence/round4-assets/login.png",
+        "sha256": "6d902b1c68041dda803f6d7753111935d0a21989f95eaab9346ca9e31e50588d"
+      }
+    ]
+  },
+  "preservedFeatures": [
+    "R4 catalog_types filtering and member commerce quote/member checkout routes in the compiled package",
+    "Native component mounting and Babel-loader options isolation",
+    "Existing footer routes, selected/inactive glyphs and color styles",
+    "Server/CDN/data/bundled image semantics outside /static/mall/"
+  ],
+  "tests": {
+    "assetsContract": "PASS; three origin cases, unchanged URL kinds, invalid origin refusal, success/failure paths and actual Weixin/H5 conditional compiler guards",
+    "runtimeContract": {
+      "result": "PASS",
+      "commit": "35195f2a89bd84280ff01766c58609ef77e3eabf",
+      "sourceFilesVerified": 916,
+      "compared": 1886,
+      "outputFiles": 1886,
+      "scriptsParsed": 423,
+      "stylesRestored": 398,
+      "mutableLoaderOptionsIsolated": true,
+      "nativeComponentMountNotApplication": true,
+      "apiOrigin": "https://008.cc3798.com",
+      "appid": "wx85d4bfd0b4b6aafb",
+      "packages": {
+        "main": 2051371,
+        "pages/admin": 1797360,
+        "pages/behalf": 190173,
+        "pages/discover": 206663,
+        "pages/merchant": 203225,
+        "pages/goods": 1943974,
+        "pages/activity": 470225,
+        "pages/users": 1644676,
+        "pages/annex": 958834,
+        "pages/store": 421694,
+        "pages/work": 17442,
+        "pages/short_video": 304939,
+        "pages/extension": 71298,
+        "pages/columnGoods": 98915
+      },
+      "artifactSha256": "44b45a89cc4bcb7c9bad6083d5c4111d440930eeca050b945d316418c4f87398"
+    },
+    "gitDiffCheck": "PASS scoped files",
+    "originalStagingPreserved": true,
+    "nativeUi": [
+      "Final candidate home: four navigation images and five footer glyphs visible.",
+      "Final candidate product 911: return/menu/share/customer-service/favorite/cart glyphs visible; image and buy CTA visible. No purchase was performed.",
+      "Project tab retains its login gate; login logo visible; cancelled without entering credentials."
+    ],
+    "serverResourceReadOnly": {
+      "images": "Four existing 008 static/mall PNG URLs returned HTTP 200 and valid PNG signatures.",
+      "font": {
+        "status": 200,
+        "cors": "*",
+        "bytes": 44100,
+        "exactCanonicalFont": true,
+        "sha256": "a5d3a77efe622a8ec4b6b8a3eaf8eb5945a74c0b8dea253695f2dfbe9f0aad9a"
+      }
+    }
+  },
+  "knownLimits": [
+    "Seven of the ten returned stores have genuinely empty image/background_image fields. No store photos were fabricated or overwritten.",
+    "Existing map-key configuration error, startup-ad issue and simulator SDK timeout were not fixed in this asset-only candidate. Pages rendered during verification despite SDK warnings/timeouts.",
+    "No real-device or payment acceptance claimed. WeChat cloud preview and development upload have not been rerun for this unaccepted candidate."
+  ],
+  "commentsUpdated": [
+    "前端代码/uniapp/App.vue",
+    "前端代码/uniapp/components/easy-loadimage/easy-loadimage.vue",
+    "前端代码/uniapp/manifest.json",
+    "前端代码/uniapp/static/iconfont/iconfont.css",
+    "前端代码/uniapp/utils/memberAssetUrl.js",
+    "前端代码/uniapp/utils/memberIconFont.js",
+    "scripts/build/member-008-round4-mini.cjs"
+  ],
+  "cleanup": "Discarded oversized font-inlining experiment; its new plugin was removed and vue.config.js restored to its pre-task exact contents. No competing runtime implementation retained.",
+  "serverWrites": false,
+  "databaseWrites": false,
+  "committed": false,
+  "pushed": false,
+  "uploaded": false,
+  "experienceVersionConfigured": false,
+  "reviewSubmitted": false,
+  "productionReleased": false
+}

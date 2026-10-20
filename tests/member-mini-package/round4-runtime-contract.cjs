@@ -58,6 +58,14 @@ assert(Object.values(receipt.after).every(n=>n<=2048*1024));assert(receipt.chang
 const input=JSON.parse(fs.readFileSync(base+'/input.json'));
 // Every source input must remain the accepted Git blob. Customer identity is
 // recorded separately as process-local configuration, never a customer fork.
-for(const row of input.files){const file=path.join(base,'readonly',row.file),bytes=fs.readFileSync(file);assert.strictEqual(sha(bytes),row.sha256);assert(bytes.equals(cp.execFileSync('git',['show',input.commit+':'+row.file],{maxBuffer:16e6})),row.file);}
+for(const row of input.files){
+ const file=path.join(base,'readonly',row.file),bytes=fs.readFileSync(file);assert.strictEqual(sha(bytes),row.sha256);
+ // A pre-commit fixed candidate may include only its explicit canonical-source
+ // allowlist. Every other input remains byte-identical to the Git baseline.
+ const expected=(input.sourceOverrides||[]).includes(row.file)
+  ?fs.readFileSync(path.resolve(__dirname,'../..',row.file))
+  :cp.execFileSync('git',['show',input.commit+':'+row.file],{maxBuffer:16e6});
+ assert(bytes.equals(expected),row.file);
+}
 const result={result:'PASS',commit:input.commit,sourceFilesVerified:input.files.length,compared:files.length,outputFiles:outFiles.length,scriptsParsed:scripts,stylesRestored:styles,mutableLoaderOptionsIsolated:true,nativeComponentMountNotApplication:true,apiOrigin:api.HTTP_REQUEST_URL,appid:config.appid,packages:receipt.after,artifactSha256:sha(Buffer.from(files.sort().map(file=>file+'\0'+sha(fs.readFileSync(path.join(after,file)))).join('\n')))};
 fs.writeFileSync(base+'/verification.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));

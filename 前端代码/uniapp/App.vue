@@ -9,6 +9,9 @@
 	import { getUserInfo } from "@/api/user.js"
 	import { mapGetters } from "vuex"
 	import { silenceBindingSpread } from "@/utils/index.js";
+	// #ifdef MP-WEIXIN
+	import { loadMemberIconFont } from '@/utils/memberIconFont';
+	// #endif
 	// #ifdef MP
 	// let livePlayer = requirePlugin('live-player-plugin')
 	// #endif
@@ -68,6 +71,11 @@
 		},
 		onLaunch: async function(option) {
 			uni.hideTabBar()
+			// #ifdef MP-WEIXIN
+			// Start the global font without blocking business startup or waiting
+			// for simulator callbacks; the rendered glyphs are verified separately.
+			loadMemberIconFont(wx.loadFontFace && wx.loadFontFace.bind(wx), HTTP_REQUEST_URL);
+			// #endif
 			// 冷启动统一买家端模式
 			try {
 				this.$store.commit('merchant/SET_MODE', 'buyer');

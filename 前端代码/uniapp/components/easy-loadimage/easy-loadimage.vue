@@ -1,13 +1,13 @@
 <template>
 	<view class="easy-loadimage" :style="[boxStyle]" :id="uid">
-		<image class="origin-img block" :src="imageSrc" :mode="mode" 
+		<image class="origin-img block" :src="resolvedImageSrc" :mode="mode"
 			v-if="loadImg&&!isLoadError" 
 			v-show="showImg"
 			:style="[imgStyle]"
 			:class="{'no-transition':!openTransition,'show-transition':showTransition&&openTransition}"
 			@load="handleImgLoad" @error="handleImgError">
 		</image>
-		<image class="border-img" :src="borderSrc" mode="aspectFill"
+		<image class="border-img" :src="resolvedBorderSrc" mode="aspectFill"
 			v-if="loadImg&&!isLoadError&&borderSrc"
 			v-show="showImg"
 			:style="[imgStyle]"
@@ -19,6 +19,8 @@
 </template>
 <script>
 	import {throttle} from '@/utils/validate.js';
+	import { HTTP_REQUEST_URL } from '@/config/app';
+	import { resolveServerAssetUrl } from '@/utils/memberAssetUrl';
 
 	// 生成全局唯一id
 	function generateUUID() {
@@ -95,6 +97,24 @@
 			}
 		},
 		computed:{
+			// Only Weixin needs a server origin for media excluded from its package.
+			// Resolve at render time so legacy cached decorations also remain valid.
+			resolvedImageSrc() {
+				// #ifdef MP-WEIXIN
+				return resolveServerAssetUrl(this.imageSrc, HTTP_REQUEST_URL);
+				// #endif
+				// #ifndef MP-WEIXIN
+				return this.imageSrc;
+				// #endif
+			},
+			resolvedBorderSrc() {
+				// #ifdef MP-WEIXIN
+				return resolveServerAssetUrl(this.borderSrc, HTTP_REQUEST_URL);
+				// #endif
+				// #ifndef MP-WEIXIN
+				return this.borderSrc;
+				// #endif
+			},
 			boxStyle(){
 				return {
 					width: this.width,

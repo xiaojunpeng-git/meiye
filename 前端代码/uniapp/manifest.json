@@ -186,8 +186,9 @@
             "postcss" : true,
             "es6" : true
         },
-        /* H5素材/预览壳不进入小程序；已编入WXSS的样式/字体源文件不重复上传。
-           iconfont.woff2仍由WXSS按路径引用，必须保留，不能排除整个iconfont目录。 */
+        /* H5素材/预览壳不进入小程序；样式源文件不重复上传。
+           微信通过当前客户的HTTPS地址加载原图标字体，不再上传无效的包内副本；
+           H5/APP仍保留原始字体文件与加载方式。 */
         "packOptions" : {
             "ignore" : [
                 { "type" : "folder", "value" : "static/design-preview" },
@@ -196,6 +197,7 @@
                 { "type" : "folder", "value" : "static/html" },
                 { "type" : "folder", "value" : "static/fonts" },
                 { "type" : "folder", "value" : "static/css" },
+                { "type" : "file", "value" : "static/iconfont/iconfont.woff2" },
                 { "type" : "file", "value" : "static/iconfont/iconfont.css" }
             ]
         },

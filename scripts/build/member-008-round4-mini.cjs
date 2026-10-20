@@ -3,8 +3,21 @@ const fs=require('fs'),path=require('path'),cp=require('child_process'),crypto=r
 // One immutable canonical release and one explicitly authorized customer/terminal.
 // Customer configuration is a process-local build input, never an editable fork.
 const root=path.resolve(__dirname,'../..');
-const commit='2b912bd52b5191d9f3ce73d21292a9c5db5901c9';
-const base='/private/tmp/m008-round4-mini-20261020-runtime-fixed';
+// The original accepted build stays reproducible. The explicit assets candidate
+// reads only the reviewed local allowlist on its newer baseline, then freezes it;
+// unrelated dirty/staged work can never enter either package.
+const assetsCandidate=process.argv[2]==='--assets-candidate';
+if(process.argv.length>2&&!assetsCandidate)throw Error('Unknown build option');
+const commit=assetsCandidate?'35195f2a89bd84280ff01766c58609ef77e3eabf':'2b912bd52b5191d9f3ce73d21292a9c5db5901c9';
+const base=assetsCandidate?'/private/tmp/m008-round4-mini-20261020-assets-final':'/private/tmp/m008-round4-mini-20261020-runtime-fixed';
+const sourceOverrides=assetsCandidate?[
+ '前端代码/uniapp/components/easy-loadimage/easy-loadimage.vue',
+ '前端代码/uniapp/utils/memberAssetUrl.js',
+ '前端代码/uniapp/App.vue',
+ '前端代码/uniapp/utils/memberIconFont.js',
+ '前端代码/uniapp/static/iconfont/iconfont.css',
+ '前端代码/uniapp/manifest.json'
+]:[];
 const source=path.join(base,'readonly'),input=path.join(source,'前端代码/uniapp'),output=path.join(base,'008-member');
 const target={customer:'008',terminal:'member',appid:'wx85d4bfd0b4b6aafb',origin:'https://008.cc3798.com'};
 const cli='/Applications/HBuilderX.app/Contents/HBuilderX/plugins/uniapp-cli';
@@ -12,13 +25,18 @@ const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const git=args=>cp.execFileSync('git',args,{cwd:root,maxBuffer:128e6});
 if(git(['rev-parse','HEAD']).toString().trim()!==commit)throw Error('Fixed release HEAD changed');
 const dirty=git(['diff','--name-only','HEAD','--','前端代码/uniapp','前端代码/shared','scripts/build/member-mini-css-dedupe.cjs']).toString().trim();
-if(dirty)throw Error('Unexpected affected source changes');
+if(dirty.split('\n').filter(Boolean).some(file=>!sourceOverrides.includes(file)))throw Error('Unexpected affected source changes');
 if(fs.existsSync(source)||fs.existsSync(output))throw Error('Build input/output already exists; preserve original artifacts');
 fs.mkdirSync(source,{recursive:true});
 const paths=['前端代码/uniapp','前端代码/shared','scripts/build/member-mini-css-dedupe.cjs'];
 cp.execFileSync('tar',['-xf','-','-C',source],{input:git(['archive',commit,...paths])});
 const files=git(['ls-tree','-rz','--name-only',commit,'--',...paths]).toString().split('\0').filter(Boolean);
 for(const file of files)if(!fs.readFileSync(path.join(source,file)).equals(git(['show',commit+':'+file])))throw Error('Immutable input differs '+file);
+for(const file of sourceOverrides){
+ const dest=path.join(source,file);fs.mkdirSync(path.dirname(dest),{recursive:true});
+ fs.writeFileSync(dest,fs.readFileSync(path.join(root,file)));
+ if(!files.includes(file))files.push(file);
+}
 fs.symlinkSync(path.join(cli,'node_modules'),path.join(input,'node_modules'));
 // app.js and project.config.json are generated environment inputs, excluded from Git.
 fs.writeFileSync(path.join(input,'config/app.js'),fs.readFileSync(path.join(input,'config/app.mp.template.js')));
@@ -58,5 +76,5 @@ Service.prototype.init=function(...args){const result=init.apply(this,args);this
  });}});
  });return result;};
 Service.prototype.run=function(command,...args){const result=run.call(this,command,...args);if(command!=='uni-build')return result;return Promise.resolve(result).then(value=>{if(!fs.existsSync(path.join(output,'app.json')))throw Error('Compiler returned without output');fs.writeFileSync(base+'/complete.json',JSON.stringify({commit,target,result:'PASS',actualOutput:true})+'\n');process.exit(0);return value;});};
-fs.writeFileSync(base+'/input.json',JSON.stringify({commit,tree:git(['rev-parse',commit+'^{tree}']).toString().trim(),target,input,output,node:process.version,readonly:true,compressionPasses:1,loaderOptionsIsolated:true,buildScriptSha256:sha(originalRead(__filename)),files:files.map(file=>({file,sha256:sha(originalRead(path.join(source,file)))})),overlays:[...overlays].map(([file,b])=>({file,sha256:sha(b)}))},null,2)+'\n');
+fs.writeFileSync(base+'/input.json',JSON.stringify({commit,tree:git(['rev-parse',commit+'^{tree}']).toString().trim(),sourceOverrides,target,input,output,node:process.version,readonly:true,compressionPasses:1,loaderOptionsIsolated:true,buildScriptSha256:sha(originalRead(__filename)),files:files.map(file=>({file,sha256:sha(originalRead(path.join(source,file)))})),overlays:[...overlays].map(([file,b])=>({file,sha256:sha(b)}))},null,2)+'\n');
 process.chdir(cli);process.argv=[process.argv[0],path.join(cli,'bin/uniapp-cli.js')];require(path.join(cli,'bin/uniapp-cli.js'));
