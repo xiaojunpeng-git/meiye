@@ -431,6 +431,10 @@ const filterSchema = computed(() => {
       && !['organization_store_scope', 'date_range', 'month', 'year'].includes(type)
   })
 })
+// 年度进店的统计方式仍由后端声明；仅恢复这一个业务筛选，其他共享报表维持固定列筛选。
+const visibleFilterSchema = computed(() => activeReport.value === 'member_visit_annual_summary'
+  ? filterSchema.value.filter((field) => field.key === 'mode')
+  : isPlatformReport.value && !isSharedStoreReport.value ? filterSchema.value : [])
 const isAnnualAcquisitionSummary = computed(() => ['field_acquisition_summary', 'cross_industry_customer_summary'].includes(activeReport.value))
 const isMemberVisitAnalysis = computed(() => activeReport.value === 'member_visit_analysis')
 const isHeadquartersAcquisition = computed(() => activeReport.value === 'phase_six_headquarters_acquisition')
@@ -1089,6 +1093,8 @@ function syncFiltersFromRoute() {
   dynamicFilters.value = Object.fromEntries(Object.entries(query)
     .filter(([key, value]) => !reserved.has(key) && value !== undefined && value !== '')
     .map(([key, value]) => [key, String(value)]))
+  // 无 mode 的旧链接与服务端默认口径相同，控件也明确显示“按次数”。
+  if (activeReport.value === 'member_visit_annual_summary' && !dynamicFilters.value.mode) dynamicFilters.value.mode = 'count'
   // 深链保留字段键，实际允许范围由当前报表的后端列契约校验。
   try {
     const restored = JSON.parse(String(query.row_filters || '[]'))
@@ -1984,11 +1990,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateTabsLayout))
         <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
         <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
       </template>
-      <label v-for="field in isPlatformReport && !isSharedStoreReport ? filterSchema : []" :key="field.key">
+      <label v-for="field in visibleFilterSchema" :key="field.key">
         <!-- 报表可隐藏重复的可见标题，输入控件仍通过 aria-label 保留可访问语义。 -->
         <span v-if="field.show_label !== false">{{ field.label || field.name || field.key }}</span>
         <select v-if="['select', 'category_tree'].includes(field.type)" v-model="dynamicFilters[field.key]">
-          <option value="">{{ field.placeholder || '全部' }}</option>
+          <option v-if="activeReport !== 'member_visit_annual_summary' || field.key !== 'mode'" value="">{{ field.placeholder || '全部' }}</option>
           <option v-for="option in filterFieldOptions(field)" :key="String(option.value ?? option.code)" :value="String(option.value ?? option.code)">{{ option.label ?? option.name }}</option>
         </select>
         <template v-else-if="field.type === 'money_range'">
