@@ -13,7 +13,7 @@
             <td>{{ scheme.name }}</td><td>{{ scheme.description || '—' }}</td>
             <td><span :class="['status', scheme.status === 'active' ? 'status--active' : '', scheme.status === 'void' ? 'status--void' : '']">{{ statusLabel(scheme.status) }}</span></td>
             <td>{{ scheme.line_count }} 条</td><td>{{ scheme.version }}</td>
-            <td class="target-scheme-list__actions"><button type="button" @click="edit(scheme.id)">{{ scheme.status === 'draft' ? '编辑' : '查看' }}</button><button v-if="scheme.status !== 'void'" type="button" class="target-scheme-list__danger" @click="openVoid(scheme)">作废</button></td>
+            <td class="target-scheme-list__actions"><button type="button" @click="edit(scheme.id)">{{ scheme.status === 'draft' ? '编辑' : '查看' }}</button><button v-if="scheme.status !== 'void'" type="button" class="target-scheme-list__danger" @click="openVoid(scheme)">作废</button><button v-else type="button" class="target-scheme-list__danger" @click="openDelete(scheme)">删除</button></td>
           </tr>
           <tr v-if="!schemes.length"><td colspan="6" class="target-scheme-list__empty">暂无目标方案，可点击右上角新增。</td></tr>
         </tbody>
@@ -29,18 +29,26 @@
         <div class="target-scheme-list__dialog-actions"><button type="button" :disabled="busy" @click="closeVoid">取消</button><button type="button" class="target-scheme-list__danger-primary" :disabled="busy || !voidReason" @click="confirmVoid">{{ busy ? '作废中…' : '确认作废' }}</button></div>
       </section>
     </div>
+    <div v-if="deleteTarget" class="target-scheme-list__backdrop" @click.self="closeDelete">
+      <section class="target-scheme-list__dialog" role="dialog" aria-modal="true" aria-labelledby="target-scheme-delete-title">
+        <h2 id="target-scheme-delete-title">删除已作废方案</h2>
+        <p>确认删除“{{ deleteTarget.name }}”？删除后不再出现在方案列表中；历史明细及操作审计保留，不影响其他生效方案。</p>
+        <p v-if="deleteError" role="alert" class="target-scheme-list__error">{{ deleteError }}</p>
+        <div class="target-scheme-list__dialog-actions"><button type="button" :disabled="busy" @click="closeDelete">取消</button><button type="button" class="target-scheme-list__danger-primary" :disabled="busy" @click="confirmDelete">{{ busy ? '删除中…' : '确认删除' }}</button></div>
+      </section>
+    </div>
   </main>
 </template>
 
 <script>
-import { schemeList, schemeVoid } from '@/api/target';
+import { schemeList, schemeVoid, schemeDelete } from '@/api/target';
 
 const randomKey = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
 /** 列表展示方案状态与作废入口；目标明细的编辑仍在独立路由。 */
 export default {
   name: 'TargetSchemeListPage',
-  data() { return { schemes: [], error: '', voidTarget: null, voidReason: '', voidError: '', busy: false }; },
+  data() { return { schemes: [], error: '', voidTarget: null, voidReason: '', voidError: '', deleteTarget: null, deleteError: '', deleteKey: '', busy: false }; },
   async created() { await this.loadSchemes(); },
   methods: {
     async loadSchemes() {
@@ -52,6 +60,19 @@ export default {
     edit(id) { this.$router.push({ name: 'target_scheme_edit', params: { id }}); },
     openVoid(scheme) { this.voidTarget = scheme; this.voidReason = ''; this.voidError = ''; },
     closeVoid() { if (!this.busy) { this.voidTarget = null; this.voidReason = ''; this.voidError = ''; } },
+    openDelete(scheme) { if (scheme.status !== 'void') return; this.deleteTarget = scheme; this.deleteError = ''; this.deleteKey = randomKey(); },
+    closeDelete() { if (!this.busy) { this.deleteTarget = null; this.deleteError = ''; } },
+    /** 同一次确认重试沿用幂等键，响应丢失不会再次删除或丢失审计。 */
+    async confirmDelete() {
+      if (!this.deleteTarget || this.busy) return;
+      this.busy = true; this.deleteError = '';
+      try {
+        await schemeDelete({ scheme_id: Number(this.deleteTarget.id), expected_version: Number(this.deleteTarget.version), idempotency_key: this.deleteKey });
+        this.deleteTarget = null;
+        await this.loadSchemes();
+      } catch (error) { this.deleteError = error.msg || error.message || '删除目标方案失败'; }
+      finally { this.busy = false; }
+    },
     /** 提交当前列表版本，服务端再锁定方案和绑定；失败时保留原因供用户修正或刷新。 */
     async confirmVoid() {
       if (!this.voidTarget || this.busy) return;

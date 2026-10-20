@@ -65,4 +65,6 @@ export const schemeUpdate = (data) => request({ url: 'target/scheme/update', met
 export const schemeSaveLines = (data) => request({ url: 'target/scheme/lines', method: 'post', data });
 export const schemeActivate = (data) => request({ url: 'target/scheme/activate', method: 'post', data });
 export const schemeVoid = (data) => request({ url: 'target/scheme/void', method: 'post', data });
+// 服务端限制为已作废方案，并校验管理权限、版本及幂等键。
+export const schemeDelete = (data) => request({ url: 'target/scheme/delete', method: 'post', data });
 export const schemeReport = (params) => request({ url: 'target/scheme/report', method: 'get', params });

@@ -26,7 +26,7 @@
             <p v-if="batchMessage" class="scheme-batch__message" role="status">{{ batchMessage }}</p>
             <p class="scheme-batch__hint">仅修改当前页面草稿明细；检查后点击“保存草稿”才会写入数据库。默认不覆盖已填写的目标值。商品 ID 属于门店商品，只能对单店应用。</p>
           </div>
-          <div class="scheme-table-wrap"><table class="scheme-table"><thead><tr><th>月份</th><th>门店</th><th>指标</th><th>对象</th><th>商品或分类</th><th>目标值</th><th v-if="isDraft">操作</th></tr></thead><tbody>
+          <div class="scheme-table-wrap"><table class="scheme-table"><thead><tr><th>月份</th><th>门店</th><th>指标</th><th>对象</th><th>商品或分类</th><th>目标值</th><th v-if="isDraft">操作</th><th v-else>当前生效报表</th></tr></thead><tbody>
             <tr v-for="(row, index) in lines" :key="row.localKey">
               <td><input v-model="row.month_key" type="month" :disabled="!isDraft" /></td>
               <td><select v-model.number="row.store_id" :disabled="!isDraft" @change="onStoreChanged(row)"><option :value="0">请选择</option><option v-for="store in catalog.stores" :key="store.id" :value="Number(store.id)">{{ store.name }}</option></select></td>
@@ -35,13 +35,27 @@
               <td><span v-if="row.scope_type === 'store'">全店</span><select v-else-if="row.scope_type === 'category'" v-model.number="row.scope_id" :disabled="!isDraft"><option :value="0">请选择分类</option><option v-for="category in catalog.categories" :key="category.id" :value="Number(category.id)">{{ category.cate_name }}</option></select><div v-else class="scheme-product"><input v-model.number="row.scope_id" type="number" min="1" :disabled="!isDraft" placeholder="商品 ID" /><button v-if="isDraft" type="button" @click="searchProducts(row)">查找</button><select v-if="row.productOptions && row.productOptions.length" v-model.number="row.scope_id" @change="onProductSelected(row)"><option v-for="product in row.productOptions" :key="product.id" :value="Number(product.id)">{{ product.store_name }}</option></select><span v-else-if="row.scope_name">{{ row.scope_name }}</span></div></td>
               <td><input v-model.trim="row.displayValue" type="text" inputmode="decimal" :disabled="!isDraft" :aria-label="`第${index+1}行目标值`" /><small>{{ unitFor(row) }}</small></td>
               <td v-if="isDraft"><button type="button" @click="lines.splice(index, 1)">移除</button></td>
+              <td v-else>{{ (row.active_report_codes || []).map(code => catalog.reports[code] || code).join('、') || '无' }}</td>
             </tr>
-            <tr v-if="!lines.length"><td :colspan="isDraft ? 7 : 6" class="scheme-empty">暂无目标明细</td></tr>
+            <tr v-if="!lines.length"><td colspan="7" class="scheme-empty">暂无目标明细</td></tr>
           </tbody></table></div>
           <div class="scheme-footer"><button v-if="isDraft" type="button" :disabled="busy || !lines.length" @click="saveLines">保存草稿</button><span v-if="isDraft">导入后请先检查明细，再保存和启用。</span></div>
           <section class="scheme-reports"><h3>引用此方案的报表</h3><p>启用时只切换所选报表；其他报表继续使用各自绑定的方案。</p><div class="scheme-reports__grid"><label v-for="(name, code) in catalog.reports" :key="code"><input v-model="selectedReports" type="checkbox" :value="code" :disabled="!isDraft" />{{ name }}</label></div><button v-if="isDraft" type="button" :disabled="busy || !lines.length || !selectedReports.length" @click="activate">启用并应用到所选报表</button></section>
         </template>
       </main>
+    </div>
+    <Modal v-model="activationSucceeded" title="启用成功" :closable="false" :mask-closable="false" :width="420">
+      <p>方案已成功启用并应用到所选报表。</p>
+      <div slot="footer"><Button type="primary" @click="backToList">确认</Button></div>
+    </Modal>
+    <div v-if="activationConflict" class="scheme-conflict-backdrop">
+      <section class="scheme-conflict-dialog" role="dialog" aria-modal="true" aria-labelledby="scheme-conflict-title">
+        <h2 id="scheme-conflict-title">确认替换相同目标</h2>
+        <p>以下 {{ activationConflict.conflicts.length }} 项已有生效目标。确认后仅替换这些引用，其他月份、门店和目标保持不变。</p>
+        <div class="scheme-conflict-table"><table><thead><tr><th>报表</th><th>月份</th><th>门店</th><th>指标</th><th>对象</th><th>原方案编号</th></tr></thead><tbody><tr v-for="row in activationConflict.conflicts" :key="row.binding_id"><td>{{ catalog.reports[row.report_code] }}</td><td>{{ row.month_key }}</td><td>{{ conflictStore(row) }}</td><td>{{ conflictMetric(row) }}</td><td>{{ scopeLabel(row.scope_type) }}{{ row.scope_id ? ` #${row.scope_id}` : '' }}</td><td>{{ row.old_scheme_id }}</td></tr></tbody></table></div>
+        <p v-if="error" class="scheme-error" role="alert">{{ error }}</p>
+        <footer><button type="button" :disabled="busy" @click="activationConflict = null">取消</button><button type="button" :disabled="busy" @click="submitActivation(activationConflict.conflict_token)">确认替换并启用</button></footer>
+      </section>
     </div>
   </div>
 </template>
@@ -57,7 +71,9 @@ const randomKey = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? cr
 export default {
   name: 'TargetSchemeEditPage',
   components: { OrganizationStoreScopePicker },
-  data() { return { catalog: { stores: [], metrics: [], categories: [], reports: {}}, detail: null, selectedId: 0, lines: [], batchStores: [], batchMonth: new Date().toLocaleDateString('sv-SE').slice(0, 7), batchMetricCode: '', batchScopeType: 'store', batchScopeId: 0, batchDisplayValue: '', batchOverwrite: false, batchMessage: '', selectedReports: [], newName: '', newDescription: '', editName: '', editDescription: '', busy: false, error: '' }; },
+  // 冲突确认绑定服务端版本与请求快照，不能在用户确认期间悄悄更换目标报表。
+  beforeCreate() { this.activationPayload = null; this.activationRequest = null; },
+  data() { return { activationSucceeded: false, activationConflict: null, catalog: { stores: [], metrics: [], categories: [], reports: {}}, detail: null, selectedId: 0, lines: [], batchStores: [], batchMonth: new Date().toLocaleDateString('sv-SE').slice(0, 7), batchMetricCode: '', batchScopeType: 'store', batchScopeId: 0, batchDisplayValue: '', batchOverwrite: false, batchMessage: '', selectedReports: [], newName: '', newDescription: '', editName: '', editDescription: '', busy: false, error: '' }; },
   computed: { isDraft() { return this.detail && this.detail.scheme.status === 'draft'; }, isCreate() { return this.$route.name === 'target_scheme_create'; }, schemeStatusLabel() { const status = this.detail && this.detail.scheme.status; return status === 'active' ? '已生效' : (status === 'void' ? '已作废' : '草稿'); }, voidTime() { const seconds = Number(this.detail && this.detail.void_info && this.detail.void_info.occurred_at); return seconds ? new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '—'; }, batchScopes() { const metric = this.catalog.metrics.find(item => item.code === this.batchMetricCode); return metric ? metric.scopes : ['store']; } },
   watch: { '$route.params.id'(id) { if (id) this.openScheme(id); } },
   async created() { await this.load(); },
@@ -162,9 +178,32 @@ export default {
       this.error = ''; this.busy = true;
       try { const payload = { scheme_id: this.selectedId, expected_version: Number(this.detail.scheme.version), idempotency_key: randomKey(), lines: this.normalizedLines() }; await schemeSaveLines(payload); await this.openScheme(this.selectedId); } catch (error) { this.error = error.msg || error.message || '保存草稿失败'; } finally { this.busy = false; }
     },
+    conflictStore(row) { const store = this.catalog.stores.find(item => Number(item.id) === Number(row.store_id)); return store ? store.name : `门店#${row.store_id}`; },
+    conflictMetric(row) { const metric = this.catalog.metrics.find(item => item.code === row.metric_code); return metric ? metric.name : row.metric_code; },
     async activate() {
+      if (this.busy || this.activationSucceeded) return;
+      this.activationPayload = { scheme_id: this.selectedId, expected_version: Number(this.detail.scheme.version), report_codes: this.selectedReports.slice() };
+      this.activationRequest = null;
+      await this.submitActivation('');
+    },
+    /** 每次冲突变化都重新展示明细；旧确认令牌绝不能直接覆盖另一个人的新方案。 */
+    async submitActivation(token) {
+      if (this.busy || !this.activationPayload) return;
       this.error = ''; this.busy = true;
-      try { await schemeActivate({ scheme_id: this.selectedId, expected_version: Number(this.detail.scheme.version), report_codes: this.selectedReports, idempotency_key: randomKey() }); await this.openScheme(this.selectedId); } catch (error) { this.error = error.msg || error.message || '启用方案失败'; } finally { this.busy = false; }
+      try {
+        // 确认请求失败重试沿用同一键；新的冲突清单使用新键，避免重放旧预览。
+        if (!this.activationRequest || this.activationRequest.conflict_token !== token) this.activationRequest = { ...this.activationPayload, conflict_preview: true, conflict_token: token, idempotency_key: randomKey() };
+        const result = await schemeActivate(this.activationRequest);
+        if (result.data.status === 'confirmation_required') { this.activationConflict = result.data; if (token) this.error = '目标引用已变化，请重新核对后确认。'; return; }
+        if (result.data.status !== 'active') throw new Error('未收到启用成功结果，请刷新后核对方案状态');
+        this.activationConflict = null;
+        // 只有启用接口明确成功才提示；不再依赖二次详情请求，避免保存成功却因刷新失败误报失败。
+        // 保留当前页直到用户点击确认，普通启用与冲突确认共用这一出口。
+        this.detail.scheme.status = 'active';
+        if (result.data.version) this.detail.scheme.version = result.data.version;
+        this.activationPayload = null; this.activationRequest = null;
+        this.activationSucceeded = true;
+      } catch (error) { this.error = error.msg || error.message || '启用方案失败'; } finally { this.busy = false; }
     },
     downloadTemplate() {
       const sheet = XLSX.utils.aoa_to_sheet([['月份', '门店ID', '指标代码', '对象类型', '对象ID', '目标值（元或个）'], ['2026-10', '', 'actual_performance', 'store', '0', '10000']]);
@@ -192,6 +231,13 @@ export default {
 
 <style scoped>
 .target-scheme-page { padding: 20px; color: #24344b; }
+.scheme-conflict-backdrop { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(20, 34, 56, .45); }
+.scheme-conflict-dialog { width: 900px; max-width: 100%; max-height: 85vh; overflow: auto; padding: 20px; background: #fff; border-radius: 8px; }
+.scheme-conflict-dialog h2 { font-size: 18px; margin: 0 0 12px; }
+.scheme-conflict-table { max-height: 50vh; overflow: auto; margin: 12px 0; }
+.scheme-conflict-table table { width: 100%; min-width: 680px; border-collapse: collapse; }
+.scheme-conflict-table th, .scheme-conflict-table td { text-align: left; padding: 8px; border-bottom: 1px solid #e4eaf2; }
+.scheme-conflict-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
 .target-scheme-page__heading h1 { font-size: 22px; margin: 0 0 5px; }
 .target-scheme-page__heading p, .scheme-note, .scheme-reports p { color: #718198; }
 .target-scheme-page__layout { display: block; margin-top: 16px; }
