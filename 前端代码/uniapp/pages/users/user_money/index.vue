@@ -25,7 +25,7 @@
 								class='recharge'>充值</navigator>
 							<!-- #endif -->
 							<!-- #ifdef MP -->
-							<view v-if="recharge_switch" @click="openSubscribe('/pages/users/user_payment/index')"
+							<view v-if="recharge_switch" @click="goRecharge"
 								class='recharge'>充值</view>
 							<!-- #endif -->
 						</view>
@@ -112,9 +112,6 @@
 		getProductHot
 	} from '@/api/store.js';
 	import {
-		openRechargeSubscribe
-	} from '@/utils/SubscribeMessage.js';
-	import {
 		getUserInfo,
 		userActivity
 	} from '@/api/user.js';
@@ -183,21 +180,11 @@
 			goarrow(){
 				uni.navigateBack()
 			},
-			// #ifdef MP
-			openSubscribe: function(page) {
-				uni.showLoading({
-					title: '正在加载',
-				})
-				openRechargeSubscribe().then(res => {
-					uni.hideLoading();
-					uni.navigateTo({
-						url: page,
-					});
-				}).catch(() => {
-					uni.hideLoading();
-				});
+			goRecharge() {
+				// Choosing an amount is ordinary navigation. Notification permission
+				// is requested by the shared checkout's explicit submit action.
+				uni.navigateTo({ url: '/pages/users/user_payment/index' });
 			},
-			// #endif
 			/**
 			 * 获取用户详情
 			 */

@@ -30,9 +30,6 @@
 </template>
 
 <script>
-import {
-  openSelfSubscribe
-} from '@/utils/SubscribeMessage.js';
 	import {mapState,mapGetters} from "vuex"
 	import {getNavigation} from '@/api/public.js'
 	// import {getCartCounts} from '@/api/order.js';
@@ -179,21 +176,10 @@ import {
 					this.getNavigationInfo();
 				}
 			},
-      // #ifdef MP
-      openSubscribe: function(item) {
-        openSelfSubscribe().then(res => {
-          this.toUrl(item)
-        }).catch(err=>{
-        })
-      },
-      // #endif
 			goRouter(item) {
-        // #ifdef MP
-        this.openSubscribe(item);
-        // #endif
-        // #ifndef MP
+        // Navigation must not request message permission. Purchase/recharge
+        // buttons own that request so revisiting a page never waits for it.
         this.toUrl(item)
-        // #endif
 			},
       toUrl(item){
         const pages = getCurrentPages();

@@ -104,14 +104,23 @@ export function openPaySubscribe() {
 }
 
 /**
- *  充值通知、消费通知、退款通知
+ * Request the existing member notifications from an explicit checkout click.
+ * Refund permission is collected with payment because a later store refund has
+ * no member-side click. Denial/SDK errors must never change the payment result.
  */
-export function openSelfSubscribe() {
-	return subscribe([
-		'nsLLYSlNv5fydo0rgNMtmHPv6oFLrvoJPW3bEt-O_zw',
-		'wbK4H_hUdLeXlpdEMpAcjUtzlamWrXc3B9JNSY3gIcU',
-		'79U-cWBDS9wueyn-Ccj1FyomQpJnwYs7W7dFWHDuXsc'
-	]);
+export function openMemberCommerceSubscribe(kind) {
+	try {
+		if (kind === 'recharge') return openRechargeSubscribe().catch(() => undefined);
+		if (kind === 'purchase') {
+			return subscribe([
+				'wbK4H_hUdLeXlpdEMpAcjUtzlamWrXc3B9JNSY3gIcU',
+				'79U-cWBDS9wueyn-Ccj1FyomQpJnwYs7W7dFWHDuXsc'
+			]).catch(() => undefined);
+		}
+	} catch (error) {
+		// Unsupported clients cannot prevent a valid business operation.
+	}
+	return Promise.resolve();
 }
 /**
  * 收益消息订阅
@@ -181,13 +190,21 @@ export function openOrderRefundSubscribe() {
 }
 
 /**
- * 充值成功
+ * Recharge keeps both the configured success template and the original member
+ * recharge/refund templates. Deduplication respects Weixin's three-ID limit.
  */
 export function openRechargeSubscribe() {
-	let tmplIds = auth();
-	return subscribe([
-		tmplIds.recharge_success
-	]);
+	let tmplIds = {};
+	try {
+		tmplIds = auth() || {};
+	} catch (error) {
+		// A stale local template cache must not discard the original templates.
+	}
+	return subscribe([...new Set([
+		tmplIds.recharge_success,
+		'nsLLYSlNv5fydo0rgNMtmHPv6oFLrvoJPW3bEt-O_zw',
+		'79U-cWBDS9wueyn-Ccj1FyomQpJnwYs7W7dFWHDuXsc'
+	].filter(id => typeof id === 'string' && id.trim()))]);
 }
 
 /**

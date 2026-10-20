@@ -1,0 +1,108 @@
+{
+  "task": "M008-R7-NAV-SUBSCRIBE-001",
+  "baseline": "6ae31bd4c2767244f51d5d543bdf956cc8055da7",
+  "uploadedMemberBaseline": "1fee16c9780c89b1dcec71c16b059d4e836818bc",
+  "affectedSourceBaselinesMatch": true,
+  "patchSha256": "cd46fdb0b55fd342bdde95d8a66c6d4d9702523ba3d8a01ce1f303b10db80613",
+  "files": [
+    {
+      "file": "前端代码/uniapp/components/pageFooter/index.vue",
+      "sha256": "189e8094bb372e11638805347d42d31042df928fcf686fcb67ca0e0f6dc558e7"
+    },
+    {
+      "file": "前端代码/uniapp/utils/SubscribeMessage.js",
+      "sha256": "e4aad0bb5be81d3f6e3582dd86fa1f853dca96f83f02236f7553797837c4f0e4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/member_checkout/index.vue",
+      "sha256": "94f30e7d34c3430ec03139b72a3223f7fb9a9454f0493e505c909109e801b74c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_money/index.vue",
+      "sha256": "35d848d8671b3947f4ede72bea40fd1fda7bcf67819b749ed8ab169d203f0414"
+    },
+    {
+      "file": "tests/member-mini-package/navigation-subscription.cjs",
+      "sha256": "b30fe493225b1535d11316c1292e1d7e3cb856184baef967a89ccb3c9149bac5"
+    }
+  ],
+  "candidate": {
+    "result": "PASS",
+    "commit": "6ae31bd4c2767244f51d5d543bdf956cc8055da7",
+    "sourceFilesVerified": 916,
+    "compared": 1886,
+    "outputFiles": 1886,
+    "scriptsParsed": 423,
+    "stylesRestored": 398,
+    "mutableLoaderOptionsIsolated": true,
+    "nativeComponentMountNotApplication": true,
+    "apiOrigin": "https://008.cc3798.com",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "packages": {
+      "main": 2051531,
+      "pages/admin": 1797387,
+      "pages/activity": 470199,
+      "pages/users": 1644509,
+      "pages/goods": 1956267,
+      "pages/store": 421663,
+      "pages/merchant": 203195,
+      "pages/behalf": 190172,
+      "pages/short_video": 304929,
+      "pages/discover": 206659,
+      "pages/extension": 71282,
+      "pages/annex": 958836,
+      "pages/work": 17438,
+      "pages/columnGoods": 98909
+    },
+    "artifactSha256": "43b4253458225caf8879edf49e7bdf29efc1f85ee5e217ce0894dec641dc718e"
+  },
+  "tests": [
+    {
+      "command": "node tests/member-mini-package/navigation-subscription.cjs",
+      "result": "PASS",
+      "scope": "Canonical methods under Weixin, H5 and APP conditional preprocessing; mocked native consent and transaction transport"
+    },
+    {
+      "command": "node tests/member-checkout/member-checkout-ui-contract.cjs",
+      "result": "PASS"
+    },
+    {
+      "command": "node tests/member-mini-package/assets-contract.cjs",
+      "result": "PASS"
+    },
+    {
+      "command": "node tests/member-mini-package/round4-runtime-contract.cjs /private/tmp/m008-round7-nav-20261021",
+      "result": "PASS"
+    }
+  ],
+  "compiledNavigation": {
+    "clicks": 8,
+    "subscriptionRequests": 0,
+    "navigationActions": 7,
+    "samePageNoop": true,
+    "nativeApisMocked": true
+  },
+  "notifications": {
+    "purchase": [
+      "existing consumption template",
+      "existing refund template"
+    ],
+    "recharge": [
+      "existing recharge template",
+      "existing refund template",
+      "configured recharge-success template when present"
+    ],
+    "reservationAndRefundBusinessHandlersUnchanged": true,
+    "backendSendersUnchanged": true
+  },
+  "realDeviceTest": false,
+  "realNotificationDelivery": false,
+  "serverCalls": 0,
+  "productionWrites": 0,
+  "remoteBaseline": "not applicable: local implementation only",
+  "productManagerAcceptance": "pending",
+  "committed": false,
+  "deployed": false,
+  "pushed": false,
+  "miniUploaded": false
+}

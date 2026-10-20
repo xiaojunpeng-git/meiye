@@ -188,6 +188,9 @@
 import colors from '@/mixins/color';
 import { toLogin } from '@/libs/login.js';
 import { quoteMemberCommerce, createMemberCommerce, getMemberCommerce, payMemberCommerce, cancelMemberCommerce } from '@/api/memberCommerce';
+// #ifdef MP-WEIXIN
+import { openMemberCommerceSubscribe } from '@/utils/SubscribeMessage.js';
+// #endif
 
 export default {
   mixins: [colors],
@@ -332,20 +335,30 @@ export default {
       this.submitting = true;
       this.error = '';
       try {
+        // Ask while still handling the explicit submit gesture. The duplicate
+        // submit guard stays held until permission and order creation finish.
+        // #ifdef MP-WEIXIN
+        await openMemberCommerceSubscribe(this.kind);
+        // #endif
         const res = await createMemberCommerce(this.payload());
         this.order = res.data;
-        if (this.order.status !== 'paid') await this.payOnline();
+        if (this.order.status !== 'paid') await this.payOnline(false);
       } catch (error) {
         this.error = error.msg || '支付未完成，请重试或查询订单';
       } finally {
         this.submitting = false;
       }
     },
-    async payOnline() {
+    async payOnline(requestSubscription = true) {
       if (this.paying) return;
       this.paying = true;
       this.error = '';
       try {
+        // A manual retry has its own gesture; the automatic submit-to-payment
+        // handoff has already requested permission and must not ask twice.
+        // #ifdef MP-WEIXIN
+        if (requestSubscription !== false) await openMemberCommerceSubscribe(this.order.kind);
+        // #endif
         const res = await payMemberCommerce(this.order.id, {});
         const pay = res.data;
         // Payment parameters belong to this server-created attempt. The client
