@@ -17,15 +17,15 @@ use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\cashier\CashierV3SaleCatalogServices;
 use app\services\cashier\v3\cashier\CashierV3SharedCardPurchaseAmount;
+use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\order\store\WriteOffOrderServices;
 use app\services\user\UserBalanceAtomicServices;
 use think\facade\Db;
 
 /**
- * One manual refund targets one card component, a whole shared-count pool,
- * a purchased sales line, or a catalog item without an original order. The
- * recorded refund and optional member-balance grant are independent facts;
- * neither is a payment-channel refund or a new sale receipt.
+ * One manual refund targets card rights, a sales line, a catalog item, or the
+ * member wallet. Recorded cash refund and wallet credit/debit are independent
+ * facts; none invokes an external payment-channel refund.
  */
 final class CashierV3UnifiedRefundServices
 {
@@ -42,7 +42,17 @@ final class CashierV3UnifiedRefundServices
             throw self::fail('请选择有效会员。', 'refund_member_invalid');
         }
         $mode = (string)($payload['mode'] ?? 'card');
-        if (!in_array($mode, ['card', 'document', 'catalog'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
+        if (!in_array($mode, ['card', 'document', 'catalog', 'balance'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
+        if ($mode === 'balance') {
+            // Candidate balances are advisory. The command compares the account version under lock.
+            $balance = (new CashierV3MemberBalanceProvider())->readSnapshot($memberId, $operator, $scope);
+            return ['mode' => 'balance', 'balance' => [
+                'principalCents' => (int)$balance['principalCents'],
+                'giftCents' => (int)$balance['giftCents'],
+                'totalCents' => (int)$balance['totalCents'],
+                'accountVersion' => (int)$balance['accountVersion'],
+            ]];
+        }
         if ($mode === 'catalog') {
             // The catalog is a label authority only: this mode never creates a sale or restores stock/rights.
             return ['mode' => 'catalog', 'items' => $this->catalogItems($operator, $scope)];
@@ -126,7 +136,7 @@ final class CashierV3UnifiedRefundServices
         $this->assertAccess($operator, $scope);
         $payload = (array)($command['payload'] ?? []);
         $mode = (string)($payload['mode'] ?? '');
-        if (!in_array($mode, ['card', 'document', 'catalog'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
+        if (!in_array($mode, ['card', 'document', 'catalog', 'balance'], true)) throw self::fail('请选择退款类型。', 'refund_mode_invalid');
         $memberId = (int)($payload['memberId'] ?? 0);
         $void = $payload['voidTarget'] ?? false;
         if (!is_bool($void) || $memberId <= 0) throw self::fail('退款对象无效，请重新选择。', 'refund_target_invalid');
@@ -135,8 +145,11 @@ final class CashierV3UnifiedRefundServices
         $refundCents = self::enteredWholeYuanCents($payload['refundAmount'] ?? null, $mode === 'card');
         $balanceCents = self::enteredWholeYuanCents($payload['balanceAmount'] ?? null, true);
         $balanceKind = (string)($payload['balanceKind'] ?? 'bonus');
-        // 两类退款的余额去向均固定为赠金；拒绝旧客户端提交本金，避免页面口径与账务事实分叉。
-        if ($balanceKind !== 'bonus') throw self::fail('退款转入余额只能记入赠金。', 'refund_balance_kind_invalid');
+        // 钱包模式扣本金再扣赠金；其余模式只能增加赠金。两条方向不能由客户端混用。
+        if ($balanceKind !== ($mode === 'balance' ? 'principal_first' : 'bonus')) {
+            throw self::fail($mode === 'balance' ? '扣减余额必须本金优先。' : '退款转入余额只能记入赠金。',
+                'refund_balance_kind_invalid');
+        }
         $reason = trim((string)($payload['reason'] ?? ''));
         if ($reason === '' || mb_strlen($reason) > 255) throw self::fail('请填写退款原因（不超过255字）。', 'refund_reason_invalid');
         $holderId = (int)($payload['holderId'] ?? 0);
@@ -145,7 +158,10 @@ final class CashierV3UnifiedRefundServices
         $catalogItemId = (int)($payload['catalogItemId'] ?? 0);
         if (($mode === 'card' && $holderId <= 0)
             || ($mode === 'document' && !preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $lineId))
-            || ($mode === 'catalog' && ($catalogItemId <= 0 || $void || $balanceCents !== 0))) {
+            || ($mode === 'catalog' && ($catalogItemId <= 0 || $void || $balanceCents !== 0))
+            || ($mode === 'balance' && ($void || $holderId !== 0 || $componentId !== 0
+                || $lineId !== '' || $catalogItemId !== 0 || $balanceCents <= 0
+                || (int)($payload['balanceVersion'] ?? 0) <= 0))) {
             throw self::fail('请选择一张卡的项目或一条购买明细。', 'refund_line_invalid');
         }
         $key = (string)($command['idempotency_key'] ?? '');
@@ -160,7 +176,8 @@ final class CashierV3UnifiedRefundServices
         $snapshot = $mode === 'card'
             ? $this->cardSnapshot($holderId, $memberId, $scope->tenantId(), true)
             : ($mode === 'document' ? $this->lineSnapshot($lineId, $memberId, $scope->tenantId(), true)
-                : $this->catalogSnapshot($catalogItemId, $operator, $scope));
+                : ($mode === 'balance' ? $this->balanceSnapshot($memberId, $balanceCents, $payload, $operator, $scope)
+                    : $this->catalogSnapshot($catalogItemId, $operator, $scope)));
         if ($snapshot['voided'] || !$snapshot['canRefund']) {
             throw self::fail((string)$snapshot['unavailableReason'], 'refund_target_unavailable');
         }
@@ -182,13 +199,13 @@ final class CashierV3UnifiedRefundServices
         // without original cash. Never use it to lift cash refunds or paid-card caps.
         $zeroPriceBonusGrant = $mode === 'card' && (int)$snapshot['purchaseAmountCents'] === 0
             && $refundCents === 0;
-        if ($mode !== 'catalog' && ($refundCents > $remaining
+        if (!in_array($mode, ['catalog', 'balance'], true) && ($refundCents > $remaining
             || (!$zeroPriceBonusGrant && $balanceCents > (int)$snapshot['usableRemainingAmountCents']))) {
             throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
         }
         // Rights keep their voucher-funded face value, but a partial refund
         // cannot turn the non-cash voucher into refundable cash.
-        if ($mode !== 'catalog' && !$zeroPriceBonusGrant && $refundCents + $balanceCents
+        if (!in_array($mode, ['catalog', 'balance'], true) && !$zeroPriceBonusGrant && $refundCents + $balanceCents
             > (int)($snapshot['cashRefundRemainingCents'] ?? $remaining)) {
             throw self::fail('本次退款超过原单实际支付的可退金额，抵用券不参与退款。', 'refund_coupon_tender_exceeds_cash');
         }
@@ -224,7 +241,9 @@ final class CashierV3UnifiedRefundServices
                 'aggregate_name_snapshot' => (string)$target['name'],
                 'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'),
                 'payload' => ['mode' => $mode, 'refundAmountCents' => $refundCents,
-                    'balanceCreditCents' => $balanceCents, 'voidTarget' => $void,
+                    'balanceCreditCents' => $mode === 'balance' ? 0 : $balanceCents,
+                    'balanceDebitCents' => $mode === 'balance' ? $balanceCents : 0,
+                    'voidTarget' => $void,
                     'zeroPriceBonusGrantCents' => $zeroPriceBonusGrant ? $balanceCents : 0],
             ]);
         // 卡项作废必须能精确恢复整张卡的既有状态；请求事实同时保存前后快照，
@@ -233,8 +252,9 @@ final class CashierV3UnifiedRefundServices
         $after = $mode === 'card'
             ? $this->adjustCard($snapshot, $target, $refundCents, $void, $newEnd, $scope->tenantId(), $now)
             : ($mode === 'document' ? $this->adjustLine($snapshot, $refundCents, $void)
-                : ['remainingAmountCents' => 0, 'closedRemainingCents' => 0,
-                    'remainingTimes' => 0, 'timesRemoved' => 0, 'timesClosed' => 0]);
+                : ['remainingAmountCents' => $mode === 'balance' ? $remaining - $balanceCents : 0,
+                    'closedRemainingCents' => 0, 'remainingTimes' => 0,
+                    'timesRemoved' => 0, 'timesClosed' => 0]);
         $sourceOrderId = (string)$snapshot['sourceOrderId'];
         $sourceOrderNo = (string)$snapshot['sourceOrderNo'];
         $requestSnapshot = $payload;
@@ -257,7 +277,7 @@ final class CashierV3UnifiedRefundServices
             'business_event_no' => (string)$event['event_no'], 'amount_cents' => -$refundCents,
             'cash_refund_cents' => $refundCents, 'reversed_cash_cents' => 0,
             'restored_principal_cents' => 0,
-            'restored_bonus_cents' => $balanceCents,
+            'restored_bonus_cents' => $mode === 'balance' ? 0 : $balanceCents,
             'status' => 'succeeded', 'version' => 1, 'business_date' => $date,
             'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
             'created_at' => $now, 'updated_at' => $now,
@@ -274,7 +294,9 @@ final class CashierV3UnifiedRefundServices
             'catalog_item_id' => $mode === 'catalog' ? $catalogItemId : 0,
             'catalog_kind' => $mode === 'catalog' ? (string)$target['kind'] : '',
             'source_order_no_snapshot' => $sourceOrderNo, 'target_name_snapshot' => (string)$target['name'],
-            'refund_amount_cents' => $refundCents, 'balance_credit_cents' => $balanceCents,
+            'refund_amount_cents' => $refundCents,
+            'balance_credit_cents' => $mode === 'balance' ? 0 : $balanceCents,
+            'balance_debit_cents' => $mode === 'balance' ? $balanceCents : 0,
             'balance_kind' => $balanceKind, 'remaining_before_cents' => (int)$snapshot['remainingAmountCents'],
             'remaining_after_cents' => $after['remainingAmountCents'],
             'closed_remaining_cents' => $after['closedRemainingCents'],
@@ -289,8 +311,13 @@ final class CashierV3UnifiedRefundServices
         // 退款人员归属独立于原单，负向工资事实与退款在同一事务落账。
         (new CashierV3RefundSalespersonServices())->createInTx($row, $payload,
             (int)$adjustmentRowId, $event, $operator, $scope);
-        $this->creditBalance($memberId, $balanceCents, $key, (int)$adjustmentRowId,
-            $operationId, $sourceOrderNo, $operator, $scope, $event, $date, $now);
+        if ($mode === 'balance') {
+            $this->debitBalance($memberId, $balanceCents, $key, (int)$adjustmentRowId,
+                $operationId, $operationNo, $operator, $scope, $event, $date, $now, $snapshot);
+        } else {
+            $this->creditBalance($memberId, $balanceCents, $key, (int)$adjustmentRowId,
+                $operationId, $sourceOrderNo, $operator, $scope, $event, $date, $now);
+        }
         return $this->result($row, false, $after + ['voidTarget' => $void]);
     }
 
@@ -380,6 +407,25 @@ final class CashierV3UnifiedRefundServices
         throw self::fail('所选商品已不在当前门店目录中，请重新选择。', 'refund_catalog_item_unavailable');
     }
 
+    /** Wallet refund has no sale or rights target; lock the account and reject a stale picker version. */
+    private function balanceSnapshot(int $memberId, int $debitCents, array $payload,
+        CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope): array
+    {
+        $wallet = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx($memberId, $operator, $scope);
+        if ((int)$wallet['accountVersion'] !== (int)($payload['balanceVersion'] ?? 0)) {
+            throw self::fail('会员余额已变化，请重新查询后再退款。', 'refund_balance_version_changed');
+        }
+        if ($debitCents > (int)$wallet['totalCents']) {
+            throw self::fail('扣减余额超过会员当前剩余余额。', 'refund_balance_insufficient');
+        }
+        return ['id' => 'balance:' . $memberId, 'lineId' => 'balance:' . $memberId,
+            'name' => '会员余额', 'sourceOrderId' => '', 'sourceOrderNo' => '',
+            'remainingAmountCents' => (int)$wallet['totalCents'],
+            'usableRemainingAmountCents' => (int)$wallet['totalCents'],
+            'remainingTimes' => 0, 'validThrough' => 0, 'voided' => false,
+            'canRefund' => true, 'unavailableReason' => '', 'wallet' => $wallet];
+    }
+
     private function cardSnapshot(int $holderId, int $memberId, string $tenantId, bool $lock, ?array $candidate = null): array
     {
         if (!$candidate) {
@@ -411,6 +457,7 @@ final class CashierV3UnifiedRefundServices
             ->order('id asc')->lock($lock)->select()->toArray();
         $components = [];
         $sum = 0;
+        $saleOrder = ['id' => $originId, 'pay_price' => (string)$candidate['pay_price']];
         $sharedCount = (string)($rule['rule_type'] ?? '') === 'choice_count';
         $combination = (string)($rule['rule_type'] ?? '') === 'combination';
         if ($sharedCount) {
@@ -452,12 +499,11 @@ final class CashierV3UnifiedRefundServices
                 'removedTimes' => $removed];
         } elseif ($combination) {
             // 每个共享组只计一次金额与余次；任选种数项目仍用既有项目实收分摊。
-            $allocations = (new CashierV3CardSaleActualAmountServices())->forOrders([$originId], $carts);
+            $allocations = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$saleOrder], $carts);
             $authorities = (new CashierV3CardRuleEntitlementAuthorityServices())
                 ->authoritiesForHolders($tenantId, [$holderId])[$holderId] ?? [];
             $seenSharedGroups = [];
             $purchaseSum = 0;
-            $saleOrder = ['id' => $originId, 'pay_price' => (string)$candidate['pay_price']];
             foreach ($carts as $cart) {
                 $cartInfo = json_decode((string)($cart['cart_info'] ?? ''), true);
                 $cartInfo = is_array($cartInfo) ? $cartInfo : [];
@@ -485,9 +531,8 @@ final class CashierV3UnifiedRefundServices
                     }
                     $sum += self::moneyCents(CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                         self::centsToMoney($amount), $total, $total - $left,
-                        $cartInfo + ['amountCalculationVersion' => $amount % 100 === 0
-                            ? CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION
-                            : 'operation-cent-combination-project-v1']), true);
+                        $cartInfo + ['amountCalculationVersion' =>
+                            CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION]), true);
                 }
             }
             if ($purchaseSum !== self::moneyCents((string)$candidate['pay_price'], true)) {
@@ -499,7 +544,7 @@ final class CashierV3UnifiedRefundServices
                 'remainingTimes' => (int)$candidate['write_surplus_times'],
                 'refundedCents' => 0, 'removedTimes' => 0];
         } else {
-            $allocations = (new CashierV3CardSaleActualAmountServices())->forOrders([$originId], $carts);
+            $allocations = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$saleOrder], $carts);
             $ruleAuthorities = (new CashierV3CardRuleEntitlementAuthorityServices())
                 ->authoritiesForHolders($tenantId, [$holderId]);
             foreach ($carts as $cart) {
@@ -860,6 +905,60 @@ final class CashierV3UnifiedRefundServices
         }
     }
 
+    /** Debit and refund are distinct amounts; the ledger and split fact must match the same locked wallet. */
+    private function debitBalance(int $memberId, int $amount, string $key, int $adjustmentRowId,
+        string $operationId, string $operationNo, CashierV3OperatorScope $operator,
+        CashierV3DataScopeContext $scope, array $event, string $date, int $now, array $snapshot): void
+    {
+        $before = $snapshot['wallet'];
+        try {
+            $changed = (new UserBalanceAtomicServices())->deductPreferBen($memberId,
+                self::centsToMoney($amount), 'manual_refund_debit', $adjustmentRowId,
+                '余额退款扣减', 'cv3-balance-refund-' . hash('sha256', $scope->tenantId() . '|' . $key));
+        } catch (\Throwable $error) {
+            throw self::fail('会员余额不足或资料已变化，本次退款已回滚。', 'refund_balance_debit_failed');
+        }
+        $after = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx($memberId, $operator, $scope);
+        $principal = self::moneyCents((string)($changed['paid_ben'] ?? ''), true);
+        $bonus = self::moneyCents((string)($changed['paid_give'] ?? ''), true);
+        if (empty($changed['money_id']) || !empty($changed['idempotent']) || $principal + $bonus !== $amount
+            || (int)$after['accountVersion'] !== (int)$before['accountVersion'] + 1
+            || (int)$after['principalCents'] !== (int)$before['principalCents'] - $principal
+            || (int)$after['giftCents'] !== (int)$before['giftCents'] - $bonus) {
+            throw self::fail('余额扣减流水与本金赠金不一致，本次退款已回滚。', 'refund_balance_debit_mismatch');
+        }
+        Db::name(self::TABLE)->where('id', $adjustmentRowId)->where('tenant_id', $scope->tenantId())
+            ->update(['principal_debit_cents' => $principal, 'bonus_debit_cents' => $bonus]);
+        $storeName = (string)Db::name('system_store')->where('id', $operator->storeId())->value('name');
+        $organizationId = (string)Db::name('organization_store')->where('store_id', $operator->storeId())->value('org_id');
+        $memberName = (string)Db::name('user')->where('uid', $memberId)->value('real_name');
+        $fact = [
+            'fact_id' => 'R29B-' . substr(hash('sha256', $operationId), 0, 40),
+            'business_event_no' => (string)$event['event_no'],
+            'fact_type' => 'balance_changed', 'fact_direction' => 'forward',
+            'natural_key' => 'manual_refund_debit:' . $operationId,
+            'command_idempotency_key' => $key, 'fact_version' => 1, 'reversal_of' => '',
+            'status' => 'effective', 'tenant_id' => $scope->tenantId(),
+            'tenant_name_snapshot' => '', 'organization_id' => $organizationId,
+            'organization_name_snapshot' => '', 'organization_path_snapshot' => $organizationId,
+            'store_id' => $operator->storeId(), 'store_name_snapshot' => $storeName,
+            'member_id' => $memberId, 'member_name_snapshot' => $memberName,
+            'operator_id' => $operator->operatorId(), 'operator_name_snapshot' => '',
+            'business_date' => $date, 'business_timezone' => 'Asia/Shanghai',
+            'occurred_at' => $now, 'settled_at' => $now, 'recorded_at' => $now,
+            'checkout_request_id' => $operationId, 'order_id' => $operationId,
+            'order_no_snapshot' => $operationNo, 'source_document_type' => 'manual_refund',
+            'source_line_id' => (string)$adjustmentRowId, 'balance_change_type' => 'manual_refund_debit',
+            'balance_account_id' => (string)$after['authorityKey'],
+            'account_version' => (int)$after['accountVersion'],
+            'principal_delta_cents' => -$principal, 'bonus_delta_cents' => -$bonus,
+            'principal_after_cents' => (int)$after['principalCents'],
+            'bonus_after_cents' => (int)$after['giftCents'],
+        ];
+        $fact['immutable_fingerprint'] = hash('sha256', json_encode($fact, JSON_UNESCAPED_UNICODE));
+        Db::name('cashier_v3_balance_fact')->insert($fact);
+    }
+
     private function creditBalance(int $memberId, int $amount, string $key, int $adjustmentRowId,
         string $operationId, string $sourceOrderNo, CashierV3OperatorScope $operator,
         CashierV3DataScopeContext $scope, array $event, string $date, int $now): void
@@ -927,6 +1026,9 @@ final class CashierV3UnifiedRefundServices
             'sourceOrderNo' => (string)$row['source_order_no_snapshot'],
             'refundAmountCents' => (int)$row['cash_refund_cents'],
             'balanceCreditCents' => (int)$row['restored_principal_cents'] + (int)$row['restored_bonus_cents'],
+            'balanceDebitCents' => (int)($saved['balance_debit_cents'] ?? 0),
+            'principalDebitCents' => (int)($saved['principal_debit_cents'] ?? 0),
+            'bonusDebitCents' => (int)($saved['bonus_debit_cents'] ?? 0),
             'remainingAmountCents' => $after['remainingAmountCents'] ?? null,
             'remainingTimes' => $after['remainingTimes'] ?? null,
             'closedRemainingCents' => $after['closedRemainingCents'] ?? null,

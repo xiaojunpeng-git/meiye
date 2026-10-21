@@ -109,6 +109,124 @@ final class CashierV3CardSaleActualAmountServices
         return $result;
     }
 
+    /**
+     * Convert immutable sale weights into whole-yuan entitlement pools.
+     *
+     * Card checkout settles a whole-yuan total, while the sale allocation fact
+     * may contain cents because it is also used for reporting. Writeoff cannot
+     * consume those reporting cents directly. Each order is therefore rounded
+     * with Hamilton allocation: floor every component to yuan, then give the
+     * remaining yuan to the largest cent remainders in stable cart order. The
+     * result keeps every component nonnegative and reconciles exactly to the
+     * card's settled total.
+     *
+     * @return array<int,int> legacy cart detail id => whole-yuan writeoff cents
+     */
+    public function wholeYuanForOrders(array $orders, array $carts): array
+    {
+        $orderIds = array_values(array_unique(array_filter(array_map(
+            static fn(array $order): int => (int)($order['id'] ?? 0),
+            $orders
+        ))));
+        if ($orderIds === [] || $carts === []) return [];
+        $raw = $this->forOrders($orderIds, $carts);
+        $ordersById = [];
+        foreach ($orders as $order) $ordersById[(int)($order['id'] ?? 0)] = $order;
+        $cartsByOrder = [];
+        foreach ($carts as $cart) {
+            $orderId = (int)($cart['oid'] ?? 0);
+            $cartId = (int)($cart['id'] ?? 0);
+            if ($orderId > 0 && $cartId > 0) $cartsByOrder[$orderId][] = $cartId;
+        }
+        // Cart id is the immutable sale-line order used to break equal
+        // remainders. Do not depend on whichever ordering a caller selected.
+        foreach ($cartsByOrder as &$cartIds) sort($cartIds, SORT_NUMERIC);
+        unset($cartIds);
+        $result = [];
+        foreach ($orderIds as $orderId) {
+            $order = $ordersById[$orderId] ?? [];
+            $paid = trim((string)($order['pay_price'] ?? ''));
+            if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $paid) !== 1) continue;
+            $paidCents = (int)bcmul($paid, '100', 0);
+            $ids = $cartsByOrder[$orderId] ?? [];
+            $amounts = [];
+            foreach ($ids as $id) {
+                if (!array_key_exists($id, $raw)) {
+                    $amounts = [];
+                    break;
+                }
+                $amounts[$id] = (int)$raw[$id];
+            }
+            if ($ids === [] || $amounts === []) continue;
+            try {
+                $result += self::normalizeWholeYuanAllocations($amounts, $ids, $paidCents);
+            } catch (\InvalidArgumentException $exception) {
+                // Missing or unreconciled sale facts must fail closed at the
+                // caller; never fall back to a different writeoff amount.
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Pure whole-yuan normalization used by contracts and read models.
+     * Stable order resolves equal remainders without depending on DB row order.
+     *
+     * @param array<int,int> $rawCentsByCartId
+     * @param int[] $orderedCartIds
+     * @return array<int,int>
+     */
+    public static function normalizeWholeYuanAllocations(
+        array $rawCentsByCartId,
+        array $orderedCartIds,
+        int $paidCents
+    ): array {
+        if ($paidCents < 0 || $paidCents % 100 !== 0 || $orderedCartIds === []) {
+            throw new \InvalidArgumentException('card writeoff total must be whole yuan');
+        }
+        $rows = [];
+        $rawTotal = 0;
+        foreach (array_values($orderedCartIds) as $sequence => $cartId) {
+            $cartId = (int)$cartId;
+            if ($cartId <= 0 || !array_key_exists($cartId, $rawCentsByCartId)) {
+                throw new \InvalidArgumentException('card writeoff allocation is incomplete');
+            }
+            $amount = (int)$rawCentsByCartId[$cartId];
+            if ($amount < 0 || $amount > PHP_INT_MAX - $rawTotal) {
+                throw new \InvalidArgumentException('card writeoff allocation is invalid');
+            }
+            $rawTotal += $amount;
+            $rows[] = [
+                'id' => $cartId,
+                'sequence' => $sequence,
+                'amount' => intdiv($amount, 100) * 100,
+                'remainder' => $amount % 100,
+            ];
+        }
+        if ($rawTotal !== $paidCents) {
+            throw new \InvalidArgumentException('card writeoff allocation does not reconcile');
+        }
+        $wholeTotal = array_sum(array_column($rows, 'amount'));
+        $yuanLeft = intdiv($paidCents - $wholeTotal, 100);
+        usort($rows, static function (array $left, array $right): int {
+            return $right['remainder'] <=> $left['remainder']
+                ?: $left['sequence'] <=> $right['sequence'];
+        });
+        for ($index = 0; $index < $yuanLeft; $index++) {
+            if (!isset($rows[$index]) || $rows[$index]['remainder'] <= 0) {
+                throw new \InvalidArgumentException('card writeoff remainder cannot be allocated');
+            }
+            $rows[$index]['amount'] += 100;
+        }
+        usort($rows, static fn(array $left, array $right): int => $left['sequence'] <=> $right['sequence']);
+        $result = [];
+        foreach ($rows as $row) $result[$row['id']] = $row['amount'];
+        if (array_sum($result) !== $paidCents) {
+            throw new \InvalidArgumentException('card writeoff allocation lost value');
+        }
+        return $result;
+    }
+
     private function rows($rows): array
     {
         if (is_array($rows)) {
