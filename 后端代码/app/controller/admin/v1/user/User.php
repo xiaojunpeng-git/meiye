@@ -19,6 +19,7 @@ use app\services\store\SystemStoreStaffServices;
 use app\services\user\group\UserGroupServices;
 use app\services\user\label\UserLabelServices;
 use app\services\user\UserBatchProcessServices;
+use app\services\user\UserBelongStoreServices;
 use app\services\user\UserCardHolderServices;
 use app\services\user\UserServices;
 use app\controller\admin\AuthController;
@@ -537,6 +538,27 @@ class User extends AuthController
     {
         if (!$id) return $this->fail('数据不存在');
         return $this->success($this->services->edit($id));
+    }
+
+    /**
+     * 获取会员调店可选门店。此功能按产品口径仅要求平台登录，不额外校验角色菜单权限。
+     */
+    public function transferStoreOptions(UserBelongStoreServices $services)
+    {
+        return $this->success($services->getTransferStoreOptions());
+    }
+
+    /**
+     * 保存会员调店命令；目标门店与原因是唯一可写入的业务输入。
+     */
+    public function transferStore($id, UserBelongStoreServices $services)
+    {
+        [$storeId, $reason] = $this->request->postMore([
+            ['store_id', 0],
+            ['reason', ''],
+        ], true);
+        $result = $services->transferUserStore((int)$id, (int)$storeId, (string)$reason, (int)$this->adminId);
+        return $this->success($result['changed'] ? '调店成功' : '会员已属于目标门店', $result);
     }
 
     public function update($id)

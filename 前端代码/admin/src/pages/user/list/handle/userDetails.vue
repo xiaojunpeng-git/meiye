@@ -147,6 +147,7 @@
                     { val: 'reservation_record', label: '预约记录' },
                     { val: 'visit', label: '浏览足迹' },
                     { val: 'spread_change', label: '推荐人变更记录' },
+                    { val: 'store_transfer', label: '调店详情' },
                 ],
                 modals: false,
                 spinShow: false,
@@ -710,6 +711,36 @@
                   },
                 ]
                 break;
+                          case 'store_transfer':
+                            // 调店详情直接展示后端审计快照，避免前端重新解释历史门店和操作人。
+                            this.columns = [
+                              {
+                                title: '原门店',
+                                key: 'from_store_name',
+                                minWidth: 160,
+                              },
+                              {
+                                title: '目标门店',
+                                key: 'to_store_name',
+                                minWidth: 160,
+                              },
+                              {
+                                title: '调店原因',
+                                key: 'reason',
+                                minWidth: 240,
+                              },
+                              {
+                                title: '操作人',
+                                key: 'operator_name',
+                                minWidth: 140,
+                              },
+                              {
+                                title: '操作时间',
+                                key: 'add_time',
+                                minWidth: 170,
+                              },
+                            ]
+                            break;
                           case 'belong_store_change':
                             this.columns = [
                               {

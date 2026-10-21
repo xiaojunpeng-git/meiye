@@ -1954,6 +1954,11 @@ class UserServices extends BaseServices
                 $services = app()->make(UserSpreadServices::class);
                 return $services->getSpreadList(['store_id' => 0, 'staff_id' => 0, 'uid' => $id], '*', ['spreadUser'], false);
                 break;
+            case 'store_transfer'://平台会员调店审计记录
+                /** @var UserBelongStoreServices $userBelongStoreServices */
+                $userBelongStoreServices = app()->make(UserBelongStoreServices::class);
+                return $userBelongStoreServices->getTransferHistory($id);
+                break;
             case 'belong_store_change'://所属门店变更记录
                 /** @var UserBelongStoreServices $userBelongStoreServices */
                 $userBelongStoreServices = app()->make(UserBelongStoreServices::class);

@@ -2989,6 +2989,9 @@ Route::group('adminapi', function () {
         Route::get('user/extend_info/:id', 'v1.user.User/extendInfoForm')->option(['real_name' => '用户补充信息表单']);
         //用户补充信息保存
         Route::post('user/extend_info/:id', 'v1.user.User/saveExtendForm')->option(['real_name' => '用户补充信息保存']);
+        // 第22轮会员调店：保持为登录即用的未登记接口，不附加角色菜单权限。
+        Route::get('user/transfer_store/options', 'v1.user.User/transferStoreOptions')->option(['real_name' => '会员调店门店选项']);
+        Route::post('user/transfer_store/:id', 'v1.user.User/transferStore')->option(['real_name' => '会员调店保存']);
         //用户管理资源路由
         Route::resource('user', 'v1.user.user')->option(['real_name' => [
             'index' => '获取用户列表',

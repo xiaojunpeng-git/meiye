@@ -28,6 +28,13 @@
 					<Input search enter-button placeholder="请输入商品名称,关键字,编号" v-model="formValidate.store_name"
 						style="width: 240px" @on-search="userSearchs" />
 				</FormItem>
+				<!-- 平台卡项选项目时，状态筛选与左侧商品标签处于同一行。 -->
+				<FormItem v-if="Number(chooseType) === 97" label="商品状态：">
+					<Select v-model="formValidate.type" @on-change="userSearchs">
+						<Option :value="1">销售中</Option>
+						<Option :value="2">仓库中</Option>
+					</Select>
+				</FormItem>
 				</Col>
 			</Row>
 		</Form>
@@ -177,7 +184,9 @@ export default {
         is_new: this.is_new,
         store_label_id: '',
         product_type: '',
-        choose_type: this.chooseType
+        choose_type: this.chooseType,
+        // 卡项项目选择默认只读销售中商品，2 与商品列表“仓库中”使用同一后端状态口径。
+        type: Number(this.chooseType) === 97 ? 1 : ''
       },
       total: 0,
       loading: false,

@@ -21,6 +21,29 @@ export function userList(data) {
     params: data
   });
 }
+
+/**
+ * @description 获取会员调店可选的全部启用门店；该入口不按管理员组织范围裁剪。
+ */
+export function memberTransferStoreOptionsApi() {
+  return request({
+    url: 'user/user/transfer_store/options',
+    method: 'get'
+  });
+}
+
+/**
+ * @description 仅变更会员归属门店，并保存调店原因审计。
+ * @param {Number} id 会员 ID
+ * @param {Object} data { store_id, reason }
+ */
+export function memberTransferStoreApi(id, data) {
+  return request({
+    url: `user/user/transfer_store/${id}`,
+    method: 'post',
+    data
+  });
+}
 /**
  * @description 获取用户设置
  * @param {Object} param data {Object} 传值参数

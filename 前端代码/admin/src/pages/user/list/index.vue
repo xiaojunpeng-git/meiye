@@ -585,7 +585,7 @@
         <vxe-column field="cash_consume_amount" title="消费现金金额" min-width="120"></vxe-column>
         <vxe-column field="cash_consume_count" title="消费次数" min-width="90"></vxe-column>
         <vxe-column field="writeoff_count" title="到店次数" min-width="90"></vxe-column>
-        <vxe-column field="action" title="操作" width="180" fixed="right">
+        <vxe-column field="action" title="操作" width="230" fixed="right">
           <template v-slot="{ row }">
             <span v-auth="['admin-user-user-edit']" v-if="row.delete_time != null" style="color: #c5c8ce;">编辑</span>
             <a v-auth="['admin-user-user-edit']" v-else @click="edit(row)">编辑</a>
@@ -593,6 +593,9 @@
             <a v-auth="['admin-user-user-extend_info']" @click="extendInfo(row)" v-if="row.is_extend_info">信息补充</a>
             <Divider v-auth="['admin-user-user-extend_info']" type="vertical" />
             <a @click="changeMenu(row, '1')">详情</a>
+            <Divider type="vertical" />
+            <a v-if="row.delete_time == null" @click="openMemberTransfer(row)">调店</a>
+            <span v-else style="color: #c5c8ce;">调店</span>
           </template>
         </vxe-column>
       </vxe-table>
@@ -607,6 +610,58 @@
         />
       </div>
     </Card>
+    <!-- 调店只改变会员归属门店；原因随归属历史落库，不联动订单、卡项、余额或店员。 -->
+    <Modal
+        v-model="memberTransferModal"
+        title="会员调店"
+        width="560"
+        :mask-closable="false"
+        @on-cancel="resetMemberTransfer"
+    >
+      <Alert show-icon>仅变更会员所属门店，会员的订单、卡项、权益、余额和绑定店员不会改变。</Alert>
+      <Form
+          ref="memberTransferForm"
+          :model="memberTransferForm"
+          :rules="memberTransferRules"
+          :label-width="100"
+      >
+        <FormItem label="会员">
+          <span>{{ memberTransferForm.member_name || '-' }}</span>
+        </FormItem>
+        <FormItem label="当前门店">
+          <span>{{ memberTransferForm.current_store_name || '未设置' }}</span>
+        </FormItem>
+        <FormItem label="目标门店" prop="store_id">
+          <Select
+              v-model="memberTransferForm.store_id"
+              filterable
+              placeholder="请选择目标门店"
+              :loading="memberTransferOptionsLoading"
+          >
+            <Option
+                v-for="store in memberTransferStoreList"
+                :key="store.id"
+                :value="store.id"
+                :disabled="Number(store.id) === Number(memberTransferForm.current_store_id)"
+            >{{ store.name }}</Option>
+          </Select>
+        </FormItem>
+        <FormItem label="调店原因" prop="reason">
+          <Input
+              v-model="memberTransferForm.reason"
+              type="textarea"
+              :rows="4"
+              :maxlength="200"
+              show-word-limit
+              placeholder="请输入调店原因"
+          />
+        </FormItem>
+      </Form>
+      <div slot="footer">
+        <Button @click="resetMemberTransfer">取消</Button>
+        <Button type="primary" :loading="memberTransferSubmitting" @click="saveMemberTransfer">保存</Button>
+      </div>
+    </Modal>
     <!-- 用户标签 -->
     <Modal
         v-model="labelListShow"
@@ -832,6 +887,8 @@ import {
   extendInfo,
   batchProcess,
   exportUserData,
+  memberTransferStoreOptionsApi,
+  memberTransferStoreApi,
 } from "@/api/user";
 import { agentSpreadApi } from "@/api/agent";
 import { staffListInfo } from "@/api/store";
@@ -1101,6 +1158,25 @@ export default {
       },
       spread_name: '',
       storeList: [],
+      memberTransferModal: false,
+      memberTransferSubmitting: false,
+      memberTransferOptionsLoading: false,
+      memberTransferStoreList: [],
+      memberTransferForm: {
+        uid: 0,
+        member_name: '',
+        current_store_id: 0,
+        current_store_name: '',
+        store_id: '',
+        reason: '',
+      },
+      memberTransferRules: {
+        store_id: [{ required: true, type: 'number', message: '请选择目标门店', trigger: 'change' }],
+        reason: [
+          { required: true, message: '请输入调店原因', trigger: 'blur' },
+          { min: 2, max: 200, message: '调店原因请输入 2-200 个字符', trigger: 'blur' },
+        ],
+      },
       importShow: false,
       importCardShow: false,
       integralStart: null,
@@ -1184,6 +1260,75 @@ export default {
       }).catch(err=>{
         this.$Message.error(err.msg);
       })
+    },
+    /**
+     * 打开会员调店弹窗。目标门店使用专用全集接口，避免复用列表筛选的组织范围。
+     */
+    openMemberTransfer(row) {
+      if (this.$refs.memberTransferForm) {
+        this.$refs.memberTransferForm.resetFields();
+      }
+      this.memberTransferForm = {
+        uid: Number(row.uid),
+        member_name: row.nickname || row.real_name || `会员 ${row.uid}`,
+        current_store_id: Number(row.belong_store_id || 0),
+        current_store_name: row.belong_store_name || '',
+        store_id: '',
+        reason: '',
+      };
+      this.memberTransferModal = true;
+      this.memberTransferOptionsLoading = true;
+      memberTransferStoreOptionsApi()
+          .then((res) => {
+            this.memberTransferStoreList = Array.isArray(res.data) ? res.data : [];
+          })
+          .catch((err) => {
+            this.$Message.error(err.msg || '门店列表加载失败');
+          })
+          .finally(() => {
+            this.memberTransferOptionsLoading = false;
+          });
+    },
+    /**
+     * 保存独立调店命令；提交中禁用按钮，成功后刷新列表显示新的归属门店。
+     */
+    saveMemberTransfer() {
+      this.$refs.memberTransferForm.validate((valid) => {
+        if (!valid || this.memberTransferSubmitting) return;
+        if (Number(this.memberTransferForm.store_id) === Number(this.memberTransferForm.current_store_id)) {
+          return this.$Message.warning('目标门店不能与当前门店相同');
+        }
+        this.memberTransferSubmitting = true;
+        memberTransferStoreApi(this.memberTransferForm.uid, {
+          store_id: Number(this.memberTransferForm.store_id),
+          reason: this.memberTransferForm.reason.trim(),
+        })
+            .then((res) => {
+              this.$Message.success(res.msg || '调店成功');
+              this.memberTransferModal = false;
+              this.getList();
+            })
+            .catch((err) => {
+              this.$Message.error(err.msg || '调店失败');
+            })
+            .finally(() => {
+              this.memberTransferSubmitting = false;
+            });
+      });
+    },
+    /** 清理弹窗草稿，避免下一位会员继承上一次的目标门店或原因。 */
+    resetMemberTransfer() {
+      if (this.memberTransferSubmitting) return;
+      this.memberTransferModal = false;
+      this.memberTransferForm = {
+        uid: 0,
+        member_name: '',
+        current_store_id: 0,
+        current_store_name: '',
+        store_id: '',
+        reason: '',
+      };
+      this.$nextTick(() => this.$refs.memberTransferForm && this.$refs.memberTransferForm.resetFields());
     },
     checkboxItem(e){
       let uid = parseInt(e.rowid);

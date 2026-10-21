@@ -820,10 +820,13 @@ class StoreProduct extends AuthController
             $where['type'] = 0;
             $where['relation_id'] = 0;
         } elseif ($chooseType === 97) {
-            // 平台卡项只配置已上架的平台项目主数据；门店项目 ID 在同步后由原映射链路解析。
+            // 平台卡项只配置平台项目主数据；状态 1/2 分别复用商品列表“销售中/仓库中”口径。
+            // 未传或篡改为其他状态时仍收敛到销售中，门店项目 ID 继续由原映射链路解析。
             $where['type'] = 0;
             $where['relation_id'] = 0;
-            $where['is_show'] = 1;
+            $projectStatus = (int)($where['status'] ?? 1);
+            $where['status'] = in_array($projectStatus, [1, 2], true) ? $projectStatus : 1;
+            unset($where['is_show']);
             $where['is_card'] = 0;
         } else {
             $where['type'] = [0, 2];
