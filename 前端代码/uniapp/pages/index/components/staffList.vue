@@ -1,8 +1,10 @@
 <template>
-	<view v-if="staffList.length" class="staff-module" :style="moduleStyle">
+	<!-- Wrap computed style objects so the uni-app mini compiler serializes CSS,
+	     rather than emitting [object Object] and ignoring saved DIY settings. -->
+	<view v-if="staffList.length" class="staff-module" :style="[moduleStyle]">
 		<view class="staff-module__header">
-			<text class="staff-module__title" :style="titleStyle">{{ titleText }}</text>
-			<view v-if="showMore" class="staff-module__more" :style="textStyle" @tap="goMore">
+			<text class="staff-module__title" :style="[titleStyle]">{{ titleText }}</text>
+			<view v-if="showMore" class="staff-module__more" :style="[textStyle]" @tap="goMore">
 				<text>查看全部</text>
 				<text class="iconfont icon-ic_rightarrow fs-22 ml-4"></text>
 			</view>
@@ -13,19 +15,19 @@
 					v-for="item in staffList"
 					:key="item.id"
 					class="staff-module__card"
-					:style="cardStyle"
+					:style="[cardStyle]"
 				>
 					<image v-if="item.avatar && !failedAvatars[item.id]" class="staff-module__avatar" :src="item.avatar" mode="aspectFill" @error="handleAvatarError(item.id)" />
 					<view v-else class="staff-module__avatar staff-module__avatar--placeholder">
 						<text class="iconfont icon-ic_user1"></text>
 					</view>
 					<view class="staff-module__info">
-						<text class="staff-module__name" :style="titleStyle">{{ item.staff_name }}</text>
-						<text v-if="showField(0) && item.position_label" class="staff-module__meta" :style="textStyle">{{ item.position_label }}</text>
-						<text v-if="showField(1) && item.position_level_label" class="staff-module__level" :style="textStyle">{{ item.position_level_label }}</text>
-						<text v-if="showField(2) && item.staff_intro" class="staff-module__intro" :style="textStyle">{{ item.staff_intro }}</text>
+						<text class="staff-module__name" :style="[titleStyle]">{{ item.staff_name }}</text>
+						<text v-if="showField(0) && item.position_label" class="staff-module__meta" :style="[textStyle]">{{ item.position_label }}</text>
+						<text v-if="showField(1) && item.position_level_label" class="staff-module__level" :style="[textStyle]">{{ item.position_level_label }}</text>
+						<text v-if="showField(2) && item.staff_intro" class="staff-module__intro" :style="[textStyle]">{{ item.staff_intro }}</text>
 					</view>
-					<view v-if="showField(3)" class="staff-module__button" :style="buttonStyle" @tap.stop="goBooking(item)">去预约</view>
+					<view v-if="showField(3)" class="staff-module__button" :style="[buttonStyle]" @tap.stop="goBooking(item)">去预约</view>
 				</view>
 			</view>
 		</scroll-view>

@@ -1,11 +1,12 @@
 <template>
 	<!-- 底部导航 -->
 	<view v-if="showTabBar">
-		<view class="fixed-lb w-full pb-safe z-999" :style="[bgColor]">
-			<view class="page-footer-wrapper">
+		<view class="page-footer-fixed" :style="[bgColor]">
+			<view class="page-footer-wrapper" :class="{ 'page-footer-wrapper--floating': isFloating }">
 				<view class="page-footer" :class="{
 					'page-footer2': newData.navStyleConfig.tabVal == 1,
 					'page-footer3': newData.navStyleConfig.tabVal == 2,
+					'page-footer--docked': !isFloating,
 				}" id="target" :style="[componentStyle, footerToneStyle]">
 					<view class="foot-item flex-1 flex-col flex-center h-96 relative" :class="{ 'is-active': isActive(item) }" v-for="(item,index) in newData.menuList" :key="index" @click="goRouter(item)">
 						<template v-if="isActive(item)">
@@ -24,8 +25,8 @@
 				</view>
 			</view>
 		</view>
-		<view :style="{ height: `${footerHeight}px` }"></view>
-		<view class="safe-area-inset-bottom"></view>
+		<!-- One measured spacer includes the bar, configured gaps and safe area. -->
+		<view class="page-footer-spacer" :style="[footerSpacerStyle]"></view>
 	</view>
 </template>
 
@@ -48,6 +49,12 @@
 		},
 		computed: {
 			...mapGetters(['isLogin', 'cartNum']),
+			isFloating() {
+				return !!(this.newData.navConfig && this.newData.navConfig.tabVal);
+			},
+			footerSpacerStyle() {
+				return { height: `${this.footerHeight}px` };
+			},
 			txtActiveColor() {
 				let styleObject = {};
 				if (this.newData.toneConfig && this.newData.toneConfig.tabVal) {
@@ -91,22 +98,29 @@
 						borderRadius =
 							`${this.newData.fillet.valList[0].val * 2}rpx ${this.newData.fillet.valList[1].val * 2}rpx ${this.newData.fillet.valList[3].val * 2}rpx ${this.newData.fillet.valList[2].val * 2}rpx`;
 					}
-					styleObject['right'] = `${this.newData.prConfig.val * 2}rpx`;
-					styleObject['bottom'] = `${this.newData.mbConfig.val * 2}rpx`;
-					styleObject['left'] = `${this.newData.prConfig.val * 2}rpx`;
+					// Floating offsets remain DIY-owned, but participate in normal
+					// flow so the fixed container and content spacer have real height.
+					styleObject['margin-right'] = `${this.newData.prConfig.val * 2}rpx`;
+					styleObject['margin-bottom'] = `${this.newData.mbConfig.val * 2}rpx`;
+					styleObject['margin-left'] = `${this.newData.prConfig.val * 2}rpx`;
 					styleObject['padding-top'] = `${this.newData.topConfig.val * 2}rpx`;
 					styleObject['padding-bottom'] = `${this.newData.bottomConfig.val * 2}rpx`;
 					styleObject['border-radius'] = borderRadius;
 					styleObject['background'] = this.newData.bgColor2.color[0].item;
 				} else {
 					styleObject['padding-top'] = `${this.newData.topConfig.val * 2}rpx`;
-					styleObject['padding-bottom'] = `${this.newData.bottomConfig.val * 2}rpx`;
+					styleObject['--footer-bottom-padding'] = `${this.newData.bottomConfig.val * 2}rpx`;
 					styleObject['background'] = this.newData.bgColor.color[0].item;
 				}
 				return styleObject;
 			},
 		},
 		watch: {
+			newData: {
+				handler() { this.measureFooter(); },
+				deep: true
+			},
+			showTabBar() { this.measureFooter(); },
 			configData(newVal){
 				if(!this.showTabBar && newVal){
 					let configData = newVal;
@@ -123,9 +137,16 @@
 			let curRoute = routes[routes.length - 1].$page.fullPath; //获取当前页面路由
 			this.activeRouter = curRoute;
 			this.navigationInfo();
+			// Resize callbacks are scoped to this component and removed on exit;
+			// safe-area/viewport changes must not leave an obsolete content spacer.
+			this.footerResizeHandler = () => this.measureFooter();
+			if (uni.onWindowResize) uni.onWindowResize(this.footerResizeHandler);
 			// if (this.isLogin) {
 			// 	this.getCartNum()
 			// }
+		},
+		beforeDestroy() {
+			if (uni.offWindowResize && this.footerResizeHandler) uni.offWindowResize(this.footerResizeHandler);
 		},
 		data() {
 			return {
@@ -136,6 +157,17 @@
 			}
 		},
 		methods: {
+			measureFooter() {
+				if (!this.showTabBar) { this.footerHeight = 0; return; }
+				this.$nextTick(() => {
+					if (!this.showTabBar || this._isDestroyed) return;
+					// Read this component's fixed box, not a similarly named footer
+					// in a cached page. Never count the safe area a second time.
+					uni.createSelectorQuery().in(this).select('.page-footer-fixed').boundingClientRect(rect => {
+						if (this.showTabBar && rect) this.footerHeight = Math.ceil(rect.height);
+					}).exec();
+				});
+			},
 			isActive(item) {
 				const currentPath = (this.activeRouter || '').split('?')[0];
 				const itemPath = ((item && item.link) || '').trim().split('?')[0];
@@ -229,22 +261,33 @@
 </script>
 
 <style scoped lang="scss">
-	.safe-area-inset-bottom {
-		height: 0;
-		height: constant(safe-area-inset-bottom);
-		height: env(safe-area-inset-bottom);
+	.page-footer-fixed {
+		position: fixed;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 999;
 	}
 
 	.page-footer-wrapper {
 		position: relative;
-		padding: 0 20rpx 16rpx;
+	}
+
+	/* Docked background includes the gesture area; floating bars retain their
+	   configured offsets and reserve the same area outside their own frame. */
+	.page-footer-wrapper--floating {
+		padding-bottom: constant(safe-area-inset-bottom);
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+
+	.page-footer--docked {
+		padding-bottom: var(--footer-bottom-padding, 0rpx);
+		padding-bottom: calc(var(--footer-bottom-padding, 0rpx) + constant(safe-area-inset-bottom));
+		padding-bottom: calc(var(--footer-bottom-padding, 0rpx) + env(safe-area-inset-bottom));
 	}
 
 	.page-footer {
-		position: absolute;
-		right: 0;
-		bottom: 0;
-		left: 0;
+		position: relative;
 		display: flex;
 		min-height: 108rpx;
 		box-shadow: 0 12rpx 36rpx rgba(87, 44, 55, 0.12);

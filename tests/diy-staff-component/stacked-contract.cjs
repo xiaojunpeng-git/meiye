@@ -10,7 +10,11 @@ for (const file of paths) {
   const current = compiler.parseComponent(fs.readFileSync(path.join(root,file),'utf8'));
   const prior = compiler.parseComponent(execFileSync('git',['show','3faea328d6077e9eca7d52805464c826fc3051a7:'+file],{cwd:root,encoding:'utf8'}));
   assert.equal(current.script.content,prior.script.content,'Business methods/defaults changed');
-  assert.equal(current.template.content,prior.template.content,'Existing fields/navigation changed');
+  // The later mini style fix only wraps these computed objects in arrays;
+  // fields, event handlers and navigation must still match the original rail.
+  const normalize = value => value.replace(/<!--[^]*?-->/g, '')
+    .replace(/:style="\[(moduleStyle|titleStyle|textStyle|cardStyle|buttonStyle)\]"/g, ':style="$1"').trim();
+  assert.equal(normalize(current.template.content),normalize(prior.template.content),'Existing fields/navigation changed');
   assert(current.styles[0].content.includes('.staff-module__list--0 .staff-module__card { flex: 0 0 '));
   // Remove only this documented rail block: all prior style rules must survive.
   const stripped=current.styles[0].content.replace(/\s*\/\* (?:Only the horizontal rail|Stack only horizontal cards)[\s\S]*?\*\/\s*\.staff-module__list--0 \.staff-module__card[^\n]*\n\s*\.staff-module__list--0 \.staff-module__info[^\n]*\n\s*\.staff-module__list--0 \.staff-module__button[^\n]*/, '');

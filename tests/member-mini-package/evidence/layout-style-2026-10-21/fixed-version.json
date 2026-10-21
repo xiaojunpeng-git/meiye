@@ -1,0 +1,60 @@
+{
+  "task": "M008-R8-LAYOUT-001",
+  "status": "self-test-pass-awaiting-product-manager-acceptance",
+  "baselineHead": "39f927b3c1a94797b4a04349b0f62a5af1d1997e",
+  "patchSha256": "cea4387a4158c5599765dbf2b4fc3a16ef1194b5301f9d6e88df6ed31a2e65c1",
+  "files": [
+    {
+      "file": "前端代码/uniapp/pages/index/components/staffList.vue",
+      "sha256": "856f661bd375af431eb6c8839e12253a30a644a2a6de2406c2995af03cdd21b3"
+    },
+    {
+      "file": "前端代码/uniapp/components/pageFooter/index.vue",
+      "sha256": "f1c089c833bac44cecb8b24c8ad517380aa95052c9d2cc30df2e62df3876894a"
+    },
+    {
+      "file": "tests/diy-staff-component/stacked-contract.cjs",
+      "sha256": "10d626023873e632ac6959b6371ef7868ef84887997391fd312512b484d2f0a8"
+    },
+    {
+      "file": "tests/member-mini-package/layout-style-contract.cjs",
+      "sha256": "2df95205bcbd961d5381229f9b5e10a7adfeabbf82230abe01a5725fbf056859"
+    },
+    {
+      "file": "tests/member-mini-package/layout-style-fixture.cjs",
+      "sha256": "8b1373d887a577e7cc0d39d840656d2df2320d60da3b320cdf6f6d9df14d7e9d"
+    }
+  ],
+  "businessFiles": 2,
+  "testFiles": 3,
+  "compiledSourceOverrides": [
+    "前端代码/uniapp/pages/index/components/staffList.vue",
+    "前端代码/uniapp/components/pageFooter/index.vue"
+  ],
+  "browserCases": 24,
+  "native": {
+    "staffPadding": "22px",
+    "viewportHeight": 844,
+    "footerTop": 759,
+    "footerHeight": 85,
+    "footerBottom": 844,
+    "spacerHeight": 85,
+    "myPageSpacerHeight": 85,
+    "lastRowNotObscured": true
+  },
+  "miniArtifactSha256": "356e8b134a2826aa35d994bdfacf4a8b6a72888cd0b9ab2dddb35dc33ac78d7e",
+  "stagedSha256": "67ed95909d90c15de9f0d1b8e291ff6f42ce3a2cd4bb9195047c0de4063caf80",
+  "remoteBaseline": "not applicable: local development/build only; existing public configuration read without writes",
+  "boundaries": {
+    "committed": false,
+    "deployed": false,
+    "pushed": false,
+    "miniUploaded": false,
+    "productionConfigurationSaved": false,
+    "physicalDeviceVerified": false
+  },
+  "notes": [
+    "Initial IAB fixture opening logged one MutationObserver observation error; after reload no new Runtime.exceptionThrown. All 24 layout assertions and independent native geometry passed.",
+    "Prior 3.0.8 confirmation_upload_3c514da2-b9f1-4966-84a7-f83c6cf754eb is a different candidate; not polled or reissued by this task."
+  ]
+}
