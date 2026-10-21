@@ -1,0 +1,47 @@
+{
+  "instance": "rh",
+  "commit": "1d6cdad46e14fb16aec1689dc1bae4bea57a22b4",
+  "backup": "/www/backups/rh/20261021-r24-reservation-1d6cdad4",
+  "backup_result": "08af88f7d3258b1573fd236113319da0cf2cdd888aa4c3e4c8ee00268caba4cc  /www/backups/rh/20261021-r24-reservation-1d6cdad4/backend-before.tar.gz",
+  "switch_result": "ruihao swoole started pid=29387 port=20800\nR24_RH_SWITCH_OK",
+  "after": {
+    "instance": "rh",
+    "database": "ruihao",
+    "files": {
+      "app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php": "c2c1e069b1b84294a7d683afb929ef24beb3e8cef912fc8d22af72894832e8ea",
+      "app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php": "2f7faefab971a39904cc3ad760a04b5e70f74dd737e0c881ce68e81e7ff41d87",
+      "app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": "c06d869776a668871a15f8963f537608706aacb68af61c104654a9c20380653f",
+      "app/services/cashier/v3/cashier/CashierV3SharedCardPurchaseAmount.php": "aa9c5264c9a9bcb61295a1afa5f22acf276c9d3b2361b2e42ca89ea35eca33b6",
+      "app/services/cashier/v3/card/CashierV3CardRuleEntitlementAuthorityServices.php": "8f4e6df5535e978190a6cdb1697a6c1ac60be363910e5341819556d9178e652e",
+      "app/services/cashier/v3/card/CashierV3CardSaleActualAmountServices.php": "0254b2d445b1b615f8200c4f57e84e62b4d605d47261d35c61c20528d3074015",
+      "app/services/order/store/WriteOffOrderServices.php": "b1e84366eeaead73bc8638e38f5464ec8b27ff375c5da4d8b77d33cdfe983805",
+      "app/services/cashier/v3/order/CashierV3ServiceRecordCraftsmanAdjustmentServices.php": "3ffa12585ecac062132ddfaf45ea3e9121e01f48f1fe48bfd72a984719b0693e",
+      "app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php": "ec0cf3238747ecbf6a8fac84a22b81cb7e768713117242bf5184720184998214",
+      "app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php": "91fb2ebbec1096a7ff4fbe9e380c1d5b4c2c6ba5632f84b619850e9b200a9361"
+    },
+    "fronts": [
+      {
+        "path": "/www/wwwroot/rh.cc3798.com/public/view_cashier_v3",
+        "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+        "assets": {
+          "assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+          "assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+        }
+      },
+      {
+        "path": "/www/wwwroot/rh.cc3798.com-8080/public/view_cashier_v3",
+        "index": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+        "assets": {
+          "assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+          "assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+        }
+      }
+    ],
+    "migration": {
+      "upgrade_key": "20261021-047-sales-debt-balance-settlement",
+      "code_version": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+      "executed_at": "2026-10-21 18:12:27"
+    }
+  },
+  "result": "backend_switched_data_repair_pending"
+}

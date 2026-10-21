@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "checks": {
+    "original_holder_unchanged": true,
+    "original_writeoff_unchanged": true,
+    "original_service_unchanged": true,
+    "personnel_adjustments_unchanged": true,
+    "original_performance_RPF-563f6b8785e82113be12863314906468347d42f0": true,
+    "original_performance_SAA-471FA7B0A0A07BCEBD1E139460CCDA81D1E75E87": true,
+    "pool_exhausted": true,
+    "selector_zero_uses_and_value": true,
+    "all_projects_exhausted_without_debt": true,
+    "order_center_reads_99_yuan": true,
+    "craftsman_stays_zero": true
+  },
+  "selector": {
+    "remainingTimes": 0,
+    "remainingAmount": "0.00"
+  },
+  "orderCenterConsumptionCents": [
+    9900
+  ]
+}

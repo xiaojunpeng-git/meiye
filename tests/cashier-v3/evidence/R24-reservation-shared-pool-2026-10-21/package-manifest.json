@@ -1,0 +1,12 @@
+{
+  "commit": "1d6cdad46e14fb16aec1689dc1bae4bea57a22b4",
+  "files": {
+    "app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php": "c2c1e069b1b84294a7d683afb929ef24beb3e8cef912fc8d22af72894832e8ea",
+    "app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php": "2f7faefab971a39904cc3ad760a04b5e70f74dd737e0c881ce68e81e7ff41d87",
+    "app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": "c06d869776a668871a15f8963f537608706aacb68af61c104654a9c20380653f",
+    "app/services/cashier/v3/reservation/CashierV3ReservationSharedPoolRepairServices.php": "3c1f82510cac9fd43d93e3e8a9a4ddf4643f2e4218cc112a47be6310311cefd6",
+    "database/upgrades/2026-10-21-预约共享卡核销纠正/01-执行.php": "72bee43e40c96367d3fd06bb6c4ee8ed63fe81d13dc688accb487a6e7c09f283",
+    "app/services/order/store/WriteOffOrderServices.php": "b1e84366eeaead73bc8638e38f5464ec8b27ff375c5da4d8b77d33cdfe983805"
+  },
+  "payload_sha256": "0fc4217485248df2e1620d1200a5dd7ab3818a657f32e01ffee37f97e2841621"
+}

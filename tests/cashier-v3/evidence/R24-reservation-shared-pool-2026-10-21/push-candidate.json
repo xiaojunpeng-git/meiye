@@ -1,0 +1,8 @@
+{
+  "sourceCommit": "1d6cdad46e14fb16aec1689dc1bae4bea57a22b4",
+  "base": "88d0c8533d010a5864aa985fb3b0f7347abfab99",
+  "baselineCommit": "cffab8b7b6f49660d26e68c9d14eed386360bd0c",
+  "releaseCommit": "907ef3696f5cd9addaf76604e48d724dc5ecb0d7",
+  "branch": "release/r24-reservation-shared-pool-20261021",
+  "packageFilesIdentical": true
+}

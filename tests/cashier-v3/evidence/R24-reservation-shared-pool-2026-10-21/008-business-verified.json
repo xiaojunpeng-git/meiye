@@ -1,0 +1,11 @@
+{
+  "instance": "008",
+  "result": "PASS",
+  "checks": {
+    "shared_card_purchase_99": true,
+    "whole_yuan_tail_conserved": true,
+    "debt_limited_uses_6": true,
+    "fully_unpaid_blocked": true,
+    "no_rh_data_repair_executed": true
+  }
+}
