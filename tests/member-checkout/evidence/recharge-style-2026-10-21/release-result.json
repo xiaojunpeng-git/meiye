@@ -1,0 +1,87 @@
+{
+  "task": "M008-R9-RECHARGE-STYLE-RELEASE",
+  "stage": "rh-pass-awaiting-push-and-008",
+  "preflight": {
+    "task": "M008-R9-RECHARGE-STYLE-RELEASE",
+    "commit": "740c0c76732ab3a4e1108f45e80a1b8f7c0b2ee8",
+    "memberTree": "accaaca7b20609fa84e04401a8128355c241cd7c",
+    "inputFiles": 915,
+    "scriptsParsed": 262,
+    "acceptedPatch": "24ab9f58",
+    "scriptByteIdenticalToLiveBaseline": true,
+    "scriptSha256": "698b532558c8904072627f99f5979cdf5580b5243994187cc57a2f4a079e9f84",
+    "changedMemberFiles": [
+      "前端代码/uniapp/pages/users/user_payment/index.vue"
+    ],
+    "originalIndexSha256": "67ed95909d90c15de9f0d1b8e291ff6f42ce3a2cd4bb9195047c0de4063caf80",
+    "scope": "member H5 static files only; no backend/database/configuration/mini upload"
+  },
+  "payload": {
+    "commit": "740c0c76732ab3a4e1108f45e80a1b8f7c0b2ee8",
+    "fileCount": 263,
+    "fullFileCount": 504,
+    "archiveSha256": "0caf1b132aa1758b7eff1ab600e5bd27e8bc9ad45eb33d032d9450d8c8aa936c",
+    "installerSha256": "34a2fee0ec5d3aa5036a7d73b99c6f7cb2064eb248f38954f5ad29c3a1441dcb"
+  },
+  "rh": {
+    "instance": "rh",
+    "result": "PASS",
+    "commit": "740c0c76732ab3a4e1108f45e80a1b8f7c0b2ee8",
+    "filesVerified": 504,
+    "installedFiles": 263,
+    "databaseWrites": 0,
+    "environmentUnchanged": true,
+    "decorationUnchanged": true,
+    "adminUnchanged": true,
+    "cashierAndPreviewUnchanged": true,
+    "publicEntries": {
+      "member": {
+        "sha256": "e2d5e8ad4a05caef679a8abe2863219abb90b36d80c001b833fd7c77fa52575f",
+        "assets": {
+          "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+          "/static/js/chunk-vendors.32e7436b.js": "dfff1d7bebb14f66d6eb186a1b287d62274636c04f09a41341fcbdb65312e9b9",
+          "/static/js/index.6b482c2a.js": "405d7edc8379220e4a195921ae9bc3e5498bc5ad8704498628eaf520de923791"
+        }
+      },
+      "admin": {
+        "sha256": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+        "assets": {
+          "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+          "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+          "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+          "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+        }
+      },
+      "cashier": {
+        "sha256": "1636362cc6dba91baddec1c33fc0e075b25dbe49b898dac961fd2c74414fb222",
+        "assets": {
+          "/view_cashier_v3/assets/index-35dd983d.js": "99ccd08fd0ebb3accf4d5599cb1179c7d0713f578119299eec9064aca6f46409",
+          "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+        }
+      },
+      "cashier_preview": {
+        "sha256": "1469409dab2dd06d6eb0468ebb40ae112f31d9adcc2d8086f7d655cfa1c79415",
+        "assets": {
+          "/preview-8080/view_cashier_v3/assets/index-35dd983d.js": "99ccd08fd0ebb3accf4d5599cb1179c7d0713f578119299eec9064aca6f46409",
+          "/preview-8080/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+        }
+      }
+    },
+    "checkedAt": "2026-10-21T09:07:35.637Z"
+  },
+  "rhBrowser": {
+    "result": "PASS",
+    "homeVisible": true,
+    "homeToMy": true,
+    "originalServiceMenuVisible": true,
+    "rechargeAuthenticatedVerification": false,
+    "reason": "RH member session is anonymous; no cross-customer credentials used",
+    "ordersSubmitted": false,
+    "paymentsMade": false,
+    "existingLoginGuard": true
+  },
+  "rhAffectedPublicAssets": {
+    "public/pages/users/static/chongzhi.png": "f4c879ed147e7dbd74eda4f8dded4150991b3c62782d666a5005b3ce2602eacb",
+    "public/static/js/pages-users-user_payment-index.419ef1a7.js": "92f0d4660808da296bd846a5809a50184f70897bcda5576e9bfbae7d43627e7a"
+  }
+}
