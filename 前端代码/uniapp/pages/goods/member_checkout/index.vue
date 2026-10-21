@@ -107,24 +107,26 @@
 
         <view class="checkout-card">
           <view class="section-title">支付方式</view>
+          <!-- Reuse packaged glyphs: decoration must not change payment values,
+               availability or the provider handoff for purchase/recharge. -->
           <radio-group @change="changePayment">
             <label v-if="kind === 'purchase'" class="payment-row">
-              <view><text>余额支付</text><text class="payment-note">可用 ¥{{ yuan(quote.balanceCents) }}</text></view>
+              <view class="payment-label"><text class="iconfont icon-ic_money payment-icon"></text><view><text>余额支付</text><text class="payment-note">可用 ¥{{ yuan(quote.balanceCents) }}</text></view></view>
               <radio value="balance" :checked="paymentMode === 'balance'" :color="themeColor" />
             </label>
             <label class="payment-row">
-              <text>在线支付（富友）</text>
+              <view class="payment-label"><text class="iconfont icon-ic_card payment-icon"></text><text>在线支付（富友）</text></view>
               <radio value="fuyou" :checked="paymentMode === 'fuyou'" :color="themeColor" />
             </label>
             <label v-if="kind === 'purchase'" class="payment-row">
-              <text>余额＋在线支付</text>
+              <view class="payment-label"><text class="iconfont icon-ic_switch payment-icon"></text><text>余额＋在线支付</text></view>
               <radio value="combined" :checked="paymentMode === 'combined'" :color="themeColor" />
             </label>
           </radio-group>
           <!-- #ifndef MP -->
           <radio-group v-if="paymentMode !== 'balance'" class="external-methods" @change="changeExternalMethod">
-            <label class="payment-row"><text>微信支付</text><radio value="wechat" :checked="externalMethod === 'wechat'" :color="themeColor" /></label>
-            <label class="payment-row"><text>支付宝支付</text><radio value="alipay" :checked="externalMethod === 'alipay'" :color="themeColor" /></label>
+            <label class="payment-row"><view class="payment-label"><text class="iconfont icon-a-ic_wechatpay payment-icon payment-icon--wechat"></text><text>微信支付</text></view><radio value="wechat" :checked="externalMethod === 'wechat'" :color="themeColor" /></label>
+            <label class="payment-row"><view class="payment-label"><text class="iconfont icon-a-ic_alipay payment-icon payment-icon--alipay"></text><text>支付宝支付</text></view><radio value="alipay" :checked="externalMethod === 'alipay'" :color="themeColor" /></label>
           </radio-group>
           <!-- #endif -->
           <view v-if="paymentMode === 'combined'" class="split-row">
@@ -418,6 +420,9 @@ export default {
 .integral-row { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; }
 .benefit-summary { margin-top: 18rpx; color: #666; }.benefit-payable { padding-top: 20rpx; border-top: 1rpx solid #eee; }
 .section-title { margin-bottom: 8rpx; font-weight: 500; }.payment-row { min-height: 96rpx; border-bottom: 1rpx solid #eee; }
+.payment-label { display: flex; align-items: center; gap: 20rpx; min-width: 0; }
+.payment-icon { flex-shrink: 0; width: 44rpx; height: 44rpx; line-height: 44rpx; font-size: 40rpx; color: var(--view-theme); }
+.payment-icon--wechat { color: #09bb07; }.payment-icon--alipay { color: #1296db; }
 .payment-note { display: block; color: #999; font-size: 22rpx; margin-top: 8rpx; }.external-methods { display: block; margin-top: 12rpx; }
 .split-row { padding-top: 28rpx; }.split-input { display: flex; align-items: center; gap: 8rpx; }.split-input input { width: 180rpx; text-align: right; border-bottom: 1rpx solid #ddd; height: 56rpx; }
 .amount { color: var(--view-theme); font-weight: 600; }.checkout-error { margin: 20rpx; padding: 24rpx; background: #fff1f3; color: #a93149; border-radius: 16rpx; overflow-wrap: anywhere; }

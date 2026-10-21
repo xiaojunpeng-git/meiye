@@ -1,0 +1,30 @@
+{
+  "result": "PASS",
+  "commit": "277ccceb48d07eee9aac4ce27981398620605a67",
+  "sourceFilesVerified": 916,
+  "compared": 1886,
+  "outputFiles": 1886,
+  "scriptsParsed": 423,
+  "stylesRestored": 398,
+  "mutableLoaderOptionsIsolated": true,
+  "nativeComponentMountNotApplication": true,
+  "apiOrigin": "https://008.cc3798.com",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "packages": {
+    "main": 2052931,
+    "pages/behalf": 190168,
+    "pages/store": 421686,
+    "pages/merchant": 203207,
+    "pages/admin": 1797346,
+    "pages/users": 1647063,
+    "pages/discover": 206671,
+    "pages/activity": 470205,
+    "pages/annex": 958833,
+    "pages/extension": 71292,
+    "pages/goods": 1956948,
+    "pages/short_video": 304927,
+    "pages/work": 17446,
+    "pages/columnGoods": 98909
+  },
+  "artifactSha256": "bc3520625cbd2e3a691ee0b71f82931cecf1eb0d5c4679feb5c68f31b716fe81"
+}

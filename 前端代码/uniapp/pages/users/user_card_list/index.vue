@@ -24,7 +24,9 @@
 			</view>
 		</view>
 
-		<scroll-view scroll-y class="content">
+		<!-- Use page scrolling: a zero-height native scroll-view can hide rights
+		     on devices even when the same data expands in H5/devtools. -->
+		<view class="content">
 			<view v-if="loading" class="page-loading">
 				<view class="loading-spinner"></view>
 				<text class="loading-text">加载中...</text>
@@ -100,7 +102,7 @@
 			</view>
 			</template>
 			<view class="pb-safe"></view>
-		</scroll-view>
+		</view>
 		<view :style="{ height: pdHeight * 2 + 96 + 'rpx' }" v-if="showBar"></view>
 		<view class="safe-area-inset-bottom" v-if="showBar"></view>
 		<pageFooter @newDataStatus="newDataStatus"></pageFooter>
@@ -449,7 +451,6 @@
 
 .content {
 	flex: 1;
-	height: 0;
 	padding: 28rpx 24rpx 0;
 	box-sizing: border-box;
 }

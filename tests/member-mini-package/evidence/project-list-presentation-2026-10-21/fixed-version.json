@@ -1,0 +1,70 @@
+{
+  "task": "M008-R9-PRESENTATION-002",
+  "baseline": "277ccceb48d07eee9aac4ce27981398620605a67",
+  "headAtFix": "277ccceb48d07eee9aac4ce27981398620605a67",
+  "businessPatchSha256": "880be0e0bc006a95783150ea095d8575b6ff4fc15ad096d12c0f77ead777853f",
+  "patchSha256": "976782defd768533889693c20ee6fa5f504e719d0c4482ff8965a66d5c371997",
+  "files": [
+    {
+      "file": "前端代码/uniapp/pages/users/user_card_list/index.vue",
+      "sha256": "39be6c9cc58fb90586c63f6bff6eda07c3a1d8a8dd6ab02255a1c5dc10825d18"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/member_checkout/index.vue",
+      "sha256": "d6692b35fa803a11b28c4d70f028e5faa6abbd80a1f9dca82cd97c5bb9f6e9e0"
+    },
+    {
+      "file": "tests/member-mini-package/project-list-presentation-contract.cjs",
+      "sha256": "e8afd8f2673e0ed318bbde1adc28f3f352f2f9261dcf34dcc18594a091783565"
+    },
+    {
+      "file": "tests/member-mini-package/project-list-presentation-fixture.cjs",
+      "sha256": "e4825f714c2928447987f5c71c6e6a6874018d5085b8d01de4d91bab28fca111"
+    }
+  ],
+  "candidate": "/private/tmp/m009-project-layout-20261021/008-member",
+  "artifactSha256": "bc3520625cbd2e3a691ee0b71f82931cecf1eb0d5c4679feb5c68f31b716fe81",
+  "status": "local self-tests passed; PM acceptance and actual-device confirmation pending",
+  "sourceOnlyPresentation": true,
+  "businessScriptsUnchanged": true,
+  "backendChanged": false,
+  "databaseChanged": false,
+  "upload": false,
+  "deploy": false,
+  "push": false,
+  "actualPhoneReproduced": false,
+  "reportedPhoneVersion": "3.0.10",
+  "reference": "https://uniapp.dcloud.net.cn/component/scroll-view.html",
+  "indexAtFixSha256": "d906ef70eb8702d4197801f84a57e55f8c4b1a11573ebe123ec23bfd15e40738",
+  "evidence": [
+    {
+      "file": "tests/member-mini-package/evidence/project-list-presentation-2026-10-21/acceptance.md",
+      "sha256": "900b5a3fe9d3af51e77a3f55b07c6ecad0a10bec04a847ba705b7847ffafdf65"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/project-list-presentation-2026-10-21/mini-before.png",
+      "sha256": "465995cf4379884a782375bcdce44cf5b8f54bb10a6b26454b480cd7d1fb1183"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/project-list-presentation-2026-10-21/mini-bottom.png",
+      "sha256": "0d6fbbfeb2cb18e695104e948bbcde54bbaeeba363988234b0e129d25919d0fd"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/project-list-presentation-2026-10-21/mini-build-verification.json",
+      "sha256": "f5cd096985f89c48ada96a9e37178c01ad05f9f0f7dae0520cad6a56da707f15"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/project-list-presentation-2026-10-21/mini-fixed.png",
+      "sha256": "c8ae7f5ab8cacec798f2ce08f88b9ec53033114f59c29da44e822b312f80c74e"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/project-list-presentation-2026-10-21/mini-payment-icons.png",
+      "sha256": "b0d39b59f790ded428b493d31f75a43e15f029e317d1aa3547826893010e9e9f"
+    },
+    {
+      "file": "tests/member-mini-package/evidence/project-list-presentation-2026-10-21/native-observation.json",
+      "sha256": "452186a69b39437887065eb0eba4ea0811755c78eb619b7ea93bcb7c2ee5f54a"
+    }
+  ],
+  "currentHeadVerified": "277ccceb48d07eee9aac4ce27981398620605a67"
+}
