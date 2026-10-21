@@ -1,0 +1,99 @@
+{
+  "build": {
+    "result": "PASS",
+    "commit": "c474daea5a56eaf5d87cdc276317313491bbf1a4",
+    "sourceFilesVerified": 916,
+    "compared": 1886,
+    "outputFiles": 1886,
+    "scriptsParsed": 423,
+    "stylesRestored": 398,
+    "mutableLoaderOptionsIsolated": true,
+    "nativeComponentMountNotApplication": true,
+    "apiOrigin": "https://008.cc3798.com",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "packages": {
+      "pages/users": 1647100,
+      "pages/annex": 958827,
+      "main": 2052905,
+      "pages/admin": 1797391,
+      "pages/columnGoods": 98917,
+      "pages/discover": 206673,
+      "pages/behalf": 190158,
+      "pages/merchant": 203177,
+      "pages/goods": 1956281,
+      "pages/activity": 470189,
+      "pages/store": 421659,
+      "pages/work": 17446,
+      "pages/short_video": 304929,
+      "pages/extension": 71288
+    },
+    "artifactSha256": "0619d18fc4608545dfb8b76f9fcc0c2774a9a0dec0aac0343699f1ae847e9df2"
+  },
+  "native": {
+    "defaultClass": {
+      "ok": true,
+      "tool": "automation_element_action",
+      "clientName": "Codex",
+      "result": "package-row package-row package-row--custom package-row--custom data-v-fe1b2c0c data-v-fe1b2c0c package-row--selected package-row--selected"
+    },
+    "grid": {
+      "ok": true,
+      "tool": "automation_element_action",
+      "clientName": "Codex",
+      "result": "grid"
+    },
+    "pick": {
+      "ok": true,
+      "tool": "automation_element_action",
+      "clientName": "Codex",
+      "result": {
+        "success": true
+      }
+    },
+    "pickedClass": {
+      "ok": true,
+      "tool": "automation_element_action",
+      "clientName": "Codex",
+      "result": "package-row package-row data-v-fe1b2c0c data-v-fe1b2c0c package-row--selected package-row--selected"
+    },
+    "custom": {
+      "ok": true,
+      "tool": "automation_element_action",
+      "clientName": "Codex",
+      "result": {
+        "success": true
+      }
+    },
+    "amountInput": {
+      "ok": true,
+      "tool": "automation_element_action",
+      "clientName": "Codex",
+      "result": {
+        "success": true
+      }
+    },
+    "amount": {
+      "ok": true,
+      "tool": "automation_page_action",
+      "clientName": "Codex",
+      "result": {
+        "success": true,
+        "data": "33"
+      }
+    },
+    "packageId": {
+      "ok": true,
+      "tool": "automation_page_action",
+      "clientName": "Codex",
+      "result": {
+        "success": true,
+        "data": 0
+      }
+    }
+  },
+  "initialSimulatorIssue": "SDK routeDone webview not found; recovered after one simulator refresh and reLaunch",
+  "knownUnchangedIssue": "Existing home bootstrap map KEY configuration warning; no map changes",
+  "ordersSubmitted": false,
+  "paymentInvoked": false,
+  "uploaded": false
+}
