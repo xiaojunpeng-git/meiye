@@ -22,6 +22,7 @@ use think\facade\Db;
 final class CashierV3EntitlementProjectionServices
 {
     private const MAX_SELECTED_LINES = 50;
+    private const CUSTOM_CARD_SHELL_PRODUCT_ID = 8154;
 
     /** @var CashierV3CashierReadinessGuard */
     private $readiness;
@@ -437,7 +438,7 @@ final class CashierV3EntitlementProjectionServices
         }
 
         $holderQuery = Db::name('user_card_holder')
-            ->field('id,uid,oid,card_name,card_no,store_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
+            ->field('id,uid,oid,card_name,card_no,store_id,product_id,product_type,write_times,write_surplus_times,write_start,write_end,is_del')
             ->where('uid', $memberId)
             ->where('is_del', 0);
         if (!$includeUnavailableCards) {
@@ -546,6 +547,19 @@ final class CashierV3EntitlementProjectionServices
             $carts = $this->rows($cartQuery->order('id asc')->select());
         }
         $cartIds = array_values(array_unique(array_map('intval', array_column($carts, 'id'))));
+        $amountCarts = $carts;
+        if ($validOrderIds) {
+            // Whole-yuan normalization must see every component of the sold
+            // card, including exhausted rows hidden from the selector. Using
+            // only visible rows would move the rounding remainder after use.
+            $amountCarts = $this->rows(Db::name('store_order_cart_info')
+                ->field('id,oid,product_id,cart_info')
+                ->whereIn('oid', $validOrderIds)
+                ->where('cart_type', 2)
+                ->where('product_type', 6)
+                ->order('oid asc,id asc')
+                ->select());
+        }
         $reservations = [];
         // Reservations are deliberately not part of the cashier authority.
         // The displayed and settleable amount is the current card balance.
@@ -578,9 +592,9 @@ final class CashierV3EntitlementProjectionServices
             'carts' => $carts,
             'reservations' => $reservations,
             'debts' => $debts,
-            'actualSaleAmounts' => (new CashierV3CardSaleActualAmountServices())->forOrders(
-                $validOrderIds,
-                $carts
+            'actualSaleAmounts' => (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders(
+                $orders,
+                $amountCarts
             ),
         ];
     }
@@ -695,6 +709,21 @@ final class CashierV3EntitlementProjectionServices
         $holdersByOrder = [];
         foreach ($snapshot['holders'] as $holder) {
             $holdersByOrder[(int)$holder['oid']] = $holder;
+        }
+        // 已售定制卡的 holder.product_id 指向专用隐藏壳；按商品 ID 批量核对
+        // 壳的来源，不能仅凭卡名、有效期或次数猜测，以免同名普通卡被误标。
+        $customCardProductIds = [];
+        $holderProductIds = array_values(array_unique(array_filter(array_map(static function (array $holder): int {
+            return (int)($holder['product_id'] ?? 0);
+        }, $snapshot['holders']))));
+        if ($holderProductIds) {
+            foreach ($this->rows(Db::name('store_product')->field('id,pid')
+                ->whereIn('id', $holderProductIds)->select()) as $product) {
+                if ((int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
+                    || (int)$product['pid'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID) {
+                    $customCardProductIds[(int)$product['id']] = true;
+                }
+            }
         }
         $debts = [];
         foreach ($snapshot['debts'] as $debt) {
@@ -1072,6 +1101,7 @@ final class CashierV3EntitlementProjectionServices
                 'sourceType' => 'card_holder',
                 'sourceKind' => $kind['code'],
                 'sourceKindLabel' => $kind['label'],
+                'isCustomCard' => isset($customCardProductIds[(int)($holder['product_id'] ?? 0)]),
                 'name' => trim((string)$holder['card_name']) !== '' ? (string)$holder['card_name'] : '会员卡项',
                 'fullCardNo' => (string)$holder['card_no'],
                 'reference' => (string)$holder['card_no'],

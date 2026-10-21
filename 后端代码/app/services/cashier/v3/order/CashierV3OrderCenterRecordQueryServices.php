@@ -535,11 +535,17 @@ final class CashierV3OrderCenterRecordQueryServices
         if ($repaymentIds !== []) {
             $payments = Db::name('cashier_v3_debt_repayment_collection')
                 ->whereIn('repayment_id', $repaymentIds)
-                ->field('repayment_id,payment_line_no,payment_method')
+                ->field('repayment_id,payment_line_no,payment_method,amount_cents')
                 ->order('repayment_id', 'asc')->order('payment_line_no', 'asc')->select()->toArray();
             foreach ($payments as $payment) {
                 $repaymentId = (string)($payment['repayment_id'] ?? '');
-                if ($repaymentId !== '') $paymentMethods[$repaymentId][] = $this->paymentLabel((string)($payment['payment_method'] ?? ''));
+                if ($repaymentId !== '') {
+                    $method = (string)($payment['payment_method'] ?? '');
+                    $label = $this->paymentLabel($method);
+                    // List, detail and receipt share this committed tender amount, not current wallet balance.
+                    if ($method === 'member_balance') $label .= ' ¥' . number_format((int)$payment['amount_cents'] / 100, 0, '.', ',');
+                    $paymentMethods[$repaymentId][] = $label;
+                }
             }
         }
 
@@ -2660,6 +2666,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'partner_collection' => '合作方收款',
             'other_collection' => '其他收款',
             'old_card_entry' => '旧数据录入',
+            'member_balance' => '余额支付',
             'bank' => '银联刷卡',
             'yue' => '余额',
             'offline' => '线下记账',

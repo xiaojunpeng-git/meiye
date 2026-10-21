@@ -7,6 +7,7 @@ namespace app\services\cashier\v3\reservation;
 use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault;
 use app\services\cashier\v3\CashierV3TransactionGuard;
+use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
 use app\services\report\CustomerLifecycleFactServices;
@@ -281,20 +282,38 @@ final class CashierV3ReservationCompletionFactServices
         if (!$detail) $detail = Db::name('store_order_cart_info')->where('id', (int)$occupation['entitlement_source_detail_id'])->lock(true)->find();
         if (!$holder) $holder = Db::name('user_card_holder')->where('id', (int)$occupation['card_holder_id'])->lock(true)->find();
         if (!$detail || !$holder) throw new \LogicException('reservation_completion_entitlement_missing');
+        $orderId = (int)($detail['oid'] ?? 0);
+        $order = $orderId > 0 ? Db::name('store_order')->where('id', $orderId)
+            ->field('id,pay_price')->lock(true)->find() : [];
+        $orderCarts = $orderId > 0 ? $this->rows(Db::name('store_order_cart_info')
+            ->where('oid', $orderId)->where('cart_type', 2)->where('product_type', 6)
+            ->field('id,oid,product_id,pay_price,cart_info')->order('id asc')->lock(true)->select()) : [];
+        $normalized = $order
+            ? (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([(array)$order], $orderCarts)
+            : [];
         $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
         $snapshot = is_array($snapshot) ? $snapshot : [];
         $legacy = is_array($snapshot['rh_source'] ?? null) ? $snapshot['rh_source'] : [];
-        $purchase = array_key_exists('source_line_paid_amount', $legacy) ? $legacy['source_line_paid_amount'] : ($detail['pay_price'] ?? '0');
+        $normalizedCents = $normalized[(int)($detail['id'] ?? 0)] ?? null;
+        $purchase = $normalizedCents !== null
+            ? bcdiv((string)$normalizedCents, '100', 2)
+            : (array_key_exists('source_line_paid_amount', $legacy)
+                ? $legacy['source_line_paid_amount'] : ($detail['pay_price'] ?? '0'));
         $purchase = preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', trim((string)$purchase)) ? bcadd((string)$purchase, '0', 2) : '0.00';
+        if ($this->moneyToCents($purchase) % 100 !== 0) {
+            throw new \LogicException('reservation_completion_entitlement_not_whole_yuan');
+        }
         $totalTimes = max(1, (int)($detail['write_times'] ?? $holder['write_times'] ?? 1));
         $remainingBefore = (int)$detail['write_surplus_times'];
         $consumedBefore = max(0, $totalTimes - $remainingBefore);
-        $actual = CashierV3EntitlementActualAmountAllocator::allocateForSnapshot($purchase, $totalTimes, $consumedBefore, $quantity, $snapshot);
-        $centCapable = CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot);
+        // Reservation completion is a new service/writeoff fact. Historic
+        // operation-cent metadata may be displayed for traceability, but it
+        // cannot change the integer allocation used by this writer.
+        $actual = CashierV3EntitlementActualAmountAllocator::allocate($purchase, $totalTimes, $consumedBefore, $quantity);
         return [
             'actualCents' => $this->moneyToCents($actual), 'purchaseCents' => $this->moneyToCents($purchase),
             'totalTimes' => $totalTimes, 'consumedBefore' => $consumedBefore,
-            'calculationVersion' => ($centCapable ? 'operation-cent-' : 'legacy-cart-line-payment-') . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
+            'calculationVersion' => 'legacy-cart-line-payment-' . CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
             'detail' => $detail, 'holder' => $holder,
         ];
     }
@@ -401,6 +420,17 @@ final class CashierV3ReservationCompletionFactServices
     private function moneyToCents(string $amount): int
     {
         return (int)bcmul(bcadd($amount, '0', 2), '100', 0);
+    }
+
+    /** Keep locked cart rows as plain arrays before passing them to the shared whole-yuan allocator. */
+    private function rows($result): array
+    {
+        if (is_object($result) && method_exists($result, 'toArray')) {
+            $result = $result->toArray();
+        }
+        return is_array($result) ? array_values(array_map(static function ($row): array {
+            return (array)$row;
+        }, $result)) : [];
     }
 
     private function json(array $value): string

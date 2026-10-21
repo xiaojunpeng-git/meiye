@@ -7,8 +7,12 @@ use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use think\facade\Db;
 
 /**
- * 任选次数卡的原购买金额属于整卡共享次数池，不属于任一可选项目。
- * 项目销售分摊事实仍用于销售与退款追溯，不能代替服务核销的单次金额。
+ * 任选次数权益的购买金额权威。
+ *
+ * 普通任选卡以整卡成交额作为共享次数池，项目销售分摊事实只用于销售和退款追溯，
+ * 不能直接作为某个可选项目的核销金额。组合卡先把销售分摊权重按整卡成交额归整
+ * 为整数元，再汇总出各组的独立次数池；所有卡项核销都执行整元分摊，尾差只落到
+ * 本次数池最后一次，不能把分金额或其他组的次数带入当前服务。
  */
 final class CashierV3SharedCardPurchaseAmount
 {
@@ -28,8 +32,8 @@ final class CashierV3SharedCardPurchaseAmount
         $paid = trim((string)($order['pay_price'] ?? ''));
         $total = (int)($ruleAuthority['totalTimes'] ?? 0);
         $remaining = (int)($ruleAuthority['remainingTimes'] ?? -1);
-        // 整元核销必须能完整分摊原购买金额；异常历史卡不能静默改成
-        // 项目目录价、四舍五入后的购买价或按分计价。
+        // 所有卡项核销都必须是整数元。组合卡只用销售分摊事实确定各组权重，
+        // 随后按整卡实付归整；异常历史卡不能改用目录价或按分进入核销。
         $combination = (string)($ruleAuthority['cardRuleType'] ?? '') === 'combination';
         if (preg_match($combination ? '/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D'
             : '/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $paid) !== 1
@@ -47,9 +51,7 @@ final class CashierV3SharedCardPurchaseAmount
         if (!is_int($removed) || $removed < 0 || $removed > $total - $remaining) {
             return null;
         }
-        $snapshot['amountCalculationVersion'] = $combination && $groupCents % 100 !== 0
-            ? 'operation-cent-combination-group-v1'
-            : CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
+        $snapshot['amountCalculationVersion'] = CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION;
         try {
             $remainingAmount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
                 $purchaseAmount, $total, $total - $remaining, $snapshot
@@ -63,15 +65,14 @@ final class CashierV3SharedCardPurchaseAmount
             'totalPurchaseTimes' => $total,
             // 退款扣减的是未来可用次数，不可推进服务单价的末次尾差。
             'consumedTimesAtSelection' => $total - $remaining - $removed,
-            'calculationVersion' => $combination && $groupCents % 100 !== 0
-                ? 'shared-card-purchase-amount-operation-cent-combination-group-v1'
-                : self::CALCULATION_VERSION,
+            'calculationVersion' => self::CALCULATION_VERSION,
         ];
     }
 
     /**
-     * 组金额取原销售已落账的项目分摊事实，逐项合计并与整卡成交额对账；
-     * 不能改用当前商品价格或在核销时重新分摊已售卡。
+     * 组金额以原销售分摊事实为权重，先按整卡实付归整到整数元后再逐项合计。
+     * 返回的是组共享次数池总额，不是任一项目的单次核销额；单次金额仍由组总额、
+     * 组总次数和已核销次数确定，不能改用当前商品价格或保留分金额进入核销。
      */
     private static function combinationGroupActualCents(array $order, int $targetNo): ?int
     {
@@ -80,7 +81,7 @@ final class CashierV3SharedCardPurchaseAmount
         $carts = Db::name('store_order_cart_info')->where('oid', $orderId)
             ->where('cart_type', 2)->field('id,oid,product_id,cart_info')->order('id asc')->select()->toArray();
         if (!$carts) return null;
-        $amounts = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], $carts);
+        $amounts = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$order], $carts);
         $total = 0;
         $groupTotal = 0;
         foreach ($carts as $cart) {
