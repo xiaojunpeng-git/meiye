@@ -1,0 +1,91 @@
+{
+  "task": "M008-R8-LAYOUT-RELEASE",
+  "stage": "rh-pass-awaiting-push-and-008",
+  "preflight": {
+    "task": "M008-R8-LAYOUT-RELEASE",
+    "commit": "d728656bcda854555f905dd95d896b902f601fdf",
+    "baseline": "25c11527",
+    "inputFiles": 915,
+    "changedMemberSource": [
+      "前端代码/uniapp/components/pageFooter/index.vue",
+      "前端代码/uniapp/pages/index/components/staffList.vue"
+    ],
+    "parsedScripts": 262,
+    "environment": "same-origin H5",
+    "originalIndexSha256": "67ed95909d90c15de9f0d1b8e291ff6f42ce3a2cd4bb9195047c0de4063caf80",
+    "acceptedPatch": "cea4387a",
+    "scope": "static member H5 only; no database writes, mini uploads or protected frontend changes"
+  },
+  "payload": {
+    "commit": "d728656bcda854555f905dd95d896b902f601fdf",
+    "fileCount": 263,
+    "fullFileCount": 504,
+    "archiveSha256": "f0e5ad245f1e0399569122d8adc8345d733659c6e54e16e54996dc8ebcebd9d8",
+    "installerSha256": "a7ef25557205e11bfd982650795e8f5ea460b12cf5307fecb097ab08532404cd"
+  },
+  "rh": {
+    "instance": "rh",
+    "result": "PASS",
+    "commit": "d728656bcda854555f905dd95d896b902f601fdf",
+    "filesVerified": 504,
+    "installedFiles": 263,
+    "databaseWrites": 0,
+    "environmentUnchanged": true,
+    "decorationUnchanged": true,
+    "adminUnchanged": true,
+    "cashierAndPreviewUnchanged": true,
+    "publicEntries": {
+      "member": {
+        "sha256": "7806087b71e3e59275634c1ee23cb75c5bacf62dd20ffcf255c162453c79f9e0",
+        "assets": {
+          "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+          "/static/js/chunk-vendors.b04d2089.js": "8726116bbcfbab92de5011281167e477691760b24ed3359b9b67984df9a59221",
+          "/static/js/index.7b71240e.js": "7443c145cc7635f0fa985ca6e5d596f3e376be66de6e0cb0d5a4ef7c4bdf0735"
+        }
+      },
+      "admin": {
+        "sha256": "d1cc760960ab56ce7e7da53cddc07f5c0c3654a94352f5a385525216b10dc323",
+        "assets": {
+          "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+          "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+          "/view_admin/js/chunk-vendors.b7d3033a.js": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+          "/view_admin/js/app.6d572966.js": "a0f6d35a4a5f4a9536f2972350591051b4d68eed0ce14cecad52a670ca729007"
+        }
+      },
+      "cashier": {
+        "sha256": "1636362cc6dba91baddec1c33fc0e075b25dbe49b898dac961fd2c74414fb222",
+        "assets": {
+          "/view_cashier_v3/assets/index-35dd983d.js": "99ccd08fd0ebb3accf4d5599cb1179c7d0713f578119299eec9064aca6f46409",
+          "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+        }
+      },
+      "cashier_preview": {
+        "sha256": "1469409dab2dd06d6eb0468ebb40ae112f31d9adcc2d8086f7d655cfa1c79415",
+        "assets": {
+          "/preview-8080/view_cashier_v3/assets/index-35dd983d.js": "99ccd08fd0ebb3accf4d5599cb1179c7d0713f578119299eec9064aca6f46409",
+          "/preview-8080/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+        }
+      }
+    },
+    "checkedAt": "2026-10-21T07:07:56.835Z"
+  },
+  "rhBrowser": {
+    "result": "PASS",
+    "footer": {
+      "bottom": 667.3333740234375,
+      "buttons": [
+        "首页",
+        "柒粉",
+        "门店",
+        "购物车",
+        "我的"
+      ],
+      "height": 54,
+      "spacer": 54
+    },
+    "myServicesCount": 14,
+    "homeToMyAndBack": true,
+    "staffWidgetConfigured": false,
+    "ordersSubmitted": false
+  }
+}
