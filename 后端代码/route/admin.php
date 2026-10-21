@@ -1650,6 +1650,7 @@ Route::group('adminapi', function () {
         Route::post('scheme/lines', 'v1.target.StoreTarget/schemeLines')->option(['real_name' => '保存目标方案明细']);
         Route::post('scheme/activate', 'v1.target.StoreTarget/schemeActivate')->option(['real_name' => '启用目标方案']);
         Route::post('scheme/void', 'v1.target.StoreTarget/schemeVoid')->option(['real_name' => '作废目标方案']);
+        Route::post('scheme/delete', 'v1.target.StoreTarget/schemeDelete')->option(['real_name' => '删除已作废目标方案']);
         Route::get('scheme/report', 'v1.target.StoreTarget/schemeReport')->option(['real_name' => '目标方案分析']);
     })->middleware([
         \app\http\middleware\admin\AdminAuthTokenMiddleware::class,
