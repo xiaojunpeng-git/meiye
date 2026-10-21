@@ -73,8 +73,10 @@ assert.match(memberComponent, /pages\/users\/user_card_list\/index/);
 assert.match(memberComponent, /pages\/activity\/therapist_list\/index/);
 assert.match(memberComponent, /selectedPositionIds/);
 assert.match(memberComponent, /position_ids:/);
-assert.match(therapistList, /this\.positionIds = String\(options\.position_ids/);
-assert.match(therapistList, /position_ids: this\.positionIds\.join\(','\)/);
+assert.doesNotMatch(memberComponent, /positionQuery/);
+assert.match(memberComponent, /therapist_list\/index\?store_id=\$\{this\.currentStoreId\}/);
+assert.doesNotMatch(therapistList, /position_ids:/);
+assert.match(therapistList, /store_id: this\.storeId/);
 assert.doesNotMatch(memberComponent, /belong\/staff/);
 
 console.log('diy staff component static contract: PASS');

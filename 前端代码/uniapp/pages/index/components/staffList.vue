@@ -161,11 +161,9 @@
 			},
 			goMore() {
 				if (!this.currentStoreId) return;
-				const positionQuery = this.selectedPositionIds.length
-					? `&position_ids=${encodeURIComponent(this.selectedPositionIds.join(','))}`
-					: '';
+				// 控件岗位仅限制首页展示；通用列表由门店决定员工范围。
 				uni.navigateTo({
-					url: `/pages/activity/therapist_list/index?store_id=${this.currentStoreId}${positionQuery}`
+					url: `/pages/activity/therapist_list/index?store_id=${this.currentStoreId}`
 				});
 			},
 			goBooking(staff) {
