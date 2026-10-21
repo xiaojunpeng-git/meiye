@@ -9,6 +9,8 @@ use app\services\cashier\v3\CashierV3CommandException;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver;
+use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
+use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\service\ThinkPhpCashierV3ServiceOrderRepository;
 use app\services\order\store\WriteOffOrderServices;
 use app\services\store\StoreReservationStaffServices;
@@ -367,17 +369,37 @@ final class CashierV3ReservationLifecycleServices
         $settledOccupations = [];
         $debtBlockedOccupationIds = [];
         $insufficientEntitlements = $candidateResult['unavailable'];
+        $poolRemaining = [];
+        $usableConsumed = [];
+        $ruleDeductions = [];
         foreach ($candidates as $candidate) {
             $candidateId = (int)$candidate['id'];
             $detailId = (int)$candidate['entitlement_source_detail_id'];
             $holderId = (int)$candidate['card_holder_id'];
             $quantity = max(1, (int)$candidate['occupied_times']);
             $available = min((int)($detailRemain[$detailId] ?? 0), (int)($holderRemain[$holderId] ?? 0));
+            $rule = $candidate['ruleAuthoritySnapshot'] ?? null;
+            $poolKey = null;
+            if (is_array($rule)) {
+                // 同卡不同项目共享一份次数，组合卡则按组独立计数。后续行只可
+                // 使用本事务尚未分配的余次，不能把每个候选行都当成完整共享池。
+                $poolKey = $holderId . ':' . ((string)$rule['ruleType'] === 'choice_count'
+                    ? 'group:' . (int)$rule['combinationGroupNo'] : 'detail:' . $detailId);
+                if (!isset($poolRemaining[$poolKey])) $poolRemaining[$poolKey] = (int)$rule['remainingTimes'];
+                $available = min($available, $poolRemaining[$poolKey]);
+                $candidate['ruleAuthoritySnapshot']['remainingTimes'] = $poolRemaining[$poolKey];
+            }
             if ($available < $quantity) {
                 $insufficientEntitlements[] = $this->insufficientSnapshot($candidate, $available);
                 continue;
             }
-            $debtLimitedAvailable = min($available, (int)($debtLimitedAvailability[$candidateId] ?? $available));
+            // 欠款折算出的可用额度同样只能分配一次，不能让同池后续行重复
+            // 使用首行读取的额度；物理池不足与欠款不足分别保留原业务结果。
+            $usableKey = !empty($candidate['independentAmount'])
+                ? 'legacy-detail:' . $detailId : ($poolKey ?? 'legacy-detail:' . $detailId);
+            $debtLimitedAvailable = min($available, max(0,
+                (int)($debtLimitedAvailability[$candidateId] ?? $available) - ($usableConsumed[$usableKey] ?? 0)
+            ));
             if ($debtLimitedAvailable < $quantity) {
                 $debtBlockedOccupationIds[$candidateId] = true;
                 continue;
@@ -385,9 +407,35 @@ final class CashierV3ReservationLifecycleServices
             $candidate['detailSnapshot']['write_surplus_times'] = (int)$detailRemain[$detailId];
             $candidate['holderSnapshot']['write_surplus_times'] = (int)$holderRemain[$holderId];
             $settledOccupations[] = $candidate;
-            $detailRemain[$detailId] -= $quantity;
-            $holderRemain[$holderId] -= $quantity;
+            $usableConsumed[$usableKey] = ($usableConsumed[$usableKey] ?? 0) + $quantity;
+            // 时间卡从不扣兼容投影次数，和直接收银、服务作废保持对称。
+            if (!is_array($rule) || empty($rule['unlimited'])) {
+                $detailRemain[$detailId] -= $quantity;
+                $holderRemain[$holderId] -= $quantity;
+                if ($poolKey !== null) $poolRemaining[$poolKey] -= $quantity;
+            }
+            if (is_array($rule)) {
+                if (!isset($ruleDeductions[$detailId])) {
+                    $ruleDeductions[$detailId] = [
+                        'holder_id' => $holderId, 'source_detail_id' => $detailId,
+                        'project_id' => (int)$candidate['detailSnapshot']['product_id'],
+                        'deduct_physical_times' => 0,
+                        'expected_physical_remaining_times' => !empty($candidate['independentAmount'])
+                            ? (int)$candidateResult['details'][$detailId]['write_surplus_times']
+                            : (int)$rule['remainingTimes'],
+                    ];
+                }
+                $ruleDeductions[$detailId]['deduct_physical_times'] += $quantity;
+            }
         }
+        // 规则状态、旧兼容投影和不可变核销事实必须在原命令事务内一起成功。
+        // 复用收银权威扣减器的锁、有效期、任选种数、共享上限及版本检查。
+        if ($ruleDeductions) (new CashierV3CardRuleEntitlementAuthorityServices())->applyDeductionsInTx(
+            array_values($ruleDeductions), [
+                'tenant_id' => $tenantId, 'store_id' => (int)$header['store_id'],
+                'member_id' => (int)$header['member_id'], 'occurred_at' => $now,
+            ]
+        );
         $facts = (new CashierV3ReservationCompletionFactServices())->persistInTx($header, $lines, $settledOccupations, $execution, $now);
         foreach ($candidateResult['details'] as $detailId => $detail) {
             if (!array_key_exists($detailId, $detailRemain)) continue;
@@ -450,6 +498,13 @@ final class CashierV3ReservationLifecycleServices
         $detailById = [];
         foreach ($details as $detail) $detailById[(int)$detail['id']] = $detail;
 
+        // 先锁持卡记录，再按稳定顺序锁已签发规则；旧卡无规则状态时保留原路径。
+        $rulesByHolder = [];
+        $cardRules = new CashierV3CardRuleEntitlementAuthorityServices();
+        foreach ($holders as $holder) $rulesByHolder[(int)$holder['id']] = $cardRules->authoritiesForHolder(
+            (string)$header['tenant_id'], (int)$holder['id'], true
+        );
+
         $candidates = []; $unavailable = []; $detailRemain = []; $holderRemain = []; $detailMap = []; $holderMap = [];
         foreach ($entitlementLines as $line) {
             $lineId = (int)($line['id'] ?? 0); $detailId = (int)($line['entitlement_source_detail_id'] ?? 0);
@@ -460,12 +515,28 @@ final class CashierV3ReservationLifecycleServices
                 continue;
             }
             $holderId = (int)$holder['id'];
+            $rule = $rulesByHolder[$holderId][$detailId] ?? null;
+            if (($rulesByHolder[$holderId] && !is_array($rule))
+                || (is_array($rule) && ((string)$rule['stateStatus'] !== 'active' || empty($rule['choiceAvailable'])))) {
+                $unavailable[] = $this->insufficientSnapshot([
+                    'reservation_line_id' => $lineId, 'entitlement_source_detail_id' => $detailId,
+                    'card_holder_id' => $holderId, 'holderSnapshot' => $holder,
+                    'projectName' => (string)$line['project_name_snapshot'], 'occupied_times' => $quantity,
+                ], 0);
+                continue;
+            }
+            $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
+            $independent = CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot(
+                is_array($snapshot) ? $snapshot : []
+            );
             $detailRemain[$detailId] = (int)$detail['write_surplus_times'];
             $holderRemain[$holderId] = (int)$holder['write_surplus_times'];
             $detailMap[$detailId] = $detail; $holderMap[$holderId] = $holder;
             $candidates[] = ['id' => $lineId, 'reservation_line_id' => $lineId, 'entitlement_source_detail_id' => $detailId,
-                'card_holder_id' => $holderId, 'occupied_times' => $quantity, 'status' => 'DIRECT_CHECK', 'version' => 1,
+                'card_holder_id' => $holderId, 'occupied_times' => $quantity, 'status' => 'DIRECT_CHECK',
+                'version' => is_array($rule) ? (int)$rule['stateVersion'] : 1,
                 'projectName' => trim((string)($line['project_name_snapshot'] ?? '')) ?: '预约项目',
+                'ruleAuthoritySnapshot' => $rule, 'independentAmount' => $independent,
                 'detailSnapshot' => $detail, 'holderSnapshot' => $holder];
         }
         return ['candidates' => $candidates, 'details' => $detailMap, 'holders' => $holderMap,

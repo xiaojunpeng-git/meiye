@@ -1,0 +1,14 @@
+{
+  "head": "35e4554f0991b4dcd6b897621611f19bf6a516e2",
+  "files": {
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php": "c2c1e069b1b84294a7d683afb929ef24beb3e8cef912fc8d22af72894832e8ea",
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php": "2f7faefab971a39904cc3ad760a04b5e70f74dd737e0c881ce68e81e7ff41d87",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": "c06d869776a668871a15f8963f537608706aacb68af61c104654a9c20380653f",
+    "tests/cashier-v3/php/r24-reservation-shared-pool-mysql.php": "6ffe53b724e1e175561441e8548a4d5a72c09a27d73095d185d567d0ee8d327f",
+    "scripts/r24-reservation-shared-pool-audit.php": "6c75adb0143480ec7bae460d8167e5cef4443781110f81e73f7dc59c1974f3f8"
+  },
+  "patch_sha256": "0f195c06f9342eac953a3e2625a8fea3116e6106e3e2afc2d4727a4d66438f0e",
+  "acceptance": "awaiting product manager",
+  "deployment": "not performed",
+  "production_data_changes": "none"
+}

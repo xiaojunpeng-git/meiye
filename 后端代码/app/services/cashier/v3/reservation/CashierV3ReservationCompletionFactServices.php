@@ -8,7 +8,9 @@ use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
 use app\services\cashier\v3\CashierV3CraftsmanPerformanceDefault;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
+use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
+use app\services\cashier\v3\cashier\CashierV3SharedCardPurchaseAmount;
 use app\services\cashier\v3\checkout\CashierV3EntitlementCompletionKernel;
 use app\services\report\CustomerLifecycleFactServices;
 use app\services\report\StoreReportServiceCategorySnapshotServices;
@@ -71,7 +73,7 @@ final class CashierV3ReservationCompletionFactServices
             (string)($line['artisan_staff_ids_json'] ?? '[]'),
             (array)($line['point_customer_staff_ids'] ?? [])
         );
-        $amount = $occupation ? $this->entitlementAmount($occupation, $quantity) : [
+        $amount = $occupation ? $this->entitlementAmount($occupation, $quantity, $tenantId) : [
             'actualCents' => 0, 'purchaseCents' => 0, 'totalTimes' => 0,
             'consumedBefore' => 0, 'calculationVersion' => CashierV3EntitlementActualAmountAllocator::CALCULATION_VERSION,
             'detail' => [], 'holder' => [],
@@ -195,6 +197,8 @@ final class CashierV3ReservationCompletionFactServices
                     'reservationOccupationId' => (int)$occupation['id'],
                     'status' => (string)$occupation['status'],
                     'occupiedTimes' => (int)$occupation['occupied_times'],
+                    // 保留本行扣减前的共享池及规则版本，后续改配置不改变核销依据。
+                    'issuedCardRule' => $occupation['ruleAuthoritySnapshot'] ?? null,
                 ]),
                 'status' => 'effective',
             ]);
@@ -272,7 +276,7 @@ final class CashierV3ReservationCompletionFactServices
         $this->insertImmutable('cashier_v3_performance_fact', 'natural_key', $natural, $row);
     }
 
-    private function entitlementAmount(array $occupation, int $quantity): array
+    private function entitlementAmount(array $occupation, int $quantity, string $tenantId = '0'): array
     {
         // Reservation completion supplies the exact, already locked live
         // snapshot from its own authority check.  This preserves the amount
@@ -285,14 +289,47 @@ final class CashierV3ReservationCompletionFactServices
         $orderId = (int)($detail['oid'] ?? 0);
         $order = $orderId > 0 ? Db::name('store_order')->where('id', $orderId)
             ->field('id,pay_price')->lock(true)->find() : [];
+        $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        // 使用扣次前锁定的规则快照。共享池按预约行顺序推进，不能在扣次后
+        // 重新读取余次，也不能用项目销售分摊额代替整卡/组合组金额。
+        $rule = array_key_exists('ruleAuthoritySnapshot', $occupation)
+            ? $occupation['ruleAuthoritySnapshot']
+            : (new CashierV3CardRuleEntitlementAuthorityServices())->authorityForDetail(
+                $tenantId, (int)$holder['id'], (int)$detail['id'], true
+            );
+        if (is_array($rule) && (string)$rule['ruleType'] === 'choice_count'
+            && !CashierV3EntitlementActualAmountAllocator::usesIndependentAmountSnapshot($snapshot)) {
+            $snapshot['r26RefundedCents'] = 0;
+            $snapshot['r26RefundRemovedTimes'] = 0;
+            foreach ($this->rows(Db::name('cashier_v3_refund_adjustment')
+                ->where('tenant_id', $tenantId)
+                ->where('card_holder_id', (int)$holder['id'])->where('status', 'effective')
+                ->field('refund_amount_cents,times_removed')->lock(true)->select()) as $refund) {
+                $snapshot['r26RefundedCents'] += (int)$refund['refund_amount_cents'];
+                $snapshot['r26RefundRemovedTimes'] += (int)$refund['times_removed'];
+            }
+            $shared = CashierV3SharedCardPurchaseAmount::project((array)$order, $rule, $snapshot);
+            if ($shared === null) throw new \LogicException('reservation_shared_purchase_invalid');
+            $actual = CashierV3EntitlementActualAmountAllocator::allocate(
+                $shared['purchaseAmount'], $shared['totalPurchaseTimes'],
+                $shared['consumedTimesAtSelection'], $quantity
+            );
+            return [
+                'actualCents' => $this->moneyToCents($actual),
+                'purchaseCents' => $this->moneyToCents($shared['purchaseAmount']),
+                'totalTimes' => $shared['totalPurchaseTimes'],
+                'consumedBefore' => $shared['consumedTimesAtSelection'],
+                'calculationVersion' => $shared['calculationVersion'],
+                'detail' => $detail, 'holder' => $holder,
+            ];
+        }
         $orderCarts = $orderId > 0 ? $this->rows(Db::name('store_order_cart_info')
             ->where('oid', $orderId)->where('cart_type', 2)->where('product_type', 6)
             ->field('id,oid,product_id,pay_price,cart_info')->order('id asc')->lock(true)->select()) : [];
         $normalized = $order
             ? (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([(array)$order], $orderCarts)
             : [];
-        $snapshot = json_decode((string)($detail['cart_info'] ?? ''), true);
-        $snapshot = is_array($snapshot) ? $snapshot : [];
         $legacy = is_array($snapshot['rh_source'] ?? null) ? $snapshot['rh_source'] : [];
         $normalizedCents = $normalized[(int)($detail['id'] ?? 0)] ?? null;
         $purchase = $normalizedCents !== null

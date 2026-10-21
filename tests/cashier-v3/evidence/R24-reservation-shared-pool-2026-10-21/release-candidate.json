@@ -1,0 +1,27 @@
+{
+  "parent": "784384438381b8d5e985f0328b7241c1e8a54a36",
+  "business_files": [
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php",
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php"
+  ],
+  "maintenance_and_tests": [
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationSharedPoolRepairServices.php",
+    "后端代码/database/upgrades/2026-10-21-预约共享卡核销纠正/01-执行.php",
+    "tests/cashier-v3/php/r24-reservation-shared-pool-mysql.php",
+    "scripts/r24-reservation-shared-pool-audit.php",
+    "scripts/r24-reservation-release-probe.php"
+  ],
+  "fingerprints": {
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php": "c2c1e069b1b84294a7d683afb929ef24beb3e8cef912fc8d22af72894832e8ea",
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php": "2f7faefab971a39904cc3ad760a04b5e70f74dd737e0c881ce68e81e7ff41d87",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": "c06d869776a668871a15f8963f537608706aacb68af61c104654a9c20380653f",
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationSharedPoolRepairServices.php": "3c1f82510cac9fd43d93e3e8a9a4ddf4643f2e4218cc112a47be6310311cefd6",
+    "后端代码/database/upgrades/2026-10-21-预约共享卡核销纠正/01-执行.php": "72bee43e40c96367d3fd06bb6c4ee8ed63fe81d13dc688accb487a6e7c09f283",
+    "tests/cashier-v3/php/r24-reservation-shared-pool-mysql.php": "2e629d61a5b54b839366778dfef1e5442d28bcf515ee46e2c1537cdf8c72e3bb",
+    "scripts/r24-reservation-shared-pool-audit.php": "6c75adb0143480ec7bae460d8167e5cef4443781110f81e73f7dc59c1974f3f8",
+    "scripts/r24-reservation-release-probe.php": "a7c0d4c4c8c26ef1ac8ffbb9a8ef4f1d36ceda38d040ae071a08074be19a4348"
+  },
+  "acceptance": "Product manager accepted original fixed core; explicitly authorized RH historical repair and deployment/push/008 order",
+  "test_assertions": 20
+}

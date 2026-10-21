@@ -850,6 +850,11 @@ final class CashierV3EntitlementProjectionServices
             if (is_array($ruleAuthority)) {
                 $effective = min($rawSurplus, max(0, (int)$effective));
             }
+            // 未完成历史纠正的共享卡不得因为规则池漏扣而继续出售服务。
+            // 持卡旧投影已为零时整池停用，保留原余次供审计，避免扩大错扣。
+            if ($sharedPurchase) $effective = min($effective, max(0, (int)$holder['write_surplus_times']));
+            // 兼容字段继续表达不可用余次；差额本身不能证明存在待还欠款，
+            // 下方提示必须结合实际来源待还额，不能误导已核销会员去补交。
             $debtBlocked = max(0, $rawSurplus - $effective);
             $reservationOccupied = 0;
             $available = max(0, $effective);
@@ -872,6 +877,9 @@ final class CashierV3EntitlementProjectionServices
                 $reason = $start > $now ? '未到可用时间' : '权益已过期';
             } elseif ($invalidAmount) {
                 $reason = '权益实际金额不完整';
+            } elseif ($sharedPurchase && $rawSurplus === 0
+                && (string)$ruleAuthority['stateStatus'] === 'exhausted') {
+                $reason = '共享次数已用完';
             } elseif (is_array($ruleAuthority) && (string)$ruleAuthority['stateStatus'] !== 'active') {
                 $reason = '卡项当前不可用';
             } elseif (is_array($ruleAuthority) && empty($ruleAuthority['choiceAvailable'])) {
@@ -880,8 +888,11 @@ final class CashierV3EntitlementProjectionServices
                 && bccomp((string)$pendingDebt, '0', 2) > 0) {
                 // 与核销提交读取同一已售卡快照及卡来源待还额，不能以会员总欠款误拦其他卡。
                 $reason = '该卡有欠款，请先结清';
-            } elseif ($available <= 0 && $debtBlocked > 0) {
+            } elseif ($available <= 0 && $debtBlocked > 0 && bccomp((string)$pendingDebt, '0', 2) > 0) {
                 $reason = '欠款限制后暂无可用次数';
+            } elseif ($available <= 0 && ($rawSurplus > max(0, (int)$cart['write_surplus_times'])
+                || ($sharedPurchase && $rawSurplus > max(0, (int)$holder['write_surplus_times'])))) {
+                $reason = '权益次数记录不一致，请联系管理员核对';
             } elseif ($available <= 0) {
                 $reason = '暂无可用次数';
             }
@@ -913,7 +924,8 @@ final class CashierV3EntitlementProjectionServices
                 'occupiedTimes' => $reservationOccupied,
                 'availableTimes' => $available,
                 'debtBlockedTimes' => $debtBlocked,
-                'debtRestrictionLabel' => $debtBlocked > 0 ? sprintf('欠款限制 %d 次', $debtBlocked) : '',
+                'debtRestrictionLabel' => $debtBlocked > 0 && bccomp((string)$pendingDebt, '0', 2) > 0
+                    ? sprintf('欠款限制 %d 次', $debtBlocked) : '',
                 'validThroughLabel' => $validity['label'],
                 'expiryDate' => $this->expiryDate($end),
                 'orderRemark' => trim((string)($order['mark'] ?? '')),

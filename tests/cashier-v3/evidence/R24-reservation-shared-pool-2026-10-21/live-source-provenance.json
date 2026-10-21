@@ -1,0 +1,22 @@
+{
+  "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php": {
+    "commit": "6cbeb37a528d155ad51b38492a6913686830d448",
+    "sha256": "e34ae71a08c755e57b088c2a56c6eff37f417ff0c6511b5cc28f0c6c8947d67d",
+    "blob": "8dd0aca73ff3fcc334d3adc3524418645dabbc1c"
+  },
+  "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": {
+    "commit": "65fd619e813cf52ad80f680670f05f69cd94a7e6",
+    "sha256": "d7f7a7c041f6dcca5daf39710db35bc81c103a0afa2b634fcb32dd5dbb4d3ac6",
+    "blob": "794bae62cd0afd2343d2774d61349bb89b41460f"
+  },
+  "后端代码/app/services/cashier/v3/cashier/CashierV3SharedCardPurchaseAmount.php": {
+    "commit": "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+    "sha256": "aa9c5264c9a9bcb61295a1afa5f22acf276c9d3b2361b2e42ca89ea35eca33b6",
+    "blob": "189a15faad80b21660f2fc2d4392b95646607579"
+  },
+  "后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php": {
+    "commit": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+    "sha256": "ec0cf3238747ecbf6a8fac84a22b81cb7e768713117242bf5184720184998214",
+    "blob": "ab0dd1a2b073bdd3d8443b104b133ab0f6113145"
+  }
+}

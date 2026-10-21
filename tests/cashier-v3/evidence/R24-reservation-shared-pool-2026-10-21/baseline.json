@@ -1,0 +1,9 @@
+{
+  "head": "35e4554f0991b4dcd6b897621611f19bf6a516e2",
+  "files": {
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationLifecycleServices.php": "c2d7dc8b567079053b86fb9ec84f4822c0f38d74e81541ea84fb0519fb930d30",
+    "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationCompletionFactServices.php": "e34ae71a08c755e57b088c2a56c6eff37f417ff0c6511b5cc28f0c6c8947d67d",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": "d7f7a7c041f6dcca5daf39710db35bc81c103a0afa2b634fcb32dd5dbb4d3ac6"
+  },
+  "online_changes": "not applicable: local repair only"
+}

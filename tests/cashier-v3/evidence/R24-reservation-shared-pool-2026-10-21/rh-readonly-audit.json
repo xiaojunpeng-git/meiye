@@ -1,0 +1,30 @@
+{
+  "mode": "read_only",
+  "data_as_of": "2026-10-21T18:59:21+08:00",
+  "database": "ruihao",
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "holder_id": 2079298,
+      "card_no": "6030160",
+      "rule_version": 1,
+      "rule_remaining": 1,
+      "legacy_remaining": 0,
+      "expected_remaining": 0,
+      "written_cents": 2300,
+      "review_flags": [],
+      "followup_service_adjustments": 1,
+      "manual_review_required": true,
+      "facts": [
+        {
+          "writeoff_id": "EWO-fe07fe24b0fe25b83ba5663c4ba938e701d11cba",
+          "document_no": "FW102000795",
+          "source_type": "reservation",
+          "quantity": 1,
+          "written_cents": 2300,
+          "expected_cents": 9900
+        }
+      ]
+    }
+  ]
+}
