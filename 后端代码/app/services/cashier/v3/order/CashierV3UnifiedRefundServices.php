@@ -203,9 +203,9 @@ final class CashierV3UnifiedRefundServices
             || (!$zeroPriceBonusGrant && $balanceCents > (int)$snapshot['usableRemainingAmountCents']))) {
             throw self::fail('本次退款金额或转入余额超过实际剩余金额，请调整后重试。', 'refund_amount_exceeds_remaining');
         }
-        // Rights keep their voucher-funded face value, but a partial refund
-        // cannot turn the non-cash voucher into refundable cash.
-        if (!in_array($mode, ['catalog', 'balance'], true) && !$zeroPriceBonusGrant && $refundCents + $balanceCents
+        // 退款登记与转入赠金是独立事实，不相加占用现金上限；赠金仍受上方剩余权益限制。
+        // 现金退款单独排除原单券抵付和余额支付，不能将非现金结算转成可退现金。
+        if (!in_array($mode, ['catalog', 'balance'], true) && !$zeroPriceBonusGrant && $refundCents
             > (int)($snapshot['cashRefundRemainingCents'] ?? $remaining)) {
             throw self::fail('本次退款超过原单实际支付的可退金额，抵用券不参与退款。', 'refund_coupon_tender_exceeds_cash');
         }
@@ -644,8 +644,6 @@ final class CashierV3UnifiedRefundServices
         }
         $priorRefundCents = (int)Db::name(self::TABLE)->where('tenant_id', $tenantId)
             ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('refund_amount_cents');
-        $priorBalanceCreditCents = (int)Db::name(self::TABLE)->where('tenant_id', $tenantId)
-            ->where('card_holder_id', $holderId)->where('status', 'effective')->sum('balance_credit_cents');
         // New orders freeze how much of this card was paid by stored balance.
         // A manual cash refund must never convert that non-cash tender to cash.
         $balancePaidCents = $receipt && (string)($receipt['sales_order_line_id'] ?? '') !== ''
@@ -653,8 +651,9 @@ final class CashierV3UnifiedRefundServices
                 ->where('tenant_id', $tenantId)
                 ->where('order_line_id', (string)$receipt['sales_order_line_id'])->value('amount_cents')
             : 0;
+        // 历史转入赠金不属于再次退款；现金额度仅扣有效退款，权益消耗另由 usableSum 限制。
         $cashRefundRemainingCents = max(0, $cardPurchaseCents - $cardCouponCents - $balancePaidCents
-            - $priorRefundCents - $priorBalanceCreditCents);
+            - $priorRefundCents);
         $otherCollection = $this->usesOtherCollection($tenantId, $salesOrderId);
         $cashRefundRemainingCents = $otherCollection ? 0 : min($cashRefundRemainingCents, $usableSum);
         $hasZeroPriceRights = $cardPurchaseCents === 0 && (int)$candidate['write_surplus_times'] > 0;
@@ -728,8 +727,8 @@ final class CashierV3UnifiedRefundServices
         }
         $history = Db::name(self::TABLE)->where('tenant_id', $tenantId)->where('source_line_id', $lineId)
             ->where('status', 'effective')->order('id asc')->lock($lock)->select()->toArray();
-        $used = array_sum(array_map(static fn(array $r): int =>
-            (int)$r['refund_amount_cents'] + (int)($r['balance_credit_cents'] ?? 0), $history));
+        // 与 adjustLine 的落账结果一致：只按有效退款扣剩余金额，独立赠金不再重复扣减。
+        $used = array_sum(array_map(static fn(array $r): int => (int)$r['refund_amount_cents'], $history));
         $voided = (bool)array_filter($history, static fn(array $r): bool => (int)$r['void_target'] === 1);
         $remaining = max(0, (int)$line['sale_amount_cents']
             - (int)($line['coupon_payment_cents'] ?? 0) - $used);
