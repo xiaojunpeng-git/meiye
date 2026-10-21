@@ -885,12 +885,9 @@
 		left: 90%;
 	}
 
-	/* 美业主题：保留装修内容与链接，仅替换阅读层级和视觉质感 */
+	/* 背景由当前轮播图片和 bgGradientStyle 的装修配置决定；阅读层样式
+	   不得另加底色、压低图片透明度或覆盖渐变，避免与配置页显示不一致。 */
 	.page_count {
-		background: #fbf7f4;
-
-		.bg-img { opacity: .16; }
-		.bag-gradient { background: linear-gradient(180deg, rgba(251,247,244,.74), rgba(251,247,244,.98)); }
 		.serch-wrapper {
 			.title, .map { color: #5c3d45; }
 			.input, .uninput {

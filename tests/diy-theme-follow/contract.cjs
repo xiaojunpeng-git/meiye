@@ -1,4 +1,5 @@
-// Assert the real computed branches and unchanged non-indicator behavior.
+// Assert indicator behavior and non-background compatibility. The later R8
+// restoration removes only the three obsolete member background overrides.
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const { root, compiler, component, config, paths } = require('./source-harness.cjs');
@@ -24,8 +25,22 @@ for (const [key, file] of Object.entries(paths)) {
   const previous = compiler.parseComponent(execFileSync('git', ['show', baseline + ':' + file], { cwd: root, encoding: 'utf8' }));
   const current = component(key).sfc;
   assert.equal(current.template.content, previous.template.content, 'Template/navigation changed');
-  const styles = sfc => sfc.styles.map(({ content, attrs }) => ({ content, attrs }));
-  assert.deepEqual(styles(current), styles(previous), 'Layout/background styles changed');
+  const styles = sfc => sfc.styles.map(({ content, attrs }) => ({
+    content: content.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim(), attrs
+  }));
+  if (key === 'member') {
+    // All other presentation remains the accepted baseline, including search,
+    // image radius, layout and custom indicator styles. Comments are nonsemantic.
+    for (const declaration of [
+      '\tbackground: #fbf7f4;\n',
+      '\t.bg-img { opacity: .16; }\n',
+      '\t.bag-gradient { background: linear-gradient(180deg, rgba(251,247,244,.74), rgba(251,247,244,.98)); }\n'
+    ]) {
+      assert.equal(previous.styles[0].content.split(declaration).length, 2, 'Background baseline changed');
+      previous.styles[0].content = previous.styles[0].content.replace(declaration, '');
+    }
+  }
+  assert.deepEqual(styles(current), styles(previous), 'Unrelated layout or styles changed');
   if (key === 'preview') assert.equal(current.script.content, previous.script.content);
   else {
     const oldScript = previous.script.content;
@@ -45,4 +60,4 @@ member.options.methods.swiperChange.call(ctx, { detail: { current: 1, source: 't
 assert.equal(ctx.swiperCur, 1);
 assert.equal(member.options.computed.progressValue.call({ swiperCur: 1, dataConfig: config() }).width, `${2 / 3 * 100}%`);
 assert(preview.sfc.template.content.includes('colorStyle.theme'));
-console.log('PASS: 4 indicators; numeric/string modes; legacy theme fallback; custom colors; saved JSON; unchanged templates/styles/non-color logic; slide navigation/progress.');
+console.log('PASS: 4 indicators; numeric/string modes; legacy theme fallback; custom colors; saved JSON; only three allowed background overrides removed; unchanged templates/scripts/other styles; slide navigation/progress.');
