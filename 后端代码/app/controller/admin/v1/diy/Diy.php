@@ -581,6 +581,12 @@ class Diy extends AuthController
      */
     public function colorChange($status, $type)
     {
+        // Theme configuration may be absent on a new instance. Its dedicated
+        // command creates only that scalar setting; category templates stay unchanged.
+        if ((string)$type === 'color_change') {
+            $this->services->saveThemeColor($status);
+            return $this->success('设置成功');
+        }
         if (!$status) return app('json')->fail('参数错误');
         $info = $this->services->get(['template_name' => $type, 'type' => 3]);
         if ($info) {

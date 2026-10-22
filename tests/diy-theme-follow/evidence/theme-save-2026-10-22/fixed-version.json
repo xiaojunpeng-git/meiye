@@ -1,0 +1,156 @@
+{
+  "task": "M008-EMERG-R2-THEME-SAVE",
+  "startedBaseline": "f97660fb5cbcf4e43da31dcaee7da8721a6554a8",
+  "baseline": "d07c5a624b8aa0dc4668e43d2db7506ad5b02af2",
+  "baselineDrift": "Other task commits advanced HEAD; affected backend/frontend baseline content unchanged",
+  "patchSha256": "0a99b5ed0be162b33e0ebcbe904ae60e053334043eab2c03a42c25f7fda64298",
+  "files": [
+    {
+      "file": "后端代码/app/controller/admin/v1/diy/Diy.php",
+      "sha256": "5cf9fdaa72ef3d5055967bba74326848787e6ff8ffb0a363188bfda55172bccd",
+      "group": "backend"
+    },
+    {
+      "file": "后端代码/app/services/diy/DiyServices.php",
+      "sha256": "e9aecf33ceb9a7d1a9223cb6c665ba4e99b1a1c920413959e2cef05755194c2a",
+      "group": "backend"
+    },
+    {
+      "file": "tests/diy-theme-follow/save-mysql.php",
+      "sha256": "28f7188835c990d293df5548bbbafc295ec07afc90516f8123bf21a1a164d803",
+      "group": "test"
+    },
+    {
+      "file": "tests/diy-theme-follow/saved-theme-browser.cjs",
+      "sha256": "641729f027835a5cdb297f192cc2c5762c1879ba00c693fe95e7c53c633d365e",
+      "group": "test"
+    }
+  ],
+  "frontend": [],
+  "migrations": [],
+  "engineeringScripts": [],
+  "productionDiagnosis": {
+    "instance": "008",
+    "themeRows": 0,
+    "publicThemeStatus": 0,
+    "renderedTheme": "#e93323",
+    "productionWrites": 0
+  },
+  "validation": {
+    "phpLint": "PASS",
+    "mysql": "PASS theme first/repeat/save-refresh; all palettes; invalid values; SQL rollback; cache refresh; document isolation; duplicate rejection; lock cleanup/contention; category compatibility",
+    "browser": {
+      "result": "PASS",
+      "source": "Local MySQL save -> actual public controller response -> compiled App.vue -> booking button",
+      "productionConfigurationWrites": 0,
+      "cases": [
+        {
+          "width": 375,
+          "theme": "#7B2941",
+          "background": "rgb(123, 41, 65)",
+          "backgroundImage": "none",
+          "left": 240,
+          "right": 350
+        },
+        {
+          "width": 320,
+          "theme": "#7B2941",
+          "background": "rgb(123, 41, 65)",
+          "backgroundImage": "none",
+          "left": 206,
+          "right": 299
+        }
+      ],
+      "requests": [
+        {
+          "path": "/api/wechat/get_logo",
+          "method": "GET"
+        },
+        {
+          "path": "/api/get_copyright",
+          "method": "GET"
+        },
+        {
+          "path": "/api/v2/diy/color_change/color_change",
+          "method": "GET"
+        },
+        {
+          "path": "/api/v2/diy/product_detail",
+          "method": "GET"
+        },
+        {
+          "path": "/api/agent/brokerage",
+          "method": "GET"
+        },
+        {
+          "path": "/api/get_script",
+          "method": "GET"
+        },
+        {
+          "path": "/api/store/list",
+          "method": "GET"
+        },
+        {
+          "path": "/api/reservation/staff/list",
+          "method": "GET"
+        },
+        {
+          "path": "/api/navigation",
+          "method": "GET"
+        },
+        {
+          "path": "/api/wechat/get_logo",
+          "method": "GET"
+        },
+        {
+          "path": "/api/get_copyright",
+          "method": "GET"
+        },
+        {
+          "path": "/api/v2/diy/color_change/color_change",
+          "method": "GET"
+        },
+        {
+          "path": "/api/v2/diy/product_detail",
+          "method": "GET"
+        },
+        {
+          "path": "/api/get_script",
+          "method": "GET"
+        },
+        {
+          "path": "/api/agent/brokerage",
+          "method": "GET"
+        },
+        {
+          "path": "/api/store/list",
+          "method": "GET"
+        },
+        {
+          "path": "/api/reservation/staff/list",
+          "method": "GET"
+        },
+        {
+          "path": "/api/navigation",
+          "method": "GET"
+        }
+      ],
+      "warnings": []
+    },
+    "memberCenterRegression": "PASS real local service/controller + editor regression"
+  },
+  "frontendBuild": {
+    "commit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+    "sourceTree": "050edfa9f06ef1e429e5dd891acce12ed21285b1",
+    "sourceUnchanged": true
+  },
+  "status": "SELF_TEST_PASS_AWAITING_PM_ACCEPTANCE",
+  "boundaries": {
+    "committed": false,
+    "pushed": false,
+    "deployed": false,
+    "productionThemeSaved": false,
+    "miniUploaded": false
+  },
+  "recordedAt": "2026-10-22T04:45:14.576Z"
+}

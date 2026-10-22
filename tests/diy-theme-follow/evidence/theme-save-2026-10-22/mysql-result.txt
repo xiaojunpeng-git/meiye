@@ -1,0 +1,1 @@
+PASS theme first/repeat/save-refresh; all palettes; invalid values; SQL rollback; cache refresh; document isolation; duplicate rejection; lock cleanup/contention; category compatibility

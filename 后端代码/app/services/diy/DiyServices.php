@@ -464,6 +464,59 @@ class DiyServices extends BaseServices
     }
 
     /**
+     * Persist one supported system palette, including an instance's first save.
+     * The DIY scalar is authoritative; never synthesize or overwrite page JSON.
+     */
+    public function saveThemeColor($status): void
+    {
+        if ((!is_int($status) && !is_string($status)) || !preg_match('/^[1-7]$/D', (string)$status)) {
+            throw new AdminException('请选择有效的主题风格');
+        }
+        $connection = \think\facade\Db::connect();
+        $database = $connection->query('SELECT DATABASE() AS db')[0]['db'];
+        // No unique key exists for this legacy document table. A database-scoped
+        // connection lock serializes first creation and cache invalidation together.
+        $lockName = 'diy_theme_' . substr(hash('sha256', (string)$database), 0, 40);
+        $locked = $connection->query('SELECT GET_LOCK(?, 10) AS acquired', [$lockName]);
+        if ((int)($locked[0]['acquired'] ?? 0) !== 1) {
+            throw new AdminException('主题配置正在保存，请稍后重试');
+        }
+        try {
+            $this->transaction(function () use ($status) {
+                $where = ['template_name' => 'color_change', 'type' => 3];
+                if ($this->dao->getCount($where) > 1) {
+                    throw new AdminException('主题配置存在重复记录，请联系管理员处理');
+                }
+                $info = $this->dao->get($where);
+                $data = ['value' => (string)$status, 'update_time' => time()];
+                if ($info) {
+                    if (!$this->dao->update($info['id'], $data)) {
+                        throw new AdminException('主题保存失败');
+                    }
+                } elseif (!$this->dao->save($data + [
+                    'name' => '主题风格', 'title' => '主题换色',
+                    'template_name' => 'color_change', 'type' => 3, 'add_time' => time(),
+                ])) {
+                    throw new AdminException('主题保存失败');
+                }
+            });
+            // Invalidate only after commit. A retry reads the saved scalar rather
+            // than publishing an uncommitted value or an older writer's cache.
+            $this->dao->cacheStrDel('color_change_color_change_3');
+            event('diy.update');
+        } finally {
+            try {
+                $released = $connection->query('SELECT RELEASE_LOCK(?) AS released', [$lockName]);
+                if ((int)($released[0]['released'] ?? 0) !== 1) $connection->close();
+            } catch (\Throwable $error) {
+                // Discard a pooled connection if its advisory lock cannot be released.
+                $connection->close();
+                \think\facade\Log::error('Theme lock release failed: ' . $error->getMessage());
+            }
+        }
+    }
+
+    /**
      * 取单个diy小程序预览二维码
      * @param int $id
      * @return string

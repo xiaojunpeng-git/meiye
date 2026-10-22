@@ -1,0 +1,98 @@
+{
+  "result": "PASS",
+  "source": "Local MySQL save -> actual public controller response -> compiled App.vue -> booking button",
+  "productionConfigurationWrites": 0,
+  "cases": [
+    {
+      "width": 375,
+      "theme": "#7B2941",
+      "background": "rgb(123, 41, 65)",
+      "backgroundImage": "none",
+      "left": 240,
+      "right": 350
+    },
+    {
+      "width": 320,
+      "theme": "#7B2941",
+      "background": "rgb(123, 41, 65)",
+      "backgroundImage": "none",
+      "left": 206,
+      "right": 299
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/store/list",
+      "method": "GET"
+    },
+    {
+      "path": "/api/reservation/staff/list",
+      "method": "GET"
+    },
+    {
+      "path": "/api/navigation",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/store/list",
+      "method": "GET"
+    },
+    {
+      "path": "/api/reservation/staff/list",
+      "method": "GET"
+    },
+    {
+      "path": "/api/navigation",
+      "method": "GET"
+    }
+  ],
+  "warnings": []
+}
