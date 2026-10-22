@@ -1,0 +1,32 @@
+PASS CPU-00A three cards absorb the integer-yuan coupon tail on the final issue
+PASS CPU-00B four-card allocation preserves the screenshot settlement total
+PASS CPU-00B2 V3 receipt freezes tender without reusing legacy discount fields
+PASS CPU-00C tiny amounts never create a negative card sale
+PASS CPU-00D whole-yuan allocations reconcile without fractional amounts
+PASS CPU-00E fractional-yuan source amounts fail without rounding the sale
+PASS CPU-00F card debt remains an exact whole-line authority without divisibility requirements
+PASS CPU-01 duration validity is issued from trusted settlement time
+PASS CPU-02 fixed validity never drifts to checkout time
+PASS CPU-02A custom-card fixed end activates at successful settlement time
+PASS CPU-03 invalid duration fails closed
+PASS CPU-04 receipt is idempotent per formal sales line and issued unit
+PASS CPU-05 formal checkout signs cards before terminal facts are exposed
+PASS CPU-06 inventory ignores cards and non-stock projects but rejects unsupported sale types
+PASS CPU-07 final card issue locks identity without replaying catalogue version or price
+PASS CPU-08 holder and each project benefit receive a projected version
+PASS CPU-09 custom-card issuance settles immutable configuration and honours delayed activation
+PASS CPU-10 custom-card workspace comes from the locked checkout request
+PASS CPU-11 new configured cards persist immutable rule and component state in checkout transaction
+PASS CPU-12 issued state supports independent, choice, shared, time and combination cards without old-card backfill
+PASS CPU-13 card issue does not compare the snapshot with current catalogue cost
+PASS CPU-14 card issue does not compare a snapshot item version with the current catalogue
+PASS CPU-15 card issue retains only immutable snapshot structure checks
+PASS CPU-16 final card issue locks SKU identity without reloading component structure
+PASS CPU-17 issuance consumes the persisted browser card snapshot
+PASS CPU-18 sales order line carries the browser card snapshot into issuance
+PASS CPU-19 issued card rule does not require stripped browser version coordinates
+PASS CPU-20 purchase receipt fingerprints the same browser card snapshot
+PASS CPU-21 formal fact input accepts the persisted card snapshot field
+PASS CPU-22 legacy order and card cart use one issued-unit allocation, not independent division
+PASS CPU-23 historical receipt replay precedes new whole-yuan allocation
+CARD_PURCHASE_ISSUANCE_CONTRACT passed=31 failed=0

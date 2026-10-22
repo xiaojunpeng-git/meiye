@@ -710,16 +710,17 @@ final class CashierV3EntitlementProjectionServices
         foreach ($snapshot['holders'] as $holder) {
             $holdersByOrder[(int)$holder['oid']] = $holder;
         }
-        // 已售定制卡的 holder.product_id 指向专用隐藏壳；按商品 ID 批量核对
-        // 壳的来源，不能仅凭卡名、有效期或次数猜测，以免同名普通卡被误标。
+        // 已售定制卡按门店业务标识识别内部载体，旧壳编号只兼容历史权益；
+        // 不能按卡名、有效期或次数猜测，也不能漏掉新客户按事务创建的载体。
         $customCardProductIds = [];
         $holderProductIds = array_values(array_unique(array_filter(array_map(static function (array $holder): int {
             return (int)($holder['product_id'] ?? 0);
         }, $snapshot['holders']))));
         if ($holderProductIds) {
-            foreach ($this->rows(Db::name('store_product')->field('id,pid')
+            foreach ($this->rows(Db::name('store_product')->field('id,pid,type,relation_id,keyword')
                 ->whereIn('id', $holderProductIds)->select()) as $product) {
-                if ((int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
+                if (\app\services\cashier\v3\card\CashierV3CustomCardTemplateServices::isTemplate($product)
+                    || (int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
                     || (int)$product['pid'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID) {
                     $customCardProductIds[(int)$product['id']] = true;
                 }

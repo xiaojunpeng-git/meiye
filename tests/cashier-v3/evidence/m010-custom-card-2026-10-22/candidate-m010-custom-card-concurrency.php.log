@@ -1,0 +1,4 @@
+PASS two stale snapshots create exactly one product and one SKU
+PASS different stores never share a carrier
+PASS rollback removes a newly created carrier and SKU
+M010 CONCURRENCY PASS 3

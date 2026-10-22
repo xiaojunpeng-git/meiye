@@ -5,6 +5,7 @@ namespace app\services\cashier\v3\cashier;
 use app\services\cashier\v3\CashierV3ResourceKindCatalog;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\product\product\StoreProductSaleUsagePolicy;
+use app\services\cashier\v3\card\CashierV3CustomCardTemplateServices;
 use think\facade\Db;
 
 /** 旧商品主表在收银 V3 的只读/行锁适配器。 */
@@ -107,6 +108,8 @@ final class ThinkPhpCashierV3SaleCatalogAuthority implements CashierV3SaleCatalo
             ->where('p.is_del', 0)->where('p.is_verify', 1)
             ->whereIn('p.is_show', [0, 1])->where('p.product_type', 6)
             ->where('p.pid', '<>', 8154)
+            // Historical NULL keywords remain ordinary project candidates.
+            ->whereRaw("COALESCE(p.keyword, '') <> ?", [CashierV3CustomCardTemplateServices::marker($storeId)])
             ->where('sku.type', 0)->where('sku.is_show', 1)
             ->field($this->joinedFields());
         $rows = $this->rows(StoreProductSaleUsagePolicy::excludeHistoricalCarriers($query, 'p')

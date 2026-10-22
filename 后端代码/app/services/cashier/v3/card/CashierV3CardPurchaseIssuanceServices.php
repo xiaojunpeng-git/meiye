@@ -276,7 +276,8 @@ final class CashierV3CardPurchaseIssuanceServices
             (int)$holder['holderId'],
             (array)$components['benefitDetailIds'],
             $operatorScope,
-            $dataScope
+            $dataScope,
+            $customConfiguration !== null && empty($purchase['activateOnPurchase'])
         );
         $result = [
             'receiptId' => $receiptId,
@@ -935,7 +936,8 @@ final class CashierV3CardPurchaseIssuanceServices
         int $holderId,
         array $benefitDetailIds,
         CashierV3OperatorScope $operatorScope,
-        CashierV3DataScopeContext $dataScope
+        CashierV3DataScopeContext $dataScope,
+        bool $allowDisabledBenefitPool = false
     ): void {
         $this->versions->synchronizeProjectionVersion(
             'card_holder',
@@ -944,11 +946,15 @@ final class CashierV3CardPurchaseIssuanceServices
             $dataScope
         );
         foreach ($benefitDetailIds as $detailId) {
+            // A newly purchased, deliberately inactive custom card still owns
+            // real rights and needs a version. This only initializes that
+            // identity; selection/write-off keep rejecting its disabled state.
             $this->versions->synchronizeProjectionVersion(
                 'member_benefit_pool',
                 (string)(int)$detailId,
                 $operatorScope,
-                $dataScope
+                $dataScope,
+                $allowDisabledBenefitPool
             );
         }
     }

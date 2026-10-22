@@ -170,7 +170,6 @@ final class CashierV3CustomCardConfigurationServices
             'totalAmountCents' => $total,
             'components' => $components,
         ];
-        $fingerprint = hash('sha256', $this->canonicalJson($snapshot));
         $configurationId = 'CCD-' . strtoupper(substr(hash('sha256', implode('|', [
             $dataScope->tenantId(), $operatorScope->storeId(), $workspaceId, $idempotencyKey,
         ])), 0, 40));
@@ -188,6 +187,18 @@ final class CashierV3CustomCardConfigurationServices
             ->where('tenant_id', $dataScope->tenantId())
             ->lock(true)
             ->find();
+        // New configurations freeze a store-owned compatibility identity.
+        // Historical fingerprints remain unchanged on replay: never retrofit
+        // a later template into an already accepted configuration.
+        if ($configuration) {
+            $accepted = json_decode((string)$configuration['configuration_snapshot_json'], true);
+            if (is_array($accepted['templateIdentity'] ?? null)) {
+                $snapshot['templateIdentity'] = $accepted['templateIdentity'];
+            }
+        } else {
+            $snapshot['templateIdentity'] = $this->catalog->ensureCustomCardTemplateInTx($operatorScope, $dataScope);
+        }
+        $fingerprint = hash('sha256', $this->canonicalJson($snapshot));
         if ($configuration) {
             if (!hash_equals((string)($configuration['immutable_fingerprint'] ?? ''), $fingerprint)
                 || (string)($configuration['workspace_id'] ?? '') !== $workspaceId

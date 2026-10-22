@@ -1,0 +1,78 @@
+PASS composition empty
+PASS composition sale only
+PASS composition entitlement only
+PASS composition mixed
+PASS unknown role rejected
+PASS optional detail remark accepts legacy and current entitlement commands
+PASS plan is explicitly not persisted and entitlement only
+PASS direct browser snapshot does not require a legacy workspace lock
+PASS legacy workspace flow still requires its workspace lock
+PASS gateway permission fingerprint and both inventory adapter contract gates are frozen
+PASS authoritative sort controls line order
+PASS physical baseline and delta are explicit without writable after-values
+PASS actual amount uses each locked physical source baseline
+PASS checkout snapshot actual amounts are executed without a second configured-price allocation
+PASS stale fractional allocation drafts are rejected before completion
+PASS consumption and labor performance remain separate facts
+FAIL locked craftsman sequence owns primary and tail allocation
+PASS business date and service linkage come only from locked snapshot
+PASS business dimensions times source names and allocation basis remain historical snapshots
+PASS strict and flexible projects use different entitlement sources
+PASS inventory follows authoritative sort and never creates fake batches
+PASS persistence plan preserves performance inventory and cost calculation snapshots
+PASS batch cost tail is allocated cumulatively so split cart lines do not change total cost
+PASS batch cost cursor keeps tails stable across separate completion commands
+PASS shortage estimated cost cursor keeps tails stable across separate completion commands
+PASS strict inventory requests are reserved before shortage-tolerant lines
+PASS shared locked plan covers debt guard formula batch occupation staff profile and workspace
+PASS current reservation conversion is separated from and locks every other occupation
+PASS current service order can convert only its own locked occupation
+PASS writeoff service and consumption events are exact per line
+PASS labor events are exact per line and craftsman
+PASS non-gift entitlement keeps gift consumption optional but explicitly allowed
+PASS legacy gift stays holder-backed and requires an exact gift consumption event
+PASS historical independent gift requires a benefit lock but no card holder
+PASS order-attached gift stays closed
+PASS inventory events distinguish every real batch and shortage
+PASS every event rule has exact locked cardinality and idempotent natural-key envelope
+PASS pure entitlement plan forbids sale and money writes
+PASS command and snapshot array permutations cannot move tails or stock
+PASS consistent duplicate source lines aggregate and return the whole-yuan tail deterministically
+PASS zero shortage remains allowed but is not falsely required
+PASS same source cannot diverge on store scope performance policy or formula
+PASS different entitlement sources cannot attach conflicting snapshots to one locked rule policy or recipe
+PASS all tested whole-yuan tails return to source total
+PASS operation-cent allocation preserves cent-level amount and final remainder
+PASS fractional-yuan source amounts are rejected instead of rounded or truncated
+PASS labor allocation is exact even below craftsman count
+PASS card operations are explicitly rejected
+PASS command cannot override authoritative business date or source
+PASS mixed checkout cannot enter B1 kernel
+PASS deny-shortage policy rejects the whole plan
+PASS resolved inventory policy must equal merchant default plus product override
+PASS inactive craftsman fails closed
+PASS 权益完成必须拥有收银或核销权限
+PASS kernel matches the command to the gateway locked permission fingerprint without a fake resource lock
+PASS inventory adapter rejects provider version drift and an unproven shortage cursor lock
+PASS occupation selection fails closed unless every contributor and current conversion context are authoritative
+PASS debt limited usable and occupied times cap aggregate quantity
+PASS direct completion is authoritative and does not fabricate service linkage
+PASS kernel rejects an incomplete already-locked resource plan
+PASS kernel rejects a missing explicit shortage cursor resource lock
+PASS kernel rejects shortage cursor version drift
+PASS kernel accepts only the exact orchestrator-filtered entitlement lock subset
+PASS outer checkout request stays locked by orchestration but is never passed into the entitlement kernel
+PASS kernel rejects a locked resource version that differs from snapshot
+PASS kernel rejects lock kinds outside the canonical C1 catalog
+PASS kernel rejects caller-supplied lock order that differs from the canonical catalog
+PASS kernel requires each lock role to use the expected canonical resource kind
+PASS batch complexity budget fails before allocation scanning
+PASS total consumable request budget fails before stock scanning
+PASS pre-lock candidate id order exactly matches canonical numeric id semantics
+PASS completion planner and post-lock kernel share the catalog comparator
+PASS completion lock kinds and orders are canonical C1 catalog entries
+PASS shortage cursor resource identity is stable across C2 planning
+PASS new completion resources have explicit canonical scopes and remain domain-owned fail-closed
+PASS standalone member gift and staff time slot are not completion lock candidates
+ASSERT_PASSED=75
+ASSERT_FAILED=1

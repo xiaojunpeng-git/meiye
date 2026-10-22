@@ -1,0 +1,19 @@
+{
+  "time": "2026-10-21T18:59:53.400Z",
+  "isolatedDataBeforeRemoval": {
+    "store": 0,
+    "member": 0,
+    "product": 0,
+    "sku": 0,
+    "order": 0,
+    "payment": 0,
+    "card": 0
+  },
+  "removedContainers": [
+    "m010-custom-card-mysql57",
+    "m010-custom-card-redis"
+  ],
+  "removedNetwork": "m010-custom-card-test",
+  "privateEnvCopiesRemoved": true,
+  "sharedLocalServicesUntouched": true
+}

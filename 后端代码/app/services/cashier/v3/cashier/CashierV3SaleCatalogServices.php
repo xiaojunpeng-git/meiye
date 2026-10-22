@@ -10,6 +10,7 @@ use think\facade\Db;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\product\product\StoreProductSaleUsagePolicy;
+use app\services\cashier\v3\card\CashierV3CustomCardTemplateServices;
 
 /** 门店销售目录、购物车 sale 行及结账来源的统一服务端口径。 */
 final class CashierV3SaleCatalogServices
@@ -17,6 +18,8 @@ final class CashierV3SaleCatalogServices
     public const CONTRACT_VERSION = 'cashier-sale-catalog-v1';
     public const CHECKOUT_SOURCE_CONTRACT_VERSION = 'cashier-sale-checkout-source-v1';
 
+    // Read compatibility for historical carts; new configurations do not
+    // require this customer-era ID and use a store-bound internal template.
     private const CUSTOM_CARD_SHELL_PRODUCT_ID = 8154;
     private const MAX_CATALOG_ITEMS = 5000;
     private const MAX_QUANTITY = 1000000;
@@ -190,6 +193,7 @@ final class CashierV3SaleCatalogServices
             || (int)($row['product_relation_id'] ?? 0) !== $storeId
             || (int)($row['product_product_type'] ?? -1) !== 6
             || (int)($row['product_pid'] ?? 0) === self::CUSTOM_CARD_SHELL_PRODUCT_ID
+            || CashierV3CustomCardTemplateServices::isTemplate($row)
             || (int)($row['product_is_del'] ?? 1) !== 0
             || (int)($row['product_is_verify'] ?? 0) !== 1
             || !in_array((int)($row['product_is_show'] ?? -1), [0, 1], true)
@@ -320,7 +324,28 @@ final class CashierV3SaleCatalogServices
         CashierV3OperatorScope $operatorScope,
         CashierV3DataScopeContext $dataScope
     ): array {
-        return $this->serverResources($this->readCustomCardShell($operatorScope, $dataScope, false));
+        try {
+            return $this->serverResources($this->readCustomCardShell($operatorScope, $dataScope, false));
+        } catch (CashierV3CommandException $exception) {
+            if (($exception->getDetail()['reason'] ?? '') !== 'custom_card_shell_not_available') throw $exception;
+            // A new internal carrier is created only in the final transaction;
+            // it is not an existing resource with an invented zero version.
+            return [];
+        }
+    }
+
+    /** Freeze the compatibility identity in the immutable card configuration. */
+    public function ensureCustomCardTemplateInTx(CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope): array
+    {
+        CashierV3TransactionGuard::assertInTransaction('customCardTemplateResolve');
+        $this->assertStoreScope($operatorScope, $dataScope);
+        try {
+            $shell = $this->readCustomCardShell($operatorScope, $dataScope, false);
+            return ['productId' => (int)$shell['productId'], 'skuId' => (int)$shell['skuId']];
+        } catch (CashierV3CommandException $exception) {
+            if (($exception->getDetail()['reason'] ?? '') !== 'custom_card_shell_not_available') throw $exception;
+            return (new CashierV3CustomCardTemplateServices())->ensureInTx($operatorScope->storeId());
+        }
     }
 
     /**
@@ -343,7 +368,7 @@ final class CashierV3SaleCatalogServices
         // configuration and its actual project components are materialized
         // inside this final transaction; entitlement/balance/inventory checks
         // remain in their respective final authorities.
-        $shell = $this->readCustomCardShell($operatorScope, $dataScope, !$directSnapshot);
+        $shell = $this->configurationTemplate($configuration, $operatorScope, $dataScope, !$directSnapshot);
         $current = $this->customCardCurrentFromConfiguration($shell, $configuration);
         if (!$directSnapshot) {
             // Legacy mutable-workspace command path only.
@@ -364,7 +389,7 @@ final class CashierV3SaleCatalogServices
         CashierV3TransactionGuard::assertInTransaction('cashierCustomCardIssuanceLine');
         // See customCardSaleLineAfterGatewayLocksInTx(): the host is only a
         // configuration template and is not an eligible product resource.
-        $shell = $this->readCustomCardShell($operatorScope, $dataScope, false);
+        $shell = $this->configurationTemplate($configuration, $operatorScope, $dataScope, false);
         return $this->saleLineFromItem($this->customCardCurrentFromConfiguration($shell, $configuration), 'custom-card-issue:' . (string)$configuration['configuration_id']);
     }
 
@@ -945,6 +970,10 @@ final class CashierV3SaleCatalogServices
         bool $lock
     ): array {
         $this->assertStoreScope($operatorScope, $dataScope);
+        $identity = (new CashierV3CustomCardTemplateServices())->find($operatorScope->storeId());
+        if ($identity !== null) {
+            return $this->loadCustomCardTemplate($identity, $operatorScope, $lock);
+        }
         $rows = $this->authority->listStoreItems($operatorScope->storeId());
         foreach ($rows as $row) {
             $item = $this->normalizeAuthorityRow($row, false);
@@ -966,6 +995,31 @@ final class CashierV3SaleCatalogServices
             return $current;
         }
         throw self::failure(CashierV3ResultCode::RESOURCE_NOT_FOUND, '当前门店未配置可用的定制卡入口。', 'custom_card_shell_not_available');
+    }
+
+    /** New cards retain their accepted identity even if another template appears later. */
+    private function configurationTemplate(array $configuration, CashierV3OperatorScope $operatorScope, CashierV3DataScopeContext $dataScope, bool $lock): array
+    {
+        $snapshot = (array)($configuration['configuration_snapshot'] ?? $configuration['snapshot'] ?? []);
+        $identity = $snapshot['templateIdentity'] ?? null;
+        if (!is_array($identity)) return $this->readCustomCardShell($operatorScope, $dataScope, $lock);
+        $this->assertStoreScope($operatorScope, $dataScope);
+        return $this->loadCustomCardTemplate($identity, $operatorScope, $lock);
+    }
+
+    /** Only server-frozen product/SKU identities are accepted, always store-scoped. */
+    private function loadCustomCardTemplate(array $identity, CashierV3OperatorScope $operatorScope, bool $lock): array
+    {
+        $skuId = (int)($identity['skuId'] ?? 0);
+        $row = $lock
+            ? $this->authority->lockStoreItemBySkuId($operatorScope->storeId(), $skuId)
+            : $this->authority->readStoreItemBySkuId($operatorScope->storeId(), $skuId);
+        if (!is_array($row) || (int)($row['product_id'] ?? 0) !== (int)($identity['productId'] ?? 0)
+            || (int)($row['product_is_del'] ?? 1) !== 0 || (int)($row['product_is_verify'] ?? 0) !== 1
+            || (int)($row['sku_is_show'] ?? 0) !== 1) throw self::notAvailable($skuId);
+        $item = $this->normalizeAuthorityRow($row, false);
+        if ($item['kindCode'] !== 'custom_card') throw self::notAvailable($skuId);
+        return $item;
     }
 
     private function readStoredCustomCardConfiguration(
@@ -1423,7 +1477,9 @@ final class CashierV3SaleCatalogServices
             }
         }
         $categoryIds = self::positiveIds((string)($row['product_cate_id'] ?? ''));
-        $kind = self::kind($productType, $productId, (int)($row['product_pid'] ?? 0));
+        $kind = CashierV3CustomCardTemplateServices::isTemplate($row)
+            ? ['code' => 'custom_card', 'label' => '定制卡']
+            : self::kind($productType, $productId, (int)($row['product_pid'] ?? 0));
         $stock = self::nonnegativeDecimal($row['sku_stock'] ?? 0, 'stock', true);
         $active = (int)($row['product_type'] ?? 0) === 1
             && (int)($row['product_is_del'] ?? 1) === 0
@@ -2330,7 +2386,8 @@ final class CashierV3SaleCatalogServices
                 // standalone shelf item. Deletion and SKU status still apply.
                 $customCardShell = $sourceType === 'card'
                     && (int)$product['product_type'] === 6
-                    && ((int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
+                    && (CashierV3CustomCardTemplateServices::isTemplate((array)$product)
+                        || (int)$product['id'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID
                         || (int)$product['pid'] === self::CUSTOM_CARD_SHELL_PRODUCT_ID);
                 self::assertNewSaleAvailability([
                     'product_type' => $product['type'],

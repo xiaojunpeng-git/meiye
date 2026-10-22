@@ -586,6 +586,9 @@ final class CashierV3CheckoutPreparationServices
                         ? $line['customCardConfiguration']
                         : (is_array($line['localCustomCardConfiguration'] ?? null)
                             ? $line['localCustomCardConfiguration'] : []);
+                    // Configuration and issuer must share this exact browser
+                    // line identity; an independently generated key cannot
+                    // reliably bind the resulting card to its sale detail.
                     $server = $this->customCards->createSaleLineAfterGatewayLocksInTx(
                         $configuration,
                         $workspaceId,
@@ -595,7 +598,8 @@ final class CashierV3CheckoutPreparationServices
                         $operatorScope,
                         $dataScope,
                         (int)($snapshot['memberId'] ?? 0),
-                        true
+                        true,
+                        (string)($line['lineId'] ?? 'snapshot-' . $index)
                     );
                 } else {
                     $server = $this->saleCatalog->selectDraftSaleLineAfterGatewayLocksInTx(

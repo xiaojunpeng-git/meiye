@@ -1,0 +1,251 @@
+{
+  "source": {
+    "head": "05c61feb3080bbe6e7f8192f02eaa0d924a2b73b",
+    "files": {
+      "后端代码/app/services/cashier/v3/card/CashierV3CustomCardTemplateServices.php": "77298de1fd5c89e3b231b57af06800e399835c8963c9ebe8c0cf6137d54e21e8",
+      "后端代码/app/services/cashier/v3/card/CashierV3CustomCardConfigurationServices.php": "98f2adf20e41847b71742f20489160092d8d61fe0cae7867963ed523fc3b6a73",
+      "后端代码/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php": "1cb16fe37ad28e620ed9e7d71c9d0bd868e8649403c862b0b4442c32d63c6d5c",
+      "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php": "7e9bcd50c554318a6d58ff4f833a86030859207c77e4ba20de3bd3a7f51f2414",
+      "后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php": "e092d522cd82cb55a2a641f729b0c98d7f960825e8e7d94930a896d6652714db",
+      "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php": "9765f3c54fd38697bbfcce898deabd3ccadadc98fdc22441bae3519271b9bb73",
+      "后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php": "3eb62cf66e3705f7c6b0adae17488520f7150f939e18fad973f1184c57eeda09",
+      "tests/cashier-v3/php/custom-card-configuration-contract.php": "388d0acdd64ea97fdc2b61384151100cb00b0a01589bd10bd221c88ce8315312",
+      "tests/cashier-v3/php/m010-custom-card-template-local.php": "eebb46783e75118572009d6ad48f5805228ee57e29fb1214368f79697a9ef5fc",
+      "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": "49aa233602ddf9fe4c00185ec6b893cd1b6e78bdcdfed4dbbe5a50e310993bae",
+      "tests/cashier-v3/php/m010-custom-card-concurrency.php": "c7202e2a6002852820e130f2a70e4a96c21275e60307d8caf6811531673e1df6"
+    },
+    "source": "HEAD plus explicit M010 files only; no unrelated workspace overlays",
+    "previousHead": "58bc3513a0ea94beb09d8ea7460c86bcd5e78e1c",
+    "baselineAdvance": {
+      "commit": "05c61feb",
+      "scope": "member therapist list only; affected backend/cashier source unchanged"
+    }
+  },
+  "runtime": "Core: PHP7.4.33 / strict MySQL5.7.44; reflection-only void helper also tested with PHP8.2",
+  "results": [
+    {
+      "label": "baseline-probe",
+      "file": "m010-custom-card-template-local.php",
+      "status": 0,
+      "passedAssertions": 1,
+      "failures": [],
+      "summary": "PASS unpatched baseline reproduces missing-template checkout rejection",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "m010-custom-card-template-local.php",
+      "status": 0,
+      "passedAssertions": 37,
+      "failures": [],
+      "summary": "M010 PASS 37",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "m010-custom-card-concurrency.php",
+      "status": 0,
+      "passedAssertions": 3,
+      "failures": [],
+      "summary": "M010 CONCURRENCY PASS 3",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "custom-card-configuration-contract.php",
+      "status": 0,
+      "passedAssertions": 15,
+      "failures": [],
+      "summary": "CUSTOM_CARD_CONFIGURATION_CONTRACT passed=15 failed=0",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "card-purchase-issuance-contract.php",
+      "status": 0,
+      "passedAssertions": 31,
+      "failures": [],
+      "summary": "CARD_PURCHASE_ISSUANCE_CONTRACT passed=31 failed=0",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "checkout-submit-failure-envelope-contract.php",
+      "status": 0,
+      "passedAssertions": 4,
+      "failures": [],
+      "summary": "checkout-submit-failure-envelope-contract: 4 passed, 0 failed",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "c2-checkout-settlement-contract.php",
+      "status": 0,
+      "passedAssertions": 99,
+      "failures": [],
+      "summary": "CHECKOUT_SETTLEMENT_CONTRACT=PASS",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "c2-entitlement-completion-contract.php",
+      "status": 1,
+      "passedAssertions": 75,
+      "failures": [
+        "FAIL locked craftsman sequence owns primary and tail allocation"
+      ],
+      "summary": "ASSERT_FAILED=1",
+      "runtime": "mohe-app:local",
+      "newFailures": []
+    },
+    {
+      "label": "candidate",
+      "file": "c2-catalog-writer-lock-contract.php",
+      "status": 0,
+      "passedAssertions": 29,
+      "failures": [],
+      "summary": "C2_CATALOG_WRITER_LOCK_CONTRACT assertions=29 passed=29 failed=0",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "card-operation-kernel-contract.php",
+      "status": 0,
+      "passedAssertions": 0,
+      "failures": [],
+      "summary": "card-operation kernel: 16/0 PASS",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "sale-off-shelf-contract.php",
+      "status": 0,
+      "passedAssertions": 0,
+      "failures": [],
+      "summary": "sale-off-shelf-contract: 12 passed",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "baseline",
+      "file": "checkout-snapshot-direct-authority-contract.php",
+      "status": 1,
+      "passedAssertions": 45,
+      "failures": [
+        "[FAIL] snapshot completion clears the shell without comparing legacy workspace lines",
+        "[FAIL] snapshot salespeople never fall back to legacy workspace rows",
+        "[FAIL] entitlement service intent is decoded separately from sale personnel snapshot",
+        "[FAIL] snapshot salesperson array participates in projection fingerprint",
+        "[FAIL] entitlement selector is a member-id display read without workspace or version contexts"
+      ],
+      "summary": "checkout-snapshot-direct-authority-contract: 45 passed, 5 failed",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "checkout-snapshot-direct-authority-contract.php",
+      "status": 1,
+      "passedAssertions": 45,
+      "failures": [
+        "[FAIL] snapshot completion clears the shell without comparing legacy workspace lines",
+        "[FAIL] snapshot salespeople never fall back to legacy workspace rows",
+        "[FAIL] entitlement service intent is decoded separately from sale personnel snapshot",
+        "[FAIL] snapshot salesperson array participates in projection fingerprint",
+        "[FAIL] entitlement selector is a member-id display read without workspace or version contexts"
+      ],
+      "summary": "checkout-snapshot-direct-authority-contract: 45 passed, 5 failed",
+      "runtime": "mohe-app:local",
+      "newFailures": []
+    },
+    {
+      "label": "baseline",
+      "file": "member-entitlement-whole-yuan-contract.php",
+      "status": 1,
+      "passedAssertions": 7,
+      "failures": [
+        "FAIL member detail reads the same completed actual-sale allocation as the cashier selector"
+      ],
+      "summary": "ASSERT_FAILED=1",
+      "runtime": "mohe-app:local"
+    },
+    {
+      "label": "candidate",
+      "file": "member-entitlement-whole-yuan-contract.php",
+      "status": 1,
+      "passedAssertions": 7,
+      "failures": [
+        "FAIL member detail reads the same completed actual-sale allocation as the cashier selector"
+      ],
+      "summary": "ASSERT_FAILED=1",
+      "runtime": "mohe-app:local",
+      "newFailures": []
+    },
+    {
+      "label": "candidate",
+      "file": "sales-order-void-restored-state-contract.php",
+      "status": 0,
+      "passedAssertions": 0,
+      "failures": [],
+      "summary": "SALES_ORDER_VOID_RESTORED_STATE=PASS",
+      "runtime": "docker.m.daocloud.io/library/php:8.2-cli"
+    },
+    {
+      "label": "baseline",
+      "file": "c2-entitlement-completion-contract.php",
+      "status": 1,
+      "passedAssertions": 75,
+      "failures": [
+        "FAIL locked craftsman sequence owns primary and tail allocation"
+      ],
+      "summary": "ASSERT_FAILED=1",
+      "runtime": "mohe-app:local"
+    }
+  ],
+  "lint": [
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CustomCardTemplateServices.php",
+      "status": "pass"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CustomCardConfigurationServices.php",
+      "status": "pass"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php",
+      "status": "pass"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php",
+      "status": "pass"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/ThinkPhpCashierV3SaleCatalogAuthority.php",
+      "status": "pass"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php",
+      "status": "pass"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3SaleOnlyCheckoutSubmissionServices.php",
+      "status": "pass"
+    },
+    {
+      "path": "tests/cashier-v3/php/custom-card-configuration-contract.php",
+      "status": "pass"
+    },
+    {
+      "path": "tests/cashier-v3/php/m010-custom-card-template-local.php",
+      "status": "pass"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php",
+      "status": "pass"
+    },
+    {
+      "path": "tests/cashier-v3/php/m010-custom-card-concurrency.php",
+      "status": "pass"
+    }
+  ],
+  "stagedDiffUnchanged": true,
+  "diffCheck": "pass"
+}

@@ -72,7 +72,7 @@ customCardCheck('CCC-07 final browser snapshot creates and locks the configurati
     && strpos($module, "'custom_card_configuration'") !== false
     && strpos($preparation, 'createSaleLineAfterGatewayLocksInTx(') !== false
     && strpos($preparation, "(int)(\$snapshot['memberId'] ?? 0),") !== false
-    && strpos($preparation, "                        true\n                    );") !== false
+    && strpos($preparation, "                        true,\n                        (string)(\$line['lineId'] ?? 'snapshot-' . \$index)") !== false
     && strpos($preparation, "                        true\n                    ) as \$resource") !== false
     && strpos($configuration, 'bool $directSnapshot = false') !== false
     && strpos($configuration, 'if ($directSnapshot) {') !== false);
@@ -95,8 +95,8 @@ customCardCheck('CCC-11 component cost is frozen and initial configured total re
     && strpos($configuration, 'roundUpToWholeYuan($configuredCostTotalCents)') !== false
     && strpos($catalog, "'custom_card_component_cost_overflow'") !== false);
 customCardCheck('CCC-12 direct snapshots never validate the hidden custom-card shell as a sellable SKU',
-    strpos($catalog, 'readCustomCardShell($operatorScope, $dataScope, !$directSnapshot)') !== false
-    && strpos($catalog, 'readCustomCardShell($operatorScope, $dataScope, false);') !== false);
+    strpos($catalog, 'configurationTemplate($configuration, $operatorScope, $dataScope, !$directSnapshot)') !== false
+    && strpos($catalog, 'configurationTemplate($configuration, $operatorScope, $dataScope, false);') !== false);
 customCardCheck('CCC-13 direct snapshots bind custom configuration to the browser line identity',
     strpos($configuration, 'string $snapshotLineId = \'\'') !== false
     && strpos($configuration, "? 'sale:' . substr(\$snapshotLineId, 0, 59)") !== false

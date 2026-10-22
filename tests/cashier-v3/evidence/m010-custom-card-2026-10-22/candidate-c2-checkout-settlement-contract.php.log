@@ -1,0 +1,101 @@
+PASS seven receipt methods and one non-cash settlement method are exact
+PASS old card is outside bookkeeping methods
+PASS old card entry remains separate and zero cash performance
+PASS presale salesperson survives checkout request persistence
+PASS historical sale line without salesperson retains its sparse snapshot
+PASS coupon tender preserves gross sale and excludes voucher from cash and debt
+PASS final authority rebuild retains coupon tender and gross sale
+PASS final authority rebuild keeps the selected presale salesperson
+PASS coupon tender without a coupon authority is rejected
+PASS coupon-only sale retains gross rights value with zero cash collection
+PASS guide round survives the checkout draft kernel
+PASS mixed composition is server classified
+PASS draft remains eventless editing state
+PASS sales amount excludes entitlement actual amount
+PASS bookkeeping-method sum is cash performance
+PASS balance and debt remain independent non-cash components
+PASS balanced draft records equality
+PASS request and child ids are server stable ids
+PASS sale and entitlement are separate draft grains
+PASS line drafts carry immutable service and inventory tags
+PASS entitlement source and project history are frozen separately
+PASS payment detail freezes operator source and historical business date
+PASS draft writes no business facts or mutations
+PASS persistence plan uses insert and CAS version one
+PASS presale checkout projection retains the locked request fingerprint
+PASS current editing checkout projection freezes request identity and correlation token
+PASS checkout projection carries exact workspace and request command contexts
+PASS checkout projection restores the persisted source version into command contexts
+PASS checkout projection rejects source-version fingerprint drift
+PASS checkout projection lines summary and composition use frozen request rows
+PASS projection exposes seven receipt methods and other collection without a permissionless old-card button
+PASS projection payment lines and summary remain exact cents-derived values
+PASS checkout projection rejects persisted entitlement detail drift
+PASS checkout projection rejects persisted payment drift
+PASS same key same fingerprint replays without persistence
+PASS stable child ids survive replay
+PASS idempotent replay returns the frozen business result
+PASS same idempotency key with changed snapshot conflicts
+PASS balanced prepare advances by CAS to ready
+PASS child identities survive versioned edit
+PASS disabled legacy supplement audit is normalized without blocking checkout
+PASS missing legacy supplement block defaults to disabled
+PASS stale expected version is rejected
+PASS editing may retain an explicitly unbalanced draft without facts
+PASS submission preparation requires exact receivable equality
+PASS sale-only composition is supported
+PASS entitlement-only composition has zero receivable and cash performance
+PASS pure entitlement keeps guide round on its own line without sale money
+PASS pure entitlement guide survives saved-draft authority rebuild
+PASS pure entitlement rejects an out-of-range guide round
+PASS entitlement actual amounts must be whole yuan before persistence
+PASS legacy entitlement source kind remains traceable without being recast
+PASS explicit entitlement source detail identity participates in every fingerprint
+PASS entitlement source detail identity is mandatory and never parsed from authority key
+PASS entitlement source detail identity must be a positive integer
+PASS entitlement-only cannot smuggle a settlement amount
+PASS old card entry is rejected from combined checkout
+PASS old card entry settles card payable with debt and zero cash performance
+PASS other collection balances a project sale without cash performance
+PASS mixed settlement counts only real tender as cash performance
+PASS old data entry settles product without cash performance and keeps outbound choice
+PASS old data product entry reaches final preparation with zero cash performance
+PASS old data entry also retains a product no-outbound selection
+PASS old data entry still rejects project purchases
+PASS old card entry rejects combined bookkeeping methods
+PASS old card entry rejects stored-balance combinations
+PASS unknown cash-like payment method is rejected
+PASS one request can contain multiple independent rows of one bookkeeping method
+PASS editing draft can retain a selected payment method at zero pending amount entry
+PASS positive receivable still rejects a zero-valued payment draft as unbalanced
+PASS non-integer money is rejected
+PASS client amount field is outside command contract
+PASS tampered authority snapshot fingerprint is rejected first
+PASS formal sale amount equation is enforced
+PASS audited price change cannot settle below configured cost
+PASS audited price change equal to configured cost is accepted
+PASS audited exact-zero price remains a formal sale with no collection
+PASS new checkout money must be whole yuan
+PASS gift shell cannot be classified as formal sale
+PASS empty composition is rejected
+PASS guest cannot consume member balance
+PASS payment business time cannot drift from server operation time
+PASS unsupported business timezone is rejected
+PASS invalid historical business date is rejected
+PASS recorded time cannot precede real operation time
+PASS duplicate authoritative sale line is rejected
+PASS short server ID secret is rejected
+PASS canonicalizer rejects floats independently
+PASS actual performance contract deducts only frozen external allocations
+PASS approved sales and cash performance wording is frozen verbatim
+PASS approved payment detail and debt wording is frozen verbatim
+PASS approved remaining business glossary is complete
+PASS submit remains fail-closed and status preserving
+PASS submit reports payment balance debt event and inventory gates
+PASS inventory provider and lock contract is frozen without activation
+PASS inventory provider DTO names remain byte-for-byte compatible
+PASS inventory shortage and history semantics remain provider-owned
+PASS successful request is terminal and not editable
+PASS state machine rejects direct editing to succeeded transition
+CHECKOUT_SETTLEMENT_ASSERTIONS=99 failed=0
+CHECKOUT_SETTLEMENT_CONTRACT=PASS

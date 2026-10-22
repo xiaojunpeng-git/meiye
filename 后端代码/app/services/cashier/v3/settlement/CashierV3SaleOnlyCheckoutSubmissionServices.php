@@ -714,7 +714,7 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
                 ->where('id', $productId)
                 ->where('relation_id', $dataScope->forcedStoreId())
                 ->where('type', 1)
-                ->field('id,pid,product_type,is_inventory')
+                ->field('id,pid,type,relation_id,keyword,product_type,is_inventory')
                 ->find();
             if (!$product || !self::isSupportedSaleProduct($sourceType, $product)) {
                 throw self::unsupportedFulfillment();
@@ -724,7 +724,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
 
     /**
      * Final checkout can sell ordinary products and card purchase definitions.
-     * Legacy custom-card shells are project copies, identified only by id/pid 8154.
+     * New custom-card carriers are store-marked project copies. Historical
+     * id/pid recognition is retained unchanged for legacy data.
      */
     private static function isSupportedSaleProduct(string $sourceType, array $product): bool
     {
@@ -742,7 +743,8 @@ final class CashierV3SaleOnlyCheckoutSubmissionServices
             return true;
         }
         return $productType === 6
-            && ((int)($product['id'] ?? 0) === 8154 || (int)($product['pid'] ?? 0) === 8154);
+            && (\app\services\cashier\v3\card\CashierV3CustomCardTemplateServices::isTemplate($product)
+                || (int)($product['id'] ?? 0) === 8154 || (int)($product['pid'] ?? 0) === 8154);
     }
 
     private function assertTablesReady(): void
