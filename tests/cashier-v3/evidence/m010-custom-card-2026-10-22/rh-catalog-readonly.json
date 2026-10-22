@@ -1,0 +1,51 @@
+{
+  "database": "ruihao",
+  "readOnly": true,
+  "catalogs": [
+    {
+      "result": "PASS",
+      "keys": [
+        "contractVersion",
+        "types",
+        "categories",
+        "items",
+        "customCardProjects",
+        "itemCount",
+        "complete",
+        "priceAuthority",
+        "dataScope"
+      ],
+      "fingerprint": "38eecf04e8cd2c93982b5beed91c572d350706223ca4a1e03bad5cb56121d3e5"
+    },
+    {
+      "result": "PASS",
+      "keys": [
+        "contractVersion",
+        "types",
+        "categories",
+        "items",
+        "customCardProjects",
+        "itemCount",
+        "complete",
+        "priceAuthority",
+        "dataScope"
+      ],
+      "fingerprint": "2070e74fe833a33c77b146ec022f8a90102f8f544089330743861263ed151c7c"
+    },
+    {
+      "result": "PASS",
+      "keys": [
+        "contractVersion",
+        "types",
+        "categories",
+        "items",
+        "customCardProjects",
+        "itemCount",
+        "complete",
+        "priceAuthority",
+        "dataScope"
+      ],
+      "fingerprint": "c0df2fb526d49c6cd67ee72c4d92b9e0a537ba1775168853cd4458dc15ea0c1a"
+    }
+  ]
+}
