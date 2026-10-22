@@ -404,6 +404,7 @@ final class CashierV3MemberDetailQueryServices
                 'remainingProjectTimes' => $remainingTimes,
                 'remainingProjectAmount' => $remainingAmount,
                 'activeCardCount' => $activeCardCount,
+                'totalRechargeAmount' => $overview['totalRechargeAmount'],
                 'totalConsumptionAmount' => $overview['totalConsumptionAmount'],
                 'latestPurchaseDate' => $overview['latestPurchaseDate'],
                 'visitCount' => $overview['visitCount'],
@@ -972,6 +973,14 @@ final class CashierV3MemberDetailQueryServices
     /** @return array<string,mixed> */
     private function overview(int $memberId, string $tenantId): array
     {
+        // All-store lifetime recharge principal comes from successful balance
+        // facts, including paid recharge-debt credits and signed reversals.
+        // Never add gift balances, unpaid debt, current balance or list rows.
+        $rechargeCents = (int)Db::name('cashier_v3_balance_fact')
+            ->where('tenant_id', $tenantId)->where('member_id', $memberId)
+            ->where('status', 'effective')
+            ->whereIn('balance_change_type', ['recharge_credit', 'recharge_debt_repayment_credit'])
+            ->sum('principal_delta_cents');
         $salesQuery = Db::name('cashier_v3_sale_fact')->where('tenant_id', $tenantId)
             ->where('member_id', $memberId)->where('status', 'effective');
         // 顶部消费与到店汇总必须覆盖和各页签相同的会员全门店事实。
@@ -990,6 +999,7 @@ final class CashierV3MemberDetailQueryServices
         $latest = (array)$latestQuery->field('sf.project_name_snapshot,sf.store_name_snapshot,sf.craftsmen_snapshot_json,sf.business_date,sf.settled_at,sf.occurred_at')
             ->order('sf.business_date desc,sf.settled_at desc,sf.id desc')->find();
         return [
+            'totalRechargeAmount' => $this->moneyFromCents($rechargeCents),
             'totalConsumptionAmount' => $this->moneyFromCents((int)($sales['total_cents'] ?? 0)),
             'latestPurchaseDate' => (string)($sales['latest_date'] ?? ''),
             'visitCount' => (int)($visits['visit_count'] ?? 0),

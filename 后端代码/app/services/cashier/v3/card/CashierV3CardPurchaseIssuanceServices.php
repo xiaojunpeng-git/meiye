@@ -186,12 +186,12 @@ final class CashierV3CardPurchaseIssuanceServices
         }
         $issueAmounts = $lineIssueAmounts[$issueNo];
 
-        $customConfiguration = $this->lockCustomConfiguration(
-            $header,
-            $workspaceId,
-            $workspaceLineKey,
-            $commandIdempotencyKey
-        );
+        // Card kind belongs to this final sale-line snapshot. A normal card
+        // must never discover a custom configuration from another checkout row.
+        $acceptedPurchase = $this->salesLineCardPurchaseSnapshot($salesLine);
+        $customConfiguration = (string)($acceptedPurchase['sourceKind'] ?? '') === 'custom_card'
+            ? $this->lockCustomConfiguration($header, $workspaceId, $workspaceLineKey, $commandIdempotencyKey)
+            : null;
         // Lock the physical card SKU in the final transaction so issuance is
         // bound to the selected store resource.  The browser checkout
         // snapshot owns price and displayed card data; do not compare those
@@ -207,7 +207,7 @@ final class CashierV3CardPurchaseIssuanceServices
         $purchase = $customConfiguration
             ? (is_array($line['authority_snapshot']['cardPurchase'] ?? null)
                 ? $line['authority_snapshot']['cardPurchase'] : [])
-            : $this->salesLineCardPurchaseSnapshot($salesLine);
+            : $acceptedPurchase;
         // Revalidate under final issuance locks; switching off edits after preparation
         // must not issue increased rights or allow a forged project snapshot.
         $ordinaryIncrease = CashierV3OrdinaryCardSaleAdjustment::validate($purchase,
@@ -1055,29 +1055,35 @@ final class CashierV3CardPurchaseIssuanceServices
         string $workspaceLineKey,
         string $commandIdempotencyKey
     ): ?array {
+        // Direct checkout stores sale:<browser lineId>, while its authority
+        // binding yields the unprefixed browser lineId. Resolve that exact row
+        // first and require this command's identity; never fall back to row 0.
         $row = Db::name(self::CUSTOM_CONFIGURATION_TABLE)
             ->where('tenant_id', (string)$header['tenant_id'])
             ->where('store_id', (int)$header['store_id'])
             ->where('workspace_id', $workspaceId)
-            ->where('workspace_line_key', $workspaceLineKey)
+            ->where('workspace_line_key', 'sale:' . substr($workspaceLineKey, 0, 59))
             ->lock(true)
             ->find();
-        // Direct snapshot checkout creates the configuration and consumes it
-        // within one final command. A persisted checkout line ID is generated
-        // after that configuration, so it is not a reliable lookup key here.
-        // The command idempotency key is the immutable transaction identity;
-        // use it only as a precise fallback, never as a broad workspace scan.
-        if (!$row && $commandIdempotencyKey !== '') {
+        if ($row && ($commandIdempotencyKey === ''
+            || strpos((string)$row['created_command_idempotency_key'], $commandIdempotencyKey . ':snapshot:') !== 0)) {
+            $row = null;
+        }
+        // Legacy workspace lines already contain the sale: namespace. Keep
+        // only their exact line binding, scoped to store, tenant and workspace.
+        if (!$row) {
             $row = Db::name(self::CUSTOM_CONFIGURATION_TABLE)
                 ->where('tenant_id', (string)$header['tenant_id'])
                 ->where('store_id', (int)$header['store_id'])
                 ->where('workspace_id', $workspaceId)
-                ->where('created_command_idempotency_key', $commandIdempotencyKey . ':snapshot:0')
+                ->where('workspace_line_key', $workspaceLineKey)
                 ->lock(true)
                 ->find();
         }
         if (!$row) {
-            return null;
+            // A custom sale cannot silently become a catalogue carrier sale
+            // when its accepted configuration is missing or belongs elsewhere.
+            throw self::failure('custom_card_configuration_missing');
         }
         $row = (array)$row;
         if ((string)($row['status'] ?? '') !== 'in_cart'

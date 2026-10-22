@@ -73,7 +73,6 @@ const selectedCardOperationProjectKeys = computed(() => (previewCardOperation.va
   `${entitlementCardHolderId(source)}:${entitlementBenefitPoolId(source)}`
 )))
 const guidedBusinessMode = ref('')
-const isCustomCardConflictOpen = ref(false)
 const pendingCardPurchase = ref(null)
 const ordinaryCardEditRows = ref(null)
 const ordinaryCardEditError = ref('')
@@ -2147,8 +2146,9 @@ async function selectCatalogItem(item) {
     return
   }
   if (item.id === 'custom-card-entry' && !(previewCardOperation.value?.mode === 'card-upgrade' && previewCardOperation.value?.awaitingTarget)) {
-    if (hasCartLines.value) isCustomCardConflictOpen.value = true
-    else if (currentCustomerMode.value === 'guest') {
+    // Custom cards append to the same final checkout snapshot. Existing cart
+    // rows must survive entering or cancelling the configuration editor.
+    if (currentCustomerMode.value === 'guest') {
       // 选中会员后必须续接本次定制卡意图，不能退回普通收银目录。
       pendingCustomCardEntry.value = true
       window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
@@ -5136,16 +5136,6 @@ async function appendMultiCardUpgradeCustomTarget(operation = {}, payload = {}, 
     detail: { status: 'success', message: '定制目标卡已加入本次升级结账。' }
   }))
   return localDraftResult('定制目标卡已加入本次购物车。')
-}
-
-async function continueCustomCard() {
-  // 后端禁止定制卡与普通商品混合结账。必须先通过收银台的唯一清空命令
-  // 提交本地草稿，成功后才能进入创建页，避免只关弹窗造成旧行残留。
-  const cleared = await confirmClearCart()
-  if (!['success', 'succeeded'].includes(resultStatus(cleared))) return cleared
-  isCustomCardConflictOpen.value = false
-  guidedBusinessMode.value = 'custom-card'
-  return cleared
 }
 
 function handleMemberSelectorClosedForEntitlement(event = {}) {
@@ -8660,18 +8650,6 @@ onBeforeUnmount(() => {
       </div>
     </Teleport>
 
-    <Teleport to="body">
-      <div v-if="isCustomCardConflictOpen" class="cashier-card-operation-editor" role="dialog" aria-label="当前购物车已有内容">
-        <div class="cashier-card-operation-editor__panel">
-          <header><strong>当前购物车已有内容</strong></header>
-          <span>定制卡不能与其他商品同时结账，请先处理当前订单。</span>
-          <footer>
-            <button type="button" class="button button--secondary" @click="isCustomCardConflictOpen = false">取消</button>
-            <button type="button" class="button button--primary" :disabled="isClearingCart" @click="continueCustomCard">清空并继续</button>
-          </footer>
-        </div>
-      </div>
-    </Teleport>
   </section>
 </template>
 
