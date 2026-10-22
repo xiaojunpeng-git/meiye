@@ -17,13 +17,13 @@ const homeTransportContract : any = {
 	}
 }
 
-const HOME_CACHE_KEY = 'mobile.merchant.home.cache'
+const HOME_CACHE_KEY = 'mobile.merchant.home.sections.v3.cache'
 const HOME_CACHE_TTL_MS = 30 * 60 * 1000
 
-function readHomeCache(periodMode : string) : any {
+function readHomeCache(queryKey : string, contextKey : string) : any {
 	let stored = uni.getStorageSync(HOME_CACHE_KEY)
 	if (stored == null || typeof stored != 'object') return null
-	if (String(stored.periodMode || '') != periodMode || Number(stored.savedAt || 0) + HOME_CACHE_TTL_MS < Date.now()) return null
+	if (String(stored.queryKey || '') != queryKey || String(stored.contextKey || '') != contextKey || Number(stored.savedAt || 0) + HOME_CACHE_TTL_MS < Date.now()) return null
 	// 相对日期筛选按上海自然日解释；跨零点后旧缓存不能冒充今天或本月数据。
 	let shanghaiOffsetMs = 8 * 60 * 60 * 1000
 	if (Math.floor((Number(stored.savedAt || 0) + shanghaiOffsetMs) / 86400000) != Math.floor((Date.now() + shanghaiOffsetMs) / 86400000)) return null
@@ -31,8 +31,8 @@ function readHomeCache(periodMode : string) : any {
 	return body != null && typeof body == 'object' ? body : null
 }
 
-function saveHomeCache(periodMode : string, body : any) : void {
-	if (body != null && typeof body == 'object') uni.setStorageSync(HOME_CACHE_KEY, { periodMode: periodMode, savedAt: Date.now(), body: body })
+function saveHomeCache(queryKey : string, contextKey : string, body : any) : void {
+	if (body != null && typeof body == 'object') uni.setStorageSync(HOME_CACHE_KEY, { queryKey: queryKey, contextKey: contextKey, savedAt: Date.now(), body: body })
 }
 
 export function queryMobileMerchantHome(payload : any, done : (value : any) => void) : void {
@@ -41,14 +41,16 @@ export function queryMobileMerchantHome(payload : any, done : (value : any) => v
 	if (session == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
 	let plan = buildMobileRequestPlan(homeTransportContract, 'queryHome', session)
 	if (!mobileRequestPlanMatchesContract(homeTransportContract, 'queryHome', session, plan)) { done({ ok: false, message: '经营首页请求上下文无效，请重新进入商家端。', body: null }); return }
-	let periodMode = String((payload || {}).periodMode || 'month')
-	let cached = readHomeCache(periodMode)
+	// 缓存随登录上下文、日期一起隔离，分类详情不能读到另一账号或另一期间的结果。
+	let queryKey = JSON.stringify(payload || {})
+	let contextKey = String(session.activeContextId) + ':' + String(session.stateContextId) + ':' + String(session.clientSessionId)
+	let cached = readHomeCache(queryKey, contextKey)
 	if (cached != null) done({ ok: true, body: cached, cached: true })
 	sendMobileRequest(plan, payload || {}, (response : any) => {
-		if (response != null && response.ok === true && response.body != null) saveHomeCache(periodMode, response.body)
+		if (response != null && response.ok === true && response.body != null) saveHomeCache(queryKey, contextKey, response.body)
 		// A cached projection keeps the page usable while the authoritative
 		// refresh is unavailable; do not replace visible values with an error.
-		if (cached != null && (response == null || response.ok !== true)) return
+		if (cached != null && response == null) return
 		done(response)
 	})
 }

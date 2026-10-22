@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace app\services\mobile\dashboard;
 
-use app\services\merchant\MerchantBusinessSecondaryMetricServices;
-use app\services\merchant\MerchantCustomerMetricServices;
-use app\services\mobile\customer\MobileCustomerQueryServices;
 use app\services\mobile\warehouse\MobileWarehouseServices;
 use app\services\mobile\protocol\MobileApiException;
 use think\facade\Db;
+use app\services\report\GroupManagementDashboardServices;
+use app\services\merchant\MerchantCustomerMetricServices;
+use app\services\mobile\customer\MobileCustomerQueryServices;
+use app\services\merchant\MerchantBusinessSecondaryMetricServices;
 
 /**
  * Mobile merchant unified home projection.
@@ -20,20 +21,23 @@ use think\facade\Db;
  */
 final class MobileMerchantDashboardServices
 {
-    public const METRIC_VERSION = 'mobile-merchant-dashboard-v1';
+    public const METRIC_VERSION = 'mobile-merchant-dashboard-sections-v3';
 
     private $warehouse;
+    private $groupDashboard;
     private $customerMetrics;
     private $customerQuery;
     private $secondaryMetrics;
 
     public function __construct(
         MobileWarehouseServices $warehouse,
+        GroupManagementDashboardServices $groupDashboard,
         MerchantCustomerMetricServices $customerMetrics,
         MobileCustomerQueryServices $customerQuery,
         MerchantBusinessSecondaryMetricServices $secondaryMetrics
     ) {
         $this->warehouse = $warehouse;
+        $this->groupDashboard = $groupDashboard;
         $this->customerMetrics = $customerMetrics;
         $this->customerQuery = $customerQuery;
         $this->secondaryMetrics = $secondaryMetrics;
@@ -52,16 +56,53 @@ final class MobileMerchantDashboardServices
             throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可查看的门店。');
         }
 
+        // 分类页仍走同一读接口，但不加载首页趋势、组织排行和商品指标。
+        // 分类 ID 只选择已授权结果，不参与门店范围计算。
+        if (($input['view'] ?? '') === 'category') {
+            $period = $this->warehouse->periodForDashboard($input);
+            $sections = $this->groupDashboard->homeSections(
+                ['tenant_id' => '0', 'store_ids' => $storeIds],
+                ['start_date' => $period['startDate'], 'end_date' => $period['endDate']], false
+            );
+            $categoryId = (int)($input['categoryId'] ?? 0);
+            return [
+                'categories' => array_values(array_filter($sections['categories'], static function (array $category) use ($categoryId): bool {
+                    return $categoryId > 0 && (int)$category['category_id'] === $categoryId && $category['visible'];
+                })),
+                'period' => $period, 'metric_version' => self::METRIC_VERSION . '+' . GroupManagementDashboardServices::METRIC_VERSION,
+                'data_as_of' => time(), 'aggregation_caught_up' => false,
+            ];
+        }
+
         $projection = $this->warehouse->dashboardProjection($storeIds, array_merge($input, ['includeTrend' => false]));
         $trendComparison = $this->warehouse->dashboardTrendComparison($storeIds, $input);
         $trend = $this->mergeTrendSeries($trendComparison['actual'] ?? [], $trendComparison['consume'] ?? []);
         $period = (array)($projection['period'] ?? []);
-        $startTs = strtotime((string)($period['startDate'] ?? '') . ' 00:00:00');
-        $endTs = strtotime((string)($period['endDate'] ?? '') . ' 23:59:59');
 
         $overview = $this->overview($projection['summaryMetrics'] ?? []);
-        $customer = $this->customer($merchant, $storeIds, $startTs, $endTs);
-        $product = $this->product($storeIds, $startTs, $endTs);
+        $useSections = ($input['projectionVersion'] ?? '') === 'sections-v2';
+        if ($useSections) {
+            // 商家身份只提供服务端已裁剪的门店，客户端不能借平台报表扩大范围。
+            $canViewCustomers = in_array('CUSTOMER_VIEW', (array)($merchant['availableActions'] ?? []), true);
+            $sections = $this->groupDashboard->homeSections(
+                ['tenant_id' => '0', 'store_ids' => $storeIds],
+                ['start_date' => $period['startDate'], 'end_date' => $period['endDate']], $canViewCustomers, true
+            );
+            $overview = ['state' => 'ready', 'cards' => $sections['cards']];
+            $sources = $sections['sources'] ?? ['records' => [], 'source_explanation' => '当前账号没有客户查看权限'];
+            $sources['state'] = $canViewCustomers ? (empty($sources['records']) ? 'empty' : 'ready') : 'unavailable';
+            $extension = ['sale_type_cards' => $sections['sale_type_cards'], 'categories' => $sections['categories'], 'sources' => $sources];
+            $extensionBlocks = ['sources' => $sources['state']];
+        } else {
+            // 已上传旧包仍读取 customer/product；明确按请求版本兼容，不能随新首页上线删除。
+            // 新包不执行此路径，避免重复加载已被替换的客户统计与商品占位指标。
+            $startTs = strtotime($period['startDate'] . ' 00:00:00');
+            $endTs = strtotime($period['endDate'] . ' 23:59:59');
+            $customer = $this->customer($merchant, $storeIds, $startTs, $endTs);
+            $product = $this->product($storeIds, $startTs, $endTs);
+            $extension = ['customer' => $customer, 'product' => $product];
+            $extensionBlocks = ['customer' => $customer['state'], 'product' => $product['state']];
+        }
         $rankingSpec = $this->rankingSpec($merchant, (string)($period['endDate'] ?? date('Y-m-d')));
         $rankingRows = $this->warehouse->dashboardRanking($storeIds, $input, $rankingSpec['dimension']);
         $ranking = [
@@ -76,10 +117,8 @@ final class MobileMerchantDashboardServices
         $blocks = [
             'overview' => $overview['state'],
             'trend' => empty((array)($trend['points'] ?? [])) ? 'empty' : 'ready',
-            'customer' => $customer['state'],
-            'product' => $product['state'],
             'ranking' => $ranking['state'],
-        ];
+        ] + $extensionBlocks;
 
         return [
             'overview' => $overview,
@@ -88,8 +127,6 @@ final class MobileMerchantDashboardServices
                 'source' => '统一经营事实趋势序列',
                 'data' => $trend,
             ],
-            'customer' => $customer,
-            'product' => $product,
             'ranking' => $ranking,
             'scope' => [
                 'mode' => (string)($merchant['dataScopeMode'] ?? ''),
@@ -100,9 +137,9 @@ final class MobileMerchantDashboardServices
             'period' => $period,
             'blocks' => $blocks,
             'data_as_of' => (int)($projection['data_as_of'] ?? time()),
-            'metric_version' => self::METRIC_VERSION . '+' . (string)($projection['metric_version'] ?? MobileWarehouseServices::METRIC_VERSION),
+            'metric_version' => ($useSections ? self::METRIC_VERSION . '+' . GroupManagementDashboardServices::METRIC_VERSION : 'mobile-merchant-dashboard-v1') . '+' . (string)($projection['metric_version'] ?? MobileWarehouseServices::METRIC_VERSION),
             'aggregation_caught_up' => (bool)($projection['aggregation_caught_up'] ?? false),
-        ];
+        ] + $extension;
     }
 
     /**
@@ -235,6 +272,7 @@ final class MobileMerchantDashboardServices
         ];
     }
 
+    // 兼容已安装旧包的只读字段；仅由上方无 sections-v2 标记的请求调用。
     /** @return array<string,mixed> */
     private function customer(array $merchant, array $storeIds, int $startTs, int $endTs): array
     {

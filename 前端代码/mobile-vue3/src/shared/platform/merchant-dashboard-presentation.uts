@@ -1,0 +1,6 @@
+// 只格式化后端金额：以分返回、按元四舍五入展示；展示值不得用于统计或回写。
+// 与平台看板使用相同的中文整数元格式，退款净额为负时也保持相同舍入规则。
+export function formatDashboardMoney(cents : any) : string {
+	if (cents == null || cents === '' || !isFinite(Number(cents))) return '—'
+	return '¥' + (Number(cents) / 100).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+}

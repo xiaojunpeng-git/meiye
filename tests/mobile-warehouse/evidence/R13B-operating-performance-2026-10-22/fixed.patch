@@ -1,0 +1,895 @@
+--- /dev/null
++++ b/tests/mobile-warehouse/js/r13-home-client.mjs
+@@ -0,0 +1,57 @@
++/** Execute the production UTS client with an in-memory transport to verify cache scope and rejection handling. */
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import path from 'node:path'
++import test from 'node:test'
++import { stripTypeScriptTypes } from 'node:module'
++
++const root = path.resolve(import.meta.dirname, '../../..')
++const clientSource = fs.readFileSync(path.join(root, '前端代码/mobile-vue3/src/shared/api/mobile-home-client.uts'), 'utf8')
++const formatSource = fs.readFileSync(path.join(root, '前端代码/mobile-vue3/src/shared/platform/merchant-dashboard-presentation.uts'), 'utf8')
++let moduleId = 0
++async function clientHarness() {
++  const storage = new Map()
++  let session = { activeContextId: 'account-a', stateContextId: 'scope-a', clientSessionId: 'browser-a' }
++  let reply = { ok: true, body: { marker: 'fresh-a' } }
++  const harness = {
++    uni: { getStorageSync: key => storage.get(key), setStorageSync: (key, value) => storage.set(key, value) },
++    currentMerchantRoot: () => ({}), merchantRequestSession: () => session,
++    buildMobileRequestPlan: () => ({}), mobileRequestPlanMatchesContract: () => true,
++    sendMobileRequest: (_plan, _payload, done) => done(reply)
++  }
++  globalThis.__r13Harness = harness
++  const imports = 'const { uni, currentMerchantRoot, merchantRequestSession, buildMobileRequestPlan, mobileRequestPlanMatchesContract, sendMobileRequest } = globalThis.__r13Harness;\n'
++  const js = stripTypeScriptTypes(clientSource.replace(/^import .*\n/gm, ''))
++  const client = await import('data:text/javascript;base64,' + Buffer.from(imports + js + '\n// ' + moduleId++).toString('base64'))
++  delete globalThis.__r13Harness
++  const query = payload => { const responses = []; client.queryMobileMerchantHome(payload, value => responses.push(value)); return responses }
++  return { query, setSession: value => { session = value }, setReply: value => { reply = value } }
++}
++
++test('cache is isolated by authenticated context and exact dates', async () => {
++  const h = await clientHarness()
++  const first = { periodMode: 'custom', startDate: '2026-10-21', endDate: '2026-10-21' }
++  assert.equal(h.query(first).length, 1)
++  assert.equal(h.query(first)[0].cached, true)
++  assert.equal(h.query({ ...first, startDate: '2026-10-22', endDate: '2026-10-22' }).length, 1)
++  h.setSession({ activeContextId: 'account-b', stateContextId: 'scope-b', clientSessionId: 'browser-a' })
++  assert.equal(h.query(first).length, 1, 'another account cannot display previous account cache')
++})
++
++test('server permission rejection reaches caller even after a cached response', async () => {
++  const h = await clientHarness()
++  h.query({ periodMode: 'today' })
++  h.setReply({ ok: false, message: '权限已变更', body: { errorCode: 'STORE_NOT_ALLOWED' } })
++  const results = h.query({ periodMode: 'today' })
++  assert.equal(results.length, 2)
++  assert.equal(results.at(-1).ok, false)
++})
++
++test('new amounts use the platform integer-yuan rounding for positive and negative values', async () => {
++  const js = stripTypeScriptTypes(formatSource)
++  const { formatDashboardMoney } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'))
++  assert.equal(formatDashboardMoney(150), '¥2')
++  assert.equal(formatDashboardMoney(-150), '¥-2')
++  assert.equal(formatDashboardMoney(0), '¥0')
++  assert.equal(formatDashboardMoney(null), '—')
++})
+--- /dev/null
++++ b/tests/mobile-warehouse/php/r13-home-shared-sections-readonly.php
+@@ -0,0 +1,62 @@
++<?php
++/** 本地只读对账：平台和商家首页使用同一分类、销售类型与客情投影，不写业务数据。 */
++declare(strict_types=1);
++require '/var/www/html/vendor/autoload.php';
++use app\services\report\GroupManagementDashboardServices;
++use app\services\mobile\dashboard\MobileMerchantDashboardServices;
++use think\facade\Db;
++(new think\App('/var/www/html/'))->initialize();
++if (config('database.connections.mysql.hostname') !== 'mysql' || config('database.connections.mysql.database') !== 'ruihao') {
++    throw new RuntimeException('Only local ruihao Docker database is allowed');
++}
++$assert = static function (bool $ok, string $label): void {
++    if (!$ok) throw new RuntimeException('FAIL ' . $label);
++    echo 'PASS ' . $label . PHP_EOL;
++};
++Db::execute('SET TRANSACTION READ ONLY');
++Db::startTrans();
++try {
++    $stores = array_map('intval', Db::name('system_store')->where('is_del', 0)->where('name', '<>', '总部')->column('id'));
++    $employeeId = (int)Db::name('employee')->where('is_del', 0)->value('id');
++    $date = '2026-10-22';
++    $context = ['employeeId' => $employeeId, 'visibleStoreIds' => $stores, 'dataScopeMode' => 'STORES', 'availableActions' => ['CUSTOMER_VIEW']];
++    $input = ['projectionVersion' => 'sections-v2', 'periodMode' => 'custom', 'startDate' => $date, 'endDate' => $date];
++    $groupService = app()->make(GroupManagementDashboardServices::class);
++    $mobileService = app()->make(MobileMerchantDashboardServices::class);
++    $group = $groupService->dashboard(['tenant_id' => '0', 'store_ids' => $stores], ['start_date' => $date, 'end_date' => $date]);
++    $mobile = $mobileService->home($context, $input);
++    $assert($group['cards'] === $mobile['overview']['cards'], 'six operating metrics match platform exactly');
++    foreach (['sale_type_cards', 'categories'] as $key) $assert($group[$key] === $mobile[$key], $key . ' matches platform exactly');
++    $assert($group['sources']['records'] === $mobile['sources']['records'], 'source metrics match platform exactly');
++    $assert(array_column($mobile['sale_type_cards'], 'code') === ['normal_card', 'project', 'product'], 'fixed sale types preserve their existing metric contract');
++    foreach ($mobile['categories'] as $category) {
++        $assert(count($category['project_rankings']) <= 5 && count($category['product_rankings']) <= 5, 'category ' . $category['category_id'] . ' rank contract');
++    }
++    foreach ($mobile['sources']['records'] as $source) {
++        $assert(array_key_exists('active_customer_count', $source) === ($source['source_code'] === 'A'), 'only A has active customer count');
++    }
++    $visible = array_values(array_filter($mobile['categories'], static fn(array $c): bool => $c['visible']));
++    if ($visible !== []) {
++        $detail = $mobileService->home($context, array_merge($input, ['view' => 'category', 'categoryId' => $visible[0]['category_id']]));
++        $assert($detail['categories'] === [$visible[0]] && !isset($detail['trend']) && !isset($detail['sources']), 'category view keeps exact category and skips unrelated home projections');
++    }
++    $missing = $mobileService->home($context, array_merge($input, ['view' => 'category', 'categoryId' => 2147483647]));
++    $assert($missing['categories'] === [], 'unknown category never guesses a result');
++    $legacyInput = $input;
++    unset($legacyInput['projectionVersion']);
++    $legacy = $mobileService->home($context, $legacyInput);
++    $assert(isset($legacy['customer']['metrics'], $legacy['product']['metrics']) && !isset($legacy['sources']), 'installed legacy client keeps its original customer and product fields');
++    $denied = $mobileService->home(array_merge($context, ['availableActions' => []]), $input);
++    $assert($denied['sources']['state'] === 'unavailable' && $denied['sources']['records'] === [], 'customer permission is enforced on server');
++    $restricted = array_merge($context, ['visibleStoreIds' => [$stores[0]]]);
++    $narrow = $mobileService->home($restricted, array_merge($input, ['store_ids' => implode(',', $stores)]));
++    $expected = $groupService->homeSections(['tenant_id' => '0', 'store_ids' => [$stores[0]]], ['start_date' => $date, 'end_date' => $date]);
++    $assert($narrow['categories'] === $expected['categories'] && $narrow['sources']['records'] === $expected['sources']['records'], 'client scope cannot enlarge authorized stores');
++    try {
++        $mobileService->home(array_merge($context, ['dataScopeMode' => 'PERSONAL_SELF']), $input);
++        throw new RuntimeException('Personal scope unexpectedly allowed');
++    } catch (\app\services\mobile\protocol\MobileApiException $error) {
++        $assert(true, 'personal scope cannot read store dashboard');
++    }
++    echo json_encode(['stores' => count($stores), 'visible_categories' => count(array_filter($mobile['categories'], static fn(array $c): bool => $c['visible'])), 'sources' => count($mobile['sources']['records']), 'date' => $date], JSON_UNESCAPED_UNICODE), PHP_EOL;
++} finally { Db::rollback(); }
+--- a/前端代码/mobile-vue3/pages.json
++++ b/前端代码/mobile-vue3/pages.json
+@@ -5,6 +5,10 @@
+ 			"style": {
+ 				"navigationStyle": "custom"
+ 			}
++		},
++		{
++			"path": "src/merchant/pages/category-ranking/index",
++			"style": { "navigationStyle": "custom" }
+ 		},
+ 		{
+ 			"path": "src/merchant/pages/home/index",
+--- /dev/null
++++ b/前端代码/mobile-vue3/src/merchant/pages/category-ranking/index.uvue
+@@ -0,0 +1,93 @@
++<template>
++	<view class="category-ranking">
++		<view class="category-ranking__header"><text @tap="goBack">‹ 返回</text><text class="category-ranking__title">{{ category == null ? '分类业绩排行' : category.name }}</text></view>
++		<view class="category-ranking__period"><text>{{ startDate }} 至 {{ endDate }}</text><text>当前授权范围 · 实际业绩</text></view>
++		<view class="category-ranking__tabs"><view :class="{ active: rankType === 'projects' }" @tap="rankType = 'projects'"><text>项目</text></view><view :class="{ active: rankType === 'products' }" @tap="rankType = 'products'"><text>产品</text></view></view>
++		<scroll-view scroll-y="true" class="category-ranking__body">
++			<view v-if="loading" class="category-ranking__state"><text>正在加载排行</text></view>
++			<view v-else-if="message.length > 0" class="category-ranking__state"><text>{{ message }}</text><text class="category-ranking__retry" @tap="reload">重新加载</text></view>
++			<view v-else-if="rows().length === 0" class="category-ranking__state"><text>当前分类暂无{{ rankType === 'projects' ? '项目' : '产品' }}业绩排行</text></view>
++			<view v-else class="category-ranking__list"><text class="category-ranking__note">{{ rankType === 'projects' ? '项目' : '产品' }}实际业绩前五名</text><view v-for="(row, index) in rows()" :key="row.name" class="category-ranking__row" :class="{ 'category-ranking__row--first': index === 0 }"><text class="category-ranking__badge" :class="'category-ranking__badge--' + index.toString()">{{ index + 1 }}</text><text class="category-ranking__name">{{ row.name }}</text><text class="category-ranking__amount">{{ formatDashboardMoney(row.amount_cents) }}</text></view></view>
++		</scroll-view>
++	</view>
++</template>
++
++<script setup lang="uts">
++	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
++	import { formatDashboardMoney } from '../../../shared/platform/merchant-dashboard-presentation.uts'
++	import { currentMerchantRoot, merchantRequestSession, clearMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
++	import { openMerchantBootstrap } from '../../../shared/platform/mobile-navigation.uts'
++
++	const category = ref<any>(null)
++	const rankType = ref('projects')
++	const startDate = ref('')
++	const endDate = ref('')
++	const loading = ref(false)
++	const message = ref('')
++	let categoryId = 0
++
++	onLoad((options : any) => {
++		categoryId = Number(options.categoryId || 0)
++		startDate.value = String(options.startDate || '')
++		endDate.value = String(options.endDate || '')
++		reload()
++	})
++
++	// 详情仅携带分类身份和精确日期，数据仍由首页共用接口按当前身份重新返回。
++	// 不从路由接受金额、排行、门店范围，也不按分类名称反推查询条件。
++	function reload() : void {
++		if (merchantRequestSession(currentMerchantRoot()) == null) { openMerchantBootstrap(); return }
++		if (categoryId <= 0 || startDate.value.length === 0 || endDate.value.length === 0) { message.value = '分类或日期条件不完整，请返回首页重新进入。'; return }
++		loading.value = true
++		message.value = ''
++		queryMobileMerchantHome({ view: 'category', categoryId: categoryId, periodMode: 'custom', startDate: startDate.value, endDate: endDate.value }, (response : any) => {
++			loading.value = false
++			if (response == null || response.ok !== true || response.body == null) {
++				category.value = null
++				if (response != null && response.body != null && String(response.body.errorCode || response.body.protocolCode || '') === 'MERCHANT_SESSION_EXPIRED') { clearMerchantRoot(); openMerchantBootstrap(); return }
++				message.value = String(response == null ? '排行暂时无法加载。' : (response.message || '排行暂时无法加载。'))
++				return
++			}
++			category.value = null
++			const categories = Array.isArray(response.body.categories) ? response.body.categories : []
++			for (let index = 0; index < categories.length; index++) {
++				const item = categories[index]
++				if (Number(item.category_id) === categoryId && item.visible === true) category.value = item
++			}
++			if (category.value == null) message.value = '当前范围内该分类没有可展示的业绩，或分类统计已关闭。'
++		})
++	}
++	function rows() : Array<any> {
++		if (category.value == null) return []
++		const result = rankType.value === 'products' ? category.value.product_rankings : category.value.project_rankings
++		return Array.isArray(result) ? result : []
++	}
++	function goBack() : void { uni.navigateBack({ fail: () => { uni.redirectTo({ url: '/src/merchant/pages/home/index' }) } }) }
++</script>
++
++<style>
++	.category-ranking { display: flex; height: 100vh; min-height: 0; flex-direction: column; background-color: #f4f7fb; color: #2b4358; }
++	.category-ranking__header { display: flex; flex-direction: row; align-items: center; padding: 24px 16px 14px; background-color: #ffffff; font-size: 14px; }
++	.category-ranking__title { flex: 1; margin-left: 18px; font-size: 18px; font-weight: 700; }
++	.category-ranking__period { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; font-size: 11px; color: #718397; }
++	.category-ranking__tabs { display: flex; flex-direction: row; margin: 0 16px 10px; padding: 4px; border-radius: 10px; background-color: #e8eef5; }
++	.category-ranking__tabs > view { flex: 1; padding: 10px; border-radius: 8px; text-align: center; font-size: 14px; }
++	.category-ranking__tabs .active { background-color: #ffffff; color: #1f5f8b; font-weight: 700; }
++	.category-ranking__body { flex: 1; height: 0; min-height: 0; }
++	.category-ranking__list { margin: 0 16px 24px; padding: 12px; border-radius: 12px; background-color: #ffffff; }
++	.category-ranking__note { display: block; margin-bottom: 8px; font-size: 11px; color: #718397; }
++	.category-ranking__row { display: flex; flex-direction: row; align-items: center; gap: 9px; padding: 14px 5px; border-bottom: 1px solid #eef2f5; }
++	.category-ranking__row--first { background-color: #fff8df; }
++	.category-ranking__badge { flex-shrink: 0; width: 23px; height: 23px; border-radius: 12px; background-color: #e1ebf1; text-align: center; line-height: 23px; font-size: 12px; }
++	.category-ranking__badge--0 { background-color: #f2c75c; color: #6e4c00; }
++	.category-ranking__badge--1 { background-color: #d7a078; color: #704123; }
++	.category-ranking__badge--2 { background-color: #f5e19c; color: #755f00; }
++	.category-ranking__name { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
++	.category-ranking__amount { flex-shrink: 0; font-size: 14px; font-weight: 700; color: #1f5f8b; }
++	.category-ranking__state { padding: 40px 20px; text-align: center; font-size: 14px; color: #718397; }
++	.category-ranking__retry { display: block; margin-top: 16px; color: #1f5f8b; }
++	/* 小程序预留胶囊区，H5 保留紧凑页头。 */
++	/* #ifdef MP-WEIXIN */
++	.category-ranking__header { padding-top: 94px; }
++	/* #endif */
++</style>
+--- a/前端代码/mobile-vue3/src/merchant/pages/home/index.uvue
++++ b/前端代码/mobile-vue3/src/merchant/pages/home/index.uvue
+@@ -5,7 +5,7 @@
+ 				<view class="merchant-home-page__context"><view class="merchant-home-page__org-filter" @tap="openWarehouse"><text>{{ scopeLabel }}›</text></view><view class="merchant-home-page__periods"><view v-for="item in periods" :key="item.key" class="merchant-home-page__period" :class="{ 'merchant-home-page__period--active': selectedPeriod === item.key }" @tap="selectPeriod(item.key)"><text>{{ item.label }}</text></view></view></view>
+ 				<view v-if="message.length > 0" class="merchant-home-page__error"><text>{{ message }}</text><view class="merchant-home-page__error-retry" @tap="reload"><text>重新加载</text></view></view>
+ 
+-				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">经营概览</text><text class="merchant-home-page__section-note">统一业绩事实汇总</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看数仓 ›</text></view>
++				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">经营业绩</text><text class="merchant-home-page__section-note">按当前筛选范围</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看数仓 ›</text></view>
+ 				<view class="merchant-home-page__metric-grid">
+ 					<view v-for="metric in overviewMetrics" :key="metric.key" class="merchant-home-page__metric-card" :class="'merchant-home-page__metric-card--' + metric.tone">
+ 						<view class="merchant-home-page__metric-head">
+@@ -17,10 +17,37 @@
+ 					</view>
+ 				</view>
+ 
++				<!-- 销售类型取后台共用投影，数量和现金业绩分别展示，不能与实际业绩混算。 -->
++				<view class="merchant-home-page__sale-grid">
++					<view v-for="card in saleTypeCards" :key="card.code" class="merchant-home-page__sale-card">
++						<text class="merchant-home-page__card-title">{{ card.title }}</text>
++						<text class="merchant-home-page__card-note">销售数量</text><text class="merchant-home-page__sale-quantity">{{ card.sales_quantity }}</text>
++						<text class="merchant-home-page__card-note">现金业绩</text><text class="merchant-home-page__sale-money">{{ formatDashboardMoney(card.cash_performance_cents) }}</text>
++					</view>
++				</view>
++
+ 				<view class="merchant-home-page__trend-card"><view class="merchant-home-page__card-head"><view><text class="merchant-home-page__card-title">经营趋势</text><text class="merchant-home-page__card-note">实际业绩与消耗业绩</text></view><text class="merchant-home-page__card-badge">{{ selectedPeriodLabel }}</text></view><view v-if="loading" class="merchant-home-page__inline-state"><text>正在加载趋势数据</text></view><view v-else-if="trendPoints().length > 0" class="merchant-home-page__trend-ready"><image v-if="platformUsesNativeCanvas && nativeTrendImage.length > 0" :src="nativeTrendImage" mode="scaleToFill" class="merchant-home-page__trend-canvas"></image><canvas v-else canvas-id="merchant-home-trend" id="merchant-home-trend" width="720" height="228" class="merchant-home-page__trend-canvas"></canvas><view class="merchant-home-page__trend-legend"><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--actual"></text><text>实际业绩</text></view><view><text class="merchant-home-page__trend-dot merchant-home-page__trend-dot--consume"></text><text>消耗业绩</text></view></view></view><view v-else class="merchant-home-page__trend-empty"><view class="merchant-home-page__trend-grid"><view v-for="line in 4" :key="line" class="merchant-home-page__trend-line"></view></view><text>暂无趋势数据</text><text>当前日期范围没有已完成事实</text></view></view>
+ 
+-				<view class="merchant-home-page__section-head merchant-home-page__section-head--compact"><view><text class="merchant-home-page__section-title">客户概况</text><text class="merchant-home-page__section-note">按当前权限范围统计</text></view><text class="merchant-home-page__section-link" @tap="openMemberDashboard">查看明细 ›</text></view>
+-				<view class="merchant-home-page__summary-card"><view v-for="metric in customerMetrics" :key="metric.key" class="merchant-home-page__summary-item"><view class="merchant-home-page__summary-icon merchant-home-page__summary-icon--customer"><text>{{ metric.icon }}</text></view><view><text class="merchant-home-page__summary-label">{{ metric.label }}</text><text class="merchant-home-page__summary-value">{{ metric.value }}</text><text v-if="metric.source" class="merchant-home-page__summary-source">{{ metric.source }}</text></view></view></view>
++				<view class="merchant-home-page__section-head"><text class="merchant-home-page__section-title">分类业绩</text><text class="merchant-home-page__section-note">点击分类查看项目／产品排行</text></view>
++				<view v-if="loading && categoryCards.length === 0" class="merchant-home-page__inline-state"><text>正在加载分类业绩</text></view>
++				<view v-for="category in categoryCards" :key="category.category_id" class="merchant-home-page__category-card" @tap="openCategory(category.category_id)">
++					<view class="merchant-home-page__card-head"><text class="merchant-home-page__card-title">{{ category.name }}</text><text class="merchant-home-page__section-link">查看排行 ›</text></view>
++					<view class="merchant-home-page__category-total"><view><text class="merchant-home-page__sale-money">{{ formatDashboardMoney(category.amount_cents) }}</text><text class="merchant-home-page__card-note">分类实际业绩</text></view><text class="merchant-home-page__card-badge">{{ category.share == null ? '—' : category.share + '%' }}</text></view>
++					<view class="merchant-home-page__category-types"><view v-for="type in category.sale_types" :key="type.code"><text class="merchant-home-page__summary-label">{{ type.title }}</text><text class="merchant-home-page__card-note">销售量 {{ type.sales_quantity }}</text><text class="merchant-home-page__sale-money merchant-home-page__sale-money--small">{{ formatDashboardMoney(type.cash_performance_cents) }}</text></view></view>
++				</view>
++				<view v-if="!loading && categoryCards.length === 0" class="merchant-home-page__ranking-empty"><text>{{ message.length > 0 ? '分类业绩暂时无法加载' : '当前范围暂无分类业绩' }}</text></view>
++
++				<view class="merchant-home-page__section-head"><view><text class="merchant-home-page__section-title">{{ selectedPeriod === 'today' ? '今日客情' : '客情概况' }}</text><text class="merchant-home-page__section-note">按启用来源展示 · {{ selectedPeriodLabel }}</text></view><text class="merchant-home-page__section-link" @tap="showSourceExplanation">取值来源</text></view>
++				<view class="merchant-home-page__source-grid">
++					<view v-for="source in sourceCards" :key="source.source_id" class="merchant-home-page__source-card">
++						<text class="merchant-home-page__card-title">{{ source.name }}</text>
++						<view class="merchant-home-page__source-row"><text>进店数</text><text>{{ source.visit_count }}</text></view>
++						<view v-if="source.source_code === 'A'" class="merchant-home-page__source-row"><text>活客数</text><text>{{ source.active_customer_count }}</text></view>
++						<view class="merchant-home-page__source-row"><text>成交人数</text><text>{{ source.deal_count }}</text></view>
++						<view class="merchant-home-page__source-row merchant-home-page__source-row--money"><text>实际业绩</text><text>{{ formatDashboardMoney(source.deal_amount_cents) }}</text></view>
++					</view>
++				</view>
++				<view v-if="!loading && sourceCards.length === 0" class="merchant-home-page__ranking-empty"><text>{{ message.length > 0 ? '客情暂时无法加载' : sourceState === 'unavailable' ? '当前账号没有客户查看权限' : '当前没有启用的业务来源' }}</text></view>
+ 
+ 
+ 				<view class="merchant-home-page__section-head merchant-home-page__section-head--compact"><view><text class="merchant-home-page__section-title">{{ rankingName }}</text><text class="merchant-home-page__section-note">{{ rankingNote }}</text></view><text class="merchant-home-page__section-link" @tap="openWarehouse">查看全部 ›</text></view>
+@@ -35,6 +62,7 @@
+ </template>
+ 
+ <script setup lang="uts">
++	import { formatDashboardMoney } from '../../../shared/platform/merchant-dashboard-presentation.uts'
+ 	import MerchantPrimaryTabBar from '../../../shared/components/merchant-primary-tab-bar.uvue'
+ 	import { queryMobileMerchantHome } from '../../../shared/api/mobile-home-client.uts'
+ 	import { currentMobilePlatform, drawMobileTrendCanvas } from '../../../shared/platform/mobile-platform.uts'
+@@ -57,18 +85,14 @@
+ 	const platformUsesNativeCanvas = currentMobilePlatform() === 'MP_WEIXIN'
+ 	const nativeTrendImage = ref('')
+ 	const canvasHost : any = getCurrentInstance().proxy
+-	const overviewMetrics = ref<Array<any>>([
+-		{ key: 'cash', label: '现金业绩', value: '—', source: '销售成功且收款事实统计', icon: '¥', tone: 'cash' },
+-		{ key: 'actual', label: '实际业绩', value: '—', source: '统一实际业绩事实统计', icon: '实', tone: 'actual' },
+-		{ key: 'consume', label: '消耗业绩', value: '—', source: '项目核销完成后统计', icon: '耗', tone: 'consume' },
+-		{ key: 'target', label: '目标完成率', value: '—', source: '门店目标汇总统计', icon: '%', tone: 'target' }
+-	])
+-	const customerMetrics = ref<Array<any>>([
+-		{ key: 'total', label: '客户总数', value: '—', source: '统一客户查询结果总数', icon: '人' },
+-		{ key: 'new', label: '新客数', value: '—', source: '首次现金业绩有效下单客户去重统计', icon: '新' },
+-		{ key: 'active', label: '服务客户', value: '—', source: '周期内完成核销到店客户去重统计', icon: '活' },
+-		{ key: 'sleeping', label: '沉睡客户', value: '—', source: '沉睡客户口径待客户分析接口提供', icon: '沉' }
+-	])
++	const overviewMetrics = ref<Array<any>>([])
++	const saleTypeCards = ref<Array<any>>([])
++	const categoryCards = ref<Array<any>>([])
++	const sourceCards = ref<Array<any>>([])
++	const sourceState = ref('empty')
++	const sourceExplanation = ref('')
++	const currentPeriod = ref<any>({})
++	let requestSequence = 0
+ 
+ 	const selectedPeriodLabel = computed(() => {
+ 		for (let index = 0; index < periods.length; index++) if (periods[index].key === selectedPeriod.value) return periods[index].label
+@@ -89,9 +113,13 @@
+ 	function reload() : void {
+ 		loading.value = true
+ 		message.value = ''
+-		queryMobileMerchantHome({ periodMode: selectedPeriod.value }, (response : any) => {
++		const sequence = ++requestSequence
++		queryMobileMerchantHome({ projectionVersion: 'sections-v2', periodMode: selectedPeriod.value }, (response : any) => {
++			// 快速切换期间时，旧请求不能覆盖新的筛选结果。
++			if (sequence !== requestSequence) return
+ 			loading.value = false
+ 			if (response == null || response.ok !== true || response.body == null) {
++				clearHomeData()
+ 				if (response != null && response.body != null && String(response.body.errorCode || response.body.protocolCode || '') === 'MERCHANT_SESSION_EXPIRED') {
+ 					clearMerchantRoot()
+ 					openMerchantBootstrap()
+@@ -108,13 +136,32 @@
+ 	function selectPeriod(value : string) : void {
+ 		if (value === 'custom') { openWarehouse(); return }
+ 		selectedPeriod.value = value
++		clearHomeData()
+ 		reload()
+ 	}
+ 
++	// 条件变化或服务端拒绝后清掉旧期间/旧权限数值，不能把历史结果当成新查询结果。
++	function clearHomeData() : void {
++		saleTypeCards.value = []
++		categoryCards.value = []
++		sourceCards.value = []
++		trend.value = { points: [] }
++		nativeTrendImage.value = ''
++		rankingRows.value = []
++		currentPeriod.value = {}
++		overviewMetrics.value = []
++	}
++
+ 	function openWarehouse() : void { uni.redirectTo({ url: '/src/merchant/pages/warehouse/index' }) }
+-	// 首页的明细入口直接进入已经接入真实数据和权限处理的业务页面，
+-	// 避免落到仅用于早期占位的 member/product-dashboard 页面。
+-	function openMemberDashboard() : void { uni.redirectTo({ url: '/src/merchant/pages/customers/index' }) }
++	function openCategory(categoryId : number) : void {
++		// 传稳定分类 ID 和后端解析后的日期；详情重新经同一接口校验当前权限。
++		const period = currentPeriod.value
++		if (!period.startDate || !period.endDate) return
++		uni.navigateTo({ url: '/src/merchant/pages/category-ranking/index?categoryId=' + categoryId.toString() + '&startDate=' + period.startDate + '&endDate=' + period.endDate })
++	}
++	function showSourceExplanation() : void {
++		uni.showModal({ title: '客情取值来源', content: sourceExplanation.value, showCancel: false })
++	}
+ 
+ 	function applyHomePayload(payload : any) : void {
+ 		scopeLabel.value = String((payload.scope || {}).label || '授权组织范围')
+@@ -126,15 +173,22 @@
+ 		rankingName.value = String((payload.ranking || {}).name || '组织排行')
+ 		const rankingCode = String((payload.ranking || {}).code || '')
+ 		rankingNote.value = rankingCode === 'branch_cash_performance' ? '按分公司现金业绩排序' : rankingCode === 'manager_cash_performance' ? '按经理现金业绩排序' : '按门店现金业绩排序'
+-		const overview = payload.overview || {}
+-		const overviewItems = Array.isArray(overview.metrics) ? overview.metrics : []
+-		for (let index = 0; index < overviewMetrics.value.length; index++) {
+-			const target = overviewMetrics.value[index]
+-			const code = target.key === 'cash' ? 'cash_performance' : target.key === 'actual' ? 'actual_performance' : target.key === 'consume' ? 'consume_amount' : 'target_completion_rate'
+-			const found = findMetric(overviewItems, code)
+-			if (found != null) target.value = formatMetricValue(found)
+-		}
+-		applySummary(customerMetrics.value, ((payload.customer || {}).metrics || []))
++		// 指标名、解释与数值均消费平台同一六项契约，手机只映射视觉样式和金额格式。
++		const cards = (payload.overview || {}).cards
++		overviewMetrics.value = (Array.isArray(cards) ? cards : []).map((metric : any) : any => {
++			const code = String(metric.metric_code || '')
++			const tone = code === 'actual_performance' ? 'actual' : code === 'refund_performance' ? 'refund' : code === 'consumption_performance' ? 'consume' : code === 'consumption_count' ? 'service' : code === 'consumption_unit_price' ? 'unit' : 'cash'
++			const icons : any = { cash: '¥', refund: '退', actual: '实', consume: '耗', service: '次', unit: '均' }
++			return { key: code, label: String(metric.name || ''), source: String(metric.source_explanation || ''), tone: tone, icon: icons[tone], value: metric.value_type === 'money' ? formatDashboardMoney(metric.value_cents) : metric.value == null ? '—' : String(metric.value) }
++		})
++		currentPeriod.value = payload.period || {}
++		saleTypeCards.value = Array.isArray(payload.sale_type_cards) ? payload.sale_type_cards : []
++		// 分类次序与显隐均由后台决定；手机端不按金额重新排序。
++		categoryCards.value = (Array.isArray(payload.categories) ? payload.categories : []).filter((category : any) : boolean => category.visible === true)
++		const sources = payload.sources || {}
++		sourceCards.value = Array.isArray(sources.records) ? sources.records : []
++		sourceState.value = String(sources.state || 'empty')
++		sourceExplanation.value = String(sources.source_explanation || '')
+ 		queueTrendDraw()
+ 	}
+ 
+@@ -155,30 +209,6 @@
+ 		drawMobileTrendCanvas('merchant-home-trend', points, canvasHost, (filePath : string) => { nativeTrendImage.value = filePath })
+ 	}
+ 
+-	function findMetric(items : Array<any>, code : string) : any {
+-		for (let index = 0; index < items.length; index++) if (String(items[index].code || '') === code) return items[index]
+-		return null
+-	}
+-
+-	function applySummary(targets : Array<any>, itemsValue : any) : void {
+-		const items = Array.isArray(itemsValue) ? itemsValue : []
+-		for (let index = 0; index < targets.length; index++) {
+-			const target = targets[index]
+-			const code = target.key === 'total' ? 'customer_total' : target.key === 'new' ? 'new_customer' : target.key === 'active' ? 'visit_customer' : target.key === 'sleeping' ? 'sleeping_customer' : target.key === 'sales' ? 'product_sales' : target.key === 'profit' ? 'product_profit' : target.key === 'stock' ? 'stock_alert' : 'expiry_product'
+-			const found = findMetric(items, code)
+-			if (found != null) { target.value = formatMetricValue(found); target.source = String(found.source || target.source || '') }
+-		}
+-	}
+-
+-	function formatMetricValue(metric : any) : string {
+-		if (metric == null || metric.value == null || String(metric.state || '') === 'unavailable' || String(metric.state || '') === 'error') return '—'
+-		const unit = String(metric.unit || '')
+-		const value = Number(metric.value)
+-		if (!isFinite(value)) return '—'
+-		if (unit === 'amount') return '¥' + value.toLocaleString()
+-		if (unit === 'percent') return value.toString() + '%'
+-		return value.toLocaleString()
+-	}
+ 
+ 	function formatDataTime(timestamp : number) : string {
+ 		if (timestamp <= 0) return '—'
+@@ -216,20 +246,21 @@
+ 	.merchant-home-page__metric-card { position: relative; display: flex; box-sizing: border-box; width: calc(50% - 4px); min-height: 112px; flex-direction: column; padding: 12px; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); border-top-width: 3px; border-top-style: solid; border-top-color: #4f8fc5; }
+ 	.merchant-home-page__metric-card--actual { border-top-color: #4c9a8b; }
+ 	.merchant-home-page__metric-card--consume { border-top-color: #c28a34; }
+-	.merchant-home-page__metric-card--target { border-top-color: #8276bd; }
+-	/* 四项经营指标共用同一标题结构，保证图标和指标名在窄屏卡片内始终成组对齐。 */
++	.merchant-home-page__metric-card--refund, .merchant-home-page__metric-card--service { border-top-color: #4c9a8b; }
++	/* 六项经营指标共用同一标题结构，保证图标和指标名在窄屏卡片内始终成组对齐。 */
+ 	.merchant-home-page__metric-head { display: flex; min-width: 0; flex-direction: row; align-items: center; }
+ 	.merchant-home-page__metric-icon { display: flex; width: 25px; height: 25px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 8px; background-color: #eaf4fd; font-size: 11px; font-weight: 800; color: #2778ba; }
+ 	.merchant-home-page__metric-card--actual .merchant-home-page__metric-icon { background-color: #e9f6f2; color: #3d887b; }
+ 	.merchant-home-page__metric-card--consume .merchant-home-page__metric-icon { background-color: #fff5df; color: #ae751d; }
+-	.merchant-home-page__metric-card--target .merchant-home-page__metric-icon { background-color: #f0edff; color: #7164a9; }
++	.merchant-home-page__metric-card--refund .merchant-home-page__metric-icon, .merchant-home-page__metric-card--service .merchant-home-page__metric-icon { background-color: #e9f6f2; color: #357a72; }
+ 	.merchant-home-page__metric-label { min-width: 0; margin-left: 8px; font-size: 11px; line-height: 15px; color: #718397; white-space: nowrap; }
+ 	.merchant-home-page__metric-value { margin-top: 8px; font-size: 21px; font-weight: 800; line-height: 26px; color: #1f5f8b; }
+ 	.merchant-home-page__metric-card--actual .merchant-home-page__metric-value { color: #357a72; }
+ 	.merchant-home-page__metric-card--consume .merchant-home-page__metric-value { color: #a66d13; }
+-	.merchant-home-page__metric-card--target .merchant-home-page__metric-value { color: #6659a0; }
++	.merchant-home-page__metric-card--refund .merchant-home-page__metric-value, .merchant-home-page__metric-card--service .merchant-home-page__metric-value { color: #357a72; }
++	.merchant-home-page__metric-card--unit .merchant-home-page__metric-value { color: #3b78a5; }
+ 	.merchant-home-page__metric-source { margin-top: auto; overflow: hidden; font-size: 9px; line-height: 13px; color: #a0aab4; text-overflow: ellipsis; white-space: nowrap; }
+-	.merchant-home-page__trend-card, .merchant-home-page__summary-card, .merchant-home-page__ranking-card { overflow: hidden; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); }
++	.merchant-home-page__trend-card, .merchant-home-page__ranking-card { overflow: hidden; border-radius: 14px; background-color: #ffffff; box-shadow: 0 5px 16px rgba(45, 74, 101, 0.06); }
+ 	.merchant-home-page__trend-card { margin-top: 10px; padding: 13px; }
+ 	.merchant-home-page__card-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+ 	.merchant-home-page__card-title { display: block; font-size: 14px; font-weight: 800; line-height: 19px; color: #304961; }
+@@ -248,14 +279,26 @@
+ 	.merchant-home-page__trend-empty > text:first-of-type { z-index: 1; font-size: 12px; font-weight: 700; line-height: 17px; }
+ 	.merchant-home-page__trend-empty > text:last-of-type { z-index: 1; margin-top: 3px; font-size: 10px; line-height: 14px; color: #a0acb7; }
+ 	.merchant-home-page__inline-state { display: flex; min-height: 105px; align-items: center; justify-content: center; font-size: 12px; color: #8493a1; }
+-	.merchant-home-page__summary-card { display: flex; flex-direction: row; flex-wrap: wrap; padding: 4px 0; }
+-	.merchant-home-page__summary-item { display: flex; box-sizing: border-box; width: 50%; min-height: 68px; flex-direction: row; align-items: center; padding: 10px 12px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: #eef2f5; }
+-	.merchant-home-page__summary-item:nth-child(odd) { border-right-width: 1px; border-right-style: solid; border-right-color: #eef2f5; }
+-	.merchant-home-page__summary-icon { display: flex; width: 28px; height: 28px; flex-shrink: 0; align-items: center; justify-content: center; margin-right: 8px; border-radius: 9px; background-color: #eaf5fb; font-size: 10px; font-weight: 800; color: #2779ba; }
+-	.merchant-home-page__summary-icon--product { background-color: #fff5e2; color: #a8731c; }
+-	.merchant-home-page__summary-label { display: block; font-size: 10px; line-height: 14px; color: #8795a2; }
+-	.merchant-home-page__summary-value { display: block; margin-top: 2px; font-size: 17px; font-weight: 800; line-height: 22px; color: #2a435b; }
+-	.merchant-home-page__summary-source { display: block; margin-top: 2px; overflow: hidden; max-width: 135px; font-size: 8px; line-height: 11px; color: #a0aab4; text-overflow: ellipsis; white-space: nowrap; }
++	/* 销售类型固定三项；动态分类单列，来源卡可换行，长名称不撑破视口。 */
++	.merchant-home-page__sale-grid { display: flex; flex-direction: row; gap: 7px; margin-top: 10px; }
++	.merchant-home-page__sale-card { flex: 1; min-width: 0; padding: 11px 8px; border-radius: 12px; background-color: #ffffff; border-top: 2px solid #4f8fc5; }
++	.merchant-home-page__sale-card .merchant-home-page__card-title { font-size: 12px; }
++	.merchant-home-page__sale-quantity { display: block; margin-top: 3px; font-size: 17px; font-weight: 700; color: #357a72; }
++	.merchant-home-page__sale-money { display: block; margin-top: 3px; font-size: 17px; font-weight: 700; color: #1f5f8b; overflow-wrap: anywhere; }
++	.merchant-home-page__sale-money--small { font-size: 12px; }
++	.merchant-home-page__sale-card .merchant-home-page__sale-money { font-size: 14px; }
++	.merchant-home-page__category-card { margin-bottom: 10px; padding: 12px; border-radius: 13px; background-color: #ffffff; border-top: 2px solid #4c9a8b; }
++	.merchant-home-page__category-total { display: flex; flex-direction: row; justify-content: space-between; align-items: center; margin-top: 5px; }
++	.merchant-home-page__category-types { display: flex; flex-direction: row; margin-top: 10px; padding-top: 9px; border-top: 1px solid #eef2f5; }
++	.merchant-home-page__category-types > view { flex: 1; min-width: 0; padding-right: 5px; }
++	.merchant-home-page__summary-label { display: block; font-size: 11px; color: #718397; }
++	.merchant-home-page__source-grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
++	.merchant-home-page__source-card { box-sizing: border-box; width: calc(50% - 4px); padding: 12px; border-radius: 12px; background-color: #ffffff; border-top: 2px solid #4f8fc5; }
++	.merchant-home-page__source-card .merchant-home-page__card-title { margin-bottom: 9px; font-size: 12px; overflow-wrap: anywhere; }
++	.merchant-home-page__source-row { display: flex; flex-direction: row; justify-content: space-between; gap: 6px; margin-top: 5px; font-size: 11px; color: #718397; }
++	.merchant-home-page__source-row text:last-child { color: #2b4358; font-weight: 700; }
++	.merchant-home-page__source-row--money text:last-child { color: #1f5f8b; }
++
+ 	.merchant-home-page__error { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background-color: #fff2f0; color: #b94b43; font-size: 11px; }
+ 	.merchant-home-page__error-retry { padding: 5px 8px; border-radius: 6px; background-color: #c6534c; color: #ffffff; }
+ 	.merchant-home-page__ranking-card { min-height: 116px; }
+--- a/前端代码/mobile-vue3/src/shared/api/mobile-home-client.uts
++++ b/前端代码/mobile-vue3/src/shared/api/mobile-home-client.uts
+@@ -17,13 +17,13 @@
+ 	}
+ }
+ 
+-const HOME_CACHE_KEY = 'mobile.merchant.home.cache'
++const HOME_CACHE_KEY = 'mobile.merchant.home.sections.v3.cache'
+ const HOME_CACHE_TTL_MS = 30 * 60 * 1000
+ 
+-function readHomeCache(periodMode : string) : any {
++function readHomeCache(queryKey : string, contextKey : string) : any {
+ 	let stored = uni.getStorageSync(HOME_CACHE_KEY)
+ 	if (stored == null || typeof stored != 'object') return null
+-	if (String(stored.periodMode || '') != periodMode || Number(stored.savedAt || 0) + HOME_CACHE_TTL_MS < Date.now()) return null
++	if (String(stored.queryKey || '') != queryKey || String(stored.contextKey || '') != contextKey || Number(stored.savedAt || 0) + HOME_CACHE_TTL_MS < Date.now()) return null
+ 	// 相对日期筛选按上海自然日解释；跨零点后旧缓存不能冒充今天或本月数据。
+ 	let shanghaiOffsetMs = 8 * 60 * 60 * 1000
+ 	if (Math.floor((Number(stored.savedAt || 0) + shanghaiOffsetMs) / 86400000) != Math.floor((Date.now() + shanghaiOffsetMs) / 86400000)) return null
+@@ -31,8 +31,8 @@
+ 	return body != null && typeof body == 'object' ? body : null
+ }
+ 
+-function saveHomeCache(periodMode : string, body : any) : void {
+-	if (body != null && typeof body == 'object') uni.setStorageSync(HOME_CACHE_KEY, { periodMode: periodMode, savedAt: Date.now(), body: body })
++function saveHomeCache(queryKey : string, contextKey : string, body : any) : void {
++	if (body != null && typeof body == 'object') uni.setStorageSync(HOME_CACHE_KEY, { queryKey: queryKey, contextKey: contextKey, savedAt: Date.now(), body: body })
+ }
+ 
+ export function queryMobileMerchantHome(payload : any, done : (value : any) => void) : void {
+@@ -41,14 +41,16 @@
+ 	if (session == null) { done({ ok: false, message: '请先完成商家端登录。', body: null }); return }
+ 	let plan = buildMobileRequestPlan(homeTransportContract, 'queryHome', session)
+ 	if (!mobileRequestPlanMatchesContract(homeTransportContract, 'queryHome', session, plan)) { done({ ok: false, message: '经营首页请求上下文无效，请重新进入商家端。', body: null }); return }
+-	let periodMode = String((payload || {}).periodMode || 'month')
+-	let cached = readHomeCache(periodMode)
++	// 缓存随登录上下文、日期一起隔离，分类详情不能读到另一账号或另一期间的结果。
++	let queryKey = JSON.stringify(payload || {})
++	let contextKey = String(session.activeContextId) + ':' + String(session.stateContextId) + ':' + String(session.clientSessionId)
++	let cached = readHomeCache(queryKey, contextKey)
+ 	if (cached != null) done({ ok: true, body: cached, cached: true })
+ 	sendMobileRequest(plan, payload || {}, (response : any) => {
+-		if (response != null && response.ok === true && response.body != null) saveHomeCache(periodMode, response.body)
++		if (response != null && response.ok === true && response.body != null) saveHomeCache(queryKey, contextKey, response.body)
+ 		// A cached projection keeps the page usable while the authoritative
+ 		// refresh is unavailable; do not replace visible values with an error.
+-		if (cached != null && (response == null || response.ok !== true)) return
++		if (cached != null && response == null) return
+ 		done(response)
+ 	})
+ }
+--- /dev/null
++++ b/前端代码/mobile-vue3/src/shared/platform/merchant-dashboard-presentation.uts
+@@ -0,0 +1,6 @@
++// 只格式化后端金额：以分返回、按元四舍五入展示；展示值不得用于统计或回写。
++// 与平台看板使用相同的中文整数元格式，退款净额为负时也保持相同舍入规则。
++export function formatDashboardMoney(cents : any) : string {
++	if (cents == null || cents === '' || !isFinite(Number(cents))) return '—'
++	return '¥' + (Number(cents) / 100).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
++}
+--- a/后端代码/app/services/mobile/dashboard/MobileMerchantDashboardServices.php
++++ b/后端代码/app/services/mobile/dashboard/MobileMerchantDashboardServices.php
+@@ -4,12 +4,13 @@
+ 
+ namespace app\services\mobile\dashboard;
+ 
+-use app\services\merchant\MerchantBusinessSecondaryMetricServices;
+-use app\services\merchant\MerchantCustomerMetricServices;
+-use app\services\mobile\customer\MobileCustomerQueryServices;
+ use app\services\mobile\warehouse\MobileWarehouseServices;
+ use app\services\mobile\protocol\MobileApiException;
+ use think\facade\Db;
++use app\services\report\GroupManagementDashboardServices;
++use app\services\merchant\MerchantCustomerMetricServices;
++use app\services\mobile\customer\MobileCustomerQueryServices;
++use app\services\merchant\MerchantBusinessSecondaryMetricServices;
+ 
+ /**
+  * Mobile merchant unified home projection.
+@@ -20,20 +21,23 @@
+  */
+ final class MobileMerchantDashboardServices
+ {
+-    public const METRIC_VERSION = 'mobile-merchant-dashboard-v1';
++    public const METRIC_VERSION = 'mobile-merchant-dashboard-sections-v3';
+ 
+     private $warehouse;
++    private $groupDashboard;
+     private $customerMetrics;
+     private $customerQuery;
+     private $secondaryMetrics;
+ 
+     public function __construct(
+         MobileWarehouseServices $warehouse,
++        GroupManagementDashboardServices $groupDashboard,
+         MerchantCustomerMetricServices $customerMetrics,
+         MobileCustomerQueryServices $customerQuery,
+         MerchantBusinessSecondaryMetricServices $secondaryMetrics
+     ) {
+         $this->warehouse = $warehouse;
++        $this->groupDashboard = $groupDashboard;
+         $this->customerMetrics = $customerMetrics;
+         $this->customerQuery = $customerQuery;
+         $this->secondaryMetrics = $secondaryMetrics;
+@@ -52,16 +56,53 @@
+             throw MobileApiException::business('STORE_NOT_ALLOWED', '当前数据权限范围内没有可查看的门店。');
+         }
+ 
++        // 分类页仍走同一读接口，但不加载首页趋势、组织排行和商品指标。
++        // 分类 ID 只选择已授权结果，不参与门店范围计算。
++        if (($input['view'] ?? '') === 'category') {
++            $period = $this->warehouse->periodForDashboard($input);
++            $sections = $this->groupDashboard->homeSections(
++                ['tenant_id' => '0', 'store_ids' => $storeIds],
++                ['start_date' => $period['startDate'], 'end_date' => $period['endDate']], false
++            );
++            $categoryId = (int)($input['categoryId'] ?? 0);
++            return [
++                'categories' => array_values(array_filter($sections['categories'], static function (array $category) use ($categoryId): bool {
++                    return $categoryId > 0 && (int)$category['category_id'] === $categoryId && $category['visible'];
++                })),
++                'period' => $period, 'metric_version' => self::METRIC_VERSION . '+' . GroupManagementDashboardServices::METRIC_VERSION,
++                'data_as_of' => time(), 'aggregation_caught_up' => false,
++            ];
++        }
++
+         $projection = $this->warehouse->dashboardProjection($storeIds, array_merge($input, ['includeTrend' => false]));
+         $trendComparison = $this->warehouse->dashboardTrendComparison($storeIds, $input);
+         $trend = $this->mergeTrendSeries($trendComparison['actual'] ?? [], $trendComparison['consume'] ?? []);
+         $period = (array)($projection['period'] ?? []);
+-        $startTs = strtotime((string)($period['startDate'] ?? '') . ' 00:00:00');
+-        $endTs = strtotime((string)($period['endDate'] ?? '') . ' 23:59:59');
+ 
+         $overview = $this->overview($projection['summaryMetrics'] ?? []);
+-        $customer = $this->customer($merchant, $storeIds, $startTs, $endTs);
+-        $product = $this->product($storeIds, $startTs, $endTs);
++        $useSections = ($input['projectionVersion'] ?? '') === 'sections-v2';
++        if ($useSections) {
++            // 商家身份只提供服务端已裁剪的门店，客户端不能借平台报表扩大范围。
++            $canViewCustomers = in_array('CUSTOMER_VIEW', (array)($merchant['availableActions'] ?? []), true);
++            $sections = $this->groupDashboard->homeSections(
++                ['tenant_id' => '0', 'store_ids' => $storeIds],
++                ['start_date' => $period['startDate'], 'end_date' => $period['endDate']], $canViewCustomers, true
++            );
++            $overview = ['state' => 'ready', 'cards' => $sections['cards']];
++            $sources = $sections['sources'] ?? ['records' => [], 'source_explanation' => '当前账号没有客户查看权限'];
++            $sources['state'] = $canViewCustomers ? (empty($sources['records']) ? 'empty' : 'ready') : 'unavailable';
++            $extension = ['sale_type_cards' => $sections['sale_type_cards'], 'categories' => $sections['categories'], 'sources' => $sources];
++            $extensionBlocks = ['sources' => $sources['state']];
++        } else {
++            // 已上传旧包仍读取 customer/product；明确按请求版本兼容，不能随新首页上线删除。
++            // 新包不执行此路径，避免重复加载已被替换的客户统计与商品占位指标。
++            $startTs = strtotime($period['startDate'] . ' 00:00:00');
++            $endTs = strtotime($period['endDate'] . ' 23:59:59');
++            $customer = $this->customer($merchant, $storeIds, $startTs, $endTs);
++            $product = $this->product($storeIds, $startTs, $endTs);
++            $extension = ['customer' => $customer, 'product' => $product];
++            $extensionBlocks = ['customer' => $customer['state'], 'product' => $product['state']];
++        }
+         $rankingSpec = $this->rankingSpec($merchant, (string)($period['endDate'] ?? date('Y-m-d')));
+         $rankingRows = $this->warehouse->dashboardRanking($storeIds, $input, $rankingSpec['dimension']);
+         $ranking = [
+@@ -76,10 +117,8 @@
+         $blocks = [
+             'overview' => $overview['state'],
+             'trend' => empty((array)($trend['points'] ?? [])) ? 'empty' : 'ready',
+-            'customer' => $customer['state'],
+-            'product' => $product['state'],
+             'ranking' => $ranking['state'],
+-        ];
++        ] + $extensionBlocks;
+ 
+         return [
+             'overview' => $overview,
+@@ -88,8 +127,6 @@
+                 'source' => '统一经营事实趋势序列',
+                 'data' => $trend,
+             ],
+-            'customer' => $customer,
+-            'product' => $product,
+             'ranking' => $ranking,
+             'scope' => [
+                 'mode' => (string)($merchant['dataScopeMode'] ?? ''),
+@@ -100,9 +137,9 @@
+             'period' => $period,
+             'blocks' => $blocks,
+             'data_as_of' => (int)($projection['data_as_of'] ?? time()),
+-            'metric_version' => self::METRIC_VERSION . '+' . (string)($projection['metric_version'] ?? MobileWarehouseServices::METRIC_VERSION),
++            'metric_version' => ($useSections ? self::METRIC_VERSION . '+' . GroupManagementDashboardServices::METRIC_VERSION : 'mobile-merchant-dashboard-v1') . '+' . (string)($projection['metric_version'] ?? MobileWarehouseServices::METRIC_VERSION),
+             'aggregation_caught_up' => (bool)($projection['aggregation_caught_up'] ?? false),
+-        ];
++        ] + $extension;
+     }
+ 
+     /**
+@@ -235,6 +272,7 @@
+         ];
+     }
+ 
++    // 兼容已安装旧包的只读字段；仅由上方无 sections-v2 标记的请求调用。
+     /** @return array<string,mixed> */
+     private function customer(array $merchant, array $storeIds, int $startTs, int $endTs): array
+     {
+--- a/后端代码/app/services/report/GroupManagementDashboardServices.php
++++ b/后端代码/app/services/report/GroupManagementDashboardServices.php
+@@ -16,7 +16,7 @@
+ final class GroupManagementDashboardServices
+ {
+     public const DASHBOARD_CODE = 'group_management_dashboard';
+-    public const METRIC_VERSION = 'group-management-sale-type-cards-v7';
++    public const METRIC_VERSION = 'group-management-shared-home-v9';
+     public const COVERAGE_START = '2026-08-10';
+ 
+     private $organizationDimensions;
+@@ -75,31 +75,8 @@
+         }
+         $cashRows = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+         $serviceRows = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+-        if ($categoryIds === []) {
+-            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
+-            $cash = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+-            $refund = $reader->summary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+-            $actual = $reader->summary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range);
+-            $consumption = $reader->summary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range);
+-            $serviceCount = $reader->summary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range);
+-        } else {
+-            $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
+-            $cash = $reader->categorySummary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+-            $refund = $reader->categorySummary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+-            $actual = $reader->categorySummary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+-            $consumption = $reader->categorySummary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+-            $serviceCount = $reader->categorySummary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+-        }
+-        $month = substr($range['end'], 0, 7);
+         $year = (int)substr($range['end'], 0, 4);
+-        $cards = [
+-            $this->registeredMetric('cash_performance', 'cash_performance', $cash),
+-            $this->registeredMetric('refund_performance', 'refund_performance', $refund),
+-            $this->registeredMetric('actual_performance', 'actual_performance', $actual),
+-            $this->registeredMetric('consumption_performance', 'consume_amount', $consumption),
+-            $this->registeredMetric('consumption_count', 'completed_service_item_count', $serviceCount),
+-            $this->metric('consumption_unit_price', '消耗单价', $serviceCount > 0 ? (int)round($consumption / $serviceCount) : null, 'money', '消耗业绩除以消耗数量；分母为零显示 -。'),
+-        ];
++        $cards = $this->operatingCards($scope, $range, $categoryIds);
+         if (!empty($input['summary_only'])) {
+             return [
+                 'cards' => $cards,
+@@ -112,40 +89,12 @@
+             ['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $range['end']
+         );
+         $monthTargets = $goalProgress['month_targets'];
+-        $categoryCards = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()->categoryDashboardCards(
+-            'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
+-        );
+         $currentTarget = array_sum($monthTargets);
+         $yearTarget = array_sum($goalProgress['year_targets']);
+         $monthActual = $goalProgress['month_actual'];
+         $yearActual = $goalProgress['year_actual'];
+         $targetedStoreIds = array_map('intval', array_keys($monthTargets));
+-        // The three sale-mix cards share the dashboard's authorized store/date
+-        // scope. Their positive sale receipts are narrower than the overall
+-        // cash card, which also includes recharge and debt repayments.
+-        // One reader result supplies both levels' fixed three types. Experience
+-        // cards are omitted, not merged; this layer never recalculates values.
+-        $saleTypeBreakdown = $reader->dashboardSaleTypeBreakdown($scope['tenant_id'], $scope['store_ids'], $range,
+-            $categoryTree['roots'], $categoryTree['children'], $categoryIds);
+-        $saleTypeTotals = $saleTypeBreakdown['totals'];
+-        $saleTypeCards = [];
+-        foreach (['normal_card' => '疗程卡', 'project' => '单项', 'product' => '产品'] as $code => $title) {
+-            $saleTypeCards[] = [
+-                'code' => $code,
+-                'title' => $title,
+-                'sales_quantity' => $saleTypeTotals[$code]['sales_quantity'],
+-                'cash_performance_cents' => $saleTypeTotals[$code]['cash_performance_cents'],
+-            ];
+-        }
+-        foreach ($categoryCards as &$category) {
+-            $category['sale_types'] = [];
+-            foreach ($saleTypeCards as $type) {
+-                $values = $saleTypeBreakdown['categories'][$category['category_id']][$type['code']] ?? null;
+-                if ($values === null) continue;
+-                $category['sale_types'][] = ['code' => $type['code'], 'title' => $type['title']] + $values;
+-            }
+-        }
+-        unset($category);
++        $sections = $this->performanceSections($scope, $range, $categoryTree, $categoryIds);
+ 
+         return [
+             'dashboard_code' => self::DASHBOARD_CODE,
+@@ -153,9 +102,9 @@
+             'scope' => ['store_ids' => $scope['store_ids'], 'range' => $range, 'selected_category_id' => $selectedCategory],
+             'filter_schema' => $this->filterSchema($categoryTree['roots']),
+             'cards' => $cards,
+-            'sale_type_cards' => $saleTypeCards,
++            'sale_type_cards' => $sections['sale_type_cards'],
+             'trend' => $this->trend($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds),
+-            'categories' => $categoryCards,
++            'categories' => $sections['categories'],
+             'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows, $categoryIds),
+             'goals' => [
+                 'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, '只比较本月已设置全店实际业绩目标的门店；完成值来自相同门店的统一事实，不随商品分类筛选改变。'),
+@@ -177,6 +126,97 @@
+         ];
+     }
+ 
++    /** 六项经营业绩由平台和商家端共用；消耗单价在后端按同一服务项目数派生，零分母为空。 */
++    private function operatingCards(array $scope, array $range, array $categoryIds = []): array
++    {
++        if ($categoryIds === []) {
++            $reader = new \app\services\query\metric\RegisteredMetricReadServices();
++            $cash = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range);
++            $refund = $reader->summary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range);
++            $actual = $reader->summary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range);
++            $consumption = $reader->summary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range);
++            $serviceCount = $reader->summary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range);
++        } else {
++            $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
++            $cash = $reader->categorySummary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
++            $refund = $reader->categorySummary('refund_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
++            $actual = $reader->categorySummary('actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
++            $consumption = $reader->categorySummary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
++            $serviceCount = $reader->categorySummary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
++        }
++        return [
++            $this->registeredMetric('cash_performance', 'cash_performance', $cash),
++            $this->registeredMetric('refund_performance', 'refund_performance', $refund),
++            $this->registeredMetric('actual_performance', 'actual_performance', $actual),
++            $this->registeredMetric('consumption_performance', 'consume_amount', $consumption),
++            $this->registeredMetric('consumption_count', 'completed_service_item_count', $serviceCount),
++            $this->metric('consumption_unit_price', '消耗单价', $serviceCount > 0 ? (int)round($consumption / $serviceCount) : null, 'money', '消耗业绩除以消耗数量；分母为零显示 -。'),
++        ];
++    }
++
++    /**
++     * 平台与商家端共用销售类型、分类和排行投影；调用方必须传入服务端授权范围。
++     * 只读取本模块所需事实，不为了手机首页加载目标、预警等无关报表。
++     */
++    public function homeSections(array $context, array $input, bool $includeSources = true, bool $includeOperatingCards = false): array
++    {
++        $scope = $this->scope($context, $input);
++        $range = $this->range($input);
++        $sections = $this->performanceSections($scope, $range, $this->categories(), []);
++        if ($includeOperatingCards) $sections['cards'] = $this->operatingCards($scope, $range);
++        if ($includeSources) {
++            $sections['sources'] = $this->sources($scope['store_ids'], $range,
++                $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, []),
++                $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, []), []);
++        }
++        return $sections;
++    }
++
++    /** 后端决定分类显隐和配置顺序，两端仅按同一契约渲染；金额不在客户端重算。 */
++    private function performanceSections(array $scope, array $range, array $categoryTree, array $categoryIds): array
++    {
++        $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
++        $categoryCards = $reader->categoryDashboardCards(
++            'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
++        );
++        // The three sale-mix cards share the dashboard's authorized store/date
++        // scope. Their positive sale receipts are narrower than the overall
++        // cash card, which also includes recharge and debt repayments.
++        // One reader result supplies both levels' fixed three types. Experience
++        // cards are omitted, not merged; this layer never recalculates values.
++        $saleTypeBreakdown = $reader->dashboardSaleTypeBreakdown($scope['tenant_id'], $scope['store_ids'], $range,
++            $categoryTree['roots'], $categoryTree['children'], $categoryIds);
++        $saleTypeTotals = $saleTypeBreakdown['totals'];
++        $saleTypeCards = [];
++        foreach (['normal_card' => '疗程卡', 'project' => '单项', 'product' => '产品'] as $code => $title) {
++            $saleTypeCards[] = [
++                'code' => $code,
++                'title' => $title,
++                'sales_quantity' => $saleTypeTotals[$code]['sales_quantity'],
++                'cash_performance_cents' => $saleTypeTotals[$code]['cash_performance_cents'],
++            ];
++        }
++        foreach ($categoryCards as &$category) {
++            $category['sale_types'] = [];
++            foreach ($saleTypeCards as $type) {
++                $values = $saleTypeBreakdown['categories'][$category['category_id']][$type['code']] ?? null;
++                if ($values === null) continue;
++                $category['sale_types'][] = ['code' => $type['code'], 'title' => $type['title']] + $values;
++            }
++            $hasSale = false;
++            foreach ($category['sale_types'] as $type) {
++                if ($type['sales_quantity'] != 0 || $type['cash_performance_cents'] != 0) $hasSale = true;
++            }
++            // 未分类仍保留在返回值供总额追溯；不生成可误导用户的分类入口。
++            $category['visible'] = (int)$category['category_id'] > 0
++                && trim((string)$category['name']) !== '' && $category['name'] !== '未分类'
++                && ((int)$category['amount_cents'] !== 0 || $category['project_rankings'] !== []
++                    || $category['product_rankings'] !== [] || $hasSale);
++        }
++        unset($category);
++        return ['sale_type_cards' => $saleTypeCards, 'categories' => $categoryCards];
++    }
++
+     /** @return array<string,mixed> */
+     public function targetSave(array $context, array $payload): array
+     {

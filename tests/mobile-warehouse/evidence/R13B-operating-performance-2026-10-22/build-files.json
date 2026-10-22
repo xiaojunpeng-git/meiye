@@ -1,0 +1,12 @@
+{
+  "src/merchant/pages/home/index.js": "a0b2bc2e33eb9738bd9b1a20e6d76450b8bbad0c5670a2a7df73fe17c9267422",
+  "src/merchant/pages/home/index.wxml": "02ff096be13aefa7eac34db985007df15835b26a8f8ad39e653e49f7eda36411",
+  "src/merchant/pages/category-ranking/index.js": "2e41f2c3ef6cca253fb00b6e55f4c5342f91ead9d6b4fc26f1fc662391c64fd0",
+  "src/merchant/pages/category-ranking/index.wxml": "bf56077530875745687f44ff28bd328c98baa295af4c9ccb0abab144c2203b2b",
+  "src/app/pages/bootstrap/index.js": "346be41b7b40b50524503f6563a6f53915a68f2e2038757965fc3fcd7fa4a786",
+  "src/app/pages/bootstrap/index.wxml": "0ff6f1399c199c8558fe3accb274ea268ac7d3e5dfa3030d63b3fbba01771551",
+  "src/merchant/pages/warehouse/index.js": "f254667303a9566e42818db6e74d274f7ca1c141df48094e8ad09f6a68f37268",
+  "src/merchant/pages/warehouse/index.wxml": "25dcf5e442ca7cecd757633655c97082bc5232e9133764403f6715c458a27d15",
+  "src/shared/components/mohe-ai-entry.js": "5544dbbc31b64d453e42eaf46387965d282cc96d79ba625f6541dedea37819d7",
+  "src/shared/components/mohe-ai-entry.wxml": "91bdb222a6e47223f63e267b740ba28a9ef2fefef6397f2629e4096afb56ccff"
+}

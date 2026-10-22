@@ -16,7 +16,7 @@ use think\facade\Db;
 final class GroupManagementDashboardServices
 {
     public const DASHBOARD_CODE = 'group_management_dashboard';
-    public const METRIC_VERSION = 'group-management-sale-type-cards-v7';
+    public const METRIC_VERSION = 'group-management-shared-home-v9';
     public const COVERAGE_START = '2026-08-10';
 
     private $organizationDimensions;
@@ -75,6 +75,60 @@ final class GroupManagementDashboardServices
         }
         $cashRows = $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
         $serviceRows = $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
+        $year = (int)substr($range['end'], 0, 4);
+        $cards = $this->operatingCards($scope, $range, $categoryIds);
+        if (!empty($input['summary_only'])) {
+            return [
+                'cards' => $cards,
+                'metric_version' => self::METRIC_VERSION,
+                'aggregation_caught_up' => false,
+            ];
+        }
+        // 进度只比较已设置目标的门店×月份；普通经营业绩卡仍按完整筛选范围展示。
+        $goalProgress = (new \app\services\target\TargetSchemeReportServices())->groupProgress(
+            ['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $range['end']
+        );
+        $monthTargets = $goalProgress['month_targets'];
+        $currentTarget = array_sum($monthTargets);
+        $yearTarget = array_sum($goalProgress['year_targets']);
+        $monthActual = $goalProgress['month_actual'];
+        $yearActual = $goalProgress['year_actual'];
+        $targetedStoreIds = array_map('intval', array_keys($monthTargets));
+        $sections = $this->performanceSections($scope, $range, $categoryTree, $categoryIds);
+
+        return [
+            'dashboard_code' => self::DASHBOARD_CODE,
+            'title' => '集团管理看板',
+            'scope' => ['store_ids' => $scope['store_ids'], 'range' => $range, 'selected_category_id' => $selectedCategory],
+            'filter_schema' => $this->filterSchema($categoryTree['roots']),
+            'cards' => $cards,
+            'sale_type_cards' => $sections['sale_type_cards'],
+            'trend' => $this->trend($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds),
+            'categories' => $sections['categories'],
+            'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows, $categoryIds),
+            'goals' => [
+                'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, '只比较本月已设置全店实际业绩目标的门店；完成值来自相同门店的统一事实，不随商品分类筛选改变。'),
+                'year' => $this->goalProjection('本年目标进度', $yearTarget, $yearActual, '全年目标汇总已配置月份；完成值只统计这些门店和月份截至所选日期的统一事实。'),
+                'source_explanation' => '目标由已关联集团管理看板的生效目标方案提供；未配置目标的门店和月份不进入达成率。',
+            ],
+            'rankings' => $this->rankings($targetedStoreIds, $monthTargets, $goalProgress['month_store_actuals'], $range['end']),
+            'alerts' => $this->alerts($targetedStoreIds, $monthTargets, $goalProgress['month_store_actuals']),
+            'field_explanations' => $this->fieldExplanations(),
+            'target_management' => $this->targets->yearTargets(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year),
+            'metric_version' => self::METRIC_VERSION,
+            'data_as_of' => date('Y-m-d H:i:s'),
+            'aggregation_caught_up' => false,
+            'aggregation_status' => $categoryIds !== []
+                ? '已选择商品分类，分类指标按原明细金额和关联平台商品当前分类实时读取。'
+                : '按统一事实实时读取；离线日汇总尚未具备可靠的变更失效机制。',
+            'aggregation_health' => $aggregationHealth,
+            'coverage_start' => self::COVERAGE_START,
+        ];
+    }
+
+    /** 六项经营业绩由平台和商家端共用；消耗单价在后端按同一服务项目数派生，零分母为空。 */
+    private function operatingCards(array $scope, array $range, array $categoryIds = []): array
+    {
         if ($categoryIds === []) {
             $reader = new \app\services\query\metric\RegisteredMetricReadServices();
             $cash = $reader->summary('cash_performance', $scope['tenant_id'], $scope['store_ids'], $range);
@@ -90,9 +144,7 @@ final class GroupManagementDashboardServices
             $consumption = $reader->categorySummary('consume_amount', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
             $serviceCount = $reader->categorySummary('completed_service_item_count', $scope['tenant_id'], $scope['store_ids'], $range, $categoryIds);
         }
-        $month = substr($range['end'], 0, 7);
-        $year = (int)substr($range['end'], 0, 4);
-        $cards = [
+        return [
             $this->registeredMetric('cash_performance', 'cash_performance', $cash),
             $this->registeredMetric('refund_performance', 'refund_performance', $refund),
             $this->registeredMetric('actual_performance', 'actual_performance', $actual),
@@ -100,26 +152,33 @@ final class GroupManagementDashboardServices
             $this->registeredMetric('consumption_count', 'completed_service_item_count', $serviceCount),
             $this->metric('consumption_unit_price', '消耗单价', $serviceCount > 0 ? (int)round($consumption / $serviceCount) : null, 'money', '消耗业绩除以消耗数量；分母为零显示 -。'),
         ];
-        if (!empty($input['summary_only'])) {
-            return [
-                'cards' => $cards,
-                'metric_version' => self::METRIC_VERSION,
-                'aggregation_caught_up' => false,
-            ];
+    }
+
+    /**
+     * 平台与商家端共用销售类型、分类和排行投影；调用方必须传入服务端授权范围。
+     * 只读取本模块所需事实，不为了手机首页加载目标、预警等无关报表。
+     */
+    public function homeSections(array $context, array $input, bool $includeSources = true, bool $includeOperatingCards = false): array
+    {
+        $scope = $this->scope($context, $input);
+        $range = $this->range($input);
+        $sections = $this->performanceSections($scope, $range, $this->categories(), []);
+        if ($includeOperatingCards) $sections['cards'] = $this->operatingCards($scope, $range);
+        if ($includeSources) {
+            $sections['sources'] = $this->sources($scope['store_ids'], $range,
+                $this->cashRows($scope['tenant_id'], $scope['store_ids'], $range, []),
+                $this->serviceRows($scope['tenant_id'], $scope['store_ids'], $range, []), []);
         }
-        // 进度只比较已设置目标的门店×月份；普通经营业绩卡仍按完整筛选范围展示。
-        $goalProgress = (new \app\services\target\TargetSchemeReportServices())->groupProgress(
-            ['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $range['end']
-        );
-        $monthTargets = $goalProgress['month_targets'];
-        $categoryCards = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory()->categoryDashboardCards(
+        return $sections;
+    }
+
+    /** 后端决定分类显隐和配置顺序，两端仅按同一契约渲染；金额不在客户端重算。 */
+    private function performanceSections(array $scope, array $range, array $categoryTree, array $categoryIds): array
+    {
+        $reader = \app\services\query\metric\RegisteredMetricReadServices::withCurrentReportProductCategory();
+        $categoryCards = $reader->categoryDashboardCards(
             'actual_performance', $scope['tenant_id'], $scope['store_ids'], $range, $categoryTree['roots'], $categoryTree['children'], $categoryIds
         );
-        $currentTarget = array_sum($monthTargets);
-        $yearTarget = array_sum($goalProgress['year_targets']);
-        $monthActual = $goalProgress['month_actual'];
-        $yearActual = $goalProgress['year_actual'];
-        $targetedStoreIds = array_map('intval', array_keys($monthTargets));
         // The three sale-mix cards share the dashboard's authorized store/date
         // scope. Their positive sale receipts are narrower than the overall
         // cash card, which also includes recharge and debt repayments.
@@ -144,37 +203,18 @@ final class GroupManagementDashboardServices
                 if ($values === null) continue;
                 $category['sale_types'][] = ['code' => $type['code'], 'title' => $type['title']] + $values;
             }
+            $hasSale = false;
+            foreach ($category['sale_types'] as $type) {
+                if ($type['sales_quantity'] != 0 || $type['cash_performance_cents'] != 0) $hasSale = true;
+            }
+            // 未分类仍保留在返回值供总额追溯；不生成可误导用户的分类入口。
+            $category['visible'] = (int)$category['category_id'] > 0
+                && trim((string)$category['name']) !== '' && $category['name'] !== '未分类'
+                && ((int)$category['amount_cents'] !== 0 || $category['project_rankings'] !== []
+                    || $category['product_rankings'] !== [] || $hasSale);
         }
         unset($category);
-
-        return [
-            'dashboard_code' => self::DASHBOARD_CODE,
-            'title' => '集团管理看板',
-            'scope' => ['store_ids' => $scope['store_ids'], 'range' => $range, 'selected_category_id' => $selectedCategory],
-            'filter_schema' => $this->filterSchema($categoryTree['roots']),
-            'cards' => $cards,
-            'sale_type_cards' => $saleTypeCards,
-            'trend' => $this->trend($scope['tenant_id'], $scope['store_ids'], $range, $categoryIds),
-            'categories' => $categoryCards,
-            'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows, $categoryIds),
-            'goals' => [
-                'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, '只比较本月已设置全店实际业绩目标的门店；完成值来自相同门店的统一事实，不随商品分类筛选改变。'),
-                'year' => $this->goalProjection('本年目标进度', $yearTarget, $yearActual, '全年目标汇总已配置月份；完成值只统计这些门店和月份截至所选日期的统一事实。'),
-                'source_explanation' => '目标由已关联集团管理看板的生效目标方案提供；未配置目标的门店和月份不进入达成率。',
-            ],
-            'rankings' => $this->rankings($targetedStoreIds, $monthTargets, $goalProgress['month_store_actuals'], $range['end']),
-            'alerts' => $this->alerts($targetedStoreIds, $monthTargets, $goalProgress['month_store_actuals']),
-            'field_explanations' => $this->fieldExplanations(),
-            'target_management' => $this->targets->yearTargets(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year),
-            'metric_version' => self::METRIC_VERSION,
-            'data_as_of' => date('Y-m-d H:i:s'),
-            'aggregation_caught_up' => false,
-            'aggregation_status' => $categoryIds !== []
-                ? '已选择商品分类，分类指标按原明细金额和关联平台商品当前分类实时读取。'
-                : '按统一事实实时读取；离线日汇总尚未具备可靠的变更失效机制。',
-            'aggregation_health' => $aggregationHealth,
-            'coverage_start' => self::COVERAGE_START,
-        ];
+        return ['sale_type_cards' => $saleTypeCards, 'categories' => $categoryCards];
     }
 
     /** @return array<string,mixed> */

@@ -7,6 +7,10 @@
 			}
 		},
 		{
+			"path": "src/merchant/pages/category-ranking/index",
+			"style": { "navigationStyle": "custom" }
+		},
+		{
 			"path": "src/merchant/pages/home/index",
 			"style": {
 				"navigationStyle": "custom"
