@@ -1,0 +1,93 @@
+{
+  "task": "M008-EMERG-R2-CUBE",
+  "recordedAt": "2026-10-22T09:53:14.835Z",
+  "deployment": "PASS both instances",
+  "push": "PASS",
+  "miniUpload": "PENDING USER CONFIRMATION",
+  "files": [
+    {
+      "file": "008-after.json",
+      "sha256": "e5eb4f310a02b68dca916b353c705d8e2d27e66a0befa342ae4fe98b9fb56a6a"
+    },
+    {
+      "file": "008-before.json",
+      "sha256": "717452c056b5b7fa92bf8e56836adf0b9ed8574309fa97327a7cf79f9ddbfd2a"
+    },
+    {
+      "file": "008-cube-editor.png",
+      "sha256": "74de45fa79dcaecdaad55ee1fe0d6bdfa3fca452372f7d3e5bccbe87e0875d09"
+    },
+    {
+      "file": "008-home.png",
+      "sha256": "f84569752158bea529e3ca39eb7fe459b5a029806dd146c13ecf6814cf350a42"
+    },
+    {
+      "file": "008-installed.json",
+      "sha256": "547daada45e014f13c72568f665108abd644e9684a26b6bb828aa8e2ce6cfc4e"
+    },
+    {
+      "file": "008-public-after.json",
+      "sha256": "c6797875ba1e024955360a701afe4ea09c1e6f45cb61af417ed101a66e6ff797"
+    },
+    {
+      "file": "008-public-before.json",
+      "sha256": "5a3f2e6d568e6a9d2dff26ff95c225524b49617546889991c9932b5521a6c9e4"
+    },
+    {
+      "file": "008-verified.json",
+      "sha256": "dd8bf078d81cecf54599ea8d0e036483119a6c54a6813954e38fa2b6ffbd15c0"
+    },
+    {
+      "file": "manifest.json",
+      "sha256": "9581bf76b961ce1a6fe5e9d0eebd18753c27e6617dd7e905906869e8ef30bb54"
+    },
+    {
+      "file": "mini-verification.json",
+      "sha256": "dde7ebfd7485af5ad0a2a56a905f33a66e011ab427cd5558fea9e618a86d912d"
+    },
+    {
+      "file": "payload.json",
+      "sha256": "3d4e96010d01320043f120d3b3e4880200e339eaff93a47843031b4e814c1577"
+    },
+    {
+      "file": "pending-upload.json",
+      "sha256": "abad96df638e20625c7d0869f50cd238993c0e12f776320d49f6dbde4dd2edc9"
+    },
+    {
+      "file": "pushed.json",
+      "sha256": "a884c898d9d3f92d35a204e8a2b99096da0a3a935742bc7495c60d9153bb9efb"
+    },
+    {
+      "file": "release.md",
+      "sha256": "48bcbf63d9bab1ebab6648f71a32e323f2b1b862ec7ba3e210234974062c4afa"
+    },
+    {
+      "file": "rh-after.json",
+      "sha256": "50ede7094ca374cbcfd2e32587fd2f01903a237413fec498e4afc407f3c80820"
+    },
+    {
+      "file": "rh-before.json",
+      "sha256": "740ccf0281b74e9bade8e05b3599bdbb2034e5d0762adbd251abf18cc1eb870b"
+    },
+    {
+      "file": "rh-home.png",
+      "sha256": "36fe381934964d8a071f2e4be9847df68108a12e68ea6f5adc509d6a636b8924"
+    },
+    {
+      "file": "rh-installed.json",
+      "sha256": "4ea86e8460fc1a170fac38388221e6854132d79ab9b21ff63da784b512bcff11"
+    },
+    {
+      "file": "rh-public-after.json",
+      "sha256": "4fc24c3dcefb1d0a77c991bebaac5118fb248a2936969cb8c5cc16b08fc22401"
+    },
+    {
+      "file": "rh-public-before.json",
+      "sha256": "51a63382cb9d450ba61a16344c262c0ed5e6f64759766ac934b94da490fc3fe8"
+    },
+    {
+      "file": "rh-verified.json",
+      "sha256": "780a0731945617d24051eae6de8959ebabb59153b84a5a9be3ad34d0ba89477d"
+    }
+  ]
+}
