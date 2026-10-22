@@ -767,6 +767,7 @@ class CashierV3ActionManifest
             ],
             'correct-sales-order-attribution' => self::attributionCorrectionEventContract('correct-sales-order-attribution'),
             'correct-service-order-date' => self::attributionCorrectionEventContract('correct-service-order-date'),
+            'correct-service-order-attribution' => self::attributionCorrectionEventContract('correct-service-order-attribution'),
             'correct-service-order-guide' => [
                 'required_event_types' => ['service_record.guide_corrected'],
                 'allowed_event_types' => ['service_record.guide_corrected'],
