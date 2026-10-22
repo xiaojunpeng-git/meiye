@@ -1964,9 +1964,9 @@ class CashierV3CommandGatewayServices extends BaseServices
             ->where('operator_id', $operatorScope->operatorId())
             ->where('operation_type', 'refund')
             ->where('status', 'succeeded')->find();
-        // Catalog refunds have no original order, but their committed refund operation is still
-        // the replay authority for the same operator/store/idempotency key.
-        if (!$operation || !in_array((string)($operation['source_type'] ?? ''), ['card', 'document', 'catalog'], true)
+        // Catalog and balance refunds have no original order; their committed operation
+        // still binds a replay to the same operator, store and idempotency key.
+        if (!$operation || !in_array((string)($operation['source_type'] ?? ''), ['card', 'document', 'catalog', 'balance'], true)
             || (string)$operation['operation_no'] !== (string)($existing['business_no'] ?? '')) {
             return 'refund_replay_operation_missing';
         }

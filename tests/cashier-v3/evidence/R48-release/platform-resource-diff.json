@@ -1,0 +1,64 @@
+{
+  "baseline": "444e11b411fad0fb9eff8ae9e183366293b1b6da",
+  "candidate": "0eabd85d6115d0e3d4de25ceb867d2d1b84a32ae",
+  "newBusinessBytes": [
+    {
+      "file": "system.html",
+      "sha256": "f1aeee8b3fc4927d8e406ac818a37022404bd41cb5e4a0c8e585f2e08f610112"
+    },
+    {
+      "file": "view_admin/css/chunk-49e97c98.0da1ff3d.css",
+      "sha256": "26953240d51d2446e8cdb6455c621f06b2f536d0c634c1653e43be231f49d0db"
+    },
+    {
+      "file": "view_admin/css/chunk-7c45b0f0.61eb1283.css",
+      "sha256": "46b7320e1fc45c98bd3d911155e21f8d9eb7d1b674d844bfc14aacc50634270a"
+    },
+    {
+      "file": "view_admin/js/app.0dcade86.js",
+      "sha256": "23ba3a06235dfaf8d864867fcc1bce8801908a7e6d3208a35723fab98335bf62"
+    },
+    {
+      "file": "view_admin/js/chunk-49e97c98.0691ae2c.js",
+      "sha256": "b16a2f85415edeafa1e2ca0fa9cfc06076ab397a60fdca50a181e1869da7bca7"
+    },
+    {
+      "file": "view_admin/js/chunk-7c45b0f0.fa8e388f.js",
+      "sha256": "935dc1812e3f4c0ba560e720e3d2afb0c61032383cffad5c460b20df58c432b5"
+    },
+    {
+      "file": "view_admin/js/chunk-aa18606c.45ca1548.js",
+      "sha256": "b6e566485b24f67124b7c514c898beca846c8644b24942579dfe90842ef6a9be"
+    }
+  ],
+  "replacedBusinessBytes": [
+    {
+      "file": "system.html",
+      "sha256": "bbf142703d585de9f94340c162b27185ee01d294adfa697e907a2e39eaa6f3bd"
+    },
+    {
+      "file": "view_admin/css/chunk-3e56c146.d13b2cee.css",
+      "sha256": "3f94e21f8622f86828a23ea1115861cc7b4032e7eefdadff95dc0c6aed307a02"
+    },
+    {
+      "file": "view_admin/css/chunk-f11dfb6e.d4112b22.css",
+      "sha256": "acc6deeccbdb03d7ec15e944605d58a616f7f2b5852a6e7b76e36bf1cca22296"
+    },
+    {
+      "file": "view_admin/js/app.33d40334.js",
+      "sha256": "a01a8dea362e18e33edbbf0d79e9a492cc4f3a450a126075cabfc4c4bb95e07f"
+    },
+    {
+      "file": "view_admin/js/chunk-3e56c146.6f83ec20.js",
+      "sha256": "c5359423d89ecc97af9f4013a906962f50202c90cc291ddfff74f1b1f1775654"
+    },
+    {
+      "file": "view_admin/js/chunk-aa18606c.05362c4a.js",
+      "sha256": "3da5f83b95b3355df1d9686a3842b6b28bdbaf622d938ee88a1f295d2c44fb0c"
+    },
+    {
+      "file": "view_admin/js/chunk-f11dfb6e.6e1917d5.js",
+      "sha256": "ad6758cff97ba50494d4a922c53736aee63316834681dc59f240752c0ed9aea7"
+    }
+  ]
+}

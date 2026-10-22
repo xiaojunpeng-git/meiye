@@ -479,7 +479,8 @@ final class CashierV3MemberDetailQueryServices
             ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
             ->where('cu.uid', $memberId);
         if ($status === 'active') {
-            $query->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
+            $query->where('cu.status', 0)->where('cu.is_fail', 0)
+                ->where(function ($q): void { $q->where('cu.use_time', 0)->whereOr('ci.coupon_type', 3); })
                 ->where(function ($q) use ($now): void { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
                 ->where(function ($q) use ($now): void { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); });
         }
@@ -488,12 +489,16 @@ final class CashierV3MemberDetailQueryServices
         if ($dateTo !== '') $query->where('cu.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
         $rows = $query->field('cu.id,cu.coupon_title,cu.coupon_price,cu.start_time,cu.end_time,cu.use_time,cu.status,cu.is_fail,ci.coupon_type')
             ->order('cu.add_time desc,cu.id desc')->limit(200)->select()->toArray();
-        return array_map(function (array $row) use ($now): array {
+        // Used timestamps do not exhaust an allowance; read its current account
+        // without rewriting the original coupon face or renewing validity.
+        $ids = array_column(array_filter($rows, static fn(array $row): bool => (int)($row['coupon_type'] ?? 0) === 3), 'id');
+        $remaining = (new \app\services\activity\coupon\StoreCouponAllowanceServices())->remainingByCouponIds($ids);
+        return array_map(function (array $row) use ($now, $remaining): array {
             $couponType = $row['coupon_type'] === null ? 0 : (int)$row['coupon_type'];
             $start = (int)$row['start_time'];
             $end = (int)$row['end_time'];
             $statusCode = (int)$row['status'];
-            $used = $statusCode === 1 || (int)$row['use_time'] > 0;
+            $used = $statusCode === 1 || ($couponType !== 3 && (int)$row['use_time'] > 0);
             $voided = (int)$row['is_fail'] !== 0 || $statusCode === 2;
             $statusLabel = $voided ? '已作废' : ($used ? '已使用'
                 : ($statusCode !== 0 ? '不可用'
@@ -501,11 +506,13 @@ final class CashierV3MemberDetailQueryServices
             return [
                 'id' => 'coupon:' . (int)$row['id'], 'couponNo' => (string)$row['id'],
                 'couponName' => (string)$row['coupon_title'],
-                'couponTypeLabel' => $couponType === 2 ? '折扣券' : ($couponType === 1 ? '满减券' : '未标注'),
+                'couponTypeLabel' => $couponType === 3 ? '多次抵用券' : ($couponType === 2 ? '折扣券' : ($couponType === 1 ? '满减券' : '未标注')),
                 // 折扣券的 coupon_price 是百分比而非金额；不可格式化成元。
                 'couponAmountLabel' => $couponType === 2
                     ? rtrim(rtrim((string)$row['coupon_price'], '0'), '.') . '%'
-                    : ($couponType === 0 ? '未标注' : null),
+                    : ($couponType === 3 ? '剩余 ¥' . intdiv((int)($remaining[(int)$row['id']]
+                        ?? \app\services\activity\coupon\StoreCouponAllowanceServices::wholeCents($row['coupon_price'])), 100)
+                        : ($couponType === 0 ? '未标注' : null)),
                 'couponAmount' => $couponType === 1 ? (string)$row['coupon_price'] : null,
                 'effectiveAt' => $start > 0 ? $this->dateTime($start) : null,
                 'expiresAt' => $end > 0 ? $this->dateTime($end) : null,
@@ -1300,15 +1307,6 @@ final class CashierV3MemberDetailQueryServices
             ->order('oid asc,id asc')
             ->select()
             ->toArray();
-        // A component cart keeps its configured value for legacy compatibility.
-        // Its completed card-sale allocation is the immutable actual-sale source
-        // whenever the original card order was manually repriced. Reuse the same
-        // authority as the cashier summary and entitlement selector so the same
-        // card can never show two remaining amounts in different read models.
-        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders(
-            array_keys($holderByOrder),
-            $rows
-        );
         $rowsByOrder = [];
         $rowsById = [];
         foreach ($rows as $row) {
@@ -1317,9 +1315,20 @@ final class CashierV3MemberDetailQueryServices
         }
         // R50：详情与收银共用可用金额守卫，历史购买金额/次数不改写。
         $originOrders = Db::name('store_order')->whereIn('id', array_keys($holderByOrder))
-            ->column('id,uid,store_id,debt_amount,repaid_debt_amount', 'id');
+            ->column('id,uid,store_id,pay_price,debt_amount,repaid_debt_amount', 'id');
         foreach ($originOrders as &$originOrder) { $originOrder['tenant_id'] = $tenantId; }
         unset($originOrder);
+        // Used-up components stay part of the original whole-yuan allocation;
+        // otherwise opening member detail after a service would move the yuan
+        // remainder to another project and disagree with final settlement.
+        $amountRows = Db::name('store_order_cart_info')
+            ->whereIn('oid', array_keys($holderByOrder))->where('cart_type', 2)
+            ->where('product_type', 6)->field('id,oid,product_id,cart_info')
+            ->order('oid asc,id asc')->select()->toArray();
+        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders(
+            array_values($originOrders),
+            $amountRows
+        );
         $debtRows = Db::name('store_debt')->whereIn('order_id', array_keys($holderByOrder))
             ->field('order_id,status,total_debt,repaid_debt')->select()->toArray();
         $debtByOrder = [];
@@ -1602,6 +1611,7 @@ final class CashierV3MemberDetailQueryServices
             'balance_restored' => '余额返还', 'recharge_debt_repayment_credit' => '欠款补交转余额',
             // 退款仍保留原始类型码用于对账，会员页面只展示可理解的业务名称。
             'manual_refund_credit' => '退款转入余额',
+            'manual_refund_debit' => '余额退款扣减',
         ];
         $label = $labels[$normalized] ?? (trim($value) !== '' ? $value : '余额变动');
         return strtolower(trim($direction)) === 'reversal' && !str_contains($label, '返还') ? $label . '冲销' : $label;

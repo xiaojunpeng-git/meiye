@@ -154,6 +154,21 @@ class StoreCouponIssueServices extends BaseServices
      */
     public function saveCoupon($data, $id, $coupon_issue_type)
     {
+        // Every issuer (platform/store/merchant) shares allowance invariants.
+        // Controller validation alone would let an older editor change an
+        // issued face or accidentally reinterpret it as a discount percentage.
+        $existing = $id ? $this->dao->get($id) : null;
+        if ((int)($data['coupon_type'] ?? 1) === StoreCouponAllowanceServices::TYPE
+            || ($existing && (int)$existing['coupon_type'] === StoreCouponAllowanceServices::TYPE)) {
+            if ($existing && ((int)($data['coupon_type'] ?? 1) !== (int)$existing['coupon_type']
+                || bccomp((string)($data['coupon_price'] ?? 0), (string)$existing['coupon_price'], 2) !== 0)) {
+                throw new AdminException('多次抵用券已发行，类型和总额度不可修改，请新建优惠券');
+            }
+            try { StoreCouponAllowanceServices::wholeCents($data['coupon_price'] ?? 0); }
+            catch (\app\services\cashier\v3\CashierV3CommandException $e) { throw new AdminException($e->getMessage()); }
+            if ((int)($data['use_mode'] ?? 0) !== StoreCouponOrderRule::DETAIL) throw new AdminException('多次抵用券仅支持明细抵用');
+            $data['allow_transfer'] = 0;
+        }
         $data['coupon_issue_type'] = $coupon_issue_type;
         $data['start_use_time'] = strtotime((string)$data['start_use_time']);
         $data['end_use_time'] = strtotime((string)$data['end_use_time']);
@@ -1269,6 +1284,13 @@ class StoreCouponIssueServices extends BaseServices
                 $coupon['can_use'] = false;
                 $coupon['true_coupon_price'] = 0;
                 $coupon['unuse_reason'] = '';
+                // Do not misinterpret a reusable allowance face as a percentage
+                // in old checkout projections that cannot collect an amount.
+                if ((int)$coupon['coupon_type'] === StoreCouponAllowanceServices::TYPE) {
+                    $coupon['unuse_reason'] = '请在门店收银新版中输入本次抵用金额';
+                    $result[] = $coupon;
+                    continue;
+                }
 
                 if (!$count) {
                     $coupon['unuse_reason'] = '不符合使用条件';

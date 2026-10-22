@@ -1648,9 +1648,12 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
                 'name' => (string)$person['employee_name_snapshot'], 'amount_cents' => (int)$person['amount_cents']];
         }
         $out = [];
+        $repaymentBalances = \app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::balancesByIds($repaymentIds);
         foreach ($components as $component) {
             $id = (string)$component['repayment_id'];
-            $repaymentAmount = (int)$component['repayment_amount_cents'];
+            // Both numerator and denominator use new cash; using gross debt settlement would
+            // undercount personnel performance when part of the repayment came from wallet funds.
+            $repaymentAmount = (int)$component['repayment_amount_cents'] - (int)($repaymentBalances[$id] ?? 0);
             $saleTotal = (int)$component['sale_total_cents'];
             if ($repaymentAmount <= 0 || $saleTotal <= 0) continue;
             foreach ($people[$id] ?? [] as $person) {
@@ -1725,9 +1728,10 @@ final class StoreUnifiedReportPhaseTwoServices extends BaseServices
             $totals[$id] = (int)($totals[$id] ?? 0) + (int)$row['component_sale_cents'];
         }
         $verified = [];
+        $repaymentBalances = \app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::balancesByIds(array_values(array_unique(array_column($rows, 'repayment_id'))));
         foreach ($rows as $row) {
             $id = (string)$row['repayment_id'];
-            if ((int)$row['allocated_payment_cents'] !== (int)$row['repayment_amount_cents']
+            if ((int)$row['allocated_payment_cents'] !== (int)$row['repayment_amount_cents'] - (int)($repaymentBalances[$id] ?? 0)
                 || (int)$row['original_total_cents'] <= 0
                 || $totals[$id] !== (int)$row['original_total_cents']) continue;
             $row['sale_total_cents'] = $totals[$id];
