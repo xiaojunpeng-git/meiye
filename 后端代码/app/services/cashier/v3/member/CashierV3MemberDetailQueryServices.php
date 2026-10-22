@@ -1300,15 +1300,6 @@ final class CashierV3MemberDetailQueryServices
             ->order('oid asc,id asc')
             ->select()
             ->toArray();
-        // A component cart keeps its configured value for legacy compatibility.
-        // Its completed card-sale allocation is the immutable actual-sale source
-        // whenever the original card order was manually repriced. Reuse the same
-        // authority as the cashier summary and entitlement selector so the same
-        // card can never show two remaining amounts in different read models.
-        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders(
-            array_keys($holderByOrder),
-            $rows
-        );
         $rowsByOrder = [];
         $rowsById = [];
         foreach ($rows as $row) {
@@ -1317,9 +1308,20 @@ final class CashierV3MemberDetailQueryServices
         }
         // R50：详情与收银共用可用金额守卫，历史购买金额/次数不改写。
         $originOrders = Db::name('store_order')->whereIn('id', array_keys($holderByOrder))
-            ->column('id,uid,store_id,debt_amount,repaid_debt_amount', 'id');
+            ->column('id,uid,store_id,pay_price,debt_amount,repaid_debt_amount', 'id');
         foreach ($originOrders as &$originOrder) { $originOrder['tenant_id'] = $tenantId; }
         unset($originOrder);
+        // Used-up components stay part of the original whole-yuan allocation;
+        // otherwise opening member detail after a service would move the yuan
+        // remainder to another project and disagree with final settlement.
+        $amountRows = Db::name('store_order_cart_info')
+            ->whereIn('oid', array_keys($holderByOrder))->where('cart_type', 2)
+            ->where('product_type', 6)->field('id,oid,product_id,cart_info')
+            ->order('oid asc,id asc')->select()->toArray();
+        $actualSaleAmounts = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders(
+            array_values($originOrders),
+            $amountRows
+        );
         $debtRows = Db::name('store_debt')->whereIn('order_id', array_keys($holderByOrder))
             ->field('order_id,status,total_debt,repaid_debt')->select()->toArray();
         $debtByOrder = [];
@@ -1602,6 +1604,7 @@ final class CashierV3MemberDetailQueryServices
             'balance_restored' => '余额返还', 'recharge_debt_repayment_credit' => '欠款补交转余额',
             // 退款仍保留原始类型码用于对账，会员页面只展示可理解的业务名称。
             'manual_refund_credit' => '退款转入余额',
+            'manual_refund_debit' => '余额退款扣减',
         ];
         $label = $labels[$normalized] ?? (trim($value) !== '' ? $value : '余额变动');
         return strtolower(trim($direction)) === 'reversal' && !str_contains($label, '返还') ? $label . '冲销' : $label;

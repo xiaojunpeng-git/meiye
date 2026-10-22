@@ -1020,7 +1020,7 @@ final class CashierV3CashierWorkspaceServices
     }
 
     /**
-     * 清空当前未结账草稿的商品行，但保留已选客户。
+     * 清空当前未结账草稿的商品行、挂单来源和订单编辑信息，但保留已选客户。
      * 由单一工作台版本锁保护，不能由前端逐条删除，以免并发失败时留下半空草稿。
      *
      * @param null|callable(array):void $beforeDelete
@@ -1042,7 +1042,16 @@ final class CashierV3CashierWorkspaceServices
         Db::name(self::LINE_TABLE)->where('workspace_id', $workspaceId)->delete();
         // 清空购物车就是草稿重置。若当前内容来自提单，同时解除这次
         // 工作台关联，原挂单仍留在列表中，供之后再次提取或删除。
-        $this->updateDraft($workspaceId, ['resumed_hang_order_id' => '']);
+        $this->updateDraft($workspaceId, [
+            'resumed_hang_order_id' => '',
+            'order_note' => '',
+            'supplement_enabled' => 0,
+            'supplement_business_date' => null,
+            'supplement_reason' => '',
+            'supplement_operator_id' => 0,
+            'supplement_operator_name_snapshot' => '',
+            'supplement_operated_at' => 0,
+        ]);
         $draft = $this->persistDraftWithRowsInTx($workspaceId, $draft, [], []);
         return $this->toPublicDraft($draft, []);
     }

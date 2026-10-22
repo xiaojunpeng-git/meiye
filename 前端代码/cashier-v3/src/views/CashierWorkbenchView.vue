@@ -6374,6 +6374,19 @@ async function enqueueCheckoutAction(event = {}) {
           name: '余额支付', amount, quantity: 1, status: 'editing', canEdit: true, canRemove: true
         })
       }
+    } else if (action === 'update-balance-payment') {
+      // Balance is an explicit whole-yuan tender, never an extra cash row.
+      const amount = Number(payload.amount)
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > Number(payment.availableBalance || 0)) {
+        const result = { result: { status: 'failed', message: '余额支付金额必须为正整数且不超过可用余额。' } }
+        // A rejected local amount edit still needs a receipt to release its pending input state.
+        window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
+          detail: { action, payload, status: 'failed', message: result.result.message }
+        }))
+        event?.resolve?.(result)
+        return result
+      }
+      preview.lines = checkoutLines.map((line) => checkoutLineRole(line) === 'balance_payment' ? { ...line, amount } : line)
     } else if (action === 'remove-balance-payment') {
       preview.lines = checkoutLines.filter((line) => checkoutLineRole(line) !== 'balance_payment')
     } else if (action === 'update-checkout-sales-date') {
@@ -6404,6 +6417,7 @@ async function enqueueCheckoutAction(event = {}) {
           status: 'succeeded', message: '欠款补交成功。',
           completionDescription: `补交单 ${repaid.repaymentNo || ''} 已完成。`,
           requestNo: String(repaid.repaymentNo || ''),
+          ...(Array.isArray(repaid.paymentResultLines) ? { payment: { ...preview.payment, resultLines: clonePlain(repaid.paymentResultLines) } } : {}),
           checkoutRequestId: String(repaid.checkoutRequestId || ''),
           originalIdempotencyKey: String(payload.originalIdempotencyKey || ''),
           canClose: true, canRetry: false
@@ -6614,6 +6628,8 @@ async function requestCheckoutAction({ action, payload }) {
         status: 'succeeded', message: resultMessage(direct, '欠款补交成功。'),
         completionDescription: '本次欠款补交已完成。',
         requestNo: String(repaid.repaymentNo),
+        // Successful rows come from committed collection records, not editing-state selections.
+        ...(Array.isArray(repaid.paymentResultLines) ? { payment: { ...currentCheckoutSnapshot.value.payment, resultLines: clonePlain(repaid.paymentResultLines) } } : {}),
         checkoutRequestId: String(repaid.checkoutRequestId || ''),
         originalIdempotencyKey: commandKey,
         canClose: true, canRetry: false
@@ -7108,7 +7124,12 @@ async function openPreparedCheckout(event = {}) {
       finalChanges: [],
       composition: { code: 'sale_only', lineRoles: ['sale'], hasSale: true,
         hasEntitlement: false, primaryAction: 'collect_payment', primaryActionLabel: '确认还款' },
-      payment: { methods: localCheckoutPaymentMethods(), selectedLines: [] },
+      // Only sales debt may consume existing principal/bonus. Recharge debt
+      // would otherwise create a circular balance credit and stays cash-only.
+      payment: { methods: localCheckoutPaymentMethods(), selectedLines: [],
+        ...(intent.rechargeDebt === true
+          ? { balanceAvailable: false, availableBalance: 0 }
+          : checkoutBalancePreview(member.value, memberId)) },
       sourceEnabled: true, sourceSelectable: false
     }
     checkoutLocalOutcome.value = {}

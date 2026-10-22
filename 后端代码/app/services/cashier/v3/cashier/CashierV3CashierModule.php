@@ -588,8 +588,10 @@ final class CashierV3CashierModule
                 (int)($payload['lineAmountCents'] ?? $payload['line_amount_cents'] ?? -1),
                 (int)($payload['couponThresholdCents'] ?? $payload['coupon_threshold_cents'] ?? -1),
                 is_array($payload['reservedCouponIds'] ?? null) ? $payload['reservedCouponIds'] : [],
-                (int)($payload['orderReceivableCents'] ?? -1),
-                (int)($payload['orderLineCapacityCents'] ?? -1)
+                // Older cashier bundles omit order-coupon amounts. Zero keeps
+                // those coupons unavailable without blocking ordinary coupons.
+                (int)($payload['orderReceivableCents'] ?? 0),
+                (int)($payload['orderLineCapacityCents'] ?? 0)
             );
             return [
                 'data' => ['couponSelector' => $selector],
