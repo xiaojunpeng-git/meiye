@@ -651,6 +651,9 @@ final class CashierV3UnifiedRefundServices
                 ->where('tenant_id', $tenantId)
                 ->where('order_line_id', (string)$receipt['sales_order_line_id'])->value('amount_cents')
             : 0;
+        // Balance-funded debt settlement is also non-cash; keep the original checkout share immutable.
+        $balancePaidCents += \app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::nonCashForSource(
+            $tenantId, (string)($receipt['sales_order_line_id'] ?? ''), $originId);
         // 历史转入赠金不属于再次退款；现金额度仅扣有效退款，权益消耗另由 usableSum 限制。
         $cashRefundRemainingCents = max(0, $cardPurchaseCents - $cardCouponCents - $balancePaidCents
             - $priorRefundCents);
@@ -737,6 +740,7 @@ final class CashierV3UnifiedRefundServices
         // orders have no allocation row and retain their old refund boundary.
         $balancePaidCents = (int)Db::name('cashier_v3_order_balance_allocation')
             ->where('tenant_id', $tenantId)->where('order_line_id', $lineId)->value('amount_cents');
+        $balancePaidCents += \app\services\cashier\v3\settlement\CashierV3SalesDebtBalanceServices::nonCashForSource($tenantId, $lineId);
         $cashRefundRemaining = $otherCollection ? 0 : max(0, $remaining - $balancePaidCents);
         return ['lineId' => $lineId, 'memberId' => $memberId, 'name' => (string)$line['item_name_snapshot'],
             'itemType' => (string)$line['item_type'], 'sourceOrderId' => (string)$line['order_id'],
