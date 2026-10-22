@@ -1,0 +1,23 @@
+{
+  "baseline_head": "3549b82f397dbe11fa9005e35cbc27000a8815fe",
+  "fixed_head": "3549b82f397dbe11fa9005e35cbc27000a8815fe",
+  "files": {
+    "后端代码/app/services/cashier/v3/order/CashierV3RefundVoidServices.php": "e19267c7e4fa681c5bc489c864d8160ec74e59b8e907f15cce562dee6993ba61",
+    "后端代码/app/services/user/UserBalanceAtomicServices.php": "439e794d4c8ba9724b05f4a0c38bf2e77bd89a6325db44684eb974f103e7a66a",
+    "tests/cashier-v3/php/r33-refund-void-rollback.php": "34e446a36692af29d401adb4bb88b78b85e28d0b0d4f674e4fa1b799ea10e791",
+    "tests/cashier-v3/php/r25-refund-void-current-bonus-mysql.php": "c2551bd0da54fb82cc7fbf33da595e8980b658165f73a0b8e65a00ca16732c45"
+  },
+  "patch_sha256": "55a469eb702cfd39f4c8c4a6c212fa5ed83b63d744e3f48e5dc6dfdcd04b9784",
+  "scope": "退款转入赠金作废：当前本金和赠金合计足够即可，赠金优先、本金补足，流水及冲销事实按实际来源拆分",
+  "preexisting": "余额退款类型与返还拆分分支在本轮前已有，原样保留，不作为本轮优化",
+  "tests": {
+    "R25": "PASS 100 checks，含本金单独足额、混合刚好足额、真实并发连接、失败回滚及实际拆分对账",
+    "R46": "PASS 34 assertions",
+    "R29": "PASS",
+    "R33": "上一候选未通过：旧操作员夹具被当前权限拒绝；本轮未重复扩大该测试，余额合计不足由 R25 真实授权命令链验证"
+  },
+  "remote": "不适用；未连接、未部署、未改线上数据",
+  "acceptance": "待产品经理确认验收",
+  "commit": "未提交",
+  "revision": "本金可补足赠金，替代未验收的仅赠金候选"
+}

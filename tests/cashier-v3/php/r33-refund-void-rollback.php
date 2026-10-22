@@ -183,8 +183,10 @@ foreach (['balance', 'rights', 'snapshot'] as $changedPart) {
         $id = (string)$refund['data']['unifiedRefund']['operationId'];
         if ($changedPart === 'balance') {
             $adjustmentId = (int)Db::name('cashier_v3_refund_adjustment')->where('operation_id', $id)->value('id');
-            (new UserBalanceAtomicServices())->creditBenGive($cardMember, '0.00', '1.00',
-                'manual_refund_credit', $adjustmentId, 'R33模拟后续余额入账',
+            // 后续收支允许作废；赠金和本金均可扣回，此拒绝用例应验证当前合计余额不足。
+            $wallet = (array)Db::name('user')->where('uid', $cardMember)->field('give_money,ben_money')->find();
+            (new UserBalanceAtomicServices())->deductBenGive($cardMember, (string)$wallet['ben_money'], (string)$wallet['give_money'],
+                'manual_refund_void', $adjustmentId, 'R33模拟后续余额用尽',
                 'cv3-r33-later-balance-' . bin2hex(random_bytes(12)));
         } else {
             if ($changedPart === 'rights') {
@@ -209,7 +211,7 @@ foreach (['balance', 'rights', 'snapshot'] as $changedPart) {
         } catch (\app\services\cashier\v3\CashierV3CommandException $error) {
             $message = $error->getMessage();
         }
-        $expected = $changedPart === 'balance' ? '余额已有其他收支记录'
+        $expected = $changedPart === 'balance' ? '余额充足后重试'
             : ($changedPart === 'rights' ? '卡项剩余次数或有效期' : '缺少退款前后的完整权益快照');
         $assert(($failed['status'] ?? '') !== 'success' && str_contains($message, $expected),
             'Unsafe ' . $changedPart . ' void did not report a specific cause: '

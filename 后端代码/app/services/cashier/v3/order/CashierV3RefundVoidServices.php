@@ -14,6 +14,7 @@ use app\services\cashier\v3\checkout\provider\CashierV3MemberBalanceProvider;
 use app\services\cashier\v3\event\CashierV3BusinessEventExecution;
 use app\services\cashier\v3\event\CashierV3BusinessEventRecorder;
 use app\services\user\UserBalanceAtomicServices;
+use app\services\query\metric\MetricMoneyFormatter;
 use think\facade\Db;
 
 /**
@@ -73,7 +74,10 @@ final class CashierV3RefundVoidServices
             'aggregate_name_snapshot' => (string)$adjustment['target_name_snapshot'],
             'store_name_snapshot' => (string)Db::name('system_store')->where('id', $operator->storeId())->value('name'),
             'payload' => ['recordId' => $recordId, 'reason' => $reason,
-                'refundAmountCents' => (int)$refund['cash_refund_cents']],
+                'refundAmountCents' => (int)$refund['cash_refund_cents'],
+                // 转入赠金的退款允许当前本金补足；实际扣款拆分保存在余额流水和冲销事实中。
+                'balanceCreditVoidPolicy' => (int)$adjustment['balance_credit_cents'] > 0
+                    ? 'gift_first_then_principal_whole_yuan' : 'not_applicable'],
         ]);
         $this->restoreRights($refund, $adjustment, $operator, $scope, $now);
         $balanceResult = $this->reverseBalance($refund, $adjustment, $balanceFact, $operation,
@@ -220,7 +224,7 @@ final class CashierV3RefundVoidServices
             'member_benefit_pool', (string)$cart['id'], $operator, $scope);
     }
 
-    /** A later balance mutation makes the original credit non-isolatable, even if today's total is sufficient. */
+    /** 原入账事实确定扣回总额；后续收支不阻止作废，以当前锁定的赠金及本金合计为准。 */
     private function balanceFact(array $refund, array $adjustment, CashierV3OperatorScope $operator,
         CashierV3DataScopeContext $scope): ?array
     {
@@ -246,18 +250,36 @@ final class CashierV3RefundVoidServices
         $rows = Db::name('cashier_v3_balance_fact')->where('tenant_id', $scope->tenantId())
             ->where('order_id', (string)$refund['operation_id'])->where('balance_change_type', 'manual_refund_credit')
             ->where('fact_direction', 'forward')->where('status', 'effective')->lock(true)->select()->toArray();
-        if (count($rows) !== 1 || (int)$rows[0]['bonus_delta_cents'] !== $credit
-            || (int)$rows[0]['principal_delta_cents'] !== 0) {
+        if (count($rows) !== 1 || (int)$rows[0]['member_id'] !== (int)$refund['member_id']
+            || (int)$rows[0]['bonus_delta_cents'] !== $credit
+            || (int)$rows[0]['principal_delta_cents'] !== 0
+            || $this->alreadyReversed('cashier_v3_balance_fact', $scope->tenantId(), (string)$rows[0]['fact_id'])) {
             throw self::failure('退款转入赠金的原始流水缺失或金额不一致，不能安全扣回。', 'refund_void_balance_fact_mismatch');
         }
         $balance = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx((int)$refund['member_id'], $operator, $scope);
-        if ((int)$balance['accountVersion'] !== (int)$rows[0]['account_version']) {
-            throw self::failure('退款转入赠金后，会员余额已有其他收支记录；无法确认这笔赠金未被使用，不能安全作废。', 'refund_void_balance_later_change');
-        }
-        if ((int)$balance['giftCents'] < $credit) {
-            throw self::failure('会员当前赠金不足以扣回本次退款转入金额，不能作废。', 'refund_void_bonus_insufficient');
-        }
+        $this->creditVoidDebitSplit($balance, $credit);
         return $rows[0];
+    }
+
+    /** 赠金优先，本金补足；只分配整元，不把历史小数拆成新的小数收银扣款。 */
+    private function creditVoidDebitSplit(array $balance, int $credit): array
+    {
+        if ($credit <= 0 || $credit % 100 !== 0) {
+            throw self::failure('原退款转入金额不是整数元，请先核对历史退款记录后再作废。', 'refund_void_credit_whole_yuan_required');
+        }
+        if ((int)$balance['totalCents'] < $credit) {
+            throw self::failure('会员当前本金为' . MetricMoneyFormatter::integerYuan((int)$balance['principalCents'])
+                . '元、赠金为' . MetricMoneyFormatter::integerYuan((int)$balance['giftCents'])
+                . '元，合计' . MetricMoneyFormatter::integerYuan((int)$balance['totalCents'])
+                . '元，本次作废需扣回' . MetricMoneyFormatter::integerYuan($credit)
+                . '元；请在余额充足后重试。', 'refund_void_balance_insufficient');
+        }
+        $bonus = min(intdiv((int)$balance['giftCents'], 100) * 100, $credit);
+        $principal = $credit - $bonus;
+        if ($principal > (int)$balance['principalCents']) {
+            throw self::failure('本金和赠金含历史小数，无法按整元扣回；请先核对余额后重试。', 'refund_void_balance_whole_yuan_required');
+        }
+        return ['principal' => $principal, 'bonus' => $bonus];
     }
 
     private function reverseBalance(array $refund, array $adjustment, ?array $balanceFact,
@@ -288,19 +310,28 @@ final class CashierV3RefundVoidServices
             return $after;
         }
         $credit = (int)$adjustment['balance_credit_cents'];
+        // 以本次扣款前的权威快照核对增量，不能用退款当时的余额覆盖或否定后续收支。
+        // 会员行锁贯穿整笔作废事务；赠金优先，本金补足，流水必须反映真实扣款来源。
+        $provider = new CashierV3MemberBalanceProvider();
+        $before = $provider->lockSnapshotInTx((int)$refund['member_id'], $operator, $scope);
+        $debit = $this->creditVoidDebitSplit($before, $credit);
         try {
-            $change = (new UserBalanceAtomicServices())->deductBenGive((int)$refund['member_id'], '0.00',
-                number_format($credit / 100, 2, '.', ''), 'manual_refund_void', (int)$operation['id'],
-                '误录退款作废扣回赠金', 'cv3-manual-refund-void-' . hash('sha256', $scope->tenantId() . '|' . $key));
+            $change = (new UserBalanceAtomicServices())->deductBenGive((int)$refund['member_id'],
+                number_format($debit['principal'] / 100, 2, '.', ''), number_format($debit['bonus'] / 100, 2, '.', ''),
+                'manual_refund_void', (int)$operation['id'], '误录退款作废扣回余额',
+                'cv3-manual-refund-void-' . hash('sha256', $scope->tenantId() . '|' . $key));
         } catch (\Throwable $error) {
-            throw self::failure('会员赠金不足或余额流水已变化，不能安全扣回本次退款转入金额。', 'refund_void_balance_debit_failed');
+            throw self::failure('当前余额扣回失败，请刷新并检查可用余额后重试；整笔作废已回滚。', 'refund_void_balance_debit_failed');
         }
-        $after = (new CashierV3MemberBalanceProvider())->lockSnapshotInTx((int)$refund['member_id'], $operator, $scope);
-        if ((int)$after['accountVersion'] !== (int)$balanceFact['account_version'] + 1
-            || (int)$after['giftCents'] !== (int)$balanceFact['bonus_after_cents'] - $credit
-            || empty($change['money_id'])) {
-            throw self::failure('赠金扣回流水与会员余额无法核对，整笔作废已回滚。', 'refund_void_balance_debit_mismatch');
+        $after = $provider->lockSnapshotInTx((int)$refund['member_id'], $operator, $scope);
+        if ((int)$after['accountVersion'] !== (int)$before['accountVersion'] + 1
+            || (int)$after['giftCents'] !== (int)$before['giftCents'] - $debit['bonus']
+            || (int)$after['principalCents'] !== (int)$before['principalCents'] - $debit['principal']
+            || (int)$after['totalCents'] !== (int)$before['totalCents'] - $credit
+            || empty($change['money_id']) || !empty($change['idempotent'])) {
+            throw self::failure('余额扣回流水与会员余额无法核对，整笔作废已回滚。', 'refund_void_balance_debit_mismatch');
         }
+        $after['refundCreditVoidDebit'] = $debit;
         return $after;
     }
 
@@ -333,7 +364,7 @@ final class CashierV3RefundVoidServices
             ->where('fact_direction', 'reversal')->where('status', 'effective')->count() > 0;
     }
 
-    /** Reversal facts preserve the source's business dimensions and negate only monetary deltas. */
+    /** 保留原业务维度并冲销总额；转赠金退款允许本金补足时，余额分量按实际扣回来源记录。 */
     private function reverseSignedFact(string $table, array $source, array $operation, array $event,
         string $key, CashierV3OperatorScope $operator, int $now, ?array $balanceAfter = null): void
     {
@@ -359,6 +390,12 @@ final class CashierV3RefundVoidServices
             if (array_key_exists($column, $fact)) $fact[$column] = -(int)$source[$column];
         }
         if ($balanceAfter !== null) {
+            // 本金补足是用户明确允许的扣回方式，不能仍写成全扣赠金而导致事实与钱包分量不符。
+            if (isset($balanceAfter['refundCreditVoidDebit'])) {
+                $debit = $balanceAfter['refundCreditVoidDebit'];
+                $fact['principal_delta_cents'] = -(int)$debit['principal'];
+                $fact['bonus_delta_cents'] = -(int)$debit['bonus'];
+            }
             $fact['account_version'] = (int)$balanceAfter['accountVersion'];
             $fact['principal_after_cents'] = (int)$balanceAfter['principalCents'];
             $fact['bonus_after_cents'] = (int)$balanceAfter['giftCents'];
