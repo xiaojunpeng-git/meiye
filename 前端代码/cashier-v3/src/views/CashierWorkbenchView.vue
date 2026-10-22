@@ -42,6 +42,7 @@ import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSelectorOverlay.vue'
 import { validAllowanceCents } from '@/services/couponAllowance'
+import { ordinaryCardRows, applyOrdinaryCardRows, validateOrdinaryCardSale } from '@/services/ordinaryCardSaleAdjustment'
 import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
@@ -74,6 +75,8 @@ const selectedCardOperationProjectKeys = computed(() => (previewCardOperation.va
 const guidedBusinessMode = ref('')
 const isCustomCardConflictOpen = ref(false)
 const pendingCardPurchase = ref(null)
+const ordinaryCardEditRows = ref(null)
+const ordinaryCardEditError = ref('')
 const isConfirmingCardPurchase = ref(false)
 const personnelOverlay = ref(null)
 const isSavingPersonnelAssignment = ref(false)
@@ -2220,6 +2223,8 @@ async function selectCatalogItem(item) {
   }
   if (isRuleCardPurchase(item)) {
     pendingCardPurchase.value = clonePlain(item)
+    ordinaryCardEditRows.value = null
+    ordinaryCardEditError.value = ''
     return
   }
   await appendCatalogItemToDraft(item)
@@ -2493,17 +2498,38 @@ function closePendingCardPurchase() {
   pendingCardPurchase.value = null
 }
 
+// Editing is isolated from the cart until every row passes the original signed floors.
+function editOrdinaryCardPurchase() {
+  ordinaryCardEditRows.value = ordinaryCardRows(pendingCardPurchase.value)
+  ordinaryCardEditError.value = ''
+}
+
+function saveOrdinaryCardPurchase() {
+  try {
+    pendingCardPurchase.value = applyOrdinaryCardRows(pendingCardPurchase.value, ordinaryCardEditRows.value)
+    ordinaryCardEditRows.value = null
+    ordinaryCardEditError.value = ''
+  } catch (error) {
+    ordinaryCardEditError.value = error.message
+  }
+}
+
 async function confirmPendingCardPurchase() {
   const item = pendingCardPurchase.value
   if (!item?.id || isConfirmingCardPurchase.value) return
   isConfirmingCardPurchase.value = true
   try {
+    // 加购前校验当前卡项本身；错误不得拖到确认收款后才暴露。
+    validateOrdinaryCardSale(item.cardPurchaseSnapshot, Math.round(Number(item.price) * 100))
     // 卡项预览确认也要传完整目录项，不能只传 id；新增的项目／产品
     // 加购优化会读取 kind 作为后端轻量路径提示，传 id 会把它丢失并
     // 被服务端当成“无效商品”拒绝。
     const result = await appendCatalogItemToDraft(item)
     if (['success', 'succeeded'].includes(resultStatus(result))) pendingCardPurchase.value = null
     return result
+  } catch (error) {
+    reportEntitlementContractError({ message: String(error.message || '卡项内容不符合规则。') })
+    return { result: { status: 'failed', message: error.message } }
   } finally {
     isConfirmingCardPurchase.value = false
   }
@@ -5922,6 +5948,18 @@ async function openCheckout() {
   // The checkout wizard is a browser-only projection. The first write for this
   // order is the final submit-checkout carrying the complete snapshot.
   const preview = localCheckoutPreviewSnapshot()
+  // 直接复核将进入结账的明细，不读目录或旧 workspace 替换本次业务值。
+  try {
+    for (const line of preview.lines || []) {
+      if (line.lineRole !== 'sale') continue
+      validateOrdinaryCardSale(line.cardPurchaseSnapshot,
+        localDraftLineTotalAmountCents(line), Number(line.quantity || 1))
+    }
+  } catch (error) {
+    const blocked = { result: { status: 'failed', message: error.message } }
+    reportCheckoutEntryFailure(blocked, error.message)
+    return blocked
+  }
   const entitlementFailure = localCheckoutEntitlementAvailabilityFailure(preview)
   if (entitlementFailure) {
     const blocked = { result: { status: 'failed', ...entitlementFailure } }
@@ -8573,19 +8611,29 @@ onBeforeUnmount(() => {
       <div
         v-if="pendingCardPurchase"
         class="cashier-card-operation-editor"
+        :class="{ 'cashier-card-operation-editor--ordinary-sale': pendingCardPurchase.ordinaryCardSaleEditable }"
         role="dialog"
         aria-modal="true"
         aria-label="确认卡项内容"
         @click.self="closePendingCardPurchase"
       >
-        <div class="cashier-card-operation-editor__panel cashier-card-purchase-preview">
+        <div class="cashier-card-operation-editor__panel cashier-card-purchase-preview"
+          :class="{ 'cashier-card-purchase-preview--editable': pendingCardPurchase.ordinaryCardSaleEditable }">
           <header>
             <strong>确认卡项内容</strong>
             <span>{{ pendingCardPurchase.name }} · {{ pendingCardPurchase.cardRuleLabel }}</span>
           </header>
           <p>{{ cardPreviewRuleDescription(pendingCardPurchase.cardPreview) }}</p>
           <p>有效期：{{ cardPreviewValidityText(pendingCardPurchase.cardPreview.validity) }}</p>
-          <section class="cashier-card-purchase-preview__components" aria-label="卡内项目">
+          <section v-if="ordinaryCardEditRows" class="ordinary-card-sale-editor" aria-label="修改普通卡项目">
+            <div v-for="row in ordinaryCardEditRows" :key="row.relationId" class="ordinary-card-sale-editor__row">
+              <strong>{{ row.name }}<template v-if="row.specification"> · {{ row.specification }}</template></strong>
+              <label>项目总金额（元）<input v-model="row.amount" type="number" step="1" :min="Math.ceil(row.minimumCents / 100)" max="999999999"></label>
+              <label>次数<input v-model="row.times" type="number" step="1" :min="row.minimumTimes" max="99999999"></label>
+            </div>
+            <p v-if="ordinaryCardEditError" role="alert" class="ordinary-card-sale-editor__error">{{ ordinaryCardEditError }}</p>
+          </section>
+          <section v-else class="cashier-card-purchase-preview__components" aria-label="卡内项目">
             <div v-for="component in pendingCardPurchase.cardPreview.components" :key="`${component.name}-${component.specification}`">
               <span>{{ component.name }}<template v-if="component.specification"> · {{ component.specification }}</template></span>
               <strong v-if="pendingCardPurchase.cardPreview.ruleType === 'time'">单次核销 {{ formatPlainAmount(component.writeoffAmountCents / 100) }}</strong>
@@ -8593,11 +8641,20 @@ onBeforeUnmount(() => {
               <strong v-else-if="pendingCardPurchase.cardPreview.ruleType !== 'choice_count'">{{ component.writeTimes }} 次</strong>
             </div>
           </section>
+          <p v-if="pendingCardPurchase.ordinaryCardSaleEditable">整卡售价：{{ formatMoney(pendingCardPurchase.price) }}</p>
           <footer>
-            <button type="button" class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="closePendingCardPurchase">取消</button>
-            <button type="button" class="button button--primary" :disabled="isConfirmingCardPurchase" @click="confirmPendingCardPurchase">
-              {{ isConfirmingCardPurchase ? '正在加入…' : '确认加入购物车' }}
-            </button>
+            <template v-if="ordinaryCardEditRows">
+              <button class="button button--secondary" @click="ordinaryCardEditRows = null">取消修改</button>
+              <button class="button button--primary" @click="saveOrdinaryCardPurchase">保存修改</button>
+            </template>
+            <template v-else>
+              <button type="button" class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="closePendingCardPurchase">取消</button>
+              <button v-if="pendingCardPurchase.ordinaryCardSaleEditable && pendingCardPurchase.cardPreview.ruleType === 'normal'"
+                class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="editOrdinaryCardPurchase">修改</button>
+              <button type="button" class="button button--primary" :disabled="isConfirmingCardPurchase" @click="confirmPendingCardPurchase">
+                {{ isConfirmingCardPurchase ? '正在加入…' : '确认加入购物车' }}
+              </button>
+            </template>
           </footer>
         </div>
       </div>
@@ -8617,3 +8674,48 @@ onBeforeUnmount(() => {
     </Teleport>
   </section>
 </template>
+
+<style scoped>
+/* Only the newly authorized ordinary-card editor follows the visible viewport. */
+.cashier-card-operation-editor--ordinary-sale {
+  position: fixed;
+  box-sizing: border-box;
+  overflow: auto;
+  z-index: 1000;
+}
+.cashier-card-purchase-preview--editable {
+  box-sizing: border-box;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+}
+.ordinary-card-sale-editor {
+  display: grid;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+.ordinary-card-sale-editor__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e5e9f0;
+}
+.ordinary-card-sale-editor__row > strong {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+.ordinary-card-sale-editor__row label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.ordinary-card-sale-editor__row input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ordinary-card-sale-editor__error { margin: 0; color: #c62828; }
+.cashier-card-purchase-preview--editable footer { flex-wrap: wrap; }
+</style>

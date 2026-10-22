@@ -1842,7 +1842,8 @@ final class CashierV3CashierWorkspaceServices
     public function checkoutDraftMetadata(
         string $workspaceId,
         string $stateContextId,
-        CashierV3OperatorScope $operatorScope
+        CashierV3OperatorScope $operatorScope,
+        ?int $checkoutMemberId = null
     ): array {
         $this->readiness->assertReady();
         $draft = Db::name(self::DRAFT_TABLE)
@@ -1856,6 +1857,12 @@ final class CashierV3CashierWorkspaceServices
             return ['resumed_hang_order_id' => ''];
         }
         $this->assertDraftBinding($draft, $workspaceId, $stateContextId, $operatorScope);
+        // 选客和购物车只在浏览器编辑，旧 workspace 可能仍关联上一位顾客的挂单。
+        // 最终唯一快照的会员才是本次结账身份；不同会员绝不继承旧挂单，
+        // 也不删除旧挂单。相同会员的来源继续交给事务内清理和防重复校验。
+        if ($checkoutMemberId !== null && (int)$draft['member_id'] !== $checkoutMemberId) {
+            return ['resumed_hang_order_id' => ''];
+        }
         return [
             'resumed_hang_order_id' => trim((string)($draft['resumed_hang_order_id'] ?? '')),
         ];

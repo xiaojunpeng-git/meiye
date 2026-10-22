@@ -208,10 +208,16 @@ final class CashierV3CardPurchaseIssuanceServices
             ? (is_array($line['authority_snapshot']['cardPurchase'] ?? null)
                 ? $line['authority_snapshot']['cardPurchase'] : [])
             : $this->salesLineCardPurchaseSnapshot($salesLine);
-        // The debt write-off rule is frozen on issuance, so a stale browser
-        // snapshot must not silently issue a card under the opposite rule.
-        // Compare only this safety policy; prices and card components remain
-        // the customer's accepted checkout snapshot.
+        // Revalidate under final issuance locks; switching off edits after preparation
+        // must not issue increased rights or allow a forged project snapshot.
+        $ordinaryIncrease = CashierV3OrdinaryCardSaleAdjustment::validate($purchase,
+            (array)($line['authority_snapshot']['cardPurchase'] ?? []), $operatorScope->storeId(), $skuId);
+        // The final persisted sale must still cover the accepted pre-coupon base.
+        CashierV3OrdinaryCardSaleAdjustment::assertSaleAmount($purchase, $ordinaryIncrease,
+            (int)$salesLine['quantity'], (int)$salesLine['sale_amount_cents'],
+            (int)$salesLine['discount_amount_cents']);
+        // Debt policy is checked separately against the live safety setting;
+        // ordinary row edits remain bound to their accepted signed definition.
         $this->assertDebtWriteoffPolicyCurrent($purchase, $line, (bool)$customConfiguration);
         // The selected card definition is immutable browser intent. The locked
         // catalogue row above supplies identity only and may not replace it.
@@ -764,7 +770,11 @@ final class CashierV3CardPurchaseIssuanceServices
                 || $priceCents < 0) {
                 throw self::failure('card_purchase_component_snapshot_invalid');
             }
-            $amount = $isCustomCard
+            // Ordinary-card edits store a total, not total/times: division would
+            // introduce fractional yuan and silently alter the accepted amount pool.
+            $hasOrdinaryTotal = $ruleType === 'normal' && isset($purchase['ordinarySaleBaseline'])
+                && array_key_exists('configuredAmountCents', $component);
+            $amount = $isCustomCard || $hasOrdinaryTotal
                 ? (int)($component['configuredAmountCents'] ?? -1)
                 : ($usesIndependentTimes ? $this->multiply($priceCents, $times) : $priceCents);
             if ($amount < 0) {
