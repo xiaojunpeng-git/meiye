@@ -1,0 +1,3 @@
+R26_REAL_QUEUE=PASS members=55 messages=duplicate history=55 periods=55
+R26_QUEUE_FIXTURE_CLEANUP=PASS
+R26_BROWSER_API_QUEUE=PASS members=3 unrelated_business_writes=0 fixture_cleanup=PASS

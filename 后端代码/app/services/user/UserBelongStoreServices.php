@@ -142,7 +142,7 @@ class UserBelongStoreServices extends BaseServices
      *
      * @return array{changed:bool,from_store_id:int,to_store_id:int,history_id:int}
      */
-    public function transferUserStore(int $uid, int $targetStoreId, string $reason, int $adminId): array
+    public function transferUserStore(int $uid, int $targetStoreId, string $reason, int $adminId, bool $clearCache = true): array
     {
         $reason = trim($reason);
         if ($uid <= 0) {
@@ -233,7 +233,8 @@ class UserBelongStoreServices extends BaseServices
             ];
         });
 
-        if ($result['changed']) {
+        // 批量调用方在每批事务提交后统一清理缓存，避免逐会员重复清空；单人调店保持原行为。
+        if ($result['changed'] && $clearCache) {
             /** @var UserServices $userServices */
             $userServices = app()->make(UserServices::class);
             $userServices->cacheTag()->clear();

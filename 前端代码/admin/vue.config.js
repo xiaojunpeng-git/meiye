@@ -26,6 +26,9 @@ module.exports = {
   outputDir: Setting.outputDir,
   assetsDir: Setting.assetsDir,
   runtimeCompiler: true,
+  // 本地多终端共用Docker内存，开发编译关闭额外Babel进程，避免18081被OOM杀掉。
+  // 正式构建沿用并行编译，业务资源与发布入口不变。
+  parallel: process.env.NODE_ENV === 'production',
   productionSourceMap: false, //关闭生产环境下的SourceMap映射文件
   devServer: {
     publicPath: Setting.publicPath,
@@ -108,6 +111,14 @@ module.exports = {
   // 默认设置: https://github.com/vuejs/vue-cli/tree/dev/packages/@vue/cli-service/lib/config/base.js
 
   chainWebpack: (config) => {
+    // shared 模块在 Docker 中挂载为 /shared，无法向上找到 /app 的 ESLint 配置。
+    // 所有由平台工程编译的模块统一使用本工程规则，避免共享模块导致整个热更新编译失败。
+    if (config.module.rules.has("eslint")) {
+      config.module.rule("eslint").use("eslint-loader").tap((options) => ({
+        ...options,
+        configFile: resolve(".eslintrc.js")
+      }));
+    }
     /**
      * 删除懒加载模块的 prefetch preload，降低带宽压力
      * https://cli.vuejs.org/zh/guide/html-and-static-assets.html#prefetch

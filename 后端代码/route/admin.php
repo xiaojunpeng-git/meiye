@@ -2989,6 +2989,12 @@ Route::group('adminapi', function () {
         Route::get('user/extend_info/:id', 'v1.user.User/extendInfoForm')->option(['real_name' => '用户补充信息表单']);
         //用户补充信息保存
         Route::post('user/extend_info/:id', 'v1.user.User/saveExtendForm')->option(['real_name' => '用户补充信息保存']);
+        // 门店批量转移沿用会员调店的登录态边界；批次读取与继续由服务端绑定创建人。
+        Route::get('user/store_transfer_batch/preview/:id', 'v1.user.MemberStoreTransfer/preview')->option(['real_name' => '所属会员转移预览']);
+        Route::post('user/store_transfer_batch', 'v1.user.MemberStoreTransfer/create')->option(['real_name' => '所属会员转移创建']);
+        // 批号含连字符，显式限定格式，避免框架默认变量规则拒绝合法批次。
+        Route::get('user/store_transfer_batch/:batchNo', 'v1.user.MemberStoreTransfer/status')->pattern(['batchNo' => 'BST-[a-f0-9]{32}'])->option(['real_name' => '所属会员转移进度']);
+        Route::post('user/store_transfer_batch/:batchNo/resume', 'v1.user.MemberStoreTransfer/resume')->pattern(['batchNo' => 'BST-[a-f0-9]{32}'])->option(['real_name' => '所属会员转移继续']);
         // 第22轮会员调店：保持为登录即用的未登记接口，不附加角色菜单权限。
         Route::get('user/transfer_store/options', 'v1.user.User/transferStoreOptions')->option(['real_name' => '会员调店门店选项']);
         Route::post('user/transfer_store/:id', 'v1.user.User/transferStore')->option(['real_name' => '会员调店保存']);

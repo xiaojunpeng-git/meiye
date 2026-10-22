@@ -150,6 +150,8 @@
           <template slot-scope="{ row, index }" slot="action">
             <a @click="gostore(row)">进入门店</a>
             <Divider type="vertical" />
+            <a @click="$refs.memberTransfer.open(row)">转移所属会员</a>
+            <Divider type="vertical" />
             <a @click="operation(row)">{{
               row.is_show == 0 ? "开业" : "停业"
             }}</a>
@@ -179,6 +181,7 @@
         </div>
       </div>
     </Card>
+    <StoreMemberTransferModal ref="memberTransfer" @changed="getList" />
   </div>
 </template>
 
@@ -187,6 +190,7 @@ import util from "@/libs/util";
 import Setting from "@/setting";
 import { mapState } from "vuex";
 import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
+import StoreMemberTransferModal from '@/components/member/StoreMemberTransferModal.vue';
 import {
   storeListApi,
   storeLogin,
@@ -196,7 +200,7 @@ import {
 } from "@/api/store";
 export default {
   name: "storeList",
-  components: { OrganizationResourceSelector },
+  components: { OrganizationResourceSelector, StoreMemberTransferModal },
   data() {
     return {
 	  routerPre: Setting.roterPre,
@@ -271,7 +275,7 @@ export default {
           title: "操作",
           slot: "action",
           fixed: "right",
-          minWidth: 190,
+          minWidth: 300
         },
       ],
       orderList: [],

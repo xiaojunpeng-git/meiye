@@ -1,0 +1,7 @@
+{
+    "status": "PASS",
+    "uid": 1137500,
+    "from_store_id": 23,
+    "tested_target_store_id": 1,
+    "persistent_changes": 0
+}
