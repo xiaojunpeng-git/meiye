@@ -7996,67 +7996,60 @@ html.group-dashboard-document #app {
   min-height: calc(var(--reservation-slot-height) - 8px);
   padding: 7px 9px;
   overflow: hidden;
-  border: 1px solid #b9d4ff;
+  border: 1px solid #d9e1ec;
   border-radius: 8px;
-  background: #eaf4ff;
-  color: #1677cc;
+  background: #f8fafc;
+  color: #344054;
   text-align: left;
 }
 
-.reservation-calendar-block:hover {
-  border-color: #1890ff;
-  background: #dceeff;
+/* 底色表达单次预约标记；左侧色条与状态文字共用状态色，避免两种含义混用。 */
+.reservation-calendar-block::before {
+  content: ''; position: absolute; inset: 0 auto 0 0; width: 4px;
+  background: var(--reservation-state-color, #98a2b3); pointer-events: none;
+}
+.reservation-calendar-block--status-unstarted { --reservation-state-color: #17834b; }
+.reservation-calendar-block--status-pending { --reservation-state-color: #946600; }
+.reservation-calendar-block--status-serving { --reservation-state-color: #c95705; }
+.reservation-calendar-block--status-ended { --reservation-state-color: #1d65b7; }
+.reservation-calendar-block--status-rejected { --reservation-state-color: #b72d24; }
+.reservation-calendar-block:hover { box-shadow: 0 0 0 1px #91b9ec; }
+/* 标记采用明显可辨的中浅色填充，保留深色文字及独立状态色条的对比。 */
+.reservation-calendar-block--mark-red { border-color: #e8928b; background: #ffc9c4; }
+.reservation-calendar-block--mark-yellow { border-color: #d6b34f; background: #ffe49a; }
+.reservation-calendar-block--mark-blue { border-color: #7cabe8; background: #bbd9ff; }
+.reservation-calendar-block--mark-green { border-color: #74b991; background: #b8e5c9; }
+.reservation-calendar-block--mark-purple { border-color: #b18bd7; background: #dfc5f4; }
+.reservation-calendar-block .reservation-calendar-block__heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 4px; overflow: visible;
+}
+.reservation-calendar-block__heading strong { min-width: 0; }
+.reservation-calendar-block .reservation-calendar-status {
+  /* 按已确认样式保留左侧色条，同时用同色实底白字标签突出服务状态。 */
+  flex: 0 0 auto; padding: 3px 6px; border-radius: 5px; color: #fff;
+  background: var(--reservation-state-color, #667085);
+  font-size: 12px; line-height: 16px; font-weight: 800;
 }
 
-.reservation-calendar-block--unstarted {
-  border-color: #b7dfc4;
-  background: #edf9f2;
-  color: #208a52;
+/* 固定定位的右键菜单不参与排班几何布局；5 个圆圈只提交白名单枚举。 */
+.reservation-color-menu {
+  position: fixed; z-index: 2500; width: 230px; padding: 12px; box-sizing: border-box;
+  border: 1px solid #dce3ed; border-radius: 10px; background: #fff;
+  box-shadow: 0 6px 24px #172b4d26;
 }
-
-.reservation-calendar-block--pending {
-  border-color: #fedf89;
-  background: #fffaeb;
-  color: #b54708;
-}
-
-.reservation-calendar-block--pending:hover {
-  border-color: #fdb022;
-  background: #fef0c7;
-}
-
-.reservation-calendar-block--unstarted:hover {
-  border-color: #6eb983;
-  background: #def2e5;
-}
-
-.reservation-calendar-block--serving {
-  border-color: #ffd591;
-  background: #fff7e6;
-  color: #d46b08;
-}
-
-.reservation-calendar-block--serving:hover {
-  border-color: #f5aa49;
-  background: #ffefd2;
-}
-
-.reservation-calendar-block--ended {
-  border-color: #b9d4ff;
-  background: #eaf4ff;
-  color: #1677cc;
-}
-
-.reservation-calendar-block--ended:hover {
-  border-color: #1890ff;
-  background: #dceeff;
-}
-
-.reservation-calendar-block--rejected {
-  border-color: #fecdca;
-  background: #fef3f2;
-  color: #b42318;
-}
+.reservation-color-menu__swatches { display: flex; justify-content: space-between; gap: 10px; padding: 3px; }
+.reservation-color-menu__swatch { width: 28px; height: 28px; flex: 0 0 28px; border: 2px solid #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 0 0 1px #d0d5dd; }
+.reservation-color-menu__swatch--red { background: #e85d55; }
+.reservation-color-menu__swatch--yellow { background: #eab63c; }
+.reservation-color-menu__swatch--blue { background: #408ee5; }
+.reservation-color-menu__swatch--green { background: #43a875; }
+.reservation-color-menu__swatch--purple { background: #9752c9; }
+.reservation-color-menu__swatch[aria-pressed="true"], .reservation-color-menu__swatch:focus-visible { outline: 2px solid #344054; outline-offset: 2px; }
+.reservation-color-menu__clear { width: 100%; margin-top: 12px; padding: 5px; border: 0; border-top: 1px solid #edf0f5; background: #fff; color: #475467; cursor: pointer; font-size: 12px; }
+/* 服务操作与颜色选择分区，沿用服务状态门禁，不用颜色值决定服务动作。 */
+.reservation-color-menu__service { width: 100%; margin-top: 12px; padding: 8px 5px; border: 0; border-top: 1px solid #edf0f5; background: #fff; color: #1768c3; font-size: 13px; font-weight: 700; cursor: pointer; }
+.reservation-color-menu button:disabled { opacity: .5; cursor: wait; }
+.reservation-color-menu__error { margin: 6px 0 0; color: #b42318; font-size: 12px; }
 
 .reservation-calendar-block strong,
 .reservation-calendar-block span {
