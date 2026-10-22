@@ -1,0 +1,115 @@
+{
+  "instance": "rh",
+  "database": "ruihao",
+  "port": "3306",
+  "backend": {
+    "route/admin.php": "8514ca8a27a4647aabe8ed3d5a8d2c4cc0959434cc2a5f2d54c3f260d7f9642b",
+    "app/services/user/UserBelongStoreServices.php": "fd2631eb58c6208fc657d18b1be33e3aeb250e7258f054f7b2689ffb7f0d6708",
+    "app/services/user/UserStoreTransferBatchServices.php": "f3ef019759b1de52499a866928ccfce2027a13c2fc013523c8e18d67e6d025a7",
+    "app/controller/admin/v1/user/MemberStoreTransfer.php": "c0cfee69904b49f7cda75dfa48a8a0dca8b59bae29184cdf53ab990e58b7188f",
+    "app/jobs/user/UserStoreTransferBatchJob.php": "d8e3d38a01113834e43d01fda4d21d3865568d579218be7b478a41c93d2e04c6"
+  },
+  "protected": {
+    ".env": "b89eb945fa029d397a057428e9a7c69ff6610c6471e72b635af334452a6eee34",
+    "public/index.html": "c3744c2fb84cdba7cf215c80e6e9a0ae6fad676c1246ebb815528b3f71af91a2",
+    "public/view_cashier_v3/index.html": "26bcc641f0ca8ac41a6df580d7146f9e9963a90b44c3257fb4e8e3c706c95249",
+    "../rh.cc3798.com-8080/public/view_cashier_v3/index.html": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda"
+  },
+  "admin": {
+    "public/system.html": "d0f573bbd734a57183efbff13cc674b6be20c34789ee1f86537ed5fc64cb8c9f",
+    "public/https://g.alicdn.com/de/prismplayer/2.13.2/skins/default/aliplayer-min.css": null,
+    "public/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+    "public/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+    "public/https://g.alicdn.com/de/prismplayer/2.13.2/aliplayer-min.js": null,
+    "public/view_admin/js/chunk-vendors.1ab932ec.js": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+    "public/view_admin/js/app.d89bd563.js": "ed2341ac42704a1e9869c8d88d6ba4c7b73b179869a9f6e5ae2b22d3320ffd92"
+  },
+  "latestUpgrades": [
+    {
+      "upgrade_key": "20261022-r26-member-store-transfer",
+      "code_version": "802490dcf4facafd1a29bad7fb6191d33698d772",
+      "executed_at": "2026-10-22 18:44:40"
+    },
+    {
+      "upgrade_key": "20261021-024-reservation-shared-pool",
+      "code_version": "1d6cdad46e14fb16aec1689dc1bae4bea57a22b4",
+      "executed_at": "2026-10-21 19:23:02"
+    },
+    {
+      "upgrade_key": "20261021-047-sales-debt-balance-settlement",
+      "code_version": "45090ffed0bcc5d25a60e4076860bc87bf473afd",
+      "executed_at": "2026-10-21 18:12:27"
+    }
+  ],
+  "batchTables": [
+    {
+      "Tables_in_ruihao (eb_user_store_transfer_batch%)": "eb_user_store_transfer_batch"
+    },
+    {
+      "Tables_in_ruihao (eb_user_store_transfer_batch%)": "eb_user_store_transfer_batch_item"
+    }
+  ],
+  "memberIndexes": [
+    {
+      "Table": "eb_user",
+      "Non_unique": "1",
+      "Key_name": "idx_belong_active_uid",
+      "Seq_in_index": "1",
+      "Column_name": "belong_store_id",
+      "Collation": "A",
+      "Cardinality": "169",
+      "Sub_part": null,
+      "Packed": null,
+      "Null": "",
+      "Index_type": "BTREE",
+      "Comment": "",
+      "Index_comment": ""
+    },
+    {
+      "Table": "eb_user",
+      "Non_unique": "1",
+      "Key_name": "idx_belong_active_uid",
+      "Seq_in_index": "2",
+      "Column_name": "is_del",
+      "Collation": "A",
+      "Cardinality": "193",
+      "Sub_part": null,
+      "Packed": null,
+      "Null": "",
+      "Index_type": "BTREE",
+      "Comment": "",
+      "Index_comment": ""
+    },
+    {
+      "Table": "eb_user",
+      "Non_unique": "1",
+      "Key_name": "idx_belong_active_uid",
+      "Seq_in_index": "3",
+      "Column_name": "delete_time",
+      "Collation": "A",
+      "Cardinality": "204",
+      "Sub_part": null,
+      "Packed": null,
+      "Null": "YES",
+      "Index_type": "BTREE",
+      "Comment": "",
+      "Index_comment": ""
+    },
+    {
+      "Table": "eb_user",
+      "Non_unique": "1",
+      "Key_name": "idx_belong_active_uid",
+      "Seq_in_index": "4",
+      "Column_name": "uid",
+      "Collation": "A",
+      "Cardinality": "142288",
+      "Sub_part": null,
+      "Packed": null,
+      "Null": "",
+      "Index_type": "BTREE",
+      "Comment": "",
+      "Index_comment": ""
+    }
+  ],
+  "batchQueue": "verify instance worker configuration separately"
+}

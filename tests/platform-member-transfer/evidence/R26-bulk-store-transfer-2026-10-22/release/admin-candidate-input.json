@@ -1,0 +1,13 @@
+{
+  "terminal": "admin",
+  "variant": "candidate",
+  "commit": "802490dcf4facafd1a29bad7fb6191d33698d772",
+  "tree": "6c2c5b7617ac758ba6c1370449a231f682a4df53",
+  "canonical": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "input": "/private/tmp/mohe-r26-member-transfer-20261022/candidate-readonly/前端代码/admin",
+  "output": "/private/tmp/mohe-r26-member-transfer-20261022/admin-candidate",
+  "inputFiles": 1480,
+  "readonly": true,
+  "node": "v16.20.2",
+  "runtimeConfig": null
+}

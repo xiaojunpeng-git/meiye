@@ -1,0 +1,13 @@
+{
+  "instance": "rh",
+  "result": "PASS",
+  "entrySha256": "d0f573bbd734a57183efbff13cc674b6be20c34789ee1f86537ed5fc64cb8c9f",
+  "assets": {
+    "/view_admin/js/chunk-vendors.1ab932ec.js": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+    "/view_admin/js/app.d89bd563.js": "ed2341ac42704a1e9869c8d88d6ba4c7b73b179869a9f6e5ae2b22d3320ffd92",
+    "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+    "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+  },
+  "unauthenticatedPreview": "login required",
+  "sourceCommit": "802490dcf4facafd1a29bad7fb6191d33698d772"
+}
