@@ -1028,6 +1028,9 @@ export default {
 }
 
 .content {
+	/* MP scroll-view does not inherit the global view box model; keep its padding inside the viewport. */
+	width: 100%;
+	box-sizing: border-box;
 	padding: 0 24rpx;
 }
 
@@ -1167,9 +1170,10 @@ export default {
 }
 
 .btn-primary {
-	background: linear-gradient(135deg, var(--view-gradient, #a45b6d) 0%, var(--view-theme, #7b2941) 100%);
+	/* Keep the booking action on the same runtime theme token as the list filters. */
+	background: var(--page-theme);
 	color: #fff;
-	box-shadow: 0 8rpx 20rpx rgba(123,41,65,0.25);
+	box-shadow: 0 8rpx 20rpx rgba(0,0,0,0.12);
 	width: 220rpx;
 	padding: 16rpx 0;
 }

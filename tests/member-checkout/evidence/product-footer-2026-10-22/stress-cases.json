@@ -1,0 +1,235 @@
+{
+  "result": "PASS",
+  "cases": [
+    {
+      "routeName": "product",
+      "width": 320,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(233, 51, 35)",
+          "color": "rgb(255, 255, 255)",
+          "left": 248,
+          "right": 310,
+          "top": 772.5,
+          "bottom": 804.5,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 764,
+        "bottom": 812,
+        "height": 48,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    },
+    {
+      "routeName": "product",
+      "width": 375,
+      "theme": "#e93323",
+      "expected": "rgb(233, 51, 35)",
+      "buttons": [
+        {
+          "text": "立即购买",
+          "bg": "rgb(233, 51, 35)",
+          "color": "rgb(255, 255, 255)",
+          "left": 294.5,
+          "right": 363,
+          "top": 765,
+          "bottom": 803,
+          "textCenterDeltaX": 0,
+          "textCenterDeltaY": 0
+        }
+      ],
+      "footer": {
+        "top": 755,
+        "bottom": 812,
+        "height": 57,
+        "safe": 0
+      },
+      "header": null,
+      "amounts": []
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/wechat/get_logo",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_copyright",
+      "method": "GET"
+    },
+    {
+      "path": "/api/get_script",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/color_change/color_change",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v2/diy/product_detail",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agent/brokerage",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/recommend/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/image_base64",
+      "method": "POST"
+    },
+    {
+      "path": "/api/user",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/detail/activity/3648",
+      "method": "GET"
+    },
+    {
+      "path": "/api/cart/count",
+      "method": "GET"
+    },
+    {
+      "path": "/api/product/card/related/3648",
+      "method": "GET"
+    }
+  ],
+  "errors": [
+    "",
+    "",
+    ""
+  ],
+  "network": "All API requests mocked locally; no order creation/payment/cancellation"
+}

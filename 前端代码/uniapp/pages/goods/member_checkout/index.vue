@@ -397,7 +397,7 @@ export default {
 </script>
 
 <style scoped>
-.member-checkout { min-height: 100vh; background: #f5f5f5; color: #333; padding-bottom: 136rpx; font-size: 28rpx; }
+.member-checkout { min-height: 100vh; background: #f5f5f5; color: #333; padding-bottom: calc(136rpx + env(safe-area-inset-bottom)); font-size: 28rpx; }
 .checkout-header { position: relative; z-index: 3; color: #fff; }
 .gradient-box { background: linear-gradient(180deg, var(--view-theme) 0%, var(--view-theme) 52%, transparent 100%); }
 .header-bar { height: 80rpx; padding: 0 20rpx; display: flex; align-items: center; justify-content: space-between; }
@@ -426,9 +426,10 @@ export default {
 .payment-note { display: block; color: #999; font-size: 22rpx; margin-top: 8rpx; }.external-methods { display: block; margin-top: 12rpx; }
 .split-row { padding-top: 28rpx; }.split-input { display: flex; align-items: center; gap: 8rpx; }.split-input input { width: 180rpx; text-align: right; border-bottom: 1rpx solid #ddd; height: 56rpx; }
 .amount { color: var(--view-theme); font-weight: 600; }.checkout-error { margin: 20rpx; padding: 24rpx; background: #fff1f3; color: #a93149; border-radius: 16rpx; overflow-wrap: anywhere; }
-.checkout-footer { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; height: 96rpx; padding: 0 20rpx; padding-bottom: env(safe-area-inset-bottom); background: #fff; display: flex; align-items: center; justify-content: space-between; }
-.footer-total { display: flex; align-items: baseline; gap: 12rpx; }.footer-total .amount { font-size: 38rpx; }
-.submit-button { min-width: 210rpx; height: 72rpx; margin: 0; padding: 0 32rpx; border: 0; border-radius: 36rpx; background: var(--view-theme); color: #fff; line-height: 72rpx; font-size: 27rpx; }
+/* The safe area extends the footer instead of shrinking its content row inside border-box. */
+.checkout-footer { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; box-sizing: border-box; height: calc(112rpx + env(safe-area-inset-bottom)); padding: 0 24rpx; padding-bottom: env(safe-area-inset-bottom); border-top: 1rpx solid #eee; background: #fff; display: flex; align-items: center; justify-content: space-between; gap: 24rpx; }
+.footer-total { display: flex; align-items: baseline; gap: 12rpx; min-width: 0; }.footer-total .amount { font-size: 38rpx; }
+.submit-button { display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; min-width: 210rpx; height: 72rpx; margin: 0; padding: 0 32rpx; border: 0; border-radius: 36rpx; background: var(--view-theme); color: #fff; line-height: normal; font-size: 27rpx; }
 .submit-button::after { border: 0; }.submit-button[disabled] { background: var(--view-minorColor); color: #fff; opacity: 1; }
 .sales-drawer { background: #fff; border-radius: 40rpx 40rpx 0 0; overflow: hidden; }
 .drawer-header { height: 108rpx; padding: 0 32rpx; display: flex; align-items: center; justify-content: space-between; border-bottom: 1rpx solid #eee; }
@@ -438,5 +439,8 @@ export default {
 .coupon-copy { min-width: 0; display: flex; flex-direction: column; }.coupon-name { overflow-wrap: anywhere; }
 .empty-sales { padding: 80rpx 32rpx; color: #999; text-align: center; }.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 .result-card { display: flex; flex-direction: column; align-items: center; gap: 18rpx; }.result-title { font-size: 36rpx; font-weight: 600; }.order-number { overflow-wrap: anywhere; color: #666; }
-.result-actions button { height: 76rpx; margin-top: 18rpx; border-radius: 38rpx; font-size: 28rpx; }.primary-button { background: var(--view-theme); color: #fff; }.plain-button { background: #f5f5f5; color: #333; }
+/* Native button line-height differs from H5; flex centers every result label on both targets. */
+.result-actions button { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 76rpx; padding: 0 24rpx; margin: 18rpx 0 0; border-radius: 38rpx; line-height: normal; font-size: 28rpx; }.primary-button { background: var(--view-theme); color: #fff; }
+/* Result actions share the runtime palette with checkout, including future theme colors. */
+.plain-button { background: var(--view-minorColorT); color: var(--view-theme); }
 </style>

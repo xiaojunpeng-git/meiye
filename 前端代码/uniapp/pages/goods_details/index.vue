@@ -474,9 +474,9 @@
 							</scroll-view>
 						</view>
 						<!-- 底部操作按钮 -->
-						<view class="page_footer bg--w111-fff-s111-80 w-full z-99 fixed-lb pb-safe">
-							<view class="w-full h-104 pl-32 pr-20 flex">
-								<view class="flex">
+						<view class="page_footer member-product-footer bg--w111-fff-s111-80 w-full z-99 fixed-lb pb-safe">
+							<view class="member-product-footer__row">
+								<view class="flex member-product-footer__tools">
 									<view class="flex-col flex-center mr-38" @tap="goPage(2,'/pages/index/index')"
 										v-if="diyProduct.menuList.includes(3)">
 										<text class="iconfont icon-ic_mall fs-40"></text>
@@ -2478,9 +2478,57 @@
 	.recommend_pro ~ .recommend_pro{
 		margin-left: 38rpx;
 	}
-	.page_footer{
-		backdrop-filter: blur(10px);
-		border-top: 1px solid #f5f5f5;
+	/* Keep product actions in one measured row; the safe area belongs below it. */
+	.member-product-footer {
+		box-sizing: border-box;
+		background: #fff;
+		border-top: 1rpx solid #eee;
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+	.member-product-footer__row {
+		display: flex;
+		align-items: center;
+		box-sizing: border-box;
+		width: 100%;
+		height: 112rpx;
+		padding: 0 24rpx;
+		gap: 20rpx;
+	}
+	.member-product-footer__tools {
+		flex: 0 1 auto;
+		min-width: 0;
+		align-items: center;
+		gap: 8rpx;
+	}
+	/* Normalize native contact buttons and view-based tools without changing their handlers. */
+	.member-product-footer__tools > .flex-col {
+		flex: 0 1 72rpx;
+		width: 72rpx;
+		min-width: 56rpx;
+		height: 80rpx;
+		margin: 0;
+		padding: 0;
+		gap: 4rpx;
+		line-height: 1.2;
+		white-space: nowrap;
+		background: transparent;
+	}
+	.member-product-footer__row > .flex-1 {
+		min-width: 224rpx;
+	}
+	.member-product-footer__row > .flex-1 > .h-72 {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		min-width: 0;
+		height: 76rpx;
+		border-radius: 38rpx;
+		line-height: normal;
+		white-space: nowrap;
+	}
+	.member-product-footer__row > .grid-column-2 > .h-72 {
+		font-size: 24rpx;
 	}
 	.num-badge{
 		color: #fff;

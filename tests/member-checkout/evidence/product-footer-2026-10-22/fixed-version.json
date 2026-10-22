@@ -1,0 +1,61 @@
+{
+  "baseline": "2bb0ace05e65b7a8406393525fb93386a0a1ccfb",
+  "patchSha256": "3de28d56db8f0be34b1e13e3d52046d4f5f8978b5693b598b9e13ba3333fc00b",
+  "source": [
+    {
+      "file": "前端代码/uniapp/pages/activity/therapist_list/index.vue",
+      "sha256": "39a2f23807a61c585c12c70b22f9d38f5e96a44a49e0c323f2423370acf0abd3",
+      "businessScriptUnchanged": true
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/member_checkout/index.vue",
+      "sha256": "1285627374489825ada8898f0e63addb178514779f9d50081de411d0d29a1a09",
+      "businessScriptUnchanged": true
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_details/index.vue",
+      "sha256": "2f828deaf763d4311b2755a48aa0009a02b29a3dccdfc07c8c8d554cc084da13",
+      "businessScriptUnchanged": true
+    }
+  ],
+  "backend": [],
+  "migrations": [],
+  "newPermanentTests": [],
+  "newEngineeringScripts": [],
+  "evidence": "tests/member-checkout/evidence/product-footer-2026-10-22",
+  "builds": {
+    "h5": "/private/tmp/m008-r2-product-footer-20261022/member-candidate",
+    "mini": "/private/tmp/m008-r2-product-footer-mini-20261022/008-member"
+  },
+  "validation": {
+    "h5Cases": 18,
+    "dualButtonsFiveToolsCases": 2,
+    "contract": "PASS",
+    "miniPackage": "PASS",
+    "nativeProduct": {
+      "id": 7210,
+      "window": 844,
+      "safeBottom": 810,
+      "footer": {
+        "top": 751,
+        "bottom": 844
+      },
+      "row": {
+        "top": 752,
+        "bottom": 810
+      },
+      "buy": {
+        "left": 141,
+        "right": 378,
+        "top": 761.5,
+        "bottom": 800.5
+      }
+    }
+  },
+  "limitations": [
+    "Layout API fixtures are local mocks, not payment acceptance.",
+    "Existing bootstrap mock errors and native SDK/map-key warnings remain outside this CSS scope.",
+    "No production configuration saved, no order or payment created."
+  ],
+  "status": "Product manager accepted patch 3de28d56 and authorized precise commit, RH deployment, push, 008 deployment and 008 member trial upload; execution receipts are recorded separately"
+}
