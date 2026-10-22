@@ -1,0 +1,174 @@
+{
+  "targets": {
+    "rh": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a",
+    "008": "de90f4de5a6e985729fbdb0ed35b5cd464062d109c0afbb6f760eeb754df32e6"
+  },
+  "matches": [
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+      "patches": [
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+      "patches": [
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "dfe14cc26e74e8923aa426a09a604c8734a32f4b",
+      "patches": [
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "dfe14cc26e74e8923aa426a09a604c8734a32f4b",
+      "patches": [
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "dfe14cc26e74e8923aa426a09a604c8734a32f4b",
+      "patches": [
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "dfe14cc26e74e8923aa426a09a604c8734a32f4b",
+      "patches": [
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "dfe14cc26e74e8923aa426a09a604c8734a32f4b",
+      "patches": [
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "rh",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "dfe14cc26e74e8923aa426a09a604c8734a32f4b",
+      "patches": [
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4"
+      ],
+      "blob": "55428d98a563af7d3c33a1981c38647ccdd15bdd",
+      "sha256": "5845f22b9aff2c87c27a74140281a49333b6780958766b6e8f6c88b35206d42a"
+    },
+    {
+      "site": "008",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "7e63624051cba91fed9d1332adb2c8dba5668fb9",
+      "patches": [
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7"
+      ],
+      "blob": "9556bbb6e6c872fbe0f09ee0717db5bf464356ec",
+      "sha256": "de90f4de5a6e985729fbdb0ed35b5cd464062d109c0afbb6f760eeb754df32e6"
+    },
+    {
+      "site": "008",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "7e63624051cba91fed9d1332adb2c8dba5668fb9",
+      "patches": [
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c"
+      ],
+      "blob": "9556bbb6e6c872fbe0f09ee0717db5bf464356ec",
+      "sha256": "de90f4de5a6e985729fbdb0ed35b5cd464062d109c0afbb6f760eeb754df32e6"
+    },
+    {
+      "site": "008",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "7e63624051cba91fed9d1332adb2c8dba5668fb9",
+      "patches": [
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7"
+      ],
+      "blob": "9556bbb6e6c872fbe0f09ee0717db5bf464356ec",
+      "sha256": "de90f4de5a6e985729fbdb0ed35b5cd464062d109c0afbb6f760eeb754df32e6"
+    },
+    {
+      "site": "008",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "7e63624051cba91fed9d1332adb2c8dba5668fb9",
+      "patches": [
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4"
+      ],
+      "blob": "9556bbb6e6c872fbe0f09ee0717db5bf464356ec",
+      "sha256": "de90f4de5a6e985729fbdb0ed35b5cd464062d109c0afbb6f760eeb754df32e6"
+    },
+    {
+      "site": "008",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "7e63624051cba91fed9d1332adb2c8dba5668fb9",
+      "patches": [
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c"
+      ],
+      "blob": "9556bbb6e6c872fbe0f09ee0717db5bf464356ec",
+      "sha256": "de90f4de5a6e985729fbdb0ed35b5cd464062d109c0afbb6f760eeb754df32e6"
+    },
+    {
+      "site": "008",
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "sourceCommit": "7e63624051cba91fed9d1332adb2c8dba5668fb9",
+      "patches": [
+        "e2c36cc036433cf3abbdd1f7240f8fae66f727f7",
+        "92a02ef16c4802a05e170c32d44c45e208de9d8c",
+        "30582fd009384a1a8aa88d7954d9d2ae06015bd4"
+      ],
+      "blob": "9556bbb6e6c872fbe0f09ee0717db5bf464356ec",
+      "sha256": "de90f4de5a6e985729fbdb0ed35b5cd464062d109c0afbb6f760eeb754df32e6"
+    }
+  ]
+}
