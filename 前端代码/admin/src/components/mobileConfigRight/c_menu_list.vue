@@ -14,7 +14,6 @@
           <div
             class="delect-btn"
             @click.stop="bindDelete(item, index)"
-            v-if="!configData.isCube"
           >
             <span class="iconfont-diy icondel_1"></span>
           </div>
@@ -36,18 +35,8 @@
                   v-model="infos.value"
                   :placeholder="infos.tips"
                   :maxlength="infos.max"
-                  v-if="configData.isCube"
-                  @on-blur="onBlur"
-				  @on-click="getLink(index, key, item.info)"
-                />
-                <Input
-                  :icon="key == item.info.length - 1 ? 'ios-link' : ''"
-                  v-model="infos.value"
-                  :placeholder="infos.tips"
-                  :maxlength="infos.max"
                   show-word-limit
 				  @on-click="getLink(index, key, item.info)"
-                  v-else
                 />
               </div>
             </div>
@@ -160,11 +149,9 @@ export default {
     }
   },
   methods: {
+    // This shared editor serves navigation/hot-zone items; cube frames have one region-owned editor.
     linkUrl(e) {
       this.configData.list[this.activeIndex].info[this.indexLast].value = e;
-      if (this.defaults.name == 'pictureCube') {
-        this.defaults.picStyle.picList[this.defaults.picStyle.tabVal].link = e;
-      }
     },
     getLink(index, key, item) {
       this.indexLast = item.length - 1;
@@ -229,24 +216,8 @@ export default {
     getPic(pc) {
       this.$nextTick(() => {
         this.configData.list[this.activeIndex].img = pc.att_dir;
-        const data = this.defaults.menuConfig;
-        if (data && data.isCube) {
-          this.defaults.picStyle.picList.splice(
-            this.defaults.picStyle.tabVal,
-            1,
-            {
-              image: pc.att_dir,
-              link: data.list[0].info[0].value
-            }
-          );
-        }
         this.modalPic = false;
       });
-    },
-    onBlur() {
-      const data = this.defaults.menuConfig;
-      this.defaults.picStyle.picList[this.defaults.picStyle.tabVal].link =
-        data.list[0].info[0].value;
     },
     // 删除
     bindDelete(item, index) {

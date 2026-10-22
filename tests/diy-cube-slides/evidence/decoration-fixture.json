@@ -1,0 +1,2188 @@
+{
+  "title": "魔方验证",
+  "is_show": 1,
+  "is_bg_color": 1,
+  "color_picker": "#fff",
+  "is_bg_pic": 0,
+  "value": {
+    "cube00": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 0,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 0,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=0&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=0&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=0&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=0&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=0&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=0&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube01": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 1,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 1,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=1&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=1&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=1&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=1&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=1&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=1&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube02": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 2,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 2,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=2&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=2&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=2&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=2&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=2&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=2&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=2&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=2&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=2&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube03": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 3,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 3,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=3&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=3&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=3&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=3&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=3&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=3&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=3&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=3&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=3&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube04": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 4,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 4,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=4&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=4&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=4&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=4&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=4&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=4&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=4&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=4&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=4&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube05": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 5,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 5,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=5&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=5&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=5&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=5&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=5&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=5&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=5&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=5&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=5&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube06": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 6,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 6,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=6&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=6&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=6&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=6&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=6&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=6&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=6&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=6&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=6&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube07": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 7,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 7,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=7&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=7&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=7&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=7&frame=3a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=3a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=7&frame=3b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube08": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 8,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 8,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=8&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=8&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=8&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=8&frame=3a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=3a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=3b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=8&frame=4a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=4a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=8&frame=4b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube09": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 9,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 9,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=9&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=9&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=9&frame=2a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=2a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=2b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=9&frame=3a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=3a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=9&frame=3b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube10": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 10,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 10,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=10&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=10&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=10&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    },
+    "cube11": {
+      "cname": "图片魔方",
+      "name": "pictureCube",
+      "timestamp": 11,
+      "isHide": false,
+      "setUp": {
+        "tabVal": 0
+      },
+      "titleLeft": "展示设置",
+      "titleShow": "展示设置",
+      "titleContent": "内容设置",
+      "titleRight": "图片魔方",
+      "titleCurrency": "通用样式",
+      "styleConfig": {
+        "title": "选择风格",
+        "tabVal": 11,
+        "count": 2,
+        "type": "pictureCube"
+      },
+      "picStyle": {
+        "tabVal": 0,
+        "picList": [
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=11&frame=0a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=11&frame=0a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=11&frame=0b",
+                "objectFit": "contain"
+              }
+            ]
+          },
+          {
+            "image": "/cube-a.png",
+            "link": "/pages/users/user_coupon/index?cube=11&frame=1a",
+            "objectFit": "cover",
+            "slides": [
+              {
+                "image": "/cube-a.png",
+                "link": "/pages/users/user_coupon/index?cube=11&frame=1a",
+                "objectFit": "cover"
+              },
+              {
+                "image": "/cube-b.png",
+                "link": "/pages/users/user_coupon/index?cube=11&frame=1b",
+                "objectFit": "contain"
+              }
+            ]
+          }
+        ],
+        "docPicList": [
+          {
+            "doc": {
+              "startX": 0,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          },
+          {
+            "doc": {
+              "startX": 187.5,
+              "startY": 0,
+              "w": 187.5,
+              "h": 375
+            }
+          }
+        ]
+      },
+      "menuConfig": {
+        "title": "",
+        "maxList": 1,
+        "isCube": 1,
+        "list": [
+          {
+            "img": "",
+            "showFit": true,
+            "objectFit": "cover",
+            "info": [
+              {
+                "title": "链接",
+                "tips": "请输入链接",
+                "value": "",
+                "max": 100
+              }
+            ]
+          }
+        ]
+      },
+      "imgConfig": {
+        "title": "图片间距",
+        "val": 6,
+        "min": 0
+      },
+      "filletImg": {
+        "title": "图片圆角",
+        "type": 0,
+        "list": [
+          {
+            "val": "全部",
+            "icon": "iconcaozuo-zhengti"
+          },
+          {
+            "val": "单个",
+            "icon": "iconcaozuo-bianjiao"
+          }
+        ],
+        "valName": "圆角值",
+        "val": 8,
+        "min": 0,
+        "valList": [
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          },
+          {
+            "val": 0
+          }
+        ]
+      },
+      "bottomBgColor": {
+        "title": "底部背景",
+        "default": [
+          {
+            "item": "#f5f5f5"
+          }
+        ],
+        "color": [
+          {
+            "item": "#f5f5f5"
+          }
+        ]
+      },
+      "topConfig": {
+        "title": "上边距",
+        "val": 0,
+        "min": 0
+      },
+      "bottomConfig": {
+        "title": "下边距",
+        "val": 0,
+        "min": 0
+      },
+      "prConfig": {
+        "title": "左右边距",
+        "val": 12,
+        "min": 0
+      },
+      "mbConfig": {
+        "title": "页面上间距",
+        "val": 12,
+        "min": 0
+      }
+    }
+  }
+}

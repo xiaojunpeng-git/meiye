@@ -1,0 +1,3702 @@
+{
+  "commit": "f50a8b1a3728ccd957abe007f233fb7181e3a992",
+  "tree": "f50a8b1a3728ccd957abe007f233fb7181e3a992",
+  "sourceOverrides": [],
+  "target": {
+    "customer": "008",
+    "terminal": "member",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com"
+  },
+  "input": "/private/tmp/m008-cube-slides-20261022/mini/readonly/前端代码/uniapp",
+  "output": "/private/tmp/m008-cube-slides-20261022/mini/008-member",
+  "node": "v16.20.2",
+  "readonly": true,
+  "compressionPasses": 1,
+  "loaderOptionsIsolated": true,
+  "buildScriptSha256": "ef939e56098a678ca52aa5a25889e3b9221995046a97c8bbcc18a1003e7bc06d",
+  "files": [
+    {
+      "file": "scripts/build/member-mini-css-dedupe.cjs",
+      "sha256": "8df7c1074b9460054a5556391b2f26259cf068152a52803b33f8bd8b46db5e0f"
+    },
+    {
+      "file": "前端代码/shared/diyCubeSlides.js",
+      "sha256": "81ef54349f0048e1018801c44b52555267f4977408c36a63fe23b0d3bd201c69"
+    },
+    {
+      "file": "前端代码/shared/mohe-ai/browser-entry.mjs",
+      "sha256": "abd40fb9f14f4ee331ab2a9e9cb5449d43fdac29ca10de4a713fe45087d37c34"
+    },
+    {
+      "file": "前端代码/shared/mohe-ai/browser-transport.mjs",
+      "sha256": "4edc491c29d4167f024f847f0e345eb02d6daa93c513ec3de74130606d13044d"
+    },
+    {
+      "file": "前端代码/shared/mohe-ai/clarification-state.mjs",
+      "sha256": "2f003d1ef8c616597ba6c2e851cff15e5d2d5e7813d331dadc77981d8a1ccbd2"
+    },
+    {
+      "file": "前端代码/shared/mohe-ai/device-session.mjs",
+      "sha256": "55aa5711b382c3981db2ffbb155d5dc9cae75f935c8859b6c7082080ece6f56d"
+    },
+    {
+      "file": "前端代码/shared/mohe-ai/management-route-access.mjs",
+      "sha256": "1924248a8e08e16fda72d711075110322baba3f29a56aebf5eefb7f45fe71717"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/package.json",
+      "sha256": "ac0e964569027924634983341f13e99d55f22f0b912fbe00ed9a9dde0afa7aa6"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/QueryEntitySelectorOverlay.vue",
+      "sha256": "7528a81db92135eff63d1e0a63e525815f66e1c90af4caa20e38ae48fd67c370"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryCustomFieldDrawer.vue",
+      "sha256": "10e29040624c6b94b616d1a0cd098486a6739f9f76139bbfb3e8f77d32c0fe1f"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryDateRange.vue",
+      "sha256": "2f62f4572c905c858311622fac8498452bd27e530b138758926a20a31c8c55c8"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryExportDrawer.vue",
+      "sha256": "edceaca4566969b87a2e9ad672ca55a48a641f7f0ecb8f682a7e1699b536bb5a"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryFieldRenameDrawer.vue",
+      "sha256": "50d5d70a3c27dbc17d25697e035fd7ee582d40c02e64e63e76e0e97e8b77b2b0"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryNumericRangePresets.vue",
+      "sha256": "339a8d51e12afd04784aaa14c8121ddb53d5cc84b4de92140de39e8af4ae520e"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/UnifiedQuerySettingsDrawer.vue",
+      "sha256": "84c6fda57e0ca3e333918c694ea34add96c16dc9a5f0a3e2d81f28f827d2f057"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryToolbar.vue",
+      "sha256": "51ccb1928a78da8a77db3cb74e83059f22c2307b099b21a045211e4dcb240044"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/composables/useUnifiedQueryPage.js",
+      "sha256": "526c24d0555f52fc5420a9cd4f911018873596778ac2e3ecfbbaf7d3429baadf"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/contracts/dateRange.js",
+      "sha256": "06ff429810108f91d1cef990b77f8ddbb43195a868768cc81e6e57e09659e90e"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/contracts/localQueryPreferences.js",
+      "sha256": "33a2a39c07b67f3a34a277ed64ec347f2ca2f3800dfcd60fbee98ac9fb3c3898"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/contracts/numericRangePresets.js",
+      "sha256": "ab1d2d2095b1e2ccc8f146a47a189db052830360f118a56dda2e5d3e95bde840"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/contracts/unifiedQueryContract.js",
+      "sha256": "10d9639e37120df147a96c6a7a9d88e7180fb6c3867094487e6c87c992931547"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/index.js",
+      "sha256": "382e1dcc4998058e7294fc3a525d923e44334b6f75458b8114d99162ae5b9ffb"
+    },
+    {
+      "file": "前端代码/shared/unified-query-vue3/src/styles/unified-query.css",
+      "sha256": "86b04aa870c5daffd99703b94e7afe6e706c60a6e6b5582127d0621f46e890cb"
+    },
+    {
+      "file": "前端代码/uniapp/.gitignore",
+      "sha256": "6ede0582c60c9e6598525865899afeaf4c16a0026d8f248a04119e99706956a1"
+    },
+    {
+      "file": "前端代码/uniapp/App.vue",
+      "sha256": "260d779c1973ae1e637d454c3933c264c0824e2d2d1018ef4e580f8c4cc65320"
+    },
+    {
+      "file": "前端代码/uniapp/README.md",
+      "sha256": "e5540b1c937d2b55c616f2d47cae0330e23b599610f6d740230c5761f5a0d7f8"
+    },
+    {
+      "file": "前端代码/uniapp/androidPrivacy.json",
+      "sha256": "aa1f8c8ab984ba1dea39178738a62812307f717045941ce33b035ca6162bba2b"
+    },
+    {
+      "file": "前端代码/uniapp/api/activity.js",
+      "sha256": "74ae87bfbd70253089736c31cc2d0622ecb68114c8e02e0453e72565e69ee5cc"
+    },
+    {
+      "file": "前端代码/uniapp/api/admin.js",
+      "sha256": "272e72488a744d44dc99c5398f151c62f8b46c479ce804edff6ca8197ce65a03"
+    },
+    {
+      "file": "前端代码/uniapp/api/api.js",
+      "sha256": "047e1d183adb5a93e27edcce2c272d2673454febb1586857903c8fa53e095cc0"
+    },
+    {
+      "file": "前端代码/uniapp/api/changelog.js",
+      "sha256": "7c440b52bad260e7cbb4966dc825b44c1bd4a96b9850136c0487c0ddbed6ca8f"
+    },
+    {
+      "file": "前端代码/uniapp/api/community.js",
+      "sha256": "7fb48def7db85dd60bb17a5c50e0ea912898b8b7cdbae23f1947acfee942dd18"
+    },
+    {
+      "file": "前端代码/uniapp/api/debt.js",
+      "sha256": "edef1f508c7cc02ca6752f30b447171be7cfca613f2f585165be74fc3c5b6e97"
+    },
+    {
+      "file": "前端代码/uniapp/api/esp.js",
+      "sha256": "5bf5d039de2167624c62674f877461e2ac940d7795214fd729173bad5de8f466"
+    },
+    {
+      "file": "前端代码/uniapp/api/kefu.js",
+      "sha256": "fcec2a8b5e6ff7c3cd37646b67b00060ebd3c96b3b26552d4e3ed0b891c649fa"
+    },
+    {
+      "file": "前端代码/uniapp/api/lottery.js",
+      "sha256": "a274ea3238a6cb728cad83043aa6e7eb75bf95ac6c05076c6b0559081e944d83"
+    },
+    {
+      "file": "前端代码/uniapp/api/memberCommerce.js",
+      "sha256": "b18b301ded5fee299546bf60b6cbe256df3fd230ca6899f98065a7c98d6f5831"
+    },
+    {
+      "file": "前端代码/uniapp/api/merchant.js",
+      "sha256": "1f262e80641f3ec71a1194179919cf711050f4ab508721ceb6bfd8dc70bc9585"
+    },
+    {
+      "file": "前端代码/uniapp/api/new_store.js",
+      "sha256": "bf4a66f054c2601cabd5098a6f8755a05814227a37bf8284932579f21b680333"
+    },
+    {
+      "file": "前端代码/uniapp/api/order.js",
+      "sha256": "fe5bf211d502d278fd489168353c93dbc56f413ff1a12250f601665618f9664d"
+    },
+    {
+      "file": "前端代码/uniapp/api/organization.js",
+      "sha256": "1215e24a72b8fecc588f0bb865c8ae82f4931d5179be029a9bc85190ced01e78"
+    },
+    {
+      "file": "前端代码/uniapp/api/public.js",
+      "sha256": "0ea99ca545cf213be72fcaa7f84fde5071bc861e759cef51bdac976d9fbbf958"
+    },
+    {
+      "file": "前端代码/uniapp/api/short-video.js",
+      "sha256": "636b502240b36f812d8da1390a5d7419fdd8db021b4e548a22811c248bdd9ebe"
+    },
+    {
+      "file": "前端代码/uniapp/api/store.js",
+      "sha256": "a8d3b6410c653a370dc693418ac0531b3778df9e3048c5b1e5d748adbd65dce3"
+    },
+    {
+      "file": "前端代码/uniapp/api/target.js",
+      "sha256": "e772b34b9f173fc50bab88fbb3ce5fba5ca579d2524de44cc1b15765634d5c9a"
+    },
+    {
+      "file": "前端代码/uniapp/api/user.js",
+      "sha256": "d3fb3f3e0fc5ea27c5d1f7c09b003f6c079f7d85e2d50476c640c13cd7930e85"
+    },
+    {
+      "file": "前端代码/uniapp/api/work.js",
+      "sha256": "afded27fbbb5a9a0eabe82d4962b3bcfcd1d06c45697251535efd5aeecb1d843"
+    },
+    {
+      "file": "前端代码/uniapp/api/yeji.js",
+      "sha256": "f7d67e3e50aa4a88d449bf2d0a66e8baae36337fd75ced4b67895688980550a1"
+    },
+    {
+      "file": "前端代码/uniapp/babel.config.js",
+      "sha256": "ca9d960b9bb17a1a3f385ff04244255c36301be3d879f0bb7b95ecdc8017768a"
+    },
+    {
+      "file": "前端代码/uniapp/components/BaseMoney.vue",
+      "sha256": "723d8100f69238878f53d7fa17f7038a676e3c8b4631f5f8470045b24855cd44"
+    },
+    {
+      "file": "前端代码/uniapp/components/BaseTag.vue",
+      "sha256": "422095979c446056def934727b3c32c63c749be7c83ff211ea54467fa2d5884c"
+    },
+    {
+      "file": "前端代码/uniapp/components/Loading/index.vue",
+      "sha256": "50ea05593423d3088e1214e22c2cfde78c791a671de858712178088fd03a4e81"
+    },
+    {
+      "file": "前端代码/uniapp/components/NavBar.vue",
+      "sha256": "f3c488adf65fcfe774f01735c4cb233439d616bd55795ae70a6e38815f8d5c51"
+    },
+    {
+      "file": "前端代码/uniapp/components/WaterfallsFlow/WaterfallsFlow.vue",
+      "sha256": "254c436a90e9aba9250b02f4ba203ca19cfad2ab5c5091030268d0801de52378"
+    },
+    {
+      "file": "前端代码/uniapp/components/WaterfallsFlow/WaterfallsFlowItem.vue",
+      "sha256": "eeb9c1d9793054bedc24ffb2b5042dd4eba7dc5e364b897de2cbd59bf82e740f"
+    },
+    {
+      "file": "前端代码/uniapp/components/addressWindow/index.vue",
+      "sha256": "e7463ecd0d54acf715b0259aa2dd3593415a01349c68890c48bfb5fbb11dac78"
+    },
+    {
+      "file": "前端代码/uniapp/components/areaWindow/index.vue",
+      "sha256": "3b1047eb308cd224c78ce39747c6a1c262719bee4f48ae8750ef0e8f9692b1f5"
+    },
+    {
+      "file": "前端代码/uniapp/components/authorize/index.vue",
+      "sha256": "090e66edd3d57a4ba089e3664e303364ac2cfa7949eb9b9dfc1e7fc268bdabb4"
+    },
+    {
+      "file": "前端代码/uniapp/components/cartDiscount/index.vue",
+      "sha256": "b3c945d0c82de8fbb7f2bf5bb0e9d5fab33050b74a5c35f7e6741fdc161f19fe"
+    },
+    {
+      "file": "前端代码/uniapp/components/cartList/index.vue",
+      "sha256": "66c3a21a8f7f6cb7bbd4687e4ccc2406056b965174f2ddfb1530516acad34f87"
+    },
+    {
+      "file": "前端代码/uniapp/components/chooseTime/index.vue",
+      "sha256": "d21fa54ea0e282a71af2d1d1f36ad5638842668e981ad60feff3a115e493f5aa"
+    },
+    {
+      "file": "前端代码/uniapp/components/chooseTime/pretty-times.scss",
+      "sha256": "900ac3f5b6fc8f1435a49dea390a024947503474bdef0055df08e8782d2e1126"
+    },
+    {
+      "file": "前端代码/uniapp/components/countDown/index.vue",
+      "sha256": "c0f1f903208afb9872cc619ff4e3575c72586dac2f00d5d1d61f5511c14813ba"
+    },
+    {
+      "file": "前端代码/uniapp/components/couponListWindow/index.vue",
+      "sha256": "485ef3f5690194813e1447fe5d8f553fc76b99effb7cf9969d062d583506ef2e"
+    },
+    {
+      "file": "前端代码/uniapp/components/couponWindow/index.vue",
+      "sha256": "0c6ee9cc273ff445f0100e1a2409a5cac7807f904999739b699f4e05d7417495"
+    },
+    {
+      "file": "前端代码/uniapp/components/cusPreviewImg/index.vue",
+      "sha256": "b9d0ba071d962d690576aba0e1863279839a68317e4a0001fb2e519b846ec953"
+    },
+    {
+      "file": "前端代码/uniapp/components/customForm/index.vue",
+      "sha256": "24e322646487998526dbf5060efe2a619517dff9250a7b8bc7780ff165008b9a"
+    },
+    {
+      "file": "前端代码/uniapp/components/easy-loadimage/easy-loadimage.vue",
+      "sha256": "a590d403cf4e8038a512bd3033e0571ec21f26ec2c2da449daaa6746dfacfe67"
+    },
+    {
+      "file": "前端代码/uniapp/components/eidtUserModal/index.vue",
+      "sha256": "6e7f8d7a84f7ab6a063480958cbf7d77fa382fd2496028253f6a5a8906169f9c"
+    },
+    {
+      "file": "前端代码/uniapp/components/emptyPage.vue",
+      "sha256": "8952883bcc5a08863e28fa843eb9b7a963c421bcacaca0bcd36db25cfe5301c6"
+    },
+    {
+      "file": "前端代码/uniapp/components/ewcomerPop/index.vue",
+      "sha256": "6c4165636fbdc021a3e04ce4760f7cbb4704ec8c744a4fc7981c3c4cd9ca3481"
+    },
+    {
+      "file": "前端代码/uniapp/components/guide/index.vue",
+      "sha256": "7563483082913c1878168307926dc20989a7a38016ecdcd075237b36c889637e"
+    },
+    {
+      "file": "前端代码/uniapp/components/home/index.vue",
+      "sha256": "2ad086ff57135fe9e55fbea4404014394e544c0f95f58a91226d5b122f08338e"
+    },
+    {
+      "file": "前端代码/uniapp/components/homeList/index.vue",
+      "sha256": "e6c03a8329e3231735914e80fb5d79903ae07fefef8d242f0dd7a318016a3548"
+    },
+    {
+      "file": "前端代码/uniapp/components/jyf-parser/jyf-parser.vue",
+      "sha256": "3340fb43511c46a9a03f6ec09055da02e959635e4a295a9b7c9539e3a592f744"
+    },
+    {
+      "file": "前端代码/uniapp/components/jyf-parser/libs/CssHandler.js",
+      "sha256": "c5315d5c6a18e416ed0a7b7a9b7d99a39221adc4a1251a9146609cab49a5d0ad"
+    },
+    {
+      "file": "前端代码/uniapp/components/jyf-parser/libs/MpHtmlParser.js",
+      "sha256": "73f74aec54bd8588ee425166206c281b9d2902f15ca3d28f4accf188cfb263c4"
+    },
+    {
+      "file": "前端代码/uniapp/components/jyf-parser/libs/config.js",
+      "sha256": "d2994ad2c52f0de513d20ce6bb6cb3302172b3a95d42a647b18719b230891b0b"
+    },
+    {
+      "file": "前端代码/uniapp/components/jyf-parser/libs/handler.sjs",
+      "sha256": "e322b503070af6ece0e90bc10a48856c70664298feb45418411d7251d111996d"
+    },
+    {
+      "file": "前端代码/uniapp/components/jyf-parser/libs/handler.wxs",
+      "sha256": "f250b06ad153638707639529e48bebaea8e08e969aab24b8a3330db66c11c9c3"
+    },
+    {
+      "file": "前端代码/uniapp/components/jyf-parser/libs/trees.vue",
+      "sha256": "8fd92028a826f472be1d7d959ba29f654127bd8e9407222f9d4a569d941b64ec"
+    },
+    {
+      "file": "前端代码/uniapp/components/kefuIcon/index.vue",
+      "sha256": "21a4ea9fbdc71f04fce75fd15f46b2b02ab09bb8dbb55f870a86eb466418501f"
+    },
+    {
+      "file": "前端代码/uniapp/components/memberCommerceOrders/index.vue",
+      "sha256": "9b8407fa20f35eb23f4852726a35bbfa8117278cdfc9f312fafa486e8aac955d"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantDateFilter/index.vue",
+      "sha256": "0e098b758492b75f4409299c60bfe71c536b282ef3f50b29f3ce169c35517525"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantStoreMultiPicker/index.vue",
+      "sha256": "ff0cef56ae3bd2573db649aed85004d25a1e96fc1e126731287e0b9724e6b751"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantStorePicker/index.vue",
+      "sha256": "7be4efa47317ee795bce49dd6280b24b55883c4385ed332cdd5c25270025caf4"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantStorePicker/utils.js",
+      "sha256": "2e9c5c7114c6a7ef7d24d577e43cc138003cd4e308db2621df691cd3277f585b"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantStoreSinglePicker/index.vue",
+      "sha256": "a13ddbeba46f2214aeab6bedf1e9d9e053444522a7993faba2b07cd21cd3044a"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantSwitch/index.vue",
+      "sha256": "77da9ce3038bb35b605a35d9a3eb0b121429184dcaffcc715284b5e84fac80dc"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantTabBar/index.vue",
+      "sha256": "cf9d280170b2b33d37fd4b48b6b3b4c75d08a193bed4dfb3d8b210e94dcd3131"
+    },
+    {
+      "file": "前端代码/uniapp/components/merchantTargetTabs/index.vue",
+      "sha256": "5fc2ba1c53348c1164a0daa48085190d010bd65cdd266054deaa229596c55ebf"
+    },
+    {
+      "file": "前端代码/uniapp/components/pageFooter/index.vue",
+      "sha256": "f1c089c833bac44cecb8b24c8ad517380aa95052c9d2cc30df2e62df3876894a"
+    },
+    {
+      "file": "前端代码/uniapp/components/preferentialModal/index.vue",
+      "sha256": "68dbfc25d7d53a1082964a86b45d9d301b4ededfe5adfe1481c8b87177426a40"
+    },
+    {
+      "file": "前端代码/uniapp/components/productConSwiper/index.vue",
+      "sha256": "8e25acd923e4b766885963db5040583c3c00df0c8016a8fae6af347348f79390"
+    },
+    {
+      "file": "前端代码/uniapp/components/productWindow/index.vue",
+      "sha256": "f5d7808aba1e93db53efadde607f85a3b23f72faa8bf8c23ab3ac621a2d58bc7"
+    },
+    {
+      "file": "前端代码/uniapp/components/recommend/index.vue",
+      "sha256": "80612d65e35d023dcd2d3f4bff690e8e64270f1928856471333849f0c12eb513"
+    },
+    {
+      "file": "前端代码/uniapp/components/skeleton/index.vue",
+      "sha256": "8e263bb7965dc3ea418fd5006d19a9374f2447a178e1e85596904b7dfbad42b7"
+    },
+    {
+      "file": "前端代码/uniapp/components/specs/index.vue",
+      "sha256": "8e9f83840d959843a9a89cc49a8507afc3ffc4e4a0d673161714dad7669e1708"
+    },
+    {
+      "file": "前端代码/uniapp/components/splitOrder/index.vue",
+      "sha256": "c2e7236c049ea5b58683cc22c61440c45c5ed782efc46b21d428b44a470e6509"
+    },
+    {
+      "file": "前端代码/uniapp/components/timeSlot/index.vue",
+      "sha256": "10621198ad383c2856268a9f1f2e7c5ee80c1b9632c73bb9dd42f3e1042c8332"
+    },
+    {
+      "file": "前端代码/uniapp/components/timeranges/index.vue",
+      "sha256": "089ec018e55760e60e8723b696b8f87d869b52031cfdce381b7758296750816c"
+    },
+    {
+      "file": "前端代码/uniapp/components/tui-drawer/tui-drawer.vue",
+      "sha256": "79a568c499bcdf6fd0b3b8faac5849b2449025e66d52289ad22ecb9a9885b8ca"
+    },
+    {
+      "file": "前端代码/uniapp/components/tui-modal/index.vue",
+      "sha256": "cc3ba33ffa4bad5b41db50c2a64c790984f20e838cbbfc63696ed8c284a54ed1"
+    },
+    {
+      "file": "前端代码/uniapp/components/tui-swipe-action/index.vue",
+      "sha256": "ab4df7bc39d08d5f30b7401025a4b2242cb1d60db4fcc555f53b64dcbd122490"
+    },
+    {
+      "file": "前端代码/uniapp/components/uni-calendar/calendar.js",
+      "sha256": "547c7fa3299cb4847f9f392b8fc7f5a0c943121fd66b17311ab2c8530d83633d"
+    },
+    {
+      "file": "前端代码/uniapp/components/uni-calendar/uni-calendar-item.vue",
+      "sha256": "21355cf99eec4b04387b63e08cf5610758620723e436dfd3e9e0b48ea0459fd8"
+    },
+    {
+      "file": "前端代码/uniapp/components/uni-calendar/uni-calendar.vue",
+      "sha256": "bf9f665a32275777b7063688996730edcd3b3e1374ddb785c4a8cd953f0af09f"
+    },
+    {
+      "file": "前端代码/uniapp/components/uni-calendar/util.js",
+      "sha256": "1e6460a15f30f1faf827ab472d35f222057276b9469013265a073986e08e4f56"
+    },
+    {
+      "file": "前端代码/uniapp/components/uniNoticeBar/uni-notice-bar.vue",
+      "sha256": "2f2302ab755a1625b5e3a3d8fa39e562e7fee58a4854792dad55642221e8be74"
+    },
+    {
+      "file": "前端代码/uniapp/components/userEvaluation/index.vue",
+      "sha256": "2c5db27186e4be95fb616f2f7be3ca35b42a537e512256583e87a2cea51d4d1a"
+    },
+    {
+      "file": "前端代码/uniapp/components/zb-code/qrcode.js",
+      "sha256": "601abe0149501beea7fe1b0ff9d7a8e32b62aec5e49b2d7b55c76986f103764a"
+    },
+    {
+      "file": "前端代码/uniapp/components/zb-code/zb-code.vue",
+      "sha256": "57b93a7d4292d850e093ec9762bf8a5958248416ecf1701cd32323ba5b0c8521"
+    },
+    {
+      "file": "前端代码/uniapp/config/app.mp.template.js",
+      "sha256": "dcd0bf4f59ba235c5ff5c6da1447611f635397c1c33ce5017f98b0bfa1e8245a"
+    },
+    {
+      "file": "前端代码/uniapp/config/cache.js",
+      "sha256": "24fb243be192bf503a7846fe4f04780bd532b1a7fbae7406961a7f0dffee2231"
+    },
+    {
+      "file": "前端代码/uniapp/config/member-customer.json",
+      "sha256": "48ffb907e86a24b8d8c37257a1aaaba14deebec737be9a591189678487a6cb24"
+    },
+    {
+      "file": "前端代码/uniapp/config/socket.js",
+      "sha256": "6ab0723a6ecf2e41378ea90e4be1c507987061054ecf48f6283d3a38811b8669"
+    },
+    {
+      "file": "前端代码/uniapp/design-qa.md",
+      "sha256": "4ad2ede80ab710a4b331b7b3705100664f8bce9885d26eb3510b2f82f91da25c"
+    },
+    {
+      "file": "前端代码/uniapp/index.html",
+      "sha256": "5391191e0bbbbf97e6b6606f5cc9675490e4c88ce7e46e40dd4b920a92f4b50d"
+    },
+    {
+      "file": "前端代码/uniapp/js_sdk/wa-permission/permission.js",
+      "sha256": "40cf83b77f7767a7553392060f58ddd37f394faecc624da19e2454f958c3792c"
+    },
+    {
+      "file": "前端代码/uniapp/libs/login.js",
+      "sha256": "e912bd0208d2ced7626d3e892fc706de869224d253d8c6a4226966fe996f6c9f"
+    },
+    {
+      "file": "前端代码/uniapp/libs/network.js",
+      "sha256": "2657e3f62bcdaa55238a2ca33da685d90d262d4385b7e3d1555112042d67241d"
+    },
+    {
+      "file": "前端代码/uniapp/libs/new_chat.js",
+      "sha256": "dbc931e9869df641bf3a87c5a24b7300ab9c4a5f44e92e31b4d792b2c01ead41"
+    },
+    {
+      "file": "前端代码/uniapp/libs/order.js",
+      "sha256": "9edde9c5f552410099583a1658bc9a81fac0a0e8b43ec1cc85b4cba72c12a33f"
+    },
+    {
+      "file": "前端代码/uniapp/libs/routine.js",
+      "sha256": "843b734074291c2fb0b2c9553a1a8e35a4eeabf2d8c96cea3cb57f898b15665a"
+    },
+    {
+      "file": "前端代码/uniapp/libs/wechat.js",
+      "sha256": "2ae06ff09befea564e371d1dd271b1b31d0ac9df8cb43d1b10945996aeb3fbc0"
+    },
+    {
+      "file": "前端代码/uniapp/libs/work.js",
+      "sha256": "8beaf8fca2af38c2cf023ac42852e045451683b6330e4728e1a23ff05c0b2f31"
+    },
+    {
+      "file": "前端代码/uniapp/main.js",
+      "sha256": "75b3d795c6ba514e46963efe54c5d1e3183e4ee0b8eeaa06d8969a2f897ea078"
+    },
+    {
+      "file": "前端代码/uniapp/manifest.json",
+      "sha256": "dcd47a62af9f18f3fa309dee31ceb82884f334bf8a6db820f378c077e2574d95"
+    },
+    {
+      "file": "前端代码/uniapp/mixins/SendVerifyCode.js",
+      "sha256": "53dbefb8d7f11b4aebb7d92f65aebe79dc9cb97cabdb4e86b316ddc05e9c3fef"
+    },
+    {
+      "file": "前端代码/uniapp/mixins/color.js",
+      "sha256": "0aecdba9e434bd1dc8b54a73f876f4ba898f5302f6bc02d47d95e8d2afa3088f"
+    },
+    {
+      "file": "前端代码/uniapp/mixins/confirm.js",
+      "sha256": "82b8dce25710c4dfdd04165a0eb21d47f39b888c560ba2bfd69a7274d185f06b"
+    },
+    {
+      "file": "前端代码/uniapp/mixins/legacyMerchantRedirect.js",
+      "sha256": "5368191a4bf71e89688f7d60ec1042d239bd1561ffb25836ed0fbb292046f189"
+    },
+    {
+      "file": "前端代码/uniapp/mixins/location.js",
+      "sha256": "cddc7e4f0225ee077d2d8fbc0726ed06659df4073c0b32605c051abd6aac9e2a"
+    },
+    {
+      "file": "前端代码/uniapp/mixins/merchantGuard.js",
+      "sha256": "6d383b555a24751890470f261cbee3f70477426e88613f2c614306befd243a13"
+    },
+    {
+      "file": "前端代码/uniapp/mixins/skuSelect.js",
+      "sha256": "184feca1a31469a4a9b6f16b98750ff76e1404e570491374969ff11e7c1b5be7"
+    },
+    {
+      "file": "前端代码/uniapp/package-lock.json",
+      "sha256": "142e39c4ad0393e785e601e8a280c23780af12a7d64c3105fcfb4ba9af1a8fc2"
+    },
+    {
+      "file": "前端代码/uniapp/pages.json",
+      "sha256": "dff8e7ed847deb3c040986629a7291d6fffa6ff84d1ed33ec67d2de09984a9e5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/bargain/index.vue",
+      "sha256": "28aa0538a74e950d2684b1f3af8e988d57e0f19e58b124f5a94b6a14f037e0f3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/components/calendar/generateDates.js",
+      "sha256": "33c64ab04438cba262de5e41240118007e5809de82c4f83476e36b8c72e1b92a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/components/calendar/index.vue",
+      "sha256": "6af384966909aa2d252c6227dae63a0475631c6cb97f0cae272603ff550c4528"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/coupon/index.vue",
+      "sha256": "c6af9e67a79a8bf2d789ad66d39041dc95a9c852ce630373eaff946fe67d185e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/coupon_details/index.vue",
+      "sha256": "e7da9b3b7057c2030acb533633d56d55c9666054459c97c8a960cb8ec48b3771"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/goods_bargain/index.vue",
+      "sha256": "a639c4346f716ca0395ccd75510164901263cb58eac41f8098683de91ecb580d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/goods_bargain_details/index.vue",
+      "sha256": "04aee8cc3679f8bbe2e2943aed7cee37eca665d64fe16556f401b62df7c43581"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/goods_combination/index.vue",
+      "sha256": "c39b3af842d147ff4b658eda2ef1ab532d59380858da73284db591c3bdf7e834"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/goods_combination_status/index.vue",
+      "sha256": "67ad72f8dbeafc4afd9205a8c42d862183eb1e422383c65791ed11ab1206c3dd"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/goods_details/index.vue",
+      "sha256": "2f93ff4eb89c2b94f1bf4c28f76bcc8618623adb7543d5787e5930bc62c032b9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/goods_seckill/index.vue",
+      "sha256": "7c1d3b928991a4a69f79e8fe7e602aeca5a388762126bed5a4a97fa062a7d520"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/new_customer/index.vue",
+      "sha256": "7565d6c9130da43b61bee8a6aa2b3b03d86a7944d8c68a5610f6b2d7ba05a96c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/points_mall/index.vue",
+      "sha256": "78624c0502beb613e82dd1a7ef5fe413552b57edf5d5e7f9c1513fff59675425"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/presell/index.vue",
+      "sha256": "5b5ea57508e2b3814a39d884cbda1be6c756cdedc03b1cb8370b43fa55997203"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/reservation/index.vue",
+      "sha256": "7a843ab56d94c54f77a6f007880918ae80c1567eba6eb21bcf8d503234223e0a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/arrow.png",
+      "sha256": "43fe46c9c9b596fbf2625bf6c7e65a4f23c3bfd81ca1978190205fd8bc16f828"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/couponBg.png",
+      "sha256": "9c6a9d3ea305a3b77179715a87e041c9c8029c2f146140980ad6c40c4d9d8b70"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/coupon_item_bg.png",
+      "sha256": "4fe425f5c12a297cedbef7f6bf6116611977360c20db048cf9f5d0ea558a0170"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/discount.png",
+      "sha256": "7d83e500014964b3ee797b3fd0c528a28ff8c010a654b6a67752e1e6f10e9513"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/get_coupon_text.png",
+      "sha256": "8b86db3997c705cf78c6208a463963898fa6a2ba3a237c41d8973221823eb0aa"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/groupLine.png",
+      "sha256": "f04ad8a3a54d6518bcab07060845f4a8ec02287ee254fd620939e1b06fb91da2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/lightning.png",
+      "sha256": "13fbea53f5733f6049ed8f886f987d3c1c789539319d2c7aad5643f4fc286262"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/mall01.png",
+      "sha256": "0cabd7f4330856aa3bfc35aabc5dbe05ec1d6159438d8a46863327fbc3751877"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/mall02.png",
+      "sha256": "7c1c4f36b8e9ec480f2ad77324e4e7fbd3f43579915654edc24fcdb40f38bd87"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/mall03.png",
+      "sha256": "7f05e476a6bf47c22f45b2a3d05e24f676d1886bc2889842b72efa1f29042743"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/mall04.png",
+      "sha256": "e20d0ee79ff6cdadf1c3615def4f1337bc30dd498924f97495a6280725adb088"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/mall05.png",
+      "sha256": "37c50b8640d0726e319cd7e8709ee33825707cb6fb5742b0ff42d0910480f224"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/new_person_star.png",
+      "sha256": "fb27a2a0359f3be0c2f88ddb2484fe9d72f43223bb0c22e357557195966bce02"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/over.png",
+      "sha256": "752fe7f5cb607833c29d9633bb913039c8903887a6bedfd4ac046027e3908a98"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/preBtnLeft.png",
+      "sha256": "ceb69ec49881b81806e752a050f58f04ba4e44bbb921d6fb7dd8d11fec5411f3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/qiang.png",
+      "sha256": "b86b24e7dd8dbbdd53121f0754e6050e141ae93225a820adb4a21f0b203d4e53"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/vacancy.png",
+      "sha256": "6ed2dca19681d31180e4eb5f03ef83dada464ff31fdda52292b00b59c32d4d33"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/weixinCircle.png",
+      "sha256": "87404a14c2e5788a313ee309c300e2243a5b60bd6537979e36145c5836fae596"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/yushou1.png",
+      "sha256": "01279f371c3824ab0bd42c35592c78cfb1ef3bd126e0e59482b09e8ed11d4bab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/yushou2.png",
+      "sha256": "4f5b42d4d17b3bea154d4e05c89ff906f9d3ac7aadf8b769a851992aae5c3811"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/yushou3.png",
+      "sha256": "893c3a6ec181ed298f53e1c6b4bd0972c25c98defcb56497d75c1e72458928c4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/yuyue.png",
+      "sha256": "b3dfe06da5b8ded5f6901ebfe344308475c78078fdd94f06e3689be6dcee04c4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/therapist_list/index.vue",
+      "sha256": "39a2f23807a61c585c12c70b22f9d38f5e96a44a49e0c323f2423370acf0abd3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/agent/index.vue",
+      "sha256": "20ec8413b4d4f46a8f29eefbd02bacbfe6e7a7cc49b56e2999306cd30382d611"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/agent/shou_detail.vue",
+      "sha256": "221240a05a4c20688e69fd172ec6164a437fdc17bd36764805f41efc2787c32e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/PriceChange/index.vue",
+      "sha256": "54f6aa8cc401a9b11b3bcedaaf2bc364ce1146de1f3afb9ef434a1881f8fe14c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/footerPage/index.vue",
+      "sha256": "d2ed529a54c44a0f5bf02519dfa1ff27ecf4a4ed7a7f0874ccb03b59a6252b7f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/home/index.vue",
+      "sha256": "e7d148fb47059f75f898cc202eb93e7b7ef44bf00e47c82b0a94738803631ffb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/changelog.md",
+      "sha256": "f229ebfd676af55d3c8b363b4380dbb7da2db47f5406840fefea3a5d7f308bb1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-data-charts/qiun-data-charts.vue",
+      "sha256": "12927f5f56ea3535e40a94fbea5a2e239202242204e3b6c5eb029ed903f34f43"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-error/qiun-error.vue",
+      "sha256": "c5fe7170abb162c16ac486de9dead7a4f0e5d02860a7d5798a781d393d7209fd"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-loading/loading1.vue",
+      "sha256": "fb7ac43d4c58a716d1cfbdb39a20046edcc75f10b5db8fe88a51632e29487562"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-loading/loading2.vue",
+      "sha256": "843585d7fb239a9f7df1de3efe4392f38685bd442e005c8e8addbbb26c71f1f0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-loading/loading3.vue",
+      "sha256": "0ac3c09e81f849194c1a428a7b408393fb51e1780076b6c58b0642035ae862d9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-loading/loading4.vue",
+      "sha256": "5b14fca6bcabae963c88b37fed93a9b19ac31ff8b58efcd9080c99b81a7362fa"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-loading/loading5.vue",
+      "sha256": "4a42c7a4e56ada06d4b5c09e596672f921e25beeb1ee4c40df864556192d825c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/components/qiun-loading/qiun-loading.vue",
+      "sha256": "d15bd32bf93d40e2ee4eea7c90dfb06a62ed223d40e2350aec140133671b01b8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/js_sdk/u-charts/config-echarts.js",
+      "sha256": "7be72a198b37431ff8bb19ff857cdc98e97ea769b9253a0a090204a9758a18e5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/js_sdk/u-charts/config-ucharts.js",
+      "sha256": "d76b490f7d48c141a38ba5f2d4ae53c3c8bad2768c150432470018052f5cb966"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/js_sdk/u-charts/readme.md",
+      "sha256": "ac6a648fd6f0367a83be53fc152bf3d523de29a190b909c3f0853f8ef2fb465b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/js_sdk/u-charts/u-charts.js",
+      "sha256": "eed2401bfcd0b4e205d299207b0c03943132f52da2cdd8bd4d444fd5e948a4ad"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/js_sdk/u-charts/u-charts.min.js",
+      "sha256": "a414affae9a076bac059ea05747e5a4fe6bac1656e5ef89473c757f90fd63b44"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/license.md",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/package.json",
+      "sha256": "f0d59dd30ece40c99e3f55388edca51374538b92c09dfd7691a91d2c7591bb57"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/readme.md",
+      "sha256": "b91f5589a435927933501bd2d1aebcdcdc1e2b343af77628ec90c8b072654ca1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/static/app-plus/echarts.min.js",
+      "sha256": "32078fa4054bbd5ff2c7f3d57b824cdd7144080de27cf4bdae9005dd4ad492ec"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/qiun-data-charts/static/h5/echarts.min.js",
+      "sha256": "32078fa4054bbd5ff2c7f3d57b824cdd7144080de27cf4bdae9005dd4ad492ec"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/staffCenterFooter/index.vue",
+      "sha256": "6752b4e768a1d905efd17d2d96d11d2a51fb164715bb21888a1810b352d433e8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/storeList/index.vue",
+      "sha256": "4848b5850925ec165c595c33f2c1712ba6f27738934a11137871e2111c246aab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/ucharts/ucharts.js",
+      "sha256": "91e0da223d47abaf5be7c6171356bd715aed5afe0ab203ee97158d6719ba96dc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/ucharts/ucharts.min.js",
+      "sha256": "615f143572407177cf68242548a7aa4bc6a6a22dfc840246f1b3a6bd08990bad"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/writeOffList/index.vue",
+      "sha256": "812985d75fad78a61b6ad0c69431f5b27d76175d0bcae3b8e948fb1fd3dc513f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/components/writeOffSwitching/index.vue",
+      "sha256": "e1d26a02ef7f63fcae28c8ea329eef02b4a307c93f4bad7e59e84ba854ed4d80"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/delivery/index.vue",
+      "sha256": "3de78eacd0ec93fb2d14a60002724c12bf95959ce0cecada6ec6bc185ade055d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/delivery_confirm/index.vue",
+      "sha256": "de85e2ffcb5d60ad30ce2303ce6cb339b40617b189bbc5a61d72abe3abdf4c52"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/distribution/index.vue",
+      "sha256": "f4614cf7f62d99f355b4223c7accd419ffe26678cfdd1b93eafd0f72e49c354f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/distribution/orderDetail/index.vue",
+      "sha256": "960773332b0df10e1412f395f7b83f485e7b029d91a57b96e36a2e720a613c86"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/distribution/scanning/detail/card.vue",
+      "sha256": "6d85945794a2484915daa2207850ce73a4427a64e1924aba7f10c6457d739ec9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/distribution/scanning/detail/index.vue",
+      "sha256": "1d072336aeb6e3fecc799b8398a43153ed49d8a60918f0469ff12df055ade8a9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/distribution/scanning/index.vue",
+      "sha256": "1e479ce9e777303506671a37e2d0e0fd5a75a09ef02a8c19fec2b4e4e3420163"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/goods/components/classify/index.vue",
+      "sha256": "11d222ae8cf8e4961ba7e6fbb19ef2c7b617e4c3898f442d8491b07f2c06f5d9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/goods/components/editPrice/index.vue",
+      "sha256": "dd0ba3b36f9b0e0a86c2a99bbc76d4e53e8c32e0ce991079276cdf9ebe0137f8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/goods/components/editStock/index.vue",
+      "sha256": "ee64a3c9b9fc613a21973ef488ef2917e6dbfd8bb6cf502e19c554a438896964"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/goods/components/label/index.vue",
+      "sha256": "ae9b73c0c32608a508c7b63c77ddcc3ddd180caa30c997db1a152ac2e640063f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/goods/index.vue",
+      "sha256": "39ce14a82d4afc4ba7bd13daefbab685c480b5561fa3ddb9013ba13d93ca0604"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/goods/specs.vue",
+      "sha256": "ed599c6d09446822eb63b20b57539b28df92280d1f6938459f5f08373ca3b606"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/goods/specsStock.vue",
+      "sha256": "7178f84c8cf734932f99ea93de88b5d631013595b38ee781d7b639fc1a60516d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/logistics/index.vue",
+      "sha256": "8e71e76b3ef39d326138363d14d7996bf0d31a39c56b6e556ca778f0ed5476e9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/offOrderResult/index.vue",
+      "sha256": "7b3f349b05628cc44fc365552715a3777768694ea429e302657f821c06e0f609"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/order/index.vue",
+      "sha256": "e0f0781e3b3d9f278982eafbb75695fec6bbefc2e5d6feb1badd4c39ed2c2055"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/order/store.vue",
+      "sha256": "bf6db4369dba1ca028c65da3a863ad495e9e802e0e30c8ece8d6d522299f8889"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/orderDetail/index.vue",
+      "sha256": "d254e5ba0d99bcc935fdce9dd97b89553fa129757428b8178dd15f1e72ef9f20"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/orderList/index.vue",
+      "sha256": "6b219484bda7b51664a6372cf7621439e668f663c0c71e17bf298afa3cde67f9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/order_cancellation/index.vue",
+      "sha256": "e6ad34f834d790d9fc457310c98959f5878671fb869ef4d37226db42f16d80e8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/organization/store-select.vue",
+      "sha256": "866eb28e0693b3357a35a27c0b2aa4dd5ed6e159c22ccbd830715309c0e443e4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/refund/index.vue",
+      "sha256": "489123b0a0db957163f2f5bb13faa68f9ff914115acfa5110e0ab18719052d5f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/refundOrderDetail/index.vue",
+      "sha256": "dbbc5391fdfb5ef327cd0dc514f9515df841672a7289f971f6421f94fc779f07"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/refundOrderList/index.vue",
+      "sha256": "1acba4ed0aa521916978fe61a5c11f6587d21b8583c0b28230a1bc644d71ada1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/reservation_details/index.vue",
+      "sha256": "a4465ecdb3731fe12101d415f9d27abebb5513278c754e93d50b353b8b11daa5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/reservation_list/index.vue",
+      "sha256": "3e6815fa1ff3923fd66db08c2ae86721e0982259a9e6cff798d76f676b0db0f7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/reservation_write/index.vue",
+      "sha256": "43bfe46439c7458e1f93f0368386fe1b8245f4be38871526abf93385b34b78f2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/spread/index.vue",
+      "sha256": "cbc2b640890ddf57fcb586a4baec36b0f5473c67ec5641d2c95198a346e37e81"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/staff_center/index.vue",
+      "sha256": "d842ed138eec863e7ce17102fd519a6254bac96beb596430d88d27958d178a31"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/staff_center/introduction/index.vue",
+      "sha256": "a064dbd3edeaf74091caf6c3410af55a65d1c0b95ff358096bd55c80efa22f97"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/staff_center/order/index.vue",
+      "sha256": "b073af471b7f17a15b48662e9e699862ee9d9461e2925fd84488f21ca01cee20"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/staff_center/rest/add.vue",
+      "sha256": "14262235105c1e87fc0b6c2523a3a1f5161aec4856a62a128e1c6500ee47739c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/staff_center/rest/index.vue",
+      "sha256": "c820b356a8f59aec11530a5315efe69ee3a55ae9cb01944f33726b3b2efe3a57"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/adorn.png",
+      "sha256": "ce1128785396c4cfeacb4a12c188acac636ef4a357e31ec008c476fa1b11110b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/card.png",
+      "sha256": "e74c597c8cd0ab376b991140d5e23bb257b71f5ddd8d613ae877215be10c9f75"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/coupon.png",
+      "sha256": "1ee76d3d35d4e0079e972c71905744e42d3e0132fef8fb7cab6aab983d04afda"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/decorate.png",
+      "sha256": "2e6e3e6390f9153acd139a9d6a785354b4b12c61909025955a34188153a2f444"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer1-1.png",
+      "sha256": "021f7c8e1eb2ffa82182a5defe513133eb5afdcd2bfbd2bfb5ea28ac34352d89"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer1-2.png",
+      "sha256": "bd4bac8164de66081a08e731659b86a1fd4f83430a8a42f102851c4390ae91d9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer2-1.png",
+      "sha256": "95ae198bfeca602f670fbe171d1f9ee8237a1d8fd222cda02925cfa1f78d864c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer2-2.png",
+      "sha256": "083272442cd555780df0bccfae9c59741de6b12a797997ce7161923c9ae5cd91"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer3-1.png",
+      "sha256": "2589862bde2ba80c7c59d893182babccf58d2887c149794a9f2f32dfe1003e89"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer3-2.png",
+      "sha256": "49d0242a501f31875e86a229060600cab7198653815ff11ae4298ee2b81139e3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer4-1.png",
+      "sha256": "5bb9abf8eed1dfc03b56b27ee2e48d1cbf1340614f617279f76469ddcccc0529"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/footer4-2.png",
+      "sha256": "792dbae8f219d9361d86e81a55ff06c068f430bf653e2c514c55d636bf91a3f1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/ic_camera.png",
+      "sha256": "a1995de36e2ae6d13b6634d33705dad0ffdcc911c7fb80138b924727f8fabb73"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/pricetitle.jpg",
+      "sha256": "09ade837e9a999b4df7dbed77dc579a6a3f328e0ce03fcdbdd509941a31544cb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/result1.png",
+      "sha256": "a65a8b545f50a81b88cde93ab997662c7df51b790d5874c13c212159461d8b0a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/result2.png",
+      "sha256": "f49346a87ea0da8279b9a0c276674036b557c44d2435d6e6856003e6ab99ecea"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/scan.gif",
+      "sha256": "feb7ec7bcf81f786526dda6ef642da3f2b3085edfd982345a50af105bcc529ab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/sling.png",
+      "sha256": "c6983604de81c5858bafaaede22d58a5fec6bab80f0b2d0992c8cd17f335fc4b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/static/yonghu.png",
+      "sha256": "d7f079afdc4f20a49b90019214c739744e41316b167f8c4c801ae545e015cff9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/allocate/index.vue",
+      "sha256": "425b79a6d5282c763e634d78c826a2f40849745537f14a191f0576d02197155e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/analysis/index.vue",
+      "sha256": "fea0c97b7c18018e38eb979685a3712ced34a69ca6e96538185d0a614a8bb81b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/common/target-form.scss",
+      "sha256": "898385048d54eb557c626f919bbf2a2b52ad604ff9825dec5f240be5485e6fc2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/common/util.js",
+      "sha256": "8f16aebb1d0ba4219ff2559d06c80f69c02587c85cbaed87b61dbb7b97f061df"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/components/bottom-nav.vue",
+      "sha256": "e9be7009acd13f4fcf76c48f6742aee30ee4a630a2ec02abc00096d3d8b507cd"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/components/metric-card.vue",
+      "sha256": "c8be1c5835af3ab0e9b89ffffb72968d0717e150e37955a3b14f655c05b4636e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/components/page-nav-bar.vue",
+      "sha256": "b6745bce4d93a84f4cae1626cdd520b1f85c3311b4948ceb38cabe9151a928ef"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/detail/month.vue",
+      "sha256": "84f05772fde789ff4eae3cc31ba2f808191f5281e41a2e9a51361f00b2a4d968"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/detail/period.vue",
+      "sha256": "1c6bf6bf069f026eace158dc1506dc6016ef5c908dec307143527fae77b5fdfb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/management/index.vue",
+      "sha256": "771d2fbb32e5de918f132bf96153c1c29310faaf28536b8d858ea8195c962ecb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/select/metric.vue",
+      "sha256": "4771281e2b9e6172c4a6bef81a80d4ceea4ea333978fd3b6d7a7c5e132dba1ca"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/select/object.vue",
+      "sha256": "e2569c6bd5b2a8d932e9a50f91622ea1220e8382624c928588cf0db0f6c8d46f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/select/product.vue",
+      "sha256": "94f676b60f55c45a187b4990a91dbe002373a020c0cdedd8cd5b83bad5f12e6a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/target/setting/index.vue",
+      "sha256": "93deab85ca0688164d4b4fc481636f8962d4487cc7220fb24cbc8c0e003f2fe3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/components/coupon/index.vue",
+      "sha256": "63b4bc25a71354e9d4f4e08609031d76aa9371cf44e0a6632aa93d152c424f96"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/components/editBalance/index.vue",
+      "sha256": "8d2607be9b54b9b889521d8972c8382267a9e56422327ca80f280e7d512b2755"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/components/filter/index.vue",
+      "sha256": "9a5d51f54673a20d79e7f9901d24906a0387310f3bb705e2609320e83c8ff906"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/components/member/index.vue",
+      "sha256": "178285fafe6135b614574b1e4d390bc3734e77757c61cceb7a8a3088c04dfff3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/components/userLable/index.vue",
+      "sha256": "a6fc9a5ef49031b88a3345bec92f5dfecdd458d285f91667dc5b7ed8e5169ae8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/index.vue",
+      "sha256": "2bc4e6b46f6dd7b0545f21900cd5d232cbc2de0494fb6e4b5400e271eaba82cc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/index_back.vue",
+      "sha256": "e6be6ac25fcb73178f832d07656fda0257a7145289299095643132d5498828dc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/user/list.vue",
+      "sha256": "5848fd2a9cb9fd9c1ede33eb329ed49c9c198f297563aea2b39e063e76cb427f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/work/index.vue",
+      "sha256": "2b1a6950741ea7a5898d4b8f3d79a4a0c0ceef4f5970ef169b951eb22924fcbb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/work/store.vue",
+      "sha256": "b6509a5ff783b71fefce61d2cc711fad7282f3a94fb9a7954203f41a7f3ae09e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/writeOffCard/index.vue",
+      "sha256": "affba618dec4b365543d6e3b3802c9681b1f559ae0d3a32a06b691ffd196bb7c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/writeRecordList/index.vue",
+      "sha256": "d507f2533a054c52c537caf684e6f8f73b35a831fe779c4d57b205d9b1c2fb71"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/yeji/staff.vue",
+      "sha256": "a72934b8ac2829a7b246f96e8365886af15efceb7f8c04a154597c5cb3a6fdd3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/yeji/staff_detail.vue",
+      "sha256": "23b5f23f97215dde874cfc1b14f894c06165e71bc2632f58cb5140e18f90715e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/yeji/store.vue",
+      "sha256": "2e70d02c031d46655e744667b9af5f45ac2f4f799288a55109af4dff5d68fba1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/admin/yeji/store_detail.vue",
+      "sha256": "8a85693bd30511ee7e258384734566f99313275a75ac476c1068f708f60c0e1f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/offline_pay/index.vue",
+      "sha256": "68ecb1386988a84293f7898d7a251ca3032052e32c1ec0943a64c1e34fd43dc0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/offline_result/index.vue",
+      "sha256": "ca61aa1b5e280fa90464d219cdeca8f108f29db4c6bb7b95deb7140ec1df1df1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/record_list/index.vue",
+      "sha256": "a51d1a7eb2d6e179a9559c88737af350b31c4bb28d9828a1066d9518b3526aea"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/special/index.vue",
+      "sha256": "d7de921da9c323ddf78069d3ac7c8256b5f1efa98c1d6f05bc698865ffec3ac6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/active-zs.png",
+      "sha256": "c0359dffaa67d7f64b270ec43abb71da416b45d3f7b4172f5278d4f104859ed1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/exp.png",
+      "sha256": "f0082671c23baea01e30ecffd5d4317478981d03f859cf4dcbb6c5680ae0b85b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/left.png",
+      "sha256": "086093c17006e524b28ed82574f77c199ad892134bc011121fa2670b195a4e2f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/member-font.png",
+      "sha256": "4058eb3f3f8cbc3ba3076446697ee506c4a26fd7089f5c8ea086aa56ee862caa"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/member-wang.png",
+      "sha256": "41c15d7fa7da4ee0d6641e32bf836e98fea20728e96086c6515dbf1f53840da3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/member1.png",
+      "sha256": "9c4042841907284caf9a875ab268ca465b42cc7effe1f9c35d5cd281c188ab2d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/member2.png",
+      "sha256": "9ebe5b2f279580a6327b071149c1c1b7e14298c3657575e2f4518b75e23baf56"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/member3.png",
+      "sha256": "3e6e27f149c40de6bba67352eadfa338c15afad089b8749bb269994445a83f8f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/vip-paid-active.png",
+      "sha256": "100f575450d27d80ed157301bfc798570da87fb121bc42ef3b99e6bd58b0ce6b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/vip-paid.png",
+      "sha256": "0faf52d1fb72ad5df7157a92bfd4791590773fce1d9dfda6f9f84d7683d56d92"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/static/vipBg.png",
+      "sha256": "baa43abf2463d3b2dac840be112b587f61c363198a1d69548f96249d48a37e55"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_active/index.vue",
+      "sha256": "c42f93c0e4080ada6702e68084318d0f694c48e8cf8fa74500950ed115786ebc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_agreement/index.vue",
+      "sha256": "d59967585c28ba218a1f885b7520f3386fecf07439cbaee2074661e3c7c5f1b0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_clause/index.vue",
+      "sha256": "96d86e28762b2adb2b0a45c155fe4f0d8504e5c4d1301ac6d6fddfc1468516f2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_coupon/index.vue",
+      "sha256": "caedacce7f6c244a26ae88752b73c2dc3db49991eb1eab987a448802e289cf1d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_grade_active/index.vue",
+      "sha256": "c18b99542495ff90abff533fcdb3682fc8bd921e3d1a129d0674f3b8c468c9cb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_paid/index.vue",
+      "sha256": "8b5baff60457a6725dde9c4ae0b1c66a9a08a8c5f28d47ffa657ff112bae4f16"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_paid_active/index.vue",
+      "sha256": "ff323baac13594b68efe2539bb0ac24a8d19ef902deefa7d6da775d64544e3a9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/vip_paid_rights/index.vue",
+      "sha256": "25104f639e9b048be7e2f5f8a24f90ae2db3442a285909a28f52a5ae22e177a8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/annex/web_view/index.vue",
+      "sha256": "533f7456a8c2f71cf4ec15727bea17de3a8bc06410ee05ac946018ee5d221046"
+    },
+    {
+      "file": "前端代码/uniapp/pages/app_pay/index.vue",
+      "sha256": "dc02a3c21c62ff705b4def4918c04009d0e5e6f96fb91ac486a2ef9a2899a591"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/cashier/index.vue",
+      "sha256": "119be3007c8c592f4639b6a0c6c055e6791cf1965f69b5295ca46af080fb1f15"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/components/cartList.vue",
+      "sha256": "91b0b25bb6cc933deeb32fe7a92eef25caeb4489287b4d872316e856fca72944"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/components/giftDrawer.vue",
+      "sha256": "ac0a3766ee1b977e936f552f00235972c9cc71f4d13d73e01fe124b86aacea7f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/components/groupOrderDrawer.vue",
+      "sha256": "7321615ba7e8ac228f50459b2dad20628e9ddefd8f684c59c3b30606238c358e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/components/productWindow.vue",
+      "sha256": "786bb87d4272af255f70abc9d45b1f5849ef9253fc829ea10f6d2aad9969ad27"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/components/skuSelect.js",
+      "sha256": "cfc8a7709fed75bb5e1caa6130eaf2e2368c0f12a0a6420127864cfe9f27c5d5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/goods_list/index.vue",
+      "sha256": "e7b0564e5a590a35b924a1a0be8774a23d91f80f5bf9fd85b05a987b4db78690"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/goods_list/template/template1.vue",
+      "sha256": "38a874cadd540bfaed783d95b0ef6e93ae9f2b532991d33b2a5716a6f787fbe7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/goods_list/template/template2.vue",
+      "sha256": "ff6e6c75fcbbfb0759f6dfb8c2017f3e20fcd37d6aab44f70b6b2442e98d652d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/order_confirm/index.vue",
+      "sha256": "e9081949aef730973443fcfdc2127a0f31ec51cbbd35441dddae75d0cca42699"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/record/index.vue",
+      "sha256": "6ea008dca10b044aece13d848b0ab9b71d2309c86c73d20998ed7bd96e6a289a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/behalf/user_list/index.vue",
+      "sha256": "0a30815ec70c67cf88a3709df39de31fe62c5f1af541dab4c621b982a633746d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/columnGoods/live_list/index.vue",
+      "sha256": "5a26481bc8272b6993c4be7bf5002912b1a1b909c57690640f946d2f11094123"
+    },
+    {
+      "file": "前端代码/uniapp/pages/columnGoods/rank/index.vue",
+      "sha256": "964fa7d2e1f1bed97f7657b41a5fd40d1981bd711a18d21668539387afa398ab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/columnGoods/static/live-01.png",
+      "sha256": "9a70c5ffcbb581322ee5a402b3b821783f3a77d327cf01aee1378d81e5048a2c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/columnGoods/static/live-02.png",
+      "sha256": "d7fa2ff8c9bdc58a721c4875afa2ade80414a7e6ca679211965cc0c79427c707"
+    },
+    {
+      "file": "前端代码/uniapp/pages/columnGoods/static/yhxy.html",
+      "sha256": "9869f8227b1a216563f28799da05dfd0522811a57ee0fae160309afb5391e79d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/columnGoods/static/yszc.html",
+      "sha256": "bd6beae07ff0e650ead9588ff567988a8496f5d3f0379978b6a4853becbefc46"
+    },
+    {
+      "file": "前端代码/uniapp/pages/design_preview/index.vue",
+      "sha256": "c674a717f2398b62e8c1f57b7cb693ad37edb9aaf21af4df45b8496ce3f2c887"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/components/BaseTextMore.vue",
+      "sha256": "4e90dfcd34fe4231e2b0b91c9b3b6ae5915d9035ae1029f664741948d9d0183a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/components/discoverVideo/index.vue",
+      "sha256": "0de2a5f627d6435215232b4d8239919d490c26c40f92210c9b7a9a41f723f885"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/components/discoverVideo/replyList.vue",
+      "sha256": "170cceec2a614fcc18d5707e42c85b14790149c2bcaa8bfa1f0a15b3ed4a8074"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/components/discoverWaterfall/WaterfallsFlow.vue",
+      "sha256": "e7645813a0ae3e3996454e980fec2ef923c93af6b7f803a750c093ffbae48152"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/components/discoverWaterfall/WaterfallsFlowItem.vue",
+      "sha256": "bbaeb0e77c57d5b724306a93bbefcc02e9870b93e3785f018c2c7ca238a81d16"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/components/pageFooter/index.vue",
+      "sha256": "e87b157d67cc9df9cb0f64962acc51564902c0593c49fb64ef2f3b1987e4cd33"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverCreate/index.vue",
+      "sha256": "34717d64d661eb19c02a07f27fd539fb1e80de517321d9aeeb43d0a3489f1b8e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverCreate/topic.vue",
+      "sha256": "22eb3e9e57cdfd9f8cc83086723f186671be6d0f4b75efade11896da9a69f155"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverDesc/index.vue",
+      "sha256": "774b56729834247b211e6d0588355dae433273218c6ecfc70b036b1f10d3a951"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverDetails/index.vue",
+      "sha256": "97a3e061fafed5414e055f62b280b3a3c136b17081d8947a6d859b59d3327a1b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverFollow/index.vue",
+      "sha256": "ab3fe1faf6f5b7dc15dc2f5207a300a97e9574090e700b7e22d77e666eb8da3a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverIndex/index.vue",
+      "sha256": "e2ba3bcc0bc023b5ec08747aceee57a2f57fd3a186c9fa679b46a44ba5b13b90"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverMessage/index.vue",
+      "sha256": "c9e03494b59864b4138db13943937437c1138531df428b39c49467bd16357dda"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverSearch/index.vue",
+      "sha256": "c0de5cc678b1b461d9105bb1392053d74ccf1aa61aac4a680334632df761db54"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverTopic/index.vue",
+      "sha256": "49ac8f9147ece83199b2604d7d6d7bb8abf13e787bff4136afaae4f4ccdc70d9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverUser/index.vue",
+      "sha256": "461d253409ea6ff7bf867197fa9513f257caf4647fddd7e324a95b7cdc93fb6c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverVideo/app.vue",
+      "sha256": "4c10d2102dc1e14c48c839c3a0193f76acbb6cdcf5381fee47d3ce555bcd7bdf"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/discoverVideo/index.vue",
+      "sha256": "d3e274b65789f007bf2fc46c2f1a9caa9acb733101c09dcf2a45dc0494238d78"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/goodsDiscover/index.vue",
+      "sha256": "926079fbb9cf577f4be1e365a01dd9f67078f2fd10d1c36534faa7de955872be"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/static/discover_cart.png",
+      "sha256": "7b1c16a306dbb22d93dbb12c0c74a46ef4d6cba87647f157e299c58c89ecfb8f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/discover/static/svip_badge.png",
+      "sha256": "7099802b7efce65dd44094a995d0d0b8f08001038e5e265f9b054966281b037e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/components/shareInfo/index.vue",
+      "sha256": "e5024d16ffafe17218a4c7914e8d2e02c755a003060a925be87b9fa60eb9d3e6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/components/vconsole.min.js",
+      "sha256": "1635497a1db097de0b5078e937cb7a578ad08350aebdaddd1ef565c715b3fe3a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/customer_list/chat.vue",
+      "sha256": "35af2ab1de821fe38f802b08528fd40201ca32c80b3814c98cefc547f91b7389"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/customer_list/feedback.vue",
+      "sha256": "4a6d63eb67bb58e7d2c4bec01af24e72dcd216d7d2daf8f0e56c04831ea671e6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/invite_friend/index.vue",
+      "sha256": "18366f7f5b3d7067de391bbd435e7189ae2f86b55cfa91a4c0a1feea9b97c07d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/news_details/index.vue",
+      "sha256": "23c8eb120b6d9a241f0baa0088b9575a9be1fde32ce6f14c6f33d3d102f829fe"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/news_list/index.vue",
+      "sha256": "395775ca1a35d6228ba9976a1cbf2253ae6a1fa753f56f5365ad22f76885fa00"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/static/click.css",
+      "sha256": "29fa4f805afaee08e434489ac0b5bc99bb13e0fdcd5e3350851aa34f4d5141bc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/static/click.png",
+      "sha256": "72ce266918718178fc6019cafa42c4311bf22a45103ca6dc95c0614cbd756030"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/static/feed-icon.png",
+      "sha256": "d303d012cba773d0d212c3180d42768d8c7087411780b7601f9c276f022ff322"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/static/no-thing.png",
+      "sha256": "0afdb952cba16e6c39b27da8809d4954646c442128b9ef3e4dc395871434c408"
+    },
+    {
+      "file": "前端代码/uniapp/pages/extension/static/product-off.png",
+      "sha256": "4952aacb0b4a919a28796c26802a904e6a114eb9f467acd87f89ebdbcca7f45c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/cashier/index.vue",
+      "sha256": "670c1f81adb0eb22d74083ee7f108df11ad71527847d9307af72a3bcd87fa441"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/filterDrwer/index.vue",
+      "sha256": "7e96283f103e3eb9e8a6100922fd956710671f0c94190c844f4f90228cde9c2f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/giftDrawer/index.vue",
+      "sha256": "8860bac27daa900dc289a11020f8f313c9b35f2619fc747b5aa7f1a05e326cff"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/groupGoodsList/index.vue",
+      "sha256": "f9df95410aded9620531045da990ee0a0df55d9462faaea4a05dac23a844afd3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/groupOrderDrawer/index.vue",
+      "sha256": "119556e6c0ea529e3833ef5d93bde6cc4d4fd851fb142856df58a92399451036"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/invoicePicker/index.vue",
+      "sha256": "8ab00d92cff2c8a9bb0c958bde4d4235f1fb7804a15f8db5626aaefe8c543398"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/lottery/css/grids_lottery.css",
+      "sha256": "11a257860e51f2c4d946b4a014e7766c6316aa5e93b765cf69e9fbfe086aef9b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/lottery/css/pay_lottery.css",
+      "sha256": "51b04e7f28374e4f93f66b7ed867780e30a6db7b9bdacfa05157ee9b83f2de7b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/lottery/index.vue",
+      "sha256": "43e3e6eb884cc1919fa55156ffdadd4ffae0ecc66b280d40cf1c81d639e3b0c8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/lottery/js/grids_lottery.js",
+      "sha256": "a11833fa65627f70f011931dd7430aa69062f45465b04a6e1a5cf75680df4cac"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/lottery/payLottery.vue",
+      "sha256": "865f9efb9f074629e2edae7680a1eed5249363d1a47816e4df085a6414fef778"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/lotteryAleart/index.vue",
+      "sha256": "09f6f0921d1e0308d94e01017d132cbcf71b9bd5df9dc347a607b9203b0ae78f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/orderStatusLine/index.vue",
+      "sha256": "3ee72a6045d9a181e01e8f9e787e36176af2092750aaca7ecd74ecd05d4ec977"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/refundPopup/index.vue",
+      "sha256": "ec5607cfdb5e0300b89b66b99a4ab5cfa0e6085a2e7c9979e80ce2c0a1bc417b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/statusLine/index.vue",
+      "sha256": "0a0eff4392d560bcc5f2c5c5680e70033c124760d5b54904eac724ab5961d0eb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/components/verifyModal/index.vue",
+      "sha256": "f6404247b6f32e653237512b602e449ce0ad2fdec4fb22ee24af26232771deab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_comment_con/comment_con.vue",
+      "sha256": "dd23f0f9408fe45623258548d1678599aedeea3e77c0e64519ebacb6070ec6cb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_comment_con/index.vue",
+      "sha256": "0a11aa7d6758108098ed8420b7d85bad07aacd4ac642755a27f392e6ed2c79a1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_comment_con/lottery_comment.vue",
+      "sha256": "86c4da7ea1effceb1b433ee3cc28529471a3d437fe139646816fb910bb59ddef"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_comment_list/index.vue",
+      "sha256": "6c573aeff0c5b721c96d53bd1675f6dfd40a4d5caa7c967719d033018ecf280d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_list/index.vue",
+      "sha256": "27600fb5f15e6ef339bef03193727ffbdffef9521f4a58a7b84b80068abcf05d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_logistics/index.vue",
+      "sha256": "a50391cec73b3c6b0e43d8be1c508d6b57fbe1987b6ce4f8b6bac5de6ed41300"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_return/index.vue",
+      "sha256": "20be6c2b99d37f4004ebf03f7ddc40b0402ce9f4f27964b4fc79d6bc01f47418"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_return_list/index.vue",
+      "sha256": "88939ac7abd5c9a8fb031784c2ded1876c7d775c5611d2baa47d50b0d991b1b1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/goods_search/index.vue",
+      "sha256": "aa599b5354983a5115b41ef140a97f271d15032fb82adb757b4cca97c29e8327"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/lottery/components/noticeBar.vue",
+      "sha256": "19a598ff82f7d435322ea97df1eb60e28f37c27843de39f98e93d971fe827c8a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/lottery/components/showbox.vue",
+      "sha256": "cefb8b5f316a8102f6065dc6439e196f5dfa87ff57d2929ff42452e1c6c04359"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/lottery/grids/index.vue",
+      "sha256": "400143b8ca6c44c8eb8ec6d24fc087c4e3be2393a3ca8c8fca6d4dd10c02f6db"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/lottery/grids/record.vue",
+      "sha256": "eeb8ade178e22840db68802527598b9456ae04b03b51971ebe4ab56ecbc6fb4a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/lottery/template/template1.vue",
+      "sha256": "29965b8b68cd11f5a295a6152faa0d7ea15d5480bd214a6ec004a831e8177f21"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/lottery/template/template2.vue",
+      "sha256": "0d22f63ee77048c50516c9a90011bf25417d790cfb5ebaf822dee7f16708a93a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/lottery/wheel/index.vue",
+      "sha256": "80a0b996c698a5f43354100d06bbdc94720d39da4f6c456e9a0a5caca6bf851d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/match_pay/index.vue",
+      "sha256": "16c664fea73d9fa688126417d7e65b5ebb1824d74507d45f497b901fc833e5f2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/member_checkout/index.vue",
+      "sha256": "1285627374489825ada8898f0e63addb178514779f9d50081de411d0d29a1a09"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/order_after_details/index.vue",
+      "sha256": "c3c2405bb18044a104c5aa293de6dc74eef78c7f5ecdab9370879947717ec805"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/order_confirm/index.vue",
+      "sha256": "608de3087379e5727bd9c7c462b32a2affd2f35339475fd6fc5fefd445b1fcc2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/order_details/index.vue",
+      "sha256": "2a36bfa444256821f66492a02db76a53954d9b8fbd7d9f9bc43af8a5602a2430"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/order_details/index_bak.vue",
+      "sha256": "ca1e2013e046a761d23d578be010c66db7c21d2846ad471494ba3e5d9ca9c05c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/order_list/index.vue",
+      "sha256": "4227ca23edbdb342bc05aa40a1b56a51d48ed52e03a6bb7a93b65e1791a56fe1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/order_pay_status/index.vue",
+      "sha256": "63fa96fa7346140c04349386c43f651df4ff135dff3d5c4792f7aa26511e92de"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/order_refund_goods/index.vue",
+      "sha256": "e3db7f51a32df1334137813ccd3893f871bb52d76a45617617e26c5f5f15e887"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/reservation_details/index.vue",
+      "sha256": "dec3cecbe15dae80ee71bb4966ea49ab6d06b4e4af65d1d4e0a1665c3cebaf7e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/reservation_list/index.vue",
+      "sha256": "c1f756627a5c956eee58a332b62a17fc095c40799d9328485fc4d96a5e71e372"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/reservation_status/index.vue",
+      "sha256": "4d50f544242be88254767427b5a7de4de55e133a4d45349248449c57a10939a7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/alert_modal_bg.png",
+      "sha256": "c360ff885902af0455f7f3044229e80a6cb53b7d7ed3e3d86cf19ce1dad21476"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/cp_icon.png",
+      "sha256": "8f533edcd26a526cf14a2db4d21887e347a1f447e15e633b2aa23b889f9db86f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/hp_icon.png",
+      "sha256": "a2f378c2fd9362900127744d14eb62d2677f230942e015c8f378ba210e041cba"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/ic_camera.png",
+      "sha256": "a1995de36e2ae6d13b6634d33705dad0ffdcc911c7fb80138b924727f8fabb73"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/location_order_icon.png",
+      "sha256": "f5348ace6259657b84236c00ab841b84e5ddebf3d62e73dad6c77e1bce361c02"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/lottery_text.png",
+      "sha256": "64d162c7d086cb2ea2ed091fa604b9a450fc6593fc58b9f42660ee2f97e0166c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/nav_circle_left.png",
+      "sha256": "0e6afd8d3b8fe1f44a060ab07aafa0b88e56cdccbcd43a525efc839a80f30132"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/orderTime.png",
+      "sha256": "345652fb7fd28175f0eddcd70b9fd723eba13e092e3e4f914500841aa2622354"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/order_nav_bg.png",
+      "sha256": "09aa819dfa404259def13992941f5968b27500f811734dc7cb9c1eb68710a19a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/qrcode_bg.png",
+      "sha256": "8d96f2e84162ec7444b0e6409aa81f10928061ab14e09b33dfe0217c44da8e39"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/qrcode_bg2.png",
+      "sha256": "15ea83993184717cb26c7a7966edc028332eac01c9a2edbf54a39c180efabdc9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/rank4_icon.png",
+      "sha256": "596f58e3fcc6797b3f1d219c879d2038e516d5ede5ade203f17c9ee77884e1bc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/sales_icon.png",
+      "sha256": "7f225e34c38f89e69327d14023d669e8fe678d162406733fc75f7977d45c40fb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/select_zs.png",
+      "sha256": "129e2e315147eba1d6bfc55bb48a87cd519b3829ea6e212503755efe9c7877d6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/shuoming.png",
+      "sha256": "7ebb0229990dcd9f2e0fa04a2af4d8da2149fdef8a01913c855707c1949f0f15"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/store.png",
+      "sha256": "f3855132d28370b797ad61e7fff7fb20b0022c88af68dcde03204beef7f57e0a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/write.png",
+      "sha256": "7648df21936d191194cfa715f6f4c36e01c94833b78160c2103814c35157f546"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/writeOff.jpg",
+      "sha256": "8f978dd6bc2191e81f2895a239c457ff6e25dc38b223657e0a7fb31e0d1ab3a7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/written.png",
+      "sha256": "dc4e3c492e4d35693fc44ca6b0ef81bb8d633ff619e1eb587737220bd5774050"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/xiala.png",
+      "sha256": "51b026dcb83dc9804e900f553eb1662c7bc04b40d091c8fe5eb50ced54a0d7fc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods/static/zp_icon.png",
+      "sha256": "308d88592b87af6b9d2800ade31f667f12b0da333e6471aa96453a7bc32a2f9d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_cate/goods_cate.vue",
+      "sha256": "fe1b0689e88ec2bcd79d12d739ee093246d8d03215ccd048746b834e2a6e6640"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_cate/template/template1.vue",
+      "sha256": "81db4e83ad57e1a46745ba35603cefb817876a3e53f539f72c8b14b21f868bcd"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_cate/template/template2.vue",
+      "sha256": "50cdf522e7a0a9c8ae4a87aa798eca1d93c01bcdad7fc3741f55b046b02e1ba1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_cate/template/template3.vue",
+      "sha256": "38b6c8db3b075a05158957eb609b61e585202cd1692c3d3166cab79905676644"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_cate/template/template4.vue",
+      "sha256": "ff85a896d5c8b0120c762deee33b235dc5c3b27e7821b68726d0e6c99c5ffc63"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_details/components/serviceModal/index.vue",
+      "sha256": "7cc959d0075c4839aeb16e3830fcbe52fc32f270095bed3b77e4874074cdcf2e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_details/index.vue",
+      "sha256": "2f828deaf763d4311b2755a48aa0009a02b29a3dccdfc07c8c8d554cc084da13"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_details/static/cp_icon.png",
+      "sha256": "8f533edcd26a526cf14a2db4d21887e347a1f447e15e633b2aa23b889f9db86f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_details/static/hp_icon.png",
+      "sha256": "a2f378c2fd9362900127744d14eb62d2677f230942e015c8f378ba210e041cba"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_details/static/weixinCircle.png",
+      "sha256": "87404a14c2e5788a313ee309c300e2243a5b60bd6537979e36145c5836fae596"
+    },
+    {
+      "file": "前端代码/uniapp/pages/goods_details/static/zp_icon.png",
+      "sha256": "308d88592b87af6b9d2800ade31f667f12b0da333e6471aa96453a7bc32a2f9d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/guide/index.vue",
+      "sha256": "b9a2328ffab1039786a490d3374a07baf67c19202e8c8c76b8fdb318285cba09"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/articleList.vue",
+      "sha256": "a9bd71f32006ee24fb485c9320b53dd0262580cd68a1bce46c73faf788d4a464"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/bargain.vue",
+      "sha256": "1c9f817cb090a370cb9aebae095d74fb52651e157f0729f4d0499f3d6c48e3bf"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/blankPage.vue",
+      "sha256": "0bbfef9b708f31ce7da9b48e4775e6d9c591c1a9d82798cc4430a177f0aebde6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/combination.vue",
+      "sha256": "934d8c7fd23c799ae6dc4a16e0d5280dcfa12adde8661cd4a9d8a1f00aae316d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/community.vue",
+      "sha256": "acd5622e9e217efe688a29ab224e2dc37604474db586e171a3bffd05900ca8aa"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/coupon.vue",
+      "sha256": "d2d7b26bddd63947c2ab112950ddd3c85569013571eaac4e67594f68d2367122"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/cubeRegionImage.vue",
+      "sha256": "f8fe7c99d6afba13e1750e2a6ee1f635a41291eec5a54a5e128f1a73b8a608bc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/customerService.vue",
+      "sha256": "1eab45ad85c32759d7874983156e6868459397c1efa9e98488e6929dcf03ef24"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/follow.vue",
+      "sha256": "a10f98e799a5ec1b1597367183cb2a9c386515c1ad5725eaf7ab8578b296c611"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/goodList.vue",
+      "sha256": "4626e1e0a2a7b466ca3e1b73e9b7d90415015895fe21b512a5a633d5c9209f73"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/guide.vue",
+      "sha256": "af2d7e0e53573c49a79640a03699f9c33a3bce963bb2709084bfaf16dd9abca1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/headerSerch.vue",
+      "sha256": "0004d157076a1163d63260ed286aa3276c6ccdcf6072f68e7d85ae51fcd9cf5a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/homeComb.vue",
+      "sha256": "c6418326ac75d6e3a309133a0c84e305d03736104bed1ace3805becb17f53afb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/hotspot.vue",
+      "sha256": "830d58c69d135ab062d4d4d58276947b4743afa10727e6cd0b418b76d2d8a66d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/index.js",
+      "sha256": "f5b1ec770459363fc35a52330218baa753af3689ffdb4eb4f9503fb73d490cbe"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/liveBroadcast.vue",
+      "sha256": "533c259530965ed0b8e1e334baa0249a03c4c8fa3103377784348943f00153d8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/menus.vue",
+      "sha256": "ef07717dc55595804f6864658c04a76310c6183c164e3dfe7b63e561e63d2935"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/newVip.vue",
+      "sha256": "d8c6448c4ae21be69fa160dbb4e45736fab9331ee91a762146029f322a42ee58"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/news.vue",
+      "sha256": "5b29f98b07b3c4bdbfc5342bc2d56251d499f89cfdd22cf1b488b93714e0c4da"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/pictureCube.vue",
+      "sha256": "810edf6abb77500a5e5daa87b0609d3195e0b01332eb6f777e8958d54474d799"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/pointsMall.vue",
+      "sha256": "6df967388dcbee35ef5ec48df8b727d710d0cab90e390e746e80e5cac001f9ff"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/presale.vue",
+      "sha256": "84ac6a58785a39a3a849ea4b84ac05ba14614096877b100a14d5de1bac7953ab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/promotionList.vue",
+      "sha256": "8c609fe72fa801ebab302cad4b8cfa2311a2b913f88de7fbf496aa522aa7dcda"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/ranking.vue",
+      "sha256": "0ee33fe90974ac06f686c0a11725fa8d2a42e59913f1be459dcd36409d71ce4f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/richText.vue",
+      "sha256": "296b403f1a9c820e4ce2b5ae497b68d9bb101819b45a3e89cd2e3ff72e705fa7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/seckill.vue",
+      "sha256": "ef0c295cb7a5e39703c793e7ef5ec976856fc0326f337b34877c4db4df1d9757"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/signIn.vue",
+      "sha256": "5c6fc4c865ba1d3ab524cf184ab6ee00e91ed9cc3a0e62025dbe0eb4d8184e0e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/skeletons.vue",
+      "sha256": "3cc3b88751f75deb629e5879200a48592d01404f449b39cfe7a3415220ef91e5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/staffList.vue",
+      "sha256": "be5368c41343b6d42f2ba80d732954912b620527e18ae14be4efeb56d502ca1f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/storeList.vue",
+      "sha256": "32eae6990c145a7d1f5373f07f14a9a560b697cd5b16b02afd16b2cd963c0797"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/swiperBg.vue",
+      "sha256": "f42ad104af159063b8402d494ab07c823667a2aa86f38ee2f451adc009659b5c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/swipers.vue",
+      "sha256": "08283184c3e76e0281479bde2aca51a94f1be93a78ea14f82f14475e7dd19d7c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/tabNav.vue",
+      "sha256": "556ccff1887830fa2cd955abb36c030ae7453acfece4d4046870c592d41afe5c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/titles.vue",
+      "sha256": "e736885b93986b3ea63f39318cfe0edbb661fd1c61eecaf520248a78a612ac33"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/userInfor.vue",
+      "sha256": "b52e2f9341cfcf6c351e8a726e80c618a302c6e44e05ac1ac29d2e97056e596c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/components/videos.vue",
+      "sha256": "daec05f5f52a51fc5921e91caf0f61a459070befd11c1baccb33c71ea0f0c362"
+    },
+    {
+      "file": "前端代码/uniapp/pages/index/index.vue",
+      "sha256": "19031f8a271a179820d55e09edb43b49c3e7f0ad5293acdc239e27892d62a3b1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/care/index.vue",
+      "sha256": "79e4be06108ee80ab1a0803ba93176b80058f9bd4effc77124d9a41bc53d016c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/customer/detail.vue",
+      "sha256": "3293e7c0cd102794b7e18b0ee8923738eca8bf616be755f7d0801b805bdf2fed"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/customer/index.vue",
+      "sha256": "82313cc7861b5047103990e87fce3291acb6e31e1066d576d021d5dd23019e82"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/data/components/BusinessBoard.vue",
+      "sha256": "e73ed375be6cffe58f864f3f54096a2682536e305398df640b22056e4496e28a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/data/index.vue",
+      "sha256": "12380fbac4ad47f0579e0eb5e521c21539adf41cef1be294d85718f3f9439c87"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/debt/index.vue",
+      "sha256": "9ac7cb5e91e1f64f55ff10e2cb06172f17bfedb5dd3d27afe81eb61200b6ddb3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/home/index.vue",
+      "sha256": "06391fe19500cbcb800552f1aecac8f827737d9b71dbd46a90c92660da9687e1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/metric/actual.vue",
+      "sha256": "8f6d1a340a3422a3bea6f10e450b38e1a366141d1930b10d9142513c016475b0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/metric/cash.vue",
+      "sha256": "5b1f7ac90645350b5d5fa2df0f3ae6840ab4a65b646a43a2c8945a2980801c02"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/metric/consume.vue",
+      "sha256": "996cc7d46306edf89e1e6ab80799df558b57062609e9c7e534f943e5cd5c8500"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/profile/index.vue",
+      "sha256": "ed644a4bd017a2337b44a1b49b660fbb9f0766cffaf2f21e149797991f1febd5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/target/index.vue",
+      "sha256": "35c0a73082ff2aa183a5aaea8aa0df0afead5717309444a4b5f34c4ed0dfe903"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/training/index.vue",
+      "sha256": "337ff4192e0fbb53ebe55a0041d0f2d7735797d4d0059b303c8f6f2e9c71cfb9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/workbench/index.vue",
+      "sha256": "fe601d4e040da571782423175e6bc6fbf2e73e46752fdb0f928fd68bfa495b8e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/merchant/yeji/self.vue",
+      "sha256": "d0c41685afa5102ca8aa5ddb88909500175177cfad95ea0dd931107bcca41524"
+    },
+    {
+      "file": "前端代码/uniapp/pages/order_addcart/order_addcart.vue",
+      "sha256": "5ad079e0949dfb6b35afc133dc33464b8cd9179bfcbe9bb77f47f8dd0f062f61"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/appSwiper/index.nvue",
+      "sha256": "96bef69516372e428cd9047d008d1dd4cc07ba11fb5cc90f23d5155a89548971"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/common/html-parse/parse_html.js",
+      "sha256": "a89e2f9d6f65bfe82887ad38993650e0139bdbf42b641f92d4199c17c4eeee4c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/common/time-utils/currentData.js",
+      "sha256": "757aaf834eeb576659a08b8e6b212d018c6bd5587fa560b10caf10a21187c3f1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/components/douyin-scrollview/douyin-scrollview.nvue",
+      "sha256": "8723e766be8200b559b999cbceb15e44174b0985f9e381095aba47a7f17e057e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/components/douyin-scrollview/douyin-scrollview.vue",
+      "sha256": "d86b7de29a63a3ca8af1961a38bb19718e17d900415faf67eb272479f0a2a6c4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/components/goodsList/index.vue",
+      "sha256": "65f910ea5291980bbd909d3c344aef3862bb9ab5fc693fa37464add979e23ea3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/components/productWindow/index.vue",
+      "sha256": "eaf4b3291faa00ebeb3e50eaadd3407cc6dd7009a5599e1971c67e4f6f2bce84"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/nvueSwiper/index.nvue",
+      "sha256": "e580769ba1acbe63fcbb3dae00e4a94fe4f8555c1a84b7be79473ee133d691d1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/add-cart.png",
+      "sha256": "6b6b96b5882f3416222489201c4e9b0cd7f92a4cb8da16b65b8312145c4f1849"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/aixining.png",
+      "sha256": "1b485a70f3384b4331ccd0d80dce25f67e4e71efb72038254ae3b9939ba27339"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/cart.png",
+      "sha256": "8b99c346023d3d650df9d842acb94fe4b81712b89b98c552b54136f8af6ed1c0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/collection01.png",
+      "sha256": "b695dd141b797067b4e5255d5aad6190cf092c1c31ed0ffc7807278cf4d5fad3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/collection02.png",
+      "sha256": "4180b348001fae2264c5b39f46663a9c50a987db4fbbafa078efc96d13184202"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/drop-down.png",
+      "sha256": "9118a8f7b5e9e940c80768ee979a5f21cd896a6dce19a58d2abb210e0beb9352"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/evaluate.png",
+      "sha256": "0ea67da678f160677d9d123d2cf1fe2622fc29c5d45fccbe7ddeb8d90743a052"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/f.png",
+      "sha256": "54d6e1e0e095b17b0beb9a75f669affa66d25f46c24542f6cda16948028bec44"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/goodsCart.png",
+      "sha256": "36f1056902a038880457bba82b2354bbf878224336848dafea199f99e490f4e0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/live-avatar.png",
+      "sha256": "c322d2986f7032aef918005f32c7d29f4f3a480d6ed07998c1b7e36a2aa34301"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/logins.gif",
+      "sha256": "9440c14d5925ba933405d9f7da16d12137c8d35cbac296b66daad9e7c353ed8c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/pause.png",
+      "sha256": "22865946128b6ab390c7a3f735d6541983bae7a5fa1059ad444f508b4122b899"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/play.png",
+      "sha256": "bcc0c2f953e097ad1d534d4c6f5c27429d46389adeb4e6c81e2837ce297c0837"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/send01.png",
+      "sha256": "72710e689c1a4f9f72e243465c0685f94d239b16bb0c158f81b875f1d0c85416"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/send02.png",
+      "sha256": "7a0b6e07224f9525b654ebbb19369ac12358b0088cb45c2acbaa1e48e2fa51b6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/shopping-car.png",
+      "sha256": "7d849c46e906446a6cc174d595258a8114c4a25d2fcf9f3841c7690bd81ef3c5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/we-chat.png",
+      "sha256": "b9eb4b30fb0aaa7e5c42c58aa48214fae093fd9b59f767c711fe4385f3220028"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/xin-2.png",
+      "sha256": "af5965a0c311d0dc4bd3a1da6d19d3a1b9daaad1a910a68adc75f1238daefe22"
+    },
+    {
+      "file": "前端代码/uniapp/pages/short_video/static/img/index/xin.png",
+      "sha256": "53bc315ef17a951cd92f45f430bdc8249756dd03a8b8da44b5ca4e6b7e1dd7fa"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/components/filterPopup/index.vue",
+      "sha256": "96d258afa3877c367d0f18beb4a66e16c4e6ed30a120997e8774259a462c26c5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/components/goodClass/index.vue",
+      "sha256": "9543b3c08509526b25f39d80a4ac743b2fac48902165166b81f08192b1af1552"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/components/groupGoodsList/index.vue",
+      "sha256": "d84281d0415d94672367661bb06498367262627ad92f3f2b83dbfa92a721db69"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/components/kefu/index.vue",
+      "sha256": "e47e54121b2d627bbfe72bc982a57e03a15886261675eaa61ed452b0c3e75f74"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/components/thorui/tui-collapse.vue",
+      "sha256": "54a10688d0e6974b6bcf0c8a805b8ad1dcbc18abb78492562b21edef2b8ae5e7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/components/thorui/tui-drawer.vue",
+      "sha256": "d16b65e0a95286c187cc4eae8fee9dbad7c66f14f600776f8076df29554ae9f7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/components/thorui/tui-list-cell.vue",
+      "sha256": "3acb8be518ad37478714260ab503abec79c29247f665a5099cf9dc85f5a62ecc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/group_buy/index.vue",
+      "sha256": "23343d1bfd7ce1c15f2a46628c8e7078a85337c9e3cb016e78308a3a50f66fb0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/group_cart/cart.vue",
+      "sha256": "83ab49215d15f0f774bb91a21243bd8c90701518f0520b8251df1fde32f60079"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/group_cart/index.vue",
+      "sha256": "51bb1f9445adae2181c97b601b32893edb4bb6ef441a8ce8d7a5df3ea9e6c60f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/group_goods/index.vue",
+      "sha256": "f8a087fe852658dd400e0c4cd27fe1698e05ba8a716b20646332e201784bbf6b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/home/index.vue",
+      "sha256": "3607b4b11ffad1e3e09fb3f47de5ed57e5bb3612997478a96d4b0c0d9a4c8d60"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/home/store_cate1.vue",
+      "sha256": "66d5965b0287b904624c1fad070052c3f1ade716e7b2ca7bba0487d7282691c1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/home/store_cate2.vue",
+      "sha256": "dd79533be8aa6d0d3cae66d1bbc1db0fb678bec421112b38f10bfdd31f7a6a41"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/info/index.vue",
+      "sha256": "f4ba224128c6005d1e607c2c4f5b0bb6aea69ee64c1b021fb7cb8ba665807195"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/list/index.vue",
+      "sha256": "642b1ddd01b587b920c1e6b59b2dddfcb19d357ad52c1344d7e6c228dcb47ced"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/map/index.vue",
+      "sha256": "b2da365d456231d1b3f569cf17e48a0e02c1ba2d161ddc8c8090000964354eff"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/mapnvue/index.vue",
+      "sha256": "22793415c4525674396a599a56bb136f3a8f1650ffcce3f7ce43648052cee5b5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/service/index.vue",
+      "sha256": "e72583183d4ef6a1f70707de5167c5b00b0af38c589ad105dd25667c530a4a90"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/card.png",
+      "sha256": "e74c597c8cd0ab376b991140d5e23bb257b71f5ddd8d613ae877215be10c9f75"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/map2.png",
+      "sha256": "a6cbca4d38809e9b3b08822b627ff8f44da129b4ea6338217dfb66bb3b01eded"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/marker-icon.png",
+      "sha256": "957569ecad0f222fe77dd2a3f27de2191111ef0ba6fcd52fd8c3053c2d679021"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/navbar-left-1.png",
+      "sha256": "41502b8c73a89b8807a1c2c88efc55779b625fe934f6ddc281c298e668e22e06"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/navbar-left-2.png",
+      "sha256": "89cd9396d52aa46a03b143a58993f95d0a803321be6a032862dff913e0feda6d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/navbar-right-1.png",
+      "sha256": "72614cadf724e2978c55a6090a17d3fe77c644c67d4c23f0f8e99fe092603f29"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/navbar-right-2.png",
+      "sha256": "d7b62bddc0f17a2a6037963cda32f727aed55570c399eb54b1ae06051115d0dc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/shade.png",
+      "sha256": "6f161f28c1dbc1bd036a17bdf85d3a5777fd43af9f94976c5b167d746b4bc1f4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/static/sling.png",
+      "sha256": "c6983604de81c5858bafaaede22d58a5fec6bab80f0b2d0992c8cd17f335fc4b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/table_code/cart.vue",
+      "sha256": "8699c096c0c1d5fb1655df135d071fb58ee1aa2f3b6575c33cbd96e8951323e4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/table_code/index.vue",
+      "sha256": "3488a07941207729a078cd73cd3b8f80741e72cb1d45a52de7d985382c0216cd"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/table_confirm/index.vue",
+      "sha256": "7cdb1e0d745c51571a610a686a04e368f46d3925a5e22a9175171d3ca0017d17"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store_list/index.vue",
+      "sha256": "53be56e961884e1c27dd985030e29bd640547275897f481f2af8551d97465a72"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/agentMenus/index.vue",
+      "sha256": "d8893de8dfb6f12353e5e2a56eb3193c7155c8931e9e981f3e1c8b803b136012"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/agentMenus/template1.vue",
+      "sha256": "6aaeccb853181698b7a488bfe5282dee5abc6bfb95b54af5209b89b4c99bad66"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/agentMenus/template2.vue",
+      "sha256": "5668387b57897341ed3c6d0bfe23e5164099b1266e61046a92353a7aea4e27ef"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/agentMenus/template3.vue",
+      "sha256": "87c8cd57a3dc051595889d52d99657af4f6bbe409cb134a7f7d17f2b644c3b25"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/member/index.vue",
+      "sha256": "886a80df6c2f788adce5bcde603f65dd8bc1f3bd66fe7ee9ba9ae0e1b49b6e1d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/member/template1.vue",
+      "sha256": "977f1cbb0ed426e3b0da9a84208833e33be1820025e5e4320539658aee7178f5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/member/template2.vue",
+      "sha256": "53536a817916c1023f2b28be4e49bc2549a2bdf370546a5d55c173639b95010b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/member/template3.vue",
+      "sha256": "aecac03a5179ced84987e8e483d849f17a30176339d0bac829bf8e9996c610da"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/member/template4.vue",
+      "sha256": "2d357c7d6f2cdb67dcb99ec95a78427c5a119459c2429f257a0476f238175f13"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/member/template5.vue",
+      "sha256": "bbd5e62caae0bbe5d4c8cae7f04fe017fbe83858a15384a26a7261c623b18c2b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/menus/index.vue",
+      "sha256": "f74e752857a1379ed55352f6062bb45074fafdd25e09050e0fab4ca9c9702445"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/menus/template1.vue",
+      "sha256": "6c5e84a9b1f1fd468481532c44494c8ad3b17ac1e8c1580d1625fe06cf0a279d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/menus/template2.vue",
+      "sha256": "cbcd215df6110d3244b9304905062a8354cdc5cc9e4489575e0d99d97334254b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/menus/template3.vue",
+      "sha256": "4787fc360e6032fc5198f24281e7f6223882ffc6f721bc5679f1c3d5c66a3dba"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/merMenus/index.vue",
+      "sha256": "b4a54da22b1d480573c0ff4b26ea6eeb08ffc162dfea14db4aa8343222480ba4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/merMenus/template1.vue",
+      "sha256": "7051740eb6849c923c408cf91faf77a59777333e65334e8205424d61afab409f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/merMenus/template2.vue",
+      "sha256": "5668387b57897341ed3c6d0bfe23e5164099b1266e61046a92353a7aea4e27ef"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/merMenus/template3.vue",
+      "sha256": "87c8cd57a3dc051595889d52d99657af4f6bbe409cb134a7f7d17f2b644c3b25"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/order/index.vue",
+      "sha256": "f5d46fe1ad40803a08567653c212487f77ee2414e97c7a0a217bb4aaafc340f6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/order/template1.vue",
+      "sha256": "7eea1aafbc97adb9356baac6b5d93064226c6cfee449251bc919fb445c804c86"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/order/template2.vue",
+      "sha256": "d049b8978135f7a8a37004d70282f75419e20fc0d8b6e0e618608320ac1dd337"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/order_static/index.vue",
+      "sha256": "3f2dbdc504b8bd31817cfab0f710858d54dfb3c4fbeea61aeaf53a8c0e6efc1a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/order_static/template1.vue",
+      "sha256": "3b1cad19e85e3389d5124b7638a8c3ad089676d83d53c128c16fd043da772b9b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/order_static/template2.vue",
+      "sha256": "0ec7e019574c0fabe1cb0ea97ddd9c9cedf250e44917654b7ad449c2da01e33d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/poster/index.vue",
+      "sha256": "83260490f6e63b3356de1ba2e1fadf049e064938a2881546012431f24012d3e0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/storeMenus/index.vue",
+      "sha256": "0ef29747bb270869b3c68848848b4ab95f470a6294305bd7fa726a972ce9774b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/storeMenus/template1.vue",
+      "sha256": "6aaeccb853181698b7a488bfe5282dee5abc6bfb95b54af5209b89b4c99bad66"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/storeMenus/template2.vue",
+      "sha256": "5668387b57897341ed3c6d0bfe23e5164099b1266e61046a92353a7aea4e27ef"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/storeMenus/template3.vue",
+      "sha256": "87c8cd57a3dc051595889d52d99657af4f6bbe409cb134a7f7d17f2b644c3b25"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/components/topBar.vue",
+      "sha256": "a586e851b78852b03e848e2e0c461f7e88c632f97a155084dc3fd2c8a7574fe2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/user/index.vue",
+      "sha256": "802110b9b60cf86301dd3ce136da21b2db7380f59500bd326362f5fc907697f0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/agent/state.vue",
+      "sha256": "9ff79ee89562bdaf935efca971d4acfa20f77664a29c4be8074ac8de00491302"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/alipay_invoke/index.vue",
+      "sha256": "de47d5e6eed9346a8241bddbdeeb38cff9f39e76fa79ccecf287f70586c9c330"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/binding_phone/index.vue",
+      "sha256": "0417e77383173fa0de69900e2eec3234519b251f715615922eed8434cf49fb31"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/commission_rank/index.vue",
+      "sha256": "d848827e2883b3300c14e53734e0df56f73d0b85d0ae0c32fbba2a576916d56b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/baseCalendar/index.vue",
+      "sha256": "70f5843e08f76d9aa37c22f3b8da8085b6da955438b05615a3f2c5dfd186ff26"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/invoicePicker/index.vue",
+      "sha256": "fb5ed3094c45530670e7fe9d49f439513f071c82ad1f9f1875512fb2df3e6f66"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/loginMobile/index.vue",
+      "sha256": "fdb70b8d5dc380c88935b4ef9c5f8beff59a7a443f44f51e7d709bf7f20655ab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/pageHeader/index.vue",
+      "sha256": "238787b168ffe2a6cdc89512011075cfd4748cc53fe6b7038b26b50459d2bc64"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/privacyAgreementPopup/index.vue",
+      "sha256": "9c6a25185d6d0aeb0a311d38fe4a5ef2a4de45ba29ee7a4623390e7a792dc8e2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/verify/utils/ase.js",
+      "sha256": "db695e90ea0cc711814aadbab665342a23961f0fce152858e56224050eb16874"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/verify/utils/crypto-js.js",
+      "sha256": "f0bdf25fda8f9af5920c82070775864c7e1166eb31540d030e6b80a382e39ce1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/verify/verify.vue",
+      "sha256": "e46fd733a631b4701a10fcfad855f750951909404d533ebd36623580fabaa585"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/verify/verifyPoint/verifyPoint.vue",
+      "sha256": "ccf7feee4296816b9fcf097d2fa1a42f0dabe0fc13d3c503fce152cf10f26248"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/verify/verifySlider/verifySlider.vue",
+      "sha256": "7bb5b4d22aeaf0c68e10117bdf1a2bfafe02c2397a767947ea15f3646d614ab9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/verifyModal/index.vue",
+      "sha256": "8654a66858daabb53c93a0d584f5babf6dab5a6f1f3b29b74003905f3298e308"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/components/zh-address-parse.min.js",
+      "sha256": "be10545b2b65ae91e52a2df717efe5746370e087e689d016cd64a472646fda18"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/coupon_transfer/index.vue",
+      "sha256": "717289448c51487a9631ca25f8c630f07b0855e9634032fa269ad858ca57df53"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/debt/index.vue",
+      "sha256": "4524dd9045adb02a218bc26fc955a2176cd35b18b3ee80447a7882e85bb91ab4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/distributor/apply.vue",
+      "sha256": "8614930539a9d0621ed190cf758e77d3a23ce1b7ff657c579be02b792134505f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/distributor/index.vue",
+      "sha256": "e9210a50b30fe22b20ab9495d84c81b30233e00c52c6c17dd63d27f20a50433c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/franchisees/index.vue",
+      "sha256": "17c2f81df20aee2607b6d5e70a5a88138738f59660b8d8672dd57239d34519e9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/franchisees/record.vue",
+      "sha256": "daa12def7e12bfcc316e89760bcffcc5f117df5b4bf020839981c3ec17f4fdce"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/franchisees/state.vue",
+      "sha256": "a9dd1d5fd53c655f7b9f357b96b72e70ddedfa0cbe53260335f87acac652b7bb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/login/index.vue",
+      "sha256": "7cb257f401d3c3de33b6f2b0509b3ad5852a88e232edfc00472429d74d667249"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/message_center/index.vue",
+      "sha256": "272bf28730066b72f586782ba60826f7625e5278e6ceffd1c2dea8e5c23098f9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/message_center/messageDetail.vue",
+      "sha256": "2180b8989be6b8b6240ddfa881acf6873ab7f65534727c9f73ebbd56444874d8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/privacy/index.vue",
+      "sha256": "d5adf6afea3914435695e334a57908dbc623d0fc9744209368549b563d5c5e44"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/promoter-list/index.vue",
+      "sha256": "963014f2359c7327715369614a71fb37dc6a7ef68c98d322647d33321ebcb5bb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/promoter-order/index.vue",
+      "sha256": "e2759a0ea459ba6596c9d9f3f9e95629413e2ab658de7e7fff051bcbadb331cf"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/promoter_rank/index.vue",
+      "sha256": "35c124ce7589ee82a13d84d21ffa8fb7c438826d2bf25d73623437df34492716"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/retrievePassword/index.vue",
+      "sha256": "fceb7b9323f83db0be4aabdf3ed264b1a7110b0e579fd1718388b02f434ee026"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/scan_login/index.vue",
+      "sha256": "711356bcd6a5bb95090b0bfe1615bed4ad7fedc25ed21def698fcd69a281f7dc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/admin-msg.png",
+      "sha256": "4ed492ba2b7185be880f7f8c6552236a2af8619acdcd07cd652bc5cf570703c1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/cashBg.png",
+      "sha256": "f07eda169bb0660b6a15734241351ff91098bca5cff1b9d0bd4e570e80872c6a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/chongzhi.png",
+      "sha256": "f4c879ed147e7dbd74eda4f8dded4150991b3c62782d666a5005b3ce2602eacb"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/chongzhijilu.png",
+      "sha256": "a6ca48758e8feca826cf8bab8289e25cfca0228ff5a7cb54688f0b89a0f20055"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/choujiang.png",
+      "sha256": "b4bf7f24d62c768569b5e5ddd20cba729e94e934dd88a78e70b08188f01c160f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/code_1.png",
+      "sha256": "48e3eae9f0630a0fe15a25767dee022834a3718fe66444612154f3a3ad23f482"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/code_2.png",
+      "sha256": "8ae61160895552404e289a169ef90b08efad3eb5893e0f88a66483257e959fa7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/discover_msg.png",
+      "sha256": "dd3181d21be90367f07e117fc013722160a7d2d30bc79b67d1262d4b91a740c9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/fxbg.png",
+      "sha256": "07464f108c97a861d875837c6cdd83ef235d1526b243943ccb0ab3ac2ddf7e4b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/goumai.png",
+      "sha256": "c519b105cbd5be8d285825b65f7afb7b4e821c80eb8830dde696ef4e3b4a61c6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/gz.png",
+      "sha256": "9efc7b224925f38fb73e887c0af1db5d61a05198af373256f377fa5e4bd9bb15"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/haibao.png",
+      "sha256": "f75915f00fe3d49b4f32aa3a7e10664c6b4303362c4bf0aeb1ea540547b78b34"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/home.png",
+      "sha256": "465205641d59d08cd17450353d5bc63f5626bab660cc5894bf394f0f93c74012"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/integral.png",
+      "sha256": "248327d09b932064b43836e7453218f37366856ae9ab9dbdb88c7eec1a87abd3"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/integralBg.png",
+      "sha256": "e87458a66c45caf9fe6ad8941ae78b733ded27bcb033d8ef28a6ce11aedde9da"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/integralBg01.png",
+      "sha256": "6a8a7d4c7355e75bbcf95e08992a66257a4e91dbdb148a21001116e652875154"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/integralBg02.png",
+      "sha256": "cc4bb0d9a810b68e0a17f2f4a43287c8b5d5f9b126da025b4815a3cca8960004"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/integralBg03.png",
+      "sha256": "10cf775c9d821c07e027a98992203222eeddde232341c954cea3cbd716e81d6f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/kanjia.png",
+      "sha256": "32b2e6b806553fda5a83d21daf0557d385d1042c5aa6009c42f7604d0d78f72c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/left.png",
+      "sha256": "f56b401b33c6f9f570e447a44d290aa9decd19a717dddc1cf6daea0e08725eff"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/lock.png",
+      "sha256": "12e124746a6eb3ddbea5fc1822433622d922adcc39421c38aaa88d93fd6e135a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/login.png",
+      "sha256": "b551d9a89eee21db60eeabd51184139e8f9074f050d906190c195263fbfba464"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/logo2.png",
+      "sha256": "89de19ae71b9b1cd027218fef7413c68c3a79b106cd780e7dde53344fba56c22"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/miaosha.png",
+      "sha256": "a5755a75e9c08080ba8ee3a3a346ca7dbc486eb2f3e0ca1c9032376a9df449c9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/no1.png",
+      "sha256": "ab07bed8ebb0690098c23d218d90e1265a957496c37c184495df3a4f97cfd1ad"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/no2.png",
+      "sha256": "fed968b8c7f55bbe54722e6d9328befc40dd35d891ada16be3a3a90ce035f48b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/no3.png",
+      "sha256": "cda7988b4d454b4b6edebed999639d1e772c878e5db7b37f4ebdbbb09ab05934"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/phone_1.png",
+      "sha256": "c85d5a527a3c5e6619a2700aa730ee869802080525f71bd2944b3fd99952d43d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/pintuan.png",
+      "sha256": "af853f201388f38ed6e14b3b89e1ee8eb3bb01b140004f6d711c613b64b1693a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/qiandao.png",
+      "sha256": "c415838da1651ea32af655eace649195f43b2efc20eee033486aa91ae9caae61"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/ranking.png",
+      "sha256": "51952ff367506f67a0b2200e4e8f06371d6329bb8ec52552bd1157add6ae7213"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/receiving_success.png",
+      "sha256": "8cc3a700e0ffa3201388d398cec7b79ad66c6a2a6839354aaed09227d270893f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/score.png",
+      "sha256": "c37d0cd9576724cd55b98a2ac4e10a7c53ee12685bdf6d144ffc327808471340"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/shade.png",
+      "sha256": "6f161f28c1dbc1bd036a17bdf85d3a5777fd43af9f94976c5b167d746b4bc1f4"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/sign-coin.png",
+      "sha256": "d2a77a561b419193aff50614c10c4f89ba291e4ea1e6b8d9ad5f659545b5d266"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/sign-exp.png",
+      "sha256": "9178ab0ecb46068dab4cceee707b4dfd45f75d3e0ce8f9e03d9299827baad530"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/sign-record.png",
+      "sha256": "83f4a731c7b302d02a918ab86739d2ea67ad40c7264f0e778118ebc22005bc7f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/sign-today.png",
+      "sha256": "767b96cf632973e3867f7a91da1aeea831b8d8a6749c9e535d2870442012f296"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/signH.png",
+      "sha256": "b03b6dfe30b64f30d97ef053fce5705f6c6f1066afbc9a2802a34d73e27424e1"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/sj.png",
+      "sha256": "8dc1bff19ba5014dce6d86136702418db01d6f6ac1ec9f68d415570634fdc881"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/titleLeft.png",
+      "sha256": "87775d4045cad2a2e656c9790f6ce83d952af0d6339d6063fcc3d643bf026178"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/titleRight.png",
+      "sha256": "3be5ca99ca1e0934c05e998c9cc04426a5795fe57a27d9916ca383993cb236d9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian01.png",
+      "sha256": "f24cf6f96921060e52c8dab4ed0c9f27db9ccd730b6b9384cfd735f0c3693f74"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian02.png",
+      "sha256": "7bcaac5fee229c6d71919345e6b6643014f12cbf0ae62e9fa06f16841912786e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian03.png",
+      "sha256": "7900e9006d1ca990be983590d0f6ecbc832a2b281abf3e0ae3fe3a486c2d604b"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian04.png",
+      "sha256": "3ea817ade79cec0ea43e4deb32285198a3afdb7b67f94d3ed5fd84e9364bd485"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian05.png",
+      "sha256": "74e801cbd2e80b8384343b41f98adc42635b1e5a52473882609ffa658e4e56c8"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian06.png",
+      "sha256": "a1759566bcf563c2c4bab77ec42e3be76f8c94ac8bbe7803143917d5995d1afe"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian07.png",
+      "sha256": "db2d390872b13cc780c358c0200b7cf4d89afdc21d6768a701a19d45c12d4587"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian08.png",
+      "sha256": "87e214b0a744fd59a6d9a02f425a28a2e4bfc3b9f025a71b15966efbaeb0d07d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/tixian09.png",
+      "sha256": "095ba02b24d186d09d76078b556763c2fa8b6c02b028d95eebdc2f87e4ca8ff2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/user-msg.png",
+      "sha256": "cd386fca0c34969cb4115e33f8ae0c6c54805452e8d97f0c3ab1d7582615fa36"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/vipLable.png",
+      "sha256": "0e436e9749eab51a390919ef0dbb89ae486eba6f741b50e33951d2af46ea996f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/weixin.png",
+      "sha256": "379c01fedcccce2060616b1bbfcf736357957c71ed503bf51b7bfa2464ab8536"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/static/xiaofeijilu.png",
+      "sha256": "6452371d6d796f6c3b8c09c22f39a8eb9a94a2c13d604f215b451fe21dc41131"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/supplier/index.vue",
+      "sha256": "106b6b12e37033b13777d198541a17cc4c2e87eff90e5261fa4ae750ded31259"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/supplier/record.vue",
+      "sha256": "b0f095cf77a7197b8a9249d30a99210d0d26ab4b2d901c7f050e309d934295f0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/supplier/state.vue",
+      "sha256": "627c67c9e0ff88867f642ea08066e6f8ec55f08b47087b9b0f1010ccd8fec185"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/system_changelog/index.vue",
+      "sha256": "824a2f24bc60b6a52da6725143a97ff2baf89121399b2606ec75cfeee50a50e6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_address/addClient.vue",
+      "sha256": "3626c6822e948cd1ac32018aded0844485b6aa47e56c2b56920b345b5bfc08cd"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_address/index.vue",
+      "sha256": "416237f685afa6c454ae310304d4eaa338b2ce2bbf3b87602e9e0a0c96b22339"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_address_list/index.vue",
+      "sha256": "0bb472f1fa519c1fc888da13d3c954fb9954234fe16c47aa5e860695fb6d60f0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_agreement_list/index.vue",
+      "sha256": "2dad6bf302223d315a3cebe582fe38c524474e1c79a3e1e00bc635d3c8a6f7e9"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_bill/index.vue",
+      "sha256": "183583b8e2a546d48375fae83b66f86b678b44b1e247a2cd0264486ff6d6b1dc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_cancellation/index.vue",
+      "sha256": "4ded8f28587aa4d4086e95f0052dd3c2e60063df91647e47aae9944d9abe4fab"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_card/index.vue",
+      "sha256": "01ec671585ecc41d64d76dd2ef0f62b878354402dafe7ec93f93bd7224a95e8d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_card_list/index.vue",
+      "sha256": "39be6c9cc58fb90586c63f6bff6eda07c3a1d8a8dd6ab02255a1c5dc10825d18"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_cash/index.vue",
+      "sha256": "a331384fd57b96c1b981f2598ca4c06baf2dfeb3690baff9cc3263fbe71ffc50"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_cash/status.vue",
+      "sha256": "5a54d57340a96d69afe493cdbd36b42ccf9b2d600746e821f787272c789b7574"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_coupon/index.vue",
+      "sha256": "a8b7f8de649a33ae0eec7e4bc1f5ba0e01bb594b7a9334dd95009aac13f9df1c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_distribution_info/index.vue",
+      "sha256": "208fd55244510547c22d5e3827cab7a9de65319e5ad5f6c460b3edc9fc0e1029"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_distribution_level/index.vue",
+      "sha256": "0c3ca0670a4006ef3f482243a71c4a7a90a5f01965ab9c58861656eb8e2f311e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_goods_collection/index.vue",
+      "sha256": "0cd683d14f9c87f5816766a131a2f66c957d045977801b6a32f0660f2be558a0"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_info/index.vue",
+      "sha256": "e7e2157bc87632ea4eb6c8840d56cbec64290040a55b50e2047188cdd5ac9f4e"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_integral/index.vue",
+      "sha256": "50cca92204065d63afe92b0b5db7290fa579f99502e5351f0bedc642d752c01d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_integral_detail/index.vue",
+      "sha256": "aa515a5c38129a2e24775d249109e10bf2a8cafc6d1d1b817636d5159fc2de9f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_invoice_form/index.vue",
+      "sha256": "585d6eaec24bb3172f3f9e7d780b9c44bc24c998ec74e49dbf8e805c83695959"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_invoice_list/index.vue",
+      "sha256": "c97f7e44bc520a15d9ece377b57e3d695a5f60de4982adcab8f85280a39620d5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_invoice_order/index.vue",
+      "sha256": "650e0885c704dfd6576558c39e450a2fc4ae2eb7b96e93355a022659830101cf"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_member_code/index.vue",
+      "sha256": "7e07fdd685a8a99c0a541d7fbc2a02e060c575a93ff1fe02d915454db3b890dc"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_money/index.vue",
+      "sha256": "35d848d8671b3947f4ede72bea40fd1fda7bcf67819b749ed8ab169d203f0414"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_payment/index.vue",
+      "sha256": "55718f1ee9b935332345e8c42342d02020adc773e6f498826da513738694d0c7"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_phone/index.vue",
+      "sha256": "19dda640ed5280d06ab68ea175b19015512913902561d69892804735bbde3f50"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_pwd_edit/index.vue",
+      "sha256": "d14d30ac4be9705fe0049b198b79fd863796454622f1a80e4e7f9c3f09fe2c4f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_return_list/index.vue",
+      "sha256": "14a2b267023b7b90e4d9c0cd0eb27db6916659ab1bbf9f8b8736eb60cd66d88f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_set/index.vue",
+      "sha256": "d73cb80f72395acc6774922205f0f681c06d1ae8c05ec44fc860b45574e7cca5"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_sgin/index.vue",
+      "sha256": "41b7e3ffb065acd1b6cb50757f455a1e8d91d0efea82e34bd9d61f5324594b10"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_sgin_list/index.vue",
+      "sha256": "fa8e472667c6cca97a41d63b6b1b1f8fff8c6a21c8dd0b51c89e1583bfdc577f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_spread_code/index.vue",
+      "sha256": "6c349192b2d505f3dd0bd860b630c4171efbed8a8498f10a667774f2e6a3f0a2"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_spread_money/index.vue",
+      "sha256": "d0303258673e7f7d109156c2abe51162064bb8cdb2b97c44d1bb8d6053cafdf6"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_spread_user/components/task.vue",
+      "sha256": "e5290831f9c9bcea439f45663ae9d5f62dae621f74a9ad52596555569d5a8a54"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_spread_user/index.vue",
+      "sha256": "5c050bc72706958af3fffae922cdf758cd45804e2272b678f0f29ba400099600"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_vip/index.vue",
+      "sha256": "2f10a76e75a78365630c14682cd4f39764f48cf58586c271dea39b980e9bd75c"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_vip_areer/index.vue",
+      "sha256": "d03609bf4ddda748a5eb9c815c908f27179e759bf7159b42dc6f66a22ee05254"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_withdrawal/index.vue",
+      "sha256": "7fc451dea21b1d492cb1c0f0afa674acabc172e00979e75c670deb96a12aac4d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/user_withdrawal/receiving.vue",
+      "sha256": "13c56d923c5707d40098c9c24a21854acc854216c065013fb3563a12ddceb92f"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/visit_list/index.vue",
+      "sha256": "edec6d81b0e6557a056edf23a2979f539dfbd66eaf5c1d7c8a14fd4d63ce4377"
+    },
+    {
+      "file": "前端代码/uniapp/pages/users/wechat_login/index.vue",
+      "sha256": "f37926d6ef75171fe52b9fe7e99ebaf74c7531045ef54fb4ed73b1f85fc34cca"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/README.md",
+      "sha256": "03e0df243f81bfda8d8663a1de4843f5d18e7b995414fc6afb879fc4e9aeb03d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/components/tabNav.vue",
+      "sha256": "d3bb04ec6d0ec3aa07e73a77b8d6706593e7f055e7be51b0cebce1d5e411412d"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/groupInfo/index.vue",
+      "sha256": "a26afa652426ae79d9392b4182ac7baaab6b5b8effaedc9b488944588258bd38"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/orderDetail/index.vue",
+      "sha256": "7ec96e1ac7053db653bf3633d2754127f3ed1231e37196520f96c3ddc5a0bd46"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/orderList/index.vue",
+      "sha256": "eac6e643c263cf79c3ff4c4eecc9525a793af8cbcb6a393567c193fd1b6e8b46"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/record/index.vue",
+      "sha256": "db86941968f773b29536436cbba232f8441f2a3dcbded94d7aad7ed7a4fbebaa"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/static/shop_record.png",
+      "sha256": "b49798de801c8b68c86426ebbaafb79f81edd878ce0bd2bb377bb4448afe8e1a"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/static/view_record.png",
+      "sha256": "a3d60fc93a7aa11a05ed465657a542343fd9752ce7e142545ce096c84142c745"
+    },
+    {
+      "file": "前端代码/uniapp/pages/work/userInfo/index.vue",
+      "sha256": "c4567ca5d63c6147c4fd659edae77c137590093d0f2f8793723deb769b5a0c03"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/animate/animate.min.css",
+      "sha256": "3c770e90f98eb21b0c042fafb49755af93306fbaf42e449524f94fae9fc83295"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/clipboard/clipboard.js",
+      "sha256": "a70dc5258e443d0ce41080e7b381cf55389341e67741a590b7ac326853e98f94"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/dayjs/dayjs.min.js",
+      "sha256": "be1afb94c43b0cfb5691ae68e0b6c36229cab057764bd875e36e4d9b3c5e5f44"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/css/apple.min.css",
+      "sha256": "381b0c01906027037e1eb6405d828621dfb4f3b3f65a7f73e7fd03e4208c29a1"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/css/emojione.min.css",
+      "sha256": "c28d704d8739b60254ebc9909d4d68fca3c4d2f683e1cc1d82ced7d9bfc51b9b"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/css/facebook.min.css",
+      "sha256": "2c40edda5819aee9aeaea50eab0537cb96242b54a7aa7edfdadfddd624fb3352"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/css/google.min.css",
+      "sha256": "c1d7490d490d2f166511c296c15210f54e54e12e7f3d68bed045ff2f733579cd"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/css/messenger.min.css",
+      "sha256": "a56c5264ad14fbdc3fdac38e1539eb27a2a0db0384da2e6cf6a3958581b3c1ea"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/css/tuoluojiang.css",
+      "sha256": "3fdd29d94246841054a0da31fba2c31064f3c55ae8af224260ac86bf06e1db4c"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/css/twitter.min.css",
+      "sha256": "e27df594f19cf5d8519eb90d42405eb729b91e8b742aa1b7f915feaa3cdee5f9"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/img/sheet_apple_64_indexed_256colors.png",
+      "sha256": "c19c6d9c16db53b90cfc854ea03a5782dca692933c9a006990022749cc3a7878"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/img/sheet_emojione_64_indexed_128.png",
+      "sha256": "f34c80ec34d2f5beb24b440cd857cbec045ab4dde4b181df5e1367547e22b21c"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/img/sheet_facebook_64_indexed_128.png",
+      "sha256": "a371c00df53292d7caeb0eb8cadc366c97762cc770e9b3da539397d4c76cedc2"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/img/sheet_google_64_indexed_128.png",
+      "sha256": "3361ee9a1c73f7dcb0b9f173d719305b98332e9355d4c0de9859555d86152a94"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/img/sheet_messenger_64_indexed_128.png",
+      "sha256": "a8f330b593d0515c8c1ac431e371f38049755f7af903304e71baa64c38cfa1ac"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/emoji-awesome/img/sheet_twitter_64_indexed_128.png",
+      "sha256": "7ee7cf87591ac5c43c0ba91a76a91aecd1030de42610b775a823cb7085a0b50e"
+    },
+    {
+      "file": "前端代码/uniapp/plugin/pako/pako.es5.min.js",
+      "sha256": "db7884b4efed9372efac6fda021309a4a4c441148ddeaac3ab5f034c3aebeb2d"
+    },
+    {
+      "file": "前端代码/uniapp/project.private.config.json",
+      "sha256": "9f4877f6d78564a06941ab331ba5f8171b133bf8ca2d05f61638502c0b7417ad"
+    },
+    {
+      "file": "前端代码/uniapp/static/app-plus/mp-html/js/handler.js",
+      "sha256": "9c973856e0782dffaa5db2b3c475711d3cc1e983d0663a8b58774098b8305556"
+    },
+    {
+      "file": "前端代码/uniapp/static/app-plus/mp-html/js/uni.webview.min.js",
+      "sha256": "ba9f9c304616e9ded037a38db00746c681fc07f7e303027ece39cc526b542548"
+    },
+    {
+      "file": "前端代码/uniapp/static/app-plus/mp-html/local.html",
+      "sha256": "8e06998227958e4c607c813577b876820c2c2b3f891c756cb7e619daec8b7fe6"
+    },
+    {
+      "file": "前端代码/uniapp/static/css/base.css",
+      "sha256": "1b33edb3708ae9d712249c41d78d678cd2cd2584d508369d8de94f8b9827e7f1"
+    },
+    {
+      "file": "前端代码/uniapp/static/css/unocss.css",
+      "sha256": "26a1ad0848f2adda6791aeb7b2c33423084bbe86d97ad22c0939031867cd1b8d"
+    },
+    {
+      "file": "前端代码/uniapp/static/design-preview/beauty-hero.png",
+      "sha256": "07c0f1dfb272d5b7188af62ae9e3892a492c5b1e509346a100120a6c6c8795a1"
+    },
+    {
+      "file": "前端代码/uniapp/static/design-system/beauty-carousel-care.png",
+      "sha256": "a3c358bbedc060b79d3f94d046166cfe146ef7abfbe5473051cac95157fa31c4"
+    },
+    {
+      "file": "前端代码/uniapp/static/design-system/beauty-carousel-spa.png",
+      "sha256": "4eed06b60e0909f80bf9931ca7bf0807bbaaa395ac7f322f253d5cd56d67f93a"
+    },
+    {
+      "file": "前端代码/uniapp/static/design-system/beauty-member-hub.png",
+      "sha256": "78fda9675a439cabd457db82fcb45390d88416b7a5afb2e28cdd2ac6521864b4"
+    },
+    {
+      "file": "前端代码/uniapp/static/easy-loadimage/loadfail.png",
+      "sha256": "ca6051001d4a4d3214e3ca1125382ae3e965461f945525e947a86386956a6c3f"
+    },
+    {
+      "file": "前端代码/uniapp/static/easy-loadimage/loading.png",
+      "sha256": "1c407d3ce80f525e58eff974725c3246904f18999fc25a8af27c46fb73b1a9b1"
+    },
+    {
+      "file": "前端代码/uniapp/static/fonts/D-DIN-PRO-400-Regular.ttf",
+      "sha256": "360b632b5ecbedb940359afa8ee25a9fdf7cd1872e39f2aec72199ca5ef5ac3e"
+    },
+    {
+      "file": "前端代码/uniapp/static/fonts/D-DIN-PRO-600-SemiBold.ttf",
+      "sha256": "2a7644c5689f02ed1c14b018c2434e430b3efceabf2906a3c5e6f2ba25f406ef"
+    },
+    {
+      "file": "前端代码/uniapp/static/fonts/font.scss",
+      "sha256": "9b7e8908ddb050c5a26f4af81c2f43e122a9e6f4784dd07a17f13ab790c1e1bb"
+    },
+    {
+      "file": "前端代码/uniapp/static/html/pc.html",
+      "sha256": "a5cac91a64e1025c248b6316198be029b05d59a2f5db5672989c45f737f59b14"
+    },
+    {
+      "file": "前端代码/uniapp/static/iconfont/iconfont.css",
+      "sha256": "ceaf704df2992c63f9a9b5c37e38e2e9eb0ba298f83633d5dfd04f7d620fb56f"
+    },
+    {
+      "file": "前端代码/uniapp/static/iconfont/iconfont.woff2",
+      "sha256": "a5d3a77efe622a8ec4b6b8a3eaf8eb5945a74c0b8dea253695f2dfbe9f0aad9a"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/1-001.png",
+      "sha256": "ad767b136b8ede59c3c61665dca25d9819abcb4e41d4c6ca15fbfe8a2966495c"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/1-002.png",
+      "sha256": "a9f865da30c989344be336bc11a3e7a3b02a3238378994cccf5cbfa2a7682cc5"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/2-001.png",
+      "sha256": "798b58d8b9cc41dae4e1d2a65a4c9e8402a80857651456a22052e775035921c5"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/2-002.png",
+      "sha256": "da8d9c3988786621b79ac1b687d45ab6927b06151d5c34a71bb1a1bf900258c1"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/3-001.png",
+      "sha256": "924a07d1a0760ba09483af287ba6c7c141f42cec7aaa48c79d46f32b65639c0b"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/3-002.png",
+      "sha256": "44a2a393b498907a7eeeda13c7e35e08a91706b3d6da6560a7f5e1383cbca0e9"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/4-001.png",
+      "sha256": "2594aae48a57c6d18215ccc7719093402a313412b07ab255d2e32a0f501e2683"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/4-002.png",
+      "sha256": "60bba6ab924a876b392bf4fc76af44d1adf55be3baf22710079153c316980f8d"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/5-001.png",
+      "sha256": "5464ef9c9c2914239ca8c90d8c2a45e14292c20d1ce829e9afd8669483cc0190"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/5-002.png",
+      "sha256": "40a2f2d3c0ef0ba5bb864341721774ab3301ccfb6ac99030ea9dceb742145b78"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/changan.png",
+      "sha256": "eb941ad2fe80ff8af9474bf8a77ad944f29f6c69ff7f9e39c05c7ffb02ede0bc"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/code-bg.png",
+      "sha256": "d346e5a0a7fd57b94d8ccaa147b7f3a7abe56e650ad5f7699ffe80950b3456ae"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/def_avatar.png",
+      "sha256": "fda722c4fa1171e88f3524e85f8f3e2b95c099c2317682d663475eacab2dbaa6"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/f.png",
+      "sha256": "d458f2ea46890327989fda8ea38298157d28c2e9776e7afa22ccf5195077591c"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/haibao.png",
+      "sha256": "9def8577f5b4fb3a9b491f69f1ab71ed7c9b2ba694a011d51270c160e9bdd9bf"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/king.png",
+      "sha256": "09a3441654edd630ca3bfc5044e4543a1f8c7afc37114779e2acef4d570fa3df"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/line.jpg",
+      "sha256": "963cb6e5fbc29d563aabdddd212fc39ce7552ee7db85db19bb621d4e56f7ccda"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/map.png",
+      "sha256": "d5a8ec36ac51c7a637f2377829f0cf6375ab71e34c362fd9f1e5606be0e798ed"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/posterbackgd.png",
+      "sha256": "f5124bdf6d94e23b706234120b0fe65aa02f01b40f233cc7db3e7bc251f98aa6"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/sign-icon-01.png",
+      "sha256": "eb458822623ed6e6d508f70048afb473c1333d56ebc4fd63a0e2e226e3a102ed"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/sign-icon-02.png",
+      "sha256": "91a5c0dfd6f80921906c38e449c30d40c79e711d89af957d0e7067731cc28b7a"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/sign-icon-03.png",
+      "sha256": "d7255b3bc8216c463d651042dba61fbe40724aa757af337eb8276d13d8003e40"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/sign-icon-04.png",
+      "sha256": "1dd35818e465cf520b98b74fc29af878eb56966d2d295690fbf55aa07b397ab7"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/stop.png",
+      "sha256": "2d42f3b4ef3e876b20a8821e2c1d9d3c1433dec5d9b52077691d5ab0571d5c16"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/vip.png",
+      "sha256": "0c291e1e0ea3bb880ef07bb2b59c8d6a0520491decdb1b5e753b097ff4d94888"
+    },
+    {
+      "file": "前端代码/uniapp/static/images/weixin.png",
+      "sha256": "54aea0dc14da59566b7e841d2f5119fa6fa2e8742958747d3e365e344a3ec332"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/cart_pic.png",
+      "sha256": "a13747b3b7eee35385d9557d549a7b4f47ea0d08f93e6d7e32ff2144ae7518bf"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/clover.png",
+      "sha256": "9a53a644556488746f52e7a57e19dab857b3428f91b0aea0c34bf61fb617dd73"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/lightning.png",
+      "sha256": "c47483b86929b66b2ee196691c584f73697949e1deed1a9957ea968df33f0a6f"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/mall05.png",
+      "sha256": "a5e8dde09d642b26b5f6f41aa8b229723e93ae793c3f686608cab0cd01287a4b"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/nav_circle_left.png",
+      "sha256": "bc1f09707f3240329cb1604296e65ad331e9c0ded56349c1cdcda29e6feafd50"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/presale.png",
+      "sha256": "511590b57f6051d6ebac13d5060225084972e074f6d3074d3808c9af5ab122a5"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/rank1_icon.png",
+      "sha256": "f3127dc28a346cf255035c0707aa0510e47055a255feb625c9b90287f050318d"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/rank2_icon.png",
+      "sha256": "a09e214126f9d6b15b49c173157ddb04fae6efb78eb75e38defbdd66f3d724be"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/rank3_icon.png",
+      "sha256": "c075b1623cbcf1713a14796f527cc1f1967e9276faee2b72e372317d91516829"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/recommend_zs.png",
+      "sha256": "9f4cebc1fd4a1be53d2f09abc59c6cee03aa40b03c891f9c9afce64655c121c3"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/shandian.png",
+      "sha256": "5c4ff46c88c953228d85ebc39b94df0ff849f84fc1d25c6f4f5202e4b33f9ceb"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/video_bg.png",
+      "sha256": "74ef6f9022cb82ebcf53aa9f45e7704f027c71374466dda89d24807f3d5df9aa"
+    },
+    {
+      "file": "前端代码/uniapp/static/img/vip_leval.png",
+      "sha256": "c2ce034db76378b9227ae37c98abed00a9d776a83408cf0761a6a83121ea60ca"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/1c8dafb53e1e2fc78db1.png",
+      "sha256": "1c8dafb53e1e2fc78db1d02484ed9868008f67cf81dcd2fab19e96aa81d45e01"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/2401c62a732c234b2c18.png",
+      "sha256": "2401c62a732c234b2c18a4f54fa120342fdbe9b83744f0ed71cb82b8184e6b24"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/39964c5140b92912bb99.png",
+      "sha256": "39964c5140b92912bb990dba329c79ce4f3feecb6f7fe4269c7b8cdfa32f09ac"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/3ab42bab939ceddd54dc.jpg",
+      "sha256": "3ab42bab939ceddd54dcdf88182cd21745ae11e44ee3dea50e3fe31155224be4"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/440baab47b054942ecba.png",
+      "sha256": "440baab47b054942ecbab0bd4b38f479cb62b3bc4b4c54c0b865b537c9c600af"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/482ccab6f94b72c0db5b.png",
+      "sha256": "482ccab6f94b72c0db5b5f959473e6c638527ebf28a4119ec33cc3b0ca561f93"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/4dfdb335178be558496f.jpg",
+      "sha256": "4dfdb335178be558496f75b16b23028ec523528e26d2d02fe4be6a4b33de9b88"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/540875988ba87a589123.png",
+      "sha256": "540875988ba87a589123c6917bdb17a4f4409cd3b8c73406cce0b5bbaed36e45"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/54dba5f66232bd684446.jpg",
+      "sha256": "54dba5f66232bd684446d769f43547a811bb0836cbb20ac045b2db1f8a32ca66"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/6b4bd43a93cb93b2a005.png",
+      "sha256": "6b4bd43a93cb93b2a00555aa4c4cc0a2185542b78d6edcc1f3a2792059ef73b8"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/6c231c3034f199a65f85.png",
+      "sha256": "6c231c3034f199a65f855dfed8f0989c208e1b80e811e186cd510d8bd7938c90"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/6f9b8933e87ebdbe6937.png",
+      "sha256": "6f9b8933e87ebdbe6937de6ae18bb7a22da430efc0c73638510403551713e573"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/78d04000452dcb00f2b8.jpg",
+      "sha256": "78d04000452dcb00f2b8ff5a7b03fce0a22aad032faba051433017faa1102702"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/895dda86c7bbd851b321.png",
+      "sha256": "895dda86c7bbd851b32116ee4f0b5ea37356777b489e579efcdc736c43a4cc66"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/9cf2326ed3654063a3e3.png",
+      "sha256": "9cf2326ed3654063a3e32b6ec7c3809d05b928072db806db443366bf2d764381"
+    },
+    {
+      "file": "前端代码/uniapp/static/mall/008-20261013/c007be88f27199b65480.png",
+      "sha256": "c007be88f27199b65480e3e511a04d4de4696b097f7175028c2c243ee3b3a7e4"
+    },
+    {
+      "file": "前端代码/uniapp/static/staff-center/edit-introduction.png",
+      "sha256": "45c23ab9884887883ba2a6491c9b280a518523219f84d8d100d814abb8648a35"
+    },
+    {
+      "file": "前端代码/uniapp/store/getters.js",
+      "sha256": "aca0dbac48377bed98e6765218bf34359fc5e3121dbd9107e5a53c85f5665f75"
+    },
+    {
+      "file": "前端代码/uniapp/store/index.js",
+      "sha256": "27c9cc53dd957eda8e7963f8cd5fc894276c90f47a4cdd3a2939bea7ae78a7f7"
+    },
+    {
+      "file": "前端代码/uniapp/store/modules/app.js",
+      "sha256": "796add24f253f91070e6a3aa8581c350e822ee67aa3c84faa7d82892d1df48a5"
+    },
+    {
+      "file": "前端代码/uniapp/store/modules/hotWords.js",
+      "sha256": "a3697693dd26de63001dcd9823a2e2b8276311c7bdd4fcfe3292b5af46b4b6b4"
+    },
+    {
+      "file": "前端代码/uniapp/store/modules/index.js",
+      "sha256": "85143c34f41d81a771f0569c5b64b46a77179799b13e9e878e2f95c3874805de"
+    },
+    {
+      "file": "前端代码/uniapp/store/modules/indexData.js",
+      "sha256": "d2843548e31022b4e2105d93c9185d3f749899f9fe24193ea13c0addf152dc86"
+    },
+    {
+      "file": "前端代码/uniapp/store/modules/merchant.js",
+      "sha256": "7fbdd1a15591852209374186ae40688505a2181932c6d11725701fe4484a7044"
+    },
+    {
+      "file": "前端代码/uniapp/uni.scss",
+      "sha256": "31d2f8d295c3b65b9f776892c04de7ec2937b808b7e54b3e283d81e944c2863e"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-badge/changelog.md",
+      "sha256": "341f0964762925f755b3b3d41264d3e8d6d2cb9030c11a327355eb6856304c4b"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-badge/components/uni-badge/uni-badge.vue",
+      "sha256": "70f00b9d0d95206ae2b4175f111652ab806d4873450ebb59ee4e21bbd2f1ee9e"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-badge/package.json",
+      "sha256": "ac6eefe9f39df9c6c221804d0573702d701e4aa4cfa7099f9354b1ccc95ce70c"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-badge/readme.md",
+      "sha256": "de279815f8d03db7fa7c5ddeb5e6ad72de61c9083a9e75c7c4c7a65957c51e44"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-config-center/changelog.md",
+      "sha256": "a703bb0e6aaa5d62e45dc2eeb3e904bbdacfce1f4e507575645b8d766716eb81"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-config-center/package.json",
+      "sha256": "b4ca280d517ed1c5b848bab830fdf890f0654e54348ca8ed25dfa611bc8db756"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-config-center/readme.md",
+      "sha256": "aee3241c0319ebe44273e0d47e6aa8ff6f111d54b7a64babb72c6690e9670197"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-config-center/uniCloud/cloudfunctions/common/uni-config-center/index.js",
+      "sha256": "c5f7077d2f7d8ec3ae579733f6562302200c5b829d0a20900e2d6da4e0244a32"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-config-center/uniCloud/cloudfunctions/common/uni-config-center/package.json",
+      "sha256": "56a5f7402d343390ea8e1bb8c59e006dc691ac5a8cc461555c65fcde7e9d5e9b"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/changelog.md",
+      "sha256": "4fd3fa5b67f49ba82c97344062e107870ae29806ae101127ad641447df566f95"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/calendar-item.vue",
+      "sha256": "a6e38c03de19736d67c6b39080bf89e4a4d46ad0782bbbd5a9381481d8f6f097"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/calendar.vue",
+      "sha256": "bb43f2e4b1ea9d2e9df5f43c7e4b567fe8c100a43809a23478e40bbeec4cbef3"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/en.json",
+      "sha256": "6eba36443c1c810c38f391ace7cc84ded612f20c405857d46574e6a282cc97eb"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/index.js",
+      "sha256": "c53c6e209da2ea21ad3404518084539c2644be273990d4f00d0d47178dfb1855"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/zh-Hans.json",
+      "sha256": "674380bcda94fe0b770d6d5951f3295f9cc4bfdbaa504352d0869882ce5d6459"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/zh-Hant.json",
+      "sha256": "d867a67c87dbf1940327e454fb0d4f719fa52be5e16dc20c065b69aaa0527202"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/time-picker.vue",
+      "sha256": "a95265b5e410fee7843332d1f6882a067a652c440926975dd0947a1eeed439e0"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/uni-datetime-picker.vue",
+      "sha256": "412af8687962f04bd9980f5598824ec7daca33ce9acadb9ed53aa0b47b2c54aa"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/components/uni-datetime-picker/util.js",
+      "sha256": "a721b994b575c61bbf23d81057e43835133dc9d85a3b9923c6da1cc127ee1c87"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/package.json",
+      "sha256": "c65868c209abdcf82848c6a6baad9629fd564814a7b369fabd0918e3f37a2dde"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-datetime-picker/readme.md",
+      "sha256": "466fe210e11f4fe7cafe88e65db635d14292ebc1a5a118baa2dd1f9dc2d7ab92"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-icons/changelog.md",
+      "sha256": "a3f0c660e0a335c4755db3d7d01b8e647ae2f8e3b510433d9b4177fe8d15df6f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-icons/components/uni-icons/icons.js",
+      "sha256": "5bff89a202d575f60438e7def07591a4c97be34497791ad2ab6960bc9d4ebed7"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-icons/components/uni-icons/uni-icons.vue",
+      "sha256": "01fa8723113bba859657617c0821fabd3a6ef2efb23b811d8e3219514d35b635"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-icons/components/uni-icons/uniicons.css",
+      "sha256": "93bde3817f71e77863f40f0a4930faea192d761eee2b34357a29e831f85429f0"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-icons/components/uni-icons/uniicons.ttf",
+      "sha256": "89ed7d6d732e893a473c6d6b443f854f4dcdf57360a11016306335a2048895ff"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-icons/package.json",
+      "sha256": "1c843dcb59da2e43f7a07606739a0e1a7269ff26f1363a87649ead8138c2b0b9"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-icons/readme.md",
+      "sha256": "c5eb3c5b62156bb85c1424e41d5beee23c8a975682a925b9ce3bcc72e4ad9a8c"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-id/changelog.md",
+      "sha256": "4343c9245d8a7afcc381fbab08b3a943fc45478d1dac1197f9722b15da7ed26d"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-id/package.json",
+      "sha256": "73582d03398b18278e9b223851f8b197ac1dd2a535f47646d8e7ca2f71300c7b"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-id/readme.md",
+      "sha256": "fc0294e28f174b89b554d0191cc70e1d00a587d206607eb3d1fb2b4d03fb226e"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-id/uniCloud/cloudfunctions/common/uni-id/LICENSE.md",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-id/uniCloud/cloudfunctions/common/uni-id/index.js",
+      "sha256": "1392f744cc2c42a7174779ba738b2c28d9a8ba4669f62b0a3f27bc27a402fbdd"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-id/uniCloud/cloudfunctions/common/uni-id/package.json",
+      "sha256": "e738d1e2233b43fbbcb470b6cc9decbe9162ebdd6a7f33ff4344600021ecf357"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/changelog.md",
+      "sha256": "e1786712a42cb35d7a1a075c69eb7bb8116d33f0b935d5a9d81ae7889d165890"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup-dialog/keypress.js",
+      "sha256": "f9db998d5f5784b363ab0a2d2ec9bc997c7b2143f67220968e3c6f7270fb033f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup-dialog/uni-popup-dialog.vue",
+      "sha256": "979ede7cc7ae931795cf3bbbfed7f5f0fb9b0f16e2b90d3cc4bae3a56b610605"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup-message/uni-popup-message.vue",
+      "sha256": "42d426ad81f19f11968656304c5fef4daba0cfcac8ad90f1d8ca9fe68f33da2c"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup-share/uni-popup-share.vue",
+      "sha256": "e07f459eefb0fb58916059e84c7744f42e8e1414535fb68c4aa32b3f3b445832"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup/i18n/en.json",
+      "sha256": "acbe0df7896d572c865e42190af6f78675e634cebe14c3c418ff006eee08ce98"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup/i18n/index.js",
+      "sha256": "c53c6e209da2ea21ad3404518084539c2644be273990d4f00d0d47178dfb1855"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup/i18n/zh-Hans.json",
+      "sha256": "fd5d8dd320548861f5dd0ff1d2225b00cc28ff3c1a1d41d612ad4127033242dc"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup/i18n/zh-Hant.json",
+      "sha256": "526a8410b1b50fb06293d6afefe08109cc3104811d468f106c3ec402b60f2d41"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup/keypress.js",
+      "sha256": "a3f6dabd88f2c7411f32b448df51bc21b4101e0f0a54e9e85ac6dae82c6b4b6f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup/popup.js",
+      "sha256": "40a52dc45b0a80f96de9d07cc070c1e22bfd152f7d7d90bdc683da157de7f7de"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/components/uni-popup/uni-popup.vue",
+      "sha256": "4c54598e1f49e17c6d6c57ac74acf637c0a71d43a36e648032766d9220270c1e"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/package.json",
+      "sha256": "45eaf02154cd1d65bdf5c4579039665b350cf1c64524642344daeef484dc04c0"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-popup/readme.md",
+      "sha256": "f455f8c22a052605e2a037059ef9214cd9583a5da34b6bbeac8ccc6a54d4bb28"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/changelog.md",
+      "sha256": "225da8c634ddf9bfe25edfd5671bbfbd330f001030501255f391b68493c81eda"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/index.scss",
+      "sha256": "1cb49a1dfb926f5ae432f1ab3627c2414a2633182e411019e903a8935c741201"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/manifest.json",
+      "sha256": "51717c51d175685a7af9a90bfe6c59a5b40114be8e8cd3e94454e1fbc3821c41"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/package.json",
+      "sha256": "38e35e2ba4b03752fa8b87af2f93ff86e3d26f994dc1285affbf6208a7e0557f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/readme.md",
+      "sha256": "fdd0c0637840e8cb8b0816347c546a9a3d71d828d7c652aabdc4e74f1233f317"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/index.scss",
+      "sha256": "dec21e3e9e30770a4bd4e11bab29f73fce501c94d6d62c48c3578f5c78266ad6"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/setting/_border.scss",
+      "sha256": "c7b80772f555523ea452a72c8894a4c5568aff86033b045b5ab39a3bcd1a3723"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/setting/_color.scss",
+      "sha256": "e9a4545f4c32b87e51a2d1b51976e3639f21bcbdcc6cc4793c1f7045ec8e71bc"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/setting/_radius.scss",
+      "sha256": "d0558a4eb4c6bfd7f22b246b4f4ba7c78bb2dc6861962b774db15852d7ccdb6a"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/setting/_space.scss",
+      "sha256": "e35b268131e71b7234f91e94592448f8030f2304c8b821db9c1956bd12dd3609"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/setting/_styles.scss",
+      "sha256": "608dc88d9b55c625148b850b9f39fa256f6061010c2ff75a9582e9995695eeac"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/setting/_text.scss",
+      "sha256": "06639494419c5a4b9b0feb1911f2d2604a2e1aa429bf253a20afe17de0edf0b7"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/setting/_variables.scss",
+      "sha256": "6a9abf138f8b818b5444faa885dabd5a10772b41aabe1f3f8bd24dbcff81c97f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/styles/tools/functions.scss",
+      "sha256": "d659ee1d69b218bdef179bb5252fe7830075c2e81599192fa29bd872c5c7e775"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/theme.scss",
+      "sha256": "08625cdd98f97dc95ddde2f0e9e92443e604554ee66a1e56bbbb549d59bdeb9f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-scss/variables.scss",
+      "sha256": "918ea341198c181955ded508bc42a274b0232c89a865de931fdaf0f61750e1bb"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-transition/changelog.md",
+      "sha256": "52ad472c1509c375da435fedeeb74d7e0b350a4204883b6a443c4b7cd57568cc"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-transition/components/uni-transition/createAnimation.js",
+      "sha256": "d3e75847c6c4b8ceabb274654cf73ce1788db1046e8b2463682e8b8470df7363"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-transition/components/uni-transition/uni-transition.vue",
+      "sha256": "1ce1ea575ed28c1195d340d81687741768cf5c2ef8a5c74119509ba629c7746f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-transition/package.json",
+      "sha256": "e1554925dd00ae84413384c5e4fbd751b43adc176f5dcb8cf82bcfb287adbcef"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/uni-transition/readme.md",
+      "sha256": "695c56406bed4b86cab00473719d05b534f7ec4779ba1725b759094163f8ec0b"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/README.md",
+      "sha256": "d3441af63ce3c6fa0fdd18efeb56ef6d1f7cc15ee8a94c904fac2d8bbec8c0c8"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/changelog.md",
+      "sha256": "66e8e6b46a20100237384cfb6c1bcce4950b7c1624a4797e720ac5d14b86cda9"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/common/helper.js",
+      "sha256": "d876edca120a23268df1dda352311ee92f9d5efd28ce4ffe4b1b7e42de82df7c"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/components/w-barcode/index.vue",
+      "sha256": "51dd047ab727776f5425e5436f76e362820dbe14dbe861940eb920e160c6779f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/components/w-barcode/w-barcode.vue",
+      "sha256": "e69be68c1d4d5351969d5daedfd4d36eee29a98c81fd73057c5e645d72278f1c"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/components/w-qrcode/index.vue",
+      "sha256": "36952b5b9436d9ea5322a07c15dd7442bf5e1cf892520c7cd4a4ca4deb7ee5f5"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/components/w-qrcode/w-qrcode.vue",
+      "sha256": "175fad5afae4e235317f6a3f2153ecf0b5acdc58dd33cf9c871d481b31b026a4"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/js_sdk/index.js",
+      "sha256": "1a7b042e499ed59350e32611aecaf3966b7b2bb6f7ab2e4a389ee6b72061e42f"
+    },
+    {
+      "file": "前端代码/uniapp/uni_modules/wmf-code/package.json",
+      "sha256": "8d3dbcd059b1263abaa84d4f90df5def124523356684075601dd10449633e216"
+    },
+    {
+      "file": "前端代码/uniapp/utils/SubscribeMessage.js",
+      "sha256": "e4aad0bb5be81d3f6e3582dd86fa1f853dca96f83f02236f7553797837c4f0e4"
+    },
+    {
+      "file": "前端代码/uniapp/utils/agent.js",
+      "sha256": "adecd0ffdce2b892b73fcba5ece3bdf69c224456c2722e162bc8ef19639e2c20"
+    },
+    {
+      "file": "前端代码/uniapp/utils/cache.js",
+      "sha256": "fcef0e1bc890befc67c4f17a044f4626962d94c9497e3e718ceb661911693307"
+    },
+    {
+      "file": "前端代码/uniapp/utils/chooseTimeDate.js",
+      "sha256": "c00ddc892320a91870f2ec2b44eb205702a866a3de4699ca9d07ec186cef71cd"
+    },
+    {
+      "file": "前端代码/uniapp/utils/emoji.js",
+      "sha256": "f29409005105cf7bf98db4f76b430996d84f299209f2edc0a0ab52dffea180aa"
+    },
+    {
+      "file": "前端代码/uniapp/utils/index.js",
+      "sha256": "59f9dd305006bac66ad7feb6641060fd83cc21e7abcd1b4790ef20baa6a5eee8"
+    },
+    {
+      "file": "前端代码/uniapp/utils/memberAssetUrl.js",
+      "sha256": "7901f5815bccee033d4a30c30bf29df5e9f222c7277c1d35036c1b29c7e3248b"
+    },
+    {
+      "file": "前端代码/uniapp/utils/memberIconFont.js",
+      "sha256": "086967084c8ce0e848876172a77e5e35b30309458b793eca7898bf26aa96296e"
+    },
+    {
+      "file": "前端代码/uniapp/utils/memberMenuIcon.js",
+      "sha256": "ab7a0e2df75982839d70b3de8c3fd39cacd9cf254a49ca3d4ac7e24f36490164"
+    },
+    {
+      "file": "前端代码/uniapp/utils/mobileReservation.js",
+      "sha256": "ab0e8b89f7f2e58de946e5622941109524a2f3f1f84b1825dc7043727dc193dd"
+    },
+    {
+      "file": "前端代码/uniapp/utils/permission.js",
+      "sha256": "2fac8f16d8fe4d360c94e00e55297a65b804dffd0dc3b3e838a03837c77c466e"
+    },
+    {
+      "file": "前端代码/uniapp/utils/propertyList.js",
+      "sha256": "787f6f5f620e27c7e2b7cc2a5b80bb47b5bf05d86bef73cd0ed5e76883aa3add"
+    },
+    {
+      "file": "前端代码/uniapp/utils/request.js",
+      "sha256": "42444061051209594cbc7b05e3e1cd9e86b5cb68998049135246878907d66a9d"
+    },
+    {
+      "file": "前端代码/uniapp/utils/serviceDuration.js",
+      "sha256": "0cdec06c6fd933dd1888b1f1e7c79fc1587c88b82e0135b4873733bc2a8f7c10"
+    },
+    {
+      "file": "前端代码/uniapp/utils/util.js",
+      "sha256": "904a93cfd7884b4b10239aa2da711658b370ba9ef94cbdd958f74ed01f45fc8e"
+    },
+    {
+      "file": "前端代码/uniapp/utils/validate.js",
+      "sha256": "95a384498a34cd6fe337ddaaa6d52587c85018f344f73dd16d2fb0e0c33db656"
+    },
+    {
+      "file": "前端代码/uniapp/vue.config.js",
+      "sha256": "7a3eba9cd7a5a2f340649b0ad3f036ab236dbca4d601fc6f2f2be134451df559"
+    }
+  ],
+  "overlays": [
+    {
+      "file": "/private/tmp/m008-cube-slides-20261022/mini/readonly/前端代码/uniapp/manifest.json",
+      "sha256": "fe463eb9a1e7930ad45146a251df1d11176434dfc8f34b2e943b11cd432869b8"
+    },
+    {
+      "file": "/private/tmp/m008-cube-slides-20261022/mini/readonly/前端代码/uniapp/config/member-customer.json",
+      "sha256": "f9c5c7e27ca0cf68bbab67de3e0afabbae7712daedf438fbb0ccaf7bac0a940c"
+    }
+  ]
+}

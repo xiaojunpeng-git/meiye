@@ -1,0 +1,21 @@
+{
+  "task": "M008-EMERG-R2-CUBE",
+  "baseline": "b99e8bd78c3f4709320c5c8674c942a0d636172d",
+  "acceptedPatch": "80fc2467ee3c3548495f7885d3ae535450a494ac756592f009f4525afdbd22af",
+  "productManagerDecision": "确认验收，仅本地提交",
+  "confirmedScope": {
+    "frontendAndShared": 9,
+    "tests": 7,
+    "evidence": 27
+  },
+  "permissions": {
+    "localCommit": true,
+    "deployment": false,
+    "productionDecorationSave": false,
+    "push": false,
+    "miniUpload": false
+  },
+  "verification": "All accepted SHA-256 and evidence hashes matched; source/component contracts re-run PASS",
+  "historicalFixedManifest": "fixed-version.json retains the pre-acceptance snapshot intentionally",
+  "time": "2026-10-22T09:29:11.754Z"
+}

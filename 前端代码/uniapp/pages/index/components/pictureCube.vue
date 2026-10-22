@@ -3,116 +3,116 @@
 	<view class="pictureCube" :style="[boxStyle]" v-if="picList.length && !dataConfig.isHide">
 		<view class="advert-item-1 flex-1" :style="[grdiGap]" v-if="style==0">
 			<view v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
-				<easy-loadimage mode="widthFix" width="100%" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image mode="widthFix" width="100%" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="flex-1 grid-column-2" :style="[colGap]" v-else-if="style==1">
 			<view class="item w-full" v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
-				<easy-loadimage :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="flex-1 grid-column-3"  :style="[colGap]" v-else-if="style==2">
 			<view class="item" v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
-				<easy-loadimage :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(item.objectFit || 'cover')" width="100%"  :height="imageH + 'rpx'" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="advert-item-4 flex-1" :style="[grdiGap]" v-else-if="style==3">
 			<view class="pic1" @click="goDetail(picList[0])">
-				<easy-loadimage mode="aspectFill" width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image mode="aspectFill" width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic2" @click="goDetail(picList[1])">
-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic3" @click="goDetail(picList[2])">
-				<easy-loadimage mode="widthFix" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image mode="widthFix" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="advert-item-5 flex-1" :style="[grdiGap]" v-else-if="style==4">
 			<view class="pic1" @click="goDetail(picList[0])">
-				<easy-loadimage mode="widthFix" width="100%" height="100%" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image mode="widthFix" width="100%" height="100%" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic2" @click="goDetail(picList[1])">
-				<easy-loadimage mode="aspectFill" width="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image mode="aspectFill" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic3" @click="goDetail(picList[2])">
-				<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="advert-item-6 flex-1" :style="[grdiGap]" v-else-if="style==5">
 			<view class="pic1" @click="goDetail(picList[0])">
-				<easy-loadimage width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic2 h-full" @click="goDetail(picList[1])">
-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic3 h-full" @click="goDetail(picList[2])">
-				<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="advert-item-7 flex-1" :style="[grdiGap]" v-else-if="style==6">
 			<view class="pic1" @click="goDetail(picList[0])">
-				<easy-loadimage mode="aspectFill" width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image mode="aspectFill" width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic2" @click="goDetail(picList[1])">
-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic3" @click="goDetail(picList[2])">
-				<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="grid-column-2 flex-1" :style="[grdiGap]" v-else-if="style==7">
 			<view class="w-full" v-for="(item,index) in picList" :key="index" @click="goDetail(item)">
-				<easy-loadimage  :mode="filterMode(item.objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :image-src="item.image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image  :mode="filterMode(item.objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="item" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="advert-item-9 flex-1" :style="[grdiGap]" v-else-if="style==8">
 			<view class="pic1" @click="goDetail(picList[0])">
-				<easy-loadimage width="100%" height="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic2 " @click="goDetail(picList[1])">
-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%" :height="imageH + 'rpx'" :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" :height="imageH + 'rpx'" :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic3" @click="goDetail(picList[2])">
-				<easy-loadimage width="100%" height="100%" :height="templateH + 'rpx'" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image width="100%" :height="templateH + 'rpx'" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic4" @click="goDetail(picList[3])">
-				<easy-loadimage :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" height="100%" :height="templateH + 'rpx'" :image-src="picList[3].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" :height="templateH + 'rpx'" :region="picList[3]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic5" @click="goDetail(picList[4])">
-				<easy-loadimage :mode="filterMode(picList[4].objectFit || 'cover')" width="100%" height="100%" :height="templateH + 'rpx'" :image-src="picList[4].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[4].objectFit || 'cover')" width="100%" :height="templateH + 'rpx'" :region="picList[4]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="advert-item-6 flex-1"  :style="[grdiGap]" v-else-if="style==9">
 			<view class="pic1" @click="goDetail(picList[0])">
-				<easy-loadimage width="100%" :height="imageH + 'rpx'" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image width="100%" :height="imageH + 'rpx'" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic2" @click="goDetail(picList[1])">
-				<easy-loadimage :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%"  :image-src="picList[1].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image :mode="filterMode(picList[1].objectFit || 'cover')" width="100%" height="100%"  :region="picList[1]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 			<view class="pic3 h-full flex-between-center" >
 				<view class="flex-1 h-full" @click="goDetail(picList[2])">
-					<easy-loadimage :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[2].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+					<cube-region-image :mode="filterMode(picList[2].objectFit || 'cover')" width="100%" height="100%" :region="picList[2]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 				</view>
 				<view class="flex-1 h-full" :style="{'margin-left': dataConfig.imgConfig.val*2 + 'rpx'}" @click="goDetail(picList[3])">
-					<easy-loadimage :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" height="100%" :image-src="picList[3].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+					<cube-region-image :mode="filterMode(picList[3].objectFit || 'cover')" width="100%" height="100%" :region="picList[3]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 				</view>
 			</view>
 		</view>
 		<view class="flex-1" v-else-if="style==10">
 			<view class="h-full" @click="goDetail(picList[0])">
-				<easy-loadimage mode="widthFix" width="100%" :image-src="picList[0].image" :borderRadius="imgBorderRadius"></easy-loadimage>
+				<cube-region-image mode="widthFix" width="100%" :region="picList[0]" @navigate="goDetail" :borderRadius="imgBorderRadius"></cube-region-image>
 			</view>
 		</view>
 		<view class="advert12" :style="[autoHeight]" v-else-if="style==11">
 			<template v-if="dataConfig.picStyle.docPicList.length">
-				<view v-for="(item,index) in dataConfig.picStyle.docPicList" :key="index" :style="{
+				<view v-for="(item,index) in docPicList" :key="index" :style="{
 					top: `${(item.doc.startY/375)*100}%`,
 					left: `${(item.doc.startX/375)*100}%`,
 					width: `${(item.doc.w/375)*100}%`,
 					height: `${(item.doc.h/375)*100}%`,
 					borderWidth: `${dataConfig.imgConfig.val*2}rpx`,
 				}" class="item" @click="goDetail(item)">
-					<easy-loadimage mode="aspectFill" width="100%" height="100%" :imageSrc="item.img" class="image" :borderRadius="imgBorderRadius"></easy-loadimage>
+					<cube-region-image mode="aspectFill" width="100%" height="100%" :region="item" @navigate="goDetail" class="image" :borderRadius="imgBorderRadius"></cube-region-image>
 				</view>
 			</template>
 		</view>
@@ -120,8 +120,10 @@
 </template>
 
 <script>
+	import cubeRegionImage from './cubeRegionImage.vue';
 	export default {
 		name: 'pictureCube',
+		components: { cubeRegionImage },
 		props: {
 			dataConfig: {
 				type: Object,
@@ -137,6 +139,10 @@
 			};
 		},
 		computed: {
+			// Geometry stays in docPicList; picList remains the sole per-region image source.
+			docPicList() {
+				return this.dataConfig.picStyle.docPicList.map((doc, index) => Object.assign({}, doc, this.picList[index]));
+			},
 			boxStyle(){
 				return {
 					padding: `${this.dataConfig.topConfig.val*2}rpx ${this.dataConfig.prConfig.val*2}rpx ${this.dataConfig.bottomConfig.val*2}rpx ${this.dataConfig.prConfig.val*2}rpx`,
@@ -191,6 +197,7 @@
 				else return url.replace('http://', 'https://');
 			},
 			goDetail(url) {
+				if (!url || !url.link) return;
 				let urls = url.link;
 				this.$util.JumpPath(urls);
 			},

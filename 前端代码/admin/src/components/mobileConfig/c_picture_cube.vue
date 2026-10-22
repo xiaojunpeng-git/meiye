@@ -10,6 +10,7 @@
 <script>
 import toolCom from '@/components/mobileConfigRight/index.js';
 import rightBtn from '@/components/rightBtn/index.vue';
+import cubeSlidesEditor from '@/components/mobileConfigRight/c_cube_slides.vue';
 export default {
   name: 'c_picture_cube',
   componentsName: 'picture_cube',
@@ -27,6 +28,7 @@ export default {
   },
   components: {
     ...toolCom,
+    c_cube_slides: cubeSlidesEditor,
     rightBtn
   },
   data() {
@@ -79,7 +81,7 @@ export default {
               configNme: 'titleContent'
             },
             {
-							    components: toolCom.c_menu_list,
+							    components: cubeSlidesEditor,
 							    configNme: 'menuConfig'
             }
 			            ];

@@ -14,7 +14,7 @@
       <div class="advert-item-1 flex-1" :style="[grdiGap]" v-if="style === 0">
         <div v-for="(item, index) in picList" :key="index"
         >
-          <img class="img" :src="item.image" v-if="item.image" :style="[imgBorderRadius]"/>
+          <cube-preview-image class="img" :region="item" v-if="item.image" :style="[imgBorderRadius]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -22,7 +22,7 @@
       </div>
       <div class="flex-1 grid-column-2" :style="[colGap]" v-if="style === 1">
         <div v-for="(item, index) in picList" :key="index">
-          <img class="img" :src="item.image" v-if="item.image"  :style="[imgStyle,{'object-fit':item.objectFit}]" />
+          <cube-preview-image class="img" :region="item" v-if="item.image"  :style="[imgStyle,{'object-fit':item.objectFit}]"  />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -30,7 +30,7 @@
       </div>
       <div class="flex-1 grid-column-3" :style="[colGap]" v-if="style === 2">
         <div v-for="(item, index) in picList" :key="index">
-          <img class="img" :src="item.image" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]"/>
+          <cube-preview-image class="img" :region="item" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -38,19 +38,19 @@
       </div>
       <div class="advert-item-4 flex-1" :style="[grdiGap]" v-if="style === 3">
         <div class="pic1">
-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgStyle]"/>
+          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgStyle]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic2">
-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic3">
-          <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgBorderRadius]"/>
+          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgBorderRadius]" />
           <div class="empty-box" v-else >
             <img src="../../assets/images/shan.png" />
           </div>
@@ -58,19 +58,19 @@
       </div>
       <div class="advert-item-5 flex-1" :style="[grdiGap]" v-if="style === 4">
         <div class="pic1">
-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius]"/>
+          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius]" />
           <div class="empty-box" v-else >
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic2" :style="[{'height': imageH/2 + imgConfig + 'px'}]">
-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle]"/>
+          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic3" :style="[{'height': imageH/2 + imgConfig + 'px'}]">
-          <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgStyle,{'object-fit':picList[2].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgStyle,{'object-fit':picList[2].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -78,21 +78,21 @@
       </div>
       <div class="advert-item-6 flex-1" :style="[grdiGap]" v-if="style === 5">
         <div class="pic1">
-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig + 'px'}]"/>
+          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig + 'px'}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic2 h-full">
-          <img class="img" :src="picList[1].image" v-if="picList[1].image"
-            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image"
+            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic3 h-full">
-          <img class="img" :src="picList[2].image" v-if="picList[2].image"
-            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image"
+            :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -100,20 +100,20 @@
       </div>
       <div class="advert-item-7 flex-1" :style="[grdiGap]" v-if="style === 6">
         <div class="pic1 h-full">
-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgStyle]"/>
+          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgStyle]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic2 h-full">
-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic3">
-          <img class="img" :src="picList[2].image" v-if="picList[2].image"
-            :style="[imgBorderRadius,{'height': imageH + imgConfig + 'px','object-fit':picList[2].objectFit}]" />
+          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image"
+            :style="[imgBorderRadius,{'height': imageH + imgConfig + 'px','object-fit':picList[2].objectFit}]"  />
           <div class="empty-box" v-else >
             <img src="../../assets/images/shan.png" />
           </div>
@@ -121,7 +121,7 @@
       </div>
       <div class="grid-column-2 flex-1" :style="[grdiGap]" v-if="style === 7">
         <div class="w-full" v-for="(item, index) in picList" :key="index">
-          <img class="img" :src="item.image" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]"/>
+          <cube-preview-image class="img" :region="item" v-if="item.image" :style="[imgStyle,{'object-fit':item.objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -129,31 +129,31 @@
       </div>
       <div class="advert-item-9 flex-1" :style="[grdiGap]" v-if="style === 8">
         <div class="pic1">
-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgStyle,{'object-fit':picList[0].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgStyle,{'object-fit':picList[0].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic2">
-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgStyle,{'object-fit':picList[1].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic3">
-          <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[2].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[2].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic4">
-          <img class="img" :src="picList[3].image" v-if="picList[3].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[3].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[3]" v-if="picList[3].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[3].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic5">
-          <img class="img" :src="picList[4].image" v-if="picList[4].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[4].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[4]" v-if="picList[4].image" :style="[imgBorderRadius,{'height': templateH/2 + 'px','object-fit':picList[4].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -161,26 +161,26 @@
       </div>
       <div class="advert-item-6 flex-1" :style="[grdiGap]" v-if="style === 9">
         <div class="pic1">
-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig * 2 + 'px'}]"/>
+          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius,{'height': imageH/2 + imgConfig * 2 + 'px'}]" />
           <div class="empty-box" v-else >
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic2">
-          <img class="img" :src="picList[1].image" v-if="picList[1].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]"/>
+          <cube-preview-image class="img" :region="picList[1]" v-if="picList[1].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[1].objectFit}]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
         </div>
         <div class="pic3 flex-between-center">
           <div class="flex-1 h-full">
-            <img class="img" :src="picList[2].image" v-if="picList[2].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]"/>
+            <cube-preview-image class="img" :region="picList[2]" v-if="picList[2].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[2].objectFit}]" />
             <div class="empty-box" v-else >
               <img src="../../assets/images/shan.png" />
             </div>
           </div>
           <div class="flex-1 h-full" :style="{'margin-left': imgConfig + 'px'}">
-            <img class="img" :src="picList[3].image" v-if="picList[3].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[3].objectFit}]"/>
+            <cube-preview-image class="img" :region="picList[3]" v-if="picList[3].image" :style="[imgBorderRadius,{'height': imageH/4 + 'px','object-fit':picList[3].objectFit}]" />
             <div class="empty-box" v-else>
               <img src="../../assets/images/shan.png" />
             </div>
@@ -189,7 +189,7 @@
       </div>
       <template v-if="style === 10">
         <div class="w-full">
-          <img class="img" :src="picList[0].image" v-if="picList[0].image" :style="[imgBorderRadius]"/>
+          <cube-preview-image class="img" :region="picList[0]" v-if="picList[0].image" :style="[imgBorderRadius]" />
           <div class="empty-box" v-else>
             <img src="../../assets/images/shan.png" />
           </div>
@@ -208,12 +208,12 @@
 	        top: (item.doc.startY/375)*100 + '%',
 	      }"
 	    >
-	      <img
+	      <cube-preview-image
 	        class="img"
-	        :src="item.img"
+	        :region="item"
 	        v-if="item.img"
 	        :style="{ borderRadius: imgRadius }"
-	      />
+	       />
 	      <div class="empty-box" v-else :style="{ borderRadius: imgRadius }">
 	        <img src="../../assets/images/shan.png" />
 	      </div>
@@ -225,8 +225,10 @@
 
 <script>
 import { mapState } from 'vuex';
+import cubePreviewImage from './cubePreviewImage.vue';
 export default {
   name: 'picture_cube',
+  components: { cubePreviewImage },
   cname: '图片魔方',
   configName: 'c_picture_cube',
   icon: '#iconzujian-tupianmofang',
@@ -443,11 +445,8 @@ export default {
             this.picList = data.picStyle.picList;
           }
         } else {
-          data.picStyle.docPicList.map((e, i) => {
-            data.picStyle.docPicList[i].img = data.picStyle.picList[i].image;
-            data.picStyle.docPicList[i].link = data.picStyle.picList[i].link;
-          });
-          this.$set(this, 'docPicList', data.picStyle.docPicList);
+          // Join images without mutating saved geometry or duplicating slide ownership.
+          this.$set(this, 'docPicList', data.picStyle.docPicList.map((doc, index) => Object.assign({}, doc, data.picStyle.picList[index])));
         }
         this.computedHeight();
       }
@@ -518,6 +517,10 @@ export default {
 }
 .advert {
   display: flex;
+  // Swiper's internal track must not set the min-content width of a grid region.
+  > div, .pic1, .pic2, .pic3, .pic4, .pic5 {
+    min-width: 0;
+  }
   // background-color: #fff;
 }
 .advert-item-1{

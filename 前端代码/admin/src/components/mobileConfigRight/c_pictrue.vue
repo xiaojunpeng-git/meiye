@@ -446,15 +446,14 @@ export default {
     },
     'configObj.styleConfig.tabVal': {
       handler() {
+        // Initial selection may precede mounted; region data still belongs to this widget.
+        if (!this.configObj.styleConfig || !this.configObj.picStyle) return;
+        this.defaults = this.configObj;
+        this.configData = this.configObj[this.configNme];
         this.count = this.defaults.styleConfig.count;
         this.picArrayConcat(this.count);
         this.configData.picList.splice(this.count);
         this.currentIndex = 0;
-        const list = this.defaults.menuConfig.list[0];
-        if (this.configData.picList[0]) {
-          list.img = this.configData.picList[0].image;
-          list.info[0].value = this.configData.picList[0].link;
-        }
         this.lis = document.getElementsByClassName('lay-item');
       },
       deep: true,
@@ -462,7 +461,7 @@ export default {
     },
     'configObj.picStyle.docPicList': {
       handler() {
-        if (this.configObj.styleConfig.tabVal == 11) {
+        if (this.configObj.styleConfig && this.configObj.styleConfig.tabVal == 11) {
           this.configObj.picStyle.docPicList.map((e, i) => {
             this.configObj.picStyle.docPicList[i].img =
               this.configObj.picStyle.picList[i].image;
@@ -480,33 +479,12 @@ export default {
       this.selPicBox = e;
       this.currentIndex = e;
       this.configData.tabVal = e;
-      if (this.defaults.menuConfig.isCube) {
-        if (this.configData.tabVal !== 11) {
-          const list = this.defaults.menuConfig.list[0];
-          if (data.picList[e] && data.picList[e].image) {
-            list.img = data.picList[e].image;
-            list.info[0].value = data.picList[e].link;
-          } else {
-            list.img = '';
-            list.info[0].value = '';
-          }
-        } else {
-          this.selPicBox = e;
-          const list = this.defaults.docPicList;
-          if (data.menuConfig.picStyle.picList[e].image) {
-            list[e].img = data.menuConfig.picStyle.picList[e].image;
-            list[e].info[0].value =
-              data.menuConfig.picStyle.docPicList[e].value;
-          } else {
-            list[0].img = '';
-            list[0].info[0].value = '';
-          }
-        }
-      }
+      // The region editor reads picList directly; no second menuConfig copy is maintained.
     },
     picArrayConcat(count) {
       for (let i = this.configData.picList.length; i < count; i++) {
-        this.configData.picList.push(this.arrayObj);
+        // Each region must own its content; sharing the placeholder object couples edits.
+        this.configData.picList.push({ ...this.arrayObj });
       }
     },
     // 删除指定热区

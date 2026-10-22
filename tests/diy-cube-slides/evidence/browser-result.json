@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "results": [
+    {
+      "width": 375,
+      "regions": 35,
+      "layoutStable": true
+    },
+    {
+      "width": 320,
+      "regions": 35,
+      "layoutStable": true
+    },
+    {
+      "currentFrameLink": "/pages/users/user_coupon/index?cube=0&frame=0b",
+      "oneNavigationPerTap": true
+    }
+  ],
+  "errors": [],
+  "productionRequests": 0
+}

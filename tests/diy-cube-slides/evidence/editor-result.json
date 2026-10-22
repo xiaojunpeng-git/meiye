@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "realComponents": true,
+  "checks": [
+    "selected-region",
+    "add-image",
+    "picker-callback",
+    "edit-link",
+    "switch-preserves-content",
+    "delete",
+    "preview"
+  ],
+  "errors": []
+}
