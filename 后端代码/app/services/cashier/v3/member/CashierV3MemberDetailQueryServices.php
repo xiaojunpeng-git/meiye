@@ -479,7 +479,8 @@ final class CashierV3MemberDetailQueryServices
             ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
             ->where('cu.uid', $memberId);
         if ($status === 'active') {
-            $query->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
+            $query->where('cu.status', 0)->where('cu.is_fail', 0)
+                ->where(function ($q): void { $q->where('cu.use_time', 0)->whereOr('ci.coupon_type', 3); })
                 ->where(function ($q) use ($now): void { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
                 ->where(function ($q) use ($now): void { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); });
         }
@@ -488,12 +489,16 @@ final class CashierV3MemberDetailQueryServices
         if ($dateTo !== '') $query->where('cu.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
         $rows = $query->field('cu.id,cu.coupon_title,cu.coupon_price,cu.start_time,cu.end_time,cu.use_time,cu.status,cu.is_fail,ci.coupon_type')
             ->order('cu.add_time desc,cu.id desc')->limit(200)->select()->toArray();
-        return array_map(function (array $row) use ($now): array {
+        // Used timestamps do not exhaust an allowance; read its current account
+        // without rewriting the original coupon face or renewing validity.
+        $ids = array_column(array_filter($rows, static fn(array $row): bool => (int)($row['coupon_type'] ?? 0) === 3), 'id');
+        $remaining = (new \app\services\activity\coupon\StoreCouponAllowanceServices())->remainingByCouponIds($ids);
+        return array_map(function (array $row) use ($now, $remaining): array {
             $couponType = $row['coupon_type'] === null ? 0 : (int)$row['coupon_type'];
             $start = (int)$row['start_time'];
             $end = (int)$row['end_time'];
             $statusCode = (int)$row['status'];
-            $used = $statusCode === 1 || (int)$row['use_time'] > 0;
+            $used = $statusCode === 1 || ($couponType !== 3 && (int)$row['use_time'] > 0);
             $voided = (int)$row['is_fail'] !== 0 || $statusCode === 2;
             $statusLabel = $voided ? '已作废' : ($used ? '已使用'
                 : ($statusCode !== 0 ? '不可用'
@@ -501,11 +506,13 @@ final class CashierV3MemberDetailQueryServices
             return [
                 'id' => 'coupon:' . (int)$row['id'], 'couponNo' => (string)$row['id'],
                 'couponName' => (string)$row['coupon_title'],
-                'couponTypeLabel' => $couponType === 2 ? '折扣券' : ($couponType === 1 ? '满减券' : '未标注'),
+                'couponTypeLabel' => $couponType === 3 ? '多次抵用券' : ($couponType === 2 ? '折扣券' : ($couponType === 1 ? '满减券' : '未标注')),
                 // 折扣券的 coupon_price 是百分比而非金额；不可格式化成元。
                 'couponAmountLabel' => $couponType === 2
                     ? rtrim(rtrim((string)$row['coupon_price'], '0'), '.') . '%'
-                    : ($couponType === 0 ? '未标注' : null),
+                    : ($couponType === 3 ? '剩余 ¥' . intdiv((int)($remaining[(int)$row['id']]
+                        ?? \app\services\activity\coupon\StoreCouponAllowanceServices::wholeCents($row['coupon_price'])), 100)
+                        : ($couponType === 0 ? '未标注' : null)),
                 'couponAmount' => $couponType === 1 ? (string)$row['coupon_price'] : null,
                 'effectiveAt' => $start > 0 ? $this->dateTime($start) : null,
                 'expiresAt' => $end > 0 ? $this->dateTime($end) : null,

@@ -860,7 +860,8 @@ final class CashierV3CashierWorkspaceServices
             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
         }
         $amounts = $this->couponLineAmounts((array)$line);
-        $options = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey);
+        $options = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey,
+            0, [], 0, 0, (int)($line['catalog_product_id'] ?? 0));
         return [
             'lineId' => $lineKey,
             'lineAmountCents' => $amounts['threshold'],
@@ -881,7 +882,8 @@ final class CashierV3CashierWorkspaceServices
         int $thresholdCents,
         array $reservedCouponIds = [],
         int $orderReceivableCents = 0,
-        int $orderLineCapacityCents = 0
+        int $orderLineCapacityCents = 0,
+        int $productId = 0
     ): array {
         // 浏览器本地购物车在最终确认前不写 cashier_workspace；不能从一个
         // 游客草稿反推当前选客。会员身份由同一请求内的权威会员摘要校验后
@@ -897,7 +899,7 @@ final class CashierV3CashierWorkspaceServices
         $amounts = ['threshold' => $thresholdCents, 'base' => $lineAmountCents, 'cap' => $lineAmountCents];
         $options = $this->couponOptions(
             $memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey, 0,
-            $reservedCouponIds, $orderReceivableCents, $orderLineCapacityCents
+            $reservedCouponIds, $orderReceivableCents, $orderLineCapacityCents, $productId
         );
         return [
             'lineId' => $lineKey,
@@ -913,7 +915,8 @@ final class CashierV3CashierWorkspaceServices
         string $stateContextId,
         CashierV3OperatorScope $operatorScope,
         string $lineKey,
-        int $couponId
+        int $couponId,
+        $requestedAmountCents = null
     ): array {
         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceApplyCoupon');
         $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
@@ -929,12 +932,23 @@ final class CashierV3CashierWorkspaceServices
             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
         }
         $amounts = $this->couponLineAmounts((array)$line);
-        $coupons = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, true, $workspaceId, $lineKey, $couponId)['available'];
+        $coupons = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, true, $workspaceId, $lineKey,
+            $couponId, [], 0, 0, (int)($line['catalog_product_id'] ?? 0))['available'];
         if (count($coupons) !== 1 || (int)$coupons[0]['couponId'] !== $couponId) {
             throw CashierV3CommandException::versionConflict('该优惠券当前不可使用，请重新选择。', ['coupon_id' => $couponId]);
         }
         $coupon = $coupons[0];
         $discount = (int)$coupon['discountAmountCents'];
+        // Reusable coupons require an explicit whole-yuan command. Browsing or
+        // an older client must never silently spend the full remaining face.
+        if ((int)($coupon['couponType'] ?? 0) === 3) {
+            if (!is_int($requestedAmountCents) || $requestedAmountCents > $discount) {
+                throw CashierV3CommandException::invalidContext('请输入本次抵用的整数金额。');
+            }
+            \app\services\activity\coupon\StoreCouponAllowanceServices::afterUse(
+                (int)$coupon['remainingAmountCents'], $requestedAmountCents);
+            $discount = $requestedAmountCents;
+        }
         $changes = [
             'coupon_user_id' => $couponId,
             'coupon_name_snapshot' => (string)$coupon['name'],
@@ -3553,15 +3567,17 @@ final class CashierV3CashierWorkspaceServices
         int $onlyCouponId = 0,
         array $reservedCouponIds = [],
         int $orderReceivableCents = 0,
-        int $orderLineCapacityCents = 0
+        int $orderLineCapacityCents = 0,
+        int $productId = 0
     ): array {
         $now = time();
         $query = Db::name('store_coupon_user')->alias('cu')
             ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
-            ->where('cu.uid', $memberId)->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
+            ->where('cu.uid', $memberId)->where('cu.status', 0)->where('cu.is_fail', 0)
+            ->where(function ($q) { $q->where('cu.use_time', 0)->whereOr('ci.coupon_type', 3); })
             ->where(function ($q) use ($now) { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
             ->where(function ($q) use ($now) { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); })
-            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id,ci.category,ci.type,ci.use_mode,ci.order_tiers_json');
+            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id,ci.category,ci.type,ci.product_id,ci.category_id,ci.brand_id,ci.use_mode,ci.order_tiers_json');
         if ($onlyCouponId > 0) $query->where('cu.id', $onlyCouponId);
         if ($lock) $query->lock(true);
         $rows = $query->order('cu.end_time asc,cu.id asc')->select();
@@ -3571,10 +3587,17 @@ final class CashierV3CashierWorkspaceServices
         $used = array_fill_keys(array_merge(array_map('intval', $usedIds), array_map('intval', $reservedCouponIds)), true);
         $available = [];
         $belowMinimum = [];
+        // Bulk-read only the new type. Existing coupons do not depend on the
+        // allowance migration, and querying choices never creates account rows.
+        $allowanceIds = array_column(array_filter($rows, static fn(array $row): bool =>
+            (int)($row['coupon_type'] ?? 0) === 3), 'id');
+        $remaining = (new \app\services\activity\coupon\StoreCouponAllowanceServices())->remainingByCouponIds($allowanceIds);
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
             if ($id <= 0 || isset($used[$id])) continue;
             if (!$this->couponAllowsStore($row, $storeId)) continue;
+            if ((int)($row['coupon_type'] ?? 0) === 3
+                && !(new \app\services\activity\coupon\StoreCouponAllowanceServices())->allowsProduct($row, $productId)) continue;
             $orderMode = (int)($row['use_mode'] ?? 0) === StoreCouponOrderRule::ORDER;
             if ($orderMode) {
                 // Workspace draft commands still bind one coupon to one line.
@@ -3609,6 +3632,15 @@ final class CashierV3CashierWorkspaceServices
                 continue;
             }
             $face = $this->decimalMoneyToCents($row['coupon_price'] ?? null, 'coupon_price_invalid');
+            if ((int)($row['coupon_type'] ?? 0) === 3) {
+                $face = (int)($remaining[$id] ?? $face);
+                $cap = intdiv(min($face, $amounts['cap']), 100) * 100;
+                if ($cap > 0) $available[] = ['couponId' => $id, 'couponType' => 3, 'useMode' => 0,
+                    'name' => trim((string)$row['coupon_title']) ?: '多次抵用券',
+                    'remainingAmountCents' => $face, 'discountAmountCents' => $cap,
+                    'useMinAmountCents' => $minimum, 'expiresAt' => (int)($row['end_time'] ?? 0)];
+                continue;
+            }
             if ((int)($row['coupon_type'] ?? 1) === 2) {
                 $rate = $this->decimalPercentHundredths($row['coupon_price'] ?? null);
                 $face = intdiv($amounts['threshold'] * (10000 - $rate), 10000);

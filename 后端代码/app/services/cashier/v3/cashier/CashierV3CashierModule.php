@@ -591,7 +591,8 @@ final class CashierV3CashierModule
                 // Older cashier bundles omit order-coupon amounts. Zero keeps
                 // those coupons unavailable without blocking ordinary coupons.
                 (int)($payload['orderReceivableCents'] ?? 0),
-                (int)($payload['orderLineCapacityCents'] ?? 0)
+                (int)($payload['orderLineCapacityCents'] ?? 0),
+                (int)($payload['productId'] ?? 0)
             );
             return [
                 'data' => ['couponSelector' => $selector],
@@ -621,7 +622,8 @@ final class CashierV3CashierModule
                         (string)($scope['state_context_id'] ?? ''),
                         $scope['operator_scope'],
                         $lineKey,
-                        $couponId
+                        $couponId,
+                        $payload['discountAmountCents'] ?? null
                     )
                     : $workspace->removeLineCouponInTx(
                         self::workspaceContextId((array)($scope['contexts'] ?? [])),

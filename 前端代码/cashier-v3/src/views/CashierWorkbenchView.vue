@@ -41,6 +41,7 @@ import EntitlementSelectorOverlay from '@/components/cashier/EntitlementSelector
 import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSelectorOverlay.vue'
+import { validAllowanceCents } from '@/services/couponAllowance'
 import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
@@ -4069,7 +4070,9 @@ function normalizeCouponSelector(selector = {}, line = {}) {
       ...coupon,
       couponId: String(coupon?.couponId || '')
     }))
-    .filter((coupon) => coupon.couponId)
+    // Upgrade credits use a separate settlement contract, not normal non-cash
+    // coupon tender. Do not offer an allowance that final checkout must reject.
+    .filter((coupon) => coupon.couponId && (Number(coupon.couponType) !== 3 || !line.cardOperationUpgrade))
   const belowMinimumCoupons = (Array.isArray(selector.belowMinimumCoupons) ? selector.belowMinimumCoupons : [])
     .map((coupon) => ({ ...coupon, couponId: String(coupon?.couponId || '') }))
     .filter((coupon) => coupon.couponId)
@@ -4084,6 +4087,7 @@ function normalizeCouponSelector(selector = {}, line = {}) {
       ? '' : String(line.couponId || selector.selectedCouponId || ''),
     selectedCouponIds: Number(line.couponUseMode || 0) === 1 && Array.isArray(line.couponUserIds)
       ? line.couponUserIds.map(String) : [],
+    selectedAmountCents: Number(line.couponDiscountCents ?? line.couponDiscountAmountCents ?? 0),
     selectedCountOtherLines: cartLines.value.reduce((count, candidate) =>
       count + (String(candidate?.id || '') === String(line.id || '') || Number(candidate?.couponUseMode || 0) !== 1
         ? 0 : (Array.isArray(candidate.couponUserIds) ? candidate.couponUserIds.length : 0)), 0),
@@ -4154,6 +4158,7 @@ async function openCartLineCoupon(line, { present = true } = {}) {
           // checkout snapshot.  A delayed summary merge may replace the member
           // object while retaining this identity.
           memberId: String(currentMemberId.value || ''),
+          productId: Number(line.productId || line.sourceId || line.catalogId || 0),
           lineAmountCents,
           couponThresholdCents,
           orderReceivableCents,
@@ -4197,10 +4202,17 @@ async function saveLineCoupon(action, couponSelection = '') {
   isSavingLineCoupon.value = true
   try {
     const couponIds = Array.isArray(couponSelection) ? couponSelection.map(String) : []
-    const couponId = couponIds[0] || String(couponSelection || '')
+    const custom = couponSelection && typeof couponSelection === 'object' && !Array.isArray(couponSelection)
+      ? couponSelection : null
+    const couponId = couponIds[0] || String(custom?.couponId || couponSelection || '')
     const coupon = (couponSelector.value?.coupons || []).find((item) => String(item?.couponId || '') === couponId)
     // The read-only below-minimum list must never enter a local draft command.
     if (couponId && !coupon) return
+    // Never silently substitute the face value for a reusable coupon command.
+    // Remaining allowance is a read hint; checkout locks and revalidates it.
+    if (Number(coupon?.couponType) === 3
+      && !validAllowanceCents(custom?.amountCents, coupon, couponSelector.value?.lineCapacityCents)) return
+    if (custom && Number(coupon?.couponType) !== 3) return
     const chosen = couponIds.map((id) => (couponSelector.value?.coupons || [])
       .find((item) => String(item?.couponId || '') === id))
     if (couponIds.length && (chosen.some((item) => !item || Number(item.useMode) !== 1)
@@ -4220,7 +4232,7 @@ async function saveLineCoupon(action, couponSelection = '') {
             ? `${coupon?.name || '优惠券'} × ${couponIds.length}` : String(coupon?.name || '已选优惠券'),
           discountAmountCents: couponIds.length
             ? chosen.reduce((sum, item) => sum + Number(item.discountAmountCents || 0), 0)
-            : Math.max(0, Number(coupon?.discountAmountCents || 0))
+            : (Number(coupon?.couponType) === 3 ? custom.amountCents : Math.max(0, Number(coupon?.discountAmountCents || 0)))
         }
       : {}
     let result = await mutateCashierDraft(action, line, payload)
@@ -5281,6 +5293,7 @@ async function changeLineQuantityWithCoupon(line, delta) {
   const isOrderCoupon = Number(line.couponUseMode || 0) === 1
     && Array.isArray(line.couponUserIds) && line.couponUserIds.length > 0
   const selectedCouponId = isOrderCoupon ? '' : String(line.couponId || '')
+  const selectedAmountCents = Number(line.couponDiscountCents ?? line.couponDiscountAmountCents ?? 0)
   if (selectedCouponId || isOrderCoupon) isRefreshingLineCoupon.value = true
   try {
     const result = await mutateCashierDraft('change-cart-line-quantity', line, { delta })
@@ -5311,11 +5324,14 @@ async function changeLineQuantityWithCoupon(line, delta) {
     const coupon = (selector?.coupons || []).find((item) => String(item.couponId) === selectedCouponId)
     const current = cartLines.value.find((item) => String(item.id) === String(line.id))
     if (scopeKey !== currentCashierDraftScopeKey.value || Number(current?.quantity || 0) !== quantity) return result
-    if (coupon) {
+    // Quantity edits may recompute an ordinary face/percentage, but must never
+    // replace the operator's explicit allowance amount with its full balance.
+    const reusable = Number(coupon?.couponType) === 3
+    if (coupon && (!reusable || validAllowanceCents(selectedAmountCents, coupon, selector.lineCapacityCents))) {
       const applied = await mutateCashierDraft('apply-line-coupon', current, {
         couponId: selectedCouponId,
         couponSummary: String(coupon.name || '已选优惠券'),
-        discountAmountCents: Math.max(0, Number(coupon.discountAmountCents || 0))
+        discountAmountCents: reusable ? selectedAmountCents : Math.max(0, Number(coupon.discountAmountCents || 0))
       })
       if (['success', 'succeeded'].includes(resultStatus(applied))) return result
     }
@@ -8141,7 +8157,7 @@ onBeforeUnmount(() => {
                       :title="cartActionLabel('优惠券', line.couponSummary)"
                       @click="openCartLineCoupon(line)"
                     >
-                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}</span></template>
+                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}<template v-if="line.couponDiscountCents > 0"> · 抵用 {{ formatMoney(line.couponDiscountCents / 100) }}</template></span></template>
                     </button>
                   </div>
                   <div class="cart-line__meta-slot cart-line__meta-slot--craftsmen">

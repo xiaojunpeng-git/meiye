@@ -52,9 +52,10 @@
                 :disabled="[1].includes(type)"
               ></Input>
             </FormItem>
-            <FormItem label="优惠券面值：" required>
+            <FormItem :label="formData.coupon_type == 3 ? '券总额度：' : '优惠券面值：'" required>
               <InputNumber
-                v-if="formData.coupon_type == 1"
+                v-if="formData.coupon_type != 2"
+                :precision="formData.coupon_type == 3 ? 0 : undefined"
                 :min="1"
                 :max="100000000"
                 v-model="formData.coupon_price"
@@ -71,7 +72,7 @@
                 :disabled="[1].includes(type)"
               ></InputNumber>
               <span class="ml10">{{
-                formData.coupon_type == 1 ? '元' : '%'
+                formData.coupon_type != 2 ? '元' : '%'
               }}</span>
             </FormItem>
             <FormItem label="最高优惠：" v-if="formData.coupon_type == 2">
@@ -112,7 +113,7 @@
             <FormItem label="会员转赠：">
               <RadioGroup v-model="formData.allow_transfer">
                 <Radio :label="0">不允许</Radio>
-                <Radio :label="1">允许</Radio>
+                <Radio :label="1" :disabled="formData.coupon_type == 3">允许</Radio>
               </RadioGroup>
               <Button
                 v-if="type === 1"
@@ -511,6 +512,7 @@ export default {
       couponType: [
         { name: '满减券', title: '满N元减N元', id: 1 },
         { name: '折扣券', title: '满N元打N折', id: 2 },
+        { name: '多次抵用券', title: '总额度分次抵用', id: 3 },
       ],
       disabled: false,
       transferSettingSaving: false,
@@ -611,6 +613,11 @@ export default {
       }
       this.formData.coupon_price = 0;
       this.formData.coupon_type = item.id;
+      // Reusable allowance cannot inherit a hidden order tier or transfer switch.
+      if (item.id === 3) {
+        this.formData.use_mode = 0;
+        this.formData.allow_transfer = 0;
+      }
     },
     // 品类
     getCategoryList() {
