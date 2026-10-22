@@ -1,0 +1,52 @@
+{
+  "database": "mohe_008",
+  "readOnly": true,
+  "catalogs": [
+    {
+      "result": "PASS",
+      "keys": [
+        "contractVersion",
+        "types",
+        "categories",
+        "items",
+        "customCardProjects",
+        "itemCount",
+        "complete",
+        "priceAuthority",
+        "dataScope"
+      ],
+      "fingerprint": "4f6338101187fd3f7c8ec2058b2e21cc7c6b796598c75e36a9061c4c0caac417"
+    },
+    {
+      "result": "PASS",
+      "keys": [
+        "contractVersion",
+        "types",
+        "categories",
+        "items",
+        "customCardProjects",
+        "itemCount",
+        "complete",
+        "priceAuthority",
+        "dataScope"
+      ],
+      "fingerprint": "01d80013a5dc46a2ea12d204367e0d5f1c02a1e61a39ffab73aab47ed947202f"
+    },
+    {
+      "result": "PASS",
+      "keys": [
+        "contractVersion",
+        "types",
+        "categories",
+        "items",
+        "customCardProjects",
+        "itemCount",
+        "complete",
+        "priceAuthority",
+        "dataScope"
+      ],
+      "fingerprint": "4d0dc36a9fa703c8df91091dddf928f790efe9f644318499244df551af4d9639"
+    }
+  ],
+  "unchangedFromBefore": true
+}

@@ -1,0 +1,14 @@
+{
+  "commit": "f4005e6682bfe04d2397ffa1bd76c8141fac2c40",
+  "site": "008",
+  "state": "deployed-verified",
+  "remote": "/www/backup/m010-008-f4005e66-20261022",
+  "prepared": "{\"result\":\"PASS\",\"mode\":\"prepare\",\"commit\":\"f4005e6682bfe04d2397ffa1bd76c8141fac2c40\",\"files\":8,\"protectedFiles\":9,\"backup\":\"\\/www\\/backup\\/m010-008-f4005e66-20261022\"}\n",
+  "beforeProbe": "{\"result\":\"PASS\",\"database\":\"mohe_008\",\"readOnly\":true,\"schemaReady\":true,\"delayedActivationContract\":true,\"templateLookups\":0,\"latestUpgrade\":{\"upgrade_key\":\"20261021-047-sales-debt-balance-settlement\",\"code_version\":\"45090ffed0bcc5d25a60e4076860bc87bf473afd\",\"executed_at\":\"2026-10-21 18:15:08\"}}\n",
+  "at": "2026-10-22T02:33:34.853Z",
+  "install": "{\"result\":\"PASS\",\"mode\":\"install\",\"commit\":\"f4005e6682bfe04d2397ffa1bd76c8141fac2c40\",\"files\":8,\"protectedFiles\":9,\"backup\":\"\\/www\\/backup\\/m010-008-f4005e66-20261022\"}\n",
+  "verify": "{\"result\":\"PASS\",\"mode\":\"verify\",\"commit\":\"f4005e6682bfe04d2397ffa1bd76c8141fac2c40\",\"files\":8,\"protectedFiles\":9,\"backup\":\"\\/www\\/backup\\/m010-008-f4005e66-20261022\"}\n",
+  "afterProbe": "{\"result\":\"PASS\",\"database\":\"mohe_008\",\"readOnly\":true,\"schemaReady\":true,\"delayedActivationContract\":true,\"templateLookups\":130,\"latestUpgrade\":{\"upgrade_key\":\"20261021-047-sales-debt-balance-settlement\",\"code_version\":\"45090ffed0bcc5d25a60e4076860bc87bf473afd\",\"executed_at\":\"2026-10-21 18:15:08\"}}\n",
+  "serviceStatus": "active\n",
+  "verifiedAt": "2026-10-22T02:34:15.415Z"
+}
