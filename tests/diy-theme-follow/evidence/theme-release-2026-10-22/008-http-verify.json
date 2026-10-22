@@ -1,0 +1,30 @@
+{
+  "site": "008",
+  "results": [
+    {
+      "entry": "member",
+      "assetsVerified": 3
+    },
+    {
+      "entry": "admin",
+      "assetsVerified": 4
+    },
+    {
+      "entry": "cashier",
+      "assetsVerified": 2
+    }
+  ],
+  "theme": {
+    "status": 200,
+    "msg": "ok",
+    "data": {
+      "status": 7,
+      "navigation": 1
+    }
+  },
+  "regression": {
+    "projection": "PASS",
+    "menuCount": 14
+  },
+  "time": "2026-10-22T05:15:44.413Z"
+}

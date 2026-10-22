@@ -1,0 +1,21 @@
+{
+  "localCommit": "bdd3d7bf869d69b239cece5dcb2d04eea7848e5f",
+  "pushedCommit": "4f19bba1ae2db7e70d5abe76319c20d04edc41ca",
+  "branch": "release/member-theme-save-20261022",
+  "parent": "a94dd8d560bb017cc86d31246ff0c1f373a05a74",
+  "files": [
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/acceptance.md",
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/booking-wine-320.png",
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/booking-wine-375.png",
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/browser-result.json",
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/fixed-version.json",
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/fixed.patch",
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/member-response.json",
+    "tests/diy-theme-follow/evidence/theme-save-2026-10-22/mysql-result.txt",
+    "tests/diy-theme-follow/save-mysql.php",
+    "tests/diy-theme-follow/saved-theme-browser.cjs",
+    "后端代码/app/controller/admin/v1/diy/Diy.php",
+    "后端代码/app/services/diy/DiyServices.php"
+  ],
+  "otherStagingUnchanged": true
+}
