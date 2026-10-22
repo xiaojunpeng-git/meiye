@@ -1,0 +1,17 @@
+{
+  "terminal": "member",
+  "variant": "candidate",
+  "commit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+  "tree": "5e7f3f92ea43f545216d594a69263db1d3c2b774",
+  "canonical": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "input": "/private/tmp/m008-emerg-r2-release-20261022/candidate-readonly/前端代码/uniapp",
+  "output": "/private/tmp/m008-emerg-r2-release-20261022/member-candidate",
+  "inputFiles": 915,
+  "readonly": true,
+  "node": "v16.20.2",
+  "runtimeConfig": {
+    "source": "canonical ignored config/app.js",
+    "sha256": "a25d7e24e1009f635b1ad8d0f6040f627b2bd34c9e10b7d59864e296585859c4",
+    "h5ApiOrigin": "window.location origin"
+  }
+}

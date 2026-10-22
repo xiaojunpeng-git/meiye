@@ -1,0 +1,48 @@
+{
+  "entries": {
+    "member": {
+      "sha256": "0bd0a7f8531b56c8a17a7becb853034f4f4159cdb70be98257869e9adb506c14",
+      "assets": {
+        "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+        "/static/js/chunk-vendors.a2062cf9.js": "d4fefd3e14c02681ddd71f4f2d84eb2fa6a9b443720560fc39de72bcec20b30d",
+        "/static/js/index.38f32eb8.js": "c3f6fadc27b2dda14f047d0e0035347f05cf6a83a0db079f3562e814d74dc96d"
+      }
+    },
+    "admin": {
+      "sha256": "080e3f4840f7a54e15fe5e8b470d15a116a8b0a6f73c11c091103b5fd0d15ece",
+      "assets": {
+        "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+        "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+        "/view_admin/js/chunk-vendors.72e8295d.js": "9c49cbcaba6169acb096b3eecebc45fabf3992d241fb2dae8970ac7f5e077fa8",
+        "/view_admin/js/app.0d1b7bdd.js": "6d97b1f288dec153b00387313bd351945202cd27b92bf267f7512669f5668a03"
+      }
+    },
+    "cashier": {
+      "sha256": "9c985261952082da6423625691668d6998d5c6e96e2b2619a04af3ce1d88dcda",
+      "assets": {
+        "/view_cashier_v3/assets/index-24ae7b5e.js": "48e36f9226625d5b2f46b4e928a7a19a14dcdc1f42d490476622e1fbf5cbf77c",
+        "/view_cashier_v3/assets/index-00e0c3b9.css": "00e0c3b907e30d60045e6cffc5afb1ed1616d332601e6f5c3317a2aa304c9b2a"
+      }
+    }
+  },
+  "api": {
+    "/api/index": {
+      "status": 200,
+      "dataSha256": "d401faf5cb59a41039e7dab13c3d5d623919058fed47241c7da3e7f68a0bff44"
+    },
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "d9e793dc146770f207354183e49bdaaa66fb3d4c48b7e0dc0ace146cadfa42c2"
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "0c156e776daec8abf2f414646e47564b6139883310d0f141b7507dd9619b35ca"
+    }
+  },
+  "affectedAssets": {
+    "public/static/js/pages-activity-reservation-index~pages-activity-therapist_list-index.fb4f42f1.js": "369f5d77b3e7c7ef47343dd233fd097144c6b5ec6c9cd24c851380c34daf4987",
+    "public/static/js/pages-activity-therapist_list-index.2447bcff.js": "e6a8d996a6abdb8b27bd83dc294eac93caaea9917e3121e59bc6b07f3f830fa4",
+    "public/static/js/pages-goods-member_checkout-index.b7f0197e.js": "e7c16f7233d1ce1842e786688ee6b36e93846b77165ec086ae7b27744f21c9d1",
+    "public/static/js/pages-goods_details-index.50aed6fa.js": "27f0ebbddd1e42cf983cce00070bdf21c06af4c6a5eeefc111e9870afa8728bd"
+  }
+}

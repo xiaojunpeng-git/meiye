@@ -1,0 +1,23 @@
+{
+  "commit": "fb574124d2cd63652822693d6350eae98b297bf8",
+  "branch": "release/member-emerg-r2-20261022",
+  "remote": "origin",
+  "parent": "f18a326340cfc3cec55a5a1e5b26cb8c6955b0d3",
+  "businessCommit": "3b7c7cdce45942742d2f076c38ff498672e6e88f",
+  "files": [
+    "tests/member-checkout/evidence/product-footer-2026-10-22/acceptance.md",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/browser-cases.json",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/fixed-version.json",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/fixed.patch",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/h5-checkout-wine-375.png",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/h5-product-wine-375.png",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/h5-result-wine-375.png",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/mini-verification.json",
+    "tests/member-checkout/evidence/product-footer-2026-10-22/stress-cases.json",
+    "前端代码/uniapp/pages/activity/therapist_list/index.vue",
+    "前端代码/uniapp/pages/goods/member_checkout/index.vue",
+    "前端代码/uniapp/pages/goods_details/index.vue"
+  ],
+  "memberSourceTree": "050edfa9f06ef1e429e5dd891acce12ed21285b1",
+  "pushedAt": "2026-10-22T04:19:27.635Z"
+}
