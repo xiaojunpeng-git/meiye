@@ -1748,6 +1748,9 @@ Route::group('adminapi', function () {
      * 报表
      */
     Route::group('report', function () {
+        Route::get('basic/catalog', 'v1.report.UnifiedReport/basicCatalog')->option(['real_name' => '基础报表目录']);
+        Route::get('basic/query', 'v1.report.UnifiedReport/basicQuery')->option(['real_name' => '基础报表统一查询']);
+        Route::post('basic/save', 'v1.report.UnifiedReport/basicSave')->option(['real_name' => '保存刷单登记']);
         Route::get('business-catalog', 'v1.report.BusinessReportCatalog/index')->option(['real_name' => '业务报表中心目录']);
         Route::get('unified/catalog', 'v1.report.UnifiedReport/catalog')->option(['real_name' => '门店业务报表目录']);
         Route::get('unified/scope', 'v1.report.UnifiedReport/scope')->option(['real_name' => '门店业务报表权限范围']);

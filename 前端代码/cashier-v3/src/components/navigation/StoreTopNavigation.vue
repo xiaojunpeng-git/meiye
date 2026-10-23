@@ -9,6 +9,7 @@ import { configuredNavigationGroups } from '../../../../shared/storeNavigationGr
 import { ORDER_RECORD_TYPES } from '@/constants/orderRecordTypes'
 import { STORE_REPORT_TABS } from '@/constants/storeBusinessReports'
 import { queryStoreBusinessReportCatalog } from '@/services/storeBusinessReportApi'
+import { loadBasicReportCatalog } from '@/services/basicReportApi'
 
 const props = defineProps({ entries: { type: Array, default: () => [] }, rules: { type: Array, default: () => [] }, storeName: String, operator: String, operatorProfile: { type: Object, default: () => ({}) }, canSwitchStores: Boolean, pendingHangCount: Number, inventoryOpen: Boolean, activeInventoryKey: String, contextId: String })
 const emit = defineEmits(['navigate', 'switch-store', 'password', 'logout'])
@@ -19,7 +20,11 @@ const menuPosition = ref({})
 const reports = ref([])
 const reportError = ref('')
 const reportsLoading = ref(false)
+const basicReports = ref([])
+const basicReportError = ref('')
+const basicReportsLoading = ref(false)
 let requestId = 0
+let basicRequestId = 0
 const quickKeys = ['cashier', 'hang', 'room', 'reservation', 'member', 'fund']
 // 快捷入口与同一配置树求交：岗位未授权或后台停用功能/祖先时，两处同时隐藏。
 const quickEntries = computed(() => {
@@ -27,9 +32,10 @@ const quickEntries = computed(() => {
   return quickKeys.map(key => props.entries.find(item => item.key === key)).filter(entry => entry && visible.has(entry.key))
 })
 const reportEntry = computed(() => props.entries.find(item => item.featureCode === 'cashier.v3.data'))
+const basicReportEntry = computed(() => props.entries.find(item => item.navigationKey === 'report.basic'))
 // 身份/路由白名单仅负责找到原处理器；名称、层级、排序、显示开关全部取配置树。
 const navigationHandlers = computed(() => [
-  ...props.entries.filter(entry => entry.key !== 'inventory-presale-claim'),
+  ...props.entries.filter(entry => entry.key !== 'inventory-presale-claim' && entry.navigationKey !== 'report.basic'),
   ...props.entries.filter(entry => entry.key === 'inventory-presale-claim').map(entry => ({ ...entry, navigationKey: 'inventory.presale_claim' })),
   ...props.entries.filter(entry => entry.key === 'order').flatMap(entry => ORDER_RECORD_TYPES.map(type => ({ ...entry,
     key: `order-${type.key}`, navigationKey: `order.${type.key}`, orderType: type.key,
@@ -37,6 +43,10 @@ const navigationHandlers = computed(() => [
   ...(reportEntry.value ? reports.value.map(report => ({ ...reportEntry.value, key: `report-${report.code}`,
     navigationKey: `report.${report.code}`, reportCode: report.code,
     to: { name: 'cashier-v3-store-business-reports', params: { report: report.code } } })) : []),
+  // 基础报表以服务端目录提供的稳定code直达原页面；层级仍由同一持久化导航树决定。
+  ...(basicReportEntry.value ? basicReports.value.map(report => ({ ...basicReportEntry.value,
+    key: `basic-report-${report.code}`, navigationKey: `report.${report.code}`, reportCode: report.code,
+    to: { name: 'cashier-v3-basic-reports', params: { report: report.code } } })) : []),
   { key: 'account-password', navigationKey: 'account.password', accountAction: 'password' },
   { key: 'account-logout', navigationKey: 'account.logout', accountAction: 'logout' }
 ])
@@ -84,16 +94,33 @@ async function loadReports() {
   } catch (_) { if (id === requestId) reportError.value = '报表目录加载失败，可进入报表页面查看或重试。' }
   finally { if (id === requestId) reportsLoading.value = false }
 }
+/** 两个报表目录独立失败、独立过期，不能因新增目录失败而隐藏旧报表。 */
+async function loadBasicReports() {
+  if (!basicReportEntry.value || basicReportsLoading.value || basicReports.value.length) return
+  const id = ++basicRequestId
+  basicReportsLoading.value = true; basicReportError.value = ''
+  try {
+    const catalog = await loadBasicReportCatalog(false)
+    if (id !== basicRequestId) return
+    basicReports.value = (Array.isArray(catalog) ? catalog : []).filter(report => report.available)
+  } catch (_) { if (id === basicRequestId) basicReportError.value = '基础报表目录加载失败，请刷新后重试。' }
+  finally { if (id === basicRequestId) basicReportsLoading.value = false }
+}
 function outside(event) { if (!root.value?.contains(event.target)) openGroup.value = '' }
 function escape(event) { if (event.key === 'Escape') openGroup.value = '' }
 watch(() => route.fullPath, () => { openGroup.value = '' })
 // 切账号/门店时丢弃旧目录和在途请求，不能把旧会话菜单带入新工作台。
-watch(() => props.contextId, () => { requestId++; reports.value = []; reportsLoading.value = false; reportError.value = ''; openGroup.value = ''; void loadReports() })
+watch(() => props.contextId, () => {
+  requestId++; basicRequestId++; reports.value = []; basicReports.value = []
+  reportsLoading.value = false; basicReportsLoading.value = false; reportError.value = ''; basicReportError.value = ''; openGroup.value = ''
+  void loadReports(); void loadBasicReports()
+})
 watch(reportEntry, () => { void loadReports() }, { immediate: true })
+watch(basicReportEntry, () => { void loadBasicReports() }, { immediate: true })
 // 子菜单加载或配置改变可能撑宽面板，重新避让视口边界。
 watch(groups, resizeMenu)
 onMounted(() => { document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape); window.addEventListener('resize', resizeMenu) })
-onBeforeUnmount(() => { requestId++; document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); window.removeEventListener('resize', resizeMenu) })
+onBeforeUnmount(() => { requestId++; basicRequestId++; document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); window.removeEventListener('resize', resizeMenu) })
 </script>
 
 <template>
@@ -136,6 +163,8 @@ onBeforeUnmount(() => { requestId++; document.removeEventListener('pointerdown',
         </div>
         <p v-if="reportsLoading && group.entries.some(row => row.entry?.featureCode === 'cashier.v3.data')" class="store-menu__hint">正在加载报表目录…</p>
         <p v-else-if="reportError && group.entries.some(row => row.entry?.featureCode === 'cashier.v3.data')" class="store-menu__hint" role="alert">{{ reportError }}</p>
+        <p v-if="basicReportsLoading && group.entries.some(row => row.entry?.featureCode === 'cashier.v3.data')" class="store-menu__hint">正在加载基础报表目录…</p>
+        <p v-else-if="basicReportError && group.entries.some(row => row.entry?.featureCode === 'cashier.v3.data')" class="store-menu__hint" role="alert">{{ basicReportError }}</p>
       </section>
     </template>
   </header>

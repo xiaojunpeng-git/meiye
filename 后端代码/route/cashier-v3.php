@@ -57,6 +57,9 @@ Route::group('cashierapi/v3', function () {
         // 报表只读统一事实服务；门店范围由 V3 会话权限生成，客户端只能缩小范围。
         Route::get('report/unified/catalog', 'Report/catalog')
             ->option(['real_name' => '收银V3经营报表目录']);
+        Route::get('report/basic/catalog', 'Report/basicCatalog')->option(['real_name' => '基础报表目录']);
+        Route::get('report/basic/query', 'Report/basicQuery')->option(['real_name' => '基础报表统一查询']);
+        Route::post('report/basic/save', 'Report/basicSave')->option(['real_name' => '保存刷单登记']);
         Route::get('report/unified/scope', 'Report/scope')
             ->option(['real_name' => '收银V3经营报表权限范围']);
         Route::get('report/unified/query', 'Report/query')

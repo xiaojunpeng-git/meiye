@@ -87,6 +87,16 @@ final class StorePermissionCatalogServices
         $items[-29020]=['id'=>-29020,'title'=>'员工薪资汇总月报表','navigation_key'=>'report.phase_six_salary_summary','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>190];
         $items[-29021]=['id'=>-29021,'title'=>'员工薪资明细月报表','navigation_key'=>'report.phase_six_salary_detail','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>200];
         $items[-29022]=['id'=>-29022,'title'=>'六维数据分析表','navigation_key'=>'report.six_dimension_analysis','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>210];
+        // R51基础报表是数据中心内与“数据”并列的heading，不新增顶部大类或可授权功能。
+        $items[-29023]=['id'=>-29023,'title'=>'基础报表','navigation_key'=>'','owner_feature'=>'cashier.v3.data','parent_id'=>-2804,'sort'=>30];
+        $basicIds = self::basicReportNavigationIds();
+        foreach (\app\services\report\BasicReportCatalogServices::entries() as $index => $entry) {
+            // 编号由显式code映射固定；目录调整顺序或名称只能影响展示，不能改变持久化身份。
+            if (!isset($basicIds[$entry['code']])) throw new \LogicException('基础报表缺少稳定菜单编号：' . $entry['code']);
+            $id = $basicIds[$entry['code']];
+            $items[$id] = ['id'=>$id,'title'=>$entry['name'],'navigation_key'=>'report.'.$entry['code'],
+                'owner_feature'=>'cashier.v3.data','parent_id'=>-29023,'sort'=>$index*10];
+        }
         $items[-30001]=['id'=>-30001,'title'=>'全部订单','navigation_key'=>'order.all','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>0];
         $items[-30002]=['id'=>-30002,'title'=>'消费订单','navigation_key'=>'order.sales','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>10];
         $items[-30003]=['id'=>-30003,'title'=>'充值订单','navigation_key'=>'order.recharge','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>20];
@@ -104,6 +114,34 @@ final class StorePermissionCatalogServices
         return $items;
     }
 
+    /** R51持久化身份只增不重排；标题及显示顺序统一取基础报表目录，不复制第二份业务目录。 */
+    private static function basicReportNavigationIds(): array
+    {
+        return [
+            'basic_store_summary' => -33001,
+            'basic_cross_store_settlement' => -33002,
+            'basic_brush_registration' => -33003,
+            'basic_store_item_sales' => -33004,
+            'basic_item_consumption' => -33005,
+            'basic_writeoff_detail' => -33006,
+            'basic_product_sales' => -33007,
+            'basic_salary_realtime' => -33008,
+            'basic_employee_summary' => -33009,
+            'basic_employee_item_sales' => -33010,
+            'basic_employee_service_home_store' => -33011,
+            'basic_employee_service_store' => -33012,
+            'basic_employee_performance_detail' => -33013,
+            'basic_balance_order_detail' => -33014,
+            'basic_balance_order_summary' => -33015,
+            'basic_daily_reconciliation' => -33016,
+            'basic_unconsumed_summary' => -33017,
+            'basic_unconsumed_detail' => -33018,
+            'basic_followup_employee_detail' => -33019,
+            'basic_customer_entitlements' => -33020,
+            'basic_unconsumed_as_of_detail' => -33021,
+        ];
+    }
+
     /** 显式补齐导航子入口，不改岗位及业务事实；再次执行只补缺项，不覆盖已配置层级。 */
     public function initializeNavigationItems(): void
     {
@@ -117,6 +155,41 @@ final class StorePermissionCatalogServices
             $json=json_encode($rows,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
             Db::name(self::TABLE)->where('id',1)->update(['rules_json'=>$json,'revision'=>(int)$before['revision']+1,'updated_at'=>time()]);
             Db::name('store_v3_permission_audit')->insert(['operator_id'=>0,'action'=>'INITIALIZE_NAVIGATION_ITEMS','before_json'=>$before['rules_json'],'after_json'=>$json,'created_at'=>time()]);
+        });
+    }
+
+    /** R51显式把旧单入口迁成heading并补齐子项；不改其他规则、岗位授权或旧审计。 */
+    public function initializeBasicReportNavigation(): void
+    {
+        Db::transaction(function () {
+            $before = Db::name(self::TABLE)->where('id', 1)->lock(true)->find();
+            if (!$before) throw new \RuntimeException('请先初始化门店端权限规则');
+            $rows = json_decode($before['rules_json'], true);
+            $definitions = self::navigationItems();
+            $required = [-29023 => $definitions[-29023]];
+            foreach (self::basicReportNavigationIds() as $id) $required[$id] = $definitions[$id];
+            $changed = false;
+            foreach ($rows as &$row) {
+                $id = (int)$row['id'];
+                if (!isset($required[$id])) continue;
+                // 仅旧report.basic需要强制移层级；已经迁成heading后尊重管理员配置，停用不重启。
+                if ($id === -29023 && ($row['navigation_key'] ?? '') === 'report.basic') {
+                    $row['navigation_key'] = '';
+                    $row['parent_id'] = -2804;
+                    $row['sort'] = 30;
+                    $changed = true;
+                }
+                unset($required[$id]);
+            }
+            unset($row);
+            if (!$changed && !$required) return;
+            $rows = array_merge($rows, array_values($required));
+            // 完整目录照常校验，但不以标准定义重写其他节点的既有配置或扩展元数据。
+            $this->validateRows($rows);
+            $json = json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            Db::name(self::TABLE)->where('id', 1)->update(['rules_json' => $json, 'revision' => (int)$before['revision'] + 1, 'updated_at' => time()]);
+            Db::name('store_v3_permission_audit')->insert(['operator_id' => 0, 'action' => 'INITIALIZE_BASIC_REPORT_NAVIGATION',
+                'before_json' => $before['rules_json'], 'after_json' => $json, 'created_at' => time()]);
         });
     }
 

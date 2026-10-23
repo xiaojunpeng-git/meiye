@@ -13,6 +13,7 @@ import ManagementCenterView from '@/views/ManagementCenterView.vue'
 import BusinessDashboardView from '@/views/BusinessDashboardView.vue'
 import StoreTargetDashboardView from '@/views/StoreTargetDashboardView.vue'
 import StoreBusinessReportView from '@/views/StoreBusinessReportView.vue'
+import BasicReportsView from '@/views/BasicReportsView.vue'
 import MemberDashboardView from '@/views/MemberDashboardView.vue'
 import GroupManagementDashboardView from '@/views/GroupManagementDashboardView.vue'
 import ProductDashboardView from '@/views/ProductDashboardView.vue'
@@ -30,6 +31,7 @@ import { bootstrapCashierV3Workbench, hasCashierV3Session } from '@/services/cas
 import { canUseCashierV3Feature, useCashierV3State } from '@/services/cashierV3Bridge'
 
 const routeFeatureCodes = Object.freeze({
+  'cashier-v3-basic-reports': 'cashier.v3.data',
   'cashier-v3-cashier': 'cashier.v3.cashier',
   'cashier-v3-writeoff': 'cashier.v3.writeoff',
   'cashier-v3-replacement': 'cashier.v3.writeoff',
@@ -76,6 +78,7 @@ export function firstGrantedRouteName() {
 }
 
 const routes = [
+  { path: '/platform/basic-reports/:report?', name: 'cashier-v3-platform-basic-reports', component: BasicReportsView, meta: { platformReport: true, title: '基础报表' } },
   { path: '/entry', name: 'cashier-v3-entry', component: RoutePlaceholderView },
   { path: '/login', name: 'cashier-v3-login', component: StoreLoginView, meta: { title: '门店端登录' } },
   {
@@ -251,6 +254,10 @@ const routes = [
         name: 'cashier-v3-store-business-reports',
         component: StoreBusinessReportView,
         meta: { title: '门店运营', description: '门店运营报表统一读取 V3 事实、指标与数据权限服务。' }
+      },
+      {
+        path: 'data/basic-reports/:report?', name: 'cashier-v3-basic-reports', component: BasicReportsView,
+        meta: { title: '基础报表' }
       }
     ]
   }

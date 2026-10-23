@@ -347,6 +347,7 @@ const topNavigationEntries = computed(() => [
   ...configuredNavigation(menuDefinitions).filter(item => canUseFeature(item.featureCode)),
   ...configuredNavigation(managementFeatureDefinitions).filter(item => canUseFeature(item.featureCode)),
   ...(canUseFeature('cashier.v3.data') ? [{ key: 'reports', label: '全部报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-store-business-reports' } }] : []),
+  ...(canUseFeature('cashier.v3.data') ? [{ key: 'basic-reports', navigationKey: 'report.basic', label: '基础报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-basic-reports' } }] : []),
   ...visibleInventoryFeatureItems.value.map(entry => ({ ...entry, key: 'inventory-' + entry.key, inventory: entry }))
 ])
 function navigateTopMenu(entry) {
