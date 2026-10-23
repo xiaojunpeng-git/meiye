@@ -1,0 +1,23 @@
+{
+  "site": "008",
+  "result": "PASS",
+  "APIDataMocked": false,
+  "readOnly": true,
+  "thirdPartySDKTested": false,
+  "results": [
+    {
+      "width": 320,
+      "regionCount": 3,
+      "actualAPI": true,
+      "horizontalOverflow": false,
+      "errors": []
+    },
+    {
+      "width": 375,
+      "regionCount": 3,
+      "actualAPI": true,
+      "horizontalOverflow": false,
+      "errors": []
+    }
+  ]
+}
