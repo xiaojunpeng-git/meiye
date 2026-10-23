@@ -181,7 +181,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $projection['open-card-benefits'] = self::FEATURE_MEMBER;
 
         $projection['query-query-entities'] = self::POLICY_QUERY_ENTITIES;
-        $projection['query-staff'] = self::FEATURE_MANAGEMENT;
+        $projection['query-staff'] = 'cashier.v3.management.staff';
         $projection['open-management-entry'] = self::FEATURE_MANAGEMENT;
 
         return CashierV3ActionManifest::buildModuleActions(self::OWNER, $command, $projection);

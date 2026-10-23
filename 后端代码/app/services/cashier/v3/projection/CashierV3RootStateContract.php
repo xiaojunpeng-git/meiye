@@ -145,6 +145,7 @@ class CashierV3RootStateContract
             'sessionMode' => (string)($extras['sessionMode'] ?? 'store_staff'),
             'storeName' => (string)($extras['storeName'] ?? ''),
             'currentStore' => $extras['currentStore'] ?? ['id' => null, 'name' => ''],
+            'navigationRules' => $extras['navigationRules'] ?? [],
             'featurePermissions' => $extras['featurePermissions'] ?? new \stdClass(),
             'operationPermissions' => $extras['operationPermissions'] ?? new \stdClass(),
             'workspace' => $extras['workspace'] ?? [

@@ -2718,6 +2718,9 @@ Route::group('adminapi', function () {
             'update' => '修改系统配置',
             'delete' => '删除系统配置'
         ]]);
+        // 独立门店端目录；控制器显式复核平台权限，不能沿用未知路由默认放行。
+        Route::get('store-permissions', 'v1.system.StorePermissions/index')->option(['real_name'=>'门店端权限规则']);
+        Route::post('store-permissions', 'v1.system.StorePermissions/save')->option(['real_name'=>'保存门店端权限规则']);
         //权限菜单资源路由
         Route::resource('menus', 'v1.system.SystemMenus')->option(['real_name' => [
             'index' => '获取权限菜单列表',

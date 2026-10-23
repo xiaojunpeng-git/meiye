@@ -178,7 +178,7 @@ class CashierV3StaffFeatureOverrideServices
                 elseif (in_array($code, self::operationFeatureCodes(), true)) $names[$code] = ['code' => $code, 'label' => $title, 'module' => $module];
             }
         };
-        $walk(JobPositionPolicyServices::STORE_V3_MENU_TREE);
+        $walk((new \app\services\organization\StorePermissionCatalogServices())->menuTree());
         return array_values($names);
     }
 }

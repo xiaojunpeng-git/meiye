@@ -277,6 +277,7 @@ const EMPTY_BOOTSTRAP = {
     id: null,
     name: '当前门店'
   },
+  navigationRules: [],
   featurePermissions: {
     'cashier.v3.cashier': false,
     'cashier.v3.writeoff': false,
@@ -286,6 +287,14 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.hang': false,
     'cashier.v3.order_center': false,
     'cashier.v3.management_center': false,
+    'cashier.v3.fund': false,
+    'cashier.v3.care': false,
+    'cashier.v3.data': false,
+    'cashier.v3.targets': false,
+    'cashier.v3.management.staff': false,
+    'cashier.v3.management.rooms': false,
+    'cashier.v3.management.dashboard': false,
+
     'cashier.v3.member.create': false,
     'cashier.v3.member.batch': false,
     'cashier.v3.inventory.overview': false,
@@ -339,7 +348,8 @@ const EMPTY_BOOTSTRAP = {
   operator: {
     name: '当前账号',
     account: '',
-    roleName: ''
+    roleName: '',
+    profile: { name: '', phone: '', positions: [] }
   },
   pendingHangCount: 0,
   cashier: EMPTY_CASHIER,
@@ -460,6 +470,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
     id: 'store-1',
     name: '瑞昊一店'
   },
+  navigationRules: [],
   featurePermissions: {
     'cashier.v3.cashier': true,
     'cashier.v3.writeoff': true,
@@ -469,6 +480,14 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.hang': true,
     'cashier.v3.order_center': true,
     'cashier.v3.management_center': true,
+    'cashier.v3.fund': true,
+    'cashier.v3.care': true,
+    'cashier.v3.data': true,
+    'cashier.v3.targets': true,
+    'cashier.v3.management.staff': true,
+    'cashier.v3.management.rooms': true,
+    'cashier.v3.management.dashboard': true,
+
     'cashier.v3.member.create': true,
     'cashier.v3.member.batch': true,
     'cashier.v3.inventory.overview': true,
@@ -1913,6 +1932,7 @@ function normalizeBootstrap(rawBootstrap = {}) {
         || raw.storeId || raw.store_id || raw.store?.id || null,
       name: incomingCurrentStore.name || incomingCurrentStore.storeName || raw.storeName || base.currentStore.name
     },
+    navigationRules: Array.isArray(raw.navigationRules) ? raw.navigationRules : [],
     featurePermissions: {
       ...base.featurePermissions,
       ...incomingFeaturePermissions

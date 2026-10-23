@@ -246,11 +246,11 @@ const C3_ACTIONS = {
 }
 
 const C4_ACTIONS = entries(C4, ACTION_TYPE_PROJECTION, {
-  'query-business-dashboard-summary': FEATURE_MANAGEMENT,
-  'query-business-dashboard-trend': FEATURE_MANAGEMENT,
-  'query-business-dashboard-ranking': FEATURE_MANAGEMENT,
-  'query-store-target-dashboard': FEATURE_MANAGEMENT,
-  'open-business-dashboard-detail': FEATURE_MANAGEMENT
+  'query-business-dashboard-summary': 'cashier.v3.management.dashboard',
+  'query-business-dashboard-trend': 'cashier.v3.management.dashboard',
+  'query-business-dashboard-ranking': 'cashier.v3.management.dashboard',
+  'query-store-target-dashboard': 'cashier.v3.targets',
+  'open-business-dashboard-detail': 'cashier.v3.management.dashboard'
 })
 
 const C5_ACTIONS = {
@@ -369,7 +369,7 @@ const C5_ACTIONS = {
     'open-card-batch': FEATURE_MEMBER,
     'open-card-benefits': FEATURE_MEMBER,
     'query-query-entities': 'selector:query_entities',
-    'query-staff': FEATURE_MANAGEMENT,
+    'query-staff': 'cashier.v3.management.staff',
     'open-management-entry': FEATURE_MANAGEMENT
   })
 }
