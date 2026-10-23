@@ -26,6 +26,7 @@ final class CashierV3CheckoutProjectionServices
         'partner_collection' => '合作方收款',
         'other_collection' => '其他收款',
         'old_card_entry' => '旧数据录入',
+        'member_balance' => '余额支付',
     ];
 
     /** @var CashierV3CheckoutRequestRepository */
@@ -201,7 +202,9 @@ final class CashierV3CheckoutProjectionServices
             $method = (string)$row['payment_method'];
             if (!isset(self::PAYMENT_NAMES[$method])) throw self::failure('debt_repayment_collection_method_invalid');
             $resultLines[] = [
-                'id' => (string)$row['collection_id'], 'kind' => 'bookkeeping_collection',
+                'id' => (string)$row['collection_id'],
+                'kind' => $method === CashierV3SalesDebtBalanceServices::METHOD ? 'balance_deduction' : 'bookkeeping_collection',
+                'lineRole' => $method === CashierV3SalesDebtBalanceServices::METHOD ? 'balance_payment' : 'payment',
                 'method' => $method, 'name' => (string)($row['payment_method_name_snapshot'] ?? self::PAYMENT_NAMES[$method]),
                 'amount' => self::money((int)$row['amount_cents']), 'status' => 'succeeded',
                 'externalTransactionNo' => (string)$row['external_transaction_no_snapshot'],
@@ -209,6 +212,7 @@ final class CashierV3CheckoutProjectionServices
             ];
         }
         $amount = (int)$repayment['repayment_amount_cents'];
+        $balanceCents = CashierV3SalesDebtBalanceServices::balanceCents((string)$repayment['repayment_id']);
         return [
             'contractVersion' => self::CONTRACT_VERSION, 'businessType' => 'debt_repayment',
             'status' => 'succeeded', 'requestStatus' => 'succeeded',
@@ -224,7 +228,7 @@ final class CashierV3CheckoutProjectionServices
             'summary' => ['selectedCount'=>0,'originalAmount'=>self::money($amount),'discountAmount'=>0,'receivableAmount'=>self::money($amount),'entitlementActualAmount'=>0],
             'compositionCode' => 'sale_only',
             'composition' => ['code'=>'sale_only','lineRoles'=>[],'hasSale'=>false,'hasEntitlement'=>false,'primaryAction'=>'collect_payment','primaryActionLabel'=>'确认还款'],
-            'debtAmount' => 0, 'cashPerformanceAmount' => self::money($amount), 'balancePaymentAmount' => 0,
+            'debtAmount' => 0, 'cashPerformanceAmount' => self::money($amount - $balanceCents), 'balancePaymentAmount' => self::money($balanceCents),
             'payment' => ['methods'=>[],'selectedLines'=>[],'resultLines'=>$resultLines,'summary'=>['receivableAmount'=>self::money($amount),'selectedAmount'=>self::money($amount),'remainingAmount'=>0,'overpaidAmount'=>0]],
             'finalChanges' => [], 'commandContexts' => [],
         ];
@@ -244,10 +248,10 @@ final class CashierV3CheckoutProjectionServices
         if (!isset($projection['payment']) || !is_array($projection['payment'])) {
             throw self::failure('checkout_projection_payment_missing');
         }
-        // Sales-debt repayment accepts only the configured bookkeeping collection
-        // methods. It must not silently turn an old receivable into a balance
-        // deduction, for which the repayment authority has no ledger fields.
-        if ((string)($projection['businessType'] ?? '') === 'debt_repayment') {
+        // Existing wallet funds may settle sales debt, never recharge debt (circular credit).
+        if ((string)($projection['businessType'] ?? '') === 'debt_repayment'
+            && (!empty($projection['rechargeDebt']) || array_filter((array)($projection['orderLines'] ?? []),
+                static fn(array $line): bool => (string)($line['name'] ?? '') === '充值欠款补交'))) {
             $projection['payment']['balanceAvailable'] = false;
             $projection['payment']['availableBalance'] = 0;
             return $projection;

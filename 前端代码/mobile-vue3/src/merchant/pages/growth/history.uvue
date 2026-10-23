@@ -1,0 +1,22 @@
+<template><view class="history-page"><text class="history-kicker">每一步，都有来处</text><text class="history-title">完整成长记录</text><picker :range="labels" :value="typeIndex" :disabled="busy" @change="changeType"><view class="history-picker">{{ labels[typeIndex] || '选择记录类型' }} ▾</view></picker><text v-if="message.length>0" class="history-error">{{ message }}</text><text v-if="busy" class="history-note">正在查找成长足迹…</text><view v-for="r in rows" :key="r.id" class="history-card"><text class="history-card-title">{{ r.title }}</text><text class="history-note">{{ date(Number(r.occurred_at||0)) }}</text><text class="history-summary">{{ r.summary }}</text><text v-if="Number(r.task_id)>0" class="history-link" @tap="openTask(Number(r.task_id))">查看原任务与正式记录 →</text><view v-if="r.evidence && Array.isArray(r.evidence.asset_ids)"><text v-for="asset in r.evidence.asset_ids" :key="asset" class="history-link" @tap="growthViewAsset(Number(asset),0)">查看证书附件 →</text></view><text v-for="h in r.history||[]" :key="h.id" class="history-note">{{ h.reason }}</text></view><text v-if="!busy&&rows.length==0" class="history-empty">这一类暂时还没有记录</text><view class="history-pager"><button :disabled="busy||page<=1" @tap="load(page-1)">上一页</button><text>共 {{ total }} 条 · {{ page }} / {{ pages }}</text><button :disabled="busy||page>=pages" @tap="load(page+1)">下一页</button></view></view></template>
+<script setup lang="uts">
+import {growthRequest,growthViewAsset,growthTaskUrl} from '../../api/mobile-growth-client.uts'
+const types=ref<Array<string>>(['tasks','attempts','evaluations','coaching','points','certificates','jobs','organizations'])
+const labels=ref<Array<string>>(['学习与活动任务','正式练考结果','实操鉴定','带教记录','积分流水','证书记录','任职历史','组织归属历史'])
+const typeIndex=ref(0)
+const rows=ref<Array<any>>([])
+const page=ref(1)
+const pages=ref(1)
+const total=ref(0)
+const busy=ref(false)
+const message=ref('')
+onLoad((o:any)=>{let i=types.value.indexOf(String(o['kind']||'tasks'));if(i>=0)typeIndex.value=i;load(1)})
+// 列表和总数由后端同范围分页；不把摘要中的最近记录当作完整历史。
+function load(next:number):void{if(busy.value)return;busy.value=true;message.value='';growthRequest('profileHistory',{kind:types.value[typeIndex.value],page:next},(r:any)=>{busy.value=false;if(!r.ok){rows.value=[];message.value=r.message;return};rows.value=r.data.rows;page.value=Number(r.data.page);pages.value=Number(r.data.total_pages);total.value=Number(r.data.total)})}
+function changeType(e:any):void{typeIndex.value=Number(e.detail.value);load(1)}
+function date(value:number):string{return value>0?new Date(value*1000).toLocaleString():'原系统记录'}
+function openTask(id:number):void{growthRequest('task',{id:id},(r:any)=>{if(!r.ok){message.value=r.message;return};uni.navigateTo({url:growthTaskUrl(r.data)})})}
+</script>
+<style>
+.history-page{min-height:100vh;background-color:#f6f7f2;padding:25px 18px 95px;box-sizing:border-box;color:#25483f}.history-kicker{display:block;font-size:12px;color:#96895e}.history-title{display:block;font-size:26px;font-weight:700;margin-top:12px}.history-picker{padding:15px;margin-top:20px;background-color:#e7eee1;border-radius:10px;font-size:14px}.history-card{padding:20px;margin-top:16px;border:1px solid #e2e9da;border-radius:12px;background-color:#fff}.history-card-title{display:block;font-size:17px;line-height:27px}.history-note{display:block;font-size:12px;color:#7d8e73;line-height:23px;margin-top:8px}.history-summary{display:block;font-size:14px;line-height:26px;margin-top:10px;white-space:pre-wrap}.history-link{display:block;font-size:13px;color:#2d7053;line-height:26px;margin-top:12px}.history-error{display:block;padding:12px;background-color:#fff0e6;color:#a15839;border-radius:8px;margin-top:14px;font-size:13px}.history-empty{display:block;padding:55px 20px;color:#829177;text-align:center;font-size:14px}.history-pager{position:fixed;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:10px 18px;background-color:#fff;border-top:1px solid #e2e8da;font-size:12px}.history-pager button{font-size:12px;margin:0;padding:0 12px;background-color:#edf2e7;color:#446b42}
+</style>

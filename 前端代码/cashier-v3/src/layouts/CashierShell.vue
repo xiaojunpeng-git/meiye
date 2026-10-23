@@ -2,24 +2,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BadgeDollarSign from '@lucide/vue/dist/esm/icons/badge-dollar-sign.mjs'
-import Boxes from '@lucide/vue/dist/esm/icons/boxes.mjs'
 import CalendarDays from '@lucide/vue/dist/esm/icons/calendar-days.mjs'
 import ChartNoAxesCombined from '@lucide/vue/dist/esm/icons/chart-no-axes-combined.mjs'
-import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
-import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
 import ClipboardList from '@lucide/vue/dist/esm/icons/clipboard-list.mjs'
 import DoorOpen from '@lucide/vue/dist/esm/icons/door-open.mjs'
 import HeartHandshake from '@lucide/vue/dist/esm/icons/heart-handshake.mjs'
 import WalletCards from '@lucide/vue/dist/esm/icons/wallet-cards.mjs'
-import KeyRound from '@lucide/vue/dist/esm/icons/key-round.mjs'
-import LogOut from '@lucide/vue/dist/esm/icons/log-out.mjs'
-import PanelLeftClose from '@lucide/vue/dist/esm/icons/panel-left-close.mjs'
-import PanelLeftOpen from '@lucide/vue/dist/esm/icons/panel-left-open.mjs'
 import ReceiptText from '@lucide/vue/dist/esm/icons/receipt-text.mjs'
-import Settings from '@lucide/vue/dist/esm/icons/settings.mjs'
-import Store from '@lucide/vue/dist/esm/icons/store.mjs'
-import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import Users from '@lucide/vue/dist/esm/icons/users.mjs'
+import StoreTopNavigation from '@/components/navigation/StoreTopNavigation.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
 import MemberSummaryCard from '@/components/common/MemberSummaryCard.vue'
@@ -118,7 +109,6 @@ const isRechargeSubmitting = ref(false)
 const directGiftSession = ref(null)
 const isDirectGiftSubmitting = ref(false)
 const uiFeedback = ref(null)
-const isAccountMenuOpen = ref(false)
 const isPasswordDialogOpen = ref(false)
 const isPasswordSubmitting = ref(false)
 const passwordChange = ref({ account: '', currentPassword: '', newPassword: '', confirmation: '' })
@@ -293,11 +283,6 @@ watch(
   { immediate: true }
 )
 
-const sidebarPreferenceKey = 'cashier-v3-sidebar-collapsed'
-const isSidebarCollapsed = ref(readSidebarPreference())
-const isInventoryMenuExpanded = ref(false)
-const managementRouteNames = ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard']
-const isManagementMenuExpanded = ref(managementRouteNames.includes(route.name))
 // 库存工作区与收银台共用当前 V3 会话；初始化时就读取，避免 HMR/路由重载
 // 期间库存组件先于点击事件挂载而拿到空 token。
 const inventorySessionToken = ref(readStoreV3SessionToken())
@@ -316,14 +301,14 @@ const inventoryFeatureItems = [
   { key: 'presale-claim', label: '会员领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
 ]
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
-const managementFeatureItems = [
-  { key: 'staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
-  { key: 'room-settings', label: '房间设置', to: { name: 'cashier-v3-room-settings' } },
-  { key: 'business-dashboard', label: '经营看板', to: { name: 'cashier-v3-business-dashboard' } }
+const managementFeatureDefinitions = [
+  { key: 'staff', featureCode: 'cashier.v3.management.staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
+  { key: 'room-settings', featureCode: 'cashier.v3.management.rooms', label: '房间设置', to: { name: 'cashier-v3-room-settings' } },
+  { key: 'business-dashboard', featureCode: 'cashier.v3.management.dashboard', label: '经营看板', to: { name: 'cashier-v3-business-dashboard' } }
 ]
 const isInventoryWorkspaceOpen = ref(false)
 const activeInventoryFeatureKey = ref('overview')
-const menuItems = [
+const menuDefinitions = [
   {
     key: 'cashier',
     label: '收银',
@@ -336,41 +321,40 @@ const menuItems = [
   { key: 'room', label: '房间', icon: DoorOpen, featureCode: 'cashier.v3.room', to: { name: 'cashier-v3-room' } },
   { key: 'reservation', label: '预约', icon: CalendarDays, featureCode: 'cashier.v3.reservation', to: { name: 'cashier-v3-reservation' } },
   { key: 'member', label: '会员', icon: Users, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-member' } },
-  { key: 'fund', label: '费用', icon: WalletCards, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-fund' } },
-  { key: 'care', label: '客情', icon: HeartHandshake, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-care' } },
+  { key: 'fund', label: '费用', icon: WalletCards, featureCode: 'cashier.v3.fund', to: { name: 'cashier-v3-fund' } },
+  { key: 'care', label: '客情', icon: HeartHandshake, featureCode: 'cashier.v3.care', to: { name: 'cashier-v3-care' } },
   { key: 'order', label: '订单', icon: ReceiptText, featureCode: 'cashier.v3.order_center', to: { name: 'cashier-v3-order-center' } },
-  {
-    key: 'management',
-    label: '管理',
-    icon: Settings,
-    featureCode: 'cashier.v3.management_center',
-    to: { name: 'cashier-v3-staff-list' },
-    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard']
-  },
-  {
-    key: 'data',
-    label: '数据',
-    icon: ChartNoAxesCombined,
-    featureCode: 'cashier.v3.management_center',
-    to: { name: 'cashier-v3-store-business-reports' },
-    activeRouteNames: ['cashier-v3-store-business-reports']
-  },
   {
     key: 'targets',
     label: '目标',
     icon: ChartNoAxesCombined,
-    featureCode: 'cashier.v3.management_center',
+    featureCode: 'cashier.v3.targets',
     to: { name: 'cashier-v3-store-target-dashboard' }
   },
-  {
-    key: 'inventory',
-    label: '库存',
-    icon: Boxes,
-    // 库存入口只由已授权的库存子功能决定，不继承收银或管理权限；
-    // 子功能和接口仍各自校验门店、仓位及成本字段权限。
-    submenu: inventoryFeatureItems
-  }
+
 ]
+// 仅合并权威展示元数据，路由/图标/动作白名单始终来自现有源码。
+function configuredNavigation(items) {
+  const rules = new Map((state.navigationRules || []).map(row => [row.feature_code, row]))
+  return items.map((item, index) => {
+    const code = item.featureCode
+    const rule = rules.get(code)
+    return { ...item, label: rule?.title || item.label, sort: rule?.sort ?? index * 10 }
+  }).sort((a, b) => a.sort - b.sort)
+}
+// 五类入口与快捷栏只组合已有页面，不建立另一份路由、授权或业务工作台。
+const topNavigationEntries = computed(() => [
+  ...configuredNavigation(menuDefinitions).filter(item => canUseFeature(item.featureCode)),
+  ...configuredNavigation(managementFeatureDefinitions).filter(item => canUseFeature(item.featureCode)),
+  ...(canUseFeature('cashier.v3.data') ? [{ key: 'reports', label: '全部报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-store-business-reports' } }] : []),
+  ...visibleInventoryFeatureItems.value.map(entry => ({ ...entry, key: 'inventory-' + entry.key, inventory: entry }))
+])
+function navigateTopMenu(entry) {
+  if (!entry || !canUseFeature(entry.featureCode)) return
+  if (entry.inventory && !entry.to) { openInventoryWorkspace(entry.inventory); return }
+  closeInventoryWorkspace()
+  if (entry.to) void router.push(entry.to)
+}
 const cashierWorkflowTabs = [
   { key: 'checkout', label: '结账收款', icon: '¥', featureCode: 'cashier.v3.cashier.checkout', to: { name: 'cashier-v3-cashier' } },
   { key: 'replacement', label: '项目替换', icon: '↔', featureCode: 'cashier.v3.writeoff', to: { name: 'cashier-v3-replacement' } }
@@ -425,64 +409,20 @@ const allowedServiceCompletionActions = new Set([
   'save-service-line-craftsmen'
 ])
 
-function readSidebarPreference() {
-  if (typeof window === 'undefined') return false
-  try {
-    return window.localStorage.getItem(sidebarPreferenceKey) === '1'
-  } catch {
-    return false
-  }
-}
-
-function persistSidebarPreference() {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(sidebarPreferenceKey, isSidebarCollapsed.value ? '1' : '0')
-  } catch {
-    // The visual state still works when browser storage is unavailable.
-  }
-}
-
-function toggleSidebar() {
-  isSidebarCollapsed.value = !isSidebarCollapsed.value
-  persistSidebarPreference()
-}
-
-function toggleInventoryMenu() {
-  isInventoryMenuExpanded.value = !isInventoryMenuExpanded.value
-}
-
-function toggleManagementMenu() {
-  isManagementMenuExpanded.value = !isManagementMenuExpanded.value
-}
-
 function openInventoryWorkspace(entry = visibleInventoryFeatureItems.value[0]) {
   if (!entry || !canUseFeature(entry.featureCode)) return
   activeInventoryFeatureKey.value = entry.key
   inventorySessionToken.value = readStoreV3SessionToken()
-  isInventoryMenuExpanded.value = true
   isInventoryWorkspaceOpen.value = true
 }
+// 库存是独立工作台：只有库存权限的账号登录后直接打开其首个已授权子功能。
+watch(() => route.name, (name) => {
+  if (name === 'cashier-v3-inventory-entry') openInventoryWorkspace()
+}, { immediate: true })
+
 
 function closeInventoryWorkspace() {
   isInventoryWorkspaceOpen.value = false
-}
-
-function isInventoryFeatureActive(entry) {
-  if (entry?.to?.name) return route.name === entry.to.name
-  return activeInventoryFeatureKey.value === entry?.key && isInventoryWorkspaceOpen.value
-}
-
-function isManagementFeatureActive(entry) {
-  return route.name === entry?.to?.name
-}
-
-function isMenuItemActive(item) {
-  if (!item || !item.to || !item.to.name) return false
-  const activeRouteNames = Array.isArray(item.activeRouteNames) && item.activeRouteNames.length
-    ? item.activeRouteNames
-    : [item.to.name]
-  return activeRouteNames.includes(route?.name || '')
 }
 
 const isCashierPage = computed(() => route.name === 'cashier-v3-cashier')
@@ -639,9 +579,6 @@ watch(
   () => route.name,
   (routeName) => {
     isCardOperationMenuOpen.value = false
-    if (managementRouteNames.includes(routeName)) {
-      isManagementMenuExpanded.value = true
-    }
     // 收银台 V3 的充值由 CashierWorkbenchView 统一接管，离开旧页面时
     // 清掉 Shell 兼容充值状态，避免旧弹层在路由切换后重新覆盖新 Checkout。
     if (routeName === 'cashier-v3-cashier') rechargeSession.value = null
@@ -2420,7 +2357,6 @@ function clearCashierNegativeState() {
 }
 
 function openPasswordDialog() {
-  isAccountMenuOpen.value = false
   passwordChange.value = { account: String(state.operator.account || ''), currentPassword: '', newPassword: '', confirmation: '' }
   passwordChangeError.value = ''
   isPasswordDialogOpen.value = true
@@ -2461,7 +2397,6 @@ async function submitPasswordChange() {
 
 async function logoutCurrentAccount() {
   if (!window.confirm('确定退出当前账号吗？')) return
-  isAccountMenuOpen.value = false
   try {
     await logoutStoreV3()
   } catch (_) {
@@ -2691,7 +2626,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="cashier-shell" :class="{ 'cashier-shell--sidebar-collapsed': isSidebarCollapsed }">
+  <div class="cashier-shell cashier-shell--top-navigation">
     <div v-if="isStoreSwitchOpen" class="cashier-account-dialog-backdrop" @click.self="closeStoreSwitch">
       <section class="cashier-account-dialog cashier-store-switch-dialog" aria-label="切换门店" role="dialog" aria-modal="true">
         <header><h2>切换门店</h2><button type="button" class="cashier-account-dialog__close" aria-label="关闭" :disabled="isStoreSwitchLoading" @click="closeStoreSwitch">×</button></header>
@@ -2735,155 +2670,22 @@ onBeforeUnmount(() => {
       @close="directGiftSession = null"
       @submit="submitDirectGift"
     />
-    <aside class="cashier-sidebar" :class="{ 'cashier-sidebar--collapsed': isSidebarCollapsed }" aria-label="门店端菜单">
-      <button v-if="canSwitchStores" type="button" class="cashier-brand cashier-brand--switchable" :title="isSidebarCollapsed ? `切换门店：${state.storeName}` : undefined" aria-label="切换门店" @click="openStoreSwitch">
-        <span class="cashier-brand__mark" aria-hidden="true"><RefreshCw :size="21" :stroke-width="1.9" /></span>
-        <span v-if="!isSidebarCollapsed" class="cashier-brand__copy"><strong>{{ state.storeName }}</strong></span>
-      </button>
-      <div v-else class="cashier-brand" :title="isSidebarCollapsed ? state.storeName : undefined">
-        <span class="cashier-brand__mark" aria-hidden="true"><Store :size="21" :stroke-width="1.9" /></span>
-        <div v-if="!isSidebarCollapsed" class="cashier-brand__copy"><strong>{{ state.storeName }}</strong></div>
-      </div>
-
-      <nav id="cashier-primary-nav" class="cashier-nav" aria-label="日常业务">
-        <span v-if="!isSidebarCollapsed" class="cashier-nav__section">日常业务</span>
-        <template v-for="item in menuItems" :key="item.key">
-          <div v-if="item.key === 'management' && canUseFeature(item.featureCode)" class="cashier-management-group">
-            <div class="cashier-management-entry" :class="{ 'cashier-management-entry--open': isManagementMenuExpanded }">
-              <RouterLink
-                :to="item.to"
-                class="cashier-nav__item cashier-nav__item--management"
-                :class="{ 'cashier-nav__item--active': isMenuItemActive(item) }"
-                :aria-label="item.label"
-                :title="isSidebarCollapsed ? item.label : undefined"
-                @click="closeInventoryWorkspace"
-              >
-                <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-                <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-              </RouterLink>
-              <button
-                v-if="!isSidebarCollapsed"
-                type="button"
-                class="cashier-management-toggle"
-                :aria-label="isManagementMenuExpanded ? '收起管理功能' : '展开管理功能'"
-                :aria-expanded="isManagementMenuExpanded"
-                @click="toggleManagementMenu"
-              >
-                <ChevronDown class="cashier-nav__management-chevron" :class="{ 'cashier-nav__management-chevron--open': isManagementMenuExpanded }" :size="16" aria-hidden="true" />
-              </button>
-            </div>
-            <div v-if="isManagementMenuExpanded && !isSidebarCollapsed" class="cashier-management-grid" aria-label="管理功能">
-              <RouterLink
-                v-for="entry in managementFeatureItems"
-                :key="entry.key"
-                class="cashier-management-grid__item"
-                :class="{ 'cashier-management-grid__item--active': isManagementFeatureActive(entry) }"
-                :to="entry.to"
-                @click="closeInventoryWorkspace"
-              >{{ entry.label }}</RouterLink>
-            </div>
-          </div>
-          <div v-else-if="item.key === 'inventory' && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
-            <div class="cashier-inventory-entry" :class="{ 'cashier-inventory-entry--open': isInventoryMenuExpanded }">
-              <a
-                href="#/cashier"
-                class="cashier-nav__item cashier-nav__item--inventory"
-                :aria-label="item.label"
-                :title="isSidebarCollapsed ? item.label : undefined"
-                @click.prevent="openInventoryWorkspace()"
-              >
-                <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-                <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-              </a>
-              <button
-                v-if="!isSidebarCollapsed"
-                type="button"
-                class="cashier-inventory-toggle"
-                :aria-label="isInventoryMenuExpanded ? '收起库存功能' : '展开库存功能'"
-                :aria-expanded="isInventoryMenuExpanded"
-                @click="toggleInventoryMenu"
-              >
-                <ChevronDown class="cashier-nav__inventory-chevron" :class="{ 'cashier-nav__inventory-chevron--open': isInventoryMenuExpanded }" :size="16" aria-hidden="true" />
-              </button>
-            </div>
-            <div v-if="isInventoryMenuExpanded && !isSidebarCollapsed" class="cashier-inventory-grid" aria-label="库存管理功能">
-              <template v-for="entry in visibleInventoryFeatureItems" :key="entry.key">
-                <RouterLink
-                  v-if="entry.to"
-                  class="cashier-inventory-grid__item"
-                  :class="{ 'cashier-inventory-grid__item--active': isInventoryFeatureActive(entry) }"
-                  :to="entry.to"
-                  @click="closeInventoryWorkspace"
-                >{{ entry.label }}</RouterLink>
-                <a
-                  v-else
-                  class="cashier-inventory-grid__item"
-                  :class="{ 'cashier-inventory-grid__item--active': isInventoryFeatureActive(entry) }"
-                  href="#/cashier"
-                  @click.prevent="openInventoryWorkspace(entry)"
-                >{{ entry.label }}</a>
-              </template>
-            </div>
-          </div>
-          <a
-            v-else-if="canUseFeature(item.featureCode) && item.href"
-            :href="item.href"
-            class="cashier-nav__item"
-            :aria-label="item.label"
-            :title="isSidebarCollapsed ? item.label : undefined"
-            @click="closeInventoryWorkspace"
-          >
-            <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-            <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-          </a>
-          <RouterLink
-            v-else-if="canUseFeature(item.featureCode) && item.to"
-            :to="item.to"
-            class="cashier-nav__item"
-            :class="{ 'cashier-nav__item--active': isMenuItemActive(item) }"
-            :aria-label="item.label"
-            :title="isSidebarCollapsed ? item.label : undefined"
-            @click="closeInventoryWorkspace"
-            >
-            <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-            <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-            <span
-              v-if="item.key === 'hang' && pendingHangCount > 0"
-              class="cashier-nav__badge"
-              :aria-label="`待结账挂单 ${pendingHangCount} 笔`"
-            >{{ pendingHangCount }}</span>
-          </RouterLink>
-        </template>
-      </nav>
-
-      <div class="cashier-sidebar__footer">
-        <div class="cashier-account" :class="{ 'cashier-account--open': isAccountMenuOpen }">
-          <button type="button" class="cashier-account__trigger" :aria-expanded="isAccountMenuOpen" :title="operatorLabel" @click="isAccountMenuOpen = !isAccountMenuOpen">
-          <CircleUserRound class="cashier-account__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-          <div v-if="!isSidebarCollapsed" class="cashier-account__copy">
-            <span class="cashier-account__label">V26083001</span>
-            <strong>{{ operatorLabel }}</strong>
-          </div>
-          </button>
-          <div v-if="isAccountMenuOpen" class="cashier-account__menu" role="menu">
-            <button type="button" role="menuitem" @click="openPasswordDialog"><KeyRound :size="16" aria-hidden="true" />修改密码</button>
-            <button type="button" role="menuitem" @click="logoutCurrentAccount"><LogOut :size="16" aria-hidden="true" />退出登录</button>
-          </div>
-        </div>
-        <button
-          type="button"
-          class="cashier-sidebar-toggle"
-          :aria-label="isSidebarCollapsed ? '展开菜单栏' : '收起菜单栏'"
-          :aria-expanded="!isSidebarCollapsed"
-          aria-controls="cashier-primary-nav"
-          :title="isSidebarCollapsed ? '展开菜单栏' : '收起菜单栏'"
-          @click="toggleSidebar"
-        >
-          <PanelLeftOpen v-if="isSidebarCollapsed" :size="16" :stroke-width="2" aria-hidden="true" />
-          <PanelLeftClose v-else :size="16" :stroke-width="2" aria-hidden="true" />
-        </button>
-      </div>
-    </aside>
+    <StoreTopNavigation
+      :entries="topNavigationEntries"
+      :rules="state.navigationRules"
+      :store-name="state.storeName"
+      :operator="operatorLabel"
+      :operator-profile="state.operator.profile"
+      :can-switch-stores="canSwitchStores"
+      :pending-hang-count="pendingHangCount"
+      :inventory-open="isInventoryWorkspaceOpen"
+      :active-inventory-key="activeInventoryFeatureKey"
+      :context-id="state.stateContextId"
+      @navigate="navigateTopMenu"
+      @switch-store="openStoreSwitch"
+      @password="openPasswordDialog"
+      @logout="logoutCurrentAccount"
+    />
 
     <section class="cashier-main" :class="{ 'cashier-main--workflow': isCashierWorkflowPage || isInventoryWorkspaceOpen, 'cashier-main--headerless': isHeaderlessPage }">
       <header v-if="!isCashierWorkflowPage && !isInventoryWorkspaceOpen && !isHeaderlessPage" class="cashier-main__header">
@@ -3262,168 +3064,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.cashier-nav__item--management {
-  width: 100%;
-  background: transparent;
-}
-
-.cashier-management-group {
-  display: grid;
-  gap: 4px;
-}
-
-.cashier-management-entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: 10px;
-}
-
-.cashier-management-entry--open {
-  border-color: rgba(185, 212, 255, .26);
-  background: rgba(234, 244, 255, .1);
-}
-
-.cashier-management-entry--open .cashier-nav__item--management {
-  color: #fff;
-}
-
-.cashier-management-toggle {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, .76);
-}
-
-.cashier-management-toggle:hover {
-  background: rgba(234, 244, 255, .12);
-  color: #fff;
-}
-
-.cashier-nav__management-chevron {
-  flex: none;
-  transition: transform .16s ease;
-}
-
-.cashier-nav__management-chevron--open {
-  transform: rotate(180deg);
-}
-
-.cashier-management-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px 8px;
-  padding: 1px 4px 8px;
-}
-
-.cashier-management-grid__item {
-  min-width: 0;
-  padding: 5px 7px;
-  border-radius: 6px;
-  color: rgba(255, 255, 255, .72);
-  font-size: 13px;
-  line-height: 20px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.cashier-management-grid__item:hover {
-  background: rgba(234, 244, 255, .1);
-  color: #fff;
-}
-
-.cashier-management-grid__item--active {
-  background: rgba(143, 199, 255, .2);
-  color: #fff;
-}
-
-.cashier-nav__item--inventory {
-  width: 100%;
-  background: transparent;
-}
-
-.cashier-inventory-group {
-  display: grid;
-  gap: 4px;
-}
-
-.cashier-inventory-entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: 10px;
-}
-
-.cashier-inventory-entry--open {
-  border-color: rgba(185, 212, 255, .26);
-  background: rgba(234, 244, 255, .1);
-}
-
-.cashier-inventory-entry--open .cashier-nav__item--inventory {
-  color: #fff;
-}
-
-.cashier-inventory-toggle {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, .76);
-}
-
-.cashier-inventory-toggle:hover {
-  background: rgba(234, 244, 255, .12);
-  color: #fff;
-}
-
-.cashier-nav__inventory-chevron {
-  flex: none;
-  transition: transform .16s ease;
-}
-
-.cashier-nav__inventory-chevron--open {
-  transform: rotate(180deg);
-}
-
-.cashier-inventory-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px 8px;
-  padding: 1px 4px 8px;
-}
-
-.cashier-inventory-grid__item {
-  min-width: 0;
-  padding: 5px 7px;
-  border-radius: 6px;
-  color: rgba(255, 255, 255, .72);
-  font-size: 13px;
-  line-height: 20px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.cashier-inventory-grid__item:hover {
-  background: rgba(234, 244, 255, .1);
-  color: #fff;
-}
-
-.cashier-inventory-grid__item--active {
-  background: rgba(143, 199, 255, .2);
-  color: #fff;
-}
-
 .cashier-inventory-workspace {
   width: 100%;
   height: 100%;

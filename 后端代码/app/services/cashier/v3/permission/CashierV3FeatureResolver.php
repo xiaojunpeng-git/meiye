@@ -37,6 +37,8 @@ class CashierV3FeatureResolver
         'cashier.v3.room',
         'cashier.v3.reservation',
         'cashier.v3.member',
+        'cashier.v3.fund', 'cashier.v3.care', 'cashier.v3.data', 'cashier.v3.targets',
+        'cashier.v3.management.staff', 'cashier.v3.management.rooms', 'cashier.v3.management.dashboard',
         'cashier.v3.hang',
         'cashier.v3.order_center',
         'cashier.v3.management_center',
@@ -143,6 +145,7 @@ class CashierV3FeatureResolver
         if (!empty($operatorProfile['_trusted_mobile_merchant_session'])) {
             $granted = array_merge($granted, $this->mobileMerchantFeatures((int)($operatorProfile['employee_id'] ?? 0)));
         }
+        // 门店规则只裁剪 store_v3 部分；可信商家端桥接继续遵守其独立能力目录。
         return array_values(array_unique($granted));
     }
 
@@ -162,8 +165,8 @@ class CashierV3FeatureResolver
                     $walk((array)($node['children'] ?? []));
                 }
             };
-            $walk(JobPositionPolicyServices::STORE_V3_MENU_TREE);
-            return array_keys($visible);
+            $walk((new \app\services\organization\StorePermissionCatalogServices())->menuTree());
+            return (new \app\services\organization\StorePermissionCatalogServices())->filterEnabled(array_keys($visible));
         }
         return $this->resolveGrantedFeatures($operatorProfile);
     }

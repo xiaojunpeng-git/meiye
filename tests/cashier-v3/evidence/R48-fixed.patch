@@ -1,0 +1,1282 @@
+diff --git a/前端代码/admin/src/pages/marketing/storeCouponIssue/create.vue b/前端代码/admin/src/pages/marketing/storeCouponIssue/create.vue
+index e111f298..61bbd3cb 100644
+--- a/前端代码/admin/src/pages/marketing/storeCouponIssue/create.vue
++++ b/前端代码/admin/src/pages/marketing/storeCouponIssue/create.vue
+@@ -52,9 +52,10 @@
+                 :disabled="[1].includes(type)"
+               ></Input>
+             </FormItem>
+-            <FormItem label="优惠券面值：" required>
++            <FormItem :label="formData.coupon_type == 3 ? '券总额度：' : '优惠券面值：'" required>
+               <InputNumber
+-                v-if="formData.coupon_type == 1"
++                v-if="formData.coupon_type != 2"
++                :precision="formData.coupon_type == 3 ? 0 : undefined"
+                 :min="1"
+                 :max="100000000"
+                 v-model="formData.coupon_price"
+@@ -71,7 +72,7 @@
+                 :disabled="[1].includes(type)"
+               ></InputNumber>
+               <span class="ml10">{{
+-                formData.coupon_type == 1 ? '元' : '%'
++                formData.coupon_type != 2 ? '元' : '%'
+               }}</span>
+             </FormItem>
+             <FormItem label="最高优惠：" v-if="formData.coupon_type == 2">
+@@ -112,7 +113,7 @@
+             <FormItem label="会员转赠：">
+               <RadioGroup v-model="formData.allow_transfer">
+                 <Radio :label="0">不允许</Radio>
+-                <Radio :label="1">允许</Radio>
++                <Radio :label="1" :disabled="formData.coupon_type == 3">允许</Radio>
+               </RadioGroup>
+               <Button
+                 v-if="type === 1"
+@@ -511,6 +512,7 @@ export default {
+       couponType: [
+         { name: '满减券', title: '满N元减N元', id: 1 },
+         { name: '折扣券', title: '满N元打N折', id: 2 },
++        { name: '多次抵用券', title: '总额度分次抵用', id: 3 },
+       ],
+       disabled: false,
+       transferSettingSaving: false,
+@@ -611,6 +613,11 @@ export default {
+       }
+       this.formData.coupon_price = 0;
+       this.formData.coupon_type = item.id;
++      // Reusable allowance cannot inherit a hidden order tier or transfer switch.
++      if (item.id === 3) {
++        this.formData.use_mode = 0;
++        this.formData.allow_transfer = 0;
++      }
+     },
+     // 品类
+     getCategoryList() {
+diff --git a/前端代码/admin/src/pages/marketing/storeCouponIssue/index.vue b/前端代码/admin/src/pages/marketing/storeCouponIssue/index.vue
+index 81f6db72..ac07fd19 100644
+--- a/前端代码/admin/src/pages/marketing/storeCouponIssue/index.vue
++++ b/前端代码/admin/src/pages/marketing/storeCouponIssue/index.vue
+@@ -22,6 +22,7 @@
+             >
+               <Option value="1">满减券</Option>
+               <Option value="2">折扣券</Option>
++              <Option value="3">多次抵用券</Option>
+             </Select>
+           </FormItem>
+           <FormItem label="优惠券来源：">
+@@ -149,6 +150,7 @@
+       >
+         <template slot-scope="{ row }" slot="coupon_price">
+           <span v-if="row.coupon_type == 1">{{ row.coupon_price }}元</span>
++          <span v-if="row.coupon_type == 3">总额度 {{ row.coupon_price }}元</span>
+           <span v-if="row.coupon_type == 2"
+             >{{ parseFloat(row.coupon_price) / 10 }}折（{{
+               row.coupon_price.toString().split('.')[0]
+@@ -164,6 +166,7 @@
+         </template>
+         <template slot-scope="{ row }" slot="coupon_type">
+           <span v-if="row.coupon_type === 1">满减券</span>
++          <span v-else-if="row.coupon_type === 3">多次抵用券</span>
+           <span v-else>折扣券</span>
+         </template>
+         <template slot-scope="{ row }" slot="type">
+diff --git a/前端代码/cashier-v3/src/components/cashier/CashierCouponSelectorOverlay.vue b/前端代码/cashier-v3/src/components/cashier/CashierCouponSelectorOverlay.vue
+index cf5eb729..32b9a3d6 100644
+--- a/前端代码/cashier-v3/src/components/cashier/CashierCouponSelectorOverlay.vue
++++ b/前端代码/cashier-v3/src/components/cashier/CashierCouponSelectorOverlay.vue
+@@ -1,6 +1,7 @@
+ <script setup>
+ import { computed, ref, watch } from 'vue'
+ import { formatMoney } from '@/services/cashierV3Bridge'
++import { allowanceAmountCents, validAllowanceCents } from '@/services/couponAllowance'
+ 
+ const props = defineProps({
+   selector: { type: Object, required: true },
+@@ -11,6 +12,9 @@ const emit = defineEmits(['close', 'apply', 'remove'])
+ const selectedCouponId = ref('')
+ const selectedCouponIds = ref([])
+ const selectionError = ref('')
++const amountCoupon = ref(null)
++const amountInput = ref('')
++const amountError = ref('')
+ 
+ watch(
+   () => props.selector.selectedCouponId,
+@@ -83,14 +87,45 @@ function confirmSelection() {
+     emit('remove')
+     return
+   }
++  const coupon = coupons.value.find((item) => couponId(item) === selectedCouponId.value)
++  if (Number(coupon?.couponType) === 3) {
++    openAmount(coupon)
++    return
++  }
+   emit('apply', selectedCouponIds.value.length ? selectedCouponIds.value : selectedCouponId.value)
+ }
+ 
++// Opening/editing the input never consumes allowance. Cancel leaves the cart unchanged.
++function openAmount(coupon) {
++  amountCoupon.value = coupon
++  amountInput.value = couponId(coupon) === String(props.selector.selectedCouponId || '')
++    ? String(Number(props.selector.selectedAmountCents || 0) / 100 || '') : ''
++  amountError.value = ''
++}
++
++function confirmAmount() {
++  if (props.saving) return
++  const amount = allowanceAmountCents(amountInput.value, amountCoupon.value, lineCapacityCents.value)
++  if (!validAllowanceCents(amount, amountCoupon.value, lineCapacityCents.value)) {
++    amountError.value = '请输入正整数元，且不超过券剩余额度和本条明细可抵用金额。'
++    return
++  }
++  emit('apply', { couponId: couponId(amountCoupon.value), amountCents: amount })
++}
++
+ function chooseCoupon(coupon) {
+   if (props.saving) return
+   selectionError.value = ''
+   const id = couponId(coupon)
+   if (Number(coupon.useMode) !== 1) {
++    if (Number(coupon.couponType) === 3) {
++      if (selectedMode.value === 1) {
++        selectionError.value = '整单券和明细券不能混选，请先取消已选整单券。'
++        return
++      }
++      openAmount(coupon)
++      return
++    }
+     if (selectedCouponId.value === id) {
+       selectedCouponId.value = ''
+       return
+@@ -140,7 +175,7 @@ function chooseCoupon(coupon) {
+ 
+ <template>
+   <div class="cashier-coupon-overlay" role="dialog" aria-modal="true" aria-label="选择优惠券" @click.self="emit('close')">
+-    <section class="cashier-coupon-panel">
++    <section v-if="!amountCoupon" class="cashier-coupon-panel">
+       <header>
+         <div>
+           <strong>选择优惠券</strong>
+@@ -161,7 +196,7 @@ function chooseCoupon(coupon) {
+           :disabled="saving"
+           @click="chooseCoupon(coupon)"
+         >
+-          <span class="cashier-coupon-item__amount">优惠 {{ moneyFromCents(coupon.discountAmountCents) }}</span>
++          <span class="cashier-coupon-item__amount">{{ Number(coupon.couponType) === 3 ? '剩余' : '优惠' }} {{ Number(coupon.couponType) === 3 ? roundedMoneyFromCents(coupon.remainingAmountCents) : moneyFromCents(coupon.discountAmountCents) }}</span>
+           <span class="cashier-coupon-item__content">
+             <strong>{{ coupon.name || '优惠券' }}</strong>
+             <small>
+@@ -202,10 +237,29 @@ function chooseCoupon(coupon) {
+         </div>
+       </footer>
+     </section>
++    <form v-else class="cashier-coupon-panel" aria-label="本次抵用金额" @submit.prevent="confirmAmount">
++      <header><strong>本次抵用金额</strong></header>
++      <div class="cashier-coupon-amount">
++        <strong>{{ amountCoupon.name }}</strong>
++        <p>券剩余 {{ roundedMoneyFromCents(amountCoupon.remainingAmountCents) }}</p>
++        <p>本条明细最多可抵用 {{ roundedMoneyFromCents(Math.min(amountCoupon.discountAmountCents, lineCapacityCents)) }}</p>
++        <label for="coupon-allowance-amount">抵用金额（元）</label>
++        <input id="coupon-allowance-amount" v-model="amountInput" type="number" inputmode="numeric" min="1" step="1" :disabled="saving" autofocus />
++        <p v-if="amountError" class="cashier-coupon-list__error" role="alert">{{ amountError }}</p>
++      </div>
++      <footer><span></span><div>
++        <button type="button" class="button button--secondary" :disabled="saving" @click="amountCoupon = null">取消</button>
++        <button type="submit" class="button button--primary" :disabled="saving">{{ saving ? '保存中…' : '确认抵用' }}</button>
++      </div></footer>
++    </form>
+   </div>
+ </template>
+ 
+ <style scoped>
++.cashier-coupon-amount { padding: 20px; overflow: auto; color: #25333a; }
++.cashier-coupon-amount p { font-size: 14px; }
++.cashier-coupon-amount label { display: block; margin: 18px 0 8px; }
++.cashier-coupon-amount input { box-sizing: border-box; width: 100%; min-height: 40px; border: 1px solid #b9c9d6; border-radius: 4px; padding: 8px 12px; font: inherit; }
+ .cashier-coupon-overlay {
+   position: fixed;
+   inset: 0;
+diff --git a/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue b/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
+index a3a1ae51..81740f1f 100644
+--- a/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
++++ b/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
+@@ -41,6 +41,7 @@ import EntitlementSelectorOverlay from '@/components/cashier/EntitlementSelector
+ import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
+ import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
+ import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSelectorOverlay.vue'
++import { validAllowanceCents } from '@/services/couponAllowance'
+ import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
+ import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
+ import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
+@@ -4069,7 +4070,9 @@ function normalizeCouponSelector(selector = {}, line = {}) {
+       ...coupon,
+       couponId: String(coupon?.couponId || '')
+     }))
+-    .filter((coupon) => coupon.couponId)
++    // Upgrade credits use a separate settlement contract, not normal non-cash
++    // coupon tender. Do not offer an allowance that final checkout must reject.
++    .filter((coupon) => coupon.couponId && (Number(coupon.couponType) !== 3 || !line.cardOperationUpgrade))
+   const belowMinimumCoupons = (Array.isArray(selector.belowMinimumCoupons) ? selector.belowMinimumCoupons : [])
+     .map((coupon) => ({ ...coupon, couponId: String(coupon?.couponId || '') }))
+     .filter((coupon) => coupon.couponId)
+@@ -4084,6 +4087,7 @@ function normalizeCouponSelector(selector = {}, line = {}) {
+       ? '' : String(line.couponId || selector.selectedCouponId || ''),
+     selectedCouponIds: Number(line.couponUseMode || 0) === 1 && Array.isArray(line.couponUserIds)
+       ? line.couponUserIds.map(String) : [],
++    selectedAmountCents: Number(line.couponDiscountCents ?? line.couponDiscountAmountCents ?? 0),
+     selectedCountOtherLines: cartLines.value.reduce((count, candidate) =>
+       count + (String(candidate?.id || '') === String(line.id || '') || Number(candidate?.couponUseMode || 0) !== 1
+         ? 0 : (Array.isArray(candidate.couponUserIds) ? candidate.couponUserIds.length : 0)), 0),
+@@ -4154,6 +4158,7 @@ async function openCartLineCoupon(line, { present = true } = {}) {
+           // checkout snapshot.  A delayed summary merge may replace the member
+           // object while retaining this identity.
+           memberId: String(currentMemberId.value || ''),
++          productId: Number(line.productId || line.sourceId || line.catalogId || 0),
+           lineAmountCents,
+           couponThresholdCents,
+           orderReceivableCents,
+@@ -4197,10 +4202,17 @@ async function saveLineCoupon(action, couponSelection = '') {
+   isSavingLineCoupon.value = true
+   try {
+     const couponIds = Array.isArray(couponSelection) ? couponSelection.map(String) : []
+-    const couponId = couponIds[0] || String(couponSelection || '')
++    const custom = couponSelection && typeof couponSelection === 'object' && !Array.isArray(couponSelection)
++      ? couponSelection : null
++    const couponId = couponIds[0] || String(custom?.couponId || couponSelection || '')
+     const coupon = (couponSelector.value?.coupons || []).find((item) => String(item?.couponId || '') === couponId)
+     // The read-only below-minimum list must never enter a local draft command.
+     if (couponId && !coupon) return
++    // Never silently substitute the face value for a reusable coupon command.
++    // Remaining allowance is a read hint; checkout locks and revalidates it.
++    if (Number(coupon?.couponType) === 3
++      && !validAllowanceCents(custom?.amountCents, coupon, couponSelector.value?.lineCapacityCents)) return
++    if (custom && Number(coupon?.couponType) !== 3) return
+     const chosen = couponIds.map((id) => (couponSelector.value?.coupons || [])
+       .find((item) => String(item?.couponId || '') === id))
+     if (couponIds.length && (chosen.some((item) => !item || Number(item.useMode) !== 1)
+@@ -4220,7 +4232,7 @@ async function saveLineCoupon(action, couponSelection = '') {
+             ? `${coupon?.name || '优惠券'} × ${couponIds.length}` : String(coupon?.name || '已选优惠券'),
+           discountAmountCents: couponIds.length
+             ? chosen.reduce((sum, item) => sum + Number(item.discountAmountCents || 0), 0)
+-            : Math.max(0, Number(coupon?.discountAmountCents || 0))
++            : (Number(coupon?.couponType) === 3 ? custom.amountCents : Math.max(0, Number(coupon?.discountAmountCents || 0)))
+         }
+       : {}
+     let result = await mutateCashierDraft(action, line, payload)
+@@ -5281,6 +5293,7 @@ async function changeLineQuantityWithCoupon(line, delta) {
+   const isOrderCoupon = Number(line.couponUseMode || 0) === 1
+     && Array.isArray(line.couponUserIds) && line.couponUserIds.length > 0
+   const selectedCouponId = isOrderCoupon ? '' : String(line.couponId || '')
++  const selectedAmountCents = Number(line.couponDiscountCents ?? line.couponDiscountAmountCents ?? 0)
+   if (selectedCouponId || isOrderCoupon) isRefreshingLineCoupon.value = true
+   try {
+     const result = await mutateCashierDraft('change-cart-line-quantity', line, { delta })
+@@ -5311,11 +5324,14 @@ async function changeLineQuantityWithCoupon(line, delta) {
+     const coupon = (selector?.coupons || []).find((item) => String(item.couponId) === selectedCouponId)
+     const current = cartLines.value.find((item) => String(item.id) === String(line.id))
+     if (scopeKey !== currentCashierDraftScopeKey.value || Number(current?.quantity || 0) !== quantity) return result
+-    if (coupon) {
++    // Quantity edits may recompute an ordinary face/percentage, but must never
++    // replace the operator's explicit allowance amount with its full balance.
++    const reusable = Number(coupon?.couponType) === 3
++    if (coupon && (!reusable || validAllowanceCents(selectedAmountCents, coupon, selector.lineCapacityCents))) {
+       const applied = await mutateCashierDraft('apply-line-coupon', current, {
+         couponId: selectedCouponId,
+         couponSummary: String(coupon.name || '已选优惠券'),
+-        discountAmountCents: Math.max(0, Number(coupon.discountAmountCents || 0))
++        discountAmountCents: reusable ? selectedAmountCents : Math.max(0, Number(coupon.discountAmountCents || 0))
+       })
+       if (['success', 'succeeded'].includes(resultStatus(applied))) return result
+     }
+@@ -8142,7 +8158,7 @@ onBeforeUnmount(() => {
+                       :title="cartActionLabel('优惠券', line.couponSummary)"
+                       @click="openCartLineCoupon(line)"
+                     >
+-                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}</span></template>
++                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}<template v-if="line.couponDiscountCents > 0"> · 抵用 {{ formatMoney(line.couponDiscountCents / 100) }}</template></span></template>
+                     </button>
+                   </div>
+                   <div class="cart-line__meta-slot cart-line__meta-slot--craftsmen">
+diff --git a/后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php b/后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php
+index 3d298019..a03a6a48 100644
+--- a/后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php
++++ b/后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php
+@@ -121,6 +121,14 @@ class StoreCouponIssue extends AuthController
+             ['order_tiers', []],//整单应收档位与全单张数
+         ]);
+         $data['allow_transfer'] = (int)!empty($data['allow_transfer']);
++        // Allowance claims are non-cash accounts, never percentage discounts.
++        if (!in_array((int)$data['coupon_type'], [1, 2, 3], true)) return $this->fail('请选择正确的优惠类型');
++        if ((int)$data['coupon_type'] === 3) {
++            try { \app\services\activity\coupon\StoreCouponAllowanceServices::wholeCents($data['coupon_price']); }
++            catch (\app\services\cashier\v3\CashierV3CommandException $e) { return $this->fail($e->getMessage()); }
++            $data['allow_transfer'] = 0;
++            if ((int)$data['use_mode'] !== StoreCouponOrderRule::DETAIL) return $this->fail('多次抵用券仅支持明细抵用');
++        }
+         if ($data['applicable_type'] == 1) {
+             $data['applicable_store_id'] = [];
+         } elseif ($data['applicable_type'] == 2) {
+@@ -193,6 +201,12 @@ class StoreCouponIssue extends AuthController
+         if ($id > 0) {
+             $existing = $this->services->get($id);
+             if (!$existing || (int)$existing->is_del === 1) return $this->fail('优惠券不存在');
++            // Previously issued allowance faces cannot be repurposed by editing a template.
++            if (((int)$existing->coupon_type === 3 || (int)$data['coupon_type'] === 3)
++                && ((int)$existing->coupon_type !== (int)$data['coupon_type']
++                    || bccomp((string)$existing->coupon_price, (string)$data['coupon_price'], 2) !== 0)) {
++                return $this->fail('多次抵用券已发行，类型和总额度不可修改，请新建优惠券');
++            }
+             $data['use_mode'] = (int)($existing->use_mode ?? StoreCouponOrderRule::DETAIL);
+             $data['order_tiers_json'] = (string)($existing->order_tiers_json ?? '');
+             if ($data['use_mode'] === StoreCouponOrderRule::ORDER
+@@ -249,6 +263,8 @@ class StoreCouponIssue extends AuthController
+             ['allow_transfer', 0],
+         ], true);
+         $allowTransfer = (int)$allowTransfer === 1 ? 1 : 0;
++        // Generic transfer has no allowance ledger ownership transition.
++        if ((int)$info->coupon_type === 3 && $allowTransfer) return $this->fail('多次抵用券暂不支持转赠');
+         if (!$this->services->update($id, ['allow_transfer' => $allowTransfer])) {
+             return $this->fail('转赠设置保存失败');
+         }
+diff --git a/后端代码/app/services/activity/coupon/StoreCouponUserServices.php b/后端代码/app/services/activity/coupon/StoreCouponUserServices.php
+index 8066ba0b..066d02fd 100644
+--- a/后端代码/app/services/activity/coupon/StoreCouponUserServices.php
++++ b/后端代码/app/services/activity/coupon/StoreCouponUserServices.php
+@@ -67,6 +67,7 @@ class StoreCouponUserServices extends BaseServices
+     {
+         [$page, $limit] = $this->getPageValue();
+         $list = $this->dao->getList($where, '*', ['issue'], $page, $limit);
++        $list = $this->withAllowanceRemaining($list);
+         $count = 0;
+         if ($list) {
+             /** @var UserServices $userServices */
+@@ -102,6 +103,7 @@ class StoreCouponUserServices extends BaseServices
+         $couponIssueServices = app()->make(StoreCouponIssueServices::class);
+         if ($status != -1) $where['status'] = $status;
+         $list = $this->dao->getList($where, '*', ['issue'], $page, $limit);
++        $list = $this->withAllowanceRemaining($list);
+         foreach ($list as &$item) {
+             $item['_add_time'] = date('Y-m-d H:i:s', $item['add_time']);
+             $item['_end_time'] = date('Y-m-d H:i:s', $item['end_time']);
+@@ -127,6 +129,9 @@ class StoreCouponUserServices extends BaseServices
+      */
+     public function recoverCoupon(int $id)
+     {
++        // Generic one-use recovery has no order identity and cannot safely
++        // reverse an allowance debit. Only the V3 whole-order void may do so.
++        $this->rejectLegacyAllowance($id);
+         $status = $this->dao->value(['id' => $id], 'status');
+         if ($status) return $this->dao->update($id, ['status' => 0, 'use_time' => 0]);
+         else return true;
+@@ -773,6 +778,7 @@ class StoreCouponUserServices extends BaseServices
+         if (!$couponId || !$uid || !$cartInfo) {
+             return true;
+         }
++        $this->rejectLegacyAllowance($couponId);
+         /** @var StorePromotionsServices $promotionsServices */
+         $promotionsServices = app()->make(StorePromotionsServices::class);
+         [$couponInfo, $couponPrice] = $promotionsServices->useCoupon($couponId, $uid, $cartInfo, $promotions, $store_id);
+@@ -783,4 +789,30 @@ class StoreCouponUserServices extends BaseServices
+         }
+         return true;
+     }
++
++    /** Fail closed on old clients: status=used is not an allowance settlement. */
++    private function rejectLegacyAllowance(int $couponId): void
++    {
++        $type = \think\facade\Db::name('store_coupon_user')->alias('cu')
++            ->join('store_coupon_issue ci', 'ci.id=cu.cid')->where('cu.id', $couponId)->value('ci.coupon_type');
++        if ((int)$type === StoreCouponAllowanceServices::TYPE) {
++            throw new ValidateException('多次抵用券请在门店收银新版中输入金额使用或作废原订单。');
++        }
++    }
++
++    /** Keep face immutable; display the independently accounted remaining amount. */
++    private function withAllowanceRemaining(array $rows): array
++    {
++        $ids = array_column(array_filter($rows, static fn(array $row): bool =>
++            (int)($row['coupon_type'] ?? 0) === StoreCouponAllowanceServices::TYPE), 'id');
++        $remaining = (new StoreCouponAllowanceServices())->remainingByCouponIds($ids);
++        foreach ($rows as &$row) {
++            if ((int)($row['coupon_type'] ?? 0) !== StoreCouponAllowanceServices::TYPE) continue;
++            $amount = (int)($remaining[(int)$row['id']] ?? StoreCouponAllowanceServices::wholeCents($row['coupon_price']));
++            $row['remaining_amount'] = (string)intdiv($amount, 100);
++            if ($row['status'] === '未使用' && (int)$row['use_time'] > 0) $row['status'] = '可继续使用';
++        }
++        unset($row);
++        return $rows;
++    }
+ }
+diff --git a/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php b/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php
+index d9137357..290dc9a2 100644
+--- a/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php
++++ b/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php
+@@ -860,7 +860,8 @@ final class CashierV3CashierWorkspaceServices
+             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
+         }
+         $amounts = $this->couponLineAmounts((array)$line);
+-        $options = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey);
++        $options = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey,
++            0, [], 0, 0, (int)($line['catalog_product_id'] ?? 0));
+         return [
+             'lineId' => $lineKey,
+             'lineAmountCents' => $amounts['threshold'],
+@@ -881,7 +882,8 @@ final class CashierV3CashierWorkspaceServices
+         int $thresholdCents,
+         array $reservedCouponIds = [],
+         int $orderReceivableCents = 0,
+-        int $orderLineCapacityCents = 0
++        int $orderLineCapacityCents = 0,
++        int $productId = 0
+     ): array {
+         // 浏览器本地购物车在最终确认前不写 cashier_workspace；不能从一个
+         // 游客草稿反推当前选客。会员身份由同一请求内的权威会员摘要校验后
+@@ -897,7 +899,7 @@ final class CashierV3CashierWorkspaceServices
+         $amounts = ['threshold' => $thresholdCents, 'base' => $lineAmountCents, 'cap' => $lineAmountCents];
+         $options = $this->couponOptions(
+             $memberId, $operatorScope->storeId(), $amounts, false, $workspaceId, $lineKey, 0,
+-            $reservedCouponIds, $orderReceivableCents, $orderLineCapacityCents
++            $reservedCouponIds, $orderReceivableCents, $orderLineCapacityCents, $productId
+         );
+         return [
+             'lineId' => $lineKey,
+@@ -913,7 +915,8 @@ final class CashierV3CashierWorkspaceServices
+         string $stateContextId,
+         CashierV3OperatorScope $operatorScope,
+         string $lineKey,
+-        int $couponId
++        int $couponId,
++        $requestedAmountCents = null
+     ): array {
+         CashierV3TransactionGuard::assertInTransaction('cashierWorkspaceApplyCoupon');
+         $draft = $this->lockOrCreateDraft($workspaceId, $stateContextId, $operatorScope);
+@@ -929,12 +932,23 @@ final class CashierV3CashierWorkspaceServices
+             throw CashierV3ScopeResolver::notFound('cashier_workspace_line', $lineKey);
+         }
+         $amounts = $this->couponLineAmounts((array)$line);
+-        $coupons = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, true, $workspaceId, $lineKey, $couponId)['available'];
++        $coupons = $this->couponOptions($memberId, $operatorScope->storeId(), $amounts, true, $workspaceId, $lineKey,
++            $couponId, [], 0, 0, (int)($line['catalog_product_id'] ?? 0))['available'];
+         if (count($coupons) !== 1 || (int)$coupons[0]['couponId'] !== $couponId) {
+             throw CashierV3CommandException::versionConflict('该优惠券当前不可使用，请重新选择。', ['coupon_id' => $couponId]);
+         }
+         $coupon = $coupons[0];
+         $discount = (int)$coupon['discountAmountCents'];
++        // Reusable coupons require an explicit whole-yuan command. Browsing or
++        // an older client must never silently spend the full remaining face.
++        if ((int)($coupon['couponType'] ?? 0) === 3) {
++            if (!is_int($requestedAmountCents) || $requestedAmountCents > $discount) {
++                throw CashierV3CommandException::invalidContext('请输入本次抵用的整数金额。');
++            }
++            \app\services\activity\coupon\StoreCouponAllowanceServices::afterUse(
++                (int)$coupon['remainingAmountCents'], $requestedAmountCents);
++            $discount = $requestedAmountCents;
++        }
+         $changes = [
+             'coupon_user_id' => $couponId,
+             'coupon_name_snapshot' => (string)$coupon['name'],
+@@ -3553,15 +3567,17 @@ final class CashierV3CashierWorkspaceServices
+         int $onlyCouponId = 0,
+         array $reservedCouponIds = [],
+         int $orderReceivableCents = 0,
+-        int $orderLineCapacityCents = 0
++        int $orderLineCapacityCents = 0,
++        int $productId = 0
+     ): array {
+         $now = time();
+         $query = Db::name('store_coupon_user')->alias('cu')
+             ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
+-            ->where('cu.uid', $memberId)->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
++            ->where('cu.uid', $memberId)->where('cu.status', 0)->where('cu.is_fail', 0)
++            ->where(function ($q) { $q->where('cu.use_time', 0)->whereOr('ci.coupon_type', 3); })
+             ->where(function ($q) use ($now) { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
+             ->where(function ($q) use ($now) { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); })
+-            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id,ci.category,ci.type,ci.use_mode,ci.order_tiers_json');
++            ->field('cu.id,cu.coupon_title,cu.coupon_price,cu.use_min_price,cu.end_time,cu.cid,ci.coupon_type,ci.top_discount_price,ci.coupon_issue_type,ci.relation_id,ci.applicable_type,ci.applicable_store_id,ci.category,ci.type,ci.product_id,ci.category_id,ci.brand_id,ci.use_mode,ci.order_tiers_json');
+         if ($onlyCouponId > 0) $query->where('cu.id', $onlyCouponId);
+         if ($lock) $query->lock(true);
+         $rows = $query->order('cu.end_time asc,cu.id asc')->select();
+@@ -3571,10 +3587,17 @@ final class CashierV3CashierWorkspaceServices
+         $used = array_fill_keys(array_merge(array_map('intval', $usedIds), array_map('intval', $reservedCouponIds)), true);
+         $available = [];
+         $belowMinimum = [];
++        // Bulk-read only the new type. Existing coupons do not depend on the
++        // allowance migration, and querying choices never creates account rows.
++        $allowanceIds = array_column(array_filter($rows, static fn(array $row): bool =>
++            (int)($row['coupon_type'] ?? 0) === 3), 'id');
++        $remaining = (new \app\services\activity\coupon\StoreCouponAllowanceServices())->remainingByCouponIds($allowanceIds);
+         foreach ($rows as $row) {
+             $id = (int)($row['id'] ?? 0);
+             if ($id <= 0 || isset($used[$id])) continue;
+             if (!$this->couponAllowsStore($row, $storeId)) continue;
++            if ((int)($row['coupon_type'] ?? 0) === 3
++                && !(new \app\services\activity\coupon\StoreCouponAllowanceServices())->allowsProduct($row, $productId)) continue;
+             $orderMode = (int)($row['use_mode'] ?? 0) === StoreCouponOrderRule::ORDER;
+             if ($orderMode) {
+                 // Workspace draft commands still bind one coupon to one line.
+@@ -3609,6 +3632,15 @@ final class CashierV3CashierWorkspaceServices
+                 continue;
+             }
+             $face = $this->decimalMoneyToCents($row['coupon_price'] ?? null, 'coupon_price_invalid');
++            if ((int)($row['coupon_type'] ?? 0) === 3) {
++                $face = (int)($remaining[$id] ?? $face);
++                $cap = intdiv(min($face, $amounts['cap']), 100) * 100;
++                if ($cap > 0) $available[] = ['couponId' => $id, 'couponType' => 3, 'useMode' => 0,
++                    'name' => trim((string)$row['coupon_title']) ?: '多次抵用券',
++                    'remainingAmountCents' => $face, 'discountAmountCents' => $cap,
++                    'useMinAmountCents' => $minimum, 'expiresAt' => (int)($row['end_time'] ?? 0)];
++                continue;
++            }
+             if ((int)($row['coupon_type'] ?? 1) === 2) {
+                 $rate = $this->decimalPercentHundredths($row['coupon_price'] ?? null);
+                 $face = intdiv($amounts['threshold'] * (10000 - $rate), 10000);
+diff --git a/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php b/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php
+index e6c26961..db47cb35 100644
+--- a/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php
++++ b/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php
+@@ -591,7 +591,8 @@ final class CashierV3CashierModule
+                 // Older cashier bundles omit order-coupon amounts. Zero keeps
+                 // those coupons unavailable without blocking ordinary coupons.
+                 (int)($payload['orderReceivableCents'] ?? 0),
+-                (int)($payload['orderLineCapacityCents'] ?? 0)
++                (int)($payload['orderLineCapacityCents'] ?? 0),
++                (int)($payload['productId'] ?? 0)
+             );
+             return [
+                 'data' => ['couponSelector' => $selector],
+@@ -621,7 +622,8 @@ final class CashierV3CashierModule
+                         (string)($scope['state_context_id'] ?? ''),
+                         $scope['operator_scope'],
+                         $lineKey,
+-                        $couponId
++                        $couponId,
++                        $payload['discountAmountCents'] ?? null
+                     )
+                     : $workspace->removeLineCouponInTx(
+                         self::workspaceContextId((array)($scope['contexts'] ?? [])),
+diff --git a/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php b/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php
+index c70d764e..6bd72c55 100644
+--- a/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php
++++ b/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php
+@@ -9,6 +9,7 @@ use app\services\cashier\v3\CashierV3ResultCode;
+ use app\services\cashier\v3\CashierV3TransactionGuard;
+ use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
+ use app\services\activity\coupon\StoreCouponOrderRule;
++use app\services\activity\coupon\StoreCouponAllowanceServices;
+ use think\facade\Db;
+ 
+ /** Final-transaction CAS consumption of coupons frozen on checkout lines. */
+@@ -41,13 +42,14 @@ final class CashierV3CheckoutCouponSettlementServices
+             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
+             $issue = (int)($coupon['cid'] ?? 0) > 0
+                 ? (array)Db::name('store_coupon_issue')->where('id', (int)$coupon['cid'])->find() : [];
++            $reusable = (int)($issue['coupon_type'] ?? 0) === StoreCouponAllowanceServices::TYPE;
+             if (!$coupon
+                 || (int)($issue['use_mode'] ?? StoreCouponOrderRule::DETAIL) !== StoreCouponOrderRule::DETAIL
+                 || (int)$orderCouponResult['consumedCount'] > 0
+                 || (int)($coupon['uid'] ?? 0) !== (int)$plan->header()['member_id']
+                 || (int)($coupon['status'] ?? -1) !== 0
+                 || (int)($coupon['is_fail'] ?? -1) !== 0
+-                || (int)($coupon['use_time'] ?? -1) !== 0
++                || (!$reusable && (int)($coupon['use_time'] ?? -1) !== 0)
+                 || (int)($coupon['start_time'] ?? 0) > $now
+                 || ((int)($coupon['end_time'] ?? 0) > 0 && (int)$coupon['end_time'] < $now)
+                 || trim((string)($coupon['coupon_title'] ?? '')) !== trim((string)$line['coupon_name_snapshot'])
+@@ -58,11 +60,26 @@ final class CashierV3CheckoutCouponSettlementServices
+                     : ($discount !== (int)($line['discount_amount_cents'] ?? -1)))) {
+                 throw self::failure('checkout_coupon_frozen_authority_changed');
+             }
+-            $updated = Db::name('store_coupon_user')->where('id', $couponId)
++            if ($reusable) {
++                // Non-cash tender uses the existing sale/refund cap facts; only
++                // its allowance lifecycle differs from an ordinary one-use coupon.
++                if ((int)($line['coupon_payment_cents'] ?? 0) !== $discount
++                    || $discount > (int)$line['sale_amount_cents'] - (int)$line['debt_amount_cents']) {
++                    throw self::failure('checkout_allowance_tender_invalid');
++                }
++                (new StoreCouponAllowanceServices())->consumeInTx($couponId, $discount, [
++                    'tenant_id' => $scope->tenantId(), 'store_id' => (int)$plan->header()['store_id'],
++                    'member_id' => (int)$plan->header()['member_id'], 'order_id' => $orderId,
++                    'order_line_id' => (string)$line['order_line_id'],
++                    'product_id' => (int)$line['item_id'],
++                ], $now);
++            } else {
++                $updated = Db::name('store_coupon_user')->where('id', $couponId)
+                 ->where('uid', (int)$plan->header()['member_id'])
+                 ->where('status', 0)->where('is_fail', 0)->where('use_time', 0)
+                 ->update(['status' => 1, 'use_time' => $now]);
+-            if ((int)$updated !== 1) throw self::failure('checkout_coupon_consume_race');
++                if ((int)$updated !== 1) throw self::failure('checkout_coupon_consume_race');
++            }
+             $consumed[$couponId] = [
+                 'couponUserId' => $couponId,
+                 'couponName' => (string)$line['coupon_name_snapshot'],
+diff --git a/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php b/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php
+index 444e8347..16bf223a 100644
+--- a/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php
++++ b/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php
+@@ -592,11 +592,18 @@ final class CashierV3SalesOrderReversalServices
+                 throw self::failure('sales_reversal_coupon_trace_invalid');
+             }
+             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
++            $issue = (array)Db::name('store_coupon_issue')->where('id', (int)($coupon['cid'] ?? 0))->find();
++            $reusable = (int)($issue['coupon_type'] ?? 0) === \app\services\activity\coupon\StoreCouponAllowanceServices::TYPE;
+             if (!$coupon || (int)($coupon['uid'] ?? 0) !== (int)$source['memberId']
+-                || (int)($coupon['status'] ?? -1) !== 1 || (int)($coupon['use_time'] ?? 0) <= 0
+-                || (int)($coupon['is_fail'] ?? -1) !== 0) {
++                || (!$reusable && ((int)($coupon['status'] ?? -1) !== 1 || (int)($coupon['is_fail'] ?? -1) !== 0))
++                || (int)($coupon['use_time'] ?? 0) <= 0) {
+                 throw self::failure('sales_reversal_coupon_state_changed');
+             }
++            // An allowance may have been used by later orders. The void service
++            // restores only this line's immutable debit, preserving those uses.
++            $line['allowance_identity'] = $reusable ? ['tenant_id' => $scope->tenantId(),
++                'store_id' => (int)$source['storeId'], 'member_id' => (int)$source['memberId'],
++                'order_id' => (string)$source['sourceId'], 'order_line_id' => (string)$line['order_line_id']] : null;
+             $line['coupon'] = $coupon;
+             $seen[$couponId] = true;
+         }
+@@ -625,6 +632,14 @@ final class CashierV3SalesOrderReversalServices
+     {
+         foreach ($coupons as $line) {
+             $coupon = (array)($line['coupon'] ?? []);
++            if (!empty($line['allowance_identity'])) {
++                $identity = $line['allowance_identity'];
++                $identity['operation_id'] = $operationId;
++                (new \app\services\activity\coupon\StoreCouponAllowanceServices())->restoreInTx(
++                    (int)$line['coupon_user_id'], (int)$line['coupon_discount_cents'] + (int)($line['coupon_payment_cents'] ?? 0),
++                    $identity, $now);
++                continue;
++            }
+             $updated = Db::name('store_coupon_user')->where('id', (int)$line['coupon_user_id'])
+                 ->where('uid', (int)$source['memberId'])->where('status', 1)
+                 ->where('is_fail', 0)->where('use_time', (int)($coupon['use_time'] ?? 0))
+diff --git a/后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php b/后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php
+index 90cecac0..8690fb8b 100644
+--- a/后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php
++++ b/后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php
+@@ -479,7 +479,8 @@ final class CashierV3MemberDetailQueryServices
+             ->leftJoin('store_coupon_issue ci', 'ci.id=cu.cid')
+             ->where('cu.uid', $memberId);
+         if ($status === 'active') {
+-            $query->where('cu.status', 0)->where('cu.is_fail', 0)->where('cu.use_time', 0)
++            $query->where('cu.status', 0)->where('cu.is_fail', 0)
++                ->where(function ($q): void { $q->where('cu.use_time', 0)->whereOr('ci.coupon_type', 3); })
+                 ->where(function ($q) use ($now): void { $q->where('cu.start_time', 0)->whereOr('cu.start_time', '<=', $now); })
+                 ->where(function ($q) use ($now): void { $q->where('cu.end_time', 0)->whereOr('cu.end_time', '>=', $now); });
+         }
+@@ -488,12 +489,16 @@ final class CashierV3MemberDetailQueryServices
+         if ($dateTo !== '') $query->where('cu.add_time', '<=', strtotime($dateTo . ' 23:59:59'));
+         $rows = $query->field('cu.id,cu.coupon_title,cu.coupon_price,cu.start_time,cu.end_time,cu.use_time,cu.status,cu.is_fail,ci.coupon_type')
+             ->order('cu.add_time desc,cu.id desc')->limit(200)->select()->toArray();
+-        return array_map(function (array $row) use ($now): array {
++        // Used timestamps do not exhaust an allowance; read its current account
++        // without rewriting the original coupon face or renewing validity.
++        $ids = array_column(array_filter($rows, static fn(array $row): bool => (int)($row['coupon_type'] ?? 0) === 3), 'id');
++        $remaining = (new \app\services\activity\coupon\StoreCouponAllowanceServices())->remainingByCouponIds($ids);
++        return array_map(function (array $row) use ($now, $remaining): array {
+             $couponType = $row['coupon_type'] === null ? 0 : (int)$row['coupon_type'];
+             $start = (int)$row['start_time'];
+             $end = (int)$row['end_time'];
+             $statusCode = (int)$row['status'];
+-            $used = $statusCode === 1 || (int)$row['use_time'] > 0;
++            $used = $statusCode === 1 || ($couponType !== 3 && (int)$row['use_time'] > 0);
+             $voided = (int)$row['is_fail'] !== 0 || $statusCode === 2;
+             $statusLabel = $voided ? '已作废' : ($used ? '已使用'
+                 : ($statusCode !== 0 ? '不可用'
+@@ -501,11 +506,13 @@ final class CashierV3MemberDetailQueryServices
+             return [
+                 'id' => 'coupon:' . (int)$row['id'], 'couponNo' => (string)$row['id'],
+                 'couponName' => (string)$row['coupon_title'],
+-                'couponTypeLabel' => $couponType === 2 ? '折扣券' : ($couponType === 1 ? '满减券' : '未标注'),
++                'couponTypeLabel' => $couponType === 3 ? '多次抵用券' : ($couponType === 2 ? '折扣券' : ($couponType === 1 ? '满减券' : '未标注')),
+                 // 折扣券的 coupon_price 是百分比而非金额；不可格式化成元。
+                 'couponAmountLabel' => $couponType === 2
+                     ? rtrim(rtrim((string)$row['coupon_price'], '0'), '.') . '%'
+-                    : ($couponType === 0 ? '未标注' : null),
++                    : ($couponType === 3 ? '剩余 ¥' . intdiv((int)($remaining[(int)$row['id']]
++                        ?? \app\services\activity\coupon\StoreCouponAllowanceServices::wholeCents($row['coupon_price'])), 100)
++                        : ($couponType === 0 ? '未标注' : null)),
+                 'couponAmount' => $couponType === 1 ? (string)$row['coupon_price'] : null,
+                 'effectiveAt' => $start > 0 ? $this->dateTime($start) : null,
+                 'expiresAt' => $end > 0 ? $this->dateTime($end) : null,
+diff --git a/前端代码/admin/src/pages/marketing/storeCouponUser/index.vue b/前端代码/admin/src/pages/marketing/storeCouponUser/index.vue
+index 86b7f104..33503952 100644
+--- a/前端代码/admin/src/pages/marketing/storeCouponUser/index.vue
++++ b/前端代码/admin/src/pages/marketing/storeCouponUser/index.vue
+@@ -113,6 +113,7 @@
+         </template>
+         <template slot-scope="{ row }" slot="coupon_price">
+           <span v-if="row.coupon_type == 1">{{ row.coupon_price }}元</span>
++          <span v-if="row.coupon_type == 3">总额度 {{ parseInt(row.coupon_price) }}元 · 剩余 {{ row.remaining_amount }}元</span>
+           <span v-if="row.coupon_type == 2"
+             >{{ parseFloat(row.coupon_price) / 10 }}折（{{
+               row.coupon_price.toString().split('.')[0]
+@@ -329,4 +330,4 @@ export default {
+     },
+   },
+ };
+-</script>
+\ No newline at end of file
++</script>
+diff --git a/后端代码/app/services/activity/promotions/StorePromotionsServices.php b/后端代码/app/services/activity/promotions/StorePromotionsServices.php
+index 9bb67866..69c7469a 100644
+--- a/后端代码/app/services/activity/promotions/StorePromotionsServices.php
++++ b/后端代码/app/services/activity/promotions/StorePromotionsServices.php
+@@ -1849,6 +1849,11 @@ class StorePromotionsServices extends BaseServices
+                 throw new ValidateException('选择的优惠劵无效!');
+ //				return [[], 0];
+             }
++            // Legacy clients have no explicit amount or allowance transaction.
++            // Reject before calculating a percentage or writing an order.
++            if ((int)($couponInfo['coupon_type'] ?? 0) === 3) {
++                throw new ValidateException('多次抵用券请在门店收银新版中输入本次抵用金额。');
++            }
+             $type = $couponInfo['coupon_applicable_type'] ?? 0;
+             $flag = false;
+             $price = 0;
+diff --git a/后端代码/app/services/activity/coupon/StoreCouponIssueServices.php b/后端代码/app/services/activity/coupon/StoreCouponIssueServices.php
+index df4932bf..fed332e3 100644
+--- a/后端代码/app/services/activity/coupon/StoreCouponIssueServices.php
++++ b/后端代码/app/services/activity/coupon/StoreCouponIssueServices.php
+@@ -154,6 +154,21 @@ class StoreCouponIssueServices extends BaseServices
+      */
+     public function saveCoupon($data, $id, $coupon_issue_type)
+     {
++        // Every issuer (platform/store/merchant) shares allowance invariants.
++        // Controller validation alone would let an older editor change an
++        // issued face or accidentally reinterpret it as a discount percentage.
++        $existing = $id ? $this->dao->get($id) : null;
++        if ((int)($data['coupon_type'] ?? 1) === StoreCouponAllowanceServices::TYPE
++            || ($existing && (int)$existing['coupon_type'] === StoreCouponAllowanceServices::TYPE)) {
++            if ($existing && ((int)($data['coupon_type'] ?? 1) !== (int)$existing['coupon_type']
++                || bccomp((string)($data['coupon_price'] ?? 0), (string)$existing['coupon_price'], 2) !== 0)) {
++                throw new AdminException('多次抵用券已发行，类型和总额度不可修改，请新建优惠券');
++            }
++            try { StoreCouponAllowanceServices::wholeCents($data['coupon_price'] ?? 0); }
++            catch (\app\services\cashier\v3\CashierV3CommandException $e) { throw new AdminException($e->getMessage()); }
++            if ((int)($data['use_mode'] ?? 0) !== StoreCouponOrderRule::DETAIL) throw new AdminException('多次抵用券仅支持明细抵用');
++            $data['allow_transfer'] = 0;
++        }
+         $data['coupon_issue_type'] = $coupon_issue_type;
+         $data['start_use_time'] = strtotime((string)$data['start_use_time']);
+         $data['end_use_time'] = strtotime((string)$data['end_use_time']);
+@@ -1269,6 +1284,13 @@ class StoreCouponIssueServices extends BaseServices
+                 $coupon['can_use'] = false;
+                 $coupon['true_coupon_price'] = 0;
+                 $coupon['unuse_reason'] = '';
++                // Do not misinterpret a reusable allowance face as a percentage
++                // in old checkout projections that cannot collect an amount.
++                if ((int)$coupon['coupon_type'] === StoreCouponAllowanceServices::TYPE) {
++                    $coupon['unuse_reason'] = '请在门店收银新版中输入本次抵用金额';
++                    $result[] = $coupon;
++                    continue;
++                }
+ 
+                 if (!$count) {
+                     $coupon['unuse_reason'] = '不符合使用条件';
+diff --git a/后端代码/app/dao/activity/coupon/StoreCouponUserDao.php b/后端代码/app/dao/activity/coupon/StoreCouponUserDao.php
+index d2ee6e55..aaebf3d6 100644
+--- a/后端代码/app/dao/activity/coupon/StoreCouponUserDao.php
++++ b/后端代码/app/dao/activity/coupon/StoreCouponUserDao.php
+@@ -115,6 +115,11 @@ class StoreCouponUserDao extends BaseDao
+     {
+         $query = $this->getModel()->where('id', $id)
+             ->where('status', 0)->where('is_fail', 0)->where('use_time', 0);
++        // A direct legacy DAO caller must not exhaust an allowance without its
++        // ledger. Only the V3 settlement service writes coupon_type=3 balances.
++        $query->whereNotIn('cid', function ($q) {
++            $q->name('store_coupon_issue')->where('coupon_type', 3)->field('id');
++        });
+         if ($uid > 0) {
+             $query->where('uid', $uid);
+         }
+diff --git a/前端代码/cashier-v3/src/services/couponAllowance.js b/前端代码/cashier-v3/src/services/couponAllowance.js
+index e69de29b..e4bba947 100644
+--- a/前端代码/cashier-v3/src/services/couponAllowance.js
++++ b/前端代码/cashier-v3/src/services/couponAllowance.js
+@@ -0,0 +1,15 @@
++/** A browser choice is only a draft; final checkout locks the allowance again. */
++export function allowanceAmountCents(raw, coupon, lineCapacityCents) {
++  if (!/^[1-9][0-9]{0,8}$/.test(String(raw))) return null
++  const amount = Number(raw) * 100
++  return validAllowanceCents(amount, coupon, lineCapacityCents) ? amount : null
++}
++
++/** Never round/clamp a command: the entered whole-yuan amount is authoritative intent. */
++export function validAllowanceCents(amount, coupon, lineCapacityCents) {
++  const remaining = Number(coupon?.remainingAmountCents)
++  const cap = Math.min(Number(coupon?.discountAmountCents), Number(lineCapacityCents))
++  return Number(coupon?.couponType) === 3 && Number.isSafeInteger(amount) && amount > 0
++    && amount % 100 === 0 && Number.isSafeInteger(remaining) && amount <= remaining
++    && Number.isSafeInteger(cap) && amount <= cap
++}
+diff --git a/后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php b/后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php
+index e69de29b..b5019b11 100644
+--- a/后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php
++++ b/后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php
+@@ -0,0 +1,179 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\activity\coupon;
++
++use app\services\cashier\v3\CashierV3CommandException;
++use app\services\cashier\v3\CashierV3TransactionGuard;
++use think\facade\Db;
++
++/** Independent non-cash allowance. All writes share the checkout/void transaction. */
++final class StoreCouponAllowanceServices
++{
++    public const TYPE = 3;
++    public const ACCOUNT = 'coupon_allowance_account';
++    public const MOVEMENT = 'coupon_allowance_movement';
++
++    /** Read-only lazy initialization: browsing coupons must never write accounts. */
++    public function remainingByCouponIds(array $ids): array
++    {
++        if (!$ids) return [];
++        return Db::name(self::ACCOUNT)->whereIn('coupon_user_id', $ids)
++            ->column('remaining_cents', 'coupon_user_id');
++    }
++
++    /** New allowance amounts are whole yuan even though the ledger stores cents. */
++    public static function wholeCents($value): int
++    {
++        $raw = (string)$value;
++        if (preg_match('/^[1-9][0-9]{0,8}(?:\.0{1,2})?$/D', $raw) !== 1) {
++            throw self::failure('多次抵用券总额度必须是正整数元。');
++        }
++        return (int)$raw * 100;
++    }
++
++    /** Validate scope as well as balance; a stale or forged draft grants no rights. */
++    public function consumeInTx(int $couponId, int $amount, array $identity, int $now): void
++    {
++        CashierV3TransactionGuard::assertInTransaction('couponAllowance.consume');
++        $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
++        $issue = (array)Db::name('store_coupon_issue')->where('id', (int)($coupon['cid'] ?? 0))->find();
++        if (!$coupon || (int)($issue['coupon_type'] ?? 0) !== self::TYPE
++            || (int)($issue['use_mode'] ?? 0) !== StoreCouponOrderRule::DETAIL
++            || (int)$coupon['uid'] !== (int)$identity['member_id']
++            || (int)$coupon['status'] !== 0 || (int)$coupon['is_fail'] !== 0
++            || (int)$coupon['start_time'] > $now
++            || ((int)$coupon['end_time'] > 0 && (int)$coupon['end_time'] < $now)
++            || !$this->allowsStore($issue, (int)$identity['store_id'])
++            || !$this->allowsProduct($issue, (int)($identity['product_id'] ?? 0))) {
++            throw self::failure('该多次抵用券当前不可使用，请重新选择。');
++        }
++        $total = self::wholeCents($coupon['coupon_price']);
++        $account = (array)Db::name(self::ACCOUNT)->where('coupon_user_id', $couponId)->lock(true)->find();
++        // The claim row lock serializes first use, subsequent uses, and reversal.
++        if (!$account) {
++            Db::name(self::ACCOUNT)->insert(['coupon_user_id' => $couponId, 'member_id' => (int)$coupon['uid'],
++                'total_cents' => $total, 'remaining_cents' => $total, 'version' => 1]);
++            $account = ['member_id' => (int)$coupon['uid'], 'total_cents' => $total,
++                'remaining_cents' => $total, 'version' => 1];
++        }
++        if ((int)$account['member_id'] !== (int)$coupon['uid'] || (int)$account['total_cents'] !== $total) {
++            throw self::failure('多次抵用券额度来源不一致，请核对后重试。');
++        }
++        $after = self::afterUse((int)$account['remaining_cents'], $amount);
++        $this->writeMovement($couponId, $account, $identity, -$amount, $after, null, $now);
++        Db::name('store_coupon_user')->where('id', $couponId)
++            ->update(['status' => $after === 0 ? 1 : 0, 'use_time' => $now]);
++    }
++
++    /** Integer conservation shared with tests; never clamp an excessive command. */
++    public static function afterUse(int $remaining, int $amount): int
++    {
++        if ($remaining < 0 || $remaining % 100 !== 0 || $amount <= 0 || $amount % 100 !== 0 || $amount > $remaining) {
++            throw self::failure('本次抵用金额须为正整数元，且不能超过券剩余额度。');
++        }
++        return $remaining - $amount;
++    }
++
++    /** Whole-order void restores the exact original debit, not the coupon face. */
++    public function restoreInTx(int $couponId, int $amount, array $identity, int $now): void
++    {
++        CashierV3TransactionGuard::assertInTransaction('couponAllowance.restore');
++        $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
++        $account = (array)Db::name(self::ACCOUNT)->where('coupon_user_id', $couponId)->lock(true)->find();
++        $debit = (array)Db::name(self::MOVEMENT)->where('coupon_user_id', $couponId)
++            ->where('tenant_id', (string)$identity['tenant_id'])->where('order_id', (string)$identity['order_id'])
++            ->where('order_line_id', (string)$identity['order_line_id'])->where('delta_cents', '<', 0)
++            ->lock(true)->find();
++        if (!$coupon || !$account || !$debit || (int)$coupon['uid'] !== (int)$identity['member_id']
++            || (int)$account['member_id'] !== (int)$identity['member_id']
++            || (int)$debit['member_id'] !== (int)$identity['member_id']
++            || (int)$debit['store_id'] !== (int)$identity['store_id']
++            || (int)$debit['delta_cents'] !== -$amount || $amount <= 0 || $amount % 100 !== 0
++            || Db::name(self::MOVEMENT)->where('reversal_of', (int)$debit['id'])->find()) {
++            throw self::failure('多次抵用券原始使用流水不一致，不能重复恢复额度。');
++        }
++        $after = (int)$account['remaining_cents'] + $amount;
++        if ($after > (int)$account['total_cents']) throw self::failure('多次抵用券恢复额度超过原始总额。');
++        $this->writeMovement($couponId, $account, $identity, $amount, $after, (int)$debit['id'], $now);
++        // Expiry/revocation flags and dates are intentionally not renewed by void.
++        // Keep a use timestamp: generic legacy transfer/recover paths must not revive it.
++        Db::name('store_coupon_user')->where('id', $couponId)->update([
++            'status' => (int)$coupon['status'] > 1 ? (int)$coupon['status'] : 0, 'use_time' => $now]);
++    }
++
++    /** Version CAS plus immutable event identity protects rollback and duplicate delivery. */
++    private function writeMovement(int $couponId, array $account, array $identity, int $delta,
++        int $after, ?int $reversalOf, int $now): void
++    {
++        foreach (['tenant_id', 'order_id', 'order_line_id'] as $field) {
++            if (!isset($identity[$field]) || (string)$identity[$field] === '') throw self::failure('多次抵用券缺少结账来源，操作已回滚。');
++        }
++        $key = hash('sha256', json_encode([$identity['tenant_id'], $identity['order_id'],
++            $identity['order_line_id'], $reversalOf === null ? 'use' : 'void']));
++        if (Db::name(self::MOVEMENT)->where('coupon_user_id', $couponId)->where('event_key', $key)->find()) {
++            throw self::failure('多次抵用券流水已存在，请刷新订单核对结果。');
++        }
++        $updated = Db::name(self::ACCOUNT)->where('coupon_user_id', $couponId)
++            ->where('version', (int)$account['version'])->where('remaining_cents', (int)$account['remaining_cents'])
++            ->update(['remaining_cents' => $after, 'version' => (int)$account['version'] + 1]);
++        if ((int)$updated !== 1) throw self::failure('多次抵用券额度已经变化，请重新选择。');
++        Db::name(self::MOVEMENT)->insert(['coupon_user_id' => $couponId, 'member_id' => (int)$account['member_id'],
++            'tenant_id' => (string)$identity['tenant_id'], 'store_id' => (int)$identity['store_id'],
++            'order_id' => (string)$identity['order_id'], 'order_line_id' => (string)$identity['order_line_id'],
++            'operation_id' => (string)($identity['operation_id'] ?? ''), 'event_key' => $key,
++            'delta_cents' => $delta, 'before_cents' => (int)$account['remaining_cents'], 'after_cents' => $after,
++            'reversal_of' => $reversalOf, 'created_at' => $now]);
++    }
++
++    /** Store restrictions remain authoritative even when the browser reuses a stale selector. */
++    private function allowsStore(array $issue, int $storeId): bool
++    {
++        if ((int)($issue['coupon_issue_type'] ?? 0) === 1 && (int)($issue['relation_id'] ?? 0) !== $storeId) return false;
++        $type = (int)($issue['applicable_type'] ?? 1);
++        if ($type === 0) return false;
++        if ($type !== 2) return true;
++        $raw = trim((string)($issue['applicable_store_id'] ?? ''));
++        $ids = json_decode($raw, true);
++        if (!is_array($ids)) $ids = preg_split('/\s*,\s*/', trim($raw, "[] \t\n\r\0\x0B"));
++        return in_array($storeId, array_map('intval', $ids ?: []), true);
++    }
++
++    /** Match the canonical product (including a store copy's platform parent).
++     * Selector identity is only a hint; final checkout supplies its verified item.
++     */
++    public function allowsProduct(array $issue, int $productId): bool
++    {
++        $type = (int)($issue['type'] ?? 0);
++        if ($type === 0) return true;
++        if ($productId <= 0) return false;
++        $product = (array)Db::name('store_product')->where('id', $productId)
++            ->field('id,pid,cate_id,store_cate_id,brand_id')->find();
++        if (!$product) return false;
++        if ($type === 2) {
++            $ids = array_map('intval', explode(',', (string)($issue['product_id'] ?? '')));
++            return in_array($productId, $ids, true)
++                || ((int)$product['pid'] > 0 && in_array((int)$product['pid'], $ids, true));
++        }
++        if ($type === 1) {
++            $root = (int)($issue['category_id'] ?? 0);
++            if ($root <= 0) return false;
++            $rows = app()->make(\app\services\product\category\StoreProductCategoryServices::class)->getAllById($root);
++            $ids = array_merge([$root], array_map('intval', array_column($rows, 'id')));
++            return (bool)array_intersect($ids, array_map('intval', explode(',',
++                (string)$product['cate_id'] . ',' . (string)$product['store_cate_id'])));
++        }
++        if ($type === 3) {
++            $root = (int)($issue['brand_id'] ?? 0);
++            if ($root <= 0) return false;
++            $rows = app()->make(\app\services\product\brand\StoreBrandServices::class)->getAllById($root);
++            return in_array((int)$product['brand_id'], array_merge([$root], array_map('intval', array_column($rows, 'id'))), true);
++        }
++        return false;
++    }
++
++    private static function failure(string $message): CashierV3CommandException
++    {
++        return CashierV3CommandException::versionConflict($message, ['reason' => 'coupon_allowance_authority_changed']);
++    }
++}
+diff --git a/后端代码/database/upgrades/2026-10-22-多次抵用券/01-schema.sql b/后端代码/database/upgrades/2026-10-22-多次抵用券/01-schema.sql
+index e69de29b..91425ce3 100644
+--- a/后端代码/database/upgrades/2026-10-22-多次抵用券/01-schema.sql
++++ b/后端代码/database/upgrades/2026-10-22-多次抵用券/01-schema.sql
+@@ -0,0 +1,34 @@
++-- Coupon allowance is not member cash: claims keep their original face value.
++-- Accounts are initialized from the claim only on the first committed use.
++CREATE TABLE IF NOT EXISTS `eb_coupon_allowance_account` (
++  `coupon_user_id` bigint unsigned NOT NULL,
++  `member_id` bigint unsigned NOT NULL,
++  `total_cents` bigint NOT NULL,
++  `remaining_cents` bigint NOT NULL,
++  `version` bigint unsigned NOT NULL DEFAULT 1,
++  PRIMARY KEY (`coupon_user_id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Reusable non-cash coupon allowance';
++
++-- Reversals append a positive movement referencing exactly one debit. Never
++-- overwrite the original redemption or rebuild balances from browser drafts.
++CREATE TABLE IF NOT EXISTS `eb_coupon_allowance_movement` (
++  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
++  `coupon_user_id` bigint unsigned NOT NULL,
++  `member_id` bigint unsigned NOT NULL,
++  `tenant_id` varchar(64) NOT NULL,
++  `store_id` bigint unsigned NOT NULL,
++  `order_id` varchar(64) NOT NULL,
++  `order_line_id` varchar(64) NOT NULL,
++  `operation_id` varchar(64) NOT NULL DEFAULT '',
++  `event_key` char(64) NOT NULL,
++  `delta_cents` bigint NOT NULL,
++  `before_cents` bigint NOT NULL,
++  `after_cents` bigint NOT NULL,
++  `reversal_of` bigint unsigned DEFAULT NULL,
++  `created_at` int unsigned NOT NULL,
++  PRIMARY KEY (`id`),
++  UNIQUE KEY `uq_coupon_event` (`coupon_user_id`,`event_key`),
++  UNIQUE KEY `uq_reversal` (`reversal_of`),
++  KEY `idx_order` (`tenant_id`,`order_id`,`order_line_id`),
++  KEY `idx_coupon` (`coupon_user_id`,`id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Append-only reusable coupon redemption and void facts';
+diff --git a/tests/cashier-v3/php/r48-coupon-allowance-mysql.php b/tests/cashier-v3/php/r48-coupon-allowance-mysql.php
+index e69de29b..7168c1be 100644
+--- a/tests/cashier-v3/php/r48-coupon-allowance-mysql.php
++++ b/tests/cashier-v3/php/r48-coupon-allowance-mysql.php
+@@ -0,0 +1,169 @@
++<?php
++declare(strict_types=1);
++
++// Local-only transactional fixtures. DDL is idempotent; every business row rolls back.
++$backend = getenv('CASHIER_V3_BACKEND') ?: '/var/www/html';
++require $backend . '/vendor/autoload.php';
++use app\services\activity\coupon\StoreCouponAllowanceServices as Allowance;
++use app\services\cashier\v3\CashierV3DataScopeContext;
++use app\services\cashier\v3\cashier\CashierV3CashierWorkspaceServices;
++use app\services\cashier\v3\order\CashierV3SalesOrderReversalServices;
++use app\services\cashier\v3\order\settlement\CashierV3SalesOrderPlanV1;
++use app\services\cashier\v3\settlement\CashierV3CheckoutCouponSettlementServices;
++use think\facade\Db;
++
++set_exception_handler(static function (Throwable $e): void {
++    file_put_contents('php://stderr', get_class($e) . ': ' . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n"); exit(1);
++});
++$app = new \think\App($backend . '/');
++$app->env->load($backend . '/.env');
++$app->initialize();
++set_exception_handler(static function (Throwable $e): void {
++    file_put_contents('php://stderr', get_class($e) . ': ' . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n"); exit(1);
++});
++$config = Db::connect()->getConfig();
++if (($config['hostname'] ?? '') !== 'mysql' || ($config['database'] ?? '') !== 'ruihao'
++    || getenv('R48_LOCAL_ONLY') !== '1') throw new RuntimeException('R48_LOCAL_DATABASE_GUARD');
++foreach (explode(';', file_get_contents($backend . '/database/upgrades/2026-10-22-多次抵用券/01-schema.sql')) as $sql) {
++    if (trim($sql)) Db::execute($sql);
++}
++$passed = 0;
++$check = static function (bool $ok, string $name) use (&$passed): void {
++    if (!$ok) throw new RuntimeException('FAIL ' . $name);
++    echo 'PASS ' . $name . "\n"; $passed++;
++};
++$reject = static function (callable $call, string $name) use ($check): void {
++    $caught = false;
++    Db::startTrans();
++    try { $call(); } catch (\app\services\cashier\v3\CashierV3CommandException | \mohe\exceptions\AdminException $e) { $caught = true; }
++    finally { Db::rollback(); }
++    $check($caught, $name);
++};
++$service = new Allowance();
++$reject(static fn() => Allowance::wholeCents('88.50'), 'fractional yuan face rejected');
++$reject(static fn() => Allowance::afterUse(100000, 8850), 'fractional yuan debit rejected');
++$reject(static fn() => Allowance::afterUse(100000, 0), 'zero debit rejected');
++$check(Allowance::wholeCents('1000.00') === 100000, 'whole yuan face is exact cents');
++$scope = new CashierV3DataScopeContext(1, 1, 1, '0', '', [1], 'stores', [], false, '', 'r48', [], []);
++$workspace = (new ReflectionClass(CashierV3CashierWorkspaceServices::class))->newInstanceWithoutConstructor();
++$options = new ReflectionMethod($workspace, 'couponOptions'); $options->setAccessible(true);
++$reversal = (new ReflectionClass(CashierV3SalesOrderReversalServices::class))->newInstanceWithoutConstructor();
++$lockCoupons = new ReflectionMethod($reversal, 'lockConsumedCoupons'); $lockCoupons->setAccessible(true);
++$restore = new ReflectionMethod($reversal, 'restoreCoupons'); $restore->setAccessible(true);
++$now = time();
++$tag = 'R48-' . bin2hex(random_bytes(6));
++$member = 900004800;
++Db::startTrans();
++try {
++    $issue = (int)Db::name('store_coupon_issue')->insertGetId(['title' => $tag, 'coupon_title' => $tag,
++        'coupon_price' => '1000.00', 'use_min_price' => '0.00', 'coupon_type' => 3, 'type' => 0,
++        'use_mode' => 0, 'category' => 1, 'applicable_type' => 1, 'coupon_issue_type' => 0,
++        'status' => 1, 'is_del' => 0, 'add_time' => $now]);
++    $id = (int)Db::name('store_coupon_user')->insertGetId(['cid' => $issue, 'uid' => $member,
++        'coupon_title' => $tag, 'coupon_price' => '1000.00', 'use_min_price' => '0.00',
++        'start_time' => $now - 10, 'end_time' => $now + 86400, 'use_time' => 0, 'status' => 0,
++        'is_fail' => 0, 'add_time' => $now, 'type' => 'send']);
++    $balance = static fn(): int => (int)Db::name(Allowance::ACCOUNT)->where('coupon_user_id', $id)->value('remaining_cents');
++    $read = static fn(): array => $options->invoke($workspace, $member, 1,
++        ['threshold' => 100000, 'base' => 100000, 'cap' => 100000], false, $tag, 'r48-line', $id);
++    $check((int)$read()['available'][0]['remainingAmountCents'] === 100000, 'selector offers initial 1000 yuan');
++    $check(!Db::name(Allowance::ACCOUNT)->where('coupon_user_id', $id)->find(), 'opening selector does not write an account');
++    $lineTemplate = (array)Db::name('cashier_v3_sales_order_line')->where('line_direction', 'forward')->find();
++    if (!$lineTemplate) throw new RuntimeException('local settled sale fixture missing');
++    $settle = static function (string $suffix, int $amount, int $selectedId = 0) use ($scope, $id, $member, $tag, $now, $lineTemplate): array {
++        $selectedId = $selectedId ?: $id;
++        $order = $tag . '-' . $suffix;
++        $lineId = $order . '-line';
++        $plan = (new ReflectionClass(CashierV3SalesOrderPlanV1::class))->newInstanceWithoutConstructor();
++        foreach (['header' => ['order_id' => $order, 'member_id' => $member, 'store_id' => 1,
++            'checkout_request_id' => $order, 'tenant_id' => '0'], 'lines' => [[
++            'checkout_line_id' => $lineId, 'order_line_id' => $lineId, 'item_id' => 1,
++            'coupon_user_id' => $selectedId, 'coupon_name_snapshot' => $tag,
++            'coupon_discount_cents' => 0, 'coupon_payment_cents' => $amount,
++            'original_amount_cents' => 100000, 'sale_amount_cents' => 100000,
++            'discount_amount_cents' => 0, 'debt_amount_cents' => 0,
++        ]]] as $key => $value) {
++            $property = new ReflectionProperty($plan, $key); $property->setAccessible(true); $property->setValue($plan, $value);
++        }
++        (new CashierV3CheckoutCouponSettlementServices())->consumeInTx($plan, ['orderId' => $order], $scope, $now);
++        $row = $lineTemplate; unset($row['id']);
++        $row = array_merge($row, ['tenant_id' => '0', 'order_id' => $order, 'order_line_id' => $lineId,
++            'natural_key' => $lineId,
++            'checkout_line_id' => $lineId, 'line_direction' => 'forward', 'line_status' => 'settled',
++            'coupon_user_id' => $selectedId, 'coupon_name_snapshot' => $tag, 'coupon_discount_cents' => 0,
++            'coupon_payment_cents' => $amount, 'sale_amount_cents' => 100000]);
++        Db::name('cashier_v3_sales_order_line')->insert($row);
++        return ['sourceId' => $order, 'memberId' => $member, 'storeId' => 1];
++    };
++    $first = $settle('88', 8800);
++    $check($balance() === 91200, 'final coupon settlement deducts 88, leaves 912');
++    $check((int)$read()['available'][0]['remainingAmountCents'] === 91200, 'partially used coupon remains selectable');
++    // A second independent connection cannot update the claim while the first
++    // checkout holds its transaction lock. No worker writes a committed fixture.
++    $pdo = new PDO('mysql:host=mysql;port=' . ($config['hostport'] ?? 3306) . ';dbname=ruihao;charset=utf8mb4',
++        $config['username'], $config['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
++    $pdo->exec('SET SESSION innodb_lock_wait_timeout=1');
++    $locked = false;
++    try { $pdo->exec('UPDATE eb_store_coupon_user SET status=1 WHERE id=' . $id); }
++    catch (PDOException $e) { if ((int)($e->errorInfo[1] ?? 0) !== 1205) throw $e; $locked = true; }
++    $check($locked, 'second connection cannot bypass claim lock');
++    $second = $settle('200', 20000);
++    $check($balance() === 71200, 'second order deducts 200, leaves 712');
++    $reject(static fn() => $settle('88', 8800), 'duplicate event cannot spend twice');
++    $reject(static fn() => $settle('fraction', 50), 'checkout settlement rejects fractional yuan');
++    $reject(static fn() => $settle('overspend', 71300), 'checkout rejects overspend');
++    $check($balance() === 71200, 'failed checkouts roll back allowance and facts');
++    $void = static function (array $source) use ($lockCoupons, $restore, $reversal, $scope, $tag, $now): void {
++        $coupons = $lockCoupons->invoke($reversal, $source, $scope);
++        $restore->invoke($reversal, $coupons, $source, $tag . '-void', $now + 1);
++    };
++    $void($first);
++    $check($balance() === 80000, 'void earlier 88 order leaves later 200 redemption intact');
++    $reject(static fn() => $void($first), 'same debit cannot be restored twice');
++    $void($second);
++    $check($balance() === 100000, 'void second order restores original 1000 allowance');
++    $check((int)Db::name(Allowance::MOVEMENT)->where('coupon_user_id', $id)->count() === 4, 'two debits and two immutable reversals');
++    $check((int)Db::name(Allowance::MOVEMENT)->where('coupon_user_id', $id)->sum('delta_cents') === 0, 'ledger conserves exact total');
++    $full = $settle('full', 100000);
++    $check($balance() === 0 && (int)Db::name('store_coupon_user')->where('id', $id)->value('status') === 1,
++        'exhausted allowance is used and disappears from available choices');
++    $check($read()['available'] === [], 'zero remaining coupon is not selectable');
++    $reject(static fn() => $settle('after-full', 100), 'exhausted coupon cannot overspend');
++    $void($full);
++    $check($balance() === 100000 && count($read()['available']) === 1, 'void exhausted coupon restores usability');
++    $identity = ['tenant_id' => '0', 'store_id' => 1, 'member_id' => $member + 1,
++        'order_id' => $tag . '-wrong', 'order_line_id' => $tag . '-wrong-line'];
++    $reject(static fn() => $service->consumeInTx($id, 100, $identity, $now), 'foreign member denied');
++    $identity['member_id'] = $member;
++    $reject(static fn() => $service->consumeInTx($id, 100, $identity, $now + 90000), 'expired coupon denied');
++    Db::name('store_coupon_issue')->where('id', $issue)->update(['applicable_type' => 2, 'applicable_store_id' => '999999']);
++    $reject(static fn() => $service->consumeInTx($id, 100, $identity, $now), 'foreign store denied');
++    $check((string)Db::name('store_coupon_user')->where('id', $id)->value('coupon_price') === '1000.00', 'original face never overwritten');
++    $issueRow = (array)Db::name('store_coupon_issue')->where('id', $issue)->find(); unset($issueRow['id']);
++    $issueRow['coupon_type'] = 1; $issueRow['applicable_type'] = 1;
++    $ordinaryIssue = (int)Db::name('store_coupon_issue')->insertGetId($issueRow);
++    $claim = (array)Db::name('store_coupon_user')->where('id', $id)->find(); unset($claim['id']);
++    $claim['cid'] = $ordinaryIssue; $claim['use_time'] = 0; $claim['status'] = 0;
++    $ordinaryId = (int)Db::name('store_coupon_user')->insertGetId($claim);
++    $ordinaryOrder = $settle('ordinary', 100000, $ordinaryId);
++    $check((int)Db::name('store_coupon_user')->where('id', $ordinaryId)->value('status') === 1, 'ordinary coupon remains one-use');
++    $void($ordinaryOrder);
++    $check((int)Db::name('store_coupon_user')->where('id', $ordinaryId)->value('use_time') === 0,
++        'ordinary coupon void restores legacy unused state');
++    $check(!Db::name(Allowance::ACCOUNT)->where('coupon_user_id', $ordinaryId)->find(), 'ordinary coupon has no allowance account');
++    $dao = app()->make(\app\dao\activity\coupon\StoreCouponUserDao::class);
++    $check($dao->useCoupon($id, $member) === 0, 'legacy DAO cannot consume reusable allowance');
++    $issuer = app()->make(\app\services\activity\coupon\StoreCouponIssueServices::class);
++    $rule = $issueRow;
++    $rule['title'] = $rule['coupon_title'] = $tag . '-rule';
++    $rule['coupon_type'] = 3; $rule['allow_transfer'] = 1; $rule['product_id'] = '';
++    $issuer->saveCoupon($rule, 0, 0);
++    $savedRule = (array)Db::name('store_coupon_issue')->where('coupon_title', $rule['coupon_title'])->find();
++    $check((int)$savedRule['coupon_type'] === 3 && (int)$savedRule['allow_transfer'] === 0,
++        'shared issuer creates reusable rule without transfer');
++    $badRule = $rule; $badRule['coupon_price'] = '88.50';
++    $reject(static fn() => $issuer->saveCoupon($badRule, 0, 0), 'shared issuer rejects fractional face');
++    $badRule['coupon_price'] = '2000.00';
++    $reject(static fn() => $issuer->saveCoupon($badRule, (int)$savedRule['id'], 0), 'issued face is immutable across editors');
++} finally { Db::rollback(); }
++echo 'R48_ALLOWANCE_MYSQL passed=' . $passed . "\n";
+diff --git a/tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php b/tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php
+index e69de29b..849e4939 100644
+--- a/tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php
++++ b/tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php
+@@ -0,0 +1,40 @@
++<?php
++declare(strict_types=1);
++
++// Synthetic local UI fixture only; never copies or edits an existing member.
++$backend = getenv('CASHIER_V3_BACKEND') ?: '/var/www/html';
++require $backend . '/vendor/autoload.php';
++use think\facade\Db;
++$app = new \think\App($backend . '/'); $app->env->load($backend . '/.env'); $app->initialize();
++set_exception_handler(static function (Throwable $e): void {
++    file_put_contents('php://stderr', $e->getMessage() . "\n"); exit(1);
++});
++$config = Db::connect()->getConfig();
++if (($config['hostname'] ?? '') !== 'mysql' || ($config['database'] ?? '') !== 'ruihao'
++    || getenv('R48_LOCAL_ONLY') !== '1') throw new RuntimeException('R48_LOCAL_DATABASE_GUARD');
++$name = 'R48-ALLOWANCE-UI';
++$store = (int)Db::name('system_store')->where('name', '扬州欧尚店')->value('id');
++if ($store <= 0) throw new RuntimeException('UI test store not found');
++$result = Db::transaction(static function () use ($name, $store): array {
++    $user = (array)Db::name('user')->where('account', $name)->find();
++    if ($user) return ['memberId' => (int)$user['uid'], 'name' => $name, 'storeId' => $store, 'existing' => true];
++    $now = time();
++    $uid = (int)Db::name('user')->insertGetId(['account' => $name, 'nickname' => $name, 'real_name' => $name,
++        'phone' => '', 'belong_store_id' => $store, 'status' => 1, 'add_time' => $now]);
++    Db::name('store_user')->insert(['uid' => $uid, 'store_id' => $store, 'status' => 1, 'add_time' => $now]);
++    $issue = (int)Db::name('store_coupon_issue')->insertGetId(['title' => $name, 'coupon_title' => 'R48多次抵用券',
++        'coupon_price' => '1000.00', 'use_min_price' => '0.00', 'coupon_type' => 3, 'type' => 0,
++        'use_mode' => 0, 'category' => 1, 'applicable_type' => 1, 'coupon_issue_type' => 0,
++        'status' => 1, 'is_verify' => 1, 'is_del' => 0, 'add_time' => $now, 'coupon_time' => 30]);
++    $coupon = (int)Db::name('store_coupon_user')->insertGetId(['cid' => $issue, 'uid' => $uid,
++        'coupon_title' => 'R48多次抵用券', 'coupon_price' => '1000.00', 'use_min_price' => '0.00',
++        'start_time' => $now - 10, 'end_time' => $now + 30 * 86400, 'use_time' => 0, 'status' => 0,
++        'is_fail' => 0, 'add_time' => $now, 'type' => 'send']);
++    return ['memberId' => $uid, 'name' => $name, 'storeId' => $store, 'couponId' => $coupon];
++});
++$result['accounts'] = Db::name('coupon_allowance_account')->where('member_id', $result['memberId'])->select()->toArray();
++$result['movements'] = Db::name('coupon_allowance_movement')->where('member_id', $result['memberId'])
++    ->field('id,delta_cents,before_cents,after_cents,order_id,reversal_of')->select()->toArray();
++$result['orders'] = Db::name('cashier_v3_sales_order')->where('member_id', $result['memberId'])
++    ->field('order_id,order_no,order_status,sale_amount_cents')->select()->toArray();
++echo json_encode($result, JSON_UNESCAPED_UNICODE) . "\n";
+diff --git a/tests/cashier-v3/js/r48-coupon-allowance.mjs b/tests/cashier-v3/js/r48-coupon-allowance.mjs
+index e69de29b..d6bbd58b 100644
+--- a/tests/cashier-v3/js/r48-coupon-allowance.mjs
++++ b/tests/cashier-v3/js/r48-coupon-allowance.mjs
+@@ -0,0 +1,21 @@
++import assert from 'node:assert/strict'
++import { readFileSync } from 'node:fs'
++
++const source = readFileSync(new URL('../../../前端代码/cashier-v3/src/services/couponAllowance.js', import.meta.url), 'utf8')
++const { allowanceAmountCents, validAllowanceCents } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
++const coupon = { couponType: 3, remainingAmountCents: 100000, discountAmountCents: 30000 }
++assert.equal(allowanceAmountCents('88', coupon, 30000), 8800)
++assert.equal(allowanceAmountCents('200', coupon, 30000), 20000)
++for (const input of ['', '0', '-1', '1.2', '88.00', '1e2', '301', 'Infinity', '200000000000']) {
++  assert.equal(allowanceAmountCents(input, coupon, 30000), null, input)
++}
++assert.equal(validAllowanceCents(8850, coupon, 30000), false)
++assert.equal(validAllowanceCents(20000, { ...coupon, remainingAmountCents: 8800 }, 30000), false)
++assert.equal(validAllowanceCents(20000, coupon, 10000), false)
++assert.equal(validAllowanceCents(8800, { ...coupon, couponType: 1 }, 30000), false)
++const workbench = readFileSync(new URL('../../../前端代码/cashier-v3/src/views/CashierWorkbenchView.vue', import.meta.url), 'utf8')
++const quantity = workbench.slice(workbench.indexOf('async function changeLineQuantityWithCoupon'), workbench.indexOf('function entitlementLineMaximum'))
++assert.ok(quantity.includes('validAllowanceCents(selectedAmountCents, coupon, selector.lineCapacityCents)'))
++assert.ok(quantity.includes('discountAmountCents: reusable ? selectedAmountCents'))
++assert.ok(workbench.includes('Number(coupon.couponType) !== 3 || !line.cardOperationUpgrade'))
++console.log('R48_ALLOWANCE_JS 19 checks passed')

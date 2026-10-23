@@ -1849,6 +1849,11 @@ class StorePromotionsServices extends BaseServices
                 throw new ValidateException('选择的优惠劵无效!');
 //				return [[], 0];
             }
+            // Legacy clients have no explicit amount or allowance transaction.
+            // Reject before calculating a percentage or writing an order.
+            if ((int)($couponInfo['coupon_type'] ?? 0) === 3) {
+                throw new ValidateException('多次抵用券请在门店收银新版中输入本次抵用金额。');
+            }
             $type = $couponInfo['coupon_applicable_type'] ?? 0;
             $flag = false;
             $price = 0;

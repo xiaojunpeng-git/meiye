@@ -2249,7 +2249,7 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
-            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
+            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
             'wap_login_logo', 'product_video_status','recharge_per',
 //            'store_func_status', 'video_func_status',
@@ -2280,6 +2280,10 @@ WSS;
                 Build::switch('reservation_schedule_manage', $data['reservation_schedule_manage']['info'], (int)($data['reservation_schedule_manage']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['reservation_schedule_manage']['desc'] ?? '开启后预约看板按排班与休息展示员工'),
                 Build::switch('cashier_operator_gift_switch', $data['cashier_operator_gift_switch']['info'] ?? '前台收银支持操作员赠送', (int)($data['cashier_operator_gift_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info($data['cashier_operator_gift_switch']['desc'] ?? '关闭后收银台隐藏赠送按钮，提交时自动使用商品/储值档位预设赠送配置'),
                 Build::switch('cashier_debt_pay_switch', $data['cashier_debt_pay_switch']['info'] ?? '是否允许欠款', (int)($data['cashier_debt_pay_switch']['value'] ?? 0))->trueValue('是', 1)->falseValue('否', 0)->info($data['cashier_debt_pay_switch']['desc'] ?? '关闭后收银台购物车和充值页面隐藏欠款按钮'),
+                // 仅管理收银目录入口，不能把已存在的定制卡或卡项操作一同禁用。
+                Build::switch('cashier_custom_card_entry_switch', '开启定制卡', ($data['cashier_custom_card_entry_switch']['value'] ?? '') === '' ? 1 : (int)$data['cashier_custom_card_entry_switch']['value'])->trueValue('开启', 1)->falseValue('关闭', 0)->info('仅控制收银页定制卡入口显示，不影响已有定制卡及其他卡项操作'),
+                // 默认关闭，仅允许本次普通卡销售逐项增额、增次，不改商品配置或历史权益。
+                Build::switch('cashier_ordinary_card_sale_edit_switch', '普通卡销售可修改', (int)($data['cashier_ordinary_card_sale_edit_switch']['value'] ?? 0))->trueValue('开启', 1)->falseValue('关闭', 0)->info('开启后普通卡销售可逐项修改总金额和次数，均不得低于原配置'),
             ])->option('后台设置', $setting)
                 ->option('移动端设置', [
                     Build::uploadFrame('wap_login_logo', $data['wap_login_logo']['info'], $data['wap_login_logo']['value'])->url('/' . config('admin.admin_prefix') . '/widget.images/index.html')->info($data['wap_login_logo']['desc']),

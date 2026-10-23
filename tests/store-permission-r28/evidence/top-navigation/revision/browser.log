@@ -1,0 +1,6 @@
+PASS hierarchical indent, individual/all collapse, search ancestors, restore and complete-document save
+PASS actual platform rule page renders registered editable capabilities
+PASS filter and clear retain complete editable document
+PASS existing job editor loads same split catalog without replacing platform/mobile tabs
+PASS real store bootstrap and navigation render; first accessible route selected
+R28 BROWSER PASS

@@ -107,6 +107,8 @@ class CashierV3C3ServiceModule implements CashierV3ActionModule
         foreach ([
             'create-reservation',
             'update-reservation',
+            // 日历颜色属于当前预约的资料标记，沿用预约操作权限。
+            'mark-reservation-color',
             'cancel-reservation',
             'start-reservation-service',
             'end-reservation-service',

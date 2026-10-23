@@ -1,0 +1,7 @@
+{
+  "old": "c3fe33b3a94bbe92cdf1f3b6cbd1d119185c1d72",
+  "new": "2e8f283f26d5ff0b101e523bde4c0f624e3f5c81",
+  "files": [
+    "后端代码/database/upgrades/2026-10-23-渼约010测试导入/05-007原平台管理员登录010.sql"
+  ]
+}

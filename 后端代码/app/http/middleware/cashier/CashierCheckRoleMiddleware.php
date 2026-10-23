@@ -85,15 +85,13 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
     private function directOperationFeature(string $path, string $method): string
     {
         $path = ltrim($path, '/');
-        if ($path === 'cashierapi/v3/management/staff/phone-transfer') {
-            return 'cashier.v3.management_center';
+        // 独立菜单同时约束直连接口，隐藏导航不能替代后端鉴权。
+        if (strpos($path, 'cashierapi/v3/customer-care/') === 0) return 'cashier.v3.care';
+        if (strpos($path, 'cashierapi/v3/report/') === 0) return 'cashier.v3.data';
+        if (strpos($path, 'cashierapi/v3/management/room-settings') === 0 || strpos($path, 'cashierapi/v3/management/service-names') === 0) return 'cashier.v3.management.rooms';
+        if (strpos($path, 'cashierapi/v3/management/staff') === 0 || $path === 'cashierapi/v3/management/file/upload') {
+            return $path === 'cashierapi/v3/management/staff/0' && $method === 'POST' ? 'cashier.v3.staff.create' : 'cashier.v3.management.staff';
         }
-        if ($method !== 'POST') {
-            return '';
-        }
-        if (preg_match('#^cashierapi/v3/management/staff/([0-9]+)$#D', $path, $match) !== 1) {
-            return '';
-        }
-        return (int)$match[1] > 0 ? 'cashier.v3.management_center' : 'cashier.v3.staff.create';
+        return '';
     }
 }

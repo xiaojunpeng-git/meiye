@@ -1,0 +1,8 @@
+{
+  "instance": "rh",
+  "commit": "c3625d2adeb67a01ca95e078517dcf45d503fef3",
+  "result": "PASS",
+  "directoryMode": "755",
+  "fileMode": "644",
+  "scope": "Public cashier assets and view_admin only; no private config or backup paths changed"
+}
