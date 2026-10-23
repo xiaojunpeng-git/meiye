@@ -32,7 +32,9 @@ if ($mode==='preflight') {
     $pdo->exec('START TRANSACTION READ ONLY');
     $count = (int)$pdo->query('SELECT COUNT(*) FROM eb_city_area')->fetchColumn();
     $stores = $pdo->query('SELECT id,name,province,city,area,street,address,detailed_address,is_show,is_del FROM eb_system_store WHERE id IN (127,129,130) ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
-    $pdo->rollBack();
+    // This read-only transaction was opened with SQL, not beginTransaction().
+    // PHP 7.4 PDO does not track that SQL transaction for rollBack().
+    $pdo->exec('ROLLBACK');
     if ($count!==0 || Member008RegionDataRepair::digest($stores)!==Member008RegionDataRepair::digest(array_column($plan['changes'],'before'))) throw new RuntimeException('Reviewed baseline changed');
     echo json_encode(['result'=>'PREFLIGHT_PASS','dictionaryRows'=>0,'stores'=>3,'planSha256'=>$expectedPlan]),PHP_EOL;exit;
 }
