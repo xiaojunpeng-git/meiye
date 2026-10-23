@@ -1,0 +1,16 @@
+PASS Dry run executes all inserts and rolls back
+PASS Dry run preserves every store field
+PASS Concurrent address change blocks repair without partial writes
+PASS Late dictionary insert failure rolls back every earlier batch
+PASS Actual standard dictionary and exact three stores applied
+PASS Retry is idempotent
+PASS Unrelated empty-address store untouched
+PASS Real projector exposes three provinces and exactly 21 unresolved stores
+PASS District filter matches exact store 127
+PASS District filter matches exact store 129
+PASS District filter matches exact store 130
+PASS Rollback refuses later store edits
+PASS Recovery restores codes and all original store fields
+PASS Recovery retains shared dictionary to protect later address references
+PASS Persistent local eb_city_area unchanged
+PASS Persistent local eb_system_store unchanged

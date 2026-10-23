@@ -1,0 +1,198 @@
+{
+  "task": "M008-EMERG-R3-REGION-DATA",
+  "baseline": "4edd7a8125a79a227a8222ebed71cb31c82b4c82",
+  "instance": "008",
+  "database": "mohe_008",
+  "port": 3307,
+  "dictionaryBefore": 0,
+  "seedSourceSha256": "b580d24171fc318c3f2725bfe2a4aec6e34b594ea0fe81bcdb8a53cbfb8e9b58",
+  "seedSha256": "551df53339c59577425b100ebd33af0bef20ade79443cb7b01990cf582872ec8",
+  "seedRows": 44707,
+  "changes": [
+    {
+      "before": {
+        "id": "127",
+        "name": "苏州 金茂府店",
+        "province": "0",
+        "city": "0",
+        "area": "0",
+        "street": "0",
+        "address": "江苏苏州市姑苏区",
+        "detailed_address": "江苏省苏州市姑苏区金门路777号金茂城市花园18幢115室",
+        "is_show": "1",
+        "is_del": "0"
+      },
+      "after": {
+        "province": 10845,
+        "city": 11369,
+        "area": 11415
+      },
+      "names": [
+        "江苏省",
+        "苏州市",
+        "姑苏区"
+      ]
+    },
+    {
+      "before": {
+        "id": "129",
+        "name": "广州 雅居乐店",
+        "province": "0",
+        "city": "0",
+        "area": "0",
+        "street": "0",
+        "address": "广东广州市番禺区南村镇",
+        "detailed_address": "观景路268号东北方向170米",
+        "is_show": "1",
+        "is_del": "0"
+      },
+      "after": {
+        "province": 27468,
+        "city": 27469,
+        "area": 27596
+      },
+      "names": [
+        "广东省",
+        "广州市",
+        "番禺区"
+      ]
+    },
+    {
+      "before": {
+        "id": "130",
+        "name": "浙江 富阳店",
+        "province": "0",
+        "city": "0",
+        "area": "0",
+        "street": "0",
+        "address": "浙江杭州市富阳区胥口镇",
+        "detailed_address": "鹿山街道依江路492号山水国际中心广场三层",
+        "is_show": "1",
+        "is_del": "0"
+      },
+      "after": {
+        "province": 12459,
+        "city": 12460,
+        "area": 12553
+      },
+      "names": [
+        "浙江省",
+        "杭州市",
+        "富阳区"
+      ]
+    }
+  ],
+  "pendingStores": [
+    {
+      "id": "107",
+      "name": "金宸店",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "108",
+      "name": "海伦堡",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "109",
+      "name": "越秀店",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "110",
+      "name": "春天",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "111",
+      "name": "金门店",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "112",
+      "name": "东沙湖",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "113",
+      "name": "东环",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "114",
+      "name": "欧丽薇",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "115",
+      "name": "和雍锦园",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "116",
+      "name": "木渎天虹",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "117",
+      "name": "万达",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "118",
+      "name": "国金",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "119",
+      "name": "常熟",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "120",
+      "name": "钻石",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "121",
+      "name": "天安",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "122",
+      "name": "安镇",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "123",
+      "name": "滨湖",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "124",
+      "name": "玉兰",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "125",
+      "name": "海门店",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "126",
+      "name": "建业店",
+      "reason": "No saved address or region codes; do not infer from store name"
+    },
+    {
+      "id": "128",
+      "name": "渼约新港店",
+      "reason": "No saved address or region codes; do not infer from store name"
+    }
+  ],
+  "writeBoundary": [
+    "insert missing standard dictionary into an empty table",
+    "update only province/city/area on three exact unchanged stores",
+    "preserve all original address text, street and unrelated fields"
+  ],
+  "schemaChanges": false
+}

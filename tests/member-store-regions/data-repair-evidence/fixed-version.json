@@ -1,0 +1,43 @@
+{
+  "task": "M008-EMERG-R3-REGION-DATA",
+  "baseline": "4edd7a8125a79a227a8222ebed71cb31c82b4c82",
+  "files": [
+    {
+      "file": "scripts/member-008-region-data-inspect.php",
+      "sha256": "6be2e86dfdc9bf55a6ac71974e74c6b06dd5d9419ccd21615da9d2cc3133575a"
+    },
+    {
+      "file": "scripts/export-standard-city-seed.php",
+      "sha256": "34b69756ee44b8ec85dc39dbcf83109a1cf7a728c61002c5766f9a2a929db71b"
+    },
+    {
+      "file": "tests/member-store-regions/data-repair.php",
+      "sha256": "5f43110d110fd6f41d60e29f60e283fb6d7f1ac84b5d448d9813877981fc6bae"
+    },
+    {
+      "file": "后端代码/database/upgrades/2026-10-24-008门店地区数据修复/README.md",
+      "sha256": "6b39c1c4dc01db79f736f62b5dccb94052c62130348eee71c131276efd7aa288"
+    },
+    {
+      "file": "后端代码/database/upgrades/2026-10-24-008门店地区数据修复/plan.json",
+      "sha256": "1760affd35264781dfca668e424c7d2d1679a56fdc257738ef9693245c87eb3d"
+    },
+    {
+      "file": "后端代码/database/upgrades/2026-10-24-008门店地区数据修复/repair.php",
+      "sha256": "d8c5977be5706ab11bda57c28524c005bcc9e2e788f2474829f55f811b133eac"
+    },
+    {
+      "file": "后端代码/database/upgrades/2026-10-24-008门店地区数据修复/run.php",
+      "sha256": "85b2b96cd50df0d39e2bda0e6c0cd1dd31fd6c4923252b75431dfca9e34a9765"
+    },
+    {
+      "file": "后端代码/database/upgrades/2026-10-24-008门店地区数据修复/standard-city.json.gz",
+      "sha256": "fb56e5df97e186db4f3c18a712a8967d725a0fb4ed31c2cd3bebaa9aea991a4c"
+    }
+  ],
+  "planSha256": "1760affd35264781dfca668e424c7d2d1679a56fdc257738ef9693245c87eb3d",
+  "localTests": "PASS",
+  "productScopeApproval": "PENDING",
+  "productionWrites": 0,
+  "commit": "NOT CREATED"
+}
