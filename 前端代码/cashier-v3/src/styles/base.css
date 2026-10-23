@@ -52,142 +52,12 @@ button:disabled {
 }
 
 .cashier-shell {
-  display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
-  transition: grid-template-columns .18s ease;
-}
-
-.cashier-shell--sidebar-collapsed {
-  grid-template-columns: 64px minmax(0, 1fr);
-}
-
-.cashier-sidebar {
-  position: relative;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 14px;
+  height: 100dvh;
   min-height: 0;
-  padding: 18px 12px 14px;
-  border-right: 1px solid rgba(221, 228, 237, 0.12);
-  background: #18243a;
-  color: #fff;
-}
-
-.cashier-brand {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 55px;
-  padding: 2px 7px 17px;
-  border-bottom: 1px solid rgba(221, 228, 237, 0.16);
-}
-
-/* 仅多门店组织账号把品牌位变成切店入口；单门店沿用静态标识。 */
-.cashier-brand--switchable {
-  width: 100%;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  background: transparent;
-  border-top: 0;
-  border-right: 0;
-  border-left: 0;
-  cursor: pointer;
-}
-
-.cashier-brand--switchable:hover .cashier-brand__mark,
-.cashier-brand--switchable:focus-visible .cashier-brand__mark {
-  background: rgba(185, 212, 255, 0.17);
-}
-
-.cashier-brand__mark {
-  display: inline-grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid rgba(185, 212, 255, 0.18);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  color: #b9d4ff;
-}
-
-.cashier-brand__copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.cashier-brand__copy strong {
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 23px;
-  overflow-wrap: anywhere;
-}
-
-.cashier-sidebar-toggle {
-  display: inline-grid;
-  flex: none;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid #d6e4f5;
-  border-radius: 50%;
-  background: #fff;
-  color: #176fd1;
-  /* 让圆形按钮的中线准确压在侧栏分隔线上，便于收起后再展开。 */
-  margin-right: -27px;
-  z-index: 4;
-  box-shadow: 0 3px 10px rgba(4, 39, 82, 0.18);
-  transition: color .16s ease, border-color .16s ease, box-shadow .16s ease;
-}
-
-.cashier-sidebar-toggle:hover {
-  border-color: #91caff;
-  color: #0958d9;
-  box-shadow: 0 4px 12px rgba(4, 39, 82, 0.24);
-}
-
-.cashier-sidebar-toggle:focus-visible {
-  outline: 3px solid rgba(64, 150, 255, 0.32);
-  outline-offset: 2px;
-}
-
-.cashier-nav {
-  display: grid;
-  align-content: start;
-  gap: 5px;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-  scrollbar-width: thin;
-}
-
-.cashier-nav::-webkit-scrollbar {
-  width: 5px;
-}
-
-.cashier-nav::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.cashier-nav::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.cashier-nav__section {
-  padding: 2px 12px 6px;
-  color: rgba(255, 255, 255, 0.42);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .12em;
-  line-height: 18px;
+  overflow: hidden;
 }
 
 .cashier-nav__item {
@@ -247,72 +117,6 @@ button:disabled {
 .cashier-nav__badge {
   flex: none;
   margin-left: auto;
-}
-
-.cashier-account {
-  position: relative;
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  padding: 12px 13px;
-  border: 1px solid rgba(221, 228, 237, 0.14);
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.045);
-}
-
-.cashier-account__trigger {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  color: inherit;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-}
-
-.cashier-account__trigger:focus-visible {
-  outline: 2px solid #91caff;
-  outline-offset: 3px;
-}
-
-.cashier-account__menu {
-  position: absolute;
-  z-index: 20;
-  bottom: calc(100% + 8px);
-  left: 0;
-  display: grid;
-  min-width: 144px;
-  padding: 4px;
-  border: 1px solid #d9e1ea;
-  border-radius: 6px;
-  background: #fff;
-  box-shadow: 0 8px 20px rgba(25, 38, 56, 0.18);
-}
-
-.cashier-account__menu button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 4px;
-  color: #283544;
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  text-align: left;
-}
-
-.cashier-account__menu button:hover {
-  background: #eef5ff;
-  color: #1677c8;
 }
 
 .cashier-account-dialog-backdrop {
@@ -389,94 +193,6 @@ button:disabled {
   margin: -3px 0 0;
   color: #b42318;
   font-size: 13px;
-}
-
-.cashier-sidebar__footer {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-
-.cashier-account__icon {
-  flex: none;
-  color: rgba(185, 212, 255, 0.84);
-}
-
-.cashier-account__copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.cashier-account__label {
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 12px;
-}
-
-.cashier-account__copy strong {
-  overflow: hidden;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cashier-sidebar--collapsed {
-  gap: 14px;
-  padding-right: 8px;
-  padding-left: 8px;
-}
-
-.cashier-sidebar--collapsed .cashier-brand {
-  grid-template-columns: 34px;
-  justify-content: center;
-  padding-right: 0;
-  padding-left: 0;
-}
-
-.cashier-sidebar--collapsed .cashier-nav {
-  justify-items: stretch;
-}
-
-.cashier-sidebar--collapsed .cashier-nav__item {
-  position: relative;
-  justify-content: center;
-  gap: 0;
-  padding: 0;
-}
-
-.cashier-sidebar--collapsed .cashier-nav__item--active {
-  border-left-width: 1px;
-}
-
-.cashier-sidebar--collapsed .cashier-account {
-  justify-content: center;
-  min-height: 44px;
-  padding: 0;
-}
-
-.cashier-sidebar--collapsed .cashier-sidebar__footer {
-  gap: 3px;
-  margin-right: 0;
-}
-
-.cashier-sidebar--collapsed .cashier-sidebar-toggle {
-  width: 28px;
-  height: 28px;
-  margin-right: -22px;
-}
-
-.cashier-sidebar--collapsed .cashier-nav__badge {
-  position: absolute;
-  top: 3px;
-  right: -8px;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 4px;
-  font-size: 10px;
-  line-height: 17px;
 }
 
 .cashier-main {
@@ -1199,40 +915,6 @@ button:disabled {
     overflow-x: hidden;
   }
 
-  .cashier-shell {
-    grid-template-columns: 140px minmax(0, 1fr);
-  }
-
-  .cashier-shell.cashier-shell--sidebar-collapsed {
-    grid-template-columns: 64px minmax(0, 1fr);
-  }
-
-  .cashier-sidebar {
-    gap: 12px;
-    padding: 16px 8px 12px;
-  }
-
-  .cashier-brand,
-  .cashier-account {
-    padding-right: 9px;
-    padding-left: 9px;
-  }
-
-  .cashier-sidebar--collapsed .cashier-brand,
-  .cashier-sidebar--collapsed .cashier-account {
-    padding-right: 0;
-    padding-left: 0;
-  }
-
-  .cashier-brand strong {
-    font-size: 16px;
-  }
-
-  .cashier-brand span,
-  .cashier-nav__section {
-    font-size: 11px;
-  }
-
   .cashier-nav__item {
     min-height: 42px;
     padding: 0 9px;
@@ -1315,12 +997,6 @@ button:disabled {
 
   .service-completion-overlay {
     min-width: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cashier-shell {
-    transition: none;
   }
 }
 
@@ -7996,67 +7672,60 @@ html.group-dashboard-document #app {
   min-height: calc(var(--reservation-slot-height) - 8px);
   padding: 7px 9px;
   overflow: hidden;
-  border: 1px solid #b9d4ff;
+  border: 1px solid #d9e1ec;
   border-radius: 8px;
-  background: #eaf4ff;
-  color: #1677cc;
+  background: #f8fafc;
+  color: #344054;
   text-align: left;
 }
 
-.reservation-calendar-block:hover {
-  border-color: #1890ff;
-  background: #dceeff;
+/* 底色表达单次预约标记；左侧色条与状态文字共用状态色，避免两种含义混用。 */
+.reservation-calendar-block::before {
+  content: ''; position: absolute; inset: 0 auto 0 0; width: 4px;
+  background: var(--reservation-state-color, #98a2b3); pointer-events: none;
+}
+.reservation-calendar-block--status-unstarted { --reservation-state-color: #17834b; }
+.reservation-calendar-block--status-pending { --reservation-state-color: #946600; }
+.reservation-calendar-block--status-serving { --reservation-state-color: #c95705; }
+.reservation-calendar-block--status-ended { --reservation-state-color: #1d65b7; }
+.reservation-calendar-block--status-rejected { --reservation-state-color: #b72d24; }
+.reservation-calendar-block:hover { box-shadow: 0 0 0 1px #91b9ec; }
+/* 标记采用明显可辨的中浅色填充，保留深色文字及独立状态色条的对比。 */
+.reservation-calendar-block--mark-red { border-color: #e8928b; background: #ffc9c4; }
+.reservation-calendar-block--mark-yellow { border-color: #d6b34f; background: #ffe49a; }
+.reservation-calendar-block--mark-blue { border-color: #7cabe8; background: #bbd9ff; }
+.reservation-calendar-block--mark-green { border-color: #74b991; background: #b8e5c9; }
+.reservation-calendar-block--mark-purple { border-color: #b18bd7; background: #dfc5f4; }
+.reservation-calendar-block .reservation-calendar-block__heading {
+  display: flex; align-items: center; justify-content: space-between; gap: 4px; overflow: visible;
+}
+.reservation-calendar-block__heading strong { min-width: 0; }
+.reservation-calendar-block .reservation-calendar-status {
+  /* 按已确认样式保留左侧色条，同时用同色实底白字标签突出服务状态。 */
+  flex: 0 0 auto; padding: 3px 6px; border-radius: 5px; color: #fff;
+  background: var(--reservation-state-color, #667085);
+  font-size: 12px; line-height: 16px; font-weight: 800;
 }
 
-.reservation-calendar-block--unstarted {
-  border-color: #b7dfc4;
-  background: #edf9f2;
-  color: #208a52;
+/* 固定定位的右键菜单不参与排班几何布局；5 个圆圈只提交白名单枚举。 */
+.reservation-color-menu {
+  position: fixed; z-index: 2500; width: 230px; padding: 12px; box-sizing: border-box;
+  border: 1px solid #dce3ed; border-radius: 10px; background: #fff;
+  box-shadow: 0 6px 24px #172b4d26;
 }
-
-.reservation-calendar-block--pending {
-  border-color: #fedf89;
-  background: #fffaeb;
-  color: #b54708;
-}
-
-.reservation-calendar-block--pending:hover {
-  border-color: #fdb022;
-  background: #fef0c7;
-}
-
-.reservation-calendar-block--unstarted:hover {
-  border-color: #6eb983;
-  background: #def2e5;
-}
-
-.reservation-calendar-block--serving {
-  border-color: #ffd591;
-  background: #fff7e6;
-  color: #d46b08;
-}
-
-.reservation-calendar-block--serving:hover {
-  border-color: #f5aa49;
-  background: #ffefd2;
-}
-
-.reservation-calendar-block--ended {
-  border-color: #b9d4ff;
-  background: #eaf4ff;
-  color: #1677cc;
-}
-
-.reservation-calendar-block--ended:hover {
-  border-color: #1890ff;
-  background: #dceeff;
-}
-
-.reservation-calendar-block--rejected {
-  border-color: #fecdca;
-  background: #fef3f2;
-  color: #b42318;
-}
+.reservation-color-menu__swatches { display: flex; justify-content: space-between; gap: 10px; padding: 3px; }
+.reservation-color-menu__swatch { width: 28px; height: 28px; flex: 0 0 28px; border: 2px solid #fff; border-radius: 50%; cursor: pointer; box-shadow: 0 0 0 1px #d0d5dd; }
+.reservation-color-menu__swatch--red { background: #e85d55; }
+.reservation-color-menu__swatch--yellow { background: #eab63c; }
+.reservation-color-menu__swatch--blue { background: #408ee5; }
+.reservation-color-menu__swatch--green { background: #43a875; }
+.reservation-color-menu__swatch--purple { background: #9752c9; }
+.reservation-color-menu__swatch[aria-pressed="true"], .reservation-color-menu__swatch:focus-visible { outline: 2px solid #344054; outline-offset: 2px; }
+.reservation-color-menu__clear { width: 100%; margin-top: 12px; padding: 5px; border: 0; border-top: 1px solid #edf0f5; background: #fff; color: #475467; cursor: pointer; font-size: 12px; }
+/* 服务操作与颜色选择分区，沿用服务状态门禁，不用颜色值决定服务动作。 */
+.reservation-color-menu__service { width: 100%; margin-top: 12px; padding: 8px 5px; border: 0; border-top: 1px solid #edf0f5; background: #fff; color: #1768c3; font-size: 13px; font-weight: 700; cursor: pointer; }
+.reservation-color-menu button:disabled { opacity: .5; cursor: wait; }
+.reservation-color-menu__error { margin: 6px 0 0; color: #b42318; font-size: 12px; }
 
 .reservation-calendar-block strong,
 .reservation-calendar-block span {
@@ -8848,58 +8517,11 @@ html.group-dashboard-document #app {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.order-center-tabs {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-  min-height: 48px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 0 4px;
-  border-bottom: 1px solid #dfe5ec;
-  background: #fff;
-  scrollbar-width: thin;
-}
 
-.order-center-tabs__button {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  min-width: max-content;
-  padding: 0 18px;
-  border: 0;
-  background: transparent;
-  color: #657180;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
 
-.order-center-tabs__button::after {
-  position: absolute;
-  right: 16px;
-  bottom: 0;
-  left: 16px;
-  height: 3px;
-  border-radius: 3px 3px 0 0;
-  background: transparent;
-  content: '';
-}
 
-.order-center-tabs__button:hover {
-  color: #1769aa;
-}
 
-.order-center-tabs__button--active {
-  color: #1769aa;
-  font-weight: 700;
-}
 
-.order-center-tabs__button--active::after {
-  background: #1687ed;
-}
 
 .hang-order-list-wrap,
 .order-center-list-wrap {
@@ -9458,3 +9080,6 @@ html.group-dashboard-document #app {
     left: 0;
   }
 }
+
+/* R28 顶部两栏从同一外壳高度分配空间；主区域继续由各页面内部滚动，分页不被裁掉。 */
+.cashier-shell--top-navigation>.cashier-main{flex:1;min-height:0;width:100%}

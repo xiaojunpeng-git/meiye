@@ -14,7 +14,7 @@ final class CashierV3OrderLifecycleModule
     public static function install(CashierV3ActionDispatcher $dispatcher, CashierV3CashierWorkspaceServices $workspace): void
     {
         $attribution = new CashierV3OrderAttributionCorrectionServices();
-        foreach (['correct-sales-order-attribution', 'correct-service-order-date',
+        foreach (['correct-sales-order-attribution', 'correct-service-order-date', 'correct-service-order-attribution',
             'correct-recharge-order-attribution', 'correct-debt-repayment-date',
             'correct-debt-repayment-source', 'correct-refund-date'] as $action) {
             // 更正以服务端主单锁和提交时旧值比较控制并发，避免给原单增加业务版本。

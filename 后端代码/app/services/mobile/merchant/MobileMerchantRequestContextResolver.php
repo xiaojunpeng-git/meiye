@@ -20,6 +20,24 @@ final class MobileMerchantRequestContextResolver
 {
     public const CONTRACT_VERSION = 'mobile-merchant-v1';
 
+    /** 成长专用员工认证；复用完整会话校验，旧门店业务resolve仍严格要求STORE。 */
+    public function growthIdentity($request): array
+    {
+        $meta=$this->metadata($request);$session=$this->merchantSession($meta);$projection=$this->projection($session,$meta);
+        $employee=(int)$session['employee_id'];$this->assertSessionCurrent($session,$employee,$meta);
+        $business=Db::name('mobile_merchant_business_context')->where('context_id',$projection['business_context_id'])->where('state','ACTIVE')->find();
+        if(!$business||(int)$business['employee_id']!==$employee)throw MobileApiException::business('NO_VALID_ASSIGNMENT','成长上下文已失效。');
+        if($business['context_type']==='STORE')return $this->resolve($request);
+        if($business['context_type']!=='ORGANIZATION')throw MobileApiException::business('NO_VALID_ASSIGNMENT','成长上下文类型无效。');
+        $org=(int)$business['organization_id'];
+        $binding=Db::name('organization_employee')->where('employee_id',$employee)->where('org_id',$org)->where('is_del',0)->where('status',1)->find();
+        $organization=Db::name('organization')->where('id',$org)->where('is_del',0)->where('status',1)->find();
+        if(!$binding||!$organization||!app()->make(OrganizationOpsStatusServices::class)->isOrganizationEffectivelyEnabled($org))throw MobileApiException::business('NO_VALID_ASSIGNMENT','组织任职已失效。');
+        $auth=$this->mobileAuthorization($employee);$rules=array_map('intval',explode(',',(string)$auth['rules']));
+        if(!in_array(MobileMerchantCapabilityCatalog::RULE_GROWTH,$rules,true))throw MobileApiException::business('MOBILE_JOB_FUNCTION_MISSING','未授权成长菜单。');
+        return ['employeeId'=>$employee,'accountId'=>$this->internalAccountId($employee),'organizationId'=>(string)$org,'storeId'=>0,'staffId'=>0,'availableActions'=>['mobile.merchant.growth'],'session'=>$session];
+    }
+
     /**
      * @return array{employeeId:int,accountId:int,operatorId:int,staffId:int,staffName:string,storeId:int,organizationId:string,visibleStoreIds:int[],dataScopeMode:string,permissionVersion:string,availableActions:string[],session:array,requestMetadata:array}
      */

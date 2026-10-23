@@ -1,0 +1,62 @@
+[
+  {
+    "path": "src/pages/marketing/storeCouponIssue/create.vue",
+    "beforeErrors": 45,
+    "afterErrors": 45,
+    "beforeRules": {
+      "vue/no-parsing-error": 4,
+      "comma-dangle": 13,
+      "spaced-comment": 5,
+      "eqeqeq": 7,
+      "prefer-const": 13,
+      "space-before-function-paren": 1,
+      "operator-linebreak": 2
+    },
+    "afterRules": {
+      "vue/no-parsing-error": 4,
+      "comma-dangle": 13,
+      "spaced-comment": 5,
+      "eqeqeq": 7,
+      "prefer-const": 13,
+      "space-before-function-paren": 1,
+      "operator-linebreak": 2
+    }
+  },
+  {
+    "path": "src/pages/marketing/storeCouponIssue/index.vue",
+    "beforeErrors": 56,
+    "afterErrors": 56,
+    "beforeRules": {
+      "vue/no-parsing-error": 1,
+      "no-unused-vars": 2,
+      "comma-dangle": 40,
+      "eqeqeq": 7,
+      "prefer-const": 4,
+      "space-before-function-paren": 2
+    },
+    "afterRules": {
+      "vue/no-parsing-error": 1,
+      "no-unused-vars": 2,
+      "comma-dangle": 40,
+      "eqeqeq": 7,
+      "prefer-const": 4,
+      "space-before-function-paren": 2
+    }
+  },
+  {
+    "path": "src/pages/marketing/storeCouponUser/index.vue",
+    "beforeErrors": 24,
+    "afterErrors": 23,
+    "beforeRules": {
+      "comma-dangle": 20,
+      "prefer-const": 2,
+      "space-before-function-paren": 1,
+      "eol-last": 1
+    },
+    "afterRules": {
+      "comma-dangle": 20,
+      "prefer-const": 2,
+      "space-before-function-paren": 1
+    }
+  }
+]

@@ -1,0 +1,45 @@
+{
+  "tree": "83bc0fcd8027ce229f7034b47c120681ef9e8261",
+  "results": [
+    {
+      "path": "后端代码/app/services/system/config/SystemConfigServices.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3SaleCatalogServices.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3CardPurchaseIssuanceServices.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/card/CashierV3OrdinaryCardSaleAdjustment.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "tests/cashier-v3/php/r49-ordinary-card-sale-adjustment.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "tests/cashier-v3/php/r49-ordinary-card-local.php",
+      "result": "No syntax errors detected in Standard input code"
+    },
+    {
+      "path": "tests/cashier-v3/php/r49-checkout-cross-local.php",
+      "result": "No syntax errors detected in Standard input code"
+    }
+  ]
+}

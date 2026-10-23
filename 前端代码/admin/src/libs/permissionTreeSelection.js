@@ -13,6 +13,8 @@ function refreshPermissionChecks(nodes) {
   (nodes || []).forEach((node) => {
     const children = node.children || [];
     refreshPermissionChecks(children);
+    // 五类展示分组不保存授权编号，但复选状态要反映其子功能是否全选。
+    if (node.grantable === false) node.ruleChecked = children.length > 0 && children.every(child => child.checked);
     node.checked = !!node.ruleChecked && children.every(child => child.checked);
     node.indeterminate = !node.checked && (!!node.ruleChecked ||
       children.some(child => child.checked || child.indeterminate));
@@ -47,7 +49,7 @@ export function setPermissionChecks(nodes, checked) {
 // UI indeterminate state is presentation only; save the exact selected rules.
 export function collectPermissionIds(nodes, result = []) {
   (nodes || []).forEach((node) => {
-    if (node.ruleChecked) result.push(Number(node.id));
+    if (node.ruleChecked && node.grantable !== false) result.push(Number(node.id));
     collectPermissionIds(node.children, result);
   });
   return result;

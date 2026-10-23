@@ -1,0 +1,139 @@
+{
+  "head": "e88f43e610a1fd8924115a61866d8ddb83310adb",
+  "baselineTree": "444e11b411fad0fb9eff8ae9e183366293b1b6da",
+  "candidateTree": "0eabd85d6115d0e3d4de25ceb867d2d1b84a32ae",
+  "changes": [
+    {
+      "path": "前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue",
+      "source": "6d0eeac1b91241f832db814d3a4b28f6bb84bde3",
+      "blob": "ded00d2ba3ab85b226955b750a4850519dfbf877",
+      "purpose": "Preserve deployed M011 and R47 cashier behavior"
+    },
+    {
+      "path": "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+      "source": "6d0eeac1b91241f832db814d3a4b28f6bb84bde3",
+      "blob": "ed7b438ce2e00308ca8e5396548701764d19c278",
+      "purpose": "Preserve deployed M011 and R47 cashier behavior"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php",
+      "source": "7c7bc5c972867d6e98a00abd884ee313945157e3",
+      "blob": "d9137357c9f34fb70160af2bd147092ecbd404ac",
+      "purpose": "Archive exact live dependency"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php",
+      "source": "7c7bc5c972867d6e98a00abd884ee313945157e3",
+      "blob": "e6c2696170b7162aeb565ad1f1770085d2970cb8",
+      "purpose": "Archive exact live dependency"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/checkout/provider/CashierV3MemberBalanceWriterAdapter.php",
+      "source": "45090ffe",
+      "blob": "e0ce44642d8712fc727747466752f2deb9a25e39",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/order/CashierV3SupplementAttributionServices.php",
+      "source": "45090ffe",
+      "blob": "93cd40594a55cf7e705e870bd1c5d4958fa6c14a",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/order/CashierV3SupplementSalespersonAdjustmentServices.php",
+      "source": "45090ffe",
+      "blob": "ef65862a27e71d919d550f86cb0d625f39d0b0ed",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php",
+      "source": "45090ffe",
+      "blob": "7454e6ad47feda67ba888963fc309afd145aadb0",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php",
+      "source": "45090ffe",
+      "blob": "38e7b4ebd03cdf05ed07ad38571391ed2c67be43",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/report/StoreReportPaymentSaleAllocationFactServices.php",
+      "source": "45090ffe",
+      "blob": "f9674d39049bcaa6723cb72a5f7b11645fa4acc0",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php",
+      "source": "45090ffe",
+      "blob": "0349c7536bc6a76653f9513066bf963f3d022b40",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php",
+      "source": "45090ffe",
+      "blob": "50d6269f1ff46a5a248b6a4bbc5a9ea97ec11f39",
+      "purpose": "Preserve deployed R47 repayment dependencies"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/cashier/CashierV3MemberDebtProjectionServices.php",
+      "source": "5d4d6bd3a38e858945a904a17c14a3f8d2054671",
+      "blob": "1f6d497005e182cecafc5f5a618647dee111ac81",
+      "purpose": "Exact live R47 issued-card dependency; both sites verified"
+    },
+    {
+      "path": "tests/cashier-v3/js/r47-sales-debt-balance-contract.mjs",
+      "source": "45090ffe",
+      "blob": "cbd33a839a650f049a7bcbeb2e780e2ae7eccb13",
+      "purpose": "Preserve accepted R47 migration and regression fixtures"
+    },
+    {
+      "path": "tests/cashier-v3/php/r47-sales-debt-balance-local.php",
+      "source": "45090ffe",
+      "blob": "39c491784c0b59cf2f915364c3bc69c1da012f14",
+      "purpose": "Preserve accepted R47 migration and regression fixtures"
+    },
+    {
+      "path": "tests/cashier-v3/php/r47-sales-debt-v3-allocation-local.php",
+      "source": "45090ffe",
+      "blob": "570d1a43e7fc2418f04048e7e9fa2afc4051bce4",
+      "purpose": "Preserve accepted R47 migration and regression fixtures"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-21-销售欠款余额补交/01-schema.sql",
+      "source": "45090ffe",
+      "blob": "029bb1edc34a47ae0168fba54fd2b658a11218a7",
+      "purpose": "Preserve accepted R47 migration and regression fixtures"
+    },
+    {
+      "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "blob": "90cecac09662bf519400d7961f7b24619666d538",
+      "purpose": "Union of canonical already-deployed member-detail features"
+    }
+  ],
+  "acceptedLocalFingerprint": "c87e1b4dcd37dd7bc97355297f311d124376d98158437f540b1ac282b77c64b6",
+  "scope": [
+    "前端代码/admin/src/pages/marketing/storeCouponIssue/create.vue",
+    "前端代码/admin/src/pages/marketing/storeCouponIssue/index.vue",
+    "前端代码/cashier-v3/src/components/cashier/CashierCouponSelectorOverlay.vue",
+    "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+    "后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php",
+    "后端代码/app/services/activity/coupon/StoreCouponUserServices.php",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php",
+    "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php",
+    "后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php",
+    "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+    "前端代码/admin/src/pages/marketing/storeCouponUser/index.vue",
+    "后端代码/app/services/activity/promotions/StorePromotionsServices.php",
+    "后端代码/app/services/activity/coupon/StoreCouponIssueServices.php",
+    "后端代码/app/dao/activity/coupon/StoreCouponUserDao.php",
+    "前端代码/cashier-v3/src/services/couponAllowance.js",
+    "后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php",
+    "后端代码/database/upgrades/2026-10-22-多次抵用券/01-schema.sql",
+    "tests/cashier-v3/php/r48-coupon-allowance-mysql.php",
+    "tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php",
+    "tests/cashier-v3/js/r48-coupon-allowance.mjs"
+  ],
+  "status": "Prepared Git trees only; not committed, accepted for release, or deployed"
+}

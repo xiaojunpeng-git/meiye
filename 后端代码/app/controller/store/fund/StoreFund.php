@@ -10,9 +10,9 @@ use think\facade\App;
 final class StoreFund extends AuthController
 {
     public function __construct(App $app, StoreFundServices $services) { parent::__construct($app); $this->services=$services; }
-    private function scope(): array { return ['mode'=>'store','store_id'=>(int)$this->storeId]; }
+    private function scope(): array { $this->assertFundReadPermission(); return ['mode'=>'store','store_id'=>(int)$this->storeId]; }
     private function actor(): array { return ['type'=>'STORE_STAFF','id'=>(int)$this->storeStaffId,'name'=>(string)($this->storeStaffInfo['nickname']??$this->storeStaffInfo['real_name']??'门店员工')]; }
-    public function subjects() { return $this->success($this->services->subjects()); }
+    public function subjects() { $this->assertFundReadPermission(); return $this->success($this->services->subjects()); }
     public function documents() { return $this->success($this->services->listDocuments($this->scope(),$this->request->get())); }
     public function detail(int $id) { try { return $this->success($this->services->detail($this->scope(),$id)); } catch(\Throwable $e){ return $this->fail('收支单不存在或无权查看。',['code'=>$e->getMessage()]); } }
     /** 本店未审核单可由有费用权限人员编辑；操作者与授权标记不能从表单继承。 */
@@ -43,7 +43,14 @@ final class StoreFund extends AuthController
         }
     }
 
-    /** V3 费用入口沿用 member 能力；可见不代表可操作，委派只读身份不得写入。 */
+    /** 费用查询、导出和写入均读实时岗位能力；只读组织会话保留原有查询范围。 */
+    private function assertFundReadPermission(): void
+    {
+        $resolver=app()->make(CashierV3FeatureResolver::class);
+        if (!in_array('cashier.v3.fund',$resolver->resolveVisibleFeatures((array)$this->storeStaffInfo),true)) throw new \RuntimeException('当前账号没有费用功能权限');
+    }
+
+    /** V3 费用入口使用独立 fund 能力；可见不代表可操作，委派只读身份不得写入。 */
     private function assertFundWritePermission(): void
     {
         $profile = (array)$this->storeStaffInfo;
@@ -55,7 +62,7 @@ final class StoreFund extends AuthController
         }
         // 保存、审核、撤销及删除统一核验费用能力，旧会话也不能只凭接口可见获准写入。
         $features = app()->make(CashierV3FeatureResolver::class)->resolveGrantedFeatures($profile);
-        if (!in_array('cashier.v3.member', $features, true)) {
+        if (!in_array('cashier.v3.fund', $features, true)) {
             throw new \RuntimeException('fund_document_operator_forbidden');
         }
     }
@@ -79,5 +86,5 @@ final class StoreFund extends AuthController
     public function report() { return $this->success($this->services->report($this->scope(),$this->request->get())); }
     public function exportLedger() { return $this->success($this->services->exportLedger($this->scope(),$this->request->get())); }
     public function exportReport() { return $this->success($this->services->exportReport($this->scope(),$this->request->get())); }
-    public function exportFile(string $fileKey) { try{return download($this->services->exportFilePath($fileKey),$this->services->exportDownloadName($fileKey));}catch(\Throwable $e){return $this->fail('导出文件不存在或已失效。',['code'=>$e->getMessage()]);} }
+    public function exportFile(string $fileKey) { try{$this->assertFundReadPermission();return download($this->services->exportFilePath($fileKey),$this->services->exportDownloadName($fileKey));}catch(\Throwable $e){return $this->fail('导出文件不存在或已失效。',['code'=>$e->getMessage()]);} }
 }

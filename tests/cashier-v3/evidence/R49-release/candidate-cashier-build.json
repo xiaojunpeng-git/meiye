@@ -1,0 +1,15 @@
+{
+  "tree": "83bc0fcd8027ce229f7034b47c120681ef9e8261",
+  "input": "/private/tmp/mohe-r49-fixed-83bc0fcd8027/readonly-complete",
+  "output": "/private/tmp/mohe-r49-fixed-83bc0fcd8027/cashier-dist",
+  "assets": {
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "assets/index-419a1ccb.js": "7c6af9d80157efcddee3d55274b3d2ec7761047d80fec1e0feb90e7c9fdb5a20",
+    "assets/index-670a6300.css": "670a630018bfdca50f50eb48b4a3f411f34653efa05ca43722894515deaa17db",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "index.html": "df505b0abb424976cef4e6659dc8c488cf06d2bea0ca2b4be743317fd3dde47f"
+  },
+  "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "inputFiles": 1351,
+  "result": "PASS"
+}

@@ -22,6 +22,7 @@
             >
               <Option value="1">满减券</Option>
               <Option value="2">折扣券</Option>
+              <Option value="3">多次抵用券</Option>
             </Select>
           </FormItem>
           <FormItem label="优惠券来源：">
@@ -149,6 +150,7 @@
       >
         <template slot-scope="{ row }" slot="coupon_price">
           <span v-if="row.coupon_type == 1">{{ row.coupon_price }}元</span>
+          <span v-if="row.coupon_type == 3">总额度 {{ row.coupon_price }}元</span>
           <span v-if="row.coupon_type == 2"
             >{{ parseFloat(row.coupon_price) / 10 }}折（{{
               row.coupon_price.toString().split('.')[0]
@@ -164,6 +166,7 @@
         </template>
         <template slot-scope="{ row }" slot="coupon_type">
           <span v-if="row.coupon_type === 1">满减券</span>
+          <span v-else-if="row.coupon_type === 3">多次抵用券</span>
           <span v-else>折扣券</span>
         </template>
         <template slot-scope="{ row }" slot="type">

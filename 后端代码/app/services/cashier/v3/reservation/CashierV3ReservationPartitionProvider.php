@@ -324,6 +324,8 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'start' => self::businessTimeFromTimestamp($at, 'H:i'),
                 'end' => self::businessTimeFromTimestamp(max($at + 60, (int)($row['appointment_end_at'] ?? 0)), 'H:i'),
                 'projectCount' => $projectCount,
+                // 同一预约在手艺人、房间日历中的副本读取同一个持久化颜色。
+                'colorMark' => (string)($row['calendar_color'] ?? ''),
                 'status' => self::statusLabel((string)($row['status'] ?? '')),
                 'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ($roomId > 0 ? ('房间 ' . $roomId) : '待分配房间'),
             ];

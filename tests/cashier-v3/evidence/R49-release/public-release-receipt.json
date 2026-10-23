@@ -1,0 +1,78 @@
+{
+  "codeCommit": "39c69097704574af931fe5605195e5e50057e35d",
+  "branch": "release/r49-ordinary-card-20261023",
+  "candidateTree": "83bc0fcd8027ce229f7034b47c120681ef9e8261",
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "commit": "39c69097704574af931fe5605195e5e50057e35d",
+      "backup": "/www/backups/rh.cc3798.com/20261023-r49-39c69097",
+      "backupSha256": "9f9584372658154245385dd8f908c51944cdf6a28a8c5668d2e4e13fc3d3bb47",
+      "backupBytes": 426948980,
+      "publicChecks": [
+        {
+          "url": "https://rh.cc3798.com/view_cashier_v3/",
+          "html": "df505b0abb424976cef4e6659dc8c488cf06d2bea0ca2b4be743317fd3dde47f",
+          "result": "PASS"
+        },
+        {
+          "url": "https://rh.cc3798.com/preview-8080/view_cashier_v3/",
+          "html": "df505b0abb424976cef4e6659dc8c488cf06d2bea0ca2b4be743317fd3dde47f",
+          "result": "PASS"
+        }
+      ],
+      "migration": {
+        "upgrade_key": "20261023-049-ordinary-card-sale-edit",
+        "sql_checksum": "a24e6314f949714f39e83c78574d797f2b40716bc5f58a7e596d5679484ca206",
+        "code_version": "39c69097704574af931fe5605195e5e50057e35d"
+      },
+      "switch": [
+        {
+          "id": "831",
+          "menu_name": "cashier_ordinary_card_sale_edit_switch",
+          "value": "0",
+          "is_store": "0"
+        }
+      ],
+      "settingsForm": "PASS",
+      "historicalBusinessComparison": "PASS",
+      "catalogueReadAndComparison": "PASS",
+      "platformStatic": "Unchanged and fingerprint-verified",
+      "verifiedAt": "2026-10-22T17:09:43.734Z"
+    },
+    "008": {
+      "result": "PASS",
+      "commit": "39c69097704574af931fe5605195e5e50057e35d",
+      "backup": "/www/backups/008.cc3798.com/20261023-r49-39c69097",
+      "backupSha256": "1ce4cf280149647115634133d37658c8e8fc0612af78d65ee3074f1a56c204ff",
+      "backupBytes": 16321794,
+      "publicChecks": [
+        {
+          "url": "https://008.cc3798.com/view_cashier_v3/",
+          "html": "df505b0abb424976cef4e6659dc8c488cf06d2bea0ca2b4be743317fd3dde47f",
+          "result": "PASS"
+        }
+      ],
+      "migration": {
+        "upgrade_key": "20261023-049-ordinary-card-sale-edit",
+        "sql_checksum": "a24e6314f949714f39e83c78574d797f2b40716bc5f58a7e596d5679484ca206",
+        "code_version": "39c69097704574af931fe5605195e5e50057e35d"
+      },
+      "switch": [
+        {
+          "id": "831",
+          "menu_name": "cashier_ordinary_card_sale_edit_switch",
+          "value": "0",
+          "is_store": "0"
+        }
+      ],
+      "settingsForm": "PASS",
+      "historicalBusinessComparison": "PASS",
+      "catalogueReadAndComparison": "PASS",
+      "platformStatic": "Unchanged and fingerprint-verified",
+      "verifiedAt": "2026-10-22T17:14:32.484Z"
+    }
+  },
+  "productionFinancialOperations": "None",
+  "rawProductionBusinessQueryResults": "Kept local; excluded from this archive"
+}

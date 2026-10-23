@@ -391,7 +391,9 @@ const isPaymentDraftReady = computed(() => (
   hasAuthoritativePaymentSnapshot.value
   && !hasPendingPaymentLineAmountDraft.value
 ))
-const paymentResultLines = computed(() => Array.isArray(payment.value.resultLines) ? payment.value.resultLines : selectedPaymentLines.value)
+const paymentResultLines = computed(() => completedPaymentResultLines(
+  payment.value, selectedPaymentLines.value, succeededSubmissionResponse.value
+))
 const finalChanges = computed(() => Array.isArray(props.checkout.finalChanges) ? props.checkout.finalChanges : [])
 const childResults = computed(() => isRecord(props.checkout.childResults) ? props.checkout.childResults : {})
 const hasAuthoritativePaymentSnapshot = computed(() => (
@@ -677,10 +679,40 @@ function saveSalesDate() {
   })
 }
 
+function completedPaymentResultLines(payment = {}, selectedLines = [], response = {}) {
+  // 显式逐笔结果优先；只在本次正式成功回执与草稿收款笔数、金额完全相符时，
+  // 把遗留的编辑态标签投影为成功。命令 success 本身不等于到账，未知/部分失败不能提升。
+  if (Array.isArray(payment.resultLines)) return payment.resultLines
+  const envelope = submissionResponseEnvelope(response)
+  const submission = envelope?.data?.checkoutSubmission
+  const order = submission?.salesOrder
+  const collection = submission?.paymentCollection
+  const methods = new Set(['cash', 'unionpay', 'wechat', 'alipay', 'dianping_voucher', 'douyin_voucher', 'partner_collection'])
+  const collectedLines = selectedLines.filter((line) => line.lineRole === 'payment' && methods.has(line.method))
+  const cents = collectedLines.map((line) => Number(line.amount) * 100)
+  const totalCents = cents.reduce((total, amount) => total + amount, 0)
+  if (!['success', 'succeeded'].includes(String(envelope?.result?.status || '').toLowerCase())
+    || submission?.requestStatus !== 'succeeded'
+    || !submission?.checkoutRequestId
+    || order?.orderStatus !== 'settled'
+    || !order?.orderId || collection?.salesOrderId !== order.orderId
+    || !collection?.batchId || collectedLines.length === 0
+    || Number(collection.collectionCount) !== collectedLines.length
+    || cents.some((amount) => !Number.isSafeInteger(amount) || amount <= 0)
+    || !Number.isSafeInteger(totalCents)
+    || totalCents !== Number(collection.collectedAmountCents)) return selectedLines
+  return selectedLines.map((line) => {
+    const status = String(line.status || line.paymentStatus || line.resultStatus || '').trim().toLowerCase()
+    return collectedLines.includes(line) && ['', 'editing', '待确认'].includes(status)
+      ? { ...line, status: 'succeeded' }
+      : line
+  })
+}
+
 function paymentLineStatus(line = {}) {
   const rawStatus = String(line.status || line.paymentStatus || line.resultStatus || '待收款').trim()
   const normalizedStatus = rawStatus.toLowerCase()
-  if (['succeeded', 'success', 'completed'].includes(normalizedStatus)) return '成功'
+  if (['succeeded', 'success', 'completed', 'settled'].includes(normalizedStatus)) return '成功'
   if (['editing', '待确认'].includes(normalizedStatus)) return normalizedStatus === 'editing' ? '待确认' : rawStatus
   if (['processing', 'pending', 'result_pending', 'pending_confirmation'].includes(normalizedStatus)) return '处理中'
   if (normalizedStatus === 'result_unknown') return '处理中'
