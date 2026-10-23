@@ -1,0 +1,49 @@
+{
+  "result": "PASS",
+  "head": "4edd7a8125a79a227a8222ebed71cb31c82b4c82",
+  "source_sha256": {
+    "后端代码/app/services/cashier/v3/checkout/provider/CashierV3MemberBalanceProvider.php": "b270143f37fe890c7a3cb32ad6db1a3e8223864746e2f8f897a3b0f424b38c10",
+    "scripts/lib/r51-010-staff-identity-plan.php": "13adf4de87fb117fc50ddc854faa28587e1db818aa5ef4b5be567d64e69138ab",
+    "scripts/lib/r51-010-staff-identity-apply.php": "fffeb621d4a297a74ee265a181f798b339d5f12134f91461f058f9ca52ac967f",
+    "tests/cashier-v3-member-balance/php/contract.php": "8905b66e772f33db2c464fe26e9edcd1397802c16dd58c8872dd27c4e6e136fc",
+    "tests/cashier-v3-member-balance/php/read-only-readiness-contract.php": "1425dddd69542e9bd1d74f2b6c0377e5afacf79a138f324cf9cfce1455e4e37f",
+    "tests/cashier-v3-member-balance/php/read-only-minimum-privilege-mysql.php": "37521e18a3ed8554d85757643633fa4030daa2d5ea992add6c757890e4e375ac",
+    "tests/report-basic/php/010-staff-identity-plan.php": "eaf9960e29da12a49dd7f5a8462c03418ace69da5476445abd3c5a98f26014fc",
+    "tests/report-basic/php/010-staff-identity-mysql.php": "4bd263806f94bc15baacfd7e643353486d4f86595bbf2d4603a850757f267909"
+  },
+  "results": [
+    {
+      "file": "tests/cashier-v3-member-balance/php/contract.php",
+      "result": "PASS",
+      "summary": "CHECKOUT_BALANCE_CONTRACT passed=6 failed=0",
+      "output_sha256": "41181cd2726a5a56013d27fd031034e9d8b53ef2a025e48f45f54e111e843073"
+    },
+    {
+      "file": "tests/cashier-v3-member-balance/php/read-only-readiness-contract.php",
+      "result": "PASS",
+      "summary": "CHECKOUT_BALANCE_READ_ONLY_READINESS passed=296 failed=0",
+      "output_sha256": "00995a8b2d5ddcff02b6a6d6c7b512ec5ae56ac2af52eaf21600a7dd8955730a"
+    },
+    {
+      "file": "tests/cashier-v3-member-balance/php/read-only-minimum-privilege-mysql.php",
+      "result": "PASS",
+      "summary": "{\"result\":\"PASS\",\"checks\":30,\"trigger_exists\":true,\"restricted_trigger_visible\":false,\"reads_work\":true,\"mutation_guard_preserved\":true,\"application_grants_unchanged\":true,\"local_fixture_only\":true,\"persistent_business_writes\":false,\"remote_access\":false}",
+      "output_sha256": "c48079c0cb97b7cee51843fed5b6953ff337358fe7102a7829082033234b21d7"
+    },
+    {
+      "file": "tests/report-basic/php/010-staff-identity-plan.php",
+      "result": "PASS",
+      "summary": "{\"result\":\"PASS\",\"checks\":221,\"remote_connections\":0,\"database_connections\":0,\"writes\":0,\"pii_reported\":false}",
+      "output_sha256": "021107d53dde4290f864d5d78486f3bf208a9ee1cc309934ea96d2107780db16"
+    },
+    {
+      "file": "tests/report-basic/php/010-staff-identity-mysql.php",
+      "result": "PASS",
+      "summary": "{\"result\":\"PASS\",\"checks\":42,\"local_mysql\":true,\"temporary_database_removed\":true,\"remote_connections\":false,\"business_databases_written\":false}",
+      "output_sha256": "df72715fc332af2fcd44719f0524b38699734a476842dbc9913fbbdb794e6409"
+    }
+  ],
+  "remote_access": false,
+  "persistent_business_writes": false,
+  "observedAt": "2026-10-23T18:52:53.698Z"
+}
