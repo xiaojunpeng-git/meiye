@@ -15,7 +15,7 @@
 				<view class="item" :class="content.store_type==item.type?'on':''" v-for="(item, index) in navList" :key="index" @click="navChange(item.type)">{{item.name}}</view>
 			</template>
 			<view class="search acea-row row-middle" :class="isReservationMode ? 'search-full' : ''">
-				<view class="name" v-if="!isReservationMode" @click="btnFn">{{ addressInfo.length ? addressInfo[1].label : '全部' }}<text class="iconfont icon-ic_down2"></text></view>
+				<view class="name" v-if="!isReservationMode" role="button" :aria-label="regionLabel" :aria-expanded="display" @click="btnFn"><text class="region-current-label">{{ regionLabel }}</text><text class="iconfont icon-ic_down2"></text></view>
 				<input class="input" placeholder="请输入门店名称" placeholder-class="placeholders"  @confirm="searchSubmit" v-model="content.keyword"></input>
 				<text class="iconfont icon-ic_search" @click="searchSubmit"></text>
 			</view>
@@ -23,7 +23,11 @@
 				<image src="@/static/images/map.png"></image>
 			</view>
 		</view>
-		<view class="list" v-if="storeList.length">
+		<view class="store-list-state" v-if="listLoading">加载中…</view>
+		<view class="store-list-state" v-else-if="listError">
+			<text>门店加载失败</text><button class="retry-button" @click="getlist">重试</button>
+		</view>
+		<view class="list" v-else-if="storeList.length">
 			<view class="item acea-row row-between-wrapper" :class="sortIndex==item.id?'on':''" v-for="(item, index) in storeList" :key="index" @click="activeFn(item)">
 				<text class="iconfont icon-a-icon_cornermark" v-if="sortIndex==item.id"></text>
 				<view class="left">
@@ -51,7 +55,7 @@
 		<view class="emptyPage px-20" v-else>
 			<emptyPage title="暂无门店信息~" src="/statics/images/noOrder.gif"></emptyPage>
 		</view>
-		<areaWindow ref="areaWindow" :display="display" :cityShow="2" :address="addressInfo" @submit="OnChangeAddress" @changeClose="changeClose"></areaWindow>
+		<storeRegionWindow :display="display" :query="content" :value="addressInfo" @submit="OnChangeAddress" @close="changeClose"></storeRegionWindow>
 	</view>
 </template>
 
@@ -63,11 +67,11 @@
 	import {
 		getList
 	} from '@/api/new_store.js'
-	import areaWindow from '@/components/areaWindow';
+	import storeRegionWindow from './components/storeRegionWindow.vue';
 	import emptyPage from '@/components/emptyPage.vue';
 	export default {
 		components: {
-			areaWindow,
+			storeRegionWindow,
 			emptyPage
 		},
 		mixins:[colors],
@@ -80,6 +84,9 @@
 					{name:'常用',type:2}
 				],
 				storeList:[],
+				listLoading: false,
+				listError: false,
+				listRequest: 0,
 				content: {
 					// 自己的位置
 					latitude: uni.getStorageSync('user_latitude'),
@@ -102,6 +109,9 @@
 			};
 		},
 		computed: {
+			regionLabel() {
+				return this.addressInfo.length ? this.addressInfo[this.addressInfo.length - 1].label : '全部';
+			},
 			isReservationMode() {
 				return Number(this.isCollage) === 3;
 			}
@@ -122,6 +132,10 @@
 		},
 		onShow() {
 		},
+		onUnload() {
+			// 离开页面后，未完成的查询不再修改当前列表状态。
+			this.listRequest++;
+		},
 		methods: {
 			goarrow(){
 				uni.navigateBack()
@@ -136,8 +150,18 @@
 			},
 			// 门店列表
 			getlist() {
-				getList(this.content).then(res => {
+				// 筛选/搜索并发时只有最后一次查询可更新页面，原门店选择回调不变。
+				const request = ++this.listRequest;
+				this.listLoading = true;
+				this.listError = false;
+				return getList(Object.assign({}, this.content)).then(res => {
+					if (request !== this.listRequest) return;
 					this.storeList = res.data
+					this.listLoading = false;
+				}).catch(() => {
+					if (request !== this.listRequest) return;
+					this.listLoading = false;
+					this.listError = true;
 				})
 			},
 			btnFn() {
@@ -148,9 +172,10 @@
 			},
 			OnChangeAddress(address) {
 				this.addressInfo = address;
-				this.content.province = address[0].value;
-				this.content.city = address[1].value;
-				this.content.area = address[2].value;
+				// 全部、全省、全市和区县都使用同一 ID 筛选，不强制三层齐全。
+				this.content.province = address[0] ? address[0].id : 0;
+				this.content.city = address[1] ? address[1].id : 0;
+				this.content.area = address[2] ? address[2].id : 0;
 				this.getlist();
 			},
 			goMap() {
@@ -224,6 +249,23 @@
 </script>
 
 <style lang="scss" scoped>
+	.store-list-state {
+		padding: 80rpx 24rpx;
+		text-align: center;
+		color: #777;
+	}
+	.retry-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin: 20rpx;
+		padding: 0 28rpx;
+		height: 64rpx;
+		line-height: normal;
+		font-size: 26rpx;
+		color: var(--view-theme);
+		background: #fff;
+	}
 	.emptyPage{
 		position: relative;
 		
@@ -320,6 +362,16 @@
 			.name{
 				color: #FFFFFF;
 				position: relative;
+				display: flex;
+				align-items: center;
+				flex-shrink: 0;
+				.region-current-label{
+					// 长地区名只截断筛选入口，弹窗仍展示完整名称，不挤占搜索框。
+					max-width: 130rpx;
+					overflow: hidden;
+					white-space: nowrap;
+					text-overflow: ellipsis;
+				}
 				.iconfont{
 					font-size: 16rpx;
 					margin-left: 6rpx;
@@ -340,6 +392,7 @@
 				font-size: 24rpx;
 				color: #FFFFFF;
 				flex: 1;
+				min-width: 0;
 				margin-left: 20rpx;
 			}
 			::v-deep .placeholders{

@@ -514,7 +514,7 @@ class SystemStoreServices extends BaseServices
      * @throws \think\db\exception\DbException
      * @throws \think\db\exception\ModelNotFoundException
      */
-    public function getNearbyStore(array $where, string $latitude, string $longitude, string $ip = '', int $limit = 0, int $product_id = 0, int $store_id = 0)
+    public function getNearbyStore(array $where, string $latitude, string $longitude, string $ip = '', int $limit = 0, int $product_id = 0, int $store_id = 0, bool $regionOptions = false)
     {
         $where = array_merge($where, ['status' => 1]);
         if ($limit) {
@@ -576,6 +576,11 @@ class SystemStoreServices extends BaseServices
         $storeList = [];
         if (isset($where['ids'])) {
             $where['ids'] = array_unique(array_diff($where['ids'], [0]));
+        }
+        // 地区投影必须在所有既有范围约束之后读取，不分页、不返回电话/定位等资料。
+        // 普通列表仍沿用原字段、分页及距离排序；不能从当前页推断所有可选地区。
+        if ($regionOptions) {
+            return $this->dao->getStoreList($where, ['id', 'province', 'city', 'area']);
         }
         if (isset($where['id']) && $where['id']) {
             $storeList = $this->dao->getStoreList($where, $field, $page, $limit, [], $latitude, $longitude, $latitude && $longitude ? 1 : 0);

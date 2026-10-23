@@ -1,0 +1,82 @@
+{
+  "task": "M008-EMERG-R3-REGION",
+  "date": "2026-10-24",
+  "baseline": "b50fd1f13d32c157ccd13e6ef63fb139d5d09702",
+  "tree": "bdf1a28c26dcbc6f2664f5e025a1c41536096093",
+  "sourceFiles": [
+    "前端代码/uniapp/api/new_store.js",
+    "前端代码/uniapp/pages/store/list/index.vue",
+    "前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue",
+    "后端代码/app/controller/api/v1/store/Store.php",
+    "后端代码/app/services/store/SystemStoreServices.php",
+    "后端代码/app/services/store/StoreSelectableRegionServices.php"
+  ],
+  "testFiles": [
+    "tests/member-store-regions/contract.cjs",
+    "tests/member-store-regions/regions.php",
+    "tests/member-store-regions/browser.cjs",
+    "tests/member-store-regions/real-browser.cjs",
+    "tests/member-store-regions/build.cjs"
+  ],
+  "files": [
+    {
+      "file": "前端代码/uniapp/api/new_store.js",
+      "sha256": "de3a0e15247d48588031404933bda513b94d9fde9f7f352247c364eaab3c1a26"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/list/index.vue",
+      "sha256": "f26c1f56d70f9921ff98bc6b8d48a0c12e4114394da4f35db824e56650f93644"
+    },
+    {
+      "file": "前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue",
+      "sha256": "dc85c627dd8b2aceb8edb1e2bb176b3f7b70269af66d83ccef2605bf7de85088"
+    },
+    {
+      "file": "后端代码/app/controller/api/v1/store/Store.php",
+      "sha256": "e078f917359a3080b76b0c90da44be0f5dd822999e6b44026e739d41d8d086e0"
+    },
+    {
+      "file": "后端代码/app/services/store/SystemStoreServices.php",
+      "sha256": "32d6bf423ec9ea11fd8c23a7e429ac8df7ad0b2673d8d578bbd21121df71c422"
+    },
+    {
+      "file": "后端代码/app/services/store/StoreSelectableRegionServices.php",
+      "sha256": "cd3abb4498e0dac780172800c6c824c42288099489a8a8e81bae154388d369c1"
+    },
+    {
+      "file": "tests/member-store-regions/contract.cjs",
+      "sha256": "6ced8352577ca372f0a0134b440d5930d8ecb9edfbb728b435f0cbb8d7543e31"
+    },
+    {
+      "file": "tests/member-store-regions/regions.php",
+      "sha256": "a667003cd10671b8cfe8f8996b6318668d629c31f6454a12edd4fd446a29ce67"
+    },
+    {
+      "file": "tests/member-store-regions/browser.cjs",
+      "sha256": "b5e6e7e84d43e018404cc50f2c7b8793ef285a91ec9be51fc1c4e66a0601e666"
+    },
+    {
+      "file": "tests/member-store-regions/real-browser.cjs",
+      "sha256": "701e00b9281e1da6c7ce7315660d976e93c43b92807a0052a37a61c3ab0ce547"
+    },
+    {
+      "file": "tests/member-store-regions/build.cjs",
+      "sha256": "5bb835deee5d7a355180a53c2fd01fc99e945516545af9f3346af6a7dcb9e3d5"
+    }
+  ],
+  "patchSha256": "1a8849744f6e8e2ba9c25eb520580e30913a104355928a5194774cd55a2ddbfc",
+  "tests": {
+    "mysql": "PASS",
+    "contract": "PASS",
+    "realH5": "PASS",
+    "realLocalAPI": "PASS",
+    "miniCompile": "PASS",
+    "miniRuntimeContract": "PASS",
+    "existingCube": "PASS"
+  },
+  "miniTree": "e665264474db6d75a58d7a323cc265b6b32b33c5",
+  "miniSimulator": "NOT TESTED",
+  "productionOperations": "NONE",
+  "acceptance": "Awaiting product manager confirmation",
+  "commit": "NOT CREATED"
+}

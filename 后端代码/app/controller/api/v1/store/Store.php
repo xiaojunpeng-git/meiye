@@ -206,7 +206,7 @@ class Store
      */
     public function getStoreList(Request $request)
     {
-        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all] = $request->getMore([
+        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all, $region_options] = $request->getMore([
             ['store_type', 1],
             ['keyword', ''],
             ['latitude', ''],
@@ -221,10 +221,14 @@ class Store
             ['is_sum', 0],//是否取数量
             ['card_product_id', 0],//卡项商品id
             ['is_all', 0],//预约等场景：展示全部门店，不依赖定位
+            ['region_options', 0],//同一可选门店范围的地区投影，不返回门店资料
         ], true);
+        // 沿用原坐标校验：空坐标合法，有定位则继续距离排序；地区筛选不提升进店权限。
         if (!$is_all && !checkCoordinates($longitude, $latitude)) {
             return app('json')->fail('参数错误');
         }
+        // 地区选项忽略已选地区，其他搜索、常用、进店隔离和商品范围全部共用下方原路径。
+        if ($region_options) $province = $city = $area = $street = 0;
         /** @var StoreProductServices $productServices */
         $productServices = app()->make(StoreProductServices::class);
         $intersection = [];
@@ -278,7 +282,7 @@ class Store
 					$store_id = $entryStoreId;
 				}
 			}
-			$storeList = $this->services->getNearbyStore($where, $latitude, $longitude, '', 0, (int)$product_id, (int)$store_id);
+			$storeList = $this->services->getNearbyStore($where, $latitude, $longitude, '', 0, (int)$product_id, (int)$store_id, (bool)$region_options);
         }
         $data = [];
         if($intersection && $storeList) {
@@ -289,7 +293,11 @@ class Store
             }
         }
         $sum = count($storeList);
-        return app('json')->success($is_sum ? $sum : ($card_product_id ? $data : $storeList));
+        $result = $card_product_id ? $data : $storeList;
+        if ($region_options) {
+            return app('json')->success(app()->make(\app\services\store\StoreSelectableRegionServices::class)->project($result));
+        }
+        return app('json')->success($is_sum ? $sum : $result);
     }
 
 

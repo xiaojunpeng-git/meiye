@@ -1,0 +1,916 @@
+diff --git a/tests/member-store-regions/browser.cjs b/tests/member-store-regions/browser.cjs
+new file mode 100644
+index 00000000..000b6209
+--- /dev/null
++++ b/tests/member-store-regions/browser.cjs
+@@ -0,0 +1,93 @@
++// Actual HBuilderX H5 bundle. HTTP fixtures isolate UI states; real MySQL scope
++// and controller execution are separately covered by regions.php.
++const fs = require('fs'), path = require('path'), assert = require('assert/strict');
++const {chromium} = require('/Users/xiaojunpeng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
++const {regions} = require('./contract.cjs');
++const evidence = path.join(__dirname, 'evidence');
++fs.mkdirSync(evidence, {recursive: true});
++async function run() {
++  const browser = await chromium.launch({channel: 'chrome', headless: true});
++  const cases = [];
++  try {
++    for (const width of [320, 375]) {
++      const page = await browser.newPage({viewport: {width, height: 812}});
++      const errors = [], requests = [];
++      let fail = false, empty = false;
++      page.on('pageerror', e => errors.push(e.message));
++      await page.route('**/api/store/list*', async route => {
++        const query = Object.fromEntries(new URL(route.request().url()).searchParams);
++        requests.push(query);
++        if (query.region_options) {
++          if (fail) return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({status: 400, msg: '测试失败'})});
++          return route.fulfill({json: {status: 200, data: {regions: empty ? [] : regions, incomplete_count: empty ? 0 : 2}}});
++        }
++        const id = Number(query.province) === 6 ? 130 : 129;
++        return route.fulfill({json: {status: 200, data: [{id, name: id === 130 ? '杭州门店' : '广州门店', address: '示例地区', detailed_address: '示例路1号', day_time: '10:00 - 20:00'}]}});
++      });
++      // No remote domains are needed by this frontend regression.
++      await page.route('**/*', route => {
++        if (/\/jweixin-|\/jwxwork-/.test(route.request().url())) return route.fulfill({contentType: 'application/javascript', body: 'window.jWeixin=window.wx={ready:function(){},error:function(){},config:function(){}};'});
++        const host = new URL(route.request().url()).hostname;
++        return ['127.0.0.1', 'localhost'].includes(host) ? route.fallback() : route.abort();
++      });
++      await page.goto('http://127.0.0.1:8081/');
++      await page.waitForFunction(() => window.uni && uni.navigateTo);
++      await page.waitForURL('**/pages/index/index');
++      await page.locator('#target').waitFor();
++      await page.waitForLoadState('networkidle');
++      await page.evaluate(() => new Promise((resolve, reject) => uni.navigateTo({url: '/pages/store/list/index?type=1&isCollage=2&is_select=1&storeId=130', success: resolve, fail: reject})));
++      const name = page.locator('.header .search .name');
++      try {await name.waitFor({timeout: 10000});} catch (e) {
++        console.error({url: page.url(), body: (await page.locator('body').innerText()).slice(0,1500), errors});
++        await page.screenshot({path: path.join(evidence, 'failure.png')});throw e;
++      }
++      await name.click();
++      const drawer = page.locator('.store-regions');
++      const settleDrawer = () => page.waitForFunction(() => {
++        const el = document.querySelector('.store-regions');
++        const box = el && el.getBoundingClientRect();
++        return box && box.height > 100 && box.bottom <= innerHeight + 1 && box.top >= 0;
++      });
++      try {await drawer.getByRole('button', {name: '广东省', exact: true}).waitFor({timeout: 10000});} catch (e) {
++        console.error({stage: 'regions', body: (await page.locator('body').innerText()).slice(-1600), requests, errors});
++        await page.screenshot({path: path.join(evidence, 'failure.png')});throw e;
++      }
++      await settleDrawer();
++      await page.screenshot({path: path.join(evidence, `regions-${width}.png`)});
++      await drawer.getByRole('button', {name: '广东省', exact: true}).click();
++      await drawer.getByRole('button', {name: '全省门店', exact: true}).waitFor();
++      await drawer.getByRole('button', {name: '广州市', exact: true}).click();
++      await drawer.getByRole('button', {name: '全市门店', exact: true}).waitFor();
++      await page.screenshot({path: path.join(evidence, `city-${width}.png`)});
++      await drawer.getByRole('button', {name: '全市门店', exact: true}).click();
++      await page.waitForFunction(() => document.querySelector('.header .search .name').textContent.includes('广州市'));
++      assert(requests.some(q => q.province === '1' && q.city === '2' && q.area === '0'));
++      await name.click();await drawer.getByRole('button', {name: '海珠区', exact: true}).click();
++      await page.waitForFunction(() => document.querySelector('.header .search .name').textContent.includes('海珠区'));
++      await name.click();await drawer.getByRole('button', {name: '全部地区', exact: true}).first().click();
++      await drawer.locator('.all-option').click();
++      await page.waitForFunction(() => document.querySelector('.header .search .name').textContent.includes('全部'));
++      fail = true;await name.click();await drawer.getByText('地区加载失败', {exact: true}).waitFor();
++      await page.screenshot({path: path.join(evidence, `retry-${width}.png`)});
++      fail = false;await drawer.getByRole('button', {name: '重试', exact: true}).click();
++      await drawer.getByRole('button', {name: '广东省', exact: true}).waitFor();
++      await drawer.getByRole('button', {name: '关闭', exact: true}).click();
++      empty = true;await name.click();await drawer.getByText('暂无可筛选地区', {exact: true}).waitFor();
++      await settleDrawer();
++      const bounds = await drawer.evaluate(el => {
++        const rect = el.getBoundingClientRect();
++        return {left: rect.left, right: rect.right, bottom: rect.bottom, width: innerWidth,
++          overflowing: [...el.querySelectorAll('button')].filter(b => b.scrollWidth > b.clientWidth + 1).map(b => b.textContent)};
++      });
++      assert(bounds.left >= -1 && bounds.right <= width + 1 && bounds.bottom <= 813);
++      assert.deepEqual(bounds.overflowing, []);
++      assert(requests.filter(q => q.region_options).every(q => q.is_select === '1' && q.province === '0' && q.city === '0'));
++      assert.deepEqual(errors, []);
++      cases.push({width, result: 'PASS', bounds, requests, errors});
++      await page.close();
++    }
++    fs.writeFileSync(path.join(evidence, 'browser-result.json'), JSON.stringify({result: 'PASS', actualCompiledH5: true, httpBoundaryFixtures: true, cases}, null, 2));
++    console.log('PASS actual HBuilderX H5 320/375: regions, whole city, district, clear, failure/retry, empty, bounds.');
++  } finally {await browser.close();}
++}
++run().catch(error => {console.error(error);process.exitCode = 1;});
+diff --git a/tests/member-store-regions/build.cjs b/tests/member-store-regions/build.cjs
+new file mode 100644
+index 00000000..7ab8872c
+--- /dev/null
++++ b/tests/member-store-regions/build.cjs
+@@ -0,0 +1,23 @@
++// Freeze only this round's member files over canonical HEAD. This is a local
++// compile check, not upload authorization; no server or database is contacted.
++const fs = require('fs'), path = require('path'), cp = require('child_process'), vm = require('vm');
++const root = path.resolve(__dirname, '../..');
++process.chdir(root);
++const base = process.env.REGION_BUILD_BASE || '/private/tmp/m008-r3-regions-20261024/mini';
++if (!base.startsWith('/private/tmp/m008-r3-regions-20261024/')) throw Error('Unsafe build output');
++fs.mkdirSync(base, {recursive: true});
++const files = ['前端代码/uniapp/api/new_store.js', '前端代码/uniapp/pages/store/list/index.vue', '前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue'];
++const git = (args, extra = {}) => cp.execFileSync('git', args, {encoding: 'utf8', ...extra}).trim();
++const head = git(['rev-parse', 'HEAD']);
++const env = {...process.env, GIT_INDEX_FILE: path.join(base, 'source.index')};
++git(['read-tree', head], {env});
++for (const f of files) git(['update-index', '--add', '--cacheinfo', '100644', git(['hash-object', '-w', f]), f], {env});
++const tree = git(['write-tree'], {env});
++fs.writeFileSync(path.join(base, 'source.json'), JSON.stringify({head, tree, files, localOnly: true}, null, 2));
++let script = fs.readFileSync('scripts/build/member-008-round4-mini.cjs', 'utf8')
++  .replace(/const commit=assetsCandidate\?[^;]+;/, 'const commit=' + JSON.stringify(tree) + ';')
++  .replace(/const base=assetsCandidate\?[^;]+;/, 'const base=' + JSON.stringify(base) + ';')
++  .replace("git(['rev-parse','HEAD']).toString().trim()!==commit", "git(['rev-parse','HEAD']).toString().trim()!==" + JSON.stringify(head))
++  .replace(/if\(dirty\.split[^\n]+/, '// The exact isolated tree above is the only compile input.');
++process.argv = [process.argv[0], 'region-mini-build'];
++vm.runInThisContext('(function(require,__dirname,__filename){' + script + '\n})', {filename: __filename})(require, path.join(root, 'scripts/build'), __filename);
+diff --git a/tests/member-store-regions/contract.cjs b/tests/member-store-regions/contract.cjs
+new file mode 100644
+index 00000000..8440296c
+--- /dev/null
++++ b/tests/member-store-regions/contract.cjs
+@@ -0,0 +1,89 @@
++// Load real Vue2 SFC scripts/templates. Replace only request/native boundaries,
++// then exercise selection, request races and original store navigation callbacks.
++const fs = require('fs'), path = require('path'), assert = require('assert/strict');
++const root = path.resolve(__dirname, '../..');
++const deps = path.join(root, '前端代码/admin/node_modules');
++const compiler = require(path.join(deps, 'vue-template-compiler'));
++const babel = require('/Applications/HBuilderX.app/Contents/HBuilderX/plugins/uniapp-cli/node_modules/@babel/core');
++const transform = '/Applications/HBuilderX.app/Contents/HBuilderX/plugins/uniapp-cli/node_modules/@babel/plugin-transform-modules-commonjs';
++const preprocess = require('/Applications/HBuilderX.app/Contents/HBuilderX/plugins/uniapp-cli/node_modules/@dcloudio/vue-cli-plugin-uni/packages/webpack-preprocess-loader/preprocess/lib/preprocess').preprocess;
++const Vue = require(path.join(deps, 'vue/dist/vue.common.js'));
++const sources = {
++  region: '前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue',
++  page: '前端代码/uniapp/pages/store/list/index.vue',
++  drawer: '前端代码/uniapp/components/tui-drawer/tui-drawer.vue'
++};
++function component(name, api = {}) {
++  const source = fs.readFileSync(path.join(root, sources[name]), 'utf8');
++  const sfc = compiler.parseComponent(source);
++  const template = preprocess(sfc.template.content, {H5: true, APP: false, MP: false}, {type: 'html'});
++  const compiled = compiler.compile(template);
++  assert.deepEqual(compiled.errors, []);
++  const script = babel.transformSync(preprocess(sfc.script.content, {H5: true, APP: false, MP: false}, {type: 'js'}), {babelrc: false, configFile: false, plugins: [transform]}).code;
++  const load = dependency => {
++    if (dependency === '@/api/new_store.js') return api;
++    if (dependency === '@/config/app') return {HTTP_REQUEST_URL: 'http://127.0.0.1:8080'};
++    if (dependency === '@/mixins/color') return {computed: {colorStyle() {return '--view-theme:#7d2842;--view-gradient:#a7526c';}}};
++    if (dependency.includes('tui-drawer')) return component('drawer').options;
++    if (dependency.includes('storeRegionWindow')) return component('region', api).options;
++    return {render(h) {return h('view');}};
++  };
++  const module = {exports: {}};
++  new Function('require', 'module', 'exports', script)(load, module, module.exports);
++  return {options: module.exports.default, template, sfc, script};
++}
++const regions = [{id: 1, label: '广东省', children: [
++  {id: 2, label: '广州市', children: [{id: 3, label: '海珠区', children: []}]},
++  {id: 4, label: '深圳市', children: []}
++]}, {id: 6, label: '浙江省', children: [{id: 7, label: '杭州市', children: []}]}];
++const deferred = () => {let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;});return {promise, resolve, reject};};
++async function run() {
++  const calls = [], pending = [];
++  const api = {getStoreRegions(query) {calls.push(query);const p = deferred();pending.push(p);return p.promise;}, getList() {return Promise.resolve({data: []});}};
++  const vm = new Vue({...component('region', api).options, propsData: {display: false, query: {is_select: 1}, value: []}});
++  let submitted;
++  vm.$on('submit', value => {submitted = value;});
++  const first = vm.loadRegions();
++  assert(vm.loading);
++  pending.shift().resolve({data: {regions, incomplete_count: 2}});await first;
++  assert.equal(vm.regions.length, 2);assert.equal(vm.incompleteCount, 2);
++  vm.select(vm.regions[0]);assert.equal(vm.allLabel, '全省门店');
++  vm.submit(vm.path);assert.deepEqual(JSON.parse(JSON.stringify(submitted)), [{id: 1, label: '广东省'}]);
++  vm.select(vm.options[0]);assert.equal(vm.allLabel, '全市门店');
++  vm.select(vm.options[0]);assert.deepEqual(submitted.map(v => v.id), [1, 2, 3]);
++  vm.backTo(0);vm.submit(vm.path);assert.deepEqual(submitted, []);
++  vm.path = [{id: 99, label: '北京市', children: []}];assert.equal(vm.allLabel, '全市门店');vm.backTo(0);
++  const older = vm.loadRegions(), newer = vm.loadRegions();
++  const a = pending.shift(), b = pending.shift();b.resolve({data: {regions: [regions[1]]}});await newer;
++  a.resolve({data: {regions}});await older;assert.equal(vm.regions.length, 1);
++  const failed = vm.loadRegions();pending.shift().reject(Error('network'));await failed;assert(vm.failed && !vm.loading);
++  const retry = vm.loadRegions();pending.shift().resolve({data: {regions: []}});await retry;assert(!vm.failed && !vm.loading);
++  const closed = vm.loadRegions();vm.$options.watch.display.call(vm, false);pending.shift().resolve({data: {regions}});await closed;assert.equal(vm.regions.length, 0);
++  const malformed = vm.loadRegions();pending.shift().resolve({data: []});await malformed;assert(vm.failed);
++  assert.equal(calls[0].is_select, 1);
++  const events = [], listPending = [], listCalls = [];
++  global.uni = {getStorageSync: () => '', $emit: (...a) => events.push(a), navigateBack: () => events.push(['back'])};
++  Vue.prototype.$util = {getWXStatusHeight: () => ({barTop: 0, barHeight: 44})};
++  const page = new Vue(component('page', {getList(query) {listCalls.push(query);const p = deferred();listPending.push(p);return p.promise;}}).options);
++  page.OnChangeAddress([{id: 1, label: '广东省'}]);assert.equal(page.content.province, 1);assert.equal(page.content.city, 0);assert.equal(page.regionLabel, '广东省');
++  page.OnChangeAddress([]);assert.equal(page.content.province, 0);assert.equal(page.regionLabel, '全部');
++  listPending[1].resolve({data: [{id: 20}]});await Vue.nextTick();await Promise.resolve();
++  listPending[0].resolve({data: [{id: 10}]});await Vue.nextTick();await Promise.resolve();assert.equal(page.storeList[0].id, 20);
++  const failList = page.getlist();listPending[2].reject(Error('offline'));await failList;assert(page.listError && !page.listLoading);
++  for (const [mode, event] of [[1, 'activeFn'], [2, 'activeHome'], [3, 'activeReservation']]) {
++    page.comeType = 1;page.isCollage = mode;page.activeFn({id: 130});assert.equal(events[events.length - 2][0], event);assert.equal(events[events.length - 1][0], 'back');
++  }
++  // The common national-address picker is intentionally not touched or imported.
++  assert(!component('page').options.components.areaWindow);
++  const module = {exports: {}}, requestCalls = [];
++  const script = babel.transformSync(fs.readFileSync(path.join(root, '前端代码/uniapp/api/new_store.js'), 'utf8'), {babelrc: false, configFile: false, plugins: [transform]}).code;
++  new Function('require', 'module', 'exports', script)(() => ({get: (...args) => requestCalls.push(args)}), module, module.exports);
++  const query = {province: 99, city: 98, product_id: 3648, is_select: 1, store_type: 2};module.exports.getStoreRegions(query);
++  assert.equal(query.province, 99);assert.equal(requestCalls[0][0], 'store/list');
++  assert.deepEqual(requestCalls[0][1], {...query, province: 0, city: 0, area: 0, street: 0, region_options: 1});
++  assert.equal(requestCalls[0][2].noAuth, true);
++  vm.$destroy();page.$destroy();
++  console.log('PASS: SFC templates, province/city/district/all, async races, close/retry/empty, query identity, legacy selection callbacks.');
++}
++if (require.main === module) run().catch(error => {console.error(error);process.exitCode = 1;});
++module.exports = {root, deps, sources, component, regions};
+diff --git a/tests/member-store-regions/real-browser.cjs b/tests/member-store-regions/real-browser.cjs
+new file mode 100644
+index 00000000..26e7ab30
+--- /dev/null
++++ b/tests/member-store-regions/real-browser.cjs
+@@ -0,0 +1,50 @@
++// Read-only local H5 -> real API -> local MySQL smoke. Only external WeChat
++// SDK initialization is replaced; no API data, auth or store filtering is mocked.
++const fs = require('fs'), path = require('path'), http = require('http'), assert = require('assert/strict');
++const {chromium} = require('/Users/xiaojunpeng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
++const evidence = path.join(__dirname, 'evidence');
++const get = query => new Promise((resolve, reject) => http.get('http://127.0.0.1:8080/api/store/list?' + new URLSearchParams(query), response => {
++  let body = '';response.on('data', b => {body += b;});response.on('end', () => {try {resolve(JSON.parse(body));} catch (e) {reject(e);}});
++}).on('error', reject));
++async function run() {
++  const response = await get({region_options: 1, is_select: 1});
++  assert.equal(response.status, 200);
++  const province = response.data.regions.find(p => p.children.length);
++  assert(province, 'Local fixture must have at least one classified store');
++  const city = province.children[0];
++  const expected = await get({is_select: 1, province: province.id, city: city.id});
++  assert(expected.data.length > 0);
++  const browser = await chromium.launch({channel: 'chrome', headless: true});
++  try {
++    const page = await browser.newPage({viewport: {width: 375, height: 812}}), errors = [];
++    page.on('pageerror', e => errors.push(e.message));
++    await page.route('**/*', route => {
++      if (/\/jweixin-|\/jwxwork-/.test(route.request().url())) return route.fulfill({contentType: 'application/javascript', body: 'window.jWeixin=window.wx={ready:function(){},error:function(){},config:function(){}};'});
++      return ['127.0.0.1', 'localhost'].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort();
++    });
++    await page.goto('http://127.0.0.1:8081/');
++    await page.waitForURL('**/pages/index/index');await page.locator('#target').waitFor();await page.waitForLoadState('networkidle');
++    await page.evaluate(() => new Promise((resolve, reject) => uni.navigateTo({url: '/pages/store/list/index?type=1&isCollage=2&is_select=1', success: resolve, fail: reject})));
++    const name = page.locator('.header .search .name');
++    await name.click();
++    const drawer = page.locator('.store-regions');
++    await drawer.getByRole('button', {name: province.label, exact: true}).waitFor();
++    await page.waitForFunction(() => document.querySelector('.store-regions').getBoundingClientRect().bottom <= innerHeight + 1);
++    await page.screenshot({path: path.join(evidence, 'real-local-375.png')});
++    await drawer.getByRole('button', {name: province.label, exact: true}).click();
++    await drawer.getByRole('button', {name: city.label, exact: true}).click();
++    const result = page.waitForResponse(r => {
++      const url = new URL(r.url());return url.pathname === '/api/store/list' && url.searchParams.get('city') === String(city.id) && !url.searchParams.has('region_options');
++    });
++    await drawer.getByRole('button', {name: '全市门店', exact: true}).click();
++    const actual = await (await result).json();
++    assert.deepEqual(actual.data.map(s => s.id), expected.data.map(s => s.id));
++    await page.waitForFunction(label => document.querySelector('.header .search .name').textContent.includes(label), city.label);
++    await page.screenshot({path: path.join(evidence, 'real-filtered-375.png')});
++    assert.deepEqual(errors, []);
++    const receipt = {result: 'PASS', realLocalAPI: true, APIDataMocked: false, readOnly: true, province: province.id, city: city.id, matchedStores: actual.data.length, incompleteLocalStores: response.data.incomplete_count, errors};
++    fs.writeFileSync(path.join(evidence, 'real-browser-result.json'), JSON.stringify(receipt, null, 2));
++    console.log(JSON.stringify(receipt));
++  } finally {await browser.close();}
++}
++run().catch(error => {console.error(error);process.exitCode = 1;});
+diff --git a/tests/member-store-regions/regions.php b/tests/member-store-regions/regions.php
+new file mode 100644
+index 00000000..d2f37894
+--- /dev/null
++++ b/tests/member-store-regions/regions.php
+@@ -0,0 +1,147 @@
++<?php
++/** 本地真实 MySQL 查询回归；仅连接 Docker ruihao，临时表随连接释放，不写现存门店。 */
++require '/var/www/html/vendor/autoload.php';
++
++use app\Request;
++use app\controller\api\v1\store\Store;
++use app\dao\store\SystemStoreDao;
++use app\services\store\SystemStoreServices;
++use app\services\store\StoreSelectableRegionServices;
++use app\services\store\StoreUserServices;
++use app\services\product\product\StoreProductServices;
++use app\services\product\branch\StoreBranchProductServices;
++use think\facade\Db;
++
++$app = new think\App('/var/www/html/');
++$app->env->load('/var/www/html/.env');
++$app->initialize();
++if (getenv('STORE_REGIONS_LOCAL_TEST') !== '1' || config('database.connections.mysql.hostname') !== 'mysql'
++    || config('database.connections.mysql.database') !== 'ruihao') throw new RuntimeException('Local Docker database only');
++
++function checkRegion($ok, string $label): void {
++    if (!$ok) throw new RuntimeException($label);
++    echo 'PASS ', $label, PHP_EOL;
++}
++
++// Infrastructure fixtures supply entry/product/user context; the actual API,
++// scope intersection, DAO SQL and region projection remain production methods.
++class RegionStoreProbe extends SystemStoreServices {
++    public $entry = 0;
++    public $scope = [];
++    public function getStoreIdByEntryRules(int $uid = 0, array $param = [], bool $isCache = false): array {
++        return ['store_id' => $this->entry, 'shop_operation_type' => 1];
++    }
++    public function getRegionStoreIds(int $storeId) { return $this->scope; }
++}
++class RegionRequest extends Request {
++    public $input = [];
++    public function param($name = '', $default = null, $filter = '') {
++        return $this->input[explode('/', $name)[0]] ?? $default;
++    }
++    public function getMore(array $params, bool $isList = false, bool $filter = true): array {
++        $out = [];
++        foreach ($params as $p) $out[is_array($p[0]) ? $p[0][0] : $p[0]] = $this->input[is_array($p[0]) ? $p[0][0] : $p[0]] ?? $p[1];
++        return $isList ? array_values($out) : $out;
++    }
++}
++
++$template = Db::name('system_store')->where('id', '>', 0)->find();
++checkRegion((bool)$template, 'Local store schema fixture available');
++unset($template['id']);
++$originalDigest = hash('sha256', json_encode(Db::name('system_store')->order('id')->select()->toArray()));
++foreach (['system_store', 'city_area'] as $table) {
++    $ddl = Db::query('SHOW CREATE TABLE eb_' . $table)[0]['Create Table'];
++    Db::execute(preg_replace('/^CREATE TABLE /', 'CREATE TEMPORARY TABLE ', $ddl, 1));
++}
++Db::name('city_area')->insertAll([
++    ['id' => 1, 'name' => '广东省', 'parent_id' => 0, 'level' => 1],
++    ['id' => 2, 'name' => '广州市', 'parent_id' => 1, 'level' => 2],
++    ['id' => 3, 'name' => '海珠区', 'parent_id' => 2, 'level' => 3],
++    ['id' => 4, 'name' => '深圳市', 'parent_id' => 1, 'level' => 2],
++    ['id' => 5, 'name' => '南山区', 'parent_id' => 4, 'level' => 3],
++    ['id' => 6, 'name' => '浙江省', 'parent_id' => 0, 'level' => 1],
++    ['id' => 7, 'name' => '杭州市', 'parent_id' => 6, 'level' => 2],
++    ['id' => 8, 'name' => '海珠区', 'parent_id' => 7, 'level' => 3],
++]);
++for ($id = 1; $id <= 30; $id++) {
++    Db::name('system_store')->insert(array_merge($template, ['id' => $id, 'name' => 'REGION-' . $id,
++        'province' => $id === 30 ? 6 : 1, 'city' => $id === 30 ? 7 : 2, 'area' => $id === 30 ? 8 : 3,
++        'is_show' => 1, 'is_del' => 0, 'is_alone' => 0, 'latitude' => '23.1', 'longitude' => '113.2']));
++}
++Db::name('system_store')->where('id', 1)->update(['province' => 0, 'city' => 0, 'area' => 0, 'address' => '不得从广州店文字猜地区']);
++Db::name('system_store')->where('id', 2)->update(['city' => 4, 'area' => 3]); // cross-parent invalid district
++Db::name('system_store')->where('id', 3)->update(['is_show' => 0]);
++Db::name('system_store')->where('id', 4)->update(['is_del' => 1]);
++Db::name('system_store')->where('id', 5)->update(['is_alone' => 1]);
++$before = Db::name('system_store')->order('id')->select()->toArray();
++$service = new RegionStoreProbe(new SystemStoreDao());
++$controller = new Store($service);
++$request = new RegionRequest();
++$request->uid = 17;
++$app->instance('request', $request);
++$app->instance(StoreUserServices::class, new class extends StoreUserServices {
++    public function __construct() {}
++    public function getColumn($where, $field) { return [1, 30]; }
++});
++$app->instance(StoreProductServices::class, new class extends StoreProductServices {
++    public function __construct() {}
++    public function get($id, $field = []) {return ['pid' => 0, 'product_type' => $id === 100 ? 6 : 5, 'applicable_type' => 2, 'applicable_store_id' => $id === 100 ? [10, 30] : [30]];}
++});
++$app->instance(StoreBranchProductServices::class, new class extends StoreBranchProductServices {
++    public function __construct() {}
++    public function getApplicableStoreIds(int $productId, int $type = 0) {return [$productId === 300 ? [] : [10, 30], 2, 5];}
++});
++$api = function (array $input) use ($controller, $request) {
++    $request->input = array_merge(['latitude' => '23.1', 'longitude' => '113.2'], $input);
++    $response = $controller->getStoreList($request)->getData();
++    if ((int)$response['status'] !== 200) throw new RuntimeException(json_encode($response));
++    return $response['data'];
++};
++
++$queries = [];
++Db::listen(function ($sql) use (&$queries) {$queries[] = $sql;});
++$tree = $api(['region_options' => 1, 'province' => 999, 'page' => 1, 'limit' => 20]);
++checkRegion(array_column($tree['regions'], 'id') === [1, 6], 'Options include matching stores beyond the first 20 and ignore current region');
++checkRegion($tree['incomplete_count'] === 2, 'Unknown and cross-parent regions counted without guessing addresses');
++checkRegion($tree['regions'][1]['children'][0]['children'][0]['id'] === 8, 'Same-name districts retain their distinct parent IDs');
++checkRegion(count(array_filter($queries, function ($sql) {return strpos($sql, 'eb_city_area') !== false;})) === 1, 'One batched dictionary query, no per-store dictionary scans');
++checkRegion(!isset($tree['regions'][0]['phone']), 'Options expose no store phone, location or identity');
++$all = $api([]);
++checkRegion(in_array(1, array_column($all, 'id')) && !array_intersect([3, 4, 5], array_column($all, 'id')), 'All stores retain unknown regions and exclude closed/deleted/isolated stores');
++$province = $api(['province' => 6, 'latitude' => '', 'longitude' => '']);
++checkRegion(array_column($province, 'id') === [30], 'Manual province filtering works without GPS');
++$cleared = $api(['latitude' => '', 'longitude' => '']);
++checkRegion(in_array(1, array_column($cleared, 'id')) && in_array(30, array_column($cleared, 'id')), 'Clearing manual region works without GPS and retains unclassified stores');
++$city = $api(['province' => 1, 'city' => 4]);
++checkRegion(array_column($city, 'id') === [2], 'Whole-city filter preserves incomplete district stores');
++$district = $api(['province' => 6, 'city' => 7, 'area' => 8]);
++checkRegion(array_column($district, 'id') === [30], 'District IDs filter only their real parent region');
++$request->input = ['province' => 6, 'city' => 7, 'is_sum' => 1];
++checkRegion($controller->getStoreList($request)->getData() === app('json')->success(1)->getData(), 'Original store-count response envelope remains unchanged');
++$single = $service->getNearbyStore(['is_all' => 1], '', '', '', 1);
++checkRegion(isset($single['id'], $single['delivery_config']) && !isset($single[0]), 'Original single-nearest-store response and delivery configuration remain intact');
++$request->input = ['page' => 1, 'limit' => 20];
++checkRegion(count($service->getNearbyStore(['is_all' => 1], '', '')) === 20, 'Original normal-list pagination remains unchanged');
++$empty = $api(['region_options' => 1, 'keyword' => 'no-match']);
++checkRegion($empty === ['regions' => [], 'incomplete_count' => 0], 'No matching stores returns an explicit empty region tree');
++$common = $api(['region_options' => 1, 'store_type' => 2]);
++checkRegion(array_column($common['regions'], 'id') === [6] && $common['incomplete_count'] === 1, 'Common stores use the same user-store scope');
++$request->uid = 0;
++checkRegion($api(['region_options' => 1, 'store_type' => 2])['regions'] === [], 'Anonymous users cannot obtain another user common-store regions');
++$request->uid = 17;
++$service->scope = [10];
++checkRegion(array_column($api(['region_options' => 1])['regions'], 'id') === [1], 'Entry region scope is preserved');
++$service->scope = [];
++$service->entry = 5;
++checkRegion(array_column($api(['region_options' => 1])['regions'], 'id') === [1], 'An isolated entry keeps only its own store');
++$service->entry = 0;
++checkRegion(array_column($api(['region_options' => 1, 'product_id' => 100, 'card_product_id' => 200])['regions'], 'id') === [6], 'Product and component-card restrictions intersect before projecting regions');
++checkRegion($api(['region_options' => 1, 'product_id' => 300])['regions'] === [], 'A product with no applicable stores cannot fall back to all regions');
++$bad = new RegionRequest();
++$bad->input = ['province' => 1, 'latitude' => 'not-a-number', 'longitude' => '113.2'];
++checkRegion($controller->getStoreList($bad)->getData()['status'] !== 200, 'Invalid supplied coordinates cannot reach distance SQL');
++checkRegion(Db::name('system_store')->order('id')->select()->toArray() === $before, 'All reads leave historical store data byte-for-byte unchanged');
++echo 'EXPLAIN=', json_encode(Db::query('EXPLAIN SELECT id,province,city,area FROM eb_system_store WHERE is_del=0 AND is_show=1 AND is_alone=0'), JSON_UNESCAPED_UNICODE), PHP_EOL;
++foreach (['system_store', 'city_area'] as $table) Db::execute('DROP TEMPORARY TABLE eb_' . $table);
++checkRegion(hash('sha256', json_encode(Db::name('system_store')->order('id')->select()->toArray())) === $originalDigest, 'Temporary fixtures released; permanent store table digest unchanged');
++echo "PASS local MySQL region filter integration\n";
+diff --git a/前端代码/uniapp/api/new_store.js b/前端代码/uniapp/api/new_store.js
+index f6f871cf..58afe9f3 100644
+--- a/前端代码/uniapp/api/new_store.js
++++ b/前端代码/uniapp/api/new_store.js
+@@ -87,6 +87,11 @@ export function getList( data) {
+ 	});
+ }
+ 
++/** 与门店列表共用后端范围，仅返回完整地区树；不使用全国字典或当前页门店推断。 */
++export function getStoreRegions(data) {
++	return getList(Object.assign({}, data, {region_options: 1, province: 0, city: 0, area: 0, street: 0}));
++}
++
+ /**
+  * 删除收藏产品
+  * @param int id
+diff --git a/前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue b/前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue
+new file mode 100644
+index 00000000..3c811cbc
+--- /dev/null
++++ b/前端代码/uniapp/pages/store/list/components/storeRegionWindow.vue
+@@ -0,0 +1,147 @@
++<template>
++	<tuiDrawer :visible="display" mode="bottom" backgroundColor="transparent" @close="close">
++		<view class="store-regions">
++			<view class="region-title">
++				<text>选择门店地区</text>
++				<button class="close-button" role="button" aria-label="关闭" @click="close"><text class="iconfont icon-ic_close"></text></button>
++			</view>
++			<view class="region-breadcrumb">
++				<button class="crumb" role="button" aria-label="全部地区" :class="{active: !path.length}" @click="backTo(0)">全部地区</button>
++				<button v-for="(item,index) in path" :key="item.id" class="crumb" role="button" :aria-label="item.label" @click="backTo(index + 1)">{{ item.label }}</button>
++			</view>
++			<scroll-view class="region-options" scroll-y :scroll-top="scrollTop">
++				<view v-if="loading" class="region-state">加载中…</view>
++				<view v-else-if="failed" class="region-state">
++					<text>地区加载失败</text><button class="retry" role="button" aria-label="重试" @click="loadRegions">重试</button>
++				</view>
++				<view v-else>
++					<button class="region-option all-option" role="button" :aria-label="allLabel" @click="submit(path)">
++						<text>{{ allLabel }}</text><text v-if="isSelectedPath" class="iconfont icon-duihao2"></text>
++					</button>
++					<button v-for="item in options" :key="item.id" class="region-option" role="button" :aria-label="item.label" @click="select(item)">
++						<text class="region-name">{{ item.label }}</text>
++						<text v-if="item.children.length" class="iconfont icon-ic_rightarrow"></text>
++						<text v-else-if="selectedId === item.id" class="iconfont icon-duihao2"></text>
++					</button>
++					<view v-if="!regions.length" class="region-state">暂无可筛选地区</view>
++					<view v-if="incompleteCount && !path.length" class="region-note">{{ incompleteCount }}家门店地区信息待完善</view>
++				</view>
++			</scroll-view>
++		</view>
++	</tuiDrawer>
++</template>
++
++<script>
++	import tuiDrawer from '@/components/tui-drawer/tui-drawer.vue';
++	import {getStoreRegions} from '@/api/new_store.js';
++
++	// 门店专用筛选器，不复用全国地址缓存；草稿选择只在确认时提交给列表。
++	export default {
++		components: {tuiDrawer},
++		props: {
++			display: {type: Boolean, default: false},
++			query: {type: Object, default: () => ({})},
++			value: {type: Array, default: () => []}
++		},
++		data() {
++			return {regions: [], path: [], loading: false, failed: false, incompleteCount: 0, requestId: 0, scrollTop: 0};
++		},
++		computed: {
++			options() {
++				return this.path.length ? this.path[this.path.length - 1].children : this.regions;
++			},
++			allLabel() {
++				// 直辖市属于省级节点，但对用户不能称作“全省”。
++				return this.path.length === 1 ? (/市$/.test(this.path[0].label) ? '全市门店' : '全省门店') : this.path.length === 2 ? '全市门店' : '全部地区';
++			},
++			selectedId() {
++				return this.value.length ? this.value[this.value.length - 1].id : 0;
++			},
++			isSelectedPath() {
++				return (this.path.length ? this.path[this.path.length - 1].id : 0) === this.selectedId;
++			}
++		},
++		watch: {
++			display(open) {
++				if (open) this.loadRegions();
++				else this.requestId++;
++			},
++			query: {
++				deep: true,
++				handler() {
++					if (this.display) this.loadRegions();
++				}
++			}
++		},
++		beforeDestroy() {
++			this.requestId++;
++		},
++		methods: {
++			loadRegions() {
++				const request = ++this.requestId;
++				this.loading = true;
++				this.failed = false;
++				this.path = [];
++				// 不缓存用户/关键字/商品相关结果；关闭或范围变化后丢弃旧响应。
++				return getStoreRegions(Object.assign({}, this.query)).then(res => {
++					if (request !== this.requestId) return;
++					if (!res.data || !Array.isArray(res.data.regions)) throw new Error('Invalid region response');
++					this.regions = res.data.regions;
++					this.incompleteCount = Number(res.data.incomplete_count) || 0;
++					let nodes = this.regions;
++					for (const selected of this.value) {
++						const node = nodes.find(item => item.id === selected.id);
++						if (!node || !node.children.length) break;
++						this.path.push(node);
++						nodes = node.children;
++					}
++					this.loading = false;
++				}).catch(() => {
++					if (request !== this.requestId) return;
++					this.loading = false;
++					this.failed = true;
++				});
++			},
++			backTo(length) {
++				this.path = this.path.slice(0, length);
++				this.resetScroll();
++			},
++			select(item) {
++				const next = this.path.concat(item);
++				if (!item.children.length) return this.submit(next);
++				this.path = next;
++				this.resetScroll();
++			},
++			resetScroll() {
++				this.scrollTop = 1;
++				this.$nextTick(() => {this.scrollTop = 0;});
++			},
++			submit(path) {
++				// 只传地区 ID/名称，不把服务端树或门店信息带进列表查询。
++				this.$emit('close');
++				this.$emit('submit', path.map(item => ({id: item.id, label: item.label})));
++			},
++			close() {
++				this.$emit('close');
++			}
++		}
++	};
++</script>
++
++<style scoped lang="scss">
++	.store-regions {background: #fff; border-radius: 16rpx 16rpx 0 0; padding-bottom: env(safe-area-inset-bottom); color: #333;}
++	.region-title {height: 100rpx; display: flex; align-items: center; justify-content: center; position: relative; font-size: 30rpx; font-weight: 600;}
++	.close-button {position: absolute; right: 12rpx; top: 12rpx; width: 76rpx; height: 76rpx; padding: 0; display: flex; align-items: center; justify-content: center; background: transparent; font-size: 30rpx;}
++	button::after {border: 0;}
++	.region-breadcrumb {display: flex; flex-wrap: wrap; padding: 0 24rpx; border-bottom: 1rpx solid #eee;}
++	.crumb {margin: 0 20rpx 0 0; padding: 18rpx 0; max-width: 100%; border-radius: 0; background: transparent; color: #555; font-size: 26rpx; line-height: 36rpx; white-space: normal; overflow-wrap: break-word;}
++	.crumb.active {color: var(--view-theme);}
++	.region-options {height: 550rpx; max-height: 60vh; box-sizing: border-box;}
++	.region-option {margin: 0; padding: 24rpx 32rpx; min-height: 88rpx; width: 100%; box-sizing: border-box; border-radius: 0; background: #fff; font-size: 28rpx; line-height: 40rpx; display: flex; align-items: center; justify-content: space-between; text-align: left;}
++	.region-name {flex: 1; min-width: 0; overflow-wrap: break-word;}
++	.region-option .iconfont {margin-left: 20rpx; flex-shrink: 0; color: var(--view-theme);}
++	.all-option {color: var(--view-theme);}
++	.region-state {padding: 48rpx 24rpx; text-align: center; color: #777; font-size: 26rpx;}
++	.retry {display: flex; align-items: center; justify-content: center; width: 144rpx; height: 72rpx; margin: 20rpx auto 0; padding: 0; background: #f5f5f5; color: var(--view-theme); font-size: 26rpx; line-height: normal;}
++	.region-note {padding: 24rpx 32rpx; color: #888; font-size: 24rpx;}
++</style>
+diff --git a/前端代码/uniapp/pages/store/list/index.vue b/前端代码/uniapp/pages/store/list/index.vue
+index ecbbb067..88c73a45 100644
+--- a/前端代码/uniapp/pages/store/list/index.vue
++++ b/前端代码/uniapp/pages/store/list/index.vue
+@@ -15,7 +15,7 @@
+ 				<view class="item" :class="content.store_type==item.type?'on':''" v-for="(item, index) in navList" :key="index" @click="navChange(item.type)">{{item.name}}</view>
+ 			</template>
+ 			<view class="search acea-row row-middle" :class="isReservationMode ? 'search-full' : ''">
+-				<view class="name" v-if="!isReservationMode" @click="btnFn">{{ addressInfo.length ? addressInfo[1].label : '全部' }}<text class="iconfont icon-ic_down2"></text></view>
++				<view class="name" v-if="!isReservationMode" role="button" :aria-label="regionLabel" :aria-expanded="display" @click="btnFn"><text class="region-current-label">{{ regionLabel }}</text><text class="iconfont icon-ic_down2"></text></view>
+ 				<input class="input" placeholder="请输入门店名称" placeholder-class="placeholders"  @confirm="searchSubmit" v-model="content.keyword"></input>
+ 				<text class="iconfont icon-ic_search" @click="searchSubmit"></text>
+ 			</view>
+@@ -23,7 +23,11 @@
+ 				<image src="@/static/images/map.png"></image>
+ 			</view>
+ 		</view>
+-		<view class="list" v-if="storeList.length">
++		<view class="store-list-state" v-if="listLoading">加载中…</view>
++		<view class="store-list-state" v-else-if="listError">
++			<text>门店加载失败</text><button class="retry-button" @click="getlist">重试</button>
++		</view>
++		<view class="list" v-else-if="storeList.length">
+ 			<view class="item acea-row row-between-wrapper" :class="sortIndex==item.id?'on':''" v-for="(item, index) in storeList" :key="index" @click="activeFn(item)">
+ 				<text class="iconfont icon-a-icon_cornermark" v-if="sortIndex==item.id"></text>
+ 				<view class="left">
+@@ -51,7 +55,7 @@
+ 		<view class="emptyPage px-20" v-else>
+ 			<emptyPage title="暂无门店信息~" src="/statics/images/noOrder.gif"></emptyPage>
+ 		</view>
+-		<areaWindow ref="areaWindow" :display="display" :cityShow="2" :address="addressInfo" @submit="OnChangeAddress" @changeClose="changeClose"></areaWindow>
++		<storeRegionWindow :display="display" :query="content" :value="addressInfo" @submit="OnChangeAddress" @close="changeClose"></storeRegionWindow>
+ 	</view>
+ </template>
+ 
+@@ -63,11 +67,11 @@
+ 	import {
+ 		getList
+ 	} from '@/api/new_store.js'
+-	import areaWindow from '@/components/areaWindow';
++	import storeRegionWindow from './components/storeRegionWindow.vue';
+ 	import emptyPage from '@/components/emptyPage.vue';
+ 	export default {
+ 		components: {
+-			areaWindow,
++			storeRegionWindow,
+ 			emptyPage
+ 		},
+ 		mixins:[colors],
+@@ -80,6 +84,9 @@
+ 					{name:'常用',type:2}
+ 				],
+ 				storeList:[],
++				listLoading: false,
++				listError: false,
++				listRequest: 0,
+ 				content: {
+ 					// 自己的位置
+ 					latitude: uni.getStorageSync('user_latitude'),
+@@ -102,6 +109,9 @@
+ 			};
+ 		},
+ 		computed: {
++			regionLabel() {
++				return this.addressInfo.length ? this.addressInfo[this.addressInfo.length - 1].label : '全部';
++			},
+ 			isReservationMode() {
+ 				return Number(this.isCollage) === 3;
+ 			}
+@@ -122,6 +132,10 @@
+ 		},
+ 		onShow() {
+ 		},
++		onUnload() {
++			// 离开页面后，未完成的查询不再修改当前列表状态。
++			this.listRequest++;
++		},
+ 		methods: {
+ 			goarrow(){
+ 				uni.navigateBack()
+@@ -136,8 +150,18 @@
+ 			},
+ 			// 门店列表
+ 			getlist() {
+-				getList(this.content).then(res => {
++				// 筛选/搜索并发时只有最后一次查询可更新页面，原门店选择回调不变。
++				const request = ++this.listRequest;
++				this.listLoading = true;
++				this.listError = false;
++				return getList(Object.assign({}, this.content)).then(res => {
++					if (request !== this.listRequest) return;
+ 					this.storeList = res.data
++					this.listLoading = false;
++				}).catch(() => {
++					if (request !== this.listRequest) return;
++					this.listLoading = false;
++					this.listError = true;
+ 				})
+ 			},
+ 			btnFn() {
+@@ -148,9 +172,10 @@
+ 			},
+ 			OnChangeAddress(address) {
+ 				this.addressInfo = address;
+-				this.content.province = address[0].value;
+-				this.content.city = address[1].value;
+-				this.content.area = address[2].value;
++				// 全部、全省、全市和区县都使用同一 ID 筛选，不强制三层齐全。
++				this.content.province = address[0] ? address[0].id : 0;
++				this.content.city = address[1] ? address[1].id : 0;
++				this.content.area = address[2] ? address[2].id : 0;
+ 				this.getlist();
+ 			},
+ 			goMap() {
+@@ -224,6 +249,23 @@
+ </script>
+ 
+ <style lang="scss" scoped>
++	.store-list-state {
++		padding: 80rpx 24rpx;
++		text-align: center;
++		color: #777;
++	}
++	.retry-button {
++		display: inline-flex;
++		align-items: center;
++		justify-content: center;
++		margin: 20rpx;
++		padding: 0 28rpx;
++		height: 64rpx;
++		line-height: normal;
++		font-size: 26rpx;
++		color: var(--view-theme);
++		background: #fff;
++	}
+ 	.emptyPage{
+ 		position: relative;
+ 		
+@@ -320,6 +362,16 @@
+ 			.name{
+ 				color: #FFFFFF;
+ 				position: relative;
++				display: flex;
++				align-items: center;
++				flex-shrink: 0;
++				.region-current-label{
++					// 长地区名只截断筛选入口，弹窗仍展示完整名称，不挤占搜索框。
++					max-width: 130rpx;
++					overflow: hidden;
++					white-space: nowrap;
++					text-overflow: ellipsis;
++				}
+ 				.iconfont{
+ 					font-size: 16rpx;
+ 					margin-left: 6rpx;
+@@ -340,6 +392,7 @@
+ 				font-size: 24rpx;
+ 				color: #FFFFFF;
+ 				flex: 1;
++				min-width: 0;
+ 				margin-left: 20rpx;
+ 			}
+ 			::v-deep .placeholders{
+@@ -437,4 +490,4 @@
+ 			}
+ 		}
+ 	}
+-</style>
+\ No newline at end of file
++</style>
+diff --git a/后端代码/app/controller/api/v1/store/Store.php b/后端代码/app/controller/api/v1/store/Store.php
+index d39c81f3..5782b4fa 100644
+--- a/后端代码/app/controller/api/v1/store/Store.php
++++ b/后端代码/app/controller/api/v1/store/Store.php
+@@ -206,7 +206,7 @@ class Store
+      */
+     public function getStoreList(Request $request)
+     {
+-        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all] = $request->getMore([
++        [$store_type, $keywords, $latitude, $longitude, $province, $city, $area, $street, $product_id, $store_id, $is_select, $is_sum, $card_product_id, $is_all, $region_options] = $request->getMore([
+             ['store_type', 1],
+             ['keyword', ''],
+             ['latitude', ''],
+@@ -221,10 +221,14 @@ class Store
+             ['is_sum', 0],//是否取数量
+             ['card_product_id', 0],//卡项商品id
+             ['is_all', 0],//预约等场景：展示全部门店，不依赖定位
++            ['region_options', 0],//同一可选门店范围的地区投影，不返回门店资料
+         ], true);
++        // 沿用原坐标校验：空坐标合法，有定位则继续距离排序；地区筛选不提升进店权限。
+         if (!$is_all && !checkCoordinates($longitude, $latitude)) {
+             return app('json')->fail('参数错误');
+         }
++        // 地区选项忽略已选地区，其他搜索、常用、进店隔离和商品范围全部共用下方原路径。
++        if ($region_options) $province = $city = $area = $street = 0;
+         /** @var StoreProductServices $productServices */
+         $productServices = app()->make(StoreProductServices::class);
+         $intersection = [];
+@@ -278,7 +282,7 @@ class Store
+ 					$store_id = $entryStoreId;
+ 				}
+ 			}
+-			$storeList = $this->services->getNearbyStore($where, $latitude, $longitude, '', 0, (int)$product_id, (int)$store_id);
++			$storeList = $this->services->getNearbyStore($where, $latitude, $longitude, '', 0, (int)$product_id, (int)$store_id, (bool)$region_options);
+         }
+         $data = [];
+         if($intersection && $storeList) {
+@@ -289,7 +293,11 @@ class Store
+             }
+         }
+         $sum = count($storeList);
+-        return app('json')->success($is_sum ? $sum : ($card_product_id ? $data : $storeList));
++        $result = $card_product_id ? $data : $storeList;
++        if ($region_options) {
++            return app('json')->success(app()->make(\app\services\store\StoreSelectableRegionServices::class)->project($result));
++        }
++        return app('json')->success($is_sum ? $sum : $result);
+     }
+ 
+ 
+diff --git a/后端代码/app/services/store/StoreSelectableRegionServices.php b/后端代码/app/services/store/StoreSelectableRegionServices.php
+new file mode 100644
+index 00000000..4a3dfe0c
+--- /dev/null
++++ b/后端代码/app/services/store/StoreSelectableRegionServices.php
+@@ -0,0 +1,64 @@
++<?php
++
++namespace app\services\store;
++
++use app\services\other\CityAreaServices;
++
++/** 可选门店的只读地区投影：只认主表地区 ID 和字典父子关系，不猜地址、不回填历史。 */
++class StoreSelectableRegionServices
++{
++    private $cities;
++
++    public function __construct(CityAreaServices $cities)
++    {
++        $this->cities = $cities;
++    }
++
++    /**
++     * 输入已经过进店/商品/常用范围限制的完整门店集，输出最多三级地区树。
++     * 缺失或父子不一致时只保留有效前缀，并计入待完善数；全部地区仍保留这些门店。
++     */
++    public function project(array $stores): array
++    {
++        $ids = [];
++        foreach ($stores as $store) {
++            foreach (['province', 'city', 'area'] as $key) {
++                if ((int)($store[$key] ?? 0) > 0) $ids[] = (int)$store[$key];
++            }
++        }
++        $nodes = [];
++        if ($ids) {
++            foreach ($this->cities->getCityList([['id', 'in', array_values(array_unique($ids))]], 'id,name,parent_id,level') as $node) {
++                $nodes[(int)$node['id']] = $node;
++            }
++        }
++        $tree = [];
++        $incomplete = 0;
++        foreach ($stores as $store) {
++            $branch =& $tree;
++            $parent = 0;
++            foreach (['province', 'city', 'area'] as $index => $key) {
++                $id = (int)($store[$key] ?? 0);
++                $node = $nodes[$id] ?? null;
++                if (!$node || trim((string)$node['name']) === '' || (int)$node['level'] !== $index + 1 || (int)$node['parent_id'] !== $parent) {
++                    $incomplete++;
++                    break;
++                }
++                if (!isset($branch[$id])) {
++                    $branch[$id] = ['id' => $id, 'label' => (string)$node['name'], 'children' => []];
++                }
++                $parent = $id;
++                $branch =& $branch[$id]['children'];
++            }
++            unset($branch);
++        }
++        // 稳定按权威地区 ID 排序，同名区县始终属于各自父节点，不按名称合并。
++        $normalize = function (array $items) use (&$normalize): array {
++            ksort($items, SORT_NUMERIC);
++            foreach ($items as &$item) $item['children'] = $normalize($item['children']);
++            unset($item);
++            return array_values($items);
++        };
++        return ['regions' => $normalize($tree), 'incomplete_count' => $incomplete];
++    }
++}
+diff --git a/后端代码/app/services/store/SystemStoreServices.php b/后端代码/app/services/store/SystemStoreServices.php
+index 711814e2..c3a49c90 100644
+--- a/后端代码/app/services/store/SystemStoreServices.php
++++ b/后端代码/app/services/store/SystemStoreServices.php
+@@ -514,7 +514,7 @@ class SystemStoreServices extends BaseServices
+      * @throws \think\db\exception\DbException
+      * @throws \think\db\exception\ModelNotFoundException
+      */
+-    public function getNearbyStore(array $where, string $latitude, string $longitude, string $ip = '', int $limit = 0, int $product_id = 0, int $store_id = 0)
++    public function getNearbyStore(array $where, string $latitude, string $longitude, string $ip = '', int $limit = 0, int $product_id = 0, int $store_id = 0, bool $regionOptions = false)
+     {
+         $where = array_merge($where, ['status' => 1]);
+         if ($limit) {
+@@ -577,6 +577,11 @@ class SystemStoreServices extends BaseServices
+         if (isset($where['ids'])) {
+             $where['ids'] = array_unique(array_diff($where['ids'], [0]));
+         }
++        // 地区投影必须在所有既有范围约束之后读取，不分页、不返回电话/定位等资料。
++        // 普通列表仍沿用原字段、分页及距离排序；不能从当前页推断所有可选地区。
++        if ($regionOptions) {
++            return $this->dao->getStoreList($where, ['id', 'province', 'city', 'area']);
++        }
+         if (isset($where['id']) && $where['id']) {
+             $storeList = $this->dao->getStoreList($where, $field, $page, $limit, [], $latitude, $longitude, $latitude && $longitude ? 1 : 0);
+         } elseif ($latitude && $longitude) {

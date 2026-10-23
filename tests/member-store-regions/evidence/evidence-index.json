@@ -1,0 +1,82 @@
+{
+  "task": "M008-EMERG-R3-REGION",
+  "date": "2026-10-24",
+  "files": [
+    {
+      "file": "README.md",
+      "sha256": "8588ccbc3bacb5a365aae5916f52a16a672abc04ebecdbb22c57b3b59a45c5da"
+    },
+    {
+      "file": "browser-result.json",
+      "sha256": "0a93720a9f850f4925f2830844faac0f4f6af4e0aa7a071311e2db0d08cdba23"
+    },
+    {
+      "file": "city-320.png",
+      "sha256": "503580dd86acf27b882b108ae0493b9d8209c9553820a84558d29a2b92c3d228"
+    },
+    {
+      "file": "city-375.png",
+      "sha256": "0d1366a3b567e7266d138875c49e691c864949fe28330508726b6185a95025ad"
+    },
+    {
+      "file": "contract-result.txt",
+      "sha256": "14e12698f943a3150d8cee553a83077a5689e136f24617350938eca024139480"
+    },
+    {
+      "file": "existing-cube-regression.txt",
+      "sha256": "875885b478a11d959102fff9c685f9e1721bc1c37bce199fe2aaf291b8a6d814"
+    },
+    {
+      "file": "fixed-version.json",
+      "sha256": "895cfb1a99cba39b7c81b6d60624766f092d47bf103b9554240112c691a4700c"
+    },
+    {
+      "file": "fixed.patch",
+      "sha256": "1a8849744f6e8e2ba9c25eb520580e30913a104355928a5194774cd55a2ddbfc"
+    },
+    {
+      "file": "mini-build-result.json",
+      "sha256": "d4ebcbe244e87674686d756ba9ca322f5109283bdbbe31d841e20361adb09db0"
+    },
+    {
+      "file": "mini-source.json",
+      "sha256": "a4449d285956ddb4b5920d6e6273a53f0948099df41aca2b51161925752907a7"
+    },
+    {
+      "file": "mini-verification.json",
+      "sha256": "4b37a7505d39edb837f2e4db7335441013f7db377d52b20188b9bba36324bad7"
+    },
+    {
+      "file": "mysql-result.txt",
+      "sha256": "c3629e1eb2d05aa47ae57933c7ba918a7a88a95ebe589d6e4545c33a0ab9e988"
+    },
+    {
+      "file": "real-browser-result.json",
+      "sha256": "61be566b84956dee840d1e8b05fb308e6f27bdf06d2f4db2c08c15df9be81da1"
+    },
+    {
+      "file": "real-filtered-375.png",
+      "sha256": "839e792bc79dcb3e1e577307c08ede46f27ff7839913497060168bffdeb83100"
+    },
+    {
+      "file": "real-local-375.png",
+      "sha256": "b67e5380a3a601a89786f66c9b7e5fb13e94a22b25b1da04bdfd16f6a06c6aa3"
+    },
+    {
+      "file": "regions-320.png",
+      "sha256": "f157118c9ae77376a58a2f1393d9bb72995e4a76faa0ff19ced8c1ecfec6b253"
+    },
+    {
+      "file": "regions-375.png",
+      "sha256": "620f8c9c29c6b6105fd5e820b474389ffc230bcc887c5cf649afb7d14876cad5"
+    },
+    {
+      "file": "retry-320.png",
+      "sha256": "1c62729cde9fcaabfb764b154b9dca860bc171b555efeab380b6ec8fbfe7f82a"
+    },
+    {
+      "file": "retry-375.png",
+      "sha256": "6fca1fc3a5e4773ef2b831c823f5dcd273080ea6b436f7d6b64cd4c3da17ebf0"
+    }
+  ]
+}
