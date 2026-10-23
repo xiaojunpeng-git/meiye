@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, chmodSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, chmodSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import os from 'node:os'
 
 // Isolated, read-only Git export. Only guarded local MySQL fixtures may write;
 // no production address, shared index or development business file is modified.
-const evidence = 'tests/report-basic/evidence/release'
+const evidence = process.env.R51_FIXED_EVIDENCE || 'tests/report-basic/evidence/release'
+if (!['tests/report-basic/evidence/release', 'tests/report-basic/evidence/release-a2'].includes(evidence)) throw new Error('Explicit R51 evidence directory required')
 const { candidateTree } = JSON.parse(readFileSync(`${evidence}/trees.json`))
 const repo = process.cwd()
 // Colima shares the user's home, not the macOS /private/tmp namespace.
@@ -44,9 +45,16 @@ const tests = [
   'cashier-v3/php/r50-member-recharge-total-local.php', 'cashier-v3/php/r49-ordinary-card-local.php',
   'cashier-v3/php/r48-coupon-allowance-mysql.php', 'cashier-v3/php/r47-sales-debt-balance-local.php'
 ]
+if (existsSync(path.join(target, 'tests/report-basic/php/entitlement-readonly-card-lock-local.php')))
+  tests.push('report-basic/php/entitlement-readonly-card-lock-local.php')
 const results = []
 for (const file of tests) {
-  const launcher = `require '${backend}/vendor/autoload.php';$reflection=new ReflectionClass('app'.chr(92).'services'.chr(92).'report'.chr(92).'BasicSalaryReportServices');if($reflection->getFileName()!=='${backend}/app/services/report/BasicSalaryReportServices.php'||hash_file('sha256',$reflection->getFileName())!=='${salarySha}')throw new RuntimeException('Fixed source autoload mismatch');require '/fixed/tests/${file}';`
+  // Standalone contracts require their class themselves; checking its bytes
+  // must not preload that class under a different mounted path.
+  const provenance = file === 'report-basic/php/salary-contract.php'
+    ? `if(hash_file('sha256','${backend}/app/services/report/BasicSalaryReportServices.php')!=='${salarySha}')throw new RuntimeException('Fixed source hash mismatch');`
+    : `$reflection=new ReflectionClass('app'.chr(92).'services'.chr(92).'report'.chr(92).'BasicSalaryReportServices');if($reflection->getFileName()!=='${backend}/app/services/report/BasicSalaryReportServices.php'||hash_file('sha256',$reflection->getFileName())!=='${salarySha}')throw new RuntimeException('Fixed source autoload mismatch');`
+  const launcher = `require '${backend}/vendor/autoload.php';${provenance}require '/fixed/tests/${file}';`
   try {
     const output = execFileSync('docker', ['run', '--rm', '--network', network, '--entrypoint', 'php', '-w', backend,
       '-v', target + ':/fixed:ro', '-v', path.join(target, '后端代码') + ':' + backend + ':ro',

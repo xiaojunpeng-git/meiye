@@ -1466,8 +1466,10 @@ final class CashierV3MemberDetailQueryServices
                 $firstRow = $rowsById[(int)$projects[0]['id']] ?? null;
                 $originOrder = (array)($originOrders[(int)$orderId] ?? []);
                 if ($firstRow && $originOrder) {
+                    // Member/report projections share the debt limit, but must
+                    // not acquire checkout locks inside a read-only snapshot.
                     $sharedLimit = (new CashierV3CardRuleEntitlementAuthorityServices())
-                        ->debtLimitForDetail($firstRow, $originOrder);
+                        ->debtLimitForDetail($firstRow, $originOrder, false);
                     if ($sharedLimit !== null) $debtLimitedRemainingTimes = $sharedLimit;
                 }
             }
