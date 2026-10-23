@@ -1,0 +1,26 @@
+PASS Local store schema fixture available
+PASS Options include matching stores beyond the first 20 and ignore current region
+PASS Unknown and cross-parent regions counted without guessing addresses
+PASS Same-name districts retain their distinct parent IDs
+PASS One batched dictionary query, no per-store dictionary scans
+PASS Options expose no store phone, location or identity
+PASS All stores retain unknown regions and exclude closed/deleted/isolated stores
+PASS Manual province filtering works without GPS
+PASS Clearing manual region works without GPS and retains unclassified stores
+PASS Whole-city filter preserves incomplete district stores
+PASS District IDs filter only their real parent region
+PASS Original store-count response envelope remains unchanged
+PASS Original single-nearest-store response and delivery configuration remain intact
+PASS Original normal-list pagination remains unchanged
+PASS No matching stores returns an explicit empty region tree
+PASS Common stores use the same user-store scope
+PASS Anonymous users cannot obtain another user common-store regions
+PASS Entry region scope is preserved
+PASS An isolated entry keeps only its own store
+PASS Product and component-card restrictions intersect before projecting regions
+PASS A product with no applicable stores cannot fall back to all regions
+PASS Invalid supplied coordinates cannot reach distance SQL
+PASS All reads leave historical store data byte-for-byte unchanged
+EXPLAIN=[{"id":1,"select_type":"SIMPLE","table":"eb_system_store","partitions":null,"type":"ALL","possible_keys":null,"key":null,"key_len":null,"ref":null,"rows":30,"filtered":3.3333330154418945,"Extra":"Using where"}]
+PASS Temporary fixtures released; permanent store table digest unchanged
+PASS local MySQL region filter integration

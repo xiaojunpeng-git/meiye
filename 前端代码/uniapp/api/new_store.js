@@ -87,6 +87,11 @@ export function getList( data) {
 	});
 }
 
+/** 与门店列表共用后端范围，仅返回完整地区树；不使用全国字典或当前页门店推断。 */
+export function getStoreRegions(data) {
+	return getList(Object.assign({}, data, {region_options: 1, province: 0, city: 0, area: 0, street: 0}));
+}
+
 /**
  * 删除收藏产品
  * @param int id

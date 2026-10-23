@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "realLocalAPI": true,
+  "APIDataMocked": false,
+  "readOnly": true,
+  "province": 10845,
+  "city": 12051,
+  "matchedStores": 1,
+  "incompleteLocalStores": 101,
+  "errors": []
+}
