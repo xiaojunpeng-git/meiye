@@ -31,7 +31,7 @@ def commit():
  finally:
   if Path(index).exists():Path(index).unlink()
 def deploy(site):
- info=read('commit.json');commit=info['commit'];before=read(site+'-before.json');host,domain,restart,health=SITES[site];root='/www/wwwroot/'+domain;backup='/www/backups/'+site+'/20261024-r29-fund-'+commit[:8]
+ info=read('commit.json');commit=info['commit'];before=read(site+'-before.json');host,domain,restart,health=SITES[site];root='/www/wwwroot/'+domain;backup='/www/backups/'+site+'/20261024-r29-fund-'+commit[:8]+os.environ.get('R29_RELEASE_ATTEMPT','')
  if site!='rh':
   if read('push.json')['commit']!=commit:raise RuntimeError('Verified push required')
   for prior in (['rh']if site=='008'else['rh','008']):
@@ -50,15 +50,24 @@ test "$(sha256sum '{target}' | cut -d' ' -f1)" = '{old}'
 cp -p '{target}' '{backup}/before.php'
 test "$(sha256sum '{backup}/before.php' | cut -d' ' -f1)" = '{old}'
 /www/server/php/74/bin/php -l '{backup}/candidate.php'
-rollback() {{ set +e; current=$(sha256sum '{target}' | cut -d' ' -f1); if test "$current" = '{expected}'; then cp -p '{backup}/before.php' '{target}.r29-rollback'; mv '{target}.r29-rollback' '{target}'; {restart}; fi; exit 1; }}
+rollback() {{ set +e; rm -f '/tmp/r29-fund-smoke-{site}.php'; current=$(sha256sum '{target}' | cut -d' ' -f1); if test "$current" = '{expected}'; then cp -p '{backup}/before.php' '{target}.r29-rollback'; mv '{target}.r29-rollback' '{target}'; {restart}; fi; exit 1; }}
 trap rollback ERR
 cp '{backup}/candidate.php' '{target}.r29-next'
 chmod --reference='{target}' '{target}.r29-next'
 chown --reference='{target}' '{target}.r29-next'
 mv '{target}.r29-next' '{target}'
 {restart}
-{health}
-su -s /bin/sh www -c '/www/server/php/74/bin/php /dev/stdin {site}' < '{backup}/smoke.php'
+# systemd may return while the application is still activating; wait briefly before rollback.
+ready=0
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+ if {health}; then ready=1; break; fi
+ sleep 1
+done
+test "$ready" = 1
+# www cannot open root-owned stdin on every host; use a private, temporary script with normal web ownership.
+install -m 600 -o www -g www '{backup}/smoke.php' '/tmp/r29-fund-smoke-{site}.php'
+su -s /bin/sh www -c '/www/server/php/74/bin/php /tmp/r29-fund-smoke-{site}.php {site}'
+rm -f '/tmp/r29-fund-smoke-{site}.php'
 test "$(sha256sum '{target}' | cut -d' ' -f1)" = '{expected}'
 trap - ERR
 echo R29_FUND_INSTANCE_PASS
