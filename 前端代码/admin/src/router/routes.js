@@ -12,6 +12,7 @@ import product from './modules/product';
 import order from './modules/order';
 import report from './modules/report';
 import target from './modules/target';
+import growth from './modules/growth';
 import position from './modules/position';
 import user from './modules/user';
 import supplier from './modules/supplier';
@@ -263,6 +264,7 @@ const frameIn = [
   order,
   report,
   target,
+  growth,
   position,
   user,
   supplier,

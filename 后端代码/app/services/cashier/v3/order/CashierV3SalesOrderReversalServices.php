@@ -592,11 +592,18 @@ final class CashierV3SalesOrderReversalServices
                 throw self::failure('sales_reversal_coupon_trace_invalid');
             }
             $coupon = (array)Db::name('store_coupon_user')->where('id', $couponId)->lock(true)->find();
+            $issue = (array)Db::name('store_coupon_issue')->where('id', (int)($coupon['cid'] ?? 0))->find();
+            $reusable = (int)($issue['coupon_type'] ?? 0) === \app\services\activity\coupon\StoreCouponAllowanceServices::TYPE;
             if (!$coupon || (int)($coupon['uid'] ?? 0) !== (int)$source['memberId']
-                || (int)($coupon['status'] ?? -1) !== 1 || (int)($coupon['use_time'] ?? 0) <= 0
-                || (int)($coupon['is_fail'] ?? -1) !== 0) {
+                || (!$reusable && ((int)($coupon['status'] ?? -1) !== 1 || (int)($coupon['is_fail'] ?? -1) !== 0))
+                || (int)($coupon['use_time'] ?? 0) <= 0) {
                 throw self::failure('sales_reversal_coupon_state_changed');
             }
+            // An allowance may have been used by later orders. The void service
+            // restores only this line's immutable debit, preserving those uses.
+            $line['allowance_identity'] = $reusable ? ['tenant_id' => $scope->tenantId(),
+                'store_id' => (int)$source['storeId'], 'member_id' => (int)$source['memberId'],
+                'order_id' => (string)$source['sourceId'], 'order_line_id' => (string)$line['order_line_id']] : null;
             $line['coupon'] = $coupon;
             $seen[$couponId] = true;
         }
@@ -625,6 +632,14 @@ final class CashierV3SalesOrderReversalServices
     {
         foreach ($coupons as $line) {
             $coupon = (array)($line['coupon'] ?? []);
+            if (!empty($line['allowance_identity'])) {
+                $identity = $line['allowance_identity'];
+                $identity['operation_id'] = $operationId;
+                (new \app\services\activity\coupon\StoreCouponAllowanceServices())->restoreInTx(
+                    (int)$line['coupon_user_id'], (int)$line['coupon_discount_cents'] + (int)($line['coupon_payment_cents'] ?? 0),
+                    $identity, $now);
+                continue;
+            }
             $updated = Db::name('store_coupon_user')->where('id', (int)$line['coupon_user_id'])
                 ->where('uid', (int)$source['memberId'])->where('status', 1)
                 ->where('is_fail', 0)->where('use_time', (int)($coupon['use_time'] ?? 0))

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { formatMoney } from '@/services/cashierV3Bridge'
+import { allowanceAmountCents, validAllowanceCents } from '@/services/couponAllowance'
 
 const props = defineProps({
   selector: { type: Object, required: true },
@@ -11,6 +12,9 @@ const emit = defineEmits(['close', 'apply', 'remove'])
 const selectedCouponId = ref('')
 const selectedCouponIds = ref([])
 const selectionError = ref('')
+const amountCoupon = ref(null)
+const amountInput = ref('')
+const amountError = ref('')
 
 watch(
   () => props.selector.selectedCouponId,
@@ -83,7 +87,30 @@ function confirmSelection() {
     emit('remove')
     return
   }
+  const coupon = coupons.value.find((item) => couponId(item) === selectedCouponId.value)
+  if (Number(coupon?.couponType) === 3) {
+    openAmount(coupon)
+    return
+  }
   emit('apply', selectedCouponIds.value.length ? selectedCouponIds.value : selectedCouponId.value)
+}
+
+// Opening/editing the input never consumes allowance. Cancel leaves the cart unchanged.
+function openAmount(coupon) {
+  amountCoupon.value = coupon
+  amountInput.value = couponId(coupon) === String(props.selector.selectedCouponId || '')
+    ? String(Number(props.selector.selectedAmountCents || 0) / 100 || '') : ''
+  amountError.value = ''
+}
+
+function confirmAmount() {
+  if (props.saving) return
+  const amount = allowanceAmountCents(amountInput.value, amountCoupon.value, lineCapacityCents.value)
+  if (!validAllowanceCents(amount, amountCoupon.value, lineCapacityCents.value)) {
+    amountError.value = '请输入正整数元，且不超过券剩余额度和本条明细可抵用金额。'
+    return
+  }
+  emit('apply', { couponId: couponId(amountCoupon.value), amountCents: amount })
 }
 
 function chooseCoupon(coupon) {
@@ -91,6 +118,14 @@ function chooseCoupon(coupon) {
   selectionError.value = ''
   const id = couponId(coupon)
   if (Number(coupon.useMode) !== 1) {
+    if (Number(coupon.couponType) === 3) {
+      if (selectedMode.value === 1) {
+        selectionError.value = '整单券和明细券不能混选，请先取消已选整单券。'
+        return
+      }
+      openAmount(coupon)
+      return
+    }
     if (selectedCouponId.value === id) {
       selectedCouponId.value = ''
       return
@@ -140,7 +175,7 @@ function chooseCoupon(coupon) {
 
 <template>
   <div class="cashier-coupon-overlay" role="dialog" aria-modal="true" aria-label="选择优惠券" @click.self="emit('close')">
-    <section class="cashier-coupon-panel">
+    <section v-if="!amountCoupon" class="cashier-coupon-panel">
       <header>
         <div>
           <strong>选择优惠券</strong>
@@ -161,7 +196,7 @@ function chooseCoupon(coupon) {
           :disabled="saving"
           @click="chooseCoupon(coupon)"
         >
-          <span class="cashier-coupon-item__amount">优惠 {{ moneyFromCents(coupon.discountAmountCents) }}</span>
+          <span class="cashier-coupon-item__amount">{{ Number(coupon.couponType) === 3 ? '剩余' : '优惠' }} {{ Number(coupon.couponType) === 3 ? roundedMoneyFromCents(coupon.remainingAmountCents) : moneyFromCents(coupon.discountAmountCents) }}</span>
           <span class="cashier-coupon-item__content">
             <strong>{{ coupon.name || '优惠券' }}</strong>
             <small>
@@ -202,10 +237,29 @@ function chooseCoupon(coupon) {
         </div>
       </footer>
     </section>
+    <form v-else class="cashier-coupon-panel" aria-label="本次抵用金额" @submit.prevent="confirmAmount">
+      <header><strong>本次抵用金额</strong></header>
+      <div class="cashier-coupon-amount">
+        <strong>{{ amountCoupon.name }}</strong>
+        <p>券剩余 {{ roundedMoneyFromCents(amountCoupon.remainingAmountCents) }}</p>
+        <p>本条明细最多可抵用 {{ roundedMoneyFromCents(Math.min(amountCoupon.discountAmountCents, lineCapacityCents)) }}</p>
+        <label for="coupon-allowance-amount">抵用金额（元）</label>
+        <input id="coupon-allowance-amount" v-model="amountInput" type="number" inputmode="numeric" min="1" step="1" :disabled="saving" autofocus />
+        <p v-if="amountError" class="cashier-coupon-list__error" role="alert">{{ amountError }}</p>
+      </div>
+      <footer><span></span><div>
+        <button type="button" class="button button--secondary" :disabled="saving" @click="amountCoupon = null">取消</button>
+        <button type="submit" class="button button--primary" :disabled="saving">{{ saving ? '保存中…' : '确认抵用' }}</button>
+      </div></footer>
+    </form>
   </div>
 </template>
 
 <style scoped>
+.cashier-coupon-amount { padding: 20px; overflow: auto; color: #25333a; }
+.cashier-coupon-amount p { font-size: 14px; }
+.cashier-coupon-amount label { display: block; margin: 18px 0 8px; }
+.cashier-coupon-amount input { box-sizing: border-box; width: 100%; min-height: 40px; border: 1px solid #b9c9d6; border-radius: 4px; padding: 8px 12px; font: inherit; }
 .cashier-coupon-overlay {
   position: fixed;
   inset: 0;

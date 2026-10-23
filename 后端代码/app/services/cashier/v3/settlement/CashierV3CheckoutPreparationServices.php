@@ -628,6 +628,16 @@ final class CashierV3CheckoutPreparationServices
                 );
                 $coupon = is_array($line['coupon'] ?? null) ? $line['coupon'] : [];
                 $cardPurchaseSnapshot = $this->browserCardPurchaseSnapshot($line, $server);
+                // R49: validate frozen original rows before payment facts exist. Discount coupons
+                // reduce receivable normally; they cannot disguise a manual base-price reduction.
+                $increase = \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::validate(
+                    $cardPurchaseSnapshot, (array)($server['authority_snapshot']['cardPurchase'] ?? []),
+                    $operatorScope->storeId(), $itemId
+                );
+                $discount = (int)($line['couponDiscountCents'] ?? $coupon['discountAmountCents'] ?? 0);
+                \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::assertSaleAmount(
+                    $cardPurchaseSnapshot, $increase, $quantity, $lineAmount, $discount
+                );
                 $isPresale = !$customCard && !empty($line['isPresale']);
                 $saleLines[] = [
                     'lineId' => (string)($line['lineId'] ?? 'snapshot-' . $index),
@@ -730,7 +740,8 @@ final class CashierV3CheckoutPreparationServices
         $workspaceMetadata = $this->workspace->checkoutDraftMetadata(
             $workspaceId,
             $stateContextId,
-            $operatorScope
+            $operatorScope,
+            (int)($snapshot['memberId'] ?? 0)
         );
         $storedDraft = [
             'order_note' => (string)($snapshot['orderNote'] ?? ''),

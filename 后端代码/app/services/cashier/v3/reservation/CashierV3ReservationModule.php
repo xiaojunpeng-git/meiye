@@ -226,6 +226,10 @@ final class CashierV3ReservationModule
             $result = self::cancel($scope);
             return ['data' => ['reservationAction' => $result], 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => '预约已删除。'];
         });
+        self::registerCommand($handlers, 'mark-reservation-color', function (array $scope): array {
+            $result = self::markColor($scope);
+            return ['data' => ['reservationColorMark' => $result], 'business_no' => $result['reservationNo'], 'touched' => [], 'message' => '预约颜色标记已保存。'];
+        });
         self::registerCommand($handlers, 'confirm-reservation', function (array $scope): array {
             $result = self::confirm($scope);
             return ['data' => ['reservationAction' => $result], 'business_no' => $result['reservationNo'], 'touched' => ['reservation'], 'message' => '预约已确认。'];
@@ -270,10 +274,11 @@ final class CashierV3ReservationModule
             ];
         });
 
-        foreach (['create-reservation', 'update-reservation'] as $action) {
+        foreach (['create-reservation', 'update-reservation', 'mark-reservation-color'] as $action) {
             if (!$dispatcher->policies()->has($action)) {
                 // 普通预约资料保存不占用收银工作台；幂等键和领域事务内的
-                // header 锁定/CAS 已覆盖重复提交与并发覆盖。
+                // header 锁定/CAS 已覆盖重复提交与并发覆盖。颜色仅锁当前
+                // 预约行，不推进服务业务版本，也不占用收银资源。
                 $dispatcher->policies()->register(new CashierV3ContextPolicy($action, [], [], null, [], [], [], true));
             }
         }
@@ -558,6 +563,30 @@ final class CashierV3ReservationModule
         self::advanceHeader($header, $dataScope, $nextVersion, ['status' => self::STATUS_COMPLETED, 'actual_service_ended_at' => $now, 'updated_at' => $now]);
         $result = ['status' => 'succeeded', 'reservationId' => (int)$header['id'], 'reservationNo' => (string)$header['reservation_no'], 'version' => $nextVersion, 'actualEndAt' => $now, 'facts' => $facts, 'originalIdempotencyKey' => (string)($scope['idempotency_key'] ?? '')];
         self::operation($dataScope->tenantId(), (int)$header['id'], (string)($scope['idempotency_key'] ?? ''), 'END_SERVICE', (int)$header['version'], $nextVersion, $result, $now);
+        return $result;
+    }
+
+    /**
+     * 颜色只属于单次预约。网关负责权限、事务和命令幂等；本方法按租户、
+     * 门店锁定预约，只修改颜色并记录前后值，不能修改会员分类或预约业务状态。
+     */
+    private static function markColor(array $scope): array
+    {
+        $color = $scope['payload']['color'] ?? null;
+        if (!is_string($color) || !in_array($color, ['', 'red', 'yellow', 'blue', 'green', 'purple'], true)) {
+            throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '请选择红、黄、蓝、绿、紫之一，或清除标记。');
+        }
+        $header = self::reservationHeader($scope);
+        Db::name('cashier_v3_reservation')->where('id', (int)$header['id'])
+            ->where('tenant_id', $scope['data_scope']->tenantId())
+            ->where('store_id', $scope['operator_scope']->storeId())
+            ->update(['calendar_color' => $color]);
+        $result = ['status' => 'succeeded', 'reservationId' => (int)$header['id'],
+            'reservationNo' => (string)$header['reservation_no'], 'color' => $color,
+            'previousColor' => (string)($header['calendar_color'] ?? '')];
+        self::operation($scope['data_scope']->tenantId(), (int)$header['id'],
+            (string)($scope['idempotency_key'] ?? ''), 'MARK_COLOR', (int)$header['version'],
+            (int)$header['version'], $result, time());
         return $result;
     }
 
