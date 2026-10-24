@@ -1,0 +1,1 @@
+{"status":"withdrawn-before-commit","reason":"RH/008 provider already contains accepted category and service consumption fields missing from 010/R32 base. Preserve canonical cb03288e provider+contract first; no commit, deployment or push performed.","replacement":"../r52-release-v2/trees.json"}

@@ -1,0 +1,38 @@
+{
+  "commit": "5ff1318b1072f47a47b281f3d1aa6689e388131e",
+  "candidateTree": "b3c5bb23c8a3ebcac6986d905dedd01d5d225fc0",
+  "sites": [
+    {
+      "site": "rh",
+      "targets": 12,
+      "backup": "/www/backups/rh/r52-order-query-5ff1318b",
+      "publicEntries": 3,
+      "runtimeScope": "one actual active staff assignment with current order-read position grant",
+      "result": "PASS"
+    },
+    {
+      "site": "008",
+      "targets": 7,
+      "backup": "/www/backups/008/r52-order-query-5ff1318b",
+      "publicEntries": 2,
+      "runtimeScope": "existing actual platform read-only authority; staff identity validation unavailable",
+      "result": "PASS"
+    },
+    {
+      "site": "010",
+      "targets": 7,
+      "backup": "/www/backups/010/r52-order-query-5ff1318b",
+      "publicEntries": 2,
+      "runtimeScope": "existing actual platform read-only authority; staff identity validation unavailable",
+      "result": "PASS"
+    }
+  ],
+  "databaseWrites": 0,
+  "migration": false,
+  "platformStaticPackage": "unchanged",
+  "knownLimitations": [
+    "008/010 have no available authorized staff sample in this probe; actual platform read-only scopes verified instead; staff export not asserted",
+    "Empty business types are not positive business acceptance",
+    "Three legacy shared-package structure assertions remain recorded, not silently fixed"
+  ]
+}

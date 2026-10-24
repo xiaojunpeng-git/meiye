@@ -1,0 +1,110 @@
+{
+  "site": "010",
+  "result": "PASS",
+  "readOnly": true,
+  "codeSources": {
+    "app/services/cashier/v3/order/AbstractCashierV3OrderCenterUnifiedQueryProvider.php": "d10843d00e4efa7bcb003f23e3e6495f90a8424fed92fcafa525654c5c515141",
+    "app/services/cashier/v3/order/CashierV3OrderCenterUnifiedQueryContract.php": "478e4f750975849e20b9822eac4d576f333550a5cfd763f6d1f91c1d1cb3732a"
+  },
+  "period": [
+    "2026-10-18",
+    "2026-10-24"
+  ],
+  "scope": "existing actual platform read-only authority; staff identity validation unavailable",
+  "storeId": 1,
+  "authorizationMode": "all",
+  "results": [
+    {
+      "type": "all",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "ready",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "sales",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "authority_v3",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "recharge",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "authoritative_business_records",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "refund",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "authoritative_business_records",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "debt",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "authoritative_business_records",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "service",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "authoritative_business_records",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "supplement",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "authoritative_business_records",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "gift",
+      "rows": 1,
+      "total": 1,
+      "sourceStatus": "authoritative_business_records",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "positive_list_passed_export_not_authorized",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    },
+    {
+      "type": "card_operation",
+      "rows": 0,
+      "total": 0,
+      "sourceStatus": "authoritative_business_records",
+      "negativeFilter": "passed",
+      "positiveFilterAndExport": "empty_sample",
+      "frozenExport": "not_authorized_platform_read_only",
+      "pagination": "not_applicable"
+    }
+  ],
+  "businessWrites": 0,
+  "exportTasksCreated": 0
+}
