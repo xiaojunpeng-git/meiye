@@ -1,8 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Info from '@lucide/vue/dist/esm/icons/info.mjs'
+import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import { formatMoney } from '@/services/cashierV3Bridge'
-import { formatReportMoney } from '@mohe/unified-query-vue3'
+import { formatReportMoney, UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 
 /**
  * 会员详情全页面前端壳。
@@ -74,6 +75,12 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  // Only the parent knows whether the authority request succeeded. An error
+  // suppresses data/empty states until a fresh successful query replaces it.
+  loadError: {
+    type: String,
+    default: ''
   },
   onAction: {
     type: Function,
@@ -204,6 +211,12 @@ const tabKeywordPlaceholder = computed(() => {
 const hasStatusFilter = computed(() => ['assets', 'gift', 'coupons', 'care'].includes(activeTab.value))
 // 当前有效的赠送与优惠券不受日期限制；查看全部历史时才按日期收窄。
 const showDateRange = computed(() => !['assets', 'care', 'gift', 'coupons'].includes(activeTab.value) || tabStatus.value === '')
+// Confirming a period only updates this tab's query draft; query/retry keeps
+// using the same dateFrom/dateTo contract and active/unfinished exceptions.
+const tabPeriod = computed({
+  get: () => ({ min: tabDateFrom.value, max: tabDateTo.value }),
+  set: range => { tabDateFrom.value = range.min; tabDateTo.value = range.max }
+})
 
 watch(
   () => props.initialTab,
@@ -427,6 +440,12 @@ function switchTab(tab) {
 
 function queryActiveTab() {
   if (!isSearchableTab.value) return
+  retryActiveTab()
+}
+
+// Retry the same member/tab and filters, including non-searchable overview;
+// never reset dates or issue a business mutation to recover a failed read.
+function retryActiveTab() {
   emit('tab-change', {
     tab: activeTab.value,
     memberId: memberId.value,
@@ -876,13 +895,9 @@ async function triggerAction(action, context = {}) {
       </nav>
 
       <form v-if="hasDetail && !isLoading && isSearchableTab" class="member-detail-overlay__query" @submit.prevent="queryActiveTab">
-        <label v-if="showDateRange" class="member-detail-overlay__date-range">
-          <div>
-            <input v-model="tabDateFrom" type="date" aria-label="开始日期" />
-            <em>至</em>
-            <input v-model="tabDateTo" type="date" aria-label="结束日期" />
-          </div>
-        </label>
+        <div v-if="showDateRange" class="member-detail-overlay__date-range">
+          <UnifiedQueryDateRange v-model="tabPeriod" label="会员记录查询周期" />
+        </div>
         <label>
           <input v-model="tabKeyword" type="search" maxlength="80" :placeholder="tabKeywordPlaceholder" />
         </label>
@@ -905,6 +920,14 @@ async function triggerAction(action, context = {}) {
         <div v-if="isLoading" class="member-detail-overlay__loading">
           <span class="member-detail-overlay__loading-dot" />
           正在加载会员详情…
+        </div>
+
+        <div v-else-if="loadError" class="member-detail-overlay__empty" role="alert">
+          <strong>会员详情查询失败</strong>
+          <span>{{ loadError }}</span>
+          <button type="button" class="button button--secondary member-detail-overlay__retry" title="重新查询会员详情" aria-label="重新查询会员详情" @click="retryActiveTab">
+            <RefreshCw :size="16" aria-hidden="true" />
+          </button>
         </div>
 
         <div v-else-if="!hasDetail" class="member-detail-overlay__empty">
@@ -1679,17 +1702,6 @@ async function triggerAction(action, context = {}) {
   min-width: 250px;
 }
 
-.member-detail-overlay__date-range > div {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.member-detail-overlay__date-range em {
-  font-style: normal;
-  color: #98a2b3;
-}
-
 .member-detail-overlay__query .member-detail-overlay__status-filter {
   min-width: 92px;
 }
@@ -2034,6 +2046,16 @@ async function triggerAction(action, context = {}) {
 .member-detail-overlay__empty strong {
   color: #344054;
   font-size: 16px;
+}
+
+.member-detail-overlay__retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  flex: 0 0 36px;
 }
 
 .member-detail-overlay__loading-dot {

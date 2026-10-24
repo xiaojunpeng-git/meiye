@@ -1886,8 +1886,11 @@ onMounted(async () => {
       </div>
       <label v-else-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
       <template v-else>
-        <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
-        <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
+        <div class="store-business-report__period-picker">
+          <!-- Platform daily reports retain the existing coverage/future-date
+               bounds and explicit query/committed-export contract. -->
+          <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :max-date="today()" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
+        </div>
       </template>
       <label v-for="field in visibleFilterSchema" :key="field.key">
         <!-- 报表可隐藏重复的可见标题，输入控件仍通过 aria-label 保留可访问语义。 -->

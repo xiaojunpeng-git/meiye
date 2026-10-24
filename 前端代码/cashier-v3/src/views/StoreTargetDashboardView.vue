@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import CircleCheck from '@lucide/vue/dist/esm/icons/circle-check.mjs'
 import Goal from '@lucide/vue/dist/esm/icons/goal.mjs'
 import Hourglass from '@lucide/vue/dist/esm/icons/hourglass.mjs'
@@ -20,6 +21,11 @@ const errorMessage = ref('')
 const period = ref('month')
 const customStart = ref(monthStart())
 const customEnd = ref(today())
+// Preserve custom-period request fields; picking does not refresh the report.
+const customPeriod = computed({
+  get: () => ({ min: customStart.value, max: customEnd.value }),
+  set: range => { customStart.value = range.min; customEnd.value = range.max }
+})
 
 const periodOptions = [
   { key: 'today', label: '今日' },
@@ -135,8 +141,7 @@ onMounted(loadDashboard)
       <div class="store-target-filter__periods" role="group" aria-label="统计周期">
         <button v-for="option in periodOptions" :key="option.key" type="button" :class="{ 'is-active': period === option.key }" @click="changePeriod(option.key)">{{ option.label }}</button>
       </div>
-      <label v-if="period === 'custom'">开始日期<input v-model="customStart" type="date" /></label>
-      <label v-if="period === 'custom'">结束日期<input v-model="customEnd" type="date" /></label>
+      <div v-if="period === 'custom'"><UnifiedQueryDateRange v-model="customPeriod" :allow-clear="false" label="目标自定义周期" /></div>
       <button v-if="period === 'custom'" type="button" class="button button--primary" @click="loadDashboard">查询</button>
       <button type="button" class="button button--secondary store-target-filter__refresh" :disabled="loading" @click="loadDashboard"><RefreshCw :size="16" aria-hidden="true" />刷新</button>
     </section>

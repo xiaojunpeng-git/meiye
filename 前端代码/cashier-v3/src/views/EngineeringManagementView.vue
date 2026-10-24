@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
 import Plus from '@lucide/vue/dist/esm/icons/plus.mjs'
@@ -30,6 +31,11 @@ const active = ref(initialLedgerType())
 const rows = ref([])
 const schema = ref({})
 const filters = ref({ keyword: '', start_date: '', end_date: '', store_ids: [] })
+// Range confirmation does not submit: load/export retain the same ledger fields.
+const queryPeriod = computed({
+  get: () => ({ min: filters.value.start_date, max: filters.value.end_date }),
+  set: range => { filters.value.start_date = range.min; filters.value.end_date = range.max }
+})
 const pagination = ref({ page: 1, limit: 20, total: 0 })
 const scopePicker = ref({ loading: false, tree: [], allowedStoreIds: [], selectedStoreIds: [], label: '当前权限范围' })
 const loading = ref(false)
@@ -123,7 +129,7 @@ onMounted(() => { loadScope(); load() })
   <main class="engineering-ledger" aria-label="工程管理">
     <header class="engineering-ledger__header"><div><span class="eyebrow">业务台账</span><h1>工程管理</h1><p>按统一报表权限查看和维护建店、工程、维修与降租续签记录。</p></div><div class="engineering-ledger__actions"><button type="button" @click="download"><Download :size="15" />导出</button><button type="button" @click="load"><RefreshCw :size="15" />刷新</button></div></header>
     <nav class="engineering-ledger__tabs" aria-label="工程管理台账"><button v-for="tab in tabs" :key="tab.key" type="button" :class="{ active: active === tab.key }" @click="switchTab(tab.key)">{{ tab.label }}</button></nav>
-    <section class="engineering-ledger__filters"><OrganizationStoreScopePicker v-if="platform || active === 'rent_renewal'" v-model="scopePicker.selectedStoreIds" :tree="scopePicker.tree || []" :allowed-store-ids="scopePicker.allowedStoreIds || []" :label="scopePicker.label" :loading="scopePicker.loading" @change="scopeChanged" /><label>开始日期<input v-model="filters.start_date" type="date" /></label><label>结束日期<input v-model="filters.end_date" type="date" /></label><label>关键词<input v-model.trim="filters.keyword" placeholder="门店、提报人或合同" @keyup.enter="load(1)" /></label><button type="button" @click="load(1)">查询</button><button type="button" class="primary" @click="beginCreate"><Plus :size="15" />新增记录</button></section>
+    <section class="engineering-ledger__filters"><OrganizationStoreScopePicker v-if="platform || active === 'rent_renewal'" v-model="scopePicker.selectedStoreIds" :tree="scopePicker.tree || []" :allowed-store-ids="scopePicker.allowedStoreIds || []" :label="scopePicker.label" :loading="scopePicker.loading" @change="scopeChanged" /><div><UnifiedQueryDateRange v-model="queryPeriod" label="工程台账查询周期" /></div><label>关键词<input v-model.trim="filters.keyword" placeholder="门店、提报人或合同" @keyup.enter="load(1)" /></label><button type="button" @click="load(1)">查询</button><button type="button" class="primary" @click="beginCreate"><Plus :size="15" />新增记录</button></section>
     <p v-if="notice" class="engineering-ledger__notice">{{ notice }}</p><p v-if="error" class="engineering-ledger__error">{{ error }}</p>
     <section class="engineering-ledger__table-wrap"><div v-if="loading" class="state">正在读取台账...</div><div v-else-if="!activeRows.length" class="state">当前权限范围暂无{{ tabs.find((tab) => tab.key === active)?.label }}记录。</div><table v-else><thead><tr><th v-for="field in activeSchema" :key="field.key || field.name || field">{{ field.label || field.name || field }}</th><th>操作</th></tr></thead><tbody><tr v-for="row in activeRows" :key="row.id || row.record_id"><td v-for="field in activeSchema" :key="field.key || field.name || field">{{ row.values?.[field.key || field.name] ?? row[field.key || field.name] ?? '—' }}</td><td><button type="button" class="link" @click="beginEdit(row)">编辑</button><button v-if="platform" type="button" class="link link--danger" @click="voidRecord(row)"><Trash2 :size="14" />作废</button></td></tr></tbody></table><footer class="engineering-ledger__pagination"><span>共 {{ pagination.total }} 条</span><button type="button" :disabled="pagination.page <= 1" @click="pageBack">上一页</button><span>第 {{ pagination.page }} 页</span><button type="button" :disabled="pagination.page * pagination.limit >= pagination.total" @click="pageForward">下一页</button></footer></section>
     <div v-if="editing" class="engineering-ledger__editor" role="dialog" aria-modal="true"><div class="engineering-ledger__editor-card"><header><h2>{{ editing.id ? '编辑' : '新增' }}{{ tabs.find((tab) => tab.key === active)?.label }}</h2><button type="button" class="link" @click="closeEditor">关闭</button></header><div class="engineering-ledger__form"><label v-for="field in formEntries" :key="field.key">{{ field.label }}<input v-model="editing.values[field.key]" :placeholder="`${field.label}（人工填写）`" /></label></div><footer><button type="button" @click="closeEditor">取消</button><button type="button" class="primary" :disabled="saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button></footer></div></div>

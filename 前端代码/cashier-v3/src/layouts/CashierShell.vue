@@ -68,6 +68,9 @@ const isMemberDetailOpen = ref(false)
 const memberDetailInitialTab = ref('profile')
 const memberDetailFallback = ref({})
 const isMemberDetailLoading = ref(false)
+// A failed authority read is not an empty history. Keep query failure separate
+// from the last successful detail, and accept it only for the latest request.
+const memberDetailLoadError = ref('')
 const activeMemberDetailId = ref(null)
 let memberDetailLoadSequence = 0
 const isDebtReminderOpen = ref(false)
@@ -1307,6 +1310,7 @@ function closeMemberDetail() {
   isMemberDetailOpen.value = false
   memberDetailFallback.value = {}
   isMemberDetailLoading.value = false
+  memberDetailLoadError.value = ''
   activeMemberDetailId.value = null
   memberDetailInitialTab.value = 'profile'
 }
@@ -1460,6 +1464,7 @@ async function loadMemberDetailTab(payload = {}) {
   if (!payload.memberId) return { success: false, message: '未找到会员。' }
   const loadSequence = ++memberDetailLoadSequence
   isMemberDetailLoading.value = true
+  memberDetailLoadError.value = ''
   try {
     const result = await requestCashierV3Action('load-member-detail-tab', {
       memberId: payload.memberId,
@@ -1471,14 +1476,22 @@ async function loadMemberDetailTab(payload = {}) {
       silent: true
     })
     const detail = memberDetailFromResponse(result)
-    if (loadSequence === memberDetailLoadSequence
-      && isMemberDetailOpen.value
-      && isSucceededResult(result)
-      && detail
-      && String(memberDetailId(detail)) === String(activeMemberDetailId.value)) {
-      memberDetailFallback.value = mergeMemberDetail(memberDetailFallback.value, detail)
+    if (loadSequence === memberDetailLoadSequence && isMemberDetailOpen.value) {
+      if (isSucceededResult(result) && detail
+        && String(memberDetailId(detail)) === String(activeMemberDetailId.value)) {
+        memberDetailFallback.value = mergeMemberDetail(memberDetailFallback.value, detail)
+      } else {
+        // Do not expose raw server exceptions, or present cached/seeded empty
+        // arrays as the authoritative answer to a failed tab query.
+        memberDetailLoadError.value = '本次查询未完成，请重试。'
+      }
     }
     return result
+  } catch {
+    if (loadSequence === memberDetailLoadSequence && isMemberDetailOpen.value) {
+      memberDetailLoadError.value = '本次查询未完成，请重试。'
+    }
+    return { result: { status: 'failed', message: '会员详情查询未完成。' } }
   } finally {
     if (loadSequence === memberDetailLoadSequence) isMemberDetailLoading.value = false
   }
@@ -2960,6 +2973,7 @@ onBeforeUnmount(() => {
     :detail="memberDetail"
     :initial-tab="memberDetailInitialTab"
     :is-loading="isMemberDetailLoading"
+    :load-error="memberDetailLoadError"
     :on-action="handleMemberDetailAction"
     @tab-change="loadMemberDetailTab"
     @close="closeMemberDetail"

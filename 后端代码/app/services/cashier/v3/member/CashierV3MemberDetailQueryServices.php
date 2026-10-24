@@ -1727,9 +1727,11 @@ final class CashierV3MemberDetailQueryServices
             $isTimeCard = $cardRuleType === 'time';
             if ($isTimeCard) {
                 $remainingAmount = $this->money($holder['order_pay_price'] ?? 0);
+                // Member queries observe the same cancelled-debt facts without
+                // checkout locks, including inside a server READ ONLY snapshot.
                 $cancelled = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())->cancelledCardDebt(
                     (array)($originOrders[(int)$orderId] ?? []),
-                    (int)($originOrders[(int)$orderId]['uid'] ?? 0), $tenantId
+                    (int)($originOrders[(int)$orderId]['uid'] ?? 0), $tenantId, false
                 );
                 $remainingAmount = max('0.00', bcsub($remainingAmount, $cancelled, 2));
                 // A time-card refund changes value but does not fabricate usage.
