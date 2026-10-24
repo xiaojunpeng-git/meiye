@@ -93,6 +93,9 @@ button { cursor: pointer; }
 /* 平台调拨增加快捷筛选后允许控件换行，避免嵌入平台后台时压住查询按钮。 */
 .filter-card--platform-transfer { flex-wrap: wrap; }
 .filter-card--platform-transfer > .secondary-button { align-self: end; }
+/* 两端库存单据把导入和新建并排放在查询行末端，空间不足时整体换行且保持原顺序。 */
+.filter-card--store-list, .filter-card--inventory-list { flex-wrap: wrap; }
+.inventory-list-query-actions { display: flex; align-items: center; gap: 9px; margin-left: auto; }
 
 /* 统计页的业务日期是单个周期按钮，按其内容预留独立宽度并让后续字段正常换行。 */
 .inventory-unified-query--statistics .unified-query-top-field:has(.uq-period-trigger) {
@@ -125,6 +128,16 @@ button { cursor: pointer; }
 /* The cashier shell clips page overflow, so grouped document rows must scroll inside their own list. */
 .table-card--grouped-scroll .table-scroll { max-height: clamp(240px, calc(100vh - 245px), 800px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-color: #91aac4 #eef3f8; scrollbar-width: thin; }
 .table-card--grouped-scroll .table-scroll thead th { position: sticky; z-index: 1; top: 0; }
+/* 两端库存列表参照费用查询占满剩余视口；门店壳自身还占用 96px 导航高度。 */
+.inventory-shell--inventory-list-page { height: 100dvh; min-height: 0; }
+.inventory-shell--store-entry.inventory-shell--store-mode.inventory-shell--inventory-list-page { height: calc(100dvh - 96px); }
+.inventory-shell--inventory-list-page .inventory-main { display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+/* 宽屏也固定两侧各 15px，解除通用最大宽度产生的额外留白。 */
+.inventory-shell--inventory-list-page .inventory-content { display: flex; flex: 1 1 auto; flex-direction: column; width: 100%; max-width: none; min-height: 0; padding-inline: 15px; }
+/* 结果卡片外的操作禁用容器也必须占满剩余高度，否则空结果会把分页栏留在页面中部。 */
+.inventory-shell--inventory-list-page .inventory-list-result { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+.table-card--inventory-list-page { display: flex; flex: 1 1 260px; flex-direction: column; min-height: 260px; }
+.table-card--inventory-list-page .table-scroll { flex: 1 1 auto; min-height: 0; max-height: none; }
 .table-scroll .inventory-grouped-table--inbound, .table-scroll .inventory-grouped-table--outbound { min-width: 1320px; }
 .inventory-grouped-table > thead th { height: 38px; }
 .table-scroll .inventory-group-row > td { height: 48px; padding: 0 16px; background: #e5edf6; }
@@ -148,5 +161,6 @@ button { cursor: pointer; }
 .table-scroll .inventory-detail-message-row--error > td { color: #b63333; }
 .inventory-warehouse-pagination { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid #e4e9f0; background: #fff; font-size: 12px; }
 .inventory-warehouse-pagination span { margin-right: 8px; }
+.inventory-list-pagination__current { min-width: 14px; text-align: center; }
 .inventory-warehouse-choice label { display: grid; gap: 7px; margin: 14px 0; font-size: 13px; }
 .inventory-warehouse-choice select { box-sizing: border-box; width: 100%; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid #d8e0ea; border-radius: 6px; background: #fff; color: #26344a; font: inherit; }
