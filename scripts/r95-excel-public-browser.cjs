@@ -16,10 +16,18 @@ const evidence=path.resolve('tests/target-scheme/evidence/R95-excel-names-2026-1
         for(const [index,{url,preview}]of urls.entries()){
             const context=await browser.newContext({viewport:{width:1579,height:1076}});
             if(preview)await context.addCookies([{name:'rh_preview_8080',value:'1',domain:'rh.cc3798.com',path:'/'}]);
-            await context.route('https://**.cc3798.com/**',async route=>{try{const response=await route.fetch({timeout:30000});await route.fulfill({response});}catch(e){await route.abort();}});
+            const transportErrors=[];
+            await context.route('https://**.cc3798.com/**',async route=>{try{const response=await route.fetch({timeout:30000});await route.fulfill({response});}catch(e){transportErrors.push({url:route.request().url(),message:e.message});await route.abort();}});
             const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
             await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
-            await page.locator('input[type=password]').waitFor({timeout:30000});
+            try{await page.locator('input[type=password]').waitFor({timeout:30000});}
+            catch(error){
+                // Preserve actual page/transport evidence on failure; a timeout
+                // is never recorded as a successful deployment check.
+                fs.writeFileSync(path.join(evidence,`${site}-${phase}-public-failure.json`),JSON.stringify({url:page.url(),errors,transportErrors,body:await page.locator('body').innerText()},null,2));
+                await page.screenshot({path:path.join(evidence,`${site}-${phase}-public-failure.png`)});
+                throw error;
+            }
             if(errors.length)throw Error(JSON.stringify(errors));
             const state=JSON.parse(fs.readFileSync(path.join(evidence,site+'-'+phase+'.json')));
             const front=state.frontends.find(f=>f.kind==='admin'&&f.root.endsWith('-8080')===preview);

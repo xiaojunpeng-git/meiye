@@ -21,12 +21,12 @@
     "fixedPhpDatabaseChecks": 19,
     "retainedTargetChecks": 51,
     "retainedFilterParityChecks": 18,
-    "installerChecks": 5,
+    "installerChecks": 8,
     "retainedFilterViewports": [1515, 610, 375],
     "runtimeBaselines": "Seven report target readers recorded read-only on each of rh, 008, 010.",
     "rhPreviewRouting": "Existing rh_preview_8080 cookie with /admin/login; /adminapi/ uses formal backend. No nginx change."
   },
-  "committed": false,
-  "deployed": false,
-  "pushed": false
+  "committed": true,
+  "deployed": true,
+  "pushed": true
 }
