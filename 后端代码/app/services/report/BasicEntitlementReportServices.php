@@ -119,6 +119,11 @@ final class BasicEntitlementReportServices
         // stores where a member has an active relation. The subquery avoids fanout.
         $populationQuery = Db::name('user')->alias('u')
                 ->where('u.status', 1)->where('u.is_del', 0)->whereIn('u.belong_store_id', $stores)
+                // Match the shared balance authority's current-member boundary.
+                // Old timestamp/integer schemas represent "not deleted" in
+                // different ways; CAST avoids implicit datetime conversion.
+                // This same population drives count, rows, totals and export.
+                ->whereRaw("(u.delete_time IS NULL OR CAST(u.delete_time AS CHAR) IN ('', '0', '0000-00-00 00:00:00'))")
                 ->whereIn('u.uid', static function ($q) use ($stores): void {
                     $q->name('store_user')->where('status', 1)->whereIn('store_id', $stores)->field('uid');
                 });

@@ -7,7 +7,6 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3ResultCode;
 use app\services\cashier\v3\card\CashierV3CardRuleEntitlementAuthorityServices;
-use app\services\cashier\v3\card\CashierV3CardComponentPurchaseAmountAuthority;
 use app\services\cashier\v3\card\CashierV3CardSaleActualAmountServices;
 use app\services\cashier\v3\cashier\CashierV3EntitlementActualAmountAllocator;
 use app\services\cashier\v3\order\CashierV3CardRefundQuotaPolicy;
@@ -1372,22 +1371,15 @@ final class CashierV3MemberDetailQueryServices
                     ? json_decode((string)$row['cart_info'], true)
                     : ($row['cart_info'] ?? []);
                 $snapshot = is_array($snapshot) ? $snapshot : [];
-                $amountAuthority = (new CashierV3CardComponentPurchaseAmountAuthority())->resolve(
+                // Read historical cents without relaxing the shared writeoff
+                // authority or inventing a different card/checkout snapshot.
+                $amount = (new \app\services\cashier\v3\card\CashierV3CardReadAmountServices())->remainingForComponent(
                     $row,
                     $snapshot,
                     $actualSaleAmounts,
-                    $ruleAuthoritiesByHolder[(int)($holderByOrder[(int)($row['oid'] ?? 0)]['id'] ?? 0)][(int)($row['id'] ?? 0)] ?? null
-                );
-                // Formal rule authority supplies the immutable sale amount, while
-                // refunds live on the cart's current snapshot. Both are needed.
-                $allocationSnapshot = $amountAuthority['allocationSnapshot'];
-                $allocationSnapshot['r26RefundedCents'] = (int)($snapshot['r26RefundedCents'] ?? 0);
-                $allocationSnapshot['r26RefundRemovedTimes'] = (int)($snapshot['r26RefundRemovedTimes'] ?? 0);
-                $amount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
-                    $this->moneyFromCents($amountAuthority['purchaseAmountCents']),
+                    $ruleAuthoritiesByHolder[(int)($holderByOrder[(int)($row['oid'] ?? 0)]['id'] ?? 0)][(int)($row['id'] ?? 0)] ?? null,
                     $total,
-                    $total - $remaining,
-                    $allocationSnapshot
+                    $remaining
                 );
                 $orderId = (int)$row['oid'];
                 $originOrder = (array)($originOrders[$orderId] ?? []);
