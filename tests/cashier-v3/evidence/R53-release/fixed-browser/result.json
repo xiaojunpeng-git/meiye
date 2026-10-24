@@ -1,0 +1,140 @@
+{
+  "status": "PASS",
+  "baseline": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "testedTree": "0ff03c6478b16b36683ff58f680b8250b8f35d46",
+  "fileHashes": {
+    "前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue": "3847131800339e79c9136344891de665d090b9763197ed1fcdb14620e04aa091",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue": "8b4fa4a0aecf939daeedfa14f8152625ca1664928c6d7583291dd1081926b39c",
+    "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": "449e5adaf4684002fc94efa634c66bdf8969d3e14f0687c645ae562a7d2569f6",
+    "前端代码/cashier-v3/src/services/cashierV3Bridge.js": "9fe3518ffadc186c581e8df59407b4c8d3fb63ea85f149ae6331146df65be135",
+    "前端代码/cashier-v3/src/services/cardToBalance.js": "3ce18cb984fa7de6f2a06ae6c7e5592022827e112654ca37d1d56e2729b12931",
+    "tests/cashier-v3/js/r53-card-to-balance-browser.cjs": "4c44ba1b6600f09cf1db31ad66933ed4d410910f9459c2db227581f5799fcd05",
+    "tests/cashier-v3/js/r15-card-operation-frontend-contract.mjs": "a361ac12d0ac1564bc91db253a36706c03c59699723d00c4f713dcd1f4e3b227"
+  },
+  "workspacePatchSha256": "c8d9b6b299e83236f5b978774d38c9e4eb3b8d0af907728c94433d6c29fbd6eb",
+  "actualVueSfc": true,
+  "actualWorkbenchSubmit": true,
+  "actualBridge": true,
+  "existingSelectorRegression": [
+    "card-disable",
+    "card-enable",
+    "card-extension"
+  ],
+  "isolatedBackend": true,
+  "remote": "不适用",
+  "safeguards": {
+    "before": 2,
+    "afterInvalid": 2,
+    "after": 3
+  },
+  "submitted": [
+    {
+      "action": "submit-card-operation",
+      "payload": {
+        "operationType": "card_to_balance",
+        "memberId": "53",
+        "sourceCardHolderId": "2",
+        "confirmedAmountCents": 123400,
+        "reason": "会员申请转赠金",
+        "action": "submit-card-operation",
+        "clientSessionId": "SESSION-4f5d5d72-20e3-45b2-857b-2b856cd7763e",
+        "command": {
+          "action": "submit-card-operation",
+          "idempotencyKey": "CARD_OPERATION-413c9bf7-6bbc-4fc7-9568-c67db6a63f11",
+          "contexts": []
+        },
+        "correlationId": "CORR-8fb99bb3-0e05-44d1-8d06-f4befe85a01e"
+      }
+    },
+    {
+      "action": "submit-card-operation",
+      "payload": {
+        "operationType": "card_to_balance",
+        "memberId": "53",
+        "sourceCardHolderId": "3",
+        "confirmedAmountCents": 123400,
+        "reason": "金额变化测试",
+        "action": "submit-card-operation",
+        "clientSessionId": "SESSION-4f5d5d72-20e3-45b2-857b-2b856cd7763e",
+        "command": {
+          "action": "submit-card-operation",
+          "idempotencyKey": "CARD_OPERATION-60489c63-a29c-4bf5-8ede-b099de2f76ed",
+          "contexts": []
+        },
+        "correlationId": "CORR-a7cb76ca-3af1-4fe8-8a6a-adfafa37b4d0"
+      }
+    },
+    {
+      "action": "submit-card-operation",
+      "payload": {
+        "operationType": "card_to_balance",
+        "memberId": "53",
+        "sourceCardHolderId": "1",
+        "confirmedAmountCents": 123400,
+        "reason": "重复保护",
+        "action": "submit-card-operation",
+        "clientSessionId": "SESSION-4f5d5d72-20e3-45b2-857b-2b856cd7763e",
+        "command": {
+          "action": "submit-card-operation",
+          "idempotencyKey": "CARD_OPERATION-e0f9bf90-1f38-485a-9077-a99b32d40601",
+          "contexts": []
+        },
+        "correlationId": "CORR-a8c9d691-3d1d-4b00-a4f6-031ecabb4da3"
+      }
+    }
+  ],
+  "mobileViewport": {
+    "width": 375,
+    "height": 667
+  },
+  "mobileGeometry": [
+    {
+      "tag": "DIV",
+      "left": 16,
+      "right": 359,
+      "top": 135.5,
+      "bottom": 531.5,
+      "inViewport": true
+    },
+    {
+      "tag": "OUTPUT",
+      "left": 35,
+      "right": 340,
+      "top": 216.5,
+      "bottom": 232.5,
+      "inViewport": true
+    },
+    {
+      "tag": "OUTPUT",
+      "left": 35,
+      "right": 340,
+      "top": 273.5,
+      "bottom": 289.5,
+      "inViewport": true
+    },
+    {
+      "tag": "TEXTAREA",
+      "left": 35,
+      "right": 340,
+      "top": 400.5,
+      "bottom": 468.5,
+      "inViewport": true
+    },
+    {
+      "tag": "BUTTON",
+      "left": 208,
+      "right": 270,
+      "top": 484.5,
+      "bottom": 512.5,
+      "inViewport": true
+    },
+    {
+      "tag": "BUTTON",
+      "left": 278,
+      "right": 340,
+      "top": 484.5,
+      "bottom": 512.5,
+      "inViewport": true
+    }
+  ]
+}

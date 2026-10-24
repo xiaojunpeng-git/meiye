@@ -1,0 +1,14 @@
+PASS: protected project-upgrade binding keeps the persisted source detail
+PASS: stale entitlement-selector detail cannot replace the persisted source detail
+PASS: upgrade sale binding freezes project mutations and source resources together
+PASS: checkout rebuild restores source resources from the protected upgrade binding
+PASS: workspace exposes the immutable upgrade binding on the protected sale line
+PASS: final checkout preparation does not forward selector entitlement contexts
+PASS: browser snapshot preserves the local card-operation intent until final confirmation
+PASS: final submit materializes local card operation and injects its immutable upgrade binding in-transaction
+PASS: snapshot upgrade settlement re-reads current target without legacy catalog-version rejection
+PASS: snapshot upgrade never replays selector command-version contexts
+PASS: snapshot upgrade reads the current card-holder resource at final confirmation
+PASS: the prepared checkout binds the materialized upgrade operation to the same checkout request
+PASS: checkout resource discovery is rebuilt from persisted checkout rows
+PASS: project-upgrade settlement resolves exact source lines by operation identity
