@@ -1,0 +1,118 @@
+{
+  "site": "rh",
+  "root": "/www/wwwroot/rh.cc3798.com",
+  "database": "ruihao",
+  "port": "3306",
+  "files": {
+    "app/services/fund/StoreFundServices.php": "ef6ac05973584d0d5d0fc72ab7a60f663e44252b06e19d27c7ae7087d06ddff3",
+    "app/services/other/export/ExportServices.php": "00323a0f70fb33b9ccb83184575130fcc2b163015eadf799a87a0512284734a6",
+    "mohe/services/SpreadsheetExcelService.php": "c7dff4435c51c3dff964dab3cb2f81b456b1f46a2345a9d0bf753407d26a0605",
+    "app/controller/store/fund/StoreFund.php": "be6cd96e192e682a43a3b443804e81e8c28be00c89a7a02bdddec62b78849ab9",
+    "app/controller/admin/v1/fund/StoreFund.php": "3ef400d0e8d450dd70e1509616e4bd2ef35566d43f33d8dc2781d9934398d44f",
+    "route/store.php": "ca36228de44433106dc3ceb832b40009336a3c97ff7980a87750b002307ec56d",
+    "route/admin.php": "db53376d8aeb5f2c0fc1e3d66ef3bac35ca466cbe4b4fbd5291795da53f0ccf4",
+    ".env": "b89eb945fa029d397a057428e9a7c69ff6610c6471e72b635af334452a6eee34"
+  },
+  "frontends": [
+    {
+      "root": "/www/wwwroot/rh.cc3798.com",
+      "entry": "public/view_cashier_v3/index.html",
+      "sha256": "658eef33304847ceb280f4739f2fee3d2f68aff9c17c057e34584077ad0151f1",
+      "assets": {
+        "/view_cashier_v3/assets/index-91d79b27.js": "fd3006af3f068393dba86d3a474ff903052be65068d73070a0a926ef8e841165",
+        "/view_cashier_v3/assets/index-a36cf316.css": "a36cf316f042008bc90d5f877d68c7a9a54a5e5c7511b6c7717e729ee4a15740"
+      }
+    },
+    {
+      "root": "/www/wwwroot/rh.cc3798.com",
+      "entry": "public/view_fund_v3/index.html",
+      "sha256": "66f76e25a8151c14482b4b4b7ec022f87a3f4f515e53b84061950e9ed42aa380",
+      "assets": {
+        "/view_fund_v3/assets/index-85f04788.js": "e8c4b463f50b45d728096652963c7a2f6385498f561e62612ad91547a7427895",
+        "/view_fund_v3/assets/index-9a215dc4.css": "9a215dc4d452ba9746e50a6b9ac44ffbd801d7a5ed1c527d7e79c5f04800aaa3"
+      }
+    },
+    {
+      "root": "/www/wwwroot/rh.cc3798.com",
+      "entry": "public/system.html",
+      "sha256": "42bd95bde509ddeff6c20a607b8ab1aa6012aca853c1528ad2193d838a8f92ed",
+      "assets": {
+        "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+        "/view_admin/css/app.499a090c.css": "de95d6b33f860e62a4dd0947515901af44802d1a36dcc9d22865a6463586c263",
+        "/view_admin/js/chunk-vendors.33283ef6.js": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+        "/view_admin/js/app.9297ec9c.js": "22ec1534d2643a2ab2cb6dc0ccaee7dbe3e328e55774f04d2cd834634aa2dec4"
+      }
+    },
+    {
+      "root": "/www/wwwroot/rh.cc3798.com-8080",
+      "entry": "public/view_cashier_v3/index.html",
+      "sha256": "658eef33304847ceb280f4739f2fee3d2f68aff9c17c057e34584077ad0151f1",
+      "assets": {
+        "/view_cashier_v3/assets/index-91d79b27.js": "fd3006af3f068393dba86d3a474ff903052be65068d73070a0a926ef8e841165",
+        "/view_cashier_v3/assets/index-a36cf316.css": "a36cf316f042008bc90d5f877d68c7a9a54a5e5c7511b6c7717e729ee4a15740"
+      }
+    },
+    {
+      "root": "/www/wwwroot/rh.cc3798.com-8080",
+      "entry": "public/view_fund_v3/index.html",
+      "sha256": "66f76e25a8151c14482b4b4b7ec022f87a3f4f515e53b84061950e9ed42aa380",
+      "assets": {
+        "/view_fund_v3/assets/index-85f04788.js": "e8c4b463f50b45d728096652963c7a2f6385498f561e62612ad91547a7427895",
+        "/view_fund_v3/assets/index-9a215dc4.css": "9a215dc4d452ba9746e50a6b9ac44ffbd801d7a5ed1c527d7e79c5f04800aaa3"
+      }
+    },
+    {
+      "root": "/www/wwwroot/rh.cc3798.com-8080",
+      "entry": "public/system.html",
+      "sha256": "185e2f250b2e8b7a73372dab41c1a423a3fcbc2885e95bf197d4cd9341329124",
+      "assets": {
+        "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+        "/view_admin/css/app.0bbb8b49.css": "b4c27b97e1ca28cdcdb8b3db060e8d78f9559baf23448a124ddffb19c415c45c",
+        "/view_admin/js/chunk-vendors.e465035b.js": "3dd5c49123beb32864ef87c84e91e2241470eb87f991db954602051760d853cf",
+        "/view_admin/js/app.02454574.js": "8a7e36cf08762487b8ec5bdf1abae0c89bb4b17029fa6e40d5b38e254e274bed"
+      }
+    }
+  ],
+  "upgrades": [
+    {
+      "upgrade_key": "20261023-r51-basic-reports",
+      "code_version": "dfea59566663c76f0cae00d1fb851c45a262f9f9",
+      "executed_at": "2026-10-24 01:17:42"
+    },
+    {
+      "upgrade_key": "20261023-r28-store-permission-catalog",
+      "code_version": "18669cbf303299b217f32d1d0a99727ba13dc1be",
+      "executed_at": "2026-10-23 20:42:15"
+    },
+    {
+      "upgrade_key": "20261023_growth_18_help_and_message",
+      "code_version": "6472685463a1483756069a687a727003f63f95d9",
+      "executed_at": "2026-10-23 10:25:22"
+    },
+    {
+      "upgrade_key": "20261023_growth_17_setting_action",
+      "code_version": "6472685463a1483756069a687a727003f63f95d9",
+      "executed_at": "2026-10-23 10:25:22"
+    },
+    {
+      "upgrade_key": "20261023_growth_16_task_job",
+      "code_version": "6472685463a1483756069a687a727003f63f95d9",
+      "executed_at": "2026-10-23 10:25:22"
+    },
+    {
+      "upgrade_key": "20261023_growth_15_inspection_handover",
+      "code_version": "6472685463a1483756069a687a727003f63f95d9",
+      "executed_at": "2026-10-23 10:25:22"
+    },
+    {
+      "upgrade_key": "20261023_growth_14_onboarding_audit",
+      "code_version": "6472685463a1483756069a687a727003f63f95d9",
+      "executed_at": "2026-10-23 10:25:21"
+    },
+    {
+      "upgrade_key": "20261023_growth_13_learning_samples",
+      "code_version": "6472685463a1483756069a687a727003f63f95d9",
+      "executed_at": "2026-10-23 10:25:21"
+    }
+  ]
+}
