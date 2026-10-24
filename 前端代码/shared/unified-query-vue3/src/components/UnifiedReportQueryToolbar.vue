@@ -1,13 +1,17 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { cloneUnifiedQuerySnapshot } from '../contracts/unifiedQueryContract.js'
-import { buildReportFilterQuery, reportFilterDraft, reportFilterFields, reportFilterOptions, reportFilterType } from '../contracts/reportFilters.js'
+import { buildReportFilterQuery, reportFilterDraft, reportFilterFields, reportFilterIsRange, reportFilterOptions, reportFilterType } from '../contracts/reportFilters.js'
+import UnifiedQueryDateRange from './UnifiedQueryDateRange.vue'
 
 // 报表专用外观独立于旧 UnifiedQueryToolbar，既有消费者不会因新标准改变呈现。
 const props = defineProps({
   fields: { type: Array, default: () => [] },
   pageCode: { type: String, default: '' },
   isQueryLoading: { type: Boolean, default: false },
+  // 元数据尚未返回也可保留入口；不因此生成或授权任何筛选字段。
+  keepFilterToggle: { type: Boolean, default: false },
+  filterMessage: { type: String, default: '' },
   executedQuery: { type: Object, default: () => ({}) }
 })
 const emit = defineEmits(['query', 'clear'])
@@ -33,7 +37,7 @@ watch([() => props.pageCode, () => JSON.stringify(props.executedQuery), filterFi
     const restored = reportFilterDraft(props.fields, snapshot.value)
     draft.value = Object.fromEntries(filterFields.value.map((field) => {
       const value = draft.value[field.key]
-      const sameShape = reportFilterType(field) === 'number' ? value && typeof value === 'object' : typeof value !== 'object'
+      const sameShape = reportFilterIsRange(field) ? value && typeof value === 'object' : typeof value !== 'object'
       return [field.key, Object.hasOwn(draft.value, field.key) && sameShape ? value : restored[field.key]]
     }))
   }
@@ -67,15 +71,17 @@ defineExpose({ submitQuery })
   <section class="unified-report-query-toolbar" aria-label="报表查询条件">
     <div class="unified-report-query-toolbar__primary">
       <div v-if="$slots['leading-controls']" class="unified-report-query-toolbar__leading"><slot name="leading-controls" /></div>
-      <button v-if="filterFields.length" type="button" class="button button--secondary unified-report-query-toolbar__toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起筛选' : '更多筛选' }}</button>
+      <button v-if="filterFields.length || keepFilterToggle" type="button" class="button button--secondary unified-report-query-toolbar__toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起筛选' : '更多筛选' }}</button>
       <button type="button" class="button button--primary unified-report-query-toolbar__query" :disabled="isQueryLoading" :aria-busy="isQueryLoading" @click="submitQuery">{{ isQueryLoading ? '查询中' : '查询' }}</button>
       <div v-if="$slots['primary-actions']" class="unified-report-query-toolbar__actions" aria-label="报表操作"><slot name="primary-actions" /></div>
     </div>
+    <p v-if="expanded && !filterFields.length && filterMessage" class="unified-report-query-toolbar__error" role="status">{{ filterMessage }}</p>
     <div v-if="expanded && filterFields.length" class="unified-report-query-toolbar__panel" aria-label="报表高级筛选">
       <div class="unified-report-query-toolbar__fields" @keydown.enter.prevent="submitQuery">
         <label v-for="field in filterFields" :key="field.key" class="unified-report-query-toolbar__field" :class="{ 'unified-report-query-toolbar__field--range': reportFilterType(field) === 'number' }">
           <span>{{ field.label || field.key }}</span>
-          <span v-if="reportFilterType(field) === 'number'" class="unified-report-query-toolbar__range">
+          <UnifiedQueryDateRange v-if="reportFilterType(field) === 'date' && reportFilterIsRange(field)" v-model="draft[field.key]" :label="`${field.label || field.key}周期`" />
+          <span v-else-if="reportFilterType(field) === 'number'" class="unified-report-query-toolbar__range">
             <input v-model="draft[field.key].min" type="number" step="any" placeholder="最小值" :aria-label="`${field.label || field.key}最小值`">
             <span>至</span>
             <input v-model="draft[field.key].max" type="number" step="any" placeholder="最大值" :aria-label="`${field.label || field.key}最大值`">
