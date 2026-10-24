@@ -39,6 +39,7 @@ final class CashierV3OrderCenterRecordQueryServices
         'card_extension',
         'project_replacement',
         'project_upgrade',
+        'card_to_balance',
     ];
 
     /** @var callable|null function(string $operation, array $context): array */
@@ -2278,8 +2279,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberId' => (int)($row['member_id_after'] ?: $row['member_id_before'] ?: $row['origin_member_id']),
                 'memberName' => $row['member_name_after_snapshot'],
                 'sourceCard' => $this->cardOperationSourceContent($row),
-                'targetContent' => $row['target_catalog_name_snapshot'],
-                'amount' => $this->centsToMoney((int)$row['settlement_delta_cents']),
+                'targetContent' => $row['operation_type'] === 'card_to_balance'
+                    ? '会员赠金余额' : $row['target_catalog_name_snapshot'],
+                // Conversion is not an upgrade collection: show the transferred
+                // value without fabricating a payable delta or cash receipt.
+                'amount' => $this->centsToMoney((int)($row['operation_type'] === 'card_to_balance'
+                    ? $row['source_remaining_value_cents'] : $row['settlement_delta_cents'])),
                 'salesOrderNo' => $row['sales_order_no'],
                 'storeName' => $row['store_name_snapshot'],
                 'operatorName' => $row['operator_name_snapshot'],
@@ -2707,6 +2712,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'card_extension' => '卡延期',
             'project_replacement' => '项目替换',
             'project_upgrade' => '项目升级',
+            'card_to_balance' => '卡转余额',
         ];
         return $labels[$type] ?? $type;
     }

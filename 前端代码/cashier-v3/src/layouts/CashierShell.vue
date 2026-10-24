@@ -367,6 +367,8 @@ const cardOperationItems = Object.freeze([
   { key: 'card-extension', label: '卡延期', featureCode: 'cashier.v3.cashier.card.extend' },
   { key: 'card-transfer', label: '卡转让', featureCode: 'cashier.v3.cashier.card.transfer' },
   { key: 'card-disable', label: '卡停用', featureCode: 'cashier.v3.cashier.card.disable' },
+  // 转余额有独立权限；不可借停用权限开放资金权益操作。
+  { key: 'card-to-balance', label: '卡转余额', featureCode: 'cashier.v3.cashier.card.to_balance' },
   { key: 'card-enable', label: '卡启用', featureCode: 'cashier.v3.cashier.card.enable' },
   { key: 'project-replacement', label: '项目替换', featureCode: 'cashier.v3.cashier.card.project_replace' },
   { key: 'project-upgrade', label: '项目升级', featureCode: 'cashier.v3.cashier.card.project_upgrade' }

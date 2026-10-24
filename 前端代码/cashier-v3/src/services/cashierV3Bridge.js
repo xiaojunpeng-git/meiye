@@ -319,6 +319,8 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.cashier.card.transfer': false,
     'cashier.v3.cashier.card.disable': false,
     'cashier.v3.cashier.card.enable': false,
+    // Registered here so login/root normalization preserves the explicit grant.
+    'cashier.v3.cashier.card.to_balance': false,
     'cashier.v3.cashier.card.project_replace': false,
     'cashier.v3.cashier.card.project_upgrade': false,
     'cashier.v3.member.create': false,
@@ -513,6 +515,8 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.cashier.card.transfer': true,
     'cashier.v3.cashier.card.disable': true,
     'cashier.v3.cashier.card.enable': true,
+    // Asset conversion is never implicitly granted by the local preview fixture.
+    'cashier.v3.cashier.card.to_balance': false,
     'cashier.v3.cashier.card.project_replace': true,
     'cashier.v3.cashier.card.project_upgrade': true,
     'cashier.v3.member.create': true,
@@ -2583,6 +2587,8 @@ const CARD_OPERATION_FEATURE_BY_TYPE = Object.freeze({
   card_extension: 'cashier.v3.cashier.card.extend',
   card_transfer: 'cashier.v3.cashier.card.transfer',
   card_disable: 'cashier.v3.cashier.card.disable',
+  // 独立岗位叶权限；退款/停用权限不授予转余额能力。
+  card_to_balance: 'cashier.v3.cashier.card.to_balance',
   card_enable: 'cashier.v3.cashier.card.enable',
   project_replacement: 'cashier.v3.cashier.card.project_replace',
   project_upgrade: 'cashier.v3.cashier.card.project_upgrade'
@@ -2805,7 +2811,7 @@ function resolveCommandContexts(action, payload) {
   // the current card and benefit rows inside the transaction, so no browser
   // projection/version context is accepted or required for this branch.
   if (action === 'submit-card-operation'
-    && String(payload?.operationType || '') === 'project_replacement') {
+    && ['project_replacement', 'card_to_balance'].includes(String(payload?.operationType || ''))) {
     return { invalid: false, contexts: [] }
   }
   // A final browser-owned checkout snapshot is self-contained. Never carry
@@ -3672,7 +3678,8 @@ export async function requestCashierV3Action(action, payload = {}) {
   }
   const readOnly = isReadOnlyAction(canonicalAction)
   const liveProjectReplacement = canonicalAction === 'submit-card-operation'
-    && String(requestBody.operationType || '') === 'project_replacement'
+    // 卡转余额也只依赖最终业务快照和服务端事务锁，不引入浏览器版本。
+    && ['project_replacement', 'card_to_balance'].includes(String(requestBody.operationType || ''))
   // 普通结账与充值的最终确认都只提交本次浏览器快照；后端事务锁定权威资源。
   const directCheckoutSnapshot = (
     canonicalAction === 'submit-checkout'

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import Info from '@lucide/vue/dist/esm/icons/info.mjs'
 import { formatMoney } from '@/services/cashierV3Bridge'
+import { formatReportMoney } from '@mohe/unified-query-vue3'
 
 /**
  * 会员详情全页面前端壳。
@@ -1363,7 +1364,9 @@ async function triggerAction(action, context = {}) {
             <tbody>
               <tr v-for="record in cardHistory.records" :key="record.key">
                 <td>{{ new Date(record.time * 1000).toLocaleString('zh-CN') }}</td>
-                <td>{{ record.type }}</td><td>{{ record.content }}</td><td>{{ record.amount || '—' }}</td>
+                <td>{{ record.type }}</td><td>{{ record.content }}</td>
+                <!-- History retains exact backend values; only display uses the shared whole-yuan formatter. -->
+                <td>{{ hasValue(record.amount) && record.amount !== '—' ? formatReportMoney(record.amount) : '—' }}</td>
                 <td class="member-detail-overlay__detail-remark">{{ text(record.detailRemark) }}</td>
                 <td>{{ record.store || '—' }}</td><td>{{ record.operatorName || '—' }}</td><td>{{ record.result || '—' }}</td>
               </tr>

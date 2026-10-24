@@ -36,12 +36,12 @@ final class CashierV3MemberDetailQueryServices
         $holder = (array)Db::name('user_card_holder')->where('id', $holderId)
             ->where('uid', $memberId)->find();
         if (!$holder) throw $this->notFound();
+        // Transfer changes the live holder, never the immutable purchase owner.
+        // Access is granted by the exact holder above, not by the original order UID.
         $order = (array)Db::name('store_order')->where('id', (int)$holder['oid'])
-            ->where('uid', $memberId)->find();
+            ->find();
         if (!$order) throw $this->notFound();
         $tenantId = $scope->tenantId();
-        $detailIds = array_map('intval', Db::name('store_order_cart_info')
-            ->where('oid', (int)$holder['oid'])->where('cart_type', 2)->where('product_type', 6)->column('id'));
         // A V3 card purchase belongs to one issued holder and one immutable sales line.
         // Legacy cards have no receipt, so their missing line remark remains blank.
         $purchaseRemark = (string)(Db::name('cashier_v3_card_purchase_receipt')->alias('receipt')
@@ -53,8 +53,10 @@ final class CashierV3MemberDetailQueryServices
         $append = static function (string $key, string $type, string $content, string $amount,
             string $date, int $time, string $store, string $operatorName, string $result,
             string $detailRemark = '') use (&$rows): void {
-            $rows[] = compact('key', 'type', 'content', 'amount', 'date', 'time', 'store', 'operatorName', 'result', 'detailRemark');
+            // One authority identity produces one row even when multiple joins match it.
+            $rows[$key] = compact('key', 'type', 'content', 'amount', 'date', 'time', 'store', 'operatorName', 'result', 'detailRemark');
         };
+        $voidTargets = [];
         // History can show the source purchase amount, but settlement and
         // refundable value keep using the zero-valued technical carrier.
         $oldPaid = \app\services\cashier\v3\card\CashierV3HistoricalEntitlementScopePolicy::sourcePaidPrice(
@@ -66,42 +68,101 @@ final class CashierV3MemberDetailQueryServices
             '', '卡号：' . (string)$holder['card_no'], $purchaseRemark);
         // Non-cart card operations retain their own reason or collection note;
         // do not borrow the originating sale line's remark for a later event.
-        foreach (Db::name('cashier_v3_card_operation')->where('tenant_id', $tenantId)
-            ->where('source_card_holder_id', $holderId)->select()->toArray() as $row) {
-            $append('operation:' . $row['operation_id'], $this->cardOperationTypeLabel((string)$row['operation_type']),
-                (string)$row['target_catalog_name_snapshot'], $this->moneyFromCents((int)$row['settlement_delta_cents']),
-                (string)$row['business_date'], (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
-                (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot'], (string)$row['reason_snapshot']);
+        // A settled single-card upgrade also belongs to its newly issued target.
+        // Do not infer this link from card numbers, member IDs or catalog names.
+        $incomingOperationIds = [];
+        $settlements = [];
+        foreach (Db::name('cashier_v3_card_operation_settlement')->where('tenant_id', $tenantId)
+            ->where(function ($query) use ($holderId): void {
+                $query->where('source_card_holder_id', $holderId)->whereOr('target_card_holder_id', $holderId);
+            })->select()->toArray() as $settlement) {
+            $settlements[(string)$settlement['operation_id']] = $settlement;
+            if ((int)$settlement['target_card_holder_id'] === $holderId) $incomingOperationIds[] = (string)$settlement['operation_id'];
         }
+        $operations = Db::name('cashier_v3_card_operation')->where('tenant_id', $tenantId)
+            ->where(function ($query) use ($holderId, $incomingOperationIds): void {
+                $query->where('source_card_holder_id', $holderId);
+                if ($incomingOperationIds !== []) $query->whereOr('operation_id', 'in', $incomingOperationIds);
+            })->select()->toArray();
+        foreach ($operations as $row) {
+            $isBalance = (string)$row['operation_type'] === 'card_to_balance';
+            $status = $this->cardOperationStatusLabel((string)$row['operation_status']);
+            $result = $isBalance && in_array((string)$row['operation_status'], ['succeeded', 'completed'], true)
+                ? '已完成；全额转入赠金；整卡已作废' : $status;
+            $settlement = $settlements[(string)$row['operation_id']] ?? [];
+            if (($settlement['settlement_status'] ?? '') === 'reversed') {
+                $result = '已冲销；原权益已恢复';
+                $this->appendCardUpgradeReversals((string)$settlement['sales_order_id'], $tenantId, $append);
+            }
+            $append('operation:' . $row['operation_id'], $this->cardOperationTypeLabel((string)$row['operation_type']),
+                $isBalance ? (string)$row['card_name_snapshot'] : $this->cardOperationTargetContent($row),
+                $this->moneyFromCents((int)$row[$isBalance ? 'source_remaining_value_cents' : 'settlement_delta_cents']),
+                (string)$row['business_date'], (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
+                (string)$row['operator_name_snapshot'], $result, (string)$row['reason_snapshot']);
+            if ((int)$row['source_card_holder_id'] !== $holderId) {
+                $rows['operation:' . $row['operation_id']]['content'] = '来源卡：'
+                    . (string)$row['card_name_snapshot'] . '（' . (string)$row['card_no_snapshot'] . '）';
+            }
+            if ((string)$row['operation_type'] === 'project_replacement') {
+                $voidTargets['card-operation:' . $row['id']] = ['operation:' . $row['operation_id'], '项目替换作废'];
+            }
+        }
+        $this->appendMultiCardUpgradeHistory($holderId, $tenantId, $append);
         foreach (Db::name('cashier_v3_refund_adjustment')->where('tenant_id', $tenantId)
-            ->where('card_holder_id', $holderId)->where('status', 'effective')->select()->toArray() as $row) {
+            ->where('card_holder_id', $holderId)->whereIn('status', ['effective', 'voided'])->select()->toArray() as $row) {
             $append('refund:' . $row['adjustment_id'], '退款', (string)$row['target_name_snapshot'],
                 $this->moneyFromCents((int)$row['refund_amount_cents']), (string)$row['business_date'],
                 (int)$row['occurred_at'], (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
                 (string)Db::name('system_store_staff')->where('id', (int)$row['operator_id'])->value('staff_name'),
-                ((int)$row['void_target'] ? '作废本卡' : '不作废') . '；' . (string)$row['reason_snapshot'],
+                ((string)$row['status'] === 'voided' ? '已作废' : '已完成') . '；'
+                    . ((int)$row['void_target'] ? '作废本卡' : '不作废'),
                 (string)$row['reason_snapshot']);
+            $voidTargets['refund:' . $row['operation_id']] = ['refund:' . $row['adjustment_id'], '退款作废'];
         }
-        if ($detailIds !== []) {
+        // Imported-card refunds predate the unified adjustment table: their
+        // lifecycle source_order_id is explicitly the physical holder ID.
+        foreach (Db::name('cashier_v3_order_lifecycle_operation')->where('tenant_id', $tenantId)
+            ->where('source_type', 'imported_card')->where('source_order_id', (string)$holderId)
+            ->where('operation_type', 'refund')->where('status', 'succeeded')->select()->toArray() as $row) {
+            $append('lifecycle:' . $row['operation_id'], '旧卡退款', (string)$holder['card_name'],
+                $this->moneyFromCents((int)$row['cash_refund_cents']), (string)$row['business_date'], (int)$row['occurred_at'],
+                (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
+                (string)Db::name('system_store_staff')->where('id', (int)$row['operator_id'])->value('staff_name'),
+                '已完成；剩余权益已撤销', (string)$row['reason_snapshot']);
+        }
+        // Redemption authority carries the physical holder even for shared pools
+        // and pre-transfer usage. A checkout draft is not a durable history source.
+        {
             $used = Db::name('cashier_v3_entitlement_service_fact')->alias('sf')
-                ->join('cashier_v3_checkout_line_draft dl',
-                    'dl.line_id=sf.source_line_id AND dl.tenant_id=sf.tenant_id AND dl.draft_status=\'committed\'')
-                ->where('sf.tenant_id', $tenantId)->where('sf.member_id', $memberId)
-                ->whereIn('dl.entitlement_source_detail_id', $detailIds)
-                ->field('sf.service_fact_id,sf.project_name_snapshot,sf.quantity,sf.business_date,sf.occurred_at,sf.store_name_snapshot,sf.operator_name_snapshot,sf.detail_remark_snapshot')
+                ->join('cashier_v3_entitlement_writeoff_fact wf',
+                    'wf.source_line_id=sf.source_line_id AND wf.tenant_id=sf.tenant_id AND wf.checkout_request_id=sf.checkout_request_id')
+                ->where('sf.tenant_id', $tenantId)->where('wf.holder_id', $holderId)
+                ->where('sf.service_status', 'completed')
+                ->field('sf.id,sf.service_fact_id,sf.project_name_snapshot,sf.quantity,sf.business_date,sf.occurred_at,sf.store_name_snapshot,sf.operator_name_snapshot,sf.detail_remark_snapshot')
                 ->select()->toArray();
+            $serviceVoids = [];
+            if ($used !== []) {
+                foreach (Db::name('cashier_v3_service_record_void_operation')->where('tenant_id', $tenantId)
+                    ->whereIn('service_fact_id', array_column($used, 'id'))->where('status', 'succeeded')
+                    ->select()->toArray() as $void) $serviceVoids[(int)$void['service_fact_id']] = $void;
+            }
             foreach ($used as $row) {
+                $void = $serviceVoids[(int)$row['id']] ?? null;
                 $append('writeoff:' . $row['service_fact_id'], '核销',
                     (string)$row['project_name_snapshot'] . ' ×' . (int)$row['quantity'], '',
                     (string)$row['business_date'], (int)$row['occurred_at'],
-                    (string)$row['store_name_snapshot'], (string)$row['operator_name_snapshot'], '已完成',
+                    (string)$row['store_name_snapshot'], (string)$row['operator_name_snapshot'], $void ? '已作废' : '已完成',
                     (string)($row['detail_remark_snapshot'] ?? ''));
+                if ($void) $append('service-void:' . $void['operation_id'], '核销作废',
+                    (string)$row['project_name_snapshot'], '', (string)$void['business_date'], (int)$void['occurred_at'],
+                    (string)Db::name('system_store')->where('id', (int)$void['store_id'])->value('name'),
+                    (string)$void['operator_name_snapshot'], '已作废；权益已按原规则返还', (string)$void['reason_snapshot']);
             }
         }
         $debts = Db::name('store_debt')->where('order_id', (int)$holder['oid'])->column('id');
         if ($debts !== []) {
             $repayments = Db::name('cashier_v3_debt_repayment')->where('tenant_id', $tenantId)
-                ->whereIn('debt_id', $debts)->where('status', 'succeeded')->select()->toArray();
+                ->whereIn('debt_id', $debts)->whereIn('status', ['succeeded', 'voided'])->select()->toArray();
             $repaymentRemarks = [];
             $repaymentIds = array_column($repayments, 'repayment_id');
             if ($repaymentIds !== []) {
@@ -116,22 +177,199 @@ final class CashierV3MemberDetailQueryServices
                 $append('repayment:' . $row['repayment_id'], '补交', (string)$row['repayment_no'],
                     $this->moneyFromCents((int)$row['repayment_amount_cents']), (string)$row['business_date'],
                     (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
-                    (string)$row['operator_name_snapshot'], '已完成',
+                    (string)$row['operator_name_snapshot'], (string)$row['status'] === 'voided' ? '已作废' : '已完成',
                     implode('；', $repaymentRemarks[(string)$row['repayment_id']] ?? []));
+                $voidTargets['v3-sales-supplement:' . $row['repayment_id']] = ['repayment:' . $row['repayment_id'], '补交作废'];
+            }
+            $restoredCancellations = [];
+            foreach (Db::name('cashier_v3_debt_restoration')->where('tenant_id', $tenantId)
+                ->whereIn('debt_id', $debts)->select()->toArray() as $row) {
+                $restoredCancellations[(string)$row['cancellation_id']] = true;
+                $append('debt-restore:' . $row['restoration_id'], '恢复欠款', (string)$row['cancellation_id'],
+                    $this->moneyFromCents((int)$row['restored_debt_cents']), (string)$row['business_date'],
+                    (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
+                    (string)$row['operator_name_snapshot'], '已完成；原取消欠款已冲销', '');
             }
             foreach (Db::name('cashier_v3_debt_cancellation')->where('tenant_id', $tenantId)
                 ->whereIn('debt_id', $debts)->select()->toArray() as $row) {
                 $append('debt-cancel:' . $row['cancellation_id'], '取消欠款', (string)$row['debt_no_snapshot'],
                     $this->moneyFromCents((int)$row['cancelled_debt_cents']), (string)$row['business_date'],
                     (int)$row['occurred_at'], (string)$row['store_name_snapshot'],
-                    (string)$row['operator_name_snapshot'], (string)$row['reason_snapshot'], (string)$row['reason_snapshot']);
+                    (string)$row['operator_name_snapshot'], isset($restoredCancellations[(string)$row['cancellation_id']])
+                        ? '已冲销；欠款已恢复' : '已完成', (string)$row['reason_snapshot']);
             }
         }
+        // Append successful reversals and annotate their originals; failed attempts
+        // must never turn an effective action into a voided one.
+        if ($voidTargets !== []) {
+            foreach (Db::name('cashier_v3_order_center_void_operation')->where('tenant_id', $tenantId)
+                ->whereIn('record_id', array_keys($voidTargets))->where('status', 'succeeded')->select()->toArray() as $void) {
+                [$originalKey, $label] = $voidTargets[(string)$void['record_id']];
+                $rows[$originalKey]['result'] = '已作废';
+                $append('void:' . $void['operation_id'], $label, $rows[$originalKey]['content'], '',
+                    date('Y-m-d', (int)$void['created_at']), (int)$void['created_at'],
+                    (string)Db::name('system_store')->where('id', (int)$void['store_id'])->value('name'),
+                    (string)Db::name('system_store_staff')->where('id', (int)$void['operator_id'])->value('staff_name'),
+                    '已作废', (string)$void['reason_snapshot']);
+            }
+        }
+        // Whole-sale revocation is linked through the exact issued card receipt,
+        // not every card sharing a member or an order number.
+        foreach (Db::name('cashier_v3_order_lifecycle_benefit_reversal')->alias('br')
+            ->join('cashier_v3_order_lifecycle_operation op', 'op.tenant_id=br.tenant_id AND op.operation_id=br.operation_id')
+            ->where('br.tenant_id', $tenantId)->where('br.card_holder_id', $holderId)->where('br.status', 'revoked')
+            ->where('op.status', 'succeeded')
+            ->field('op.*')->select()->toArray() as $row) {
+            $label = (string)$row['operation_type'] === 'void' ? '购卡订单作废' : '购卡订单退款';
+            $append('lifecycle:' . $row['operation_id'], $label, (string)$holder['card_name'],
+                $this->moneyFromCents((int)$row['cash_refund_cents']), (string)$row['business_date'], (int)$row['occurred_at'],
+                (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
+                (string)Db::name('system_store_staff')->where('id', (int)$row['operator_id'])->value('staff_name'),
+                '已完成；本卡权益已撤销', (string)$row['reason_snapshot']);
+            $rows['card:' . $holderId]['result'] .= '；' . $label;
+        }
+        $this->appendLegacyCardHistory($holder, $append);
         usort($rows, static fn(array $a, array $b): int => [$b['time'], $b['key']] <=> [$a['time'], $a['key']]);
         $page = max(1, $page);
         return ['holderId' => $holderId, 'cardNo' => (string)$holder['card_no'],
             'records' => array_slice($rows, ($page - 1) * 50, 50),
             'total' => count($rows), 'page' => $page, 'pageSize' => 50];
+    }
+
+    /**
+     * Legacy writers use separate authorities; V3 writers do not mirror these
+     * rows. Join by physical holder/order/detail IDs only, never by names or
+     * matching timestamps. An order-level audit cannot identify one of several
+     * holders on the same order, so omit ambiguous order-only events.
+     */
+    private function appendLegacyCardHistory(array $holder, callable $append): void
+    {
+        $orderId = (int)$holder['oid'];
+        $singleHolder = (int)Db::name('user_card_holder')->where('oid', $orderId)->count() === 1;
+        $storeName = (string)Db::name('system_store')->where('id', (int)$holder['store_id'])->value('name');
+        foreach (Db::name('card_project_replacement')->where('holder_id', (int)$holder['id'])
+            ->where('oid', $orderId)->select()->toArray() as $row) {
+            $snapshot = json_decode((string)$row['snapshot_json'], true);
+            $target = (array)($snapshot['target'] ?? []);
+            $append('legacy-replacement:' . $row['id'], '项目替换',
+                (string)($target['name'] ?? $target['product_name'] ?? ''), (string)$row['target_amount'],
+                date('Y-m-d', (int)$row['business_time']), (int)$row['operate_time'],
+                (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
+                (string)Db::name('system_store_staff')->where('id', (int)$row['staff_id'])->value('staff_name'),
+                (int)$row['status'] === 0 ? '已完成' : '历史状态：' . (string)$row['status'],
+                (string)($snapshot['remark'] ?? ''));
+        }
+        if (!$singleHolder) return;
+        // Terminal authority supersedes its refund_price notification row, so
+        // the same legacy refund is not displayed twice. Pre-terminal audit
+        // rows retain their text but never supply an invented refund amount.
+        $terminals = Db::name('store_order_terminal_operation')->where('store_order_id', $orderId)
+            ->where('state', 4)->where('business_type', 1)->select()->toArray();
+        $labels = ['card_transfer' => '卡转让', 'card_extend' => '卡延期',
+            'card_upgrade_use' => '卡升级', 'refund_price' => '历史退款/作废'];
+        foreach (Db::name('store_order_status')->where('oid', $orderId)
+            ->whereIn('change_type', array_keys($labels))->select()->toArray() as $row) {
+            if ((string)$row['change_type'] === 'refund_price' && $terminals !== []) continue;
+            $append('legacy-status:' . $row['id'], $labels[(string)$row['change_type']],
+                (string)$row['change_message'], '', date('Y-m-d', (int)$row['change_time']), (int)$row['change_time'],
+                $storeName, (string)$row['change_manager'], '已记录', '');
+        }
+        foreach ($terminals as $row) {
+            $append('legacy-terminal:' . $row['id'], (int)$row['action_type'] === 2 ? '购卡订单作废' : '购卡订单退款',
+                (string)$holder['card_name'], (string)$row['refund_amount'],
+                trim((string)$row['refund_business_date']) ?: date('Y-m-d', (int)$row['operated_at']), (int)$row['operated_at'],
+                (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
+                '', '已完成', (string)$row['reason']);
+        }
+        // The legacy upgrade transaction writes the target order link and its
+        // audit together. Only the latest upgrade audit can describe that live
+        // link; a removed link after reversal cannot be recovered from prose.
+        foreach (Db::name('store_order')->where('card_upgrade_use_oid', $orderId)->column('id') as $sourceOrderId) {
+            if ((int)Db::name('user_card_holder')->where('oid', (int)$sourceOrderId)->count() !== 1) continue;
+            $audit = (array)Db::name('store_order_status')->where('oid', (int)$sourceOrderId)
+                ->where('change_type', 'card_upgrade_use')->order('change_time desc,id desc')->find();
+            if (!$audit) continue;
+            $append('legacy-status:' . $audit['id'], '卡升级', (string)$audit['change_message'], '',
+                date('Y-m-d', (int)$audit['change_time']), (int)$audit['change_time'],
+                $storeName, (string)$audit['change_manager'], '已记录；本卡升级来源', '');
+        }
+        // Legacy redemptions remain in their own table, including status=1
+        // reversals. Their schema has no trustworthy reversal time/operator;
+        // mark the original as revoked instead of fabricating a second event.
+        foreach (Db::name('store_order_writeoff')->alias('w')
+            ->join('store_order_cart_info d', 'd.id=w.order_cart_id AND d.oid=w.oid')
+            ->where('w.oid', $orderId)->whereIn('w.status', [0, 1])
+            ->field('w.*,d.cart_info')->select()->toArray() as $row) {
+            $append('legacy-writeoff:' . $row['id'], '核销', $this->projectName($row['cart_info']) . ' ×' . (int)$row['writeoff_num'],
+                '', date('Y-m-d', (int)$row['add_time']), (int)$row['add_time'],
+                (int)$row['type'] === 1 ? (string)Db::name('system_store')->where('id', (int)$row['relation_id'])->value('name') : '',
+                (int)$row['service_type'] === 0 ? (string)Db::name('system_store_staff')->where('id', (int)$row['staff_id'])->value('staff_name') : '',
+                (int)$row['status'] === 1 ? '已撤销' : '已完成', '');
+        }
+    }
+
+    /**
+     * Multi-card upgrades have their own immutable header/source authority.
+     * Read both sides without traversing other cards' private timelines. Only
+     * settled headers represent a completed upgrade; prepared attempts are omitted.
+     */
+    private function appendMultiCardUpgradeHistory(int $holderId, string $tenantId, callable $append): void
+    {
+        $sourceIds = Db::name('cashier_v3_multi_card_upgrade_source')->where('tenant_id', $tenantId)
+            ->where('source_card_holder_id', $holderId)->column('upgrade_id');
+        $headers = Db::name('cashier_v3_multi_card_upgrade')->where('tenant_id', $tenantId)
+            ->where('upgrade_status', 'settled')->where(function ($query) use ($holderId, $sourceIds): void {
+                $query->where('target_card_holder_id', $holderId);
+                if ($sourceIds !== []) $query->whereOr('upgrade_id', 'in', $sourceIds);
+            })->select()->toArray();
+        if ($headers === []) return;
+        $sources = [];
+        foreach (Db::name('cashier_v3_multi_card_upgrade_source')->where('tenant_id', $tenantId)
+            ->whereIn('upgrade_id', array_column($headers, 'upgrade_id'))->order('line_no asc')->select()->toArray() as $source) {
+            $sources[(string)$source['upgrade_id']][] = $source;
+        }
+        foreach ($headers as $header) {
+            $isTarget = (int)$header['target_card_holder_id'] === $holderId;
+            $parts = [];
+            $credit = 0;
+            foreach ($sources[(string)$header['upgrade_id']] ?? [] as $source) {
+                if ($isTarget) $parts[] = (string)$source['source_card_name_snapshot'] . '（'
+                    . (string)$source['source_card_no_snapshot'] . '）';
+                if ($isTarget || (int)$source['source_card_holder_id'] === $holderId) $credit += (int)$source['credit_cents'];
+            }
+            $sale = (array)Db::name('cashier_v3_sales_order')->where('tenant_id', $tenantId)
+                ->where('order_id', (string)$header['sales_order_id'])->find();
+            $lineName = (string)Db::name('cashier_v3_sales_order_line')->where('tenant_id', $tenantId)
+                ->where('order_line_id', (string)$header['sales_order_line_id'])->value('item_name_snapshot');
+            // Multi-upgrade snapshots remain settled after a sale reversal. The
+            // lifecycle ledger, not the mutable source link, proves restoration.
+            $reversed = $this->appendCardUpgradeReversals((string)$header['sales_order_id'], $tenantId, $append);
+            $append('multi-upgrade:' . $header['upgrade_id'], '卡升级',
+                $isTarget ? '来源卡：' . implode('、', $parts) : '升级至：' . $lineName,
+                $this->moneyFromCents($credit), (string)($sale['business_date'] ?? date('Y-m-d', (int)$header['settled_at'])),
+                (int)$header['settled_at'], (string)($sale['store_name_snapshot'] ?? ''),
+                (string)($sale['operator_name_snapshot'] ?? ''),
+                $reversed ? '已冲销；原卡权益已恢复'
+                    : ($isTarget ? '已完成；原卡权益抵入本卡' : '已完成；原卡已升级'), '');
+        }
+    }
+
+    /** Exact upgrade sale identity exposes its reversal to both source and target cards. */
+    private function appendCardUpgradeReversals(string $salesOrderId, string $tenantId, callable $append): bool
+    {
+        $found = false;
+        foreach (Db::name('cashier_v3_order_lifecycle_operation')->where('tenant_id', $tenantId)
+            ->where('source_type', 'sales')->where('source_order_id', $salesOrderId)
+            ->whereIn('operation_type', ['void', 'refund'])->where('status', 'succeeded')->select()->toArray() as $row) {
+            $found = true;
+            $append('lifecycle:' . $row['operation_id'], (string)$row['operation_type'] === 'void' ? '升级订单作废' : '升级订单退款',
+                (string)$row['source_order_no_snapshot'], $this->moneyFromCents((int)$row['cash_refund_cents']),
+                (string)$row['business_date'], (int)$row['occurred_at'],
+                (string)Db::name('system_store')->where('id', (int)$row['store_id'])->value('name'),
+                (string)Db::name('system_store_staff')->where('id', (int)$row['operator_id'])->value('staff_name'),
+                '已完成；原卡权益已恢复', (string)$row['reason_snapshot']);
+        }
+        return $found;
     }
     /**
      * AI uses the same authoritative balance/card readers as cashier detail,
@@ -1221,12 +1459,11 @@ final class CashierV3MemberDetailQueryServices
             // 整卡转让只改变当前持卡人；原购卡人仍留在订单上供债务归属和审计。
             ->where('o.paid', 1)
             ->where('o.is_del', 0)
-            ->where('o.is_user_del', 0)
-            ->where('o.card_upgrade_use_oid', 0);
+            ->where('o.is_user_del', 0);
         if ($activeOnly) {
             // Voided cards remain readable under "all" for card-specific audit,
             // but must never re-enter the active rights selector.
-            $holderQuery->where('h.is_del', 0);
+            $holderQuery->where('h.is_del', 0)->where('o.card_upgrade_use_oid', 0);
             $holderQuery->where('h.write_surplus_times', '>', 0)->where('o.refund_status', 0)->where('o.terminal_action', 0);
         }
         if ($dateFrom !== '') $holderQuery->where('h.add_time', '>=', strtotime($dateFrom . ' 00:00:00'));
@@ -1237,7 +1474,7 @@ final class CashierV3MemberDetailQueryServices
         // AI 候选读取和所有写命令继续走各自权限门禁。
         $this->applyDetailKeyword($holderQuery, $keyword, ['h.card_name', 'h.card_no']);
         $holders = $holderQuery
-            ->field('h.id,h.uid,h.oid,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price,o.store_id as order_store_id,o.is_system_del,o.mark')
+            ->field('h.id,h.uid,h.oid,h.is_del,h.card_name,h.card_no,h.store_id,h.write_start,h.write_end,h.add_time,o.pay_price as order_pay_price,o.store_id as order_store_id,o.is_system_del,o.mark,o.card_upgrade_use_oid,o.refund_status,o.terminal_action')
             ->order('h.id', 'asc')
             ->select()
             ->toArray();
@@ -1255,6 +1492,7 @@ final class CashierV3MemberDetailQueryServices
             ), true
         );
         $holderByOrder = [];
+        $historyCards = [];
         foreach ($holders as $holder) {
             $hiddenHistorical = (int)$holder['is_system_del'] === 1
                 && (int)$holder['store_id'] === 0
@@ -1273,10 +1511,31 @@ final class CashierV3MemberDetailQueryServices
             if ($activeOnly && (($start > 0 && $start > $now) || ($end > 0 && $end < $now))) {
                 continue;
             }
+            // Closed holders retain the existing per-card history button under
+            // "all". Never feed their old component/rule balances into live
+            // amount authorities or totals, even if the legacy order is active.
+            $upgraded = (int)$holder['card_upgrade_use_oid'] > 0;
+            $closed = $upgraded || (int)$holder['is_del'] !== 0
+                || (int)$holder['refund_status'] === 2 || (int)$holder['terminal_action'] !== 0;
+            if ($closed) {
+                if (!$activeOnly) $historyCards[(int)$holder['uid']][] = [
+                    'id' => (string)$holder['id'], 'cardNo' => (string)$holder['card_no'],
+                    'cardName' => trim((string)$holder['card_name']) ?: '会员卡项',
+                    'statusCode' => $upgraded ? 'upgraded' : 'voided',
+                    'statusLabel' => $upgraded ? '已升级' : '已作废',
+                    'cardRuleType' => '', 'isTimeCard' => false,
+                    'storeName' => (string)Db::name('system_store')->where('id', (int)$holder['store_id'])->value('name'),
+                    'openedAt' => $this->dateTime($holder['add_time']),
+                    'expiresAt' => $this->dateTime($holder['write_end'], '长期有效'),
+                    'remainingTimes' => 0, 'debtLimitedRemainingTimes' => 0, 'remainingAmount' => '0.00',
+                    'purchaseBatchNo' => (string)$holder['oid'], 'projects' => [],
+                ];
+                continue;
+            }
             $holderByOrder[(int)$holder['oid']] = $holder;
         }
         if (!$holderByOrder) {
-            return [];
+            return $historyCards;
         }
         $holderIds = array_values(array_unique(array_map(static function (array $holder): int {
             return (int)($holder['id'] ?? 0);
@@ -1414,7 +1673,7 @@ final class CashierV3MemberDetailQueryServices
                 return (int)$holder['store_id'];
             }, $holderByOrder))))
             ->column('name', 'id');
-        $cards = [];
+        $cards = $historyCards;
         foreach ($holderByOrder as $orderId => $holder) {
             $projects = $projectsByOrder[$orderId] ?? [];
             if (!$projects && $activeOnly) {
@@ -1616,6 +1875,8 @@ final class CashierV3MemberDetailQueryServices
             // 退款仍保留原始类型码用于对账，会员页面只展示可理解的业务名称。
             'manual_refund_credit' => '退款转入余额',
             'manual_refund_debit' => '余额退款扣减',
+            // Card conversion credits gift balance; its zero settlement delta is not the transferred amount.
+            'card_to_balance' => '卡转余额',
         ];
         $label = $labels[$normalized] ?? (trim($value) !== '' ? $value : '余额变动');
         return strtolower(trim($direction)) === 'reversal' && !str_contains($label, '返还') ? $label . '冲销' : $label;
@@ -1636,7 +1897,7 @@ final class CashierV3MemberDetailQueryServices
             'card_upgrade' => '卡升级', 'card_extension' => '卡延期',
             'card_transfer' => '卡转让', 'card_disable' => '卡停用',
             'card_enable' => '卡启用', 'project_replacement' => '项目替换',
-            'project_upgrade' => '项目升级',
+            'project_upgrade' => '项目升级', 'card_to_balance' => '卡转余额',
         ];
         $key = strtolower(trim($value));
         return $labels[$key] ?? (trim($value) !== '' ? $value : '卡操作');
@@ -1645,7 +1906,7 @@ final class CashierV3MemberDetailQueryServices
     private function cardOperationStatusLabel(string $value): string
     {
         $labels = [
-            'succeeded' => '已完成', 'awaiting_checkout' => '待结账',
+            'succeeded' => '已完成', 'completed' => '已完成', 'awaiting_checkout' => '待结账',
             'failed' => '失败', 'cancelled' => '已取消',
         ];
         $key = strtolower(trim($value));
@@ -1677,7 +1938,7 @@ final class CashierV3MemberDetailQueryServices
     private function sourceDocumentLabel(string $value): string
     {
         $labels = ['sales' => '销售订单', 'recharge' => '充值订单',
-            'debt_repayment' => '欠款补交', 'manual_refund' => '退款记录'];
+            'debt_repayment' => '欠款补交', 'manual_refund' => '退款记录', 'card_operation' => '卡操作'];
         $key = strtolower(trim($value));
         return $labels[$key] ?? (trim($value) !== '' ? $value : '—');
     }

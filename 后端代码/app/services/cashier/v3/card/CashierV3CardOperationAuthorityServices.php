@@ -421,18 +421,19 @@ final class CashierV3CardOperationAuthorityServices
         ?CashierV3DataScopeContext $snapshotDataScope = null
     ): array
     {
+        // Discovery never authorizes use. All card mutations and legacy
+        // terminal writers serialize on origin before holder to avoid cycles.
+        $holderHint = $this->row(Db::name('user_card_holder')->where('id', $holderId)->field('id,oid')->find());
+        $originId = (int)($holderHint['oid'] ?? 0);
+        $order = $originId > 0 ? $this->row(Db::name('store_order')->where('id', $originId)->lock(true)->find()) : [];
         $holder = $this->row(Db::name('user_card_holder')
             ->where('id', $holderId)
             ->where('is_del', 0)
             ->lock(true)
             ->find());
-        if (!$holder || (int)($holder['oid'] ?? 0) <= 0 || (int)($holder['uid'] ?? 0) <= 0) {
+        if (!$holder || $originId <= 0 || (int)($holder['oid'] ?? 0) !== $originId || (int)($holder['uid'] ?? 0) <= 0) {
             throw self::notFound('card_holder_not_active');
         }
-        $order = $this->row(Db::name('store_order')
-            ->where('id', (int)$holder['oid'])
-            ->lock(true)
-            ->find());
         if (!$this->activeOrder($order)
             || (int)($holder['store_id'] ?? 0) !== (int)($order['store_id'] ?? 0)
             || (int)($holder['store_id'] ?? 0) <= 0) {

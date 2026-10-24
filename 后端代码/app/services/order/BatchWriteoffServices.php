@@ -675,6 +675,9 @@ class BatchWriteoffServices extends BaseServices
             return;
         }
         $row = $locked->toArray();
+        // The orphan path bypasses cancelWriteoff, so it needs the same
+        // conversion boundary before changing history, performance or rights.
+        \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertLegacyOrderNotConverted((int)$row['oid']);
         StoreOrderWriteoff::where('id', $wid)->update(['status' => 1]);
         StaffYeji::where('link_id', $wid)->where('type', 3)->update(['status' => 1]);
         $cartId = (int)($row['order_cart_id'] ?? 0);

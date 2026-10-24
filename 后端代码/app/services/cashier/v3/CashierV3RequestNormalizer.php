@@ -261,6 +261,7 @@ class CashierV3RequestNormalizer
                 'card_transfer',
                 'card_disable',
                 'card_enable',
+                'card_to_balance',
                 'project_replacement',
                 'project_upgrade',
             ]
@@ -282,6 +283,7 @@ class CashierV3RequestNormalizer
             'card_transfer',
             'card_disable',
             'card_enable',
+            'card_to_balance',
         ], true);
         $reason = CashierV3AliasResolver::resolveString($payload, ['reason'], $reasonRequired);
         if (mb_strlen($reason) > 500) {
@@ -329,7 +331,21 @@ class CashierV3RequestNormalizer
             return $base;
         }
         $base['sourceCardHolderId'] = $holderId;
-        if ($type === 'card_transfer') {
+        if ($type === 'card_to_balance') {
+            // The displayed full balance is a confirmation, never an editable
+            // conversion amount. No catalogue/resource version enters this intent.
+            $base['memberId'] = self::canonicalPositiveInteger($payload['memberId'] ?? null, 'memberId');
+            $base['confirmedAmountCents'] = self::canonicalPositiveInteger(
+                $payload['confirmedAmountCents'] ?? null, 'confirmedAmountCents'
+            );
+            if ($base['confirmedAmountCents'] % 100 !== 0
+                || array_diff(array_keys($payload), ['operationType', 'operation_type',
+                    'sourceCardHolderId', 'source_card_holder_id', 'memberId', 'confirmedAmountCents',
+                    'reason', 'idempotencyKey']) !== []) {
+                throw self::invalidCardOperation('card_to_balance_snapshot_invalid');
+            }
+            return $base;
+        } elseif ($type === 'card_transfer') {
             $base['targetMemberId'] = self::canonicalPositiveInteger(
                 CashierV3AliasResolver::resolveString(
                     $payload,

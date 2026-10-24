@@ -31,6 +31,7 @@ class CashierV3FeatureResolver
         'cashier.v3.cashier.card.transfer',
         'cashier.v3.cashier.card.disable',
         'cashier.v3.cashier.card.enable',
+        'cashier.v3.cashier.card.to_balance',
         'cashier.v3.cashier.card.project_replace',
         'cashier.v3.cashier.card.project_upgrade',
         'cashier.v3.writeoff',

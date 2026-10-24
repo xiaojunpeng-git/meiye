@@ -43,6 +43,7 @@ import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSelectorOverlay.vue'
 import { validAllowanceCents } from '@/services/couponAllowance'
+import { cardToBalancePayload } from '@/services/cardToBalance'
 import { ordinaryCardRows, applyOrdinaryCardRows, validateOrdinaryCardSale } from '@/services/ordinaryCardSaleAdjustment'
 import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
@@ -639,16 +640,18 @@ const cardOperationTypeByMode = Object.freeze({
   'card-extension': 'card_extension',
   'card-transfer': 'card_transfer',
   'card-disable': 'card_disable',
+  'card-to-balance': 'card_to_balance',
   'card-enable': 'card_enable',
   'project-replacement': 'project_replacement',
   'project-upgrade': 'project_upgrade'
 })
 
 const cardOperationUpgradeTypes = new Set(['card_upgrade', 'project_upgrade'])
-// 延期、转让、停用、启用只改变既有卡权益，不产生销售额、收款或补差。
+// 延期、转让、停用、启用、转余额只改变既有权益，不产生销售额、收款或补差。
 // 它们必须在原因确认后立即走卡操作事务，绝不能伪装成 ¥0 的购物车行
 // 再依赖结账触发；升级类则仍需以同次销售结算为唯一生效边界。
 const directCardOperationTypes = new Set([
+  'card_to_balance',
   'card_extension',
   'card_transfer',
   'card_disable',
@@ -668,6 +671,7 @@ const cardOperationTargetModes = new Set([
   'project-upgrade'
 ])
 const cardOperationReasonModes = new Set([
+  'card-to-balance',
   'card-extension',
   'card-transfer',
   'card-disable',
@@ -2766,7 +2770,31 @@ function cardOperationSourceBalance(source = {}, quantity = 1) {
   return Math.round((remainingValue * selectedQuantity / remainingTimes) * 100) / 100
 }
 
+// 转赠金后只刷新当前会员摘要，不用诊断根投影覆盖收银现场，也不在客户端加金额。
+async function refreshCardToBalanceMemberSummary(selectedMember = {}) {
+  const memberId = String(selectedMember.id || selectedMember.memberId || '')
+  if (!memberId) return
+  try {
+    const response = await requestAction('query-cashier-member-summary', {
+      memberId, preserveRootState: true, silent: true
+    })
+    const summary = responseDataBlock(response)?.memberSummary
+    if (!['success', 'succeeded'].includes(resultStatus(response)) || !isRecord(summary)) return
+    if (String(currentMemberId.value || '') !== memberId) return
+    state.cashier = {
+      ...(state.cashier || {}),
+      customerMode: 'member',
+      member: { ...selectedMember, ...(member.value || {}), ...summary }
+    }
+  } catch (error) {
+    // 已成功的资金命令不能因后续只读刷新失败被报成失败或重新提交。
+    console.warn('Card to balance succeeded but member summary refresh failed.', error)
+  }
+}
+
 async function submitDirectCardOperation({ source, date = '', reason = '' } = {}) {
+  // 直接操作共享提交锁，避免重复确认期间发出第二笔命令。
+  if (isSubmittingCardOperation.value) return
   const operation = previewCardOperation.value || {}
   if (operation.mode === 'card-upgrade') {
     return appendMultiCardUpgradeTarget(operation)
@@ -2779,10 +2807,10 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
   // sends only the page intent; the server locks and checks current rows in
   // its transaction. Upgrade and other card operations retain versioned
   // command contexts.
-  const commandContexts = operationType === 'project_replacement'
+  const commandContexts = operationType === 'project_replacement' || operationType === 'card_to_balance'
     ? null
     : cardOperationCommandContexts(operation, source, operationType)
-  if (!operationType || !sourceContext || (operationType !== 'project_replacement' && !commandContexts) || (reasonRequired && !normalizedReason)) {
+  if (!operationType || !sourceContext || (!['project_replacement', 'card_to_balance'].includes(operationType) && !commandContexts) || (reasonRequired && !normalizedReason)) {
     const message = !sourceContext
       ? '来源卡数据不完整，请重新选择。'
       : reasonRequired && !normalizedReason
@@ -2843,7 +2871,7 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
         }
       }
     : null
-  const payload = operationType === 'project_replacement'
+  let payload = operationType === 'project_replacement'
     ? {
         operationType,
         idempotencyKey: createCashierV3CommandId('CARD_OPERATION'),
@@ -2858,6 +2886,18 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
         targetSnapshot,
         ...(commandContexts ? { commandContexts } : {})
       }
+  // 卡转余额只提交已确认的唯一业务内容，不附带目标目录或版本上下文。
+  if (operationType === 'card_to_balance') {
+    try {
+      payload = {
+        ...cardToBalancePayload(source, currentMemberId.value, sourceContext.id, normalizedReason),
+        idempotencyKey: payload.idempotencyKey
+      }
+    } catch (error) {
+      reportEntitlementContractError({ message: error.message })
+      return { result: { status: 'failed', code: 'CARD_TO_BALANCE_UNAVAILABLE', message: error.message } }
+    }
+  }
   if (normalizedReason) payload.reason = normalizedReason
   if (operationType === 'card_extension') {
     const newWriteEnd = operationEndOfDayTimestamp(date)
@@ -2950,7 +2990,7 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
     return { result: { status: 'success', preview: true } }
   }
 
-  // 这五类操作都只变更既有权益：卡延期、转让、停用、启用与项目替换。
+  // 直接操作只变更既有权益；卡转余额须由同一事务终止原卡并全额转入赠金。
   // 原因确认即为业务命令的最终确认，服务端在同一事务内锁定卡状态、
   // 执行变更并写审计；前端不得把它们加入购物车或要求零金额结账。
   if (directCardOperationTypes.has(operationType)) {
@@ -2982,6 +3022,7 @@ async function submitDirectCardOperation({ source, date = '', reason = '' } = {}
       if (['success', 'succeeded'].includes(operationStatus)) {
         finalizeEntitlementSelector()
         previewCardOperation.value = null
+        if (operationType === 'card_to_balance') await refreshCardToBalanceMemberSummary(selectedMember || {})
         // 项目替换沿用既有成功文案；本轮新增的四类直接操作明确提示“已生效”，
         // 让用户知道不需要再进入结账流程，也不误以为创建了销售订单。
         const successMessage = operationType === 'project_replacement'
@@ -7828,7 +7869,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div
-      v-if="cardOperationNotice && !['card_disable', 'card_enable', 'card_extension'].includes(cardOperationNoticeType)"
+      v-if="cardOperationNotice && !['card_disable', 'card_enable', 'card_extension', 'card_to_balance'].includes(cardOperationNoticeType)"
       class="cashier-card-operation-notice"
       role="status"
       aria-live="polite"
@@ -7968,7 +8009,7 @@ onBeforeUnmount(() => {
 
       <section class="cart-panel" aria-label="会员和购物车">
         <div class="cart-panel__content">
-          <section v-if="previewCardOperation?.sources?.length && !['card-disable', 'card-enable', 'card-extension'].includes(previewCardOperation.mode)" class="cashier-operation-preview" :aria-label="previewCardOperation.label">
+          <section v-if="previewCardOperation?.sources?.length && !['card-disable', 'card-enable', 'card-extension', 'card-to-balance'].includes(previewCardOperation.mode)" class="cashier-operation-preview" :aria-label="previewCardOperation.label">
             <header>
               <strong>{{ previewCardOperation.label }}</strong>
               <span>{{ cardOperationTargetModes.has(previewCardOperation.mode) ? '待确认' : '正在确认' }}</span>
@@ -8373,7 +8414,7 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <!-- 停用、启用、延期提交中不可关闭或重复操作；请求结束后由既有结果反馈展示成功/失败。 -->
-      <div v-if="isSubmittingCardOperation && ['card_disable', 'card_enable', 'card_extension'].includes(cardOperationNoticeType)" class="cashier-ui-feedback-backdrop">
+      <div v-if="isSubmittingCardOperation && ['card_disable', 'card_enable', 'card_extension', 'card_to_balance'].includes(cardOperationNoticeType)" class="cashier-ui-feedback-backdrop">
         <section class="cashier-ui-feedback" role="dialog" aria-modal="true" :aria-label="cardOperationNotice" aria-busy="true">
           <div role="status" aria-live="polite">
             <span class="checkout-spinner" aria-hidden="true"></span>

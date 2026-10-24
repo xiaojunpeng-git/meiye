@@ -41,6 +41,8 @@ class JobPositionPolicyServices extends BaseServices
             ['id' => 301017, 'title' => '卡启用', 'feature_code' => 'cashier.v3.cashier.card.enable'],
             ['id' => 301018, 'title' => '项目替换', 'feature_code' => 'cashier.v3.cashier.card.project_replace'],
             ['id' => 301019, 'title' => '项目升级', 'feature_code' => 'cashier.v3.cashier.card.project_upgrade'],
+            // New monetary conversion is opt-in; existing position IDs never imply this leaf.
+            ['id' => 301051, 'title' => '卡转余额', 'feature_code' => 'cashier.v3.cashier.card.to_balance'],
         ]],
         ['id' => 301002, 'title' => '挂单', 'feature_code' => 'cashier.v3.hang'],
         ['id' => 301003, 'title' => '房间', 'feature_code' => 'cashier.v3.room'],
