@@ -800,14 +800,21 @@ final class CashierV3CardOperationAuthorityServices
                 throw self::failure('project_replacement_source_quantity_invalid');
             }
             $quantity = -$delta;
-            $snapshot = json_decode((string)($row['cart_info'] ?? ''), true) ?: [];
-            $allocation = CashierV3CardOperationKernel::replacementAllocation(
-                self::moneyToCents($row['pay_price'] ?? null), $times, $before, $quantity,
-                CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot($snapshot)
-            );
-            // 计划、来源扣除和目标转入必须同口径；锁内不允许临时换金额而
-            // 留下与真实权益不一致的操作审计。差额由计划行快照永久保留。
-            if (($mutation['replacementAmountAllocation'] ?? null) !== $allocation) {
+            $allocation = (array)($mutation['replacementAmountAllocation'] ?? []);
+            // The planner built this immutable allocation from the locked,
+            // whole-yuan source pool. Validate its equation again here; the
+            // legacy cart price can still contain reporting cents and must
+            // never replace the normalized authority in a new operation.
+            if (($allocation['calculationVersion'] ?? '') !== 'replacement-whole-yuan-v1'
+                || (int)($allocation['sourceValueBeforeCents'] ?? -1) < 0
+                || (int)($allocation['sourceDeductionCents'] ?? -1) < 0
+                || (int)($allocation['sourceValueAfterCents'] ?? -1) < 0
+                || (int)($allocation['targetValueCents'] ?? -1) < 0
+                || (int)($allocation['roundingDeductionCents'] ?? -1) !== 0
+                || (int)$allocation['sourceValueBeforeCents']
+                    !== (int)$allocation['sourceDeductionCents'] + (int)$allocation['sourceValueAfterCents']
+                || (int)$allocation['sourceDeductionCents'] !== (int)$allocation['targetValueCents']
+                || (int)$allocation['targetValueCents'] % 100 !== 0) {
                 throw self::failure('project_replacement_amount_changed');
             }
             $value = $allocation['targetValueCents'];
@@ -944,7 +951,7 @@ final class CashierV3CardOperationAuthorityServices
             ->lock(true)
             ->select();
         $allRows = $this->rows($rows);
-        $actualAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], $allRows);
+        $actualAmounts = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$order], $allRows);
         $unavailableDebt = (new \app\services\cashier\v3\cashier\CashierV3CardOriginDebtResolver())
             ->unavailableCardDebt($order, (int)($order['uid'] ?? 0), $operatorScope->tenantId());
         /** @var WriteOffOrderServices $writeoff */
@@ -965,12 +972,8 @@ final class CashierV3CardOperationAuthorityServices
             $cartInfo = is_array($cartInfo) ? $cartInfo : [];
             $actualCents = (int)($actualAmounts[$detailId] ?? -1);
             $purchaseCents = $actualCents >= 0 ? $actualCents : self::moneyToCents($row['pay_price'] ?? null);
-            if ($purchaseCents % 100 !== 0) {
-                // 改价后分摊可精确到分，不能交给只接受整元的旧卡分配器。
-                $cartInfo['amountCalculationVersion'] = 'operation-cent-card-upgrade';
-            }
-            $remainingAmount = CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
-                self::centsToMoney($purchaseCents), $times, $times - $remaining, $cartInfo
+            $remainingAmount = CashierV3EntitlementActualAmountAllocator::remaining(
+                self::centsToMoney($purchaseCents), $times, $times - $remaining
             );
             $sharedLimit = $this->cardRules->debtLimitForDetail($row, $order);
             // 共享任选卡的子项目金额可能为零，整卡上限才是其次数权威。
@@ -1032,9 +1035,9 @@ final class CashierV3CardOperationAuthorityServices
                 'totalTimes' => $times,
                 'totalValueCents' => $operationType === CashierV3CardOperationKernel::TYPE_PROJECT_UPGRADE
                     ? $purchaseCents : self::moneyToCents($row['pay_price'] ?? null),
-                'centCapable' => CashierV3EntitlementActualAmountAllocator::isCentCapableSnapshot(
-                    json_decode((string)($row['cart_info'] ?? ''), true) ?: []
-                ),
+                // A replacement/upgrade is always a new whole-yuan write. Old
+                // cent markers are trace metadata and cannot reopen cent mode.
+                'centCapable' => false,
             ];
         }
         if (count($projects) !== count($ids)) {
@@ -1375,19 +1378,25 @@ final class CashierV3CardOperationAuthorityServices
 
     private function remainingValueCents(int $orderId): int
     {
+        $order = $this->row(Db::name('store_order')->where('id', $orderId)
+            ->field('id,pay_price')->lock(true)->find());
+        if (!$order) {
+            throw self::failure('card_remaining_value_order_missing');
+        }
         $rows = Db::name('store_order_cart_info')
             ->where('oid', $orderId)
             ->where('cart_type', 2)
             ->where('product_type', 6)
-            ->where('is_writeoff', 0)
-            ->where('write_surplus_times', '>', 0)
-            ->field('id,oid,product_id,pay_price,write_times,write_surplus_times,cart_info')
+            ->field('id,oid,product_id,pay_price,write_times,write_surplus_times,is_writeoff,cart_info')
             ->lock(true)
             ->select();
         if (is_object($rows) && method_exists($rows, 'toArray')) {
             $rows = $rows->toArray();
         }
-        $actualAmounts = (new CashierV3CardSaleActualAmountServices())->forOrders([$orderId], (array)$rows);
+        // Normalize against every original component before excluding exhausted
+        // rows. Otherwise the largest-remainder owner can move after use and
+        // the remaining card value would drift between operations.
+        $actualAmounts = (new CashierV3CardSaleActualAmountServices())->wholeYuanForOrders([$order], (array)$rows);
         $total = 0;
         foreach ((array)$rows as $row) {
             $times = (int)($row['write_times'] ?? 0);
@@ -1395,17 +1404,14 @@ final class CashierV3CardOperationAuthorityServices
             if ($times <= 0 || $remaining < 0 || $remaining > $times) {
                 throw self::failure('card_remaining_value_source_invalid');
             }
+            if ((int)($row['is_writeoff'] ?? 0) !== 0 || $remaining === 0) {
+                continue;
+            }
             // 改价签发卡使用实际成交分摊，历史卡没有该事实时沿用原项目价。
             $purchaseCents = (int)($actualAmounts[(int)($row['id'] ?? 0)] ?? -1);
             if ($purchaseCents < 0) $purchaseCents = self::moneyToCents($row['pay_price'] ?? null);
-            $snapshot = json_decode((string)($row['cart_info'] ?? ''), true);
-            $snapshot = is_array($snapshot) ? $snapshot : [];
-            if ($purchaseCents % 100 !== 0) {
-                $snapshot['amountCalculationVersion'] = 'operation-cent-card-upgrade';
-            }
-            $total += self::moneyToCents(CashierV3EntitlementActualAmountAllocator::remainingForSnapshot(
-                self::centsToMoney($purchaseCents), $times, $times - $remaining,
-                $snapshot
+            $total += self::moneyToCents(CashierV3EntitlementActualAmountAllocator::remaining(
+                self::centsToMoney($purchaseCents), $times, $times - $remaining
             ));
         }
         return $total;
