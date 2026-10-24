@@ -1,0 +1,11 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "files": {
+    "后端代码/database/upgrades/20261024_r30_third_party_config_definitions.sql": "7de40127596fdd7642e7fc01510ca8fe2f1e32b56332c1f077797e67b3b3519a",
+    "tests/system-config/php/r30-third-party-config.php": "3133ce311cc2107de73d5358a7961056e69813abd84adea3bbf97b05e18f1161",
+    "scripts/r30-third-party-probe.php": "9db361d056a13765838ceaae4d4e8ac92e429af7dd24634a2160dacd7a73b312"
+  },
+  "onlineWrites": false,
+  "pmAcceptance": "pending",
+  "target": "008 only"
+}
