@@ -40,6 +40,10 @@ Route::group('cashierapi/v3', function () {
     // 门店端独立登录：统一员工账号 → 可进入门店列表 → 门店绑定会话。
     Route::post('login', 'StoreLogin/login')->option(['real_name' => '门店端账号登录']);
 
+    // 无门店会话时仅可消费平台签发的一次性票据；不能由客户端指定门店或员工。
+    Route::post('platform-entry/consume', 'PlatformStoreEntry/consume')
+        ->option(['real_name' => '平台进入门店']);
+
     /**
      * 需登录、强制门店、按角色校验
      */

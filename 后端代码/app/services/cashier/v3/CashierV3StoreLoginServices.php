@@ -60,7 +60,25 @@ class CashierV3StoreLoginServices extends BaseServices
         /** @var EmployeeInternalAccountServices $accounts */
         $accounts = app()->make(EmployeeInternalAccountServices::class);
         $auth = $accounts->authenticateByPassword($account, $password);
-        $employeeId = (int)$auth['employee_id'];
+        return $this->loginAuthenticatedEmployee((int)$auth['employee_id'], (int)($auth['account_row']['id'] ?? 0), $storeId);
+    }
+
+    /**
+     * 已由平台会话或密码核实的员工共用门店登录分流。每次重读账号及员工状态，
+     * 再按实时任职、岗位入口和组织范围发门店会话，不能因跨端凭证绕过选店。
+     *
+     * @return array
+     */
+    public function loginAuthenticatedEmployee(int $employeeId, int $accountId, int $storeId = 0): array
+    {
+        /** @var EmployeeInternalAccountServices $accounts */
+        $accounts = app()->make(EmployeeInternalAccountServices::class);
+        $account = $accounts->getByEmployeeId($employeeId);
+        $employee = Db::name('employee')->where('id', $employeeId)->where('is_del', 0)->find();
+        if (!$account || (int)($account['status'] ?? 0) !== 1 || (int)($account['id'] ?? 0) !== $accountId
+            || !$employee || (int)($employee['status'] ?? 0) !== 1) {
+            throw new AdminException('当前员工账号已失效，请重新登录');
+        }
         /** @var EmployeeInternalLoginServices $employees */
         $employees = app()->make(EmployeeInternalLoginServices::class);
         // 门店人员分支：唯一有效任职门店固定直登；不能被数据权限门店覆盖。
@@ -72,7 +90,7 @@ class CashierV3StoreLoginServices extends BaseServices
             return $this->issueSelectedStore(
                 $employeeId,
                 (int)$direct['store_id'],
-                (int)($auth['account_row']['id'] ?? 0),
+                $accountId,
                 [$direct]
             );
         }
@@ -95,7 +113,7 @@ class CashierV3StoreLoginServices extends BaseServices
             $selectionTicket = bin2hex(random_bytes(24));
             Cache::set(self::SELECT_TICKET_PREFIX . $selectionTicket, [
                 'employee_id' => $employeeId,
-                'account_id' => (int)($auth['account_row']['id'] ?? 0),
+                'account_id' => $accountId,
             ], self::SELECT_TICKET_TTL);
             return [
                 'need_select_store' => true,
@@ -110,7 +128,7 @@ class CashierV3StoreLoginServices extends BaseServices
         return $this->issueSelectedStore(
             $employeeId,
             (int)$organization[0]['store_id'],
-            (int)($auth['account_row']['id'] ?? 0),
+            $accountId,
             $organization
         );
     }
