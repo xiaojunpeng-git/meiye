@@ -1,0 +1,63 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "baselineTree": "4325fa08e71348a88d8ee86ca8bc13ddf25fe0e3",
+  "candidateTree": "31d2e5d0b8bcfaa7253a2d2282bd3e9aae0a0b82",
+  "treePurpose": "scoped patch only; not a release baseline",
+  "businessPatchSha256": "eb48c97621b20468aca4b2a5930574cc11d79da85fb5601fbc9f2980cc0f889c",
+  "existingControllerBaseline": {
+    "blob": "66d05e72079ce8a93bfbf8a581c2c7e82a27ecb7",
+    "sha256": "284d6ef3d6ea9b879f38ab016258ad4027ea317ffa55be77bc8cfb7baf921fd4"
+  },
+  "files": [
+    {
+      "file": "前端代码/admin/src/pages/target/scheme/Edit.vue",
+      "sha256": "b5efd40a885e884021d87982529312189a3b4b38128793827d5ad03c6f1f2d45"
+    },
+    {
+      "file": "前端代码/admin/src/utils/targetSchemeExcel.js",
+      "sha256": "f9bfd379d2e40386ffe6fff5e4977b80d1b651e1a65377ac440577923046465b"
+    },
+    {
+      "file": "后端代码/app/controller/admin/v1/target/StoreTarget.php",
+      "sha256": "f0227ab03f55d8cb96678528a852d9a762e0810aa34d16efcaf483ece3bc1a1e"
+    },
+    {
+      "file": "tests/target-scheme/js/r95-excel-names.mjs",
+      "sha256": "12eb2b0220e071a05f4c105af45e76fc024b7388e4d11bcb177f9414d74ddb80"
+    },
+    {
+      "file": "tests/target-scheme/js/r95-excel-browser.cjs",
+      "sha256": "01c6fbbfc2e9b2f38c3b7b1cea2a3bdf0359a768961c8d0d8ed571c1101c14f9"
+    },
+    {
+      "file": "tests/target-scheme/php/r95-excel-import-integration.php",
+      "sha256": "d84cd0a29c06106bf5fd06e71b30eac3160bb3e96a5a18a65d5bf12f8b91676a"
+    },
+    {
+      "file": "scripts/r95-excel-local-build.cjs",
+      "sha256": "baadf6f85d00a1f668936b9d10b6ce0d83e102ae6b52849f1bc84162edcf9622"
+    },
+    {
+      "file": "scripts/r95-excel-evidence.cjs",
+      "sha256": "de4d69ef2d4f84aff874ff07b12de8b4a9600cb8a6ac8f0af7ddd47640c347ed"
+    }
+  ],
+  "verification": {
+    "importChecks": 49,
+    "databaseChecks": 19,
+    "existingControls": 20,
+    "browserChecks": 7,
+    "productionBuild": {
+      "result": "PASS",
+      "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+      "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/前端代码/admin",
+      "hotEntry": "http://127.0.0.1:18081/admin/login",
+      "output": "/private/tmp/mohe-r95-excel-local-build-20261024",
+      "htmlSha256": "13549b2ee8c97946b8ab81957ad06ee9f34c0bd30d0f98accf14d6f604665580",
+      "release": false
+    }
+  },
+  "remote": "not applicable; no remote access",
+  "commit": false,
+  "deployment": false
+}

@@ -187,6 +187,18 @@ class StoreTarget extends AuthController
             if (!in_array($storeId, $context['store_ids'], true)) throw new \InvalidArgumentException('无权选择该门店商品');
             $keyword = trim((string)$this->request->get('keyword', ''));
             $query = Db::name('store_product')->where('is_del', 0)->where('type', 1)->where('relation_id', $storeId);
+            // Excel 名称导入不能从模糊搜索的前100条猜身份；精确匹配最多返回两条即可识别重名。
+            // 带编号的消歧名称及旧模板仍在同一授权门店内查找，绝不绕过门店归属。
+            $exactName = (string)$this->request->get('exact_name', '');
+            $productId = (string)$this->request->get('product_id', '');
+            if ($productId !== '') {
+                if (!preg_match('/^[1-9]\d{0,14}$/D', $productId)) throw new \InvalidArgumentException('商品编号无效');
+                $query->where('id', (int)$productId);
+            } elseif ($exactName !== '') {
+                if (mb_strlen($exactName) > 255) throw new \InvalidArgumentException('商品名称过长');
+                $query->where('store_name', $exactName);
+            }
+            if ($productId !== '' || $exactName !== '') return $this->success($query->field('id,store_name,product_type')->order('id', 'desc')->limit(2)->select()->toArray());
             if ($keyword !== '') $query->whereLike('store_name|id', '%' . $keyword . '%');
             return $this->success($query->field('id,store_name,product_type')->order('id', 'desc')->limit(100)->select()->toArray());
         } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }

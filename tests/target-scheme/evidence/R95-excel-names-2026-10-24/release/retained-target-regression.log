@@ -1,0 +1,53 @@
+PASS migration preserves only current effective lines
+PASS migration preserves line identity and value
+PASS different months coexist
+PASS October stays active after November activation
+PASS same month other metric and store coexist
+PASS category and full-store goals do not conflict
+PASS annual dashboard sums months only, excludes category and other metric
+PASS dashboard cell IDs identify each owning scheme
+PASS old clients cannot silently replace a conflict
+PASS preview reports exact conflict
+PASS preview and cancel leave old target effective
+PASS stale conflict confirmation cannot replace changed owner
+PASS activation response replay is idempotent
+PASS fully replaced scheme has no effective status
+PASS replacement leaves November intact
+PASS unified reader group_dashboard
+PASS unified reader store_target
+PASS unified reader target_analysis
+PASS unified reader target_monthly
+PASS unified reader target_store
+PASS unified reader merchant_target_analysis
+PASS unified reader operations_performance_comparison
+PASS invalid report reads no targets
+PASS empty authorization reads no targets
+PASS tenant isolation
+PASS partial permissions cannot void whole scheme
+PASS active scheme cannot be deleted
+PASS draft cannot be deleted
+PASS void removes only current scheme, no historical resurrection
+PASS delete replay is idempotent
+PASS deleted detail inaccessible
+PASS deleted scheme absent from listing
+PASS delete preserves historical target lines
+PASS void and delete are independently audited
+PASS deletion does not change other month target
+PASS report month projection target_analysis
+PASS uncovered actual remains null target_analysis
+PASS report month projection target_monthly
+PASS uncovered actual remains null target_monthly
+PASS report month projection target_store
+PASS uncovered actual remains null target_store
+PASS report month projection merchant_target_analysis
+PASS uncovered actual remains null merchant_target_analysis
+PASS other actor cannot delete empty scheme
+PASS stale delete version rejected
+PASS empty deletion leaves all effective targets unchanged
+PASS partially replaced scheme remains active for other reports
+PASS detail exposes remaining per-line report references
+PASS voiding previous owner leaves replacement in another report
+PASS concurrent empty-target activation produces one winner and one explicit conflict
+PASS concurrent activation never duplicates dashboard targets
+R95_CHECKS=51
+ISOLATED_TABLES_REMOVED
