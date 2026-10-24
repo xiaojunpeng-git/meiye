@@ -5,6 +5,7 @@ import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import Store from '@lucide/vue/dist/esm/icons/store.mjs'
 import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
+import StoreFullscreenButton from './StoreFullscreenButton.vue'
 import { configuredNavigationGroups } from '../../../../shared/storeNavigationGroups.js'
 import { ORDER_RECORD_TYPES } from '@/constants/orderRecordTypes'
 import { STORE_REPORT_TABS } from '@/constants/storeBusinessReports'
@@ -138,6 +139,7 @@ onBeforeUnmount(() => { requestId++; basicRequestId++; document.removeEventListe
     <nav class="store-quickbar" aria-label="常用快捷入口">
       <button v-for="entry in quickEntries" :key="entry.key" type="button" class="cashier-nav__item" :class="{ 'cashier-nav__item--active': isActive(entry) }" :aria-current="isActive(entry) ? 'page' : undefined" @click="choose(entry)"><component :is="entry.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" /><span class="cashier-nav__label">{{ entry.label }}</span><span v-if="entry.key === 'hang' && pendingHangCount > 0" class="cashier-nav__badge">{{ pendingHangCount }}</span></button>
     </nav>
+      <StoreFullscreenButton />
       <button type="button" class="store-topbar__account store-topbar__account-button" aria-label="查看操作员信息" :aria-expanded="openGroup === 'account'" aria-controls="store-operator-profile" @click="openGroup = openGroup === 'account' ? '' : 'account'"><CircleUserRound :size="19" /><span>{{ operator }}</span></button>
     </div>
     <!-- 账号操作不属于业务授权；所属菜单大类停用时仍保留退出入口，避免锁住会话。 -->
