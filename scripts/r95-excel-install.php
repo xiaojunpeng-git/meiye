@@ -18,7 +18,14 @@ function excelDestination($key,$root,$site,$preview){
     if($relative==='public/system.html'||strpos($relative,'public/view_admin/')===0)$destination=$base.'/'.$relative;
     $backend=['app/controller/admin/v1/target/StoreTarget.php','app/services/target/TargetSchemeServices.php','app/services/report/GroupManagementDashboardTargetServices.php'];
     if($parts[0]==='formal'&&in_array($relative,$backend,true))$destination=$base.'/'.$relative;
-    if($destination===null||is_link($destination))throw new RuntimeException('TARGET_NOT_ALLOWED');
+    if($destination===null)throw new RuntimeException('TARGET_NOT_ALLOWED');
+    // RH's existing preview entry points into its own immutable integration
+    // directory. Keep the link intact and update only that allowed entry target.
+    if(is_link($destination)){
+        $resolved=realpath($destination);
+        if($site!=='rh'||$parts[0]!=='preview'||$relative!=='public/system.html'||$resolved===false||!preg_match('~^'.preg_quote($base,'~').'/public/\.local-8080-integration-releases/[a-f0-9]+/system\.html$~',$resolved))throw new RuntimeException('TARGET_NOT_ALLOWED');
+        $destination=$resolved;
+    }
     $parent=dirname($destination);while(!file_exists($parent)&&!is_link($parent))$parent=dirname($parent);
     $real=realpath($parent);if($real===false||($real!==$base&&strpos($real,$base.'/')!==0))throw new RuntimeException('TARGET_ESCAPES_INSTANCE');
     return $destination;

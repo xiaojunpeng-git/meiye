@@ -37,6 +37,18 @@ try{
     result=invoke('install');assert.notEqual(result.status,0);assert.match(result.stdout+result.stderr,/PREVIEW_NOT_AUTHORIZED/);checks++;
     manifest.targets={'formal/.env':{before:null,after:sha('new-entry')}};write(backup+'/payload/manifest.json',JSON.stringify(manifest));
     result=invoke('install');assert.notEqual(result.status,0);assert.match(result.stdout+result.stderr,/TARGET_NOT_ALLOWED/);checks++;
+    manifest.previewAuthorized=true;
+    manifest.targets={'preview/public/system.html':{before:sha('old-entry'),after:sha('new-entry')}};
+    write(backup+'/payload/manifest.json',JSON.stringify(manifest));
+    write(backup+'/payload/preview/public/system.html','new-entry');
+    const preview='wwwroot/rh.cc3798.com-8080/public', linked=preview+'/.local-8080-integration-releases/abcdef12/system.html';
+    write(linked,'old-entry');fs.symlinkSync('.local-8080-integration-releases/abcdef12/system.html',path.join(temp,preview,'system.html'));
+    result=invoke('install');assert.equal(result.status,0,result.stdout+result.stderr);assert(fs.lstatSync(path.join(temp,preview,'system.html')).isSymbolicLink());assert.equal(fs.readFileSync(path.join(temp,linked),'utf8'),'new-entry');checks++;
+    result=invoke('rollback');assert.equal(result.status,0,result.stdout+result.stderr);assert.equal(fs.readFileSync(path.join(temp,linked),'utf8'),'old-entry');checks++;
+    fs.unlinkSync(path.join(temp,backup,'prepared.json'));docker(['exec',container,'rm','/www/'+backup+'/prepared.json']);
+    fs.unlinkSync(path.join(temp,preview,'system.html'));docker(['exec',container,'rm','/www/'+preview+'/system.html']);
+    fs.symlinkSync('../../../rh.cc3798.com/public/system.html',path.join(temp,preview,'system.html'));
+    result=invoke('install');assert.notEqual(result.status,0);assert.match(result.stdout+result.stderr,/TARGET_NOT_ALLOWED/);checks++;
     const report={checks,result:'PASS',scope:'network-isolated synthetic filesystem; no live site writes'};
     fs.writeFileSync('tests/target-scheme/evidence/R95-excel-names-2026-10-24/release/installer-tests.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }finally{if(container)docker(['rm','-f',container]);fs.rmSync(temp,{recursive:true,force:true});}

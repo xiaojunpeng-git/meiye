@@ -1,5 +1,5 @@
 {
-  "checks": 5,
+  "checks": 8,
   "result": "PASS",
   "scope": "network-isolated synthetic filesystem; no live site writes"
 }
