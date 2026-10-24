@@ -1,0 +1,10 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "files": {
+    "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue": "59709f2e07f0d5d858ca40c68a282523f7a02464569400966aa3d2e463477812",
+    "tests/cashier-v3/js/r32-report-scroll-browser.cjs": "007e71761d0b2ca03c361bf400ba733f973145d7fe285daca69f6e655674ca00"
+  },
+  "scopedPatchSha256": "5447c2de50275a750b9f2e04fc9ea32ed35e7f7d6403dfb67e4fda4a1199de2c",
+  "pmAcceptance": "pending",
+  "online": "not applicable; local only"
+}
