@@ -230,6 +230,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 ['max_rows' => UnifiedQueryExecutionServices::MAX_SOURCE_ROWS]
             );
         }
+        // 消费订单与全部订单复用同一逐明细分类解析，筛选、列表及导出才不会出现两套口径。
+        if ($type === 'sales') $records = $this->salesQueries->attachCurrentItemCategories($records);
         return (new CashierV3OrderCenterQueryIdentities())->attach($type, $this->projectRows($type, $records), (string)$operatorScope->tenantId());
     }
 
@@ -243,6 +245,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             if (isset($this->sourcePayload['_allOrderTypes']) && !in_array($label, $this->sourcePayload['_allOrderTypes'], true)) continue;
             $records = $type === 'sales' ? $this->allSalesRows($operatorScope, $dataScope)
                 : $this->allRecordRows($type, $operatorScope, $dataScope);
+            if ($type === 'sales') $records = $this->salesQueries->attachCurrentItemCategories($records);
             $projected = $identities->attach($type, $this->projectRows($type, $records), (string)$operatorScope->tenantId());
             foreach ($projected as $row) {
                 // ID 保留给原业务命令，record_id 用于跨类型的排序和页面行键。
@@ -250,6 +253,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 $row['business_type'] = $label;
                 $row['order_no'] = $row[$type === 'sales' ? 'sales_order_no' : $type . '_order_no'];
                 $row['event_completed_at'] = $row[$type === 'refund' ? 'refund_completed_at' : 'payment_completed_at'];
+                $row = self::mixedDisplayFields($type, $row);
                 $rows[] = $row;
             }
             if (count($rows) > UnifiedQueryExecutionServices::MAX_SOURCE_ROWS) {
@@ -258,6 +262,23 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         }
         $this->sourcePage = ['recordType' => 'all', 'dataStatus' => 'ready', 'dataAsOf' => date('c'), 'statusOptions' => []];
         return $rows;
+    }
+
+    /** 混合页的通用列与其列表展示读取同一业务字段；专用列及原始金额保持不变。 */
+    private static function mixedDisplayFields(string $type, array $row): array
+    {
+        if ($type === 'sales') return $row;
+        $nameField = $type === 'recharge' ? 'recharge_plan' : 'product_name';
+        $amountField = $type . '_amount';
+        $row['item_name'] = $row[$nameField] ?? null;
+        $row['line_amount'] = $row[$amountField] ?? null;
+        if ($type === 'refund') {
+            $row['payment_method'] = $row['refund_method'] ?? null;
+            $row['order_status'] = $row['refund_status'] ?? null;
+        } elseif ($type === 'supplement') {
+            $row['order_status'] = $row['payment_status'] ?? null;
+        }
+        return $row;
     }
 
     protected function allSalesRows($operatorScope, $dataScope): array
@@ -381,6 +402,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'labor_fee_amount' => ['laborFeeAmount', 'manualLaborFeeAmount'],
             'labor_performance_type' => ['laborPerformanceTypeLabel', 'laborPerformanceType'],
             'labor_performance_ratio' => ['laborPerformanceRatio'],
+            'consumption_performance_amount' => ['consumptionPerformanceAmount'],
             'labor_performance_amount' => ['laborPerformanceAmount'],
             'service_status' => ['serviceStatus'], 'service_completed_at' => ['serviceCompletedAt', 'completedAt'],
             'voided_at' => ['voidedAt'], 'void_reason' => ['voidReason'], 'void_operator' => ['voidOperatorName'],
@@ -406,11 +428,12 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             }
             if ($type === 'sales') {
                 // 直接使用表格的权威明细，不重算价格、不把权益价值计入整单收款。
-                foreach (['item_name','unit_price','quantity','line_amount','craftsman','sales_manager','guide'] as $key) $row[$key] = [];
+                foreach (['item_name','product_category','unit_price','quantity','line_amount','craftsman','sales_manager','guide'] as $key) $row[$key] = [];
                 foreach ($record['items'] ?? [] as $item) {
                     foreach (['item_name'=>'name','unit_price'=>'unitPrice','quantity'=>'quantity'] as $key=>$source) {
                         if (isset($item[$source]) && $item[$source] !== '') $row[$key][] = $item[$source];
                     }
+                    $row['product_category'][] = (string)($item['category'] ?? '未分类');
                     // 导出与表格同取用券前金额；权益行仍展示独立核销价值。
                     $amount = $item[($item['businessTag'] ?? '') === '权益' ? 'entitlementAmount' : 'amountBeforeCoupon'] ?? null;
                     if ($amount !== null) $row['line_amount'][] = $amount;
@@ -421,6 +444,10 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                             if ($name !== '') $row[$key][] = $name;
                         }
                     }
+                }
+                if (is_array($row['items'] ?? null)) {
+                    foreach ($row['items'] as &$item) unset($item['_categoryProductIds']);
+                    unset($item);
                 }
             }
             if (in_array($type, ['refund', 'supplement'], true)) {
