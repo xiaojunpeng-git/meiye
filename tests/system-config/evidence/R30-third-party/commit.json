@@ -1,0 +1,22 @@
+{
+  "commit": "bef3f9459c0e8d5fc4eeb5f041ffa92c90630727",
+  "branch": "release/r30-third-party-008-20261024",
+  "baseHead": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "actualFiles": [
+    "scripts/r30-third-party-apply.php",
+    "scripts/r30-third-party-probe.php",
+    "scripts/r30-third-party-verify.php",
+    "tests/system-config/evidence/R30-third-party/008-before.json",
+    "tests/system-config/evidence/R30-third-party/008-preapply.json",
+    "tests/system-config/evidence/R30-third-party/authorization.json",
+    "tests/system-config/evidence/R30-third-party/fixed-files.json",
+    "tests/system-config/evidence/R30-third-party/initial.json",
+    "tests/system-config/evidence/R30-third-party/local-test.log",
+    "tests/system-config/evidence/R30-third-party/rh-before.json",
+    "tests/system-config/evidence/R30-third-party/修复说明.md",
+    "tests/system-config/php/r30-third-party-config.php",
+    "后端代码/database/upgrades/20261024_r30_third_party_config_definitions.sql"
+  ],
+  "sharedIndexUntouched": true,
+  "pmAccepted": true
+}

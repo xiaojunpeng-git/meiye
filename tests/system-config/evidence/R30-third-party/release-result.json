@@ -1,0 +1,9 @@
+{
+  "sourceCommit": "bef3f9459c0e8d5fc4eeb5f041ffa92c90630727",
+  "target": "008",
+  "result": "PASS",
+  "push": "not authorized; not performed",
+  "businessCodeDeployment": false,
+  "databaseUpgrade": "20261024-r30-third-party-config",
+  "otherSitesChanged": false
+}

@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "commit": "bef3f9459c0e8d5fc4eeb5f041ffa92c90630727",
+  "addedDefinitions": 4,
+  "existingValuesUnchanged": true,
+  "codeAndFrontendUnchanged": true,
+  "productionFakeKeyWrites": 0,
+  "backup": "/www/backups/008/r30-third-party-bef3f945"
+}
