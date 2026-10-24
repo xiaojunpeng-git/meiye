@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "results": [
+    {
+      "name": "full-read",
+      "result": "PASS",
+      "output": "{\"result\":\"PASS\",\"checks\":9,\"records\":7,\"fullProjection\":true,\"serverReadOnly\":true,\"businessWrites\":0}"
+    },
+    {
+      "name": "missing-dependency",
+      "result": "PASS",
+      "output": "{\"result\":\"PASS\",\"missingDependencyReproduced\":true,\"fullProjectionAborted\":true,\"businessWrites\":0}"
+    },
+    {
+      "name": "amount",
+      "result": "PASS",
+      "output": "{\"result\":\"PASS\",\"checks\":303,\"authority_mode\":\"current\",\"authority_sha256\":\"eda75efb579ca3a132196d46a3cb1035cd56b949f91d94d15f510f1e2e561da5\",\"allocator_sha256\":\"2fd37698ff7a227adc67c504e15cfd3d44b144b867124e9d987b449750f4f722\",\"helper_sha256\":\"c78ecd68414213640d3a158a224e96da4ef8e31096cd673cd64689ec16cae45c\",\"php\":\"7.4.33\",\"framework_booted\":false,\"database_connections\":0,\"business_writes\":false}"
+    },
+    {
+      "name": "member-contract",
+      "result": "PASS",
+      "harness": "Only test root resolved to readonly canonical mount"
+    }
+  ],
+  "productionWrites": false
+}

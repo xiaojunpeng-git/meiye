@@ -1,0 +1,13 @@
+[
+  {
+    "url": "https://010.cc3798.com/view_cashier_v3/",
+    "commit": "7b38fbc0c2cd6a85f67fc93d3f5d7bdcbb0b623a",
+    "result": "PASS",
+    "assets": {
+      "assets/index-fd4b0ad9.js": "d7bfa5eff3d640bd32288fd41fffe6a80532868228c570543c4c09f694d7610c",
+      "assets/index-08aaba60.css": "08aaba60abadb1c300e8538bb029d494b781a22a9e92ef4d2e1bb8e0b7f6e430"
+    },
+    "loginBoot": "PASS",
+    "limit": "Anonymous boot and readonly backend tested; no authenticated financial action."
+  }
+]
