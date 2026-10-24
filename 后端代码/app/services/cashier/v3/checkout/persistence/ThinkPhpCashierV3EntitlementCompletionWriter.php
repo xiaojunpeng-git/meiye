@@ -67,12 +67,16 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             $this->allocateServiceDocumentNumbersInTx($plan->serviceRows(), $context)
         );
         $serviceRows = $this->attachSameCheckoutSaleSourceInTx($serviceRows, $context);
+        $performanceRows = $plan->performanceRows();
+        [$serviceRows, $performanceRows, $lifecycleContext] = $this->attachEntitlementCheckoutSourceInTx(
+            $serviceRows, $performanceRows, $context
+        );
         $inserted = [
             'writeoff' => $this->persistRows(self::WRITEOFF_TABLE, 'writeoff', $plan->writeoffRows()),
             'service' => $this->persistRows(self::SERVICE_TABLE, 'service', $serviceRows),
-            'performance' => $this->persistRows(self::PERFORMANCE_TABLE, 'performance', $plan->performanceRows()),
+            'performance' => $this->persistRows(self::PERFORMANCE_TABLE, 'performance', $performanceRows),
         ];
-        (new CustomerLifecycleFactServices())->recordServiceCompletionInTx($context, $serviceRows);
+        (new CustomerLifecycleFactServices())->recordServiceCompletionInTx($lifecycleContext, $serviceRows);
 
         $result = [
             'contractVersion' => CashierV3EntitlementCompletionPlanV1::CONTRACT_VERSION,
@@ -650,6 +654,50 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
         }
         unset($row);
         return $serviceRows;
+    }
+
+    /**
+     * A pure entitlement checkout has no sale order. Copy its frozen choice to
+     * every fact created by this completion transaction; never borrow the old
+     * card sale or the member's current source. Legacy fingerprints stay based
+     * on the plan payload so a completed receipt remains replayable.
+     */
+    private function attachEntitlementCheckoutSourceInTx(array $serviceRows, array $performanceRows, array $context): array
+    {
+        if (!$serviceRows || (int)($serviceRows[0]['business_source_primary_id'] ?? 0) > 0) {
+            return [$serviceRows, $performanceRows, $context];
+        }
+        $request = Db::name('cashier_v3_checkout_request')
+            ->where('tenant_id', (string)$context['tenant_id'])
+            ->where('store_id', (int)$context['store_id'])
+            ->where('request_id', (string)$context['checkout_request_id'])
+            ->where('member_id', (int)$context['member_id'])
+            ->where('composition', 'entitlement_only')
+            ->find();
+        if (!$request) return [$serviceRows, $performanceRows, $context];
+        $selection = Db::name('cashier_v3_checkout_business_source_selection')
+            ->where('tenant_id', (string)$context['tenant_id'])
+            ->where('store_id', (int)$context['store_id'])
+            ->where('checkout_kind', 'sale')
+            ->where('checkout_request_id', (string)$context['checkout_request_id'])
+            ->lock(true)->find();
+        if (!$selection || (int)$selection['primary_source_id'] <= 0
+            || trim((string)$selection['primary_source_name_snapshot']) === ''
+            || trim((string)$selection['source_label_snapshot']) === '') {
+            return [$serviceRows, $performanceRows, $context];
+        }
+        $source = [
+            'business_source_primary_id' => (int)$selection['primary_source_id'],
+            'business_source_primary_name_snapshot' => (string)$selection['primary_source_name_snapshot'],
+            'business_source_secondary_id' => (int)$selection['secondary_source_id'],
+            'business_source_secondary_name_snapshot' => (string)$selection['secondary_source_name_snapshot'],
+            'business_source_label_snapshot' => (string)$selection['source_label_snapshot'],
+        ];
+        foreach ($serviceRows as &$row) $row = array_merge($row, $source);
+        unset($row);
+        foreach ($performanceRows as &$row) $row = array_merge($row, $source);
+        unset($row);
+        return [$serviceRows, $performanceRows, array_merge($context, $source)];
     }
 
     private function assertImmutableReplay(string $domain, array $expected, array $existing): void
