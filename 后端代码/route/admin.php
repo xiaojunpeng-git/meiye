@@ -101,6 +101,8 @@ Route::group('adminapi', function () {
 		Route::get('setting/admin/logout', 'v1.system.admin.SystemAdmin/logout')->name('SystemAdminLogout')->option(['real_name' => '退出登录']);
 		//获取当前管理员信息
 		Route::get('setting/info', 'v1.system.admin.SystemAdmin/info')->name('SystemAdminInfo')->option(['real_name' => '获取当前管理员信息']);
+		// 平台当前员工进入门店：只签发短时一次性身份票据，不代入门店管理员。
+		Route::post('store-entry/ticket', 'v1.store.PlatformStoreEntry/ticket')->option(['real_name' => '签发门店端进入票据']);
 		//修改当前管理员信息
 		Route::put('setting/update_admin', 'v1.system.admin.SystemAdmin/update_admin')->name('SystemAdminUpdateAdmin')->option(['real_name' => '修改当前管理员信息']);
 
