@@ -1,0 +1,86 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "files": {
+    "前端代码/cashier-v3/src/views/MemberListView.vue": "5161a39514d7255dc8e22999cfa012c122148869694abefc4b3c6d0acdd1087d",
+    "前端代码/cashier-v3/src/components/query/MemberReportQueryToolbar.vue": "e6e95d0e0d320f6e7f91f2dd1939ab3b81215c6c7bdc3b5f22db8fe38135022a",
+    "前端代码/cashier-v3/src/services/memberReportFilters.js": "40f23fe757210ca3142310c5bb1d5372e5b113b019ab170cdce3d1071170bcda",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedReportQueryToolbar.vue": "1141bf33499dda8a9f5966dda22f7b748178ac4d40ea4a156d0143d68f24bc91",
+    "前端代码/shared/unified-query-vue3/src/contracts/reportFilters.js": "2b6d6b1769c388860faf9ea5c4d9d611bb087698b4c98a467aba46a528bf88dc",
+    "tests/cashier-v3/js/r55-member-filters.mjs": "c5f7d5516d3fa9314db36f5fa73e106a47fe5a5536c18f58aed8711d9090ccbe",
+    "tests/cashier-v3/php/r55-member-filter-metadata.php": "c28d75cbd03ef775c8d348498908cacab92215967e92d3ee151c19e12b226a5e",
+    "tests/cashier-v3/js/unified-query-frontend-contract.mjs": "866fa3aca3b7aa4ade5a39c950cfd83319d6843c494578734b223cbbf05d720a",
+    "tests/report-basic/js/report-filter-contract.mjs": "03127cd573e64316d7dc42b3c68b4727148ce3006bdf8a686d8001be4d625707",
+    "scripts/r55-member-filters-verify.cjs": "7e24a2bac2b63454c1c82dd2a4eef0b3a00be1ace878d93cd453d4a746ec3739"
+  },
+  "sourceStable": true,
+  "knownGlobalSuite": {
+    "result": "PRE_EXISTING_FAILURE",
+    "globalRuns": {
+      "baseline": {
+        "status": 1,
+        "failure": "工具栏 facade 仅保留宿主适配"
+      },
+      "current": {
+        "status": 1,
+        "failure": "工具栏 facade 仅保留宿主适配"
+      }
+    },
+    "changedFacade": false
+  },
+  "results": [
+    {
+      "name": "member-browser",
+      "result": "PASS"
+    },
+    {
+      "name": "report-regression",
+      "result": "PASS"
+    },
+    {
+      "name": "period-contract",
+      "result": "PASS"
+    },
+    {
+      "name": "member-create-retained",
+      "result": "PASS"
+    },
+    {
+      "name": "member-edit-retained",
+      "result": "PASS"
+    },
+    {
+      "name": "member-save-retained",
+      "result": "PASS"
+    },
+    {
+      "name": "member-export-retained",
+      "result": "PASS"
+    },
+    {
+      "name": "checkout-prebuild",
+      "result": "PASS"
+    },
+    {
+      "name": "build",
+      "result": "PASS"
+    }
+  ],
+  "build": {
+    "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/前端代码/cashier-v3",
+    "hotEntry": "http://127.0.0.1:18091/view_cashier_v3/#/member",
+    "output": "/private/tmp/mohe-r55-member-filters-build-20261024",
+    "assets": {
+      "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "assets/index-4b4af571.js": "3a269ae4ac1d68cec3939e6d81f75394d82742437fe324f777d32ac5db25c659",
+      "assets/index-e44022db.css": "e44022db5cd2f5874d45dd6d341e76a5b678ab25a6b76b6b2a5d030733980644",
+      "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "index.html": "255b9e87f922d2a0e1f07ef3230ef06c03016456680fbde9f7403ae5c226e351"
+    }
+  },
+  "scope": "R55 local member list filters only; excludes unrelated hot-workspace changes from future commit/deployment",
+  "onlineInstances": "Not applicable: no remote access",
+  "databaseMigration": false,
+  "commit": false,
+  "push": false,
+  "deployment": false
+}

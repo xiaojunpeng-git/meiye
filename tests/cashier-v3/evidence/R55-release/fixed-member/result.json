@@ -1,0 +1,21 @@
+{
+  "result": "PASS",
+  "checks": 114,
+  "views": [
+    {
+      "width": 1480,
+      "result": "PASS"
+    },
+    {
+      "width": 610,
+      "result": "PASS"
+    },
+    {
+      "width": 375,
+      "result": "PASS"
+    }
+  ],
+  "backendChecks": 24,
+  "transport": "isolated fixture; real MemberListView and query components",
+  "financialWrites": 0
+}

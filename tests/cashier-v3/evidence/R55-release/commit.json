@@ -1,0 +1,18 @@
+{
+  "commit": "3b078c16beecdd5779cd3601c7856b7f9bb41d28",
+  "branch": "release/r55-member-filters-20261024",
+  "tree": "df92b91f52e940a245cfd44b7448067a40bbd427",
+  "files": [
+    "scripts/r55-member-filters-verify.cjs",
+    "tests/cashier-v3/js/r55-member-filters.mjs",
+    "tests/cashier-v3/js/unified-query-frontend-contract.mjs",
+    "tests/cashier-v3/php/r55-member-filter-metadata.php",
+    "tests/report-basic/js/report-filter-contract.mjs",
+    "前端代码/cashier-v3/src/components/query/MemberReportQueryToolbar.vue",
+    "前端代码/cashier-v3/src/services/memberReportFilters.js",
+    "前端代码/cashier-v3/src/views/MemberListView.vue",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedReportQueryToolbar.vue",
+    "前端代码/shared/unified-query-vue3/src/contracts/reportFilters.js"
+  ],
+  "sharedIndexUntouched": true
+}
