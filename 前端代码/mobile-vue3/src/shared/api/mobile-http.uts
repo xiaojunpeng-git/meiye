@@ -28,9 +28,20 @@ export function sendMobileRequest(plan : any, body : any, done : (value : Mobile
 	// 同站H5也必须只使用显式商家凭据。XMLHttpRequest的withCredentials=false
 	// 不能阻止同源Cookie，因此WEB使用credentials=omit，原生端仍沿用uni.request。
 	// #ifdef WEB
+	// fetch 不会像 uni.request 一样把 GET data 转为查询串。保留既有路径参数，
+	// 将筛选与分页显式写入 URL；不能丢失待确认条件，也不能把它们作为 GET body。
+	let requestUrl = new URL(origin + '/api' + plan.path)
+	if (plan.method == 'GET' && body != null) {
+		let queryNames = Object.keys(body)
+		for (let index = 0; index < queryNames.length; index++) {
+			let name = queryNames[index]
+			let value = body[name]
+			if (value != null) requestUrl.searchParams.set(name, String(value))
+		}
+	}
 	let controller = new AbortController()
 	let timeout = setTimeout(() => controller.abort(), 60000)
-	fetch(origin + '/api' + plan.path, { method: plan.method, headers: headers, credentials: 'omit', signal: controller.signal,
+	fetch(requestUrl.toString(), { method: plan.method, headers: headers, credentials: 'omit', signal: controller.signal,
 		body: plan.method == 'GET' ? undefined : JSON.stringify(body == null ? {} : body)
 	}).then(async (response : any) => {
 		let payload : any = await response.json()

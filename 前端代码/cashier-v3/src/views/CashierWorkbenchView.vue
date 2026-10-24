@@ -115,6 +115,7 @@ const localCheckoutBusinessSource = ref({
   rewardAmountCents: 0
 })
 const rechargeSession = ref(null)
+const rechargeAwaitingSource = ref(false)
 const isRechargeSubmitting = ref(false)
 const rechargePreparationError = ref('')
 const isHangOrderOpen = ref(false)
@@ -177,6 +178,32 @@ const defaultTypes = [...preferredCatalogTypeOrder]
 
 const cashier = computed(() => state.cashier || {})
 const member = computed(() => cashier.value.member || null)
+// Source policy controls new-business initialization and visibility only. A
+// local checkout/hang/reservation snapshot remains the owner of its chosen source.
+const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
+function initialBusinessSource(kind) {
+  const currentId = Number(member.value?.memberId || member.value?.id || 0)
+  const service = state.cashier?.serviceOrder
+  // A linked appointment is this business, not a remembered previous sale.
+  // Only a member-matched, reservation-bound server projection may carry it.
+  if (kind === 'purchase' && Number(service?.memberId || 0) === currentId
+    && Number(service?.reservationId || 0) > 0
+    && Number(service?.businessSource?.primarySourceId || 0) > 0) {
+    return clonePlain(service.businessSource)
+  }
+  const rootMatches = Number(state.businessSourceDefaultsMemberId ?? -1) === currentId
+  // Fixed choices are instance configuration, not member history. Browser-only
+  // member selection can precede a root projection: it must not invalidate the
+  // same authenticated instance's configured source. History remains ID-bound.
+  const fixed = state.businessSourcePolicy?.enabled === false
+  const defaults = fixed ? state.businessSourceDefaults || {}
+    : member.value?.sourceDefaults || (rootMatches ? state.businessSourceDefaults : {}) || {}
+  const source = clonePlain(defaults[kind] || {})
+  if (fixed && Number(source.primarySourceId || 0) <= 0 && !source.configurationError) {
+    source.configurationError = '固定来源配置尚未加载，请刷新页面后重试。'
+  }
+  return source
+}
 // 实例开关关闭或投影尚未到达时，不提供新增欠款入口；已存在的欠款事实不在页面清除。
 const isDebtEntryVisible = computed(() => cashier.value.debtPaymentEnabled === true)
 const currentMemberId = computed(() => member.value?.id || member.value?.memberId || '')
@@ -585,6 +612,8 @@ const checkoutRequiresRootReload = ref(false)
 const checkoutOverlayState = computed(() => ({
   ...(localCheckoutPreview.value || checkout.value),
   ...checkoutLocalOutcome.value,
+  // A policy refresh may hide inputs, but must never mutate snapshot.source.
+  sourceEnabled: businessSourceEnabled.value && (localCheckoutPreview.value || checkout.value).sourceEnabled !== false,
   ...(activeCardOperationUpgrade.value
     ? {
         cardOperationUpgrade: clonePlain(activeCardOperationUpgrade.value),
@@ -1791,6 +1820,16 @@ watch(
 )
 
 async function openCheckoutBusinessSourceSelector(kind) {
+  if (!businessSourceEnabled.value) {
+    // Keep the post-member-selection debt/entitlement flow moving even though
+    // fixed mode has no interactive source dialog.
+    if (Number(localCheckoutBusinessSource.value.primarySourceId || 0) <= 0) {
+      localCheckoutBusinessSource.value = initialBusinessSource('purchase')
+    }
+    publishToolbarCheckoutContext()
+    window.dispatchEvent(new CustomEvent('cashier-v3:checkout-business-source-confirmed'))
+    return localDraftResult()
+  }
   const current = kind === 'recharge' ? rechargeCheckout.value : checkout.value
   const isLocalSaleEdit = kind !== 'recharge'
     && (localCheckoutPreview.value?.localDraftPreview === true
@@ -1799,10 +1838,11 @@ async function openCheckoutBusinessSourceSelector(kind) {
   if (kind === 'recharge' && !current) {
     return { result: { status: 'failed', code: 'BUSINESS_SOURCE_NOT_SELECTABLE', message: '本次补交继承原订单来源，不能修改。' } }
   }
-  if (current.sourceSelectable === false) {
+  if (kind !== 'recharge-session' && current.sourceSelectable === false) {
     return { result: { status: 'failed', code: 'BUSINESS_SOURCE_NOT_SELECTABLE', message: '本次补交继承原订单来源，不能修改。' } }
   }
-  const localSource = localCheckoutBusinessSource.value
+  const localSource = kind === 'recharge-session'
+    ? rechargeSession.value?.businessSourceSnapshot || {} : localCheckoutBusinessSource.value
   checkoutBusinessSourceSelector.value = {
     kind,
     sources: [],
@@ -1843,6 +1883,7 @@ function closeCheckoutBusinessSourceSelector() {
   if (!isSavingCheckoutBusinessSource.value) {
     const kind = checkoutBusinessSourceSelector.value?.kind || 'sale'
     checkoutBusinessSourceSelector.value = null
+    if (kind === 'recharge-session') closeRecharge()
     if (kind === 'sale') {
       window.dispatchEvent(new CustomEvent('cashier-v3:checkout-business-source-cancelled', {
         detail: { kind }
@@ -1865,12 +1906,14 @@ async function persistCheckoutBusinessSource(kind, selection = {}) {
     localCheckoutBusinessSource.value = {
       primarySourceId,
       secondarySourceId,
+      explicitChoice: true,
       rewardAmountCents: Math.max(0, rewardAmountCents)
     }
     if (localCheckoutPreview.value?.localDraftPreview === true) {
       localCheckoutPreview.value.primarySourceId = primarySourceId
       localCheckoutPreview.value.secondarySourceId = secondarySourceId
       localCheckoutPreview.value.rewardAmountCents = Math.max(0, rewardAmountCents)
+      localCheckoutPreview.value.source = checkoutSourceSnapshot(primarySourceId, secondarySourceId, rewardAmountCents)
     }
     publishToolbarCheckoutContext()
     return localDraftResult('客户来源已回填到本地结账快照。')
@@ -1897,6 +1940,22 @@ async function persistCheckoutBusinessSource(kind, selection = {}) {
 async function saveCheckoutBusinessSource(selection = {}) {
   const selector = checkoutBusinessSourceSelector.value
   if (!selector) return
+  if (selector.kind === 'recharge-session') {
+    // Confirming recharge attribution does not mutate the purchase toolbar or
+    // any other bill. This snapshot stays in the same recharge session.
+    const primary = (selector.sources || []).find((item) => Number(item.id) === Number(selection.primarySourceId))
+    const secondary = (primary?.children || []).find((item) => Number(item.id) === Number(selection.secondarySourceId))
+    if (!rechargeSession.value || !primary || (Number(primary.requireSecondary) === 1 && !secondary)) return
+    rechargeSession.value.businessSourceSnapshot = {
+      primarySourceId: Number(primary.id), primarySourceNameSnapshot: String(primary.name),
+      secondarySourceId: Number(secondary?.id || 0), secondarySourceNameSnapshot: String(secondary?.name || ''),
+      displayNameSnapshot: [primary.name, secondary?.name].filter(Boolean).join(' / '),
+      rewardAmountCents: Number(selection.rewardAmountCents || 0)
+    }
+    rechargeAwaitingSource.value = false
+    checkoutBusinessSourceSelector.value = null
+    return
+  }
   // Before the sale checkout overlay opens, the toolbar source is only a
   // browser-side field. Do not route this interaction through any stale
   // checkout projection that may still be present in the root state.
@@ -1905,6 +1964,7 @@ async function saveCheckoutBusinessSource(selection = {}) {
     if (primarySourceId <= 0) return
     localCheckoutBusinessSource.value = {
       primarySourceId,
+      explicitChoice: true,
       secondarySourceId: Number(selection.secondarySourceId || 0),
       rewardAmountCents: Math.max(0, Number(selection.rewardAmountCents || 0))
     }
@@ -4967,6 +5027,9 @@ function handleMemberSelectedForEntitlement(event = {}) {
     return
   }
   if (event.detail?.context !== 'cashier') return
+  // Explicit member selection starts a fresh choice; root refreshes and retries
+  // do not run this initializer or clear a source already confirmed in this bill.
+  localCheckoutBusinessSource.value = initialBusinessSource('purchase')
   // 收银员明确选择会员时，新的选择替代提单恢复摘要；之后的根投影
   // 可以按正常客户切换流程更新，不能再由旧挂单检查点回写。
   restoredHangMemberCheckpoint.value = null
@@ -5012,28 +5075,41 @@ function openRecharge(event = {}) {
     return
   }
   rechargePreparationError.value = ''
-  // 客户来源在选会员后已由收银顶部确认。充值第一步只保存这一份浏览器
-  // 快照；后续“下一步”不得再读取可能被异步根投影清掉的工具栏状态，
-  // 更不能要求员工重复选择来源。
+  // Recharge uses its own policy default, never a purchase-history default.
+  // A manually selected toolbar choice is this bill's input and may be carried
+  // explicitly, but subsequent retries keep the captured recharge snapshot.
+  const initialSource = initialBusinessSource('recharge')
+  const selectedSource = localCheckoutBusinessSource.value
+  const source = selectedSource.explicitChoice === true ? selectedSource : initialSource
   rechargeSession.value = {
     ...session,
     businessSourceSnapshot: {
-      primarySourceId: Number(localCheckoutBusinessSource.value.primarySourceId || 0),
-      secondarySourceId: Number(localCheckoutBusinessSource.value.secondarySourceId || 0),
-      rewardAmountCents: Math.max(0, Number(localCheckoutBusinessSource.value.rewardAmountCents || 0))
+      ...clonePlain(source),
+      primarySourceId: Number(source.primarySourceId || 0),
+      secondarySourceId: Number(source.secondarySourceId || 0),
+      rewardAmountCents: Math.max(0, Number(source.rewardAmountCents || 0))
     }
   }
+  // The source confirmation uses the existing selector before the recharge
+  // form, so a per-kind previous default is visible and may be changed.
+  rechargeAwaitingSource.value = businessSourceEnabled.value
+  if (rechargeAwaitingSource.value) void openCheckoutBusinessSourceSelector('recharge-session')
 }
 
 function closeRecharge() {
   rechargeSession.value = null
+  rechargeAwaitingSource.value = false
   rechargePreparationError.value = ''
 }
 
 async function submitRecharge(payload = {}) {
   if (isRechargeSubmitting.value || !rechargeSession.value) return
   const capturedSource = rechargeSession.value.businessSourceSnapshot || {}
-  const livePrimarySourceId = Number(localCheckoutBusinessSource.value.primarySourceId || 0)
+  // Once captured, the recharge owns this choice. Toolbar changes behind an
+  // open form may only fill a previously empty choice, never replace one.
+  const livePrimarySourceId = Number(capturedSource.primarySourceId || 0) <= 0
+    && localCheckoutBusinessSource.value.explicitChoice === true
+    ? Number(localCheckoutBusinessSource.value.primarySourceId || 0) : 0
   const liveSecondarySourceId = Number(localCheckoutBusinessSource.value.secondarySourceId || 0)
   const primarySourceId = livePrimarySourceId > 0
     ? livePrimarySourceId
@@ -5047,7 +5123,7 @@ async function submitRecharge(payload = {}) {
   // 选会员流程尚未确认来源时，保持当前充值表单并给出明确提示；不在
   // “下一步”叠加第二个来源弹窗，避免误以为来源被重复要求。
   if (primarySourceId <= 0 || secondarySourceId < 0) {
-    rechargePreparationError.value = '请先在收银页面顶部选择客户来源。'
+    rechargePreparationError.value = capturedSource.configurationError || '请先在收银页面顶部选择客户来源。'
     return {
       result: {
         status: 'failed',
@@ -5061,6 +5137,7 @@ async function submitRecharge(payload = {}) {
     // “下一步”只冻结浏览器内这一份充值资料；不得创建服务端草稿或
     // 用工作台展示版本阻止进入收款确认。最终入账另由服务端锁定实余额。
     const businessSource = {
+      ...clonePlain(capturedSource),
       primarySourceId,
       secondarySourceId,
       rewardAmountCents
@@ -5637,7 +5714,11 @@ function localCheckoutPreviewSnapshot() {
   const composition = clonePlain(draft.checkoutComposition || {})
   const customerMode = currentCustomerMode.value
   const checkoutMemberId = Number(draft.memberId || currentMemberId.value || 0)
-  const checkoutSourceProjection = customerMode === 'guest' ? {} : checkoutProjection
+  // Never fall back to a stale checkout projection for a newly opened bill.
+  // Explicit choice wins over the per-kind initialization, even for zero IDs.
+  const initialSource = initialBusinessSource('purchase')
+  const source = Number(localCheckoutBusinessSource.value.primarySourceId || 0) > 0
+    ? localCheckoutBusinessSource.value : initialSource
   const hasSale = lines.some((line) => String(line?.lineRole || '') === 'sale')
   const hasEntitlement = lines.some((line) => String(line?.lineRole || '') === 'entitlement_service')
   const hasCardOperation = lines.some((line) => isRecord(line?.localCardOperation))
@@ -5667,11 +5748,12 @@ function localCheckoutPreviewSnapshot() {
     occurredAt: Math.floor(Date.now() / 1000),
     businessDate: String(localCheckoutBusinessDate.value || cashier.value.checkout?.businessDate || cashierToday || ''),
     businessDateReason: String(localCheckoutBusinessDateReason.value || cashier.value.checkout?.businessDateReason || ''),
-    sourceEnabled: checkoutProjection.sourceEnabled !== false,
-    sourceSelectable: checkoutProjection.sourceSelectable !== false,
-    primarySourceId: Number(localCheckoutBusinessSource.value.primarySourceId || checkoutSourceProjection.primarySourceId || 0),
-    secondarySourceId: Number(localCheckoutBusinessSource.value.secondarySourceId || checkoutSourceProjection.secondarySourceId || 0),
-    rewardAmountCents: Number(localCheckoutBusinessSource.value.rewardAmountCents || checkoutSourceProjection.rewardAmountCents || 0),
+    sourceEnabled: businessSourceEnabled.value,
+    sourceSelectable: businessSourceEnabled.value && checkoutProjection.sourceSelectable !== false,
+    source: clonePlain(source),
+    primarySourceId: Number(source.primarySourceId || 0),
+    secondarySourceId: Number(source.secondarySourceId || 0),
+    rewardAmountCents: Number(source.rewardAmountCents || 0),
     // This is the one browser-owned checkout snapshot. Payment selections are
     // appended to this same array below; do not create a parallel authority
     // for the confirmation screen.
@@ -5954,14 +6036,17 @@ async function openCheckout() {
   // The toolbar is the source of truth until checkout opens. Block an empty
   // selection here so a stale checkout projection cannot silently supply it.
   if (Number(localCheckoutBusinessSource.value.primarySourceId || 0) <= 0) {
+    localCheckoutBusinessSource.value = initialBusinessSource('purchase')
+  }
+  if (Number(localCheckoutBusinessSource.value.primarySourceId || 0) <= 0) {
     const blocked = {
       result: {
         status: 'failed',
         code: 'CASHIER_BUSINESS_SOURCE_REQUIRED',
-        message: '请先选择客户来源'
+        message: localCheckoutBusinessSource.value.configurationError || '请先选择客户来源'
       }
     }
-    reportCheckoutEntryFailure(blocked, '请先选择客户来源')
+    reportCheckoutEntryFailure(blocked, blocked.result.message)
     return blocked
   }
   const craftsmenRequiredLine = firstCartLineMissingCraftsmen()
@@ -7218,13 +7303,13 @@ async function openPreparedCheckout(event = {}) {
       occurredAt: Math.floor(Date.now() / 1000), businessDate: date,
       repaymentAmount: amount,
       salespersonAllocations: clonePlain(intent.salespersonAllocations || []),
+      // 人员归属在欠款弹窗确认后冻结进本次补交快照，不继承购物车当前行。
+      guideSelections: clonePlain(intent.guideSelections || []),
+      salesManagerSelections: clonePlain(intent.salesManagerSelections || []),
       // 欠款弹窗已确认本次补交来源，原单只是默认值；不回退工具栏来源。
       source: clonePlain(intent.businessSource || {}),
       sourceDocument: { type: 'debt_repayment', id: String(debtId), no: String(intent.record?.debtNo || '') },
       lines: [line], orderLines: [line],
-      // 人员归属在欠款弹窗确认后冻结进本次补交快照，不继承购物车当前行。
-      guideSelections: clonePlain(intent.guideSelections || []),
-      salesManagerSelections: clonePlain(intent.salesManagerSelections || []),
       summary: { originalAmount: amount, discountAmount: 0, receivableAmount: amount },
       debtAmount: 0, balancePaymentAmount: 0,
       finalChanges: [],
@@ -7236,7 +7321,7 @@ async function openPreparedCheckout(event = {}) {
         ...(intent.rechargeDebt === true
           ? { balanceAvailable: false, availableBalance: 0 }
           : checkoutBalancePreview(member.value, memberId)) },
-      sourceEnabled: true, sourceSelectable: false
+      sourceEnabled: businessSourceEnabled.value, sourceSelectable: false
     }
     checkoutLocalOutcome.value = {}
     localCheckoutPaymentOperations.value = []
@@ -7850,7 +7935,7 @@ onBeforeUnmount(() => {
     aria-label="收银工作台"
   >
     <RechargeOverlay
-      v-if="rechargeSession"
+      v-if="rechargeSession && !rechargeAwaitingSource"
       :session="rechargeSession"
       :business-date="localCheckoutBusinessDate"
       :submitting="isRechargeSubmitting"
@@ -8472,7 +8557,7 @@ onBeforeUnmount(() => {
     </Teleport>
 
     <CheckoutBusinessSourceOverlay
-      v-if="checkoutBusinessSourceSelector"
+      v-if="businessSourceEnabled && checkoutBusinessSourceSelector"
       :sources="checkoutBusinessSourceSelector.sources"
       :primary-source-id="checkoutBusinessSourceSelector.primarySourceId"
       :secondary-source-id="checkoutBusinessSourceSelector.secondarySourceId"

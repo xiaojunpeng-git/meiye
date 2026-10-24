@@ -73,7 +73,7 @@ expect('充值冻结选会员后已确认的来源，根投影变化后不重复
   && workbench.includes('Number(capturedSource.primarySourceId || 0)')
   && workbench.includes('const rewardAmountCents = livePrimarySourceId > 0')
   && !workbench.includes("new CustomEvent('cashier-v3:open-toolbar-business-source')"))
-expect('充值未选择顶部客户来源时不发送准备请求且保留当前表单', workbench.includes("rechargePreparationError.value = '请先在收银页面顶部选择客户来源。'")
+expect('充值未确认来源时不发送准备请求且保留当前表单', workbench.includes("rechargePreparationError.value = capturedSource.configurationError || '请先在收银页面顶部选择客户来源。'")
   && workbench.includes("code: 'RECHARGE_BUSINESS_SOURCE_REQUIRED'"))
 expect('充值下一步不创建服务端草稿，也不依赖工作台版本', workbench.includes('acceptLocalRechargeCheckout({')
   && !workbench.includes("requestCashierV3Action('prepare-recharge-checkout'")
@@ -104,7 +104,7 @@ expect('充值完成后重读当前工作台，刷新会员余额与欠款快照
 expect('V3 收银台由 Shell 将充值快照交给新 Checkout', shell.includes("overlayName === 'recharge'")
   && shell.includes("new CustomEvent('cashier-v3:open-recharge'")
   && shell.includes('detail: overlay')
-  && shell.includes('v-if="rechargeSession && !isCashierPage"'))
+  && shell.includes('v-if="rechargeSession && !rechargeSourceSelector && !isCashierPage"'))
 expect('充值旧草稿动作不再出现在 Shell 与桥接层', !shell.includes("action === 'prepare-recharge-checkout'")
   && !bridge.includes("canonicalAction === 'prepare-recharge-checkout'")
   && !bridge.includes("'reload-recharge-checkout'"))
@@ -135,8 +135,13 @@ expect('充值来源在本地确认快照中复用收银顶部选择', workbench
   && !rechargeCheckout.includes("'update-checkout-business-source': 'update-recharge-checkout-business-source'"))
 expect('充值结账页不重复展示客户来源选择', !checkoutOverlay.includes('isRechargeCheckout && checkout.sourceEnabled')
   && !workbench.includes('@business-source-change="saveInlineRechargeBusinessSource"'))
-expect('收款结果状态统一显示中文', checkoutOverlay.includes("if (['succeeded', 'success', 'completed'].includes(normalizedStatus)) return '成功'")
-  && checkoutOverlay.includes("if (['editing', '待确认'].includes(normalizedStatus)")
-  && !checkoutOverlay.includes('return line.status || line.paymentStatus || line.resultStatus || \'待收款\''))
+// Execute the actual formatter so adding an accepted success state cannot
+// invalidate the contract merely by changing the spelling of its array.
+const paymentStatusCode = checkoutOverlay.slice(checkoutOverlay.indexOf('function paymentLineStatus('), checkoutOverlay.indexOf('function checkoutLineRole('))
+const paymentStatus = runInNewContext(`${paymentStatusCode}; paymentLineStatus`)
+for (const [status, expected] of Object.entries({ succeeded: '成功', success: '成功', completed: '成功', settled: '成功',
+  editing: '待确认', processing: '处理中', result_unknown: '处理中', failed: '失败' })) {
+  expect(`收款状态 ${status} 显示中文`, paymentStatus({ status }) === expected)
+}
 
 console.log(`RECHARGE_OVERLAY_FRONTEND_CONTRACT_OK passed=${passed}`)

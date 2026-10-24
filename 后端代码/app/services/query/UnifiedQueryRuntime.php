@@ -12,26 +12,20 @@ final class UnifiedQueryRuntime
     /** @var array<string,object>|null */
     private static $runtime;
 
+    /** Registrar-owned capability identity, not a checkout/business version. */
+    private static $registrarCacheKey;
+
     public static function resetForTests(): void
     {
         self::$runtime = null;
+        self::$registrarCacheKey = null;
     }
 
     /** @return array<string,object> */
     public static function runtime(): array
     {
-        if (self::$runtime !== null) {
-            return self::$runtime;
-        }
-
-        /** @var MetricDictionaryServices $metricDictionary */
-        $metricDictionary = app()->make(MetricDictionaryServices::class);
-        $definitions = $metricDictionary->getDefinitions();
-        if (!$definitions) {
-            throw new \LogicException('统一查询启动失败：系统指标字典为空');
-        }
-
         $registrars = [];
+        $cacheParts = [];
         foreach (self::configuredClasses('registrars', []) as $className) {
             $registrar = app()->make($className);
             if (!$registrar instanceof UnifiedQueryPageRegistrar) {
@@ -40,7 +34,19 @@ final class UnifiedQueryRuntime
                 );
             }
             $registrars[] = $registrar;
+            // Dynamic registrars own their schema dependencies. Ordinary pages
+            // retain the existing object graph; a changed dependency rebuilds
+            // the complete graph so validators/exports share one whitelist.
+            $cacheParts[$className] = method_exists($registrar, 'runtimeCacheKey')
+                ? $registrar->runtimeCacheKey() : '';
         }
+        $cacheKey = hash('sha256', serialize($cacheParts));
+        if (self::$runtime !== null && self::$registrarCacheKey === $cacheKey) return self::$runtime;
+
+        /** @var MetricDictionaryServices $metricDictionary */
+        $metricDictionary = app()->make(MetricDictionaryServices::class);
+        $definitions = $metricDictionary->getDefinitions();
+        if (!$definitions) throw new \LogicException('统一查询启动失败：系统指标字典为空');
         $registry = UnifiedQueryPageRegistry::fromRegistrars($definitions, $registrars);
         self::bindServices(['registry' => $registry]);
         $permissionResolvers = new UnifiedQueryPagePermissionResolverRegistry($registry);
@@ -150,6 +156,7 @@ final class UnifiedQueryRuntime
             'exportStorage'
         ));
         self::bindServices(self::$runtime);
+        self::$registrarCacheKey = $cacheKey;
         return self::$runtime;
     }
 

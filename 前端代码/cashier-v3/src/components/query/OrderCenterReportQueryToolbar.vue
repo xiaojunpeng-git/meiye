@@ -2,12 +2,13 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import Download from '@lucide/vue/dist/esm/icons/download.mjs'
 import { UnifiedReportQueryToolbar, UnifiedQueryDateRange, UnifiedQueryExportDrawer, cloneUnifiedQuerySnapshot, unifiedQueryActionSucceeded } from '@mohe/unified-query-vue3'
-import { buildOrderReportQuery, orderReportDate, orderReportDraftSnapshot, orderReportFields } from '../../services/orderCenterReportFilters.js'
+import { buildOrderReportQuery, orderBusinessSourceFields, orderBusinessSourceQuery, orderReportDate, orderReportDraftSnapshot, orderReportFields } from '../../services/orderCenterReportFilters.js'
 
 // 门店订单各页签共用统计筛选，页面身份与字段由宿主提供；不合并各业务的查询或导出权限。
 const props = defineProps({
   pageCode: { type: String, default: 'order_center_all' }, pageName: { type: String, default: '全部订单' },
   sourceOptions: { type: Array, default: null },
+  businessSourceEnabled: { type: Boolean, default: true },
   fields: { type: Array, default: () => [] }, executedQuery: { type: Object, default: null },
   isQueryLoading: Boolean, pageSize: { type: Number, default: 20 },
   queryCapability: { type: Object, default: () => ({}) }, settings: { type: Object, default: () => ({}) },
@@ -21,7 +22,8 @@ const date = ref(orderReportDate({}, today))
 const scope = ref('normal')
 const original = ref({})
 const cleared = ref(false)
-const fields = computed(() => orderReportFields(props.fields, props.sourceOptions))
+const allowedFields = computed(() => orderBusinessSourceFields(props.fields, props.businessSourceEnabled))
+const fields = computed(() => orderReportFields(allowedFields.value, props.sourceOptions))
 const panelQuery = computed(() => orderReportDraftSnapshot(props.executedQuery, fields.value, props.pageCode))
 watch([() => props.pageCode, () => props.executedQuery], ([pageCode, query], previous = []) => {
   // 页签切换只恢复本页已执行条件；原页的日期、草稿和权限上下文不能带入新页。
@@ -39,7 +41,7 @@ watch([() => props.pageCode, () => props.executedQuery], ([pageCode, query], pre
   cleared.value = false
 }, { immediate: true, deep: true })
 function query(panel) {
-  emit('query', buildOrderReportQuery(original.value, panel, date.value, scope.value, props.pageSize, cleared.value, fields.value, props.pageCode))
+  emit('query', orderBusinessSourceQuery(buildOrderReportQuery(original.value, panel, date.value, scope.value, props.pageSize, cleared.value, fields.value, props.pageCode), props.businessSourceEnabled))
 }
 async function changeScope(value) {
   if (props.isQueryLoading || scope.value === value) return
@@ -54,7 +56,7 @@ const exportTask = ref(null)
 const exportError = ref('')
 // 关闭旧页任务，避免跨业务页继续展示或回查上一页的导出。
 watch(() => props.pageCode, () => { exportOpen.value = false; exportTask.value = null; exportError.value = '' })
-const exportFields = computed(() => props.fields.filter(field => !field.hidden && field.key !== 'id' && field.capabilities?.export === true))
+const exportFields = computed(() => allowedFields.value.filter(field => !field.hidden && field.key !== 'id' && field.capabilities?.export === true))
 const canExport = computed(() => {
   const capability = props.queryCapability
   return capability.enabled === true && capability.pageCode === props.pageCode
@@ -68,7 +70,9 @@ const canExport = computed(() => {
 function createExport(configuration) {
   // 未查询的日期、范围和更多筛选草稿不得混入导出。
   if (!canExport.value || !props.onCreateExport) return { status: 'failed', message: '请先完成一次成功查询。' }
-  return props.onCreateExport({ query: cloneUnifiedQuerySnapshot(props.executedQuery), configuration })
+  const allowed = new Set(exportFields.value.map(field => field.key))
+  return props.onCreateExport({ query: orderBusinessSourceQuery(cloneUnifiedQuerySnapshot(props.executedQuery), props.businessSourceEnabled),
+    configuration: { ...configuration, fields: (configuration.fields || []).filter(key => allowed.has(key)) } })
 }
 async function startExport() {
   if (!canExport.value || exporting.value) return

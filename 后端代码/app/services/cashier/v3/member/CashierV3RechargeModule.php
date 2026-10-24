@@ -94,7 +94,16 @@ final class CashierV3RechargeModule
         }
         $input = $this->normalizeInput($payload);
         $input = $this->normalizeBusinessDate($input);
-        $input['businessSource'] = $this->normalizeBusinessSource((array)($scope['business_source'] ?? []));
+        // Both direct recharge and the checkout adapter use the same policy.
+        // The adapter already verified its confirmed choice; do not resolve a
+        // second default here. Direct commands have no prior checkout snapshot.
+        $source = (array)($scope['business_source'] ?? []);
+        if (!$source) {
+            $source = (new \app\services\cashier\v3\settlement\CashierV3CheckoutBusinessSourceSelectionServices())
+                ->prepareChoice('recharge', $dataScope->tenantId(), $operator->storeId(),
+                    $input['memberId'], (array)($payload['businessSource'] ?? []));
+        }
+        $input['businessSource'] = $this->normalizeBusinessSource($source);
         $member = $this->lockedMember($input['memberId'], $operator, $dataScope);
         // 套餐金额和赠金必须在服务端按当前有效配置重算，不能信任页面
         // 在准备浮层时取得的历史数值。

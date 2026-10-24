@@ -25,7 +25,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
     ];
 
     /** @return array<string,mixed> */
-    public static function definition(string $pageCode): array
+    public static function definition(string $pageCode, bool $businessSourceEnabled = true): array
     {
         $type = self::typeForPage($pageCode);
         $definitions = [
@@ -115,10 +115,17 @@ final class CashierV3OrderCenterUnifiedQueryContract
             }
             $mixedFields = $orderedFields;
             $mixedFields['business_date'][1] = '业务日期';
+            // 仅全部订单开放来源顶栏筛选；四类单据自身的查询字段契约不变。
+            $mixedFields['source'][4] = true;
             $definitions['all'] = ['全部订单', array_values($mixedFields), ['order_no', 'source_order_no', 'member_name', 'phone', 'item_summary', 'product_name']];
         }
         if (!isset($definitions[$type])) throw new \InvalidArgumentException('订单中心统一查询页面不合法');
         [$label, $fields, $keywordFields] = $definitions[$type];
+        // 仅 source 表示客户业务来源。gift_source/source_type/source_card 等为技术追溯，不能按中文列名批量撤下。
+        if (!$businessSourceEnabled) {
+            $fields = array_values(array_filter($fields, static function (array $field): bool { return $field[0] !== 'source'; }));
+            $keywordFields = array_values(array_filter($keywordFields, static function (string $key): bool { return $key !== 'source'; }));
+        }
         $registered = [];
         foreach ($fields as $field) {
             [$key, $fieldLabel] = $field;

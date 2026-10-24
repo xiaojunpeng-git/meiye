@@ -43,6 +43,7 @@ import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi
 import { guideRoundText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
 import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
 import { orderAttributionExpectedValue } from '@/services/orderAttributionExpectedValue'
+import { orderBusinessSourceFields, orderBusinessSourceQuery } from '@/services/orderCenterReportFilters'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const serviceVoidNotice = ref('')
@@ -440,6 +441,9 @@ const FIELD_ALIASES = {
 }
 
 const state = useCashierV3State()
+// 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
+const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
+const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
 const router = useRouter()
 const route = useRoute()
 const isPlatformReadOnly = computed(() => route.meta.platformReadOnly === true)
@@ -586,7 +590,7 @@ const sourceFilterOptions = computed(() => sourceFilterSources.value.flatMap((pr
   }
   return options
 }))
-const queryFields = computed(() => activeTab.value.fields.map((item) => (
+const queryFields = computed(() => orderBusinessSourceFields(activeTab.value.fields, businessSourceEnabled.value).map((item) => (
   activeTabKey.value === 'all' && item.key === 'source'
     ? { ...item, type: 'enum', options: sourceFilterOptions.value }
     : item
@@ -630,7 +634,7 @@ const visibleFields = computed(() => {
       if (index >= 0) fields.splice(index, 1)
     }
     const recordNoIndex = fields.findIndex((item) => item.key === 'service_record_no')
-    fields.splice(recordNoIndex >= 0 ? recordNoIndex + 1 : 0, 0, available.get('source'), available.get('sales_order_no'))
+    fields.splice(recordNoIndex >= 0 ? recordNoIndex + 1 : 0, 0, ...['source', 'sales_order_no'].map(key => available.get(key)).filter(Boolean))
   }
   if (activeTabKey.value === 'supplement') {
     // 商品名称来自欠款历史快照，分类则跟随平台端当前商品档案。
@@ -650,7 +654,7 @@ const visibleFields = computed(() => {
     if (sourceIndex >= 0) fields.splice(sourceIndex, 1)
     const orderNoKey = activeTabKey.value === 'recharge' ? 'recharge_order_no' : 'supplement_order_no'
     const orderNoIndex = fields.findIndex((item) => item.key === orderNoKey)
-    fields.splice(orderNoIndex >= 0 ? orderNoIndex + 1 : 0, 0, available.get('source'))
+    if (available.has('source')) fields.splice(orderNoIndex >= 0 ? orderNoIndex + 1 : 0, 0, available.get('source'))
     const salespersonIndex = fields.findIndex((item) => item.key === 'salesperson')
     const amountIndex = fields.findIndex((item) => item.key === (activeTabKey.value === 'recharge' ? 'recharge_amount' : 'supplement_amount'))
     if (salespersonIndex >= 0 && amountIndex >= 0 && salespersonIndex > amountIndex) {
@@ -668,7 +672,7 @@ const visibleFields = computed(() => {
 })
 const detailFields = computed(() => {
   // 混合页详情始终使用原业务字段，不能把整张联合字段表塞进一笔充值/退款。
-  if (activeTabKey.value === 'all') return recordTab(genericDetailRecord.value).fields
+  if (activeTabKey.value === 'all') return orderBusinessSourceFields(recordTab(genericDetailRecord.value).fields, businessSourceEnabled.value)
   // 取消信息只补充在该笔欠款详情，不改变其他业务记录的字段。
   if (activeTabKey.value === 'debt' && genericDetailRecord.value?.cancelledAt) {
     return [...visibleFields.value, field('cancelledAmount', '取消金额', 'money'),
@@ -1215,7 +1219,7 @@ async function submitImportedCardRefund() {
 const unifiedQueryPages = Object.fromEntries(ORDER_TABS.map((tab) => [tab.key, useUnifiedQueryPage({
   pageCode: tab.pageCode,
   pageName: tab.label,
-  baseFields: tab.fields,
+  baseFields: () => orderBusinessSourceFields(tab.fields, businessSourceEnabled.value),
   requestAction
 })]))
 const activeUnifiedQuery = computed(() => unifiedQueryPages[activeTabKey.value] || unifiedQueryPages.sales)
@@ -1239,7 +1243,7 @@ const activeQueryCapability = computed(() => {
   }
 })
 const activeQueryFields = computed(() => {
-  const fields = activeUnifiedQuery.value?.fields?.value || queryFields.value
+  const fields = orderBusinessSourceFields(activeUnifiedQuery.value?.fields?.value || queryFields.value, businessSourceEnabled.value)
   if (activeTabKey.value !== 'all') return fields
   const sourceUi = queryFields.value.find((item) => item.key === 'source')
   // 服务端仍把来源声明为可精确过滤的文本字段；这里只合并下拉选项和页面位置，不能改其查询 key。
@@ -1582,6 +1586,7 @@ const editableRefundPersonnelSourceTypes = new Set([...editableRefundSourceTypes
 
 // 列表能力仅决定是否展示蓝色入口；后端仍以当前会话门店、权限及旧值独立判定。
 function canCorrectAttribution(record, field) {
+  if (field === 'source' && !businessSourceEnabled.value) return false
   // 消费订单是页面 feature，不在叶子 operation 快照中；误查 operation 会让有权门店隐藏更正入口。
   // 销售行还须由后端明确授予更正动作，实际写入仍由后端按当前会话与门店重新校验。
   if (isPlatformReadOnly.value || !canUseCashierV3Feature('cashier.v3.order_center')) return false
@@ -1674,6 +1679,7 @@ async function openAttributionEditor(record, field) {
 }
 
 async function loadSourceFilterOptions() {
+  if (!businessSourceEnabled.value) return
   if (sourceFilterSources.value.length) return
   if (sourceFilterRequest) return sourceFilterRequest
   // 下拉只读取当前实例的有效业务来源目录，不提交订单命令，也不依赖归属更正权限。
@@ -2772,7 +2778,7 @@ async function queryRecords(query = {}, resetPage = true) {
   // 只统一读取/刷新，不介入作废和人员调整命令。无新筛选的调用复用最后成功快照。
   const explicitQuery = Object.prototype.hasOwnProperty.call(query, 'topFilters')
   const previous = executedQueryByType.value[recordType] || queryModelByType.value[recordType] || {}
-  query = mergeQueryRefresh(previous, query)
+  query = orderBusinessSourceQuery(mergeQueryRefresh(previous, query), businessSourceEnabled.value)
   if (!explicitQuery && previous.page) resetPage = false
   if (recordType !== 'sales') {
     const currentQuery = queryModelByType.value[recordType] || {}
@@ -3870,6 +3876,7 @@ onBeforeUnmount(() => {
       :page-code="activeTab.pageCode"
       :page-name="activeTab.label"
       :source-options="sourceFilterOptions"
+      :business-source-enabled="businessSourceEnabled"
       :fields="activeQueryFields"
       :executed-query="executedQuery"
       :is-query-loading="isOrderQueryLoading"
@@ -3971,7 +3978,7 @@ onBeforeUnmount(() => {
                 :title="`查看${displayRecordField(record, 'member_name')}的会员详情`"
                 @click="openMemberDetail(record)"
               >{{ displayRecordField(record, 'member_name') }}</button><template v-else>{{ displayRecordField(record, 'member_name') }}</template></span>
-              <span class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：<button v-if="canCorrectAttribution(record, 'source')" type="button" class="order-link" @click="openAttributionEditor(record, 'source')">{{ displayRecordField(record, 'source') }}</button><template v-else>{{ displayRecordField(record, 'source') }}</template></span>
+              <span v-if="businessSourceEnabled" class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：<button v-if="canCorrectAttribution(record, 'source')" type="button" class="order-link" @click="openAttributionEditor(record, 'source')">{{ displayRecordField(record, 'source') }}</button><template v-else>{{ displayRecordField(record, 'source') }}</template></span>
               <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
               <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
               <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
@@ -4220,7 +4227,8 @@ onBeforeUnmount(() => {
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
       :load-error="salesDetailLoadError"
-      :attribution-changes="attributionChanges"
+      :attribution-changes="visibleAttributionChanges"
+      :business-source-enabled="businessSourceEnabled"
       :action-only="salesDetailActionOnly"
       :initial-lifecycle-action="salesDetailFocus.lifecycleAction"
       :focus-personnel-role="salesDetailFocus.personnelRole"
@@ -4340,7 +4348,7 @@ onBeforeUnmount(() => {
       :initial-lifecycle-action="initialDetailLifecycleAction"
       :on-lifecycle-action="handleRechargeLifecycleAction"
       :field-action-keys="serviceRecordIsNormal(genericDetailRecord) ? ['craftsman'] : []"
-      :attribution-changes="attributionChanges"
+      :attribution-changes="visibleAttributionChanges"
       :show-debt-changes="activeTabKey === 'debt'"
       :debt-changes="debtChanges"
       :debt-changes-loading="debtChangesLoading"
@@ -4536,7 +4544,7 @@ onBeforeUnmount(() => {
       @confirm="setUnifiedRefundAttribution"
     />
 
-    <div v-if="attributionEditor" class="service-void-modal" role="dialog" aria-modal="true" aria-label="更正订单归属">
+    <div v-if="attributionEditor && (attributionEditor.field !== 'source' || businessSourceEnabled)" class="service-void-modal" role="dialog" aria-modal="true" aria-label="更正订单归属">
       <div class="service-void-modal__backdrop"></div>
       <form class="service-void-modal__panel" @submit.prevent="submitAttributionCorrection">
         <header class="service-void-modal__head"><h2>更正{{ attributionEditor.field === 'source' ? '来源' : '业务日期' }}</h2></header>

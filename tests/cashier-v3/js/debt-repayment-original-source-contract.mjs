@@ -10,8 +10,9 @@ const workbench = read('前端代码/cashier-v3/src/views/CashierWorkbenchView.v
 const overlay = read('前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue')
 const debtOverlay = read('前端代码/cashier-v3/src/components/member/MemberDebtOverlay.vue')
 
-// 原单来源是默认值；历史空来源必须由操作员选定，结账页不能再悄悄改写。
-assert.match(debtOverlay, /record\.originalBusinessSource\?\.primarySourceId/, '去还款必须默认原单来源')
+// R57 defaults are per-business policy, never the original sale/recharge.
+assert.match(debtOverlay, /Number\(initialRepaymentSource\.value\.primarySourceId/, '补交按统一策略初始化')
+assert.doesNotMatch(debtOverlay, /record\.originalBusinessSource\?\.primarySourceId/, '手动模式不得继承原单来源')
 assert.match(debtOverlay, /请选择本次补交的客户来源/, '下一步必须拦截空来源')
 assert.match(debtOverlay, /loadCheckoutBusinessCatalog/, '选择只能来自正式来源目录')
 assert.match(shell, /const source = payload\.businessSource \|\| \{\}/, '交接必须使用欠款弹窗已选来源')

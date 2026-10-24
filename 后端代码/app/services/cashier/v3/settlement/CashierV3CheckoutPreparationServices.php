@@ -474,11 +474,9 @@ final class CashierV3CheckoutPreparationServices
             $operatorScope,
             $dataScope
         );
-        // The browser snapshot is the sole source for a newly opened local
-        // checkout. Persist its customer-source selection in this same
-        // preparation transaction, rather than replaying a mutable UI action
-        // after the checkout request exists. The selection is attribution
-        // metadata and deliberately does not validate the live source catalog.
+        // This path already consumes the browser's final sole snapshot. Do not
+        // reread a changed fixed default and create a different attribution row.
+        // Initial source defaults belong to the authenticated opening projection.
         if ($checkoutSnapshot !== null) {
             (new CashierV3CheckoutOrderCouponServices())->bindPreparedInTx(
                 $orderCouponSelections, (string)$kernel['requestId'], (int)$kernel['requestVersion'],
@@ -489,7 +487,10 @@ final class CashierV3CheckoutPreparationServices
                 $dataScope->tenantId(),
                 $operatorScope->storeId(),
                 $operatorScope->operatorId(),
-                (array)($checkoutSnapshot['source'] ?? [])
+                $this->businessSources->validateConfirmedChoice(
+                    'purchase', $dataScope->tenantId(), $operatorScope->storeId(),
+                    (int)($publicDraft['memberId'] ?? 0), (array)($checkoutSnapshot['source'] ?? [])
+                )
             );
         }
         // A resumed hang is only an editable cart draft. It never enters

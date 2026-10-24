@@ -212,6 +212,8 @@ final class CashierV3ReservationDetailQueryServices
             'remark' => (string)($reservation['remark_snapshot'] ?? ''),
             'sourceType' => (string)($reservation['source_type'] ?? ''),
             // The channel (member/store) and market attribution answer different questions.
+            // 展示开关与历史快照分开返回，隐藏入口不删除历史归因。
+            'businessSourcePolicy' => (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())->read(),
             'businessSourceLabel' => (string)($reservation['business_source_label_snapshot'] ?? ''),
             'businessSourcePrimaryId' => (int)($reservation['business_source_primary_id'] ?? 0),
             'businessSourceSecondaryId' => (int)($reservation['business_source_secondary_id'] ?? 0),

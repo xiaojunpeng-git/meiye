@@ -1366,7 +1366,7 @@ onBeforeUnmount(() => {
 
         <dl class="checkout-order-details">
           <!-- 来源已在欠款弹窗确认；收款页只读展示，最终提交仍由服务端重新校验。 -->
-          <div v-if="isDebtRepayment">
+          <div v-if="isDebtRepayment && checkout.sourceEnabled !== false">
             <dt>本次补交来源（已确认）</dt>
             <dd>{{ checkout.source?.displayNameSnapshot || '请返回欠款明细选择来源' }}</dd>
           </div>

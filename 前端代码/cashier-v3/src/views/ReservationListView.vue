@@ -1441,7 +1441,15 @@ async function refreshReservationProjectCatalog({ memberId } = {}) {
     || envelope?.reservationProjectCatalog?.catalogOptions
     || envelope?.data?.editor?.catalogOptions
     || []
-  return { catalogOptions: Array.isArray(catalogOptions) ? catalogOptions : [] }
+  // Keep source suggestions bound to the same member/catalog response. The
+  // editor owns request ordering and must not reuse another member's choice.
+  const catalog = envelope?.data?.reservationProjectCatalog
+    || envelope?.reservationProjectCatalog || envelope?.data?.editor || {}
+  return {
+    catalogOptions: Array.isArray(catalogOptions) ? catalogOptions : [],
+    initialBusinessSource: catalog.initialBusinessSource,
+    businessSourcePolicy: catalog.businessSourcePolicy
+  }
 }
 
 async function submitReservationEditor(draft) {

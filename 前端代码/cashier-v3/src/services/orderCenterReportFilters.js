@@ -3,6 +3,24 @@ export const EMPTY_ORDER_SOURCE = '__MOHE_QUERY_EMPTY__'
 const clone = (value) => JSON.parse(JSON.stringify(value || {}))
 const filters = (value) => Array.isArray(value) ? value : []
 
+/** 只识别客户业务来源；单据类型、原单号、赠送出处及权益卡来源不受此设置影响。 */
+export function orderBusinessSourceFields(fields = [], enabled = true) {
+  return fields.filter(field => enabled !== false || field?.key !== 'source')
+}
+
+/** 关闭时撤下旧查询中的来源约束，不改保存偏好或事实；其他筛选与 OR 关系保持原样。 */
+export function orderBusinessSourceQuery(query = {}, enabled = true) {
+  if (enabled !== false) return query
+  const result = clone(query)
+  const fieldKey = item => typeof item === 'string' ? item : item?.field_key || item?.fieldKey || item?.field || item?.key
+  for (const key of ['topFilters', 'topFilterConditions', 'filters', 'quickFilters', 'keywordFilters', 'sorts', 'summaries', 'groups', 'groupBy', 'visibleFields', 'quickFields']) {
+    if (Array.isArray(result[key])) result[key] = result[key].filter(item => fieldKey(item) !== 'source')
+  }
+  if (result.querySettings) result.querySettings = orderBusinessSourceQuery(result.querySettings, false)
+  if (result.export && Array.isArray(result.export.fields)) result.export.fields = result.export.fields.filter(key => key !== 'source')
+  return result
+}
+
 /** 后端可筛选白名单动态驱动控件；不能把默认快捷字段误当作全部字段或权限。 */
 export function orderReportFields(fields = [], sourceOptions = null) {
   const seen = new Set()

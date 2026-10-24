@@ -199,6 +199,15 @@ class CashierV3RootDomainAssembler
             }
         }
 
+        // Source UI and initial choices belong to this authenticated root, not
+        // browser-wide remembered state. A broken fixed default blocks only
+        // its new transaction, never the whole login or historical order list.
+        $sourcePolicy = new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices();
+        $extras['businessSourcePolicy'] = $sourcePolicy->read();
+        $member = (array)($extras['cashier']['member'] ?? []);
+        $memberId = (int)($member['memberId'] ?? $member['id'] ?? 0);
+        $extras['businessSourceDefaultsMemberId'] = $memberId;
+        $extras['businessSourceDefaults'] = $sourcePolicy->initialChoices($dataScope->tenantId(), $storeId, $memberId);
         $extras['_public_versions'] = $publicVersions;
         return $extras;
     }

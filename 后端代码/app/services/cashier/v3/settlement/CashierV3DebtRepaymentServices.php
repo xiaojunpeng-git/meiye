@@ -127,21 +127,12 @@ final class CashierV3DebtRepaymentServices
         $authority = $locked['authority'];
         $items = $locked['items'];
         $personnel = $locked['personnel'];
-        // 原单来源只作为本次补交的默认值。操作员可在欠款弹窗明确重选；
-        // 最终事务按选中 ID 解析有效来源，绝不信任浏览器提交的名称快照。
-        // 仅当选择与原单完全一致时沿用历史名称，允许已停用来源保持原貌。
-        $originalSource = self::sourceFromOriginalSalesOrder((array)$locked['order']);
-        $originalSourceColumns = self::sourceSnapshotColumns($originalSource);
-        if ($sourceColumns['business_source_primary_id'] <= 0) {
-            throw self::failure('debt_repayment_business_source_required');
-        }
-        if ($originalSource && $sourceColumns === $originalSourceColumns) {
-            $businessSource = $originalSource;
-        } else {
-            $businessSource = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot(
-                $sourceColumns['business_source_primary_id'], $sourceColumns['business_source_secondary_id'], true
-            );
-        }
+        // New repayment attribution is independent of the original sale. The
+        // policy validates this confirmed choice, never fills it from that sale.
+        $businessSource = (new CashierV3CheckoutBusinessSourceSelectionServices())->validateConfirmedChoice(
+            'repayment', $dataScope->tenantId(), $operator->storeId(),
+            (int)$authority['member_id'], $businessSource
+        );
         $sourceColumns = self::sourceSnapshotColumns($businessSource);
         $amount = self::inputMoneyCents($checkoutSnapshot['repaymentAmount'] ?? null, 'repayment_amount');
         // 奖励只属于本次已确认来源，随补交原子保存，不能抵扣本金或重复继承原销售奖励。
@@ -730,28 +721,6 @@ final class CashierV3DebtRepaymentServices
         return Db::name('cashier_v3_order_attribution_change')->where('tenant_id', $tenantId)
             ->where('record_type', 'supplement')->where('record_id', $repaymentId)
             ->where('field_key', 'source')->count() > 0;
-    }
-
-    /** 原单历史来源只供欠款弹窗默认选择；沿用时保留其名称快照，不能从会员或工具栏猜测。 */
-    private static function sourceFromOriginalSalesOrder(array $order): array
-    {
-        $primaryId = (int)($order['business_source_primary_id'] ?? 0);
-        $primaryName = trim((string)($order['business_source_primary_name_snapshot'] ?? ''));
-        $secondaryId = (int)($order['business_source_secondary_id'] ?? 0);
-        $secondaryName = trim((string)($order['business_source_secondary_name_snapshot'] ?? ''));
-        $label = trim((string)($order['business_source_label_snapshot'] ?? ''));
-        if ($primaryId <= 0 || $primaryName === '' || $label === ''
-            || ($secondaryId > 0 && $secondaryName === '')) {
-            // 历史导入欠款可以没有可核实的原单来源，不能因此阻断真实还款。
-            return [];
-        }
-        return [
-            'primarySourceId' => $primaryId,
-            'primarySourceNameSnapshot' => $primaryName,
-            'secondarySourceId' => $secondaryId,
-            'secondarySourceNameSnapshot' => $secondaryName,
-            'displayNameSnapshot' => $label,
-        ];
     }
 
     /** Read collection rows from the one browser checkout snapshot. */

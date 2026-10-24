@@ -9,6 +9,7 @@ use app\services\query\UnifiedQueryExecutionServices;
 use app\services\query\UnifiedQueryPreferenceServices;
 use app\services\query\UnifiedQueryProvider;
 use think\facade\Db;
+use app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices;
 
 /**
  * 将订单中心现有的权威只读投影接入统一查询与导出。
@@ -127,6 +128,9 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
     /** @return array<string,mixed> */
     protected function run(array $context, array $payload, array $definitions): array
     {
+        // 在领域 Reader 下推前撤下关闭的来源筛选，不能只在最终分页引擎中移除。
+        $policy = (new CashierV3BusinessSourcePolicyServices())->read();
+        if (($policy['enabled'] ?? true) === false) $payload = CashierV3OrderCenterQueryExecutionServices::withoutBusinessSource($payload);
         $payload['pageCode'] = $this->pageCode();
         unset($payload['queryCutoffDate'], $payload['query_cutoff_date']);
         $memberInitials = $this->memberInitialKeyword($payload);
@@ -173,7 +177,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             return '';
         }
         if ($keyword === '' && $filters) {
-            $expected = (array)CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode())['keywordFields'];
+            $policy = (new CashierV3BusinessSourcePolicyServices())->read();
+            $expected = (array)CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode(), ($policy['enabled'] ?? true) !== false)['keywordFields'];
             if (count($filters) !== count($expected)) {
                 return '';
             }

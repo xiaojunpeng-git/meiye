@@ -278,6 +278,11 @@ const EMPTY_BOOTSTRAP = {
     name: '当前门店'
   },
   navigationRules: [],
+  // Old, unmigrated servers retain their previous source behavior; current
+  // servers explicitly provide false for fixed-source mode, never truthy-fallback.
+  businessSourcePolicy: { enabled: true, inheritPrevious: true, mode: 'previous', configured: false },
+  businessSourceDefaults: {},
+  businessSourceDefaultsMemberId: 0,
   featurePermissions: {
     'cashier.v3.cashier': false,
     'cashier.v3.writeoff': false,
@@ -1937,6 +1942,11 @@ function normalizeBootstrap(rawBootstrap = {}) {
       name: incomingCurrentStore.name || incomingCurrentStore.storeName || raw.storeName || base.currentStore.name
     },
     navigationRules: Array.isArray(raw.navigationRules) ? raw.navigationRules : [],
+    businessSourcePolicy: raw.businessSourcePolicy && typeof raw.businessSourcePolicy.enabled === 'boolean'
+      ? { ...raw.businessSourcePolicy } : { ...base.businessSourcePolicy },
+    businessSourceDefaults: raw.businessSourceDefaults && typeof raw.businessSourceDefaults === 'object'
+      ? { ...raw.businessSourceDefaults } : {},
+    businessSourceDefaultsMemberId: Math.max(0, Number(raw.businessSourceDefaultsMemberId) || 0),
     featurePermissions: {
       ...base.featurePermissions,
       ...incomingFeaturePermissions

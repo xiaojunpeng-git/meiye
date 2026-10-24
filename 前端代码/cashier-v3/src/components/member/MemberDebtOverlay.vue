@@ -6,6 +6,8 @@ import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerforman
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
 
 const props = defineProps({
+  businessSourcePolicy: { type: Object, default: () => ({}) },
+  sourceDefaults: { type: Object, default: () => ({}) },
   member: {
     type: Object,
     default: () => ({})
@@ -61,6 +63,7 @@ const repaymentSourcesLoading = ref(false)
 const repaymentSourcesError = ref('')
 const repaymentSourcePrimaryId = ref(0)
 const repaymentSourceSecondaryId = ref(0)
+const capturedRepaymentSource = ref({})
 const repaymentRewardAmountCents = ref(0)
 const isRepaymentRewardOpen = ref(false)
 let repaymentSourceLoadToken = 0
@@ -113,27 +116,18 @@ const attributionSummary = computed(() => [
   guideSelections.value.length ? `导购：${guideSelections.value.map((person) => person.name).join('、')}` : '',
   salesManagerSelections.value.length ? `销售经理：${salesManagerSelections.value.map((person) => person.name).join('、')}` : ''
 ].filter(Boolean).join('；') || '暂未选择')
-const originalRepaymentSource = computed(() => selectedDebt.value?.originalBusinessSource || null)
+// Defaults belong to repayment, not to the sale/recharge that created the debt.
+const businessSourceEnabled = computed(() => props.businessSourcePolicy.enabled !== false)
+const initialRepaymentSource = computed(() => props.sourceDefaults.repayment || props.member.sourceDefaults?.repayment || {})
 const selectedRepaymentPrimary = computed(() => repaymentSources.value.find(
   (source) => Number(source.id) === Number(repaymentSourcePrimaryId.value)
 ) || null)
 const repaymentSourceChildren = computed(() => selectedRepaymentPrimary.value?.children || [])
 // 只按本次选中的来源判断，不能继承原销售的奖励或收银工具栏的奖励。
 const isCrossIndustryRepayment = computed(() => /^G(?:\s|异业|$)/u.test(String(
-  selectedRepaymentPrimary.value?.name || (Number(historicalPrimaryOption.value?.primarySourceId) === Number(repaymentSourcePrimaryId.value) ? historicalPrimaryOption.value?.primarySourceNameSnapshot : '') || ''
+  selectedRepaymentPrimary.value?.name || ''
 ).trim()))
-const repaymentRewardSources = computed(() => historicalPrimaryOption.value
-  ? [...repaymentSources.value, { id: Number(historicalPrimaryOption.value.primarySourceId), name: historicalPrimaryOption.value.primarySourceNameSnapshot }]
-  : repaymentSources.value)
-const historicalPrimaryOption = computed(() => originalRepaymentSource.value
-  && Number(originalRepaymentSource.value.primarySourceId) > 0
-  && !repaymentSources.value.some((source) => Number(source.id) === Number(originalRepaymentSource.value.primarySourceId))
-  ? originalRepaymentSource.value : null)
-const historicalSecondaryOption = computed(() => originalRepaymentSource.value
-  && Number(originalRepaymentSource.value.secondarySourceId) > 0
-  && Number(originalRepaymentSource.value.primarySourceId) === Number(repaymentSourcePrimaryId.value)
-  && !repaymentSourceChildren.value.some((source) => Number(source.id) === Number(originalRepaymentSource.value.secondarySourceId))
-  ? originalRepaymentSource.value : null)
+const repaymentRewardSources = computed(() => repaymentSources.value)
 
 watch(records, (nextRecords) => {
   if (selectedDebtId.value && nextRecords.some((record) => String(recordId(record)) === String(selectedDebtId.value))) return
@@ -146,6 +140,7 @@ watch(records, (nextRecords) => {
   salesManagerSelections.value = []
   repaymentSourcePrimaryId.value = 0
   repaymentSourceSecondaryId.value = 0
+  capturedRepaymentSource.value = {}
   repaymentRewardAmountCents.value = 0
   isRepaymentRewardOpen.value = false
   validationMessage.value = ''
@@ -191,12 +186,14 @@ function selectRepayment(record) {
   otherSalespersonCandidates.value = []
   guideSelections.value = Array.isArray(record.originalGuideSelections) ? record.originalGuideSelections.map((item) => ({ ...item })) : []
   salesManagerSelections.value = Array.isArray(record.originalSalesManagerSelections) ? record.originalSalesManagerSelections.map((item) => ({ ...item })) : []
-  // 原单快照仅作默认选择。历史导入欠款可能没有来源，此时必须由操作员明确选择。
-  repaymentSourcePrimaryId.value = Number(record.originalBusinessSource?.primarySourceId || 0)
-  repaymentSourceSecondaryId.value = Number(record.originalBusinessSource?.secondarySourceId || 0)
+  // Only starting a new repayment initializes a source. Catalog refresh/retry
+  // must preserve this bill's choice; manual mode receives empty defaults.
+  repaymentSourcePrimaryId.value = Number(initialRepaymentSource.value.primarySourceId || 0)
+  repaymentSourceSecondaryId.value = Number(initialRepaymentSource.value.secondarySourceId || 0)
+  capturedRepaymentSource.value = { ...initialRepaymentSource.value }
   repaymentRewardAmountCents.value = 0
   isRepaymentRewardOpen.value = false
-  loadRepaymentSources()
+  if (businessSourceEnabled.value) loadRepaymentSources()
   validationMessage.value = ''
 }
 
@@ -230,12 +227,14 @@ function confirmRepaymentReward(selection) {
 }
 
 function selectedRepaymentSource() {
-  const original = originalRepaymentSource.value
   const primaryId = Number(repaymentSourcePrimaryId.value)
   const secondaryId = Number(repaymentSourceSecondaryId.value)
-  // 原单发生时的名称不能被目录后续改名覆盖；停用来源也可沿用历史快照。
-  if (original && primaryId === Number(original.primarySourceId)
-    && secondaryId === Number(original.secondarySourceId)) return { ...original, rewardAmountCents: isCrossIndustryRepayment.value ? repaymentRewardAmountCents.value : 0 }
+  // Fixed mode uses the server-projected repayment default, including names;
+  // it must not create a hidden dependency on loading the editable catalog.
+  if (!businessSourceEnabled.value && primaryId === Number(capturedRepaymentSource.value.primarySourceId || 0)
+    && secondaryId === Number(capturedRepaymentSource.value.secondarySourceId || 0)) {
+    return { ...capturedRepaymentSource.value, rewardAmountCents: 0 }
+  }
   const primary = selectedRepaymentPrimary.value
   const secondary = repaymentSourceChildren.value.find((source) => Number(source.id) === secondaryId)
   if (!primary || (Number(primary.requireSecondary) === 1 && !secondary)
@@ -272,7 +271,8 @@ function submitRepayment() {
   }
   const businessSource = selectedRepaymentSource()
   if (!businessSource || Number(businessSource.primarySourceId) <= 0) {
-    validationMessage.value = '请选择本次补交的客户来源。'
+    validationMessage.value = businessSource?.configurationError || (businessSourceEnabled.value
+      ? '请选择本次补交的客户来源。' : '固定补交来源配置不可用，请联系管理员检查来源设置。')
     return
   }
   validationMessage.value = ''
@@ -576,16 +576,14 @@ async function searchAttributions({ scope, keyword, target } = {}) {
           </dl>
         </section>
         <section v-if="selectedDebt" class="member-debt-overlay__repayment-context" aria-label="补交业务信息">
-          <div class="member-debt-overlay__business-source" aria-label="本次补交客户来源">
+          <div v-if="businessSourceEnabled" class="member-debt-overlay__business-source" aria-label="本次补交客户来源">
             <label for="member-debt-repayment-source-primary">来源</label>
             <select id="member-debt-repayment-source-primary" v-model.number="repaymentSourcePrimaryId" :disabled="isPreparing || repaymentSourcesLoading" @change="changeRepaymentSource">
               <option :value="0">请选择来源</option>
-              <option v-if="historicalPrimaryOption" :value="Number(historicalPrimaryOption.primarySourceId)">{{ historicalPrimaryOption.primarySourceNameSnapshot }}（原单）</option>
               <option v-for="source in repaymentSources" :key="source.id" :value="source.id">{{ source.name }}</option>
             </select>
-            <select v-if="repaymentSourceChildren.length || historicalSecondaryOption" v-model.number="repaymentSourceSecondaryId" :disabled="isPreparing || repaymentSourcesLoading" aria-label="二级来源">
+            <select v-if="repaymentSourceChildren.length" v-model.number="repaymentSourceSecondaryId" :disabled="isPreparing || repaymentSourcesLoading" aria-label="二级来源">
               <option :value="0">{{ Number(selectedRepaymentPrimary?.requireSecondary) === 1 ? '请选择二级来源' : '无二级来源' }}</option>
-              <option v-if="historicalSecondaryOption" :value="Number(historicalSecondaryOption.secondarySourceId)">{{ historicalSecondaryOption.secondarySourceNameSnapshot }}（原单）</option>
               <option v-for="source in repaymentSourceChildren" :key="source.id" :value="source.id">{{ source.name }}</option>
             </select>
             <button v-if="isCrossIndustryRepayment" type="button" class="member-debt-overlay__repay-link" :disabled="isPreparing" @click="isRepaymentRewardOpen = true">奖励金额：{{ formatMoney(Math.round(repaymentRewardAmountCents / 100)) }}</button>
@@ -607,7 +605,7 @@ async function searchAttributions({ scope, keyword, target } = {}) {
       </footer>
     </section>
     <CheckoutBusinessSourceOverlay
-      v-if="isRepaymentRewardOpen"
+      v-if="businessSourceEnabled && isRepaymentRewardOpen"
       reward-only
       :sources="repaymentRewardSources"
       :primary-source-id="repaymentSourcePrimaryId"
