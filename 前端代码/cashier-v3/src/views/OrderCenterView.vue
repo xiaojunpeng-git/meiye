@@ -8,6 +8,7 @@ import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePic
 import { orderRecordTypeLabel } from '@/constants/orderRecordTypes'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
+import OrderCenterReportQueryToolbar from '@/components/query/OrderCenterReportQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
 import { queryPreferenceKey, readQueryPreferences, mergeQueryRefresh, normalizeUnifiedQuerySettings } from '@mohe/unified-query-vue3'
 import {
@@ -3862,8 +3863,38 @@ onBeforeUnmount(() => {
       <button type="button" class="button button--text" @click="leaveSalesReportDrilldown">退出报表筛选</button>
     </p>
 
+    <!-- 门店各订单页复用动态统计筛选；平台只读和报表下钻仍保留原入口及约束。 -->
+    <OrderCenterReportQueryToolbar
+      v-if="!isPlatformReadOnly && !serviceReportDrilldown && !salesReportDrilldown"
+      :key="`${state.stateContextId}:${activeTabKey}`"
+      :page-code="activeTab.pageCode"
+      :page-name="activeTab.label"
+      :source-options="sourceFilterOptions"
+      :fields="activeQueryFields"
+      :executed-query="executedQuery"
+      :is-query-loading="isOrderQueryLoading"
+      :page-size="pageSize"
+      :query-capability="activeQueryCapability"
+      :settings="querySettings"
+      :result-count="total"
+      :current-page-count="records.length"
+      :data-as-of="orderCenter.dataAsOf"
+      :on-create-export="createActiveExport"
+      :on-query-export-task="queryActiveExportTask"
+      :on-download-export="downloadActiveExport"
+      @query="queryRecords"
+    >
+      <template #primary-actions>
+        <button
+          v-if="activeTabKey === 'refund' && canUseCashierV3Operation('cashier.v3.order.refund')"
+          type="button"
+          class="button button--secondary"
+          @click="openImportedCardRefundMemberSelector"
+        >退款</button>
+      </template>
+    </OrderCenterReportQueryToolbar>
     <UnifiedQueryToolbar
-      v-if="!serviceReportDrilldown && !salesReportDrilldown"
+      v-else-if="!serviceReportDrilldown && !salesReportDrilldown"
       class="order-center-query-toolbar"
       :key="activeTabKey"
       :search-placeholder="activeTab.searchPlaceholder"
@@ -3909,14 +3940,6 @@ onBeforeUnmount(() => {
           :loading="platformScopePicker.loading"
           @change="changePlatformOrderScope"
         />
-      </template>
-      <template #primary-actions>
-        <button
-          v-if="!isPlatformReadOnly && activeTabKey === 'refund' && canUseCashierV3Operation('cashier.v3.order.refund')"
-          type="button"
-          class="button button--secondary"
-          @click="openImportedCardRefundMemberSelector"
-        >退款</button>
       </template>
     </UnifiedQueryToolbar>
 

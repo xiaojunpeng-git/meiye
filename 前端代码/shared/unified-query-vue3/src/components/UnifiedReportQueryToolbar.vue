@@ -10,7 +10,7 @@ const props = defineProps({
   isQueryLoading: { type: Boolean, default: false },
   executedQuery: { type: Object, default: () => ({}) }
 })
-const emit = defineEmits(['query'])
+const emit = defineEmits(['query', 'clear'])
 const expanded = ref(false)
 const errorMessage = ref('')
 const draft = ref({})
@@ -44,6 +44,7 @@ watch([() => props.pageCode, () => JSON.stringify(props.executedQuery), filterFi
 function clearFilters() {
   draft.value = reportFilterDraft(props.fields)
   errorMessage.value = ''
+  emit('clear')
 }
 
 // 同一入口处理按钮和回车；正在执行时不重复提交，错误范围不能静默丢弃。
@@ -57,6 +58,9 @@ function submitQuery() {
     errorMessage.value = error.message
   }
 }
+
+// 宿主的快捷范围切换复用同一草稿提交入口，不产生另一套查询条件。
+defineExpose({ submitQuery })
 </script>
 
 <template>
@@ -80,7 +84,7 @@ function submitQuery() {
             <option value="">全部</option>
             <option v-for="(option, index) in reportFilterOptions(field)" :key="index" :value="option.value">{{ option.label }}</option>
           </select>
-          <input v-else v-model="draft[field.key]" :type="reportFilterType(field)" :aria-label="`${field.label || field.key}筛选`">
+          <input v-else v-model="draft[field.key]" :type="reportFilterType(field)" :step="reportFilterType(field) === 'datetime-local' ? 1 : undefined" :aria-label="`${field.label || field.key}筛选`">
         </label>
       </div>
       <button type="button" class="button button--secondary unified-report-query-toolbar__clear" @click="clearFilters">清空筛选</button>

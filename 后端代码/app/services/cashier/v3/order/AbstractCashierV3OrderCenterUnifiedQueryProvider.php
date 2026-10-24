@@ -281,6 +281,13 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         return $row;
     }
 
+    /** 旧单据空串或“—”统一为查询空值；各订单页筛选/导出共用，不回写历史记录。 */
+    protected static function filterableAllOrderSource($source): ?string
+    {
+        $value = trim((string)($source ?? ''));
+        return $value === '' || $value === '—' ? null : $value;
+    }
+
     protected function allSalesRows($operatorScope, $dataScope): array
     {
         $records = [];
@@ -426,6 +433,8 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
                 // 未就绪的金额/日期不是零，保留空值语义，避免区间筛选把缺失值当零。
                 if ($row[$field] === '' && in_array($types[$field], ['integer','decimal','amount','date','datetime'], true)) $row[$field] = null;
             }
+            // 来源控件在各页签共用 is_null；必须在统一投影归一，而不能只处理混合页。
+            if (array_key_exists('source', $row)) $row['source'] = self::filterableAllOrderSource($row['source']);
             if ($type === 'sales') {
                 // 直接使用表格的权威明细，不重算价格、不把权益价值计入整单收款。
                 foreach (['item_name','product_category','unit_price','quantity','line_amount','craftsman','sales_manager','guide'] as $key) $row[$key] = [];

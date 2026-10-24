@@ -88,7 +88,8 @@ const bundled = await build({
   nodePaths: [path.join(repo, '前端代码/cashier-v3/node_modules')], bundle: true, write: false, format: 'iife', platform: 'browser'
 })
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
-const evidence = path.join(repo, 'tests/report-basic/evidence')
+// 跨轮回归可独立输出证据，避免覆盖已经归档的历史截图和记录。
+const evidence = process.env.REPORT_FILTER_EVIDENCE_DIR || path.join(repo, 'tests/report-basic/evidence')
 mkdirSync(evidence, { recursive: true })
 try {
   for (const width of [1515, 610, 375]) {
