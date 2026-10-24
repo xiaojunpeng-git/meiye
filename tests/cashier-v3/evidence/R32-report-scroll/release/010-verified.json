@@ -1,0 +1,9 @@
+{
+  "site": "010",
+  "commit": "f51f9f388bfe35f54640a596965bd5c1d2e6dbb5",
+  "result": "PASS",
+  "backup": "/www/backups/010/r32-report-scroll-f51f9f38",
+  "frontend": "formal cashier only",
+  "preview": "unchanged",
+  "database": "unchanged"
+}
