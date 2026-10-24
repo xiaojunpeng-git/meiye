@@ -638,6 +638,7 @@ b1Assert(
         && $lineOne['serviceSnapshot']['primaryCraftsmanId'] === 11
 );
 $craftsmanPlanMethod = new ReflectionMethod(CashierV3EntitlementCompletionKernel::class, 'craftsmanPlan');
+$craftsmanPlanMethod->setAccessible(true);
 $equalCraftsmen = b1AuthorityCraftsmen([11, 12]);
 $equalCraftsmen[0]['laborWeight'] = 50;
 $equalCraftsmen[1]['laborWeight'] = 50;
@@ -1290,6 +1291,44 @@ b1Assert(
         b1Plan(null, $inactiveStaff);
     }) === 'craftsman_not_active_eligible_in_store'
 );
+
+// Permission catalog growth must not change the business plan or bypass authorization.
+foreach ([50, 51, 128, 1001] as $featureCount) {
+    $expandedPermission = b1Snapshot();
+    $expandedPermission['operatorFeatures'] = ['cashier.v3.cashier'];
+    for ($featureIndex = 1; $featureIndex < $featureCount; $featureIndex++) {
+        $expandedPermission['operatorFeatures'][] = 'cashier.v3.test.feature.' . $featureIndex;
+    }
+    b1Assert(
+        'valid server permission list accepts ' . $featureCount . ' features without changing the plan',
+        b1Reason(static function () use ($expandedPermission): void {
+            b1Assert('expanded permission plan remains identical', b1Plan(null, $expandedPermission) === b1Plan());
+        }) === ''
+    );
+}
+foreach ([null, 'cashier.v3.cashier', ['key' => 'cashier.v3.cashier'],
+    ['cashier.v3.cashier', ''], ['cashier.v3.cashier', 1],
+    ['cashier.v3.cashier', 'cashier.v3.cashier']] as $invalidFeatures) {
+    $invalidPermission = b1Snapshot();
+    $invalidPermission['operatorFeatures'] = $invalidFeatures;
+    b1Assert('malformed permission lists remain rejected', b1Reason(static function () use ($invalidPermission): void {
+        b1Plan(null, $invalidPermission);
+    }) === 'string_list_invalid');
+}
+foreach ([[], array_map(static function (int $i): string {
+    return 'cashier.v3.test.other.' . $i;
+}, range(1, 128))] as $unauthorizedFeatures) {
+    $unauthorizedPermission = b1Snapshot();
+    $unauthorizedPermission['operatorFeatures'] = $unauthorizedFeatures;
+    b1Assert('empty or large unauthorized lists still fail closed', b1Reason(static function () use ($unauthorizedPermission): void {
+        b1Plan(null, $unauthorizedPermission);
+    }) === 'required_feature_missing');
+}
+$wrongStorePermission = b1Snapshot();
+$wrongStorePermission['operatorStoreId'] = 8;
+b1Assert('operator store boundary remains enforced', b1Reason(static function () use ($wrongStorePermission): void {
+    b1Plan(null, $wrongStorePermission);
+}) === 'operator_store_mismatch');
 
 $missingPermission = b1Snapshot();
 $missingPermission['operatorFeatures'] = ['cashier.v3.member'];

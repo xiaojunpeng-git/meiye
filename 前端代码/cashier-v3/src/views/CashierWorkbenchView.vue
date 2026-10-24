@@ -6337,7 +6337,8 @@ async function finalizeLocalCheckoutPreview(event = {}) {
       }
       checkoutReceiptSnapshot.value = clonePlain({
         ...checkoutSnapshot,
-        ...salesOrderReceiptFromCheckout(receiptPreview)
+        ...salesOrderReceiptFromCheckout(receiptPreview,
+          responseDataBlock(submitted).checkoutSubmission || responseDataBlock(submitted).checkoutResult || null)
       })
     }
     event?.resolve?.(submitted)
@@ -6461,6 +6462,11 @@ async function enqueueCheckoutAction(event = {}) {
       // A browser-owned preview has no server checkout session. Query only
       // the original command key; never send its cart snapshot as a new write.
       const queried = await requestCheckoutAction({ action, payload })
+      if (['success', 'succeeded'].includes(resultStatus(queried))) {
+        checkoutReceiptSnapshot.value = clonePlain(salesOrderReceiptFromCheckout(
+          preview, responseDataBlock(queried).checkoutSubmission || responseDataBlock(queried).checkoutResult || null
+        ))
+      }
       event?.resolve?.(queried)
       return queried
     } else if (action === 'query-checkout-result'

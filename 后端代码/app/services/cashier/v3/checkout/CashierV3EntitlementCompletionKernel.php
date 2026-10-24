@@ -714,7 +714,9 @@ final class CashierV3EntitlementCompletionKernel
         if ($snapshot['operatorStoreId'] !== $snapshot['storeId']) {
             throw self::failure('operator_store_mismatch');
         }
-        self::assertStringList($snapshot['operatorFeatures'], 'operatorFeatures', 50);
+        // 权限来自网关事务内重建的服务端授权，不以目录项数决定能否结账。
+        // 仅移除数量上限；列表有效性、下方操作权限及门店边界仍必须校验。
+        self::assertStringList($snapshot['operatorFeatures'], 'operatorFeatures');
         if (!array_intersect(self::REQUIRED_FEATURES_ANY_OF, $snapshot['operatorFeatures'])) {
             throw self::failure('required_feature_missing', [
                 'requiredAnyOf' => self::REQUIRED_FEATURES_ANY_OF,
@@ -2698,9 +2700,10 @@ final class CashierV3EntitlementCompletionKernel
         return $fraction === '' ? $whole : $whole . '.' . $fraction;
     }
 
-    private static function assertStringList($value, string $field, int $max): void
+    /** Null omits only the count cap; bounded lock-role lists retain their explicit cap. */
+    private static function assertStringList($value, string $field, ?int $max = null): void
     {
-        if (!is_array($value) || !self::isList($value) || count($value) > $max) {
+        if (!is_array($value) || !self::isList($value) || ($max !== null && count($value) > $max)) {
             throw self::failure('string_list_invalid', ['field' => $field]);
         }
         $seen = [];

@@ -94,6 +94,8 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             'occupation' => $occupation,
             'versions' => $versions,
             'inserted' => $inserted,
+            // Freeze post-deduction values in the receipt; replay never reads later balances.
+            'receiptEntitlements' => $this->receiptEntitlementsInTx($plan),
         ];
         $encoded = $this->encode($result);
         $affected = (int)Db::name(self::RECEIPT_TABLE)
@@ -110,6 +112,44 @@ final class ThinkPhpCashierV3EntitlementCompletionWriter
             throw self::failure('completion_receipt_finalize_conflict');
         }
         return $result;
+    }
+
+    /** Read already-locked, already-deducted sources for printing only; never deduct again. */
+    private function receiptEntitlementsInTx(CashierV3EntitlementCompletionPlanV1 $plan): array
+    {
+        $deductions = $plan->deductions();
+        $remainingByDetail = Db::name(self::DETAIL_TABLE)
+            ->whereIn('id', array_column($deductions, 'source_detail_id'))
+            ->column('write_surplus_times', 'id');
+        $rulesByHolder = $this->cardRules()->authoritiesForHolders(
+            $plan->context()['tenant_id'],
+            array_values(array_unique(array_filter(array_column($deductions, 'holder_id'))))
+        );
+        return self::receiptEntitlementLines($deductions, $remainingByDetail, $rulesByHolder);
+    }
+
+    /** Shared pools and replacement details both constrain the final usable physical count. */
+    private static function receiptEntitlementLines(array $deductions, array $remainingByDetail, array $rulesByHolder): array
+    {
+        $lines = [];
+        foreach ($deductions as $deduction) {
+            $detailId = $deduction['source_detail_id'];
+            $remaining = isset($remainingByDetail[$detailId]) ? (int)$remainingByDetail[$detailId] : null;
+            $rule = $rulesByHolder[$deduction['holder_id']][$detailId] ?? null;
+            if ($remaining !== null && is_array($rule)) {
+                $remaining = min($remaining, (int)$rule['remainingTimes']);
+            }
+            foreach ($deduction['line_ids'] as $lineId) {
+                $lines[] = [
+                    'lineId' => $lineId,
+                    'entitlementInstanceType' => $deduction['entitlement_instance_type'],
+                    'entitlementInstanceId' => $deduction['entitlement_instance_id'],
+                    'entitlementSourceDetailId' => $detailId,
+                    'remainingTimesAfter' => $remaining !== null && $remaining >= 0 ? $remaining : null,
+                ];
+            }
+        }
+        return $lines;
     }
 
     private function insertProcessingReceipt(CashierV3EntitlementCompletionPlanV1 $plan): array
