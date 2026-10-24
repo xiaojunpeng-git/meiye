@@ -1,0 +1,22 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "files": {
+    "后端代码/app/services/member/MemberCommerceSettingsServices.php": {
+      "sha256": "3b24ac77eb9694a3db9e00882a69606f4b3a8e7e6c0d75560a19c08d1615ca87",
+      "blob": "feaf83e00367c4bdf555c6922349cbdb0d5b420f"
+    },
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": {
+      "sha256": "6585102178bc8eff1449c36f67d790b1112c8ba879d7abbebdc966d55661e3bc",
+      "blob": "6857e918638798ea5402725eb6e26e9a2a7cac18"
+    },
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php": {
+      "sha256": "76c39ee42ab09bd934cdf51d82db0de7b110e1ce680d2d5634f35e3dfc47f419",
+      "blob": "d049c548c858f8a763011b53888386bf5bfd8091"
+    },
+    "前端代码/cashier-v3/src/services/cashierV3Bridge.js": {
+      "sha256": "9fe3518ffadc186c581e8df59407b4c8d3fb63ea85f149ae6331146df65be135",
+      "blob": "623a00fec592dba192d6184fafe98cc81c224bb0"
+    }
+  },
+  "online": "Not applicable: local only"
+}

@@ -1,0 +1,17 @@
+vite v4.5.14 building for production...
+transforming...
+✓ 2035 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../liveComparison-cashier-v3-dist/index.html                                  0.48 kB │ gzip:   0.33 kB
+../../../liveComparison-cashier-v3-dist/assets/login-beauty-quiet-826510a5.png  1,159.06 kB
+../../../liveComparison-cashier-v3-dist/assets/index-d751c788.css                 697.91 kB │ gzip: 104.58 kB
+../../../liveComparison-cashier-v3-dist/assets/exceljs.min-a0d233a6.js            939.05 kB │ gzip: 271.25 kB
+../../../liveComparison-cashier-v3-dist/assets/index-a29cdade.js                2,151.71 kB │ gzip: 639.09 kB
+✓ built in 2.96s
+{"tree":"422376e5716489f27127e5889f0a4ecf4700fac7","variant":"liveComparison","terminal":"cashier-v3","output":"/private/tmp/mohe-r57-source-policy-release-20261025/liveComparison-cashier-v3-dist","record":"/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/tests/cashier-v3/evidence/R57-release/liveComparison-cashier-v3-build.json","result":"PASS"}
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

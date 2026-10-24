@@ -1,0 +1,38 @@
+{
+  "result": "PASS",
+  "head": "98f66f31d010a5dd8ef8bb859a21f2fca9e49c8e",
+  "checks": 46,
+  "selftestSHA256": "b6fbf8b777839ad290beb7fba4b34fc5e8b27046bf632568a6ff882d7f6fc891",
+  "inputsUnchanged": true,
+  "readOnlySpotCheck": {
+    "tenant": "0",
+    "storeId": 23,
+    "memberId": 1130058,
+    "mode": "previous",
+    "purchasePrimarySourceId": 11,
+    "rechargePrimarySourceId": 17,
+    "repaymentPrimarySourceId": 0,
+    "businessWrites": 0
+  },
+  "build": {
+    "result": "PASS",
+    "source": "前端代码/cashier-v3",
+    "output": "/tmp/mohe-r57-previous-source-final-check",
+    "assets": [
+      {
+        "file": "exceljs.min-a0d233a6.js",
+        "sha256": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+      },
+      {
+        "file": "index-83d68adc.css",
+        "sha256": "83d68adc50ddf71cf5af77d1100aa3f37f903528eb9ccbbdcae2caf99fff2d62"
+      },
+      {
+        "file": "index-d5592288.js",
+        "sha256": "42d5c7e44ec610eeb441f04b880bc7545fa9aec01d9e0dec962e81b7d16ffbda"
+      }
+    ]
+  },
+  "limits": "Read-only real history spot-check plus actual summary closure, selection and overlay setup with isolated transports; no real payment or product acceptance.",
+  "acceptance": "pending product manager"
+}

@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "mode": "manual",
+  "enabled": true,
+  "inheritPrevious": false,
+  "manualChoicesEmpty": true,
+  "serverReadOnly": true,
+  "businessWrites": 0
+}

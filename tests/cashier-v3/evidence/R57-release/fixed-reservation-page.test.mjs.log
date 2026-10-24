@@ -1,0 +1,20 @@
+✔ merchant workbench exposes confirmation and service as two independent reservation functions (0.398708ms)
+✔ confirmation page only handles pending V3 reservations and requires a rejection reason (0.149958ms)
+✔ merchant confirmation edits the same pending reservation while keeping customer read-only (0.515334ms)
+✔ merchant confirmation schedules before optional projects and keeps an explicit end time (0.092333ms)
+✔ merchant confirmation recalculates only after schedule or project changes (0.068917ms)
+✔ service page uses actual-start timing, displays overtime and never auto-ends service (0.182167ms)
+✔ service tab discards responses from an earlier filter or page (0.064541ms)
+✔ service detail offers edit beside start only before service and reuses the prepared draft (0.086959ms)
+✔ unstarted reservation deletion follows the server action, version and confirmation boundary (0.11775ms)
+✔ service page creates through the V3 empty-context contract and requests store-scoped history (0.125917ms)
+✔ service start gives a mobile-side prerequisite prompt without requiring a room (0.073166ms)
+✔ reservation transport declares V3 confirmation, rejection and service commands without legacy endpoints (0.31525ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5.182208

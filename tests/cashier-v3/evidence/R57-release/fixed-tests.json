@@ -1,0 +1,29 @@
+{
+  "result": "PASS",
+  "tree": "c3a85bf3f85ff40cb94362268260153f41bf5d4a",
+  "sourceStable": true,
+  "baselineReproduced": [
+    "rh",
+    "008",
+    "010"
+  ],
+  "runtimeDependencies": [
+    "app/services/query/provider/MemberUnifiedQueryProvider.php",
+    "app/services/query/provider/MemberUnifiedQueryPageRegistrar.php",
+    "app/services/query/UnifiedQueryExecutionServices.php",
+    "app/services/query/UnifiedQueryCapabilityServices.php",
+    "app/services/cashier/v3/query/UnifiedQueryModule.php"
+  ],
+  "results": [
+    {
+      "name": "member",
+      "result": "PASS"
+    },
+    {
+      "name": "reports",
+      "result": "PASS"
+    }
+  ],
+  "financialWrites": 0,
+  "limits": "Fixture transport; no authenticated production transactions"
+}
