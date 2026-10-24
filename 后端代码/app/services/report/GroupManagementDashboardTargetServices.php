@@ -33,7 +33,8 @@ final class GroupManagementDashboardTargetServices
                 $total += $amount;
                 $cells[] = ['month' => $month, 'target_amount_cents' => $line ? $amount : '',
                     'expected_version' => $line ? (int)$line['version'] : 0,
-                    'subject_key' => sprintf('scheme:%d:store:%d:month:%02d', (int)$bound['scheme_id'], $id, $month)];
+                    // 多月份可来自不同方案，单元格身份使用自身行的方案，不能用汇总的混合方案 ID 0。
+                    'subject_key' => sprintf('scheme:%d:store:%d:month:%02d', (int)($line['scheme_id'] ?? 0), $id, $month)];
             }
             $rows[] = ['store_id' => (int)$id, 'store_name' => (string)$name,
                 'months' => $cells, 'annual_target_cents' => $total];

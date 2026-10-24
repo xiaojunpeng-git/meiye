@@ -229,6 +229,20 @@ class StoreTarget extends AuthController
         catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
+    /** 作废沿用目标管理权限与门店范围校验，不能由客户端指定更大的目标范围。 */
+    public function schemeVoid(TargetSchemeServices $schemes)
+    {
+        try { $data = $this->request->post(); return $this->success($schemes->void($this->schemeContext(true), (int)($data['scheme_id'] ?? 0), $data)); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    /** 删除复用目标管理权限；只有作废且版本匹配的方案可以移出列表。 */
+    public function schemeDelete(TargetSchemeServices $schemes)
+    {
+        try { $data = $this->request->post(); return $this->success($schemes->deleteVoided($this->schemeContext(true), (int)($data['scheme_id'] ?? 0), $data)); }
+        catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
     /** 平台三张分析表共用这一结果，只改变展示方式，不再执行旧订单/人员业绩 SQL。 */
     public function schemeReport(TargetSchemeReportServices $reports)
     {
