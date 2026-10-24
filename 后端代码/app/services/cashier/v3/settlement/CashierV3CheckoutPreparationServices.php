@@ -638,6 +638,21 @@ final class CashierV3CheckoutPreparationServices
                 \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::assertSaleAmount(
                     $cardPurchaseSnapshot, $increase, $quantity, $lineAmount, $discount
                 );
+                // 唯一快照可能来自浏览器本地改价，不能只校验旧工作台命令。
+                // 按手工改价后的单价约束，优惠券抵扣不改变商品售价区间，也不重写本单金额。
+                $range = (array)($server['display_snapshot']['salePriceRange'] ?? []);
+                $beforeCouponAmount = $lineAmount + $discount;
+                // 多卡升级的补差价不是目标卡售价，沿用本次已确认的目标卡总售价。
+                if (!empty($line['cardOperationUpgrade']['multiCardUpgrade'])
+                    && isset($cardPurchaseSnapshot['multiCardUpgrade']['targetSaleAmountCents'])) {
+                    $beforeCouponAmount = (int)$cardPurchaseSnapshot['multiCardUpgrade']['targetSaleAmountCents'];
+                }
+                if ($beforeCouponAmount !== $unit * $quantity) {
+                    \app\services\cashier\v3\cashier\CashierV3CashierMoreActionServices::assertSalePriceRangeCents(
+                        (int)($range['minimumCents'] ?? 0), (int)($range['maximumCents'] ?? 0),
+                        (string)($server['display_snapshot']['name'] ?? ''), $beforeCouponAmount, $quantity
+                    );
+                }
                 $isPresale = !$customCard && !empty($line['isPresale']);
                 $saleLines[] = [
                     'lineId' => (string)($line['lineId'] ?? 'snapshot-' . $index),

@@ -32,6 +32,7 @@ import {
 } from '@/services/cashierV3OrderProjectionContract'
 import { salesOrderReceiptFromCheckout } from '@/services/salesOrderReceiptPrint'
 import { checkoutBalancePreview } from '@/services/cashierV3CheckoutBalancePreview'
+import { salePriceRangeMessage } from '@/services/cashierV3SalePriceRange'
 import { combinationChoicePreflightFailure } from '@/services/cashierV3CombinationChoicePreflight'
 import CashierCheckoutOverlay from '@/components/cashier/CashierCheckoutOverlay.vue'
 import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
@@ -2319,6 +2320,8 @@ async function appendCatalogItemToDraft(item) {
       finalAmount: amount,
       originalAmount: amount,
       debtAmountCents: 0,
+      // 记录此SKU的单价边界供改价即时提示，后端最终提交仍自行核验。
+      salePriceRange: clonePlain(item.salePriceRange || null),
       cardPurchaseSnapshot: clonePlain(item.cardPurchaseSnapshot || {}),
       localCatalogItem: { itemId, catalogKind }
     }
@@ -5248,6 +5251,18 @@ async function saveMoreActionEditor() {
     }
     const lineAmountCents = Number(rawAmount) * 100
     if (!Number.isSafeInteger(lineAmountCents)) return
+    const itemId = Number(editor.line.catalogItemId ?? editor.line.skuId ?? editor.line.itemId ?? 0)
+    const currentItem = (Array.isArray(catalog.value.items) ? catalog.value.items : [])
+      .find((item) => Number(item.id) === itemId)
+    // 多件购买必须比较单价，错误时保留编辑框与当前草稿，不先写入再回滚。
+    const rangeMessage = salePriceRangeMessage(
+      editor.line.name, lineAmountCents, Number(editor.line.quantity || 1),
+      currentItem?.salePriceRange ?? editor.line.salePriceRange
+    )
+    if (rangeMessage) {
+      moreActionValidationMessage.value = rangeMessage
+      return
+    }
     savedPriceAmountCents = lineAmountCents
     action = 'update-cashier-line-price'
     payload = { lineId: editor.line.id, lineAmountCents, reason }

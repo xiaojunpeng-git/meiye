@@ -1,0 +1,79 @@
+PASS locked SKU range reaches display DTO: 产品
+PASS direct unique snapshot rejects bypassed price
+PASS direct unique snapshot rejects bypassed price
+PASS direct unique snapshot rejects bypassed price
+PASS unique snapshot retains confirmed boundary amount
+PASS coupon discount does not masquerade as manual underpricing
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS inclusive unit range and successful audit/debt handling: 产品
+PASS inclusive unit range and successful audit/debt handling: 产品
+PASS inclusive unit range and successful audit/debt handling: 产品
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS unbounded range preserves positive cost floor: 产品
+PASS whole-yuan rule retained: 产品
+PASS locked SKU range reaches display DTO: 卡项
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS inclusive unit range and successful audit/debt handling: 卡项
+PASS inclusive unit range and successful audit/debt handling: 卡项
+PASS inclusive unit range and successful audit/debt handling: 卡项
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS unbounded range preserves positive cost floor: 卡项
+PASS whole-yuan rule retained: 卡项
+PASS locked SKU range reaches display DTO: 组合卡项
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS inclusive unit range and successful audit/debt handling: 组合卡项
+PASS inclusive unit range and successful audit/debt handling: 组合卡项
+PASS inclusive unit range and successful audit/debt handling: 组合卡项
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS unbounded range preserves positive cost floor: 组合卡项
+PASS whole-yuan rule retained: 组合卡项
+PASS locked SKU range reaches display DTO: 项目
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS inclusive unit range and successful audit/debt handling: 项目
+PASS inclusive unit range and successful audit/debt handling: 项目
+PASS inclusive unit range and successful audit/debt handling: 项目
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS exact range prompt
+PASS rejected change preserves all cart prices, audit and debt
+PASS unbounded range preserves positive cost floor: 项目
+PASS whole-yuan rule retained: 项目
+PASS fixtures fully rolled back
+R31 SALE PRICE RANGE PASS

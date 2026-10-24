@@ -1,0 +1,78 @@
+
+cashier-more-actions-backend-contract.php
+cashier more-actions backend contract PASS (25 checks)
+
+price-change-inventory-independence-contract.php
+PASS price change policy needs only the cashier workspace context
+PASS price change policy has no server resource discovery
+PASS price change still calculates the configured cost from the locked SKU
+PASS ordinary stored-line discovery remains available for checkout validation
+PASS checkout stored-line revalidation still checks inventory availability
+5/5 PASS
+
+zero-price-change-checkout-contract.php
+
+Fatal error: Uncaught Error: Class 'app\services\cashier\v3\settlement\CashierV3CouponTenderAmounts' not found in /var/www/html/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php:974
+Stack trace:
+#0 [internal function]: app\services\cashier\v3\settlement\CashierV3CheckoutPreparationServices->saleSnapshotLine(Array)
+#1 /tmp/r31-regression/tests/cashier-v3/php/zero-price-change-checkout-contract.php(41): ReflectionMethod->invoke(Object(app\services\cashier\v3\settlement\CashierV3CheckoutPreparationServices), Array)
+#2 {main}
+  thrown in /var/www/html/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php on line 974
+
+checkout-snapshot-direct-authority-contract.php
+[PASS] snapshot drops generated version and token metadata
+[PASS] snapshot member binding is normalized
+[PASS] snapshot retains the checkout-time boundary
+[PASS] snapshot lines retain canonical role identity and quantity
+[PASS] snapshot retains non-authoritative interaction metadata for final persistence
+[PASS] duplicate snapshot line identity is rejected
+[PASS] member snapshot cannot be submitted without a member id
+[PASS] guest snapshot retains explicit guest identity for final checkout
+[PASS] guest snapshot cannot carry a member id
+[PASS] snapshot path builds authority before any workspace materializer
+[PASS] snapshot resource discovery skips payment rows for final settlement validation
+[PASS] browser snapshot authority does not depend on workspace projection version
+[PASS] no row-by-row snapshot workspace materializer remains
+[FAIL] snapshot completion clears the shell without comparing legacy workspace lines
+[FAIL] snapshot salespeople never fall back to legacy workspace rows
+[PASS] custom-card snapshot derives its member binding from the same browser snapshot
+[PASS] empty salesperson snapshot is a valid no-salesperson selection
+[PASS] snapshot sale authority preserves locked catalog category for service facts
+[PASS] snapshot entitlement authority preserves selected service settings
+[PASS] direct entitlement snapshot preserves source and project display identity
+[PASS] direct entitlement snapshot preserves the browser actual amount for kernel comparison
+[PASS] final entitlement snapshot does not apply current-time or validity-window blockers
+[PASS] direct entitlement eligibility reads the checkout snapshot time, not the server audit time
+[PASS] entitlement-only snapshot clears stale payment projection
+[FAIL] entitlement service intent is decoded separately from sale personnel snapshot
+[PASS] new snapshot sales recheck catalog availability while entitlements keep historic authority
+[PASS] active product remains saleable
+[PASS] new sale names the off-shelf product for product_is_del
+[PASS] new sale names the off-shelf product for product_is_show
+[PASS] new sale names the off-shelf product for sku_is_show
+[PASS] card components in a final snapshot do not reapply catalogue lifecycle state
+[PASS] card purchase definition is persisted from the one browser snapshot through issuance
+[PASS] final snapshot inventory locks identities without applying product or SKU lifecycle flags
+[PASS] entitlement inventory authority does not reject an already-sold project by catalogue lifecycle
+[PASS] entitlement performance authority does not reject an already-sold project by catalogue lifecycle
+[FAIL] snapshot salesperson array participates in projection fingerprint
+[PASS] snapshot projection verifies the persisted card definition fingerprint
+[PASS] snapshot projection keeps a positive workspace version when the shell is uninitialized
+[PASS] direct snapshot submit does not report browser workspace mutations
+[PASS] direct snapshot execution payload is an explicit internal three-field contract
+[PASS] direct entitlement snapshot never locks or passes the legacy workspace resource
+[PASS] direct entitlement snapshot carries a server-derived workspace-lock boundary into the kernel
+[PASS] direct sale snapshot does not require the removed browser preparation token
+[PASS] direct sale snapshot does not require browser workspace contexts
+[PASS] direct snapshot result does not require a browser projection version bump
+[PASS] direct snapshot response bypasses legacy root projection replay
+[PASS] card upgrade intent is materialized only inside final snapshot submit
+[PASS] all local card operations are materialized only inside final snapshot submit
+[PASS] standalone card-operation snapshot rows bypass sale and entitlement discovery
+[FAIL] entitlement selector is a member-id display read without workspace or version contexts
+checkout-snapshot-direct-authority-contract: 45 passed, 5 failed
+
+Zero-price test rerun with project Composer autoload (original standalone harness omitted it):
+PASS zero-price-change-checkout-contract
+
+CASHIER_MORE_ACTIONS_FRONTEND_CONTRACT_OK
