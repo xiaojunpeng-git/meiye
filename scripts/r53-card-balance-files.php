@@ -63,9 +63,12 @@ if ($mode === 'backup') {
         || r53Digest($root . '/.env') !== r53Digest($directory . '/instance-before.env')) throw new RuntimeException('Instance configuration backup failed');
     chmod($record, 0600); chmod($directory . '/instance-before.env', 0600);
 } else {
-    $backup = json_decode((string)file_get_contents($directory . '/database-backup.json'), true, 512, JSON_THROW_ON_ERROR);
+    // Only the explicitly waived, not-yet-live 010 test database may omit a
+    // full dump. Other sites still require the verified independent backup.
+    $waived = $site === '010' && is_file($directory . '/database-backup-waiver.json');
+    $backup = json_decode((string)file_get_contents($directory . ($waived ? '/database-backup-waiver.json' : '/database-backup.json')), true, 512, JSON_THROW_ON_ERROR);
     if ($backup['site'] !== $site || $backup['commit'] !== $manifest['commit']
-        || r53Digest($directory . '/database-before.sql.gz') !== $backup['sha256']) throw new RuntimeException('Independent database backup missing or changed');
+        || ($waived ? empty($backup['explicitUserWaiver']) : r53Digest($directory . '/database-before.sql.gz') !== $backup['sha256'])) throw new RuntimeException('Database backup or explicit 010 waiver missing or changed');
     $targets = json_decode((string)file_get_contents($record), true, 512, JSON_THROW_ON_ERROR);
     foreach ($targets as $key => $row) if (!in_array(r53Digest(r53Destination($key, $root, $site)), [$row['before'], $row['after']], true)) throw new RuntimeException('Concurrent target change: ' . $key);
     if ($mode === 'rollback') {

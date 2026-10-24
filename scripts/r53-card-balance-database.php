@@ -6,7 +6,7 @@ declare(strict_types=1);
 // administrator edits and cannot remove protection after a real conversion.
 $directory = $argv[1] ?? ''; $mode = $argv[2] ?? ''; $manifestHash = $argv[3] ?? '';
 if (PHP_SAPI !== 'cli' || !preg_match('~^/www/backups/(rh|008|010)/r53-card-balance-([a-f0-9]{8})$~D', $directory, $match)
-    || !in_array($mode, ['backup', 'migrate', 'rollback'], true) || !preg_match('/^[a-f0-9]{64}$/D', $manifestHash)) exit(2);
+    || !in_array($mode, ['backup', 'waive-backup', 'migrate', 'rollback'], true) || !preg_match('/^[a-f0-9]{64}$/D', $manifestHash)) exit(2);
 umask(0077); date_default_timezone_set('Asia/Shanghai');
 set_exception_handler(static function (Throwable $error): void { file_put_contents('php://stderr', $error->getMessage() . PHP_EOL); exit(1); });
 $manifestFile = $directory . '/payload/manifest.json';
@@ -67,6 +67,22 @@ function r53AssertMetadataDelta(array $before, array $after, int $changed): void
     }
     if ($count !== $changed) throw new RuntimeException('Permission change count mismatch');
 }
+// Explicit product-manager waiver applies to this unused 010 test database
+// only. Retain the already captured metadata for narrow migration rollback;
+// this receipt is never represented as a full database backup.
+if ($mode === 'waive-backup') {
+    $approval = json_decode((string)file_get_contents($directory . '/010-backup-waiver-authorization.json'), true, 512, JSON_THROW_ON_ERROR);
+    if ($site !== '010' || ($approval['commit'] ?? '') !== $manifest['commit'] || empty($approval['explicitUserWaiver'])
+        || is_file($directory . '/prepared.json') || is_file($directory . '/metadata-after.json')) throw new RuntimeException('010 waiver identity or phase mismatch');
+    $before = json_decode((string)file_get_contents($directory . '/metadata-before.json'), true, 512, JSON_THROW_ON_ERROR);
+    if (r53MetadataHash(r53Metadata($pdo)) !== r53MetadataHash($before)) throw new RuntimeException('Metadata changed since failed backup');
+    $waiver = ['site' => $site, 'database' => $database, 'port' => $port, 'commit' => $manifest['commit'],
+        'explicitUserWaiver' => true, 'fullDatabaseBackup' => false, 'metadataHash' => r53MetadataHash($before),
+        'maxCardOperationId' => (int)$pdo->query('SELECT COALESCE(MAX(id),0) FROM eb_cashier_v3_card_operation')->fetchColumn()];
+    r53Save($directory . '/database-backup-waiver.json', $waiver);
+    echo json_encode(['result' => 'PASS', 'site' => $site, 'fullDatabaseBackup' => false, 'explicitUserWaiver' => true]), PHP_EOL;
+    exit;
+}
 if ($mode === 'backup') {
     if (is_file($directory . '/database-backup.json')) throw new RuntimeException('Database backup already exists');
     $before = r53Metadata($pdo);
@@ -79,9 +95,10 @@ if ($mode === 'backup') {
     $args = [$bin, '--host=' . $config['hostname'], '--port=' . $port, '--user=' . $config['username'],
         '--single-transaction', '--quick', '--routines', '--triggers', '--events', '--no-tablespaces', '--set-gtid-purged=OFF',
         '--hex-blob', '--default-character-set=utf8mb4', $database];
+    $childEnv = array_merge($_ENV, ['PATH' => getenv('PATH') ?: '/usr/bin:/bin', 'MYSQL_PWD' => $config['password']]);
     // The password is private child environment, never argv, logs or tool output.
     $process = proc_open($args, [0 => ['pipe', 'r'], 1 => ['file', $plain, 'w'], 2 => ['file', $directory . '/dump-errors.log', 'w']],
-        $pipes, $root, array_merge($_ENV, ['PATH' => getenv('PATH') ?: '/usr/bin:/bin', 'MYSQL_PWD' => $config['password']]));
+        $pipes, $root, $childEnv);
     if (!is_resource($process)) throw new RuntimeException('Cannot start database backup');
     fclose($pipes[0]); if (proc_close($process) !== 0) throw new RuntimeException('Database backup failed; protected log retained');
     $input = fopen($plain, 'rb'); $output = gzopen($directory . '/database-before.sql.gz', 'wb1');
@@ -104,9 +121,10 @@ if ($mode === 'backup') {
     echo json_encode(['result' => 'PASS', 'site' => $site, 'backup' => $directory, 'fullDatabaseBackup' => true]), PHP_EOL;
     exit;
 }
-$receipt = json_decode((string)file_get_contents($directory . '/database-backup.json'), true, 512, JSON_THROW_ON_ERROR);
+$waived = $site === '010' && is_file($directory . '/database-backup-waiver.json');
+$receipt = json_decode((string)file_get_contents($directory . ($waived ? '/database-backup-waiver.json' : '/database-backup.json')), true, 512, JSON_THROW_ON_ERROR);
 if ($receipt['site'] !== $site || $receipt['database'] !== $database || $receipt['commit'] !== $manifest['commit']
-    || hash_file('sha256', $directory . '/database-before.sql.gz') !== $receipt['sha256']) throw new RuntimeException('Independent backup identity/hash mismatch');
+    || ($waived ? empty($receipt['explicitUserWaiver']) : hash_file('sha256', $directory . '/database-before.sql.gz') !== $receipt['sha256'])) throw new RuntimeException('Backup or explicit 010 waiver identity mismatch');
 $before = json_decode((string)file_get_contents($directory . '/metadata-before.json'), true, 512, JSON_THROW_ON_ERROR);
 if (r53MetadataHash($before) !== $receipt['metadataHash']) throw new RuntimeException('Metadata backup changed');
 require $root . '/vendor/autoload.php'; (new \think\App($root . '/'))->initialize();

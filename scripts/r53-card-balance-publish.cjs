@@ -74,7 +74,7 @@ function targetDigests(site, keys) {
   const code = `<?php $r='/www/wwwroot/${sites[site].domain}';$out=[];foreach(json_decode(base64_decode('${encoded}'),true)as $k){$p=strpos($k,'preview/')===0?$r.'-8080/'.substr($k,8):$r.'/'.substr($k,7);$out[$k]=is_file($p)?hash_file('sha256',$p):null;}echo json_encode($out);`;
   return JSON.parse(ssh(site, '/www/server/php/74/bin/php', Buffer.from(code)));
 }
-function deploy(site, resumeUpload = false) {
+function deploy(site, resumeUpload = false, resumeBackup = false, retryRollback = false) {
   if (!sites[site]) throw Error('Explicit authorized site required');
   const plan = ready(), receipt = load('commit.json');
   if (site !== 'rh') {
@@ -110,24 +110,50 @@ function deploy(site, resumeUpload = false) {
     'payload/manifest.json': bytes, 'files.php': fs.readFileSync('scripts/r53-card-balance-files.php'), 'database.php': fs.readFileSync('scripts/r53-card-balance-database.php') })) {
     const destination = path.join(stage, name); fs.mkdirSync(path.dirname(destination), { recursive: true });
     if (!resumeUpload) fs.writeFileSync(destination, body, { flag: 'wx', mode: 0o444 });
-    else if (!fs.existsSync(destination) || hash(fs.readFileSync(destination)) !== hash(body)) throw Error('Interrupted stage changed: ' + name);
+    else if (resumeBackup && ['database.php', 'files.php'].includes(name)) {
+      // Only the backup control changes; every business payload remains frozen.
+      fs.chmodSync(destination, 0o644); fs.writeFileSync(destination, body); fs.chmodSync(destination, 0o444);
+    } else if (!fs.existsSync(destination) || hash(fs.readFileSync(destination)) !== hash(body)) throw Error('Interrupted stage changed: ' + name);
   }
   const archive = run('tar', ['-czf', '-', '-C', stage, '.']);
   if (!resumeUpload) ssh(site, `test ! -e '${directory}' && mkdir -m 700 -p '${directory}'`);
   // Resume is permitted only for a lost upload before any backup/live phase.
   // Later failures require the recorded rollback path, not a blind rerun.
-  else ssh(site, `test -d '${directory}' && test ! -e '${directory}/database-backup.json' && test ! -e '${directory}/database-before.sql' && test ! -e '${directory}/prepared.json' && test ! -e '${directory}/metadata-after.json'`);
-  ssh(site, `tar -xzf - -C '${directory}'`, archive);
+  else if (retryRollback) {
+    if (site !== '010' || load('010-rollback.json').result !== 'PASS') throw Error('Safe 010 rollback required');
+    ssh(site, `test -f '${directory}/database-rollback-safe.json' && test -f '${directory}/database-backup-waiver.json' && test -f '${directory}/prepared.json' && test ! -e '${directory}/metadata-after.json'`);
+    const current = targetDigests(site, Object.keys(targets));
+    for (const [file, row] of Object.entries(targets)) if (current[file] !== row.before) throw Error('Rollback target not restored: ' + file);
+  } else ssh(site, `test -d '${directory}' && test ! -e '${directory}/database-backup.json' ${resumeBackup ? '' : "&& test ! -e '" + directory + "/database-before.sql'"} && test ! -e '${directory}/prepared.json' && test ! -e '${directory}/metadata-after.json'`);
+  if (resumeBackup) {
+    if (site !== '010') throw Error('Backup continuation is 010 only');
+    // Upload just the engineering control, not the already fingerprinted app.
+    for (const [name, file] of [['database.php', 'database'], ['files.php', 'files']]) {
+      const code = fs.readFileSync('scripts/r53-card-balance-' + file + '.php');
+      ssh(site, `/www/server/php/74/bin/php -r 'file_put_contents($argv[1], stream_get_contents(STDIN));' '${directory}/${name}'`, code);
+    }
+    const approval = load('010-backup-waiver-authorization.json');
+    if (approval.commit !== receipt.commit || !approval.explicitUserWaiver) throw Error('Explicit user waiver required');
+    ssh(site, `/www/server/php/74/bin/php -r 'file_put_contents($argv[1], stream_get_contents(STDIN));chmod($argv[1],0600);' '${directory}/010-backup-waiver-authorization.json'`, Buffer.from(JSON.stringify(approval)));
+    const stagedHash = ssh(site, `sha256sum '${directory}/payload/manifest.json'`).toString().split(/\s/)[0];
+    if (stagedHash !== manifestHash) throw Error('Staged manifest changed');
+  } else ssh(site, `tar -xzf - -C '${directory}'`, archive);
   assertAffectedBefore(site, before, plan);
-  save(site + '-manifest.json', manifest);
+  if (!resumeBackup) save(site + '-manifest.json', manifest);
+  else if (hash(Buffer.from(JSON.stringify(load(site + '-manifest.json')))) !== manifestHash) throw Error('Recorded manifest changed');
   const invoke = (script, mode) => ssh(site, `/www/server/php/74/bin/php '${directory}/${script}.php' '${directory}' '${mode}' '${manifestHash}'`);
-  // Full independent database and target file backups precede either schema or code mutation.
-  fs.writeFileSync(path.join(evidence, site + '-database-backup.log'), invoke('database', 'backup'));
-  fs.writeFileSync(path.join(evidence, site + '-file-backup.log'), invoke('files', 'backup'));
+  // Independent full backups remain mandatory except the explicitly waived
+  // unused 010 test database; target-file rollback material is still retained.
+  if (!retryRollback) {
+    fs.writeFileSync(path.join(evidence, site + (resumeBackup ? '-database-backup-waiver.log' : '-database-backup.log')), invoke('database', resumeBackup ? 'waive-backup' : 'backup'));
+    fs.writeFileSync(path.join(evidence, site + '-file-backup.log'), invoke('files', 'backup'));
+  }
   let switched = false;
   try {
     fs.writeFileSync(path.join(evidence, site + '-migration-files.log'), invoke('files', 'migrations')); switched = true;
-    const indexOutput = ssh(site, `/www/server/php/74/bin/php '/www/wwwroot/${sites[site].domain}/database/upgrades/2026-10-24-卡转余额/03-补交关联锁定索引.php' --apply`);
+    const indexOutput = site === '010'
+      ? ssh(site, `/www/server/php/74/bin/php -- '${directory}' '${manifestHash}'`, fs.readFileSync('scripts/r53-card-balance-indexes-010.php'))
+      : ssh(site, `/www/server/php/74/bin/php '/www/wwwroot/${sites[site].domain}/database/upgrades/2026-10-24-卡转余额/03-补交关联锁定索引.php' --apply`);
     fs.writeFileSync(path.join(evidence, site + '-indexes.json'), indexOutput);
     fs.writeFileSync(path.join(evidence, site + '-backend-install.log'), invoke('files', 'backend'));
     const migration = JSON.parse(invoke('database', 'migrate')); save(site + '-metadata-migration.json', migration);
@@ -193,7 +219,12 @@ function archive(partial = false) {
   if (partial && (load('010-blocked.json').result !== 'BLOCKED_BEFORE_LIVE_CHANGE'
       || load('010-blocked-readonly.json').result !== 'UNCHANGED')) throw Error('Blocked site state not proven');
   const ref = 'refs/heads/' + receipt.branch;
-  if (git(['rev-parse', ref]).toString().trim() !== receipt.commit) throw Error('Release branch moved');
+  const priorArchive = fs.existsSync(path.join(evidence, 'archive-result.json')) ? load('archive-result.json') : null;
+  const parent = priorArchive ? priorArchive.archiveCommit : receipt.commit;
+  if (git(['rev-parse', ref]).toString().trim() !== parent) throw Error('Release branch moved');
+  const priorChanges = git(['-c', 'core.quotepath=false', 'diff', '--name-only', receipt.commit, parent]).toString().trim();
+  if (priorChanges && priorChanges.split('\n').some(file => !file.startsWith('scripts/r53-card-balance-')
+      && !file.startsWith('tests/cashier-v3/evidence/R53-'))) throw Error('Prior archive changed deployed business source');
   const files = fs.readdirSync('scripts').filter(name => name.startsWith('r53-card-balance-')).map(name => 'scripts/' + name);
   function collect(directory) {
     for (const name of fs.readdirSync(directory)) {
@@ -208,21 +239,21 @@ function archive(partial = false) {
   const privateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'r53-archive-'));
   const env = { ...process.env, GIT_INDEX_FILE: path.join(privateDirectory, 'index') };
   try {
-    git(['read-tree', receipt.commit], undefined, env);
+    git(['read-tree', parent], undefined, env);
     for (const file of files.sort()) {
       const blob = git(['hash-object', '-w', '--stdin'], fs.readFileSync(file)).toString().trim();
       git(['update-index', '--add', '--cacheinfo', '100644', blob, file], undefined, env);
     }
     const tree = git(['write-tree'], undefined, env).toString().trim();
-    const changed = git(['-c', 'core.quotepath=false', 'diff', '--name-only', receipt.commit, tree]).toString().trim().split('\n');
+    const changed = git(['-c', 'core.quotepath=false', 'diff', '--name-only', parent, tree]).toString().trim().split('\n');
     if (changed.some(file => !files.includes(file))) throw Error('Archive boundary mismatch');
     const title = partial ? '瑞昊008发布证据与010备份阻断归档' : '三站发布控制与独立核验证据归档';
-    const current = git(['commit-tree', tree, '-p', receipt.commit], Buffer.from('R53-00053 ' + title + '\n\n仅工程脚本和证据，线上已部署业务仍为5fd82252。\n')).toString().trim();
+    const current = git(['commit-tree', tree, '-p', parent], Buffer.from('R53-00053 ' + title + '\n\n仅工程脚本和证据，线上已部署业务仍为5fd82252。\n')).toString().trim();
     if (hash(fs.readFileSync(index)) !== before || git(['rev-parse', 'HEAD']).toString().trim() !== head) throw Error('Shared checkout changed');
-    git(['update-ref', ref, current, receipt.commit]);
+    git(['update-ref', ref, current, parent]);
     git(['push', 'origin', ref + ':' + ref]);
     if (git(['ls-remote', 'origin', ref]).toString().split(/\s/)[0] !== current) throw Error('Archive push verification failed');
-    save('archive-result.json', { result: 'PASS', publicationComplete: !partial, pendingSites: partial ? ['010'] : [], archiveCommit: current, deployedBusinessCommit: receipt.commit, files: files.length, sharedIndexUntouched: true });
+    save(priorArchive ? 'completion-archive-result.json' : 'archive-result.json', { result: 'PASS', publicationComplete: !partial, pendingSites: partial ? ['010'] : [], archiveCommit: current, deployedBusinessCommit: receipt.commit, files: files.length, sharedIndexUntouched: true });
     console.log('ARCHIVE_PUSH_VERIFIED', current);
   } finally { fs.rmSync(privateDirectory, { recursive: true, force: true }); }
 }
@@ -230,6 +261,8 @@ const [mode, site] = process.argv.slice(2);
 if (mode === 'commit') commit();
 else if (mode === 'deploy') deploy(site);
 else if (mode === 'resume-upload') deploy(site, true);
+else if (mode === 'resume-without-db-backup') deploy(site, true, true);
+else if (mode === 'retry-010-after-rollback' && site === '010') deploy(site, true, true, true);
 else if (mode === 'push') push();
 else if (mode === 'verify') verify(site);
 else if (mode === 'archive') archive();
