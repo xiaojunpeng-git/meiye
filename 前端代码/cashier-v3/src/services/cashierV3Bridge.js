@@ -277,6 +277,7 @@ const EMPTY_BOOTSTRAP = {
     id: null,
     name: '当前门店'
   },
+  navigationRules: [],
   featurePermissions: {
     'cashier.v3.cashier': false,
     'cashier.v3.writeoff': false,
@@ -286,6 +287,14 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.hang': false,
     'cashier.v3.order_center': false,
     'cashier.v3.management_center': false,
+    'cashier.v3.fund': false,
+    'cashier.v3.care': false,
+    'cashier.v3.data': false,
+    'cashier.v3.targets': false,
+    'cashier.v3.management.staff': false,
+    'cashier.v3.management.rooms': false,
+    'cashier.v3.management.dashboard': false,
+
     'cashier.v3.member.create': false,
     'cashier.v3.member.batch': false,
     'cashier.v3.inventory.overview': false,
@@ -339,7 +348,8 @@ const EMPTY_BOOTSTRAP = {
   operator: {
     name: '当前账号',
     account: '',
-    roleName: ''
+    roleName: '',
+    profile: { name: '', phone: '', positions: [] }
   },
   pendingHangCount: 0,
   cashier: EMPTY_CASHIER,
@@ -460,6 +470,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
     id: 'store-1',
     name: '瑞昊一店'
   },
+  navigationRules: [],
   featurePermissions: {
     'cashier.v3.cashier': true,
     'cashier.v3.writeoff': true,
@@ -469,6 +480,14 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.hang': true,
     'cashier.v3.order_center': true,
     'cashier.v3.management_center': true,
+    'cashier.v3.fund': true,
+    'cashier.v3.care': true,
+    'cashier.v3.data': true,
+    'cashier.v3.targets': true,
+    'cashier.v3.management.staff': true,
+    'cashier.v3.management.rooms': true,
+    'cashier.v3.management.dashboard': true,
+
     'cashier.v3.member.create': true,
     'cashier.v3.member.batch': true,
     'cashier.v3.inventory.overview': true,
@@ -1913,6 +1932,7 @@ function normalizeBootstrap(rawBootstrap = {}) {
         || raw.storeId || raw.store_id || raw.store?.id || null,
       name: incomingCurrentStore.name || incomingCurrentStore.storeName || raw.storeName || base.currentStore.name
     },
+    navigationRules: Array.isArray(raw.navigationRules) ? raw.navigationRules : [],
     featurePermissions: {
       ...base.featurePermissions,
       ...incomingFeaturePermissions
@@ -2750,6 +2770,10 @@ function isCashierWorkspaceAction(action) {
  * 也不再接受单个 command.context——少传一个对象就是少校验一个版本。
  */
 function resolveCommandContexts(action, payload) {
+  // 单次预约颜色由领域事务按会话门店锁行保存，不依赖预约业务版本。
+  if (action === 'mark-reservation-color') {
+    return { invalid: false, contexts: [] }
+  }
   // 普通充值的确认页是浏览器快照；最终事务自行锁定会员余额与配置，
   // 不需要服务端编辑草稿，更不能附带收银工作台展示版本。
   if (action === 'submit-recharge-checkout' && payload.checkoutSnapshot) {
@@ -2830,7 +2854,11 @@ function resolveCommandContexts(action, payload) {
     contexts.push(buildCommandContext('reservation', payload.reservationId))
   }
 
-  if (payload.serviceOrderId || payload.serviceSessionId) {
+  // 预约开始/结束只声明 reservation context；关联服务单由后端按预约头
+  // 重新发现并锁定。列表携带的 serviceOrderId 是展示关联，不能推导出
+  // 未签发的 service_order 版本，也不能给该命令附加契约外的资源。
+  if ((payload.serviceOrderId || payload.serviceSessionId)
+    && !['start-reservation-service', 'end-reservation-service'].includes(action)) {
     const serviceOrderId = payload.serviceOrderId || payload.serviceSessionId
     contexts.push(buildCommandContext('service_order', serviceOrderId))
   }
@@ -3741,6 +3769,8 @@ export async function requestCashierV3Action(action, payload = {}) {
   // 因而和独立欠款操作一样允许空 command contexts，不能误拿收银工作台版本阻断。
   // 退款及其销售人改派由领域事务锁定退款单、核对人员版本，不继承收银工作台版本。
   const serverDiscoverableContextActions = [
+    // 颜色属于单次预约元数据，由领域按会话门店锁行；仍校验响应命令绑定。
+    'mark-reservation-color',
     'cancel-order-center-debt',
     'refund-imported-card',
     'refund-card-or-line',

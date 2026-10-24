@@ -19,7 +19,7 @@ import { formatMoney } from '@/services/cashierV3Bridge'
  *   member: {
  *     id, name, phone, memberNo, statusLabel, storeName, exclusiveServiceStaff,
  *     accountBalance, principalBalance, giftBalance, currentPoints, cardBenefitAmount, remainingProjectTimes,
- *     remainingProjectAmount, activeCardCount, totalConsumptionAmount,
+ *     remainingProjectAmount, activeCardCount, totalRechargeAmount, totalConsumptionAmount,
  *     visitCount, latestPurchaseDate, latestVisitDate
  *   },
  *   profile: { basicFields, customFields, relation, latestVisit, careReminder },
@@ -230,6 +230,9 @@ const headerStats = computed(() => [
   { ...metric('剩余项目次数', summaryValue(['remainingProjectTimes', 'remainingTimes']), 'times'), tooltip: '剩余项目次数不计算时间卡的次数' },
   metric('剩余项目金额', summaryValue(['remainingProjectAmount', 'remainingAmount']), 'money'),
   { label: '有效卡数量', value: numberText(summaryValue(['activeCardCount', 'validCardCount']), ' 张') },
+  // Recharge principal is aggregated by the backend fact reader, not inferred
+  // from the currently loaded recharge history or remaining account balance.
+  metric('充值总额', summaryValue(['totalRechargeAmount']), 'money'),
   metric('总消费金额', summaryValue(['totalConsumptionAmount', 'totalPurchaseAmount']), 'money'),
   { label: '到店次数', value: numberText(summaryValue(['visitCount']), ' 次') },
   metric('当前积分', summaryValue(['currentPoints', 'points', 'pointBalance']), 'number')
@@ -1578,7 +1581,7 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__stats {
   display: grid;
-  grid-template-columns: repeat(10, minmax(104px, 1fr));
+  grid-template-columns: repeat(11, minmax(104px, 1fr));
   overflow-x: auto;
   border-bottom: 1px solid #eaecf0;
   background: #fbfcfe;
@@ -2067,7 +2070,7 @@ async function triggerAction(action, context = {}) {
 
 @media (max-width: 1240px) {
   .member-detail-overlay__stats {
-    grid-template-columns: repeat(10, minmax(128px, 1fr));
+    grid-template-columns: repeat(11, minmax(128px, 1fr));
   }
 
   .member-detail-overlay__card-meta {

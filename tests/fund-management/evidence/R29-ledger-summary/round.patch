@@ -1,0 +1,15 @@
+diff --git a/后端代码/app/services/fund/StoreFundServices.php b/后端代码/app/services/fund/StoreFundServices.php
+index 2b7f2dc6..1f216fb2 100644
+--- a/后端代码/app/services/fund/StoreFundServices.php
++++ b/后端代码/app/services/fund/StoreFundServices.php
+@@ -227,7 +227,9 @@ final class StoreFundServices
+         foreach ($result['list'] as $row) $records[]=[
+             'business_date'=>$row['business_date'],'document_no'=>$row['document_no'],'store_name'=>$row['store_name']??'',
+             'subject_name'=>$row['subject_name_snapshot'],'direction'=>$row['direction']==='INCOME'?'收入':'支出',
+-            'amount'=>$row['signed_amount'],'balance'=>$row['balance'],'summary'=>$row['summary']?:$row['document_summary'],
++            // 摘要是业务原文；只有明细为空才沿用单据摘要，不能把合法文本“0”当成空值。
++            'amount'=>$row['signed_amount'],'balance'=>$row['balance'],
++            'summary'=>(string)($row['summary']??'')!==''?(string)$row['summary']:(string)($row['document_summary']??''),
+         ];
+         return $this->writeXlsx(
+             $this->ledgerColumns($withStore),

@@ -1,0 +1,21 @@
+{
+  "scope": "three unaccepted basic report routes added by another task after the fixed release; not included or overwritten",
+  "files": [
+    "后端代码/route/admin.php"
+  ],
+  "publishedSourceStillMatchesRelease": true,
+  "instances": [
+    {
+      "site": "rh",
+      "routeAdminSha256": "10e99d06d9ae4b27788ec4c20ff269e6d33a296a7e983cf994cada4744d46117"
+    },
+    {
+      "site": "008",
+      "routeAdminSha256": "10e99d06d9ae4b27788ec4c20ff269e6d33a296a7e983cf994cada4744d46117"
+    },
+    {
+      "site": "010",
+      "routeAdminSha256": "10e99d06d9ae4b27788ec4c20ff269e6d33a296a7e983cf994cada4744d46117"
+    }
+  ]
+}

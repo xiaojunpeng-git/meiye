@@ -273,7 +273,7 @@ class JobPositionPolicyServices extends BaseServices
         $mobileCatalog = app()->make(MobileMerchantCapabilityCatalog::class);
         return [
             'platform_menus' => $menus->getList(['type' => 0, 'is_del' => 0]),
-            'store_v3_menus' => self::STORE_V3_MENU_TREE,
+            'store_v3_menus' => (new StorePermissionCatalogServices())->menuTree(),
             // 岗位手机端权限与当前 Vue 3 商家端共用同一能力目录，禁止回读旧手机菜单。
             'mobile_menus' => $mobileCatalog->menuTree(),
             'help' => '岗位决定员工能操作哪些功能。平台后台权限只在总部平台生效；门店可用只决定门店能不能选择该岗位。',
@@ -787,7 +787,7 @@ class JobPositionPolicyServices extends BaseServices
     }
 
     /** @return array<int, string> stable policy-rule ID => Vue 3 feature code */
-    public static function storeV3FeatureMap(): array
+    public static function storeV3FeatureMap(bool $legacy = false): array
     {
         $map = [];
         $walk = static function (array $nodes) use (&$walk, &$map): void {
@@ -800,6 +800,7 @@ class JobPositionPolicyServices extends BaseServices
                 $walk((array)($node['children'] ?? []));
             }
         };
+        if (!$legacy) return array_column(StorePermissionCatalogServices::definitions(), 'feature_code', 'id');
         $walk(self::STORE_V3_MENU_TREE);
         return $map;
     }
@@ -807,7 +808,14 @@ class JobPositionPolicyServices extends BaseServices
     /** @return string[] */
     public static function storeV3FeaturesFromRuleIds(array $ruleIds): array
     {
-        $catalog = self::storeV3FeatureMap();
+        // 升级已将历史默认授权展开为明确编号；新保存后取消子项不会被父级自动补回。
+        return (new StorePermissionCatalogServices())->filterEnabled(StorePermissionCatalogServices::explicitFeatures($ruleIds));
+    }
+
+    /** 仅升级器读取旧授权语义，禁止用于新会话或新岗位保存。 */
+    public static function legacyStoreV3FeaturesFromRuleIds(array $ruleIds): array
+    {
+        $catalog = self::storeV3FeatureMap(true);
         $features = [];
         foreach ($ruleIds as $ruleId) {
             $feature = $catalog[(int)$ruleId] ?? '';

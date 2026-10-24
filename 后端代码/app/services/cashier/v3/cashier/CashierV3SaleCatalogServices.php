@@ -1968,6 +1968,11 @@ final class CashierV3SaleCatalogServices
 
     private function publicCatalogItem(array $item, ?array $inventory = null): array
     {
+        // Signed ordinary-card intent protects per-project floors across local carts and hangs.
+        $purchase = (array)($item['authoritySnapshot']['cardPurchase'] ?? []);
+        $purchase = \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::seal(
+            $purchase, (int)$item['storeId'], (int)$item['skuId'], (int)$item['unitPriceCents']
+        );
         $isInventoryProduct = $item['productType'] === 0 && $item['isInventory'];
         $inventoryAvailable = !$isInventoryProduct || !empty($inventory['available']);
         // 目录阶段只创建草稿，库存与可售状态统一在结账事务中判断。
@@ -1990,12 +1995,14 @@ final class CashierV3SaleCatalogServices
             'kind' => $item['kind'],
             'cardRuleType' => $item['cardRuleType'],
             'cardRuleLabel' => self::cardRuleLabel($item['cardRuleType']),
+            'ordinaryCardSaleEditable' => $item['cardRuleType'] === 'normal'
+                && \app\services\cashier\v3\card\CashierV3OrdinaryCardSaleAdjustment::enabled(),
             // Display fields drive the confirmation dialog. The complete card
             // business definition is also kept in the browser cart so clicking
             // checkout can freeze the only issuance snapshot.
             'cardPreview' => self::publicCardPreview($item),
             'cardPurchaseSnapshot' => in_array($item['kindCode'], ['count_card', 'card_package'], true)
-                ? $item['authoritySnapshot']['cardPurchase'] : null,
+                ? $purchase : null,
             'name' => $item['name'],
             'specification' => $item['specification'],
             'code' => $item['code'],

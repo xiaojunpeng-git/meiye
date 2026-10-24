@@ -1,0 +1,37 @@
+/* 完成即可的重考不撤销完成；处理人也不能越过阶段与开始时间。 */
+const { assert, admin, mobile } = require('./local-client.cjs');
+(async () => {
+  const a = await admin(), m = await mobile();
+  const q = await a.call('question/save', { type: 'single', stem: '先核对需求吗？', options: ['是', '否'], answer: [0], score: 10 });
+  const paper = await a.call('paper/publish', { title: '完成边界样例', mode: 'fixed', question_ids: [q.id] });
+  const input = { title: '完成即可重考-' + Date.now(), paper_release_id: paper.release_id, employee_ids: [91002], required_pass: false, max_attempts: 2, pass_score: 10, auto_publish: true };
+  assert.notEqual((await a.call('exam/create', { ...input, max_attempts: 1.5 }, true)).status, 200);
+  const exam = await a.call('exam/create', input), id = exam.task_ids[0];
+  const first = await m.call('exam/start', { task_id: id });
+  const failed = await m.call('exam/submit', { attempt_id: first.id, answer_session_key: first.answer_session_key, answers: { [q.id]: [1] } });
+  assert.equal(failed.passed, false); assert.equal(failed.can_retake, true);
+  assert.equal((await m.call('task?id=' + id)).state, 'COMPLETED');
+  const second = await m.call('exam/start', { task_id: id });
+  assert.equal((await m.call('task?id=' + id)).state, 'COMPLETED');
+  const passed = await m.call('exam/submit', { attempt_id: second.id, answer_session_key: second.answer_session_key, answers: { [q.id]: [0] } });
+  assert.equal(passed.passed, true); assert.equal(passed.can_retake, false);
+  const body = { title: '阶段前置正文-' + Date.now(), chapters: [{ key: 'main', title: '基础说明', type: 'text', body: '完成基础再接受带教。' }] };
+  const c = await a.call('content/save', body), pub = await a.call('content/publish', { ...body, id: c.id });
+  const activity = await a.call('activity/create', { title: '阶段带教样例', kind: 'coaching', employee_ids: [91001], handler_employee_id: 91001 });
+  const map = await a.call('map/publish', { title: '顺序与时间边界', sequential: true, stages: [{ title: '基础', activities: [{ kind: 'course', source_id: pub.publication_id, title: body.title }] }, { title: '带教', activities: [{ kind: 'coaching', source_id: activity.id, title: '阶段带教样例' }] }] });
+  const create = async (starts_at) => a.call('plan/publish', { title: '顺序培养-' + Date.now(), map_release_id: map.release_id, employee_ids: [91002], responsible_employee_id: 91001, starts_at });
+  const future = await create(Math.floor(Date.now() / 1000) + 3600);
+  const futureTasks = await a.call('tasks?plan_id=' + future.id);
+  const futureCoaching = futureTasks.rows.find(t => t.kind === 'coaching');
+  assert.ok(futureCoaching); assert.notEqual((await a.call('activity/confirm', { task_id: futureCoaching.id, body: '不允许提前确认' }, true)).status, 200);
+  const plan = await create(0), tasks = await a.call('tasks?plan_id=' + plan.id);
+  const coaching = tasks.rows.find(t => t.kind === 'coaching'), course = tasks.rows.find(t => t.kind === 'course');
+  assert.notEqual((await a.call('activity/confirm', { task_id: coaching.id, body: '不允许越阶段确认' }, true)).status, 200);
+  await m.call('learn', { task_id: course.id, chapter_key: 'main', session_key: require('./local-client.cjs').key(), session_open: true, position: 0, confirm: true });
+  const occurred = Math.floor(Date.now() / 1000) - 3600;
+  await a.call('activity/confirm', { task_id: coaching.id, body: '实际演示与跟练', problems: '复述不完整', comment: '核对动作已规范', next_steps: '继续练习复述', occurred_at: occurred });
+  const detail = await a.call('work?task_id=' + coaching.id);
+  const formal = detail.coaching[0], snapshot = JSON.parse(formal.snapshot_json);
+  assert.equal(Number(formal.occurred_at), occurred); assert.equal(snapshot.problems, '复述不完整'); assert.equal(snapshot.next_steps, '继续练习复述');
+  console.log(JSON.stringify({ passed: ['小数重考次数被拒绝', '完成即可未通过仍可重考且既有完成不撤回', '通过后不可继续刷题', '未来计划禁止负责人提前确认', '顺序阶段禁止负责人越过前置课程', '前置完成后带教独立时间与问题/点评/下一步永久保存'] }, null, 2));
+})().catch(e => { console.error(e); process.exitCode = 1; });
