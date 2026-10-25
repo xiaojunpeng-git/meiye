@@ -1,0 +1,15 @@
+{
+  "result": "PASS",
+  "checks": [
+    "new defaults pickup",
+    "empty existing config defaults pickup",
+    "configured values preserved and numeric radio hydration",
+    "toggle does not undo pickup default",
+    "city delivery uses delivery default and retains channel",
+    "actual submit method carries both defaults; HTTP mocked",
+    "Vue2 template and JS parse",
+    "quick-create actual emptyForm defaults and Vue2 template compile"
+  ],
+  "realDatabaseWrites": 0,
+  "mode": "actual component methods, mocked save transport; not a database persistence test"
+}

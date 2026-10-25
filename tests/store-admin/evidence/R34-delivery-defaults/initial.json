@@ -1,0 +1,14 @@
+{
+  "head": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "path": "前端代码/admin/src/pages/store/addStore/index.vue",
+  "sha256": "951110c47d61fcc25953b3358f5d27e255ed090bc0ab1813b4069204f4a9779a",
+  "blob": "c067c0d7c2b1137880b98f7dfc34b9930a46c208",
+  "status": "",
+  "online": "not applicable; local only",
+  "relatedDefault": {
+    "path": "前端代码/admin/src/pages/store/region/components/StoreFormModal.vue",
+    "sha256": "90661556f8f8ee054959abf1e41b3c2ff1fc5340fd7f4d4ceb7cee55ef2ddd67",
+    "blob": "31324cb43f7d3f7c68ac14c788d1d19b53ca4cab",
+    "status": ""
+  }
+}

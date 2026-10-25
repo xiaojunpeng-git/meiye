@@ -1,0 +1,12 @@
+{
+  "head": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "files": {
+    "前端代码/admin/src/pages/store/addStore/index.vue": "5203f36e8700fd5656b74ab0554e9f5eb0baf92e470ad943d607b2c6a134627e",
+    "前端代码/admin/src/pages/store/region/components/StoreFormModal.vue": "2691813d56bbbe475003c002fc295267d99a65083cab03982a178f1032f1e25a"
+  },
+  "patchSHA256": "2516ed79c8d8219651259caa3f0921afd1e86d881ba924e0d551874ca219506b",
+  "tests": "verification.json PASS; actual methods and captured save payload, no DB writes",
+  "pmAcceptance": "pending",
+  "online": "not applicable; local only",
+  "commitPushDeploy": "not performed"
+}
