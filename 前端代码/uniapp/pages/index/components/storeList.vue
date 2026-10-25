@@ -25,11 +25,7 @@
 					<view class="picBox">
 						<view class="fs-30 text--w111-333 acea-row row-middle">
 							<text v-if="showStoreName" :style="[storeNameStyle]" class="name line1">{{item.name}}</text>
-							<view class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
-								<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-12" :style="[deliveryStyle]" v-if="item.delivery_type.includes('1')">快递</view>
-								<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[cityDeliveryStyle]" v-if="item.delivery_type.includes('3')">闪送</view>
-								<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[storeStyle]" v-if="item.delivery_type.includes('2')">到店</view>
-							</view>
+							<!-- 门店展示只传达门店资料，不再展示历史履约类型标签。 -->
 						</view>
 						<view class="fs-22 text-w111-909399 mt-4" v-if="checkboxInfo.includes(1)">营业时间：{{item.day_time}}</view>
 						<view class="fs-22 text-w111-909399 mt-4 line1">
@@ -66,11 +62,7 @@
 				</view>
 				<view class="fs-30 text--w111-333 mt-16 acea-row row-middle">
 					<text v-if="showStoreName" :style="[storeNameStyle]" class="name2 line1">{{item.name}}</text>
-					<view class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
-						<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-12" :style="[deliveryStyle]" v-if="item.delivery_type.includes('1')">配送</view>
-						<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[cityDeliveryStyle]" v-if="item.delivery_type.includes('3')">闪送</view>
-						<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[storeStyle]" v-if="item.delivery_type.includes('2')">到店</view>
-					</view>
+					<!-- 不再用配送配置描述门店。 -->
 				</view>
 				<view class="fs-22 mt-4 text-w111-909399">
 					<text class="iconfont icon-ic_location51 fs-24 mr-4" v-if="checkboxInfo.includes(2) || checkboxInfo.includes(3)"></text>
@@ -92,11 +84,7 @@
 				<view class="flex-1">
 					<view class="fs-30 text--w111-333 fw-500 acea-row row-middle">
 						<text v-if="showStoreName" :style="[storeNameStyle]">{{item.name}}</text>
-						<view class="acea-row row-middle" v-if="checkboxInfo.includes(0)">
-							<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-12" :style="[deliveryStyle]" v-if="item.delivery_type.includes('1')">配送</view>
-							<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[cityDeliveryStyle]" v-if="item.delivery_type.includes('3')">闪送</view>
-							<view class="w-52 h-26 rd-4rpx acea-row row-center-wrapper fs-18 ml-8" :style="[storeStyle]" v-if="item.delivery_type.includes('2')">到店</view>
-						</view>
+						<!-- 购买门店与服务门店由业务流程选择，无须履约标签。 -->
 					</view>
 					<view class="fs-20 text--w111-666 mt-4" v-if="checkboxInfo.includes(1)">营业时间：{{item.day_time}}</view>
 					<view class="fs-22 text--w111-666 mt-4" v-if="checkboxInfo.includes(3)">{{item.address}}{{item.detailed_address}}</view>
@@ -114,11 +102,7 @@
                             <easy-loadimage :image-src="item.image" width="100%" height="100%" :borderRadius="bgRadiusStore"></easy-loadimage>
                         </view>
                         <text v-if="showStoreName" class="store-horizontal__name" :style="[storeNameStyle]">{{item.name}}</text>
-                        <view v-if="checkboxInfo.includes(0)" class="store-horizontal__badges">
-                            <text v-if="item.delivery_type.includes('1')" :style="[deliveryStyle]">快递</text>
-                            <text v-if="item.delivery_type.includes('3')" :style="[cityDeliveryStyle]">闪送</text>
-                            <text v-if="item.delivery_type.includes('2')" :style="[storeStyle]">到店</text>
-                        </view>
+						<!-- 横向门店卡片同样不展示历史履约类型。 -->
                         <view v-if="checkboxInfo.includes(1)" class="store-horizontal__meta">营业时间：{{item.day_time}}</view>
                         <view v-if="checkboxInfo.includes(3)" class="store-horizontal__address">{{item.address}}{{item.detailed_address}}</view>
                         <view v-if="checkboxInfo.includes(2) && storeDistance(item)!==null" class="store-horizontal__meta">距您{{storeDistance(item)}}km</view>

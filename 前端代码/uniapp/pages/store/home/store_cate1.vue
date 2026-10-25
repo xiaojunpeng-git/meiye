@@ -67,13 +67,7 @@
 								<text class="iconfont icon-ic_rightarrow"></text>
 							</navigator>
 						</view>
-						<view class="switch flex-center w-176 h-46 bg--w111-f5f5f5" v-if="deliveryList.length > 1">
-							<view v-for="(item, index) in deliveryList" :key="item.key" :class="{ on: switchNum == item.key }" class="btn flex-center w-84 h-38 fs-22 text--w111-666" @click="swithFn(item.key)">
-								{{item.name}}
-							</view>
-						</view>
-						<view class="tips" v-else-if="deliveryList.length == 1">
-							本店仅支持{{deliveryList[0].key == 1?'配送':'到店核销'}}</view>
+						<!-- 会员只选择购买门店，不展示历史履约方式开关。 -->
 					</view>
 					<view class="address-wrap acea-row row-bottom">
 						<view class="address-box">
@@ -528,36 +522,9 @@
 		},
 		mounted() {
 			let that = this;
-			let default_delivery = this.info.default_delivery;
-			const deliveryType = this.info.delivery_type.map(Number).sort();
-			this.deliveryList = [];
-			if (deliveryType.includes(1) || deliveryType.includes(3)) {
-				this.deliveryList.push({
-					name: '配送',
-					key: 1,
-					icon: 'icon-ic_electromobile',
-				});
-			}
-			if (deliveryType.includes(2)) {
-				this.deliveryList.push({
-					name: '到店',
-					key: 2,
-					icon: 'icon-ic_shop1',
-				});
-			}
-			// for (let i = 0; i < this.deliveryList.length; i++) {
-			// 	if (this.deliveryList[i].key == 2 && (!this.info.store_self_mention || this.info.delivery_type == 2)) {
-			// 		this.deliveryList.splice(i, 1);
-			// 		i--;
-			// 	} else if (this.deliveryList[i].key == 1 && this.info.delivery_type == 3) {
-			// 		this.deliveryList.splice(i, 1);
-			// 		i--;
-			// 	}
-			// }
-			if (this.deliveryList.length == 1) {
-				default_delivery = this.deliveryList[0].key;
-			}
-			this.collageDelivery = default_delivery;
+			// 后端沿用数字 2 标识门店订单；会员端不再提供履约类型选择。
+			this.deliveryList = [{ name: '购买门店', key: 2, icon: 'icon-ic_shop1' }];
+			this.collageDelivery = 2;
 			// 获取设备宽度
 			uni.getSystemInfo({
 				success(e) {
@@ -615,7 +582,7 @@
 			uni.$on('activeAddress', (id) => {
 				this.getAddressList(id);
 			});
-			this.switchNumFun(default_delivery);
+			this.switchNumFun(2);
 			that.getAllCategory();
 			that.getCartNum();
 			that.getAddressList();

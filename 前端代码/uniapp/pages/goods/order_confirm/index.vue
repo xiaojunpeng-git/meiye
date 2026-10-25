@@ -14,15 +14,15 @@
 				<view>{{ codeData.serial_number }}</view>
 			</view>
 			<view class="px-20 mt-30" v-if="!tableId">
-				<!-- 拼团无论配送类型都要明确购买门店，订单归属在提交时固定。 -->
-				<view v-if="isGroupOrder" class="address add1 flex-between-center rd-24rpx mb-20" @tap="goStore">
+				<!-- 会员购买只选订单归属门店；不提供配送或自提方式。 -->
+				<view v-if="!tableId" class="address add1 flex-between-center rd-24rpx mb-20" @tap="goStore">
 					<text class="fs-28 text--w111-333">购买门店</text>
 					<view class="flex-y-center fs-28 text--w111-333">
 						<text>{{system_store.name || '请选择购买门店'}}</text>
 						<text class="iconfont icon-ic_rightarrow ml-10 text--w111-999"></text>
 					</view>
 				</view>
-				<view class="allAddress" v-if="product_type != 1">
+				<view class="allAddress" v-if="false">
 					<!-- isDisplay 支持的配送方式数组 -->
 					<view class='address add1 flex-between-center rd-24rpx' @tap='onAddress(addressInfo.real_name)' v-if="[1, 3].includes(shippingType)">
 						<view v-if="addressInfo.real_name">
@@ -66,7 +66,7 @@
 						<image src='/static/images/line.jpg'></image>
 					</view>
 				</view>
-        <view class="allAddress" v-else>
+				<view class="allAddress" v-else-if="product_type == 1">
           <view class='address add1 flex-between-center rd-24rpx'>
                 到店服务
           </view>
@@ -88,7 +88,7 @@
 								<view class="w-176 h-176 relative">
 									<image class="w-176 h-176 rd-16rpx" :src='item.productInfo.attrInfo.image' v-if="item.productInfo.attrInfo"></image>
 									<image class="w-176 h-176 rd-16rpx" :src='item.productInfo.image' v-else></image>
-									<view class="over flex-center fs-24 text--w111-fff" v-if="!item.is_valid">{{shippingType == 2 ? '非到店' : '不送达'}}</view>
+									<view class="over flex-center fs-24 text--w111-fff" v-if="!item.is_valid">不可购买</view>
 								</view>
 								<view class="flex-1 flex-col justify-between pl-20">
 									<view @click="goDetail(item.product_id)">
@@ -149,7 +149,8 @@
 							<text class="text--w111-333 fs-28">{{reservationInfo.cart_num}}</text>
 						</view>
 					</view>
-					<view class="cell flex justify-between flex-y-center mt-40" v-if="type != 12 && orderKey">
+					<!-- 会员端停用配送与自提选择；购买门店在页面顶部选定。 -->
+					<view class="cell flex justify-between flex-y-center mt-40" v-if="false">
 						<text class="text--w111-333 fs-28">配送方式</text>
 						<view class="flex-y-center" @tap="openDeliveryDrawer">
 							<view class="flex-center w-128 h-50 rd-6rpx bg-primary-light fs-24 text-w111-theme" v-if="product_type == 0">
@@ -164,7 +165,7 @@
 							<text class="iconfont icon-ic_rightarrow fs-24 text--w111-999 pl-8" v-if="isDisplay.length > 1"></text>
 						</view>
 					</view>
-					<view class="cell flex justify-between flex-y-center mt-32" v-if="isStoreDeliveryType == 2" @tap="openEstimateDrawer">
+					<view class="cell flex justify-between flex-y-center mt-32" v-if="false" @tap="openEstimateDrawer">
 						<text class="text--w111-333 fs-28">配送时间</text>
 						<view>
 							<text class="text--w111-333 fs-28">{{deliveryTimeText}}</text>
@@ -421,7 +422,7 @@
 						<text class="text--w111-333 fs-28">新人首单优惠</text>
 						<text class="text--w111-333 fs-36 Regular font-num"> -￥{{priceGroup.firstOrderPrice}}</text>
 					</view>
-					<view class="cell flex-between-center" v-if="priceGroup.storePostage + priceGroup.storePostageDiscount > 0">
+					<view class="cell flex-between-center" v-if="false">
 						<view class="flex-center">
 							<text class="text--w111-333 fs-28">配送运费</text>
 							<view class="flex-center ml-14 fs-24 text-w111-theme">
@@ -436,7 +437,7 @@
 						<text class="text--w111-333 fs-28">用户等级优惠</text>
 						<text class="text--w111-333 fs-36 Regular font-num">-￥{{parseFloat(priceGroup.vipPrice).toFixed(2)}}</text>
 					</view>
-					<view class="cell flex-between-center" v-if="priceGroup.storePostageDiscount > 0">
+					<view class="cell flex-between-center" v-if="false">
 						<text class="text--w111-333 fs-28">会员运费优惠</text>
 						<text class="text--w111-333 fs-36 Regular font-num">-￥{{parseFloat(priceGroup.storePostageDiscount).toFixed(2)}}</text>
 					</view>
@@ -457,8 +458,7 @@
 			<!-- <view class="height-add"></view> -->
 			<view class="pb-safe">
 				<view class="h-80" v-if="!svip_status && svip_price > 0"></view>
-				<view class="h-76" v-if="rangeOut"></view>
-				<view class="h-76" v-if="priceGroup.poorDeliveryPrice && !groupDrawerVisible && !rangeOut"></view>
+				<!-- 会员订单没有配送及起送门槛，底部只为提交栏预留空间。 -->
 				<view class="h-96"></view>
 				<view class="h-20"></view>
 			</view>
@@ -478,37 +478,13 @@
 						<text class="iconfont icon-ic_rightarrow fs-24"></text>
 					</view>
 				</view>
-				<!-- 当前地址不在配送范围内 -->
-				<view class="h-76 bg-primary-light flex-between-center px-32" v-if="rangeOut">
-					<view class="flex-y-center">
-						<text class="iconfont icon-icon_tip fs-32 text-w111-theme"></text>
-						<view class="pl-10">
-							<text class="fs-26 text-w111-theme">当前地址不在配送范围内</text>
-						</view>
-					</view>
-				</view>
-				<!-- 去凑单 -->
-				<view class="h-76 bg-primary-light flex-between-center px-32" v-if="priceGroup.poorDeliveryPrice && !groupDrawerVisible && !rangeOut" @tap="openGroupDrawer">
-					<view class="flex-y-center">
-						<text class="iconfont icon-icon_tip fs-32 text-w111-theme"></text>
-						<view class="pl-10">
-							<text class="fs-26 text-w111-theme">还差{{priceGroup.poorDeliveryPrice}}元起送</text>
-						</view>
-					</view>
-					<view class="fs-26 text-w111-theme">
-						<text>去凑单</text>
-						<text class="iconfont icon-ic_rightarrow fs-24"></text>
-					</view>
-				</view>
 				<view class="pl-32 pr-20 h-96 flex-between-center">
 					<view class="flex items-baseline">
 						<text class="fs-24 fw-500 text--w111-333">合计</text>
 						<baseMoney :money="totalPrice || 0" symbolSize="26" integerSize="44" decimalSize="26" weight></baseMoney>
 						<text class="pl-12" v-if="type == 4 && totalIntegral > 0">+{{totalIntegral}}积分</text>
 					</view>
-					<view class="min-w-168 h-72 px-32 rd-36rpx flex-center text--w111-fff fs-26 bg-primary-light1 z-10" v-if="rangeOut">提交订单</view>
-					<view class="min-w-168 h-72 px-32 rd-36rpx flex-center text--w111-fff fs-26 bg-primary-light1 fw-500 z-10" v-else-if="shippingType == 3 && isStoreDeliveryType == 2 && priceGroup.poorDeliveryPrice">差{{priceGroup.poorDeliveryPrice}}元起送</view>
-					<view class="w-168 h-72 rd-36rpx flex-center text--w111-fff fs-26 bg-gradient z-10 fw-500" @tap.stop="goPay" v-else-if="
+					<view class="w-168 h-72 rd-36rpx flex-center text--w111-fff fs-26 bg-gradient z-10 fw-500" @tap.stop="goPay" v-if="
 					((((valid_count>0&&!discount_id && productTypeNum!=6) || (valid_count==cartInfo.length&&discount_id) || (productTypeNum==6 && isDisplay.length && isDisplay.includes('2')) || (productTypeNum==6 && addressId && isDisplay.length && isDisplay.includes('3'))) && shippingType) ||
 					(!shippingType && addressId) ||
 					(product_type != 0)) &&
@@ -530,7 +506,7 @@
 		<areaWindow ref="areaWindow" :display="display" :address='addressInfoArea' :cityShow='cityShow' @submit="OnAreaAddress" @changeClose="changeAddressClose"></areaWindow>
 		<home :isHide="homeHide"></home>
 		<!-- 配送方式弹窗 -->
-		<baseDrawer :visible="deliveryDrawerVisible" mode="bottom" backgroundColor="transparent" @close="closeDeliveryDrawer">
+		<baseDrawer v-if="false" :visible="deliveryDrawerVisible" mode="bottom" backgroundColor="transparent" @close="closeDeliveryDrawer">
 			<view class="rd-t-40rpx bg--w111-fff">
 				<view class="">
 					<view class="flex-center h-108 rd-t-40rpx fw-500 fs-32">配送方式</view>
@@ -571,7 +547,7 @@
 			</view>
 		</baseDrawer>
 		<!-- 选择送达时间 -->
-		<baseDrawer :visible="estimateDrawerVisible" mode="bottom" backgroundColor="transparent" @close="closeEstimateDrawer">
+		<baseDrawer v-if="false" :visible="estimateDrawerVisible" mode="bottom" backgroundColor="transparent" @close="closeEstimateDrawer">
 			<view class="rd-t-40rpx bg--w111-fff">
 				<view class="">
 					<view class="flex-center h-108 rd-t-40rpx fw-500 fs-32">选择送达时间</view>
@@ -955,12 +931,12 @@
 				this.invTitle = options.invoice_name;
 			}
 			if (this.isLogin) {
-				// 拼团从会员归属门店起步；用户可在统一提交订单页改选适用门店。
+				// 所有会员购买默认归属会员门店；用户可在提交页选择实际购买门店。
 				const loadCheckout = () => {
 					this.getCheckShipping();
 					if (this.storeId) this.getNearbyStore();
 				};
-				if (this.isGroupOrder && !this.storeId) {
+				if (!this.storeId) {
 					getUserInfo().then(res => {
 						this.storeId = Number(res.data && res.data.belong_store_id) || 0;
 					}).catch(() => {}).then(loadCheckout);
@@ -1018,113 +994,22 @@
 		},
 		methods: {
 			goStore() {
-				if (!this.collage_id && (!this.isStore || this.isGroupOrder)) {
+				if (!this.collage_id) {
 					uni.navigateTo({
 						url: '/pages/store/list/index?type=1&isCollage=1&storeId=' + (this.storeId || 0) + (this.isGroupOrder ? '&product_id=' + this.product_id : '')
 					})
 				}
 			},
-			// 是否显示快递配送
+			/**
+			 * 会员端不提供配送或自提选择。后端仍用 2 表示门店归属订单，
+			 * 以便沿用原有订单、核销和支付契约；必须先选定购买门店。
+			 */
 			getCheckShipping() {
-				let data = {
-					cartId: this.cartId,
-					new: this.news
-				}
-				checkShipping(data).then(res => {
-					// 商城 1：平台配送，2：到店自提，3：门店配送
-					// 门店 1：快递发货，2：到店自提，3：同城配送
-					res.data.type.sort((x, y) => x - y) //正序
-					let isDisplay = res.data.type.map(type => String(type));
-					// 抽奖
-					if (this.luckRecordId > 0) {
-						this.deliveryType = isDisplay[0];
-					}
-
-					this.isDisplay = isDisplay;
-					if (this.storeId) {
-						// 门店
-						if (this.collage_id) {
-							// 拼单
-							if (this.delivery_type == 2) {
-								this.isDisplay = isDisplay.filter(value => value == 2);
-							} else if (this.delivery_type == 3) {
-								this.isDisplay = isDisplay.filter(value => value != 2);
-							}
-						}
-						if (this.delivery_type == 2 && this.isDisplay.includes('2')) {
-							this.shippingType = 2;
-							this.isStoreDeliveryType = 0;
-							this.deliveryType = 2;
-						} else if (this.delivery_type == 3 && this.isDisplay.includes('1')) {
-							this.shippingType = 3;
-							this.isStoreDeliveryType = 1;
-							this.deliveryType = 3;
-						} else if (this.delivery_type == 3 && this.isDisplay.includes('3')) {
-							this.shippingType = 3;
-							this.isStoreDeliveryType = 2;
-							this.deliveryType = 3;
-						} else {
-							switch (this.isDisplay[0]) {
-								case '1':
-									this.shippingType = 3;
-									this.isStoreDeliveryType = 1;
-									this.deliveryType = 3;
-									break;
-								case '2':
-									this.shippingType = 2;
-									this.isStoreDeliveryType = 0;
-									this.deliveryType = 2;
-									break;
-								case '3':
-									this.shippingType = 3;
-									this.isStoreDeliveryType = 2;
-									this.deliveryType = 3;
-									break;
-							}
-						}
-						if (this.isDisplay.includes('1') || this.isDisplay.includes('3')) {
-							this.getaddressInfo(this.getConfirm);
-							this.$nextTick(function() {
-								this.$refs.addressWindow.getAddressList();
-							})
-						} else {
-							let that = this;
-							setTimeout(function() {
-								that.getConfirm('', 1);
-							}, 300)
-						}
-					} else {
-						// 商城
-						this.shippingType = 1;
-						this.isStoreDeliveryType = 0;
-						this.deliveryType = 1;
-						if (this.isDisplay.includes('1')) {
-							this.getaddressInfo(this.getConfirm);
-							this.$nextTick(function() {
-								this.$refs.addressWindow.getAddressList();
-							})
-						}
-					}
-					// 自提-门店自提
-					// if ([2].includes(this.shippingType)) {
-					// 	let that = this;
-					// 	setTimeout(function() {
-					// 		that.getConfirm('', 1);
-					// 	}, 300)
-					// }
-					// 配送-平台配送、门店快递发货、门店同城配送
-					// if ([1, 3].includes(this.shippingType)) {
-					// 	this.getaddressInfo(this.getConfirm);
-					// 	this.$nextTick(function() {
-					// 		this.$refs.addressWindow.getAddressList();
-					// 	})
-					// }
-				}).catch(err => {
-					uni.showToast({
-						title: err,
-						icon: 'none'
-					});
-				})
+				this.shippingType = 2;
+				this.deliveryType = 2;
+				this.isStoreDeliveryType = 0;
+				this.isDisplay = ['2'];
+				if (this.storeId) this.getConfirm('', 1);
 			},
 			OnAreaAddress(address) {
 				let addr = '';
@@ -1844,7 +1729,7 @@
 				this.SubOrder();
 			},
 			SubOrder: function(e) {
-				if (this.isGroupOrder && !(Number(this.storeId) > 0)) {
+				if (!(Number(this.storeId) > 0)) {
 					return this.$util.Tips({ title: '请先选择购买门店' });
 				}
 				let that = this,

@@ -111,7 +111,7 @@
 							</view>
 							<view class="item">
 								<view class="head" :class="pinkBool === 1 ? 'bg-red' : ''">3</view>
-								<view class="main">人满发货不满退款</view>
+								<view class="main">人满成团，不满退款</view>
 							</view>
 						</view>
 					</view>

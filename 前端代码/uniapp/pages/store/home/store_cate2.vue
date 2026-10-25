@@ -69,13 +69,7 @@
 								<text class="iconfont icon-ic_rightarrow"></text>
 							</navigator>
 						</view>
-						<view class="switch flex-center w-176 h-46 bg--w111-f5f5f5" v-if="deliveryList.length > 1">
-							<view v-for="(item, index) in deliveryList" :key="item.key" :class="{ on: switchNum == item.key }" class="btn flex-center w-84 h-38 fs-22 text--w111-666" @click="swithFn(item.key)">
-								{{item.name}}
-							</view>
-						</view>
-						<view class="tips" v-else-if="deliveryList.length == 1">
-							本店仅支持{{deliveryList[0].key == 1?'配送':'到店核销'}}</view>
+						<!-- 门店是购买归属，不再提供配送或自提切换。 -->
 					</view>
 					<view class="acea-row row-bottom address-wrap">
 						<view class="address-box">
@@ -440,39 +434,12 @@
 			}
 		},
 		mounted() {
-			let default_delivery = this.info.default_delivery;
-			const deliveryType = this.info.delivery_type.map(Number).sort();
-			this.deliveryList = [];
-			if (deliveryType.includes(1) || deliveryType.includes(3)) {
-				this.deliveryList.push({
-					name: '配送',
-					key: 1,
-					icon: 'icon-ic_electromobile',
-				});
-			}
-			if (deliveryType.includes(2)) {
-				this.deliveryList.push({
-					name: '到店',
-					key: 2,
-					icon: 'icon-ic_shop1',
-				});
-			}
-			// for (let i = 0; i < this.deliveryList.length; i++) {
-			// 	if (this.deliveryList[i].key == 2 && (!this.info.store_self_mention || this.info.delivery_type == 2)) {
-			// 		this.deliveryList.splice(i, 1);
-			// 		i--;
-			// 	} else if (this.deliveryList[i].key == 1 && this.info.delivery_type == 3) {
-			// 		this.deliveryList.splice(i, 1);
-			// 		i--;
-			// 	}
-			// }
-			if (this.deliveryList.length == 1) {
-				default_delivery = this.deliveryList[0].key;
-			}
-			this.collageDelivery = default_delivery;
+			// 后端兼容标识与用户文案分离，旧门店配送配置不能改变购买流程。
+			this.deliveryList = [{ name: '购买门店', key: 2, icon: 'icon-ic_shop1' }];
+			this.collageDelivery = 2;
 			this.collageStore = this.info;
 			this.where.store_id = this.info.id;
-			this.switchNumFun(default_delivery);
+			this.switchNumFun(2);
 			uni.$off('newCartNum');
 			uni.$on('newCartNum', (data) => {
 				if (data.length) {

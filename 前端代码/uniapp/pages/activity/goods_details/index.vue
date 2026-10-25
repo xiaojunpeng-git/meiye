@@ -50,7 +50,7 @@
 						@attrPicIndex="attrPicIndexs"
 						@previewImageOpen="previewImageOpen"
 						></productConSwiper>
-					<view class="mirror-image">
+					<view class="mirror-image" v-if="type != 3">
 						<image :src="productSwiper[attrPicIndex]"></image>
 					</view>
 					<view class="activity-card seckill-card rd-t-40rpx relative w-full h-152 flex justify-between"
@@ -77,20 +77,21 @@
 						<view class="text-white fs-28 mt-10 mr-20" v-else-if="status == 2">即将开始</view>
 						<view class="text-white fs-28 mt-10 mr-20" v-else>活动已结束</view>
 					</view>
-					<view class="activity-card rd-t-40rpx relative w-full h-152 flex justify-between"
-						:style="{backgroundImage:infoCardBg}" v-if="type == 3">
-						<view class="flex items-baseline text--w111-fff mt-8">
-							<text class="fs-28 fw-600 lh-40rpx pr-16">拼团价</text>
-							<baseMoney :money="attribute.productSelect.price" symbolSize="32" integerSize="56" decimalSize="32" color="#ffffff"></baseMoney>
+					<!-- 拼团价格独立排在图片之后，不依赖装饰背景图或负边距，保证主题资源缺失时仍清晰。 -->
+					<view class="group-price-card" v-if="type == 3">
+						<view class="group-price-card__prices">
+							<text class="group-price-card__label">拼团价</text>
+							<baseMoney :money="attribute.productSelect.price" symbolSize="32" integerSize="56" decimalSize="32" color="#d92d20" weight></baseMoney>
 							<baseMoney
+							v-if="Number(storeInfo.product_price) > Number(attribute.productSelect.price)"
 							:money="storeInfo.product_price"
-							symbolSize="32"
-							integerSize="32"
-							decimalSize="32"
-							line color="#ffffff"
-							class="ml-14"></baseMoney>
+							symbolSize="24"
+							integerSize="26"
+							decimalSize="24"
+							line color="#757575"
+							class="group-price-card__original"></baseMoney>
 						</view>
-						<view class="pink-badge mt-10 flex-center fs-26 fw-500">{{storeInfo.people}}人团</view>
+						<view class="group-price-card__badge">{{storeInfo.people}}人团</view>
 					</view>
 					<view class="activity-card rd-t-40rpx relative w-full h-152 flex justify-between"
 						:style="{backgroundImage:infoCardBg}" v-if="type == 6">
@@ -101,7 +102,7 @@
 						</view>
 					</view>
 					<!-- 商品介绍卡片 -->
-					<view class="info_card rd-40rpx relative" :style="{marginTop: type ==1 || type == 3 || type == 6 ? '-52rpx' : ''}">
+					<view class="info_card rd-40rpx relative" :class="{'info_card--group': type == 3}" :style="{marginTop: type ==1 || type == 6 ? '-52rpx' : ''}">
 						<view class="px-32">
 							<view class="w-full pt-36">
 								<!-- 骨架屏展示 -->
@@ -188,7 +189,7 @@
 								<!-- 库存销量 -->
 								<view class="flex-between-center mt-20 text--w111-999 fs-22 lh-30rpx">
 									<text class="line-through" v-if="type == 6 && storeInfo.ot_price">￥{{storeInfo.ot_price}}</text>
-									<text class="line-through" v-else-if="type != 6 && attribute.productSelect.ot_price">￥{{attribute.productSelect.ot_price}}</text>
+									<text class="line-through" v-else-if="type != 6 && type != 3 && attribute.productSelect.ot_price">￥{{attribute.productSelect.ot_price}}</text>
 									<text>限量：{{ storeInfo.quota_show || storeInfo.stock }}{{  storeInfo.unit_name || ''}}</text>
 									<text v-if="type == 4">已兑换：{{ storeInfo.sales}}{{  storeInfo.unit_name || ''}}</text>
 									<text v-else-if="type == 6">已预定：{{ storeInfo.sales}}{{  storeInfo.unit_name || ''}}</text>
@@ -240,7 +241,7 @@
 								</view>
 								<text class="iconfont icon-ic_rightarrow fs-24 text--w111-666"></text>
 							</view>
-							<view class="acea-row row-between h-146 pl-20 pr-20 pt-30" v-if="isMention && Object.keys(storeList).length" @tap="showStoreList">
+							<view class="acea-row row-between h-146 pl-20 pr-20 pt-30" v-if="(type == 3 || isMention) && Object.keys(storeList).length" @tap="showStoreList">
 								<view class="acea-row">
 									<text class="fs-26 text--w111-888">门店</text>
 									<view class="ml-32 text--w111-333 fs-26 w-524 line1">
@@ -248,7 +249,7 @@
 										<view class="fs-22 text--w111-666 mt-18 line1">{{ storeList.address }}{{ ", " + storeList.detailed_address }}</view>
 									</view>
 								</view>
-								<text class="iconfont icon-ic_rightarrow fs-24 text--w111-666" v-if="shopType == 1 && belongShow && storeShow"></text>
+								<text class="iconfont icon-ic_rightarrow fs-24 text--w111-666" v-if="storeShow && (type == 3 || (shopType == 1 && belongShow))"></text>
 							</view>
 						</view>
 						<!-- 拼团详情 -->
@@ -315,7 +316,7 @@
 									<view class="w-80 h-80 rd-50-p111- bg-primary-light flex-center mb-24">
 										<text class="iconfont icon-ic_box fs-44 text-red"></text>
 									</view>
-									<text class="fs-26 lh-36rpx">满员发货</text>
+									<text class="fs-26 lh-36rpx">满员成团</text>
 								</view>
 							</view>
 						</view>
@@ -896,7 +897,8 @@
 			 * 跳转门店列表
 			 */
 			showStoreList: function() {
-				if(this.shopType !=1 || !this.belongShow || !this.storeShow) return
+				// 拼团允许会员在活动适用门店之间改选；普通商品继续沿用原有门店切换开关。
+				if (!this.storeShow || (Number(this.type) !== 3 && (this.shopType != 1 || !this.belongShow))) return
 				let id = this.storeInfo.pid?this.storeInfo.pid:this.storeInfo.id
 				uni.navigateTo({
 					url:'/pages/store/list/index?type=1&isCollage=1&storeId='+this.storeList.id+'&product_id='+id
@@ -1206,9 +1208,7 @@
 					toLogin();
 					return
 				}
-				if((this.storeInfo.delivery_type[0] == 2 || this.storeInfo.delivery_type[0] == 3) && !uni.getStorageSync('refuseLocation')){
-					this.$refs.productWindow.showLocation();
-				}
+				// 规格选择不请求配送定位，订单只关联会员选择的购买门店。
 				this.currentPage = false;
 				this.attribute.cartAttr = true
 			},
@@ -1349,9 +1349,7 @@
 					if (Number(this.type) === 3 && !(Number(this.store_id) > 0)) {
 						return this.$util.Tips({ title: '请先选择购买门店' });
 					}
-					if((this.storeInfo.delivery_type[0] == 2 || this.storeInfo.delivery_type[0] == 3) && !uni.getStorageSync('refuseLocation')){
-					   this.$refs.productWindow.showLocation();
-					}
+					// 会员购买不再按配送方式请求定位，门店由购买门店选择确定。
 					var that = this;
 					that.currentPage = false;
 					var productSelect = this.productValue[this.attrValue];
@@ -1376,14 +1374,14 @@
 						cartNum: that.attribute.productSelect.cart_num,
 						uniqueId: productSelect !== undefined ? productSelect.unique : '',
 						'new': 1,
-						store_id:this.delivery_type == 1 && this.type != 3 ? 0 : this.store_id,
-						addressId:this.addressId,
-						delivery_type:this.delivery_type
+						store_id:this.store_id,
+						addressId:0,
+						delivery_type:2
 					}).then(res => {
 						this.isOpen = false
 						let id = that.type == 1?that.id:that.storeInfo.product_id
 						uni.navigateTo({
-						  url: '/pages/goods/order_confirm/index?new=1&spid='+this.spid+'&cartId=' + res.data.cartId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+(that.delivery_type == 1 && that.type != 3 ? 0 : that.store_id)+'&store_name='+that.store_name+'&product_id=' + id+'&group_purchase='+(that.type == 3 ? 1 : 0)
+						  url: '/pages/goods/order_confirm/index?new=1&spid='+this.spid+'&cartId=' + res.data.cartId+'&store_id='+that.store_id+'&store_name='+that.store_name+'&product_id=' + id+'&group_purchase='+(that.type == 3 ? 1 : 0)
 						});
 					}).catch(err => {
 						// 购物车校验失败时展示后端业务原因，便于会员重新选择规格或联系门店。
@@ -1791,6 +1789,47 @@
 	.info_card {
 	  background: linear-gradient(180deg, #ffffff 0%, #ffffff 54%, rgba(255, 255, 255, 0) 100%);
 	  margin-top: -32rpx;
+	}
+	// 拼团图片区、价格区和标题按文档流依次排列；价格行可换行，团人数不挤压金额。
+	.group-price-card {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 20rpx;
+		padding: 28rpx 32rpx;
+		background: #fff;
+		border-bottom: 1rpx solid #f0f0f0;
+		box-sizing: border-box;
+	}
+	.group-price-card__prices {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 10rpx 12rpx;
+		flex: 1;
+		min-width: 0;
+		color: #d92d20;
+	}
+	.group-price-card__label {
+		font-size: 26rpx;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+	.group-price-card__original {
+		white-space: nowrap;
+	}
+	.group-price-card__badge {
+		flex-shrink: 0;
+		padding: 8rpx 18rpx;
+		border-radius: 24rpx;
+		background: #fff0ed;
+		color: #b42318;
+		font-size: 26rpx;
+		line-height: 36rpx;
+	}
+	.info_card.info_card--group {
+		margin-top: 0;
+		border-radius: 0;
 	}
 	.seckill-card{
 		padding: 16rpx 20rpx 0 40rpx !important;
