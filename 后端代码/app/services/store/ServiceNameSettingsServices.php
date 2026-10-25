@@ -7,7 +7,7 @@ use think\facade\Db;
 /**
  * 门店服务名称基础资料的唯一读写入口。
  *
- * 该资料只保存名称，不关联商品、项目、房间、预约、订单或报表。每次写入
+ * 该资料只保存名称；预约可引用其名称快照作为附加展示，不关联商品、计费或报表。每次写入
  * 使用门店范围、乐观版本、请求幂等键和同事务审计，保证刷新可恢复且不会
  * 因重复点击覆盖并发修改。
  */
@@ -16,6 +16,26 @@ final class ServiceNameSettingsServices
     private const NAME_TABLE = 'cashier_v3_service_name';
     private const SETTING_TABLE = 'cashier_v3_service_name_setting';
     private const AUDIT_TABLE = 'cashier_v3_service_name_audit';
+
+    /** Public booking menu for one validated store, not management metadata.
+     * Lock the switch and names in the booking transaction so concurrent
+     * disabling cannot silently authorize a newly selected item.
+     */
+    public function reservationCatalog(int $storeId, bool $lock = false): array
+    {
+        $this->assertStore($storeId);
+        if (!Db::query("SHOW TABLES LIKE 'eb_cashier_v3_service_name'")
+            || !Db::query("SHOW TABLES LIKE 'eb_cashier_v3_service_name_setting'")) return ['enabled' => false, 'records' => []];
+        $state = $this->switchState($storeId, $lock);
+        if (!$state['enabled']) return ['enabled' => false, 'records' => []];
+        $query = Db::name(self::NAME_TABLE)->where('store_id', $storeId)->where('is_enabled', 1);
+        if ($lock) $query->lock(true);
+        $rows = $this->rows($query->field('id,service_name,sort_order')->order('id asc')->select());
+        usort($rows, static function (array $a, array $b): int { return ((int)$a['sort_order'] <=> (int)$b['sort_order']) ?: ((int)$a['id'] <=> (int)$b['id']); });
+        return ['enabled' => true, 'records' => array_map(static function (array $row): array {
+            return ['id' => (int)$row['id'], 'name' => (string)$row['service_name']];
+        }, $rows)];
+    }
 
     /** @return array{records:array,total:int,page:int,limit:int,switch:array} */
     public function page(int $storeId, array $filters): array
@@ -230,8 +250,8 @@ final class ServiceNameSettingsServices
     }
 
     /**
-     * 保存当前门店的独立展示开关。该值没有业务消费者，不能改变预约、收银、
-     * 商品或服务名称行本身的启停状态。
+     * 保存当前门店的独立展示开关。只控制新预约的定制服务选择，不能改变
+     * 已保存预约快照、收银、商品或服务名称行本身的启停状态。
      *
      * @param array{id?:int,name?:string} $operator
      */

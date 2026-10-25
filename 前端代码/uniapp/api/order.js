@@ -438,6 +438,11 @@ export function postReservationOrderCreate(id,data) {
 	return request.post(`reservation/v3/order/create/${id}`,data);
 }
 
+// Display-only menu scoped to the selected booking store, never a cart item.
+export function getReservationCustomServices(storeId) {
+	return request.get('reservation/v3/custom-services', { store_id: storeId });
+}
+
 /**
  * 预约单列表
  * @param object data

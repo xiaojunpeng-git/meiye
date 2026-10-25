@@ -75,6 +75,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
         $rows = is_object($rows) && method_exists($rows, 'toArray') ? $rows->toArray() : (array)$rows;
         $ids = [];
         foreach ($rows as $row) $ids[] = (int)($row['id'] ?? 0);
+        $customServices = (new ReservationCustomServiceServices())->forReservations($tenantId, $storeId, $ids);
         $serviceOrderIds = [];
         foreach ($rows as $row) {
             $serviceOrderId = (int)($row['service_order_id'] ?? 0);
@@ -210,6 +211,7 @@ final class CashierV3ReservationPartitionProvider implements CashierV3RootPartit
                 'craftsmanSummary' => $reservationArtisans ? implode('、', array_values($reservationArtisans)) : '待分配手艺人',
                 'roomName' => trim((string)($row['room_name_snapshot'] ?? '')) ?: ((int)($row['room_id'] ?? 0) > 0 ? '房间 ' . (int)$row['room_id'] : ''),
                 'remark' => (string)($row['remark_snapshot'] ?? ''),
+                'customServices' => $customServices[$id] ?? [],
                 'source' => '收银 V3',
                 'creator' => (string)($row['creator_name_snapshot'] ?? ''),
                 'status' => $status,

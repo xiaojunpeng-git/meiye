@@ -210,6 +210,8 @@ final class CashierV3ReservationDetailQueryServices
             ] : null,
             'roomChanges' => [],
             'remark' => (string)($reservation['remark_snapshot'] ?? ''),
+            // Historical display lines never depend on today's menu switch.
+            'customServices' => (new ReservationCustomServiceServices())->forReservations((string)$reservation['tenant_id'], (int)$reservation['store_id'], [(int)$reservation['id']])[(int)$reservation['id']] ?? [],
             'sourceType' => (string)($reservation['source_type'] ?? ''),
             // The channel (member/store) and market attribution answer different questions.
             // 展示开关与历史快照分开返回，隐藏入口不删除历史归因。

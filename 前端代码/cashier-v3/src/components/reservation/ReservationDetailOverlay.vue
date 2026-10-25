@@ -687,6 +687,11 @@ useModalFocusTrap({
         </div>
 
         <template v-else>
+          <section v-if="reservation.customServices?.length" class="reservation-detail__section">
+            <header class="reservation-detail__section-header"><h3>定制服务</h3></header>
+            <dl class="reservation-detail__info-list"><div v-for="item in reservation.customServices" :key="item.id"><dt>{{ item.name }}</dt><dd>× {{ item.quantity }}</dd></div></dl>
+          </section>
+
           <section class="reservation-detail__section">
             <header class="reservation-detail__section-header">
               <h3>会员</h3>
