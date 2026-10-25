@@ -5,7 +5,7 @@
 			@click="details(replyCon.product)">
 			<image class="w-104 h-104 rd-16rpx" :src="replyCon.product.image"></image>
 			<view class="ml-24 w-462 line2 text--w111-333 fs-28 lh-40rpx">{{replyCon.product.store_name}}</view>
-			<view class="flex-center w-56 h-56 rd-28rpx cart_border ml-40">
+			<view v-if="$memberCartEntryEnabled" class="flex-center w-56 h-56 rd-28rpx cart_border ml-40">
 				<text class="iconfont icon-ic_ShoppingCart1 text-primary-con"></text>
 			</view>
 		</view>

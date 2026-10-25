@@ -14,6 +14,14 @@
 				<view>{{ codeData.serial_number }}</view>
 			</view>
 			<view class="px-20 mt-30" v-if="!tableId">
+				<!-- 拼团无论配送类型都要明确购买门店，订单归属在提交时固定。 -->
+				<view v-if="isGroupOrder" class="address add1 flex-between-center rd-24rpx mb-20" @tap="goStore">
+					<text class="fs-28 text--w111-333">购买门店</text>
+					<view class="flex-y-center fs-28 text--w111-333">
+						<text>{{system_store.name || '请选择购买门店'}}</text>
+						<text class="iconfont icon-ic_rightarrow ml-10 text--w111-999"></text>
+					</view>
+				</view>
 				<view class="allAddress" v-if="product_type != 1">
 					<!-- isDisplay 支持的配送方式数组 -->
 					<view class='address add1 flex-between-center rd-24rpx' @tap='onAddress(addressInfo.real_name)' v-if="[1, 3].includes(shippingType)">
@@ -30,12 +38,13 @@
 						</view>
 						<text class="iconfont icon-ic_rightarrow fs-32 text--w111-666 ml-20"></text>
 					</view>
-					<view class='address add1 acea-row row-between-wrapper rd-24rpx' v-else>
+					<view class='address add1 acea-row row-between-wrapper rd-24rpx' v-else @tap="isGroupOrder && goStore()">
 						<view class="w-full">
 							<view class="w-full flex-between-center">
 								<view>
 									<view class="fs-30 line1 fw-500 lh-42rpx acea-row row-middle">
 										<text class="line1 max-w-368">{{system_store.name}}</text>
+										<text v-if="isGroupOrder" class="iconfont icon-ic_rightarrow ml-10 text--w111-999"></text>
 									</view>
 									<view class="fs-24 w-410 line2 text--w111-666 lh-30rpx mt-12">{{system_store.address}}{{system_store.detailed_address}}</view>
 								</view>
@@ -619,6 +628,7 @@
 	} from '@/api/order.js';
 	import {
 		getAddressDefault,
+		getUserInfo,
 		getAddressDetail,
 		invoiceList,
 		invoiceOrder
@@ -715,6 +725,7 @@
 				activityId: 0, //活动ID
 				BargainId: 0,
 				combinationId: 0,
+				isGroupOrder: false,
 				seckillId: 0,
 				discountId: 0,
 				userInfo: {}, //用户信息
@@ -885,9 +896,10 @@
 		},
 		onLoad: async function(options) {
       if (!this.$store.getters.isLogin) { toLogin(); return; }
-      // The ordinary cart shares the member transaction boundary. Historical
-      // activity-specific checkouts retain their dedicated contracts.
-      if (options.cartId && !options.tableId) {
+      // Only persisted carts have numeric database IDs for this routing check.
+      // Direct purchases (new=1), including group buys, use Redis cart keys
+      // and must continue through the existing activity checkout contract.
+      if (options.cartId && options.new !== '1' && !options.tableId) {
         try {
           const entry = await memberCommerceCartEntry(options.cartId);
           if (entry.data.ordinary) {
@@ -915,6 +927,7 @@
 				url: 1
 			});
 			this.isStore = options.is_store ? parseInt(options.is_store) : 0;
+			this.isGroupOrder = options.group_purchase === '1';
 			this.storeId = parseInt(options.store_id) || 0;
 			this.delivery_type = parseInt(options.delivery_type) || 0;
 			this.couponId = options.couponId || 0;
@@ -942,10 +955,17 @@
 				this.invTitle = options.invoice_name;
 			}
 			if (this.isLogin) {
-				this.getCheckShipping();
-				// 来自门店
-				if (this.storeId) {
-					this.getNearbyStore();
+				// 拼团从会员归属门店起步；用户可在统一提交订单页改选适用门店。
+				const loadCheckout = () => {
+					this.getCheckShipping();
+					if (this.storeId) this.getNearbyStore();
+				};
+				if (this.isGroupOrder && !this.storeId) {
+					getUserInfo().then(res => {
+						this.storeId = Number(res.data && res.data.belong_store_id) || 0;
+					}).catch(() => {}).then(loadCheckout);
+				} else {
+					loadCheckout();
 				}
 			} else {
 				toLogin();
@@ -973,7 +993,13 @@
 					// _this.news = res.new
 					// _this.pinkId = Number(res.pinkId)
 					// _this.couponId = res.couponId
-					_this.getConfirm()
+					// 改选拼团购买门店后重算配送和应付信息，避免沿用旧门店的结算结果。
+					if (_this.isGroupOrder) {
+						_this.getCheckShipping()
+						_this.getNearbyStore()
+					} else {
+						_this.getConfirm()
+					}
 				}
 				// 清除监听
 				uni.$off('activeFn');
@@ -992,9 +1018,9 @@
 		},
 		methods: {
 			goStore() {
-				if (!this.collage_id && !this.isStore) {
+				if (!this.collage_id && (!this.isStore || this.isGroupOrder)) {
 					uni.navigateTo({
-						url: '/pages/store/list/index?type=1&isCollage=1&storeId=' + this.system_store.id
+						url: '/pages/store/list/index?type=1&isCollage=1&storeId=' + (this.storeId || 0) + (this.isGroupOrder ? '&product_id=' + this.product_id : '')
 					})
 				}
 			},
@@ -1818,6 +1844,9 @@
 				this.SubOrder();
 			},
 			SubOrder: function(e) {
+				if (this.isGroupOrder && !(Number(this.storeId) > 0)) {
+					return this.$util.Tips({ title: '请先选择购买门店' });
+				}
 				let that = this,
 					data = {};
 				data = {

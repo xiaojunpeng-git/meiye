@@ -308,6 +308,10 @@ class StoreOrderCreateServices extends BaseServices
         if($orderInfo['type'] == 3){
             //拼团
             $orderInfo['source']=10;
+			// 新拼团订单必须固定购买门店，支付回调及门店收款记录才有一致归属。
+			if ((int)$orderInfo['store_id'] <= 0) {
+				throw new ValidateException('请先选择购买门店');
+			}
         }
         if ($userInfo['user_type'] == 'wechat' || $userInfo['user_type'] == 'routine') {
             /** @var WechatUserServices $wechatServices */
@@ -416,6 +420,7 @@ class StoreOrderCreateServices extends BaseServices
 				if (!$info) {
 					throw new PayException('您支付的订单不存在');
 				}
+				$data['is_group_order'] = (int)$info['type'] === 3;
 				$data['offline_pay_status'] = (int)sys_config('offline_pay_status') ?? (int)2;
 				if ($data['offline_pay_status'] == 1 && sys_config('offline_pay_type', 0)) {//线下支付开启 && 仅核销支持开启
 					//验证订单类型 是核销订单可以支持线下支付
@@ -428,6 +433,11 @@ class StoreOrderCreateServices extends BaseServices
 					$systemStoreServices = app()->make(SystemStoreServices::class);
 					$storeInfo = $systemStoreServices->get((int)$info['store_id'], ['id', 'use_system_money']);
 					$data['yue_pay_status'] = $storeInfo['use_system_money'] ? $data['yue_pay_status'] : 2;
+				}
+				// 拼团只允许第三方支付；前端选项与服务端支付约束使用同一订单类型。
+				if ($data['is_group_order']) {
+					$data['offline_pay_status'] = 2;
+					$data['yue_pay_status'] = 2;
 				}
 				//系统预设取消订单时间段
 				/** @var StoreOrderServices $storeOrderServices */

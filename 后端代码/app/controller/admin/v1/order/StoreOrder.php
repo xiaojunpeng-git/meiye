@@ -77,6 +77,9 @@ class StoreOrder extends AuthController
         $where['status'] = trim($where['status']);
         $where['is_system_del'] = 0;
         $where['plat_type'] = 0;
+        // A paid group remains in group/payment records until completion;
+        // the platform consumption list uses the shared visibility predicate.
+        $where['completed_group_consumption_only'] = 1;
         if (!in_array($where['status'], [-1, -2, -3])) {
             $where['pid'] = [0, -1];
         }

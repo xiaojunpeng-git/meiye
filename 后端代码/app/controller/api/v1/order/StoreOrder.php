@@ -486,6 +486,10 @@ class StoreOrder
             return app('json')->fail('该订单已失效!');
         }
         $order = $order->toArray();
+		// 所有拼团支付入口均须拒绝余额、线下等非第三方渠道，防止绕过会员端显隐。
+		if ((int)($order['type'] ?? 0) === 3 && !in_array($paytype, [PayServices::WEIXIN_PAY, PayServices::ALIAPY_PAY], true)) {
+			return app('json')->fail('拼团订单仅支持微信或支付宝支付');
+		}
         $isChannel = $this->getChennel[$from] ?? ($request->isApp() ? 4 : 1);
         $updateData = ['is_channel' => $isChannel];
         //只要重新支付就更新订单号

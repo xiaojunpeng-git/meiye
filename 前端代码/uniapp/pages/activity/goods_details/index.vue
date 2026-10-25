@@ -377,7 +377,7 @@
 										<text class="fs-18">收藏</text>
 									</view>
 									<view class="flex-col flex-center mr-38" @tap="goPage(2,'/pages/order_addcart/order_addcart')"
-										v-if="diyProduct.menuList.includes(2)">
+									v-if="$memberCartEntryEnabled && diyProduct.menuList.includes(2)">
 										<text class="iconfont icon-ic_ShoppingCart fs-40"></text>
 										<text class="fs-18 white-nowrap">购物车</text>
 									</view>
@@ -805,7 +805,6 @@
 				//记录推广人uid
 				if (value.spid) app.globalData.spid = value.spid;
 				this.type = value.type;
-				this.getActivityDetail();
 			}
 			// #endif
 
@@ -818,7 +817,15 @@
 			}
 			this.time_id = options.time_id ? options.time_id : '';
 			this.promotions_type = options.promotions_type || 0;
-			this.getActivityDetail();
+			if (Number(this.type) === 3 && this.isLogin) {
+				// 拼团默认会员真实归属门店；商品适用门店仍由选择器核验，不可直接信任本地缓存。
+				getUserInfo().then(res => {
+					const belongStoreId = Number(res.data && res.data.belong_store_id) || 0;
+					if (belongStoreId > 0) this.storeId = belongStoreId;
+				}).catch(() => {}).then(() => this.getActivityDetail());
+			} else {
+				this.getActivityDetail();
+			}
 			this.$nextTick(() => {
 				// #ifdef MP
 				const menuButton = uni.getMenuButtonBoundingClientRect();
@@ -1338,6 +1345,10 @@
 			 */
 			goCat: function() {
 				if(this.isLogin){
+					// 拼团订单必须先落到实际购买门店，再沿普通订单提交页继续付款。
+					if (Number(this.type) === 3 && !(Number(this.store_id) > 0)) {
+						return this.$util.Tips({ title: '请先选择购买门店' });
+					}
 					if((this.storeInfo.delivery_type[0] == 2 || this.storeInfo.delivery_type[0] == 3) && !uni.getStorageSync('refuseLocation')){
 					   this.$refs.productWindow.showLocation();
 					}
@@ -1365,14 +1376,14 @@
 						cartNum: that.attribute.productSelect.cart_num,
 						uniqueId: productSelect !== undefined ? productSelect.unique : '',
 						'new': 1,
-						store_id:this.delivery_type == 1 ? 0 : this.store_id,
+						store_id:this.delivery_type == 1 && this.type != 3 ? 0 : this.store_id,
 						addressId:this.addressId,
 						delivery_type:this.delivery_type
 					}).then(res => {
 						this.isOpen = false
 						let id = that.type == 1?that.id:that.storeInfo.product_id
 						uni.navigateTo({
-						  url: '/pages/goods/order_confirm/index?new=1&spid='+this.spid+'&cartId=' + res.data.cartId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+(that.delivery_type == 1 ? 0 : that.store_id)+'&store_name='+that.store_name+'&product_id=' + id
+						  url: '/pages/goods/order_confirm/index?new=1&spid='+this.spid+'&cartId=' + res.data.cartId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+(that.delivery_type == 1 && that.type != 3 ? 0 : that.store_id)+'&store_name='+that.store_name+'&product_id=' + id+'&group_purchase='+(that.type == 3 ? 1 : 0)
 						});
 					}).catch(err => {
 						// 购物车校验失败时展示后端业务原因，便于会员重新选择规格或联系门店。

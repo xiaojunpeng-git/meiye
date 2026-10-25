@@ -174,7 +174,7 @@
 					<view class="safe-area-inset-bottom"></view>
 				</view>
 			</view>
-			<view class="footer">
+			<view class="footer" v-if="$memberCartEntryEnabled">
 				<view class="inner-box" :class="{ open: footerOpen }">
 					<view class="inner acea-row row-between row-middle">
 						<view class="items-baseline inline-flex h-60 lh-60rpx overflow" style="flex-wrap: nowrap;">
@@ -279,7 +279,7 @@
 		</tuiDrawer>
 		<!-- #endif -->
 		<!-- 分类购物车下拉列表 -->
-		<cartList :cartNums='cartNums' :cartData="cartData" isStoreCart @closeList="closeList" @ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel"></cartList>
+		<cartList v-if="$memberCartEntryEnabled" :cartNums='cartNums' :cartData="cartData" isStoreCart @closeList="closeList" @ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel"></cartList>
 		<!-- 产品属性组件 -->
 		<productWindow :attr="attr" :isShow='1' :iSplus='1' :iScart='1' :type="2" :storeInfo="storeInfo" @myevent="onMyEvent" @ChangeAttr="ChangeAttr" @ChangeCartNum="ChangeCartNumDuo" @attrVal="attrVal" @iptCartNum="iptCartNum" @goCat="goCatNum" id='product-window'></productWindow>
 		<!-- 客服弹窗 -->

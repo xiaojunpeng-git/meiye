@@ -284,6 +284,8 @@
 			},
 			'storeId':{
 				handler(){
+					// 会员归属门店可能先于适用门店列表返回，等待列表后再选择。
+					if (!this.storeList.length) return;
 					this.defaultStore();
 					this.$emit('onstoreId',this.storeList[this.active],this.flag);
 				},
@@ -447,6 +449,11 @@
 						this.storeList = this.flag==2?selfStoreList:this.flag==3?deliveryStoreList:list;
 						this.selfStoreList = selfStoreList;//到店核销
 						this.deliveryStoreList = deliveryStoreList;//门店配送
+						// 活动商品没有适用门店时不能把空门店回传为购买门店。
+						if (!this.storeList.length) {
+							this.$emit('storeCount', 0);
+							return;
+						}
 						this.defaultStore();
 						this.$emit('onstoreId',this.storeList[this.active],this.flag);
 						this.$emit('storeCount',res.data.list.count);

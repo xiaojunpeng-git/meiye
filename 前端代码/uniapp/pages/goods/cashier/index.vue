@@ -102,6 +102,7 @@
 				],
 				paytype:'',
 				paying: false,
+				isGroupOrder: false,
 				payTypeList:[]
 			}
 		},
@@ -138,7 +139,8 @@
 			payList(){
 				let list = [];
 				this.cartArr.forEach(item=>{
-					if(item.payStatus == 1){
+					// 拼团只展示微信/支付宝，后端付款接口仍做独立校验。
+					if(item.payStatus == 1 && (!this.isGroupOrder || ['weixin', 'alipay'].includes(item.value))){
 						list.push(item);
 					}
 				})
@@ -186,6 +188,7 @@
 					// #endif
 					//余额支付是否开启
 					this.cartArr[2].payStatus = res.data.yue_pay_status;
+					this.isGroupOrder = !!res.data.is_group_order;
 					this.now_money = res.data.now_money;
 					//线下支付是否开启
 					if (res.data.offline_pay_status == 1) {
@@ -212,7 +215,7 @@
 				//付费会员购买和余额充值不允许使用线下支付和余额支付，未开启线上支付支付的话给出提示并且返回上一页
 				//检查支付类型列表数组的payStatus是不是都是0或者2
 				const isAllPayStatusZero = this.cartArr.every(item => item.payStatus == 0 || item.payStatus == 2);
-				if(isAllPayStatusZero && ['vip','recharge'].includes(this.fromType)){
+				if(isAllPayStatusZero && (['vip','recharge'].includes(this.fromType) || this.isGroupOrder)){
 					return this.$util.Tips({
 						title: '未开启线上支付，请联系管理员'
 					}, {

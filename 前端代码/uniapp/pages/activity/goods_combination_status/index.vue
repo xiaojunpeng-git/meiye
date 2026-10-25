@@ -160,6 +160,7 @@
 		:iSbnt="1"
 		:type="2"
 		:productId="storeCombination.product_id"
+		:storeId="memberStoreId"
 		:storeInfo='storeCombination'
 		@myevent="onMyEvent"
 		@ChangeAttr="ChangeAttr"
@@ -333,6 +334,7 @@
 				imgHost: HTTP_REQUEST_URL,
 				addressId:'',
 				store_id :'',
+				memberStoreId: 0,
 				delivery_type:0,
 				store_name:'',
 				endTime: false,
@@ -375,6 +377,7 @@
 				handler: function(newV, oldV) {
 					if (newV) {
 						this.userInfo = newV;
+						this.memberStoreId = Number(newV.belong_store_id) || 0;
 						app.globalData.openPages = '/pages/activity/goods_combination_status/index?id=' + this.pinkId+'&spid=' + this.userInfo.uid;
 					}
 				},
@@ -396,6 +399,8 @@
 			if (options.id) {
 				that.pinkId = options.id;
 			}
+			// 参团和开团一致，适用门店列表优先选会员归属门店。
+			this.memberStoreId = Number(this.userData && this.userData.belong_store_id) || 0;
 			// 记录推广人uid；
 			if (options.spid) app.globalData.spid = options.spid;
 			if (that.isLogin == false) {
@@ -694,6 +699,7 @@
 				that.isOpen = true;
 			},
 			goPay() {
+				if (!(Number(this.store_id) > 0)) return this.$util.Tips({ title: '请先选择购买门店' });
 				var that = this;
 				var data = {};
 				data.productId = that.storeCombination.product_id;
@@ -707,7 +713,7 @@
 				postCartAdd(data)
 					.then(res => {
 						uni.navigateTo({
-							url: '/pages/goods/order_confirm/index?new=1&cartId=' + res.data.cartId + '&pinkId=' + that.pinkId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+that.store_id+'&store_name='+that.store_name+'&product_id=' + that.storeCombination.product_id
+							url: '/pages/goods/order_confirm/index?new=1&cartId=' + res.data.cartId + '&pinkId=' + that.pinkId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+that.store_id+'&store_name='+that.store_name+'&product_id=' + that.storeCombination.product_id+'&group_purchase=1'
 						});
 					})
 					.catch(res => {

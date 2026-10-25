@@ -513,7 +513,7 @@
 									<view class="flex-col flex-center mr-38 animated relative"
 										:class="m36f2e == true ? 'bounceIn' : ''"
 										@tap="goPage(2,'/pages/order_addcart/order_addcart')"
-										v-if="diyProduct.menuList.includes(2)">
+										v-if="$memberCartEntryEnabled && diyProduct.menuList.includes(2)">
 										<text class="iconfont icon-ic_ShoppingCart fs-40"></text>
 										<text class="num-badge bg-color" v-if="parseFloat(CartCount) > 0">{{ CartCount || 0 }}</text>
 										<text class="fs-18">购物车</text>
@@ -523,7 +523,7 @@
 									<view @tap="memberPurchase" class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26">立即购买</view>
 								</view>
 								<view class="flex-1 grid-column-2 self-center grid-gap-16rpx"
-									v-else-if="attr.productSelect.stock <= 0 && storeInfo.cart_button && diyProduct.showCart">
+									v-else-if="$memberCartEntryEnabled && attr.productSelect.stock <= 0 && storeInfo.cart_button && diyProduct.showCart">
 										<!-- 无库存允许加入购物车并且可视化开启了购物车 -->
 									<view class="w-full h-72 flex-center join_cart rd-36px text--w111-fff fs-26" @tap="joinCart">加入购物车</view>
 									<!-- 平台没有可以从门店购买 -->
@@ -531,14 +531,14 @@
 									<view v-else class="w-full h-72 flex-center bg-hui rd-36px text--w111-fff fs-26">已售罄</view>
 								</view>
 								<view class="flex-1 flex-y-center"
-									v-else-if="attr.productSelect.stock <= 0 && storeInfo.cart_button && !diyProduct.showCart">
+									v-else-if="attr.productSelect.stock <= 0 && storeInfo.cart_button && (!diyProduct.showCart || !$memberCartEntryEnabled)">
 										<!-- 无库存允许加入购物车并且可视化关闭了购物车 -->
 										<!-- 平台没有可以从门店购买 -->
 									<view v-if="is_store_buy || delivery_type == 2 || delivery_type == 3" @tap="goBuy" class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26">门店购买</view>
 									<view v-else class="w-full h-72 flex-center bg-hui rd-36px text--w111-fff fs-26">已售罄</view>
 								</view>
 								<view class="flex-1 grid-column-2 self-center grid-gap-16rpx"
-									v-else-if="attr.productSelect.stock >0 && storeInfo.cart_button && diyProduct.showCart">
+									v-else-if="$memberCartEntryEnabled && attr.productSelect.stock >0 && storeInfo.cart_button && diyProduct.showCart">
 									<!-- 有库存允许加入购物车并且可视化开启了购物车 -->
 									<view class="w-full h-72 flex-center join_cart rd-36px text--w111-fff fs-26" @tap="joinCart">加入购物车</view>
 									<view class="w-full h-72 flex-center bg-color rd-36px text--w111-fff fs-26"

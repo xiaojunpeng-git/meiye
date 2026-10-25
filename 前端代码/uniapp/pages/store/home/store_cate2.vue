@@ -154,7 +154,7 @@
 				<emptyPage title="暂无商品，去看点别的吧～"></emptyPage>
 			</view>
 			<!-- </scroll-view> -->
-			<view class="footer">
+			<view class="footer" v-if="$memberCartEntryEnabled">
 				<view class="inner-box" :class="{ open: footerOpen }">
 					<view class="inner acea-row row-between row-middle">
 						<view class="items-baseline inline-flex h-60 lh-60rpx overflow" style="flex-wrap: nowrap;">
@@ -265,7 +265,7 @@
 		<productWindow :attr="attr" :isShow="1" :iSplus="1" :iScart="1" :type="2" :storeInfo="storeInfo" @myevent="onMyEvent" @attrVal="attrVal" @ChangeAttr="ChangeAttr" @ChangeCartNum="ChangeCartNumDuo" @iptCartNum="iptCartNum" @goCat="goCatNum">
 		</productWindow>
 		<homeList :currentPage="currentPage" :navH="getHeight.barTop+40" :openNavList="diyProduct.navList"></homeList>
-		<cartList :cartNums='cartNums' :cartData="cartData" isStoreCart @closeList="closeList" @ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel"></cartList>
+		<cartList v-if="$memberCartEntryEnabled" :cartNums='cartNums' :cartData="cartData" isStoreCart @closeList="closeList" @ChangeCartNumDan="ChangeCartList" @ChangeSubDel="ChangeSubDel" @ChangeOneDel="ChangeOneDel"></cartList>
 		<couponListWindow :coupon="coupon" :openType="0" @ChangCouponsClone="ChangCouponsClone" @ChangCouponsUseState="ChangCouponsUseState" @ChangCoupons="ChangCouponsClone" @tabCouponType="tabCouponType" v-if="coupon">
 		</couponListWindow>
 	</view>

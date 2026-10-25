@@ -17,6 +17,9 @@ import configs from './config/app.js'
 import socket from './libs/new_chat.js'
 Vue.prototype.$util = util;
 Vue.prototype.$config = configs;
+// Member shopping-cart navigation is hidden across clients; temporary carts
+// remain an internal checkout mechanism for direct purchases and group buys.
+Vue.prototype.$memberCartEntryEnabled = false;
 Vue.prototype.$Cache = Cache;
 Vue.prototype.$eventHub = new Vue();
 Vue.prototype.$socket = new socket();

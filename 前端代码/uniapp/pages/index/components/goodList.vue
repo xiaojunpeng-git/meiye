@@ -31,7 +31,7 @@
             <view class="flex-between-center" v-if="onlyShowPrice">
               <baseMoney :money="item.price" symbolSize="24" integerSize="40" decimalSize="24" weight
                          :color="priceColor"></baseMoney>
-              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                 <view class="w-96 h-56 rd-28rpx flex-center fs-24 text--w111-fff"
                       v-if="btnStyle == 0" :style="[btnBgColor]">购买</view>
                 <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-else-if="btnStyle == 1">
@@ -61,7 +61,7 @@
                   <text class="fs-22 text--w111-999" v-if="checkboxInfo.includes(3)">已售{{item.sales}}{{item.unit_name}}</text>
                   <text class="fs-22 text--w111-999 pl-16" v-if="checkboxInfo.includes(4)">评分{{item.star}}</text>
                 </view>
-                <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+                <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                   <view class="w-96 h-56 rd-28rpx flex-center fs-24 text--w111-fff"
                         v-if="btnStyle == 0" :style="[btnBgColor]">购买</view>
                   <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-else-if="btnStyle == 1">
@@ -114,7 +114,7 @@
                 <view class="flex-between-center mt-20" v-if="onlyShowPrice">
                   <baseMoney :money="item.price" symbolSize="24" integerSize="40" decimalSize="24" weight
                              :color="priceColor"></baseMoney>
-                  <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+                  <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                     <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-if="btnStyle == 0">
                       <view class="flex-center cart-btn">
                         <text class="iconfont icon-ic_increase fs-26"></text>
@@ -138,7 +138,7 @@
                   </view>
                   <view class="flex-between-center mt-20">
                     <text class="fs-22 text--w111-999" v-if="checkboxInfo.includes(3)">已售{{item.sales}}{{item.unit_name}}</text>
-                    <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+                    <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                       <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-if="btnStyle == 0">
                         <view class="flex-center cart-btn">
                           <text class="iconfont icon-ic_increase fs-26"></text>
@@ -188,7 +188,7 @@
                 <view class="flex-between-center mt-20" v-if="onlyShowPrice">
                   <baseMoney :money="item.price" symbolSize="24" integerSize="40" decimalSize="24" weight
                              :color="priceColor"></baseMoney>
-                  <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+                  <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                     <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-if="btnStyle == 0">
                       <view class="flex-center cart-btn">
                         <text class="iconfont icon-ic_increase fs-26"></text>
@@ -212,7 +212,7 @@
                   </view>
                   <view class="flex-between-center mt-20">
                     <text class="fs-22 text--w111-999" v-if="checkboxInfo.includes(3)">已售{{item.sales}}{{item.unit_name}}</text>
-                    <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+                    <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                       <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-if="btnStyle == 0">
                         <view class="flex-center cart-btn">
                           <text class="iconfont icon-ic_increase fs-26"></text>
@@ -271,7 +271,7 @@
             <view class="flex-between-center mt-14">
               <baseMoney :money="item.price" symbolSize="24" integerSize="40" decimalSize="24" weight
                          :color="priceColor" v-if="checkboxInfo.includes(2)"></baseMoney>
-              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                 <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-if="btnStyle == 0">
                   <view class="flex-center cart-btn">
                     <text class="iconfont icon-ic_increase fs-26"></text>
@@ -314,7 +314,7 @@
             <view class="flex-between-center" v-if="onlyShowPrice">
               <baseMoney :money="item.price" symbolSize="24" integerSize="40" decimalSize="24" weight
                          :color="priceColor"></baseMoney>
-              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                 <view class="w-96 h-56 rd-28rpx flex-center fs-24 text--w111-fff"
                       v-if="btnStyle == 0" :style="[btnBgColor]">购买</view>
                 <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-else-if="btnStyle == 1">
@@ -344,7 +344,7 @@
                   <text class="fs-22 text--w111-999" v-if="checkboxInfo.includes(3)">已售{{item.sales}}{{item.unit_name}}</text>
                   <text class="fs-22 text--w111-999 pl-16" v-if="checkboxInfo.includes(4)">评分{{item.star}}</text>
                 </view>
-                <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+                <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                   <view class="w-96 h-56 rd-28rpx flex-center fs-24 text--w111-fff"
                         v-if="btnStyle == 0" :style="[btnBgColor]">购买</view>
                   <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-else-if="btnStyle == 1">
@@ -382,7 +382,7 @@
             <view class="flex-between-center mt-8">
               <baseMoney :money="item.price" symbolSize="24" integerSize="40" decimalSize="24" weight
                          :color="priceColor" v-if="checkboxInfo.includes(2)"></baseMoney>
-              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn">
+              <view @tap.stop="addCartChange(item, index)" v-if="!showBtn && ($memberCartEntryEnabled || bntConfig != 1)">
                 <view class="rd-24rpx w-44 h-44" :style="[btnTextColor]" v-if="btnStyle == 0">
                   <view class="flex-center cart-btn">
                     <text class="iconfont icon-ic_increase fs-26"></text>
@@ -696,8 +696,9 @@ export default {
         that.DefaultSelect();
       })
     },
+    // 会员端关闭购物车入口后，装修商品卡片仍可进入详情走直接购买。
     addCartChange(item, index){
-      if(this.bntConfig == 1){
+      if(this.bntConfig == 1 && this.$memberCartEntryEnabled){
 		  this.goCartDuo(item);
         // if(item.spec_type){
         //   this.goCartDuo(item);

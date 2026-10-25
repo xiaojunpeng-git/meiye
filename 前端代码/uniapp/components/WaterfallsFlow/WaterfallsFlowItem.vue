@@ -37,10 +37,10 @@
 				</view>
 				<view class="flex-between-center mt-12">
 					<text class="fs-22 text--w111-999">已售{{item.sales}}{{item.unit_name}}</text>
-					<view class="w-44 h-44 rd-24 bg-gradient flex-center" v-if="goDetail=='goDetail'">
+					<view class="w-44 h-44 rd-24 bg-gradient flex-center" v-if="$memberCartEntryEnabled && goDetail=='goDetail'">
 						<text class="iconfont icon-ic_ShoppingCart1 text--w111-fff fs-26"></text>
 					</view>
-					<view class="w-44 h-44 rd-24 bg-gradient flex-center" @tap.stop="addCartChange" v-else>
+					<view class="w-44 h-44 rd-24 bg-gradient flex-center" @tap.stop="addCartChange" v-else-if="$memberCartEntryEnabled">
 						<text class="iconfont icon-ic_ShoppingCart1 text--w111-fff fs-26"></text>
 					</view>
 				</view>

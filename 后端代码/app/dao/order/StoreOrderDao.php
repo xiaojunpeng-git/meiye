@@ -54,6 +54,10 @@ class StoreOrderDao extends BaseDao
         // store rights/refund/history queries must still see those carriers.
         $memberCommerceUid = (int)($where['exclude_member_commerce_carriers_uid'] ?? 0);
         unset($where['exclude_member_commerce_carriers_uid']);
+        // This opt-in belongs only to platform/store consumption lists; other
+        // order readers must retain pending groups for payment and refunds.
+        $completedGroupConsumptionOnly = !empty($where['completed_group_consumption_only']);
+        unset($where['completed_group_consumption_only']);
         if (isset($where['real_name'])) {
             $where['real_name'] = trim($where['real_name']);
         }
@@ -100,7 +104,12 @@ class StoreOrderDao extends BaseDao
             $where['data_scope_participate_staff_ids'],
             $where['data_scope_participate_fields']
         );
-        return parent::search($where)->when($memberCommerceUid > 0, function ($query) use ($memberCommerceUid) {
+        return parent::search($where)->when($completedGroupConsumptionOnly, function ($query) {
+            // Model queries use the configured table prefix (for example eb_).
+            // Resolve it from this connection so correlated subqueries target
+            // the outer order row on every independent customer instance.
+            \app\services\activity\combination\CombinationConsumptionVisibilityServices::apply($query, $query->getTable());
+        })->when($memberCommerceUid > 0, function ($query) use ($memberCommerceUid) {
             $query->where('channel_type','<>','member_v3')->whereNotIn('id', function ($carriers) use ($memberCommerceUid) {
                 $carriers->name('cashier_v3_card_purchase_receipt')->field('legacy_order_id')
                     ->whereIn('sales_order_id', function ($sales) use ($memberCommerceUid) {

@@ -2703,12 +2703,6 @@
 				"text": "门店"
 			},
 			{
-				"pagePath": "pages/order_addcart/order_addcart",
-				"iconPath": "static/images/4-001.png",
-				"selectedIconPath": "static/images/4-002.png",
-				"text": "购物车"
-			},
-			{
 				"pagePath": "pages/user/index",
 				"iconPath": "static/images/5-001.png",
 				"selectedIconPath": "static/images/5-002.png",
