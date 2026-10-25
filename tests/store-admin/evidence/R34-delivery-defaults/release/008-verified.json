@@ -1,0 +1,14 @@
+{
+  "site": "008",
+  "commit": "1a4af645e4361222ea188ddf0510d691e92d9333",
+  "result": "PASS",
+  "adminFilesChanged": 113,
+  "frontendRollback": "/www/backups/008/r34-store-defaults-1a4af645",
+  "storeCount": 130,
+  "storesChanged": 130,
+  "defaults": "delivery_type=2; default_delivery=2",
+  "storeOldValuesBackedUp": false,
+  "backendAndOtherTerminalsUnchanged": true,
+  "publicAssetsAndBrowserBoot": "PASS",
+  "cacheAndDetailReadback": "PASS"
+}

@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "acceptedR62PlatformSubtreePreserved": true,
+  "onlyTwoR34VueFilesDiffer": true,
+  "candidateMatchesUserAcceptedSHA256": true,
+  "priorExistingFeatures": "all other platform source files byte-identical to accepted live R62 source",
+  "unacceptedDirtyWorktreeChangesExcluded": true
+}

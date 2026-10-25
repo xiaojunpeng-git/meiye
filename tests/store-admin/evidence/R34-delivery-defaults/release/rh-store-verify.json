@@ -1,0 +1,13 @@
+{
+  "site": "rh",
+  "database": "ruihao",
+  "mode": "verify",
+  "existingStores": 102,
+  "changedStores": 0,
+  "remainingMismatches": 0,
+  "cacheAndDetailVerified": 102,
+  "otherColumnsSHA256": "baf79abc2c172e0f8b02def96d726676620459e8edd25c43863d30f45a897187",
+  "deletedStoresUnchanged": true,
+  "oldValuesBackedUp": false,
+  "result": "PASS"
+}

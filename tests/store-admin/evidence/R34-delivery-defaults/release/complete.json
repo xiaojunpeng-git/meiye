@@ -1,0 +1,55 @@
+{
+  "completedAtUTC": "2026-10-25T16:58:14.061582+00:00",
+  "round": 34,
+  "sourceCommit": "1a4af645e4361222ea188ddf0510d691e92d9333",
+  "result": "PASS",
+  "instances": {
+    "rh": {
+      "site": "rh",
+      "commit": "1a4af645e4361222ea188ddf0510d691e92d9333",
+      "result": "PASS",
+      "adminFilesChanged": 113,
+      "frontendRollback": "/www/backups/rh/r34-store-defaults-1a4af645",
+      "storeCount": 102,
+      "storesChanged": 0,
+      "defaults": "delivery_type=2; default_delivery=2",
+      "storeOldValuesBackedUp": false,
+      "backendAndOtherTerminalsUnchanged": true,
+      "publicAssetsAndBrowserBoot": "PASS",
+      "cacheAndDetailReadback": "PASS"
+    },
+    "008": {
+      "site": "008",
+      "commit": "1a4af645e4361222ea188ddf0510d691e92d9333",
+      "result": "PASS",
+      "adminFilesChanged": 113,
+      "frontendRollback": "/www/backups/008/r34-store-defaults-1a4af645",
+      "storeCount": 130,
+      "storesChanged": 130,
+      "defaults": "delivery_type=2; default_delivery=2",
+      "storeOldValuesBackedUp": false,
+      "backendAndOtherTerminalsUnchanged": true,
+      "publicAssetsAndBrowserBoot": "PASS",
+      "cacheAndDetailReadback": "PASS"
+    },
+    "010": {
+      "site": "010",
+      "commit": "1a4af645e4361222ea188ddf0510d691e92d9333",
+      "result": "PASS",
+      "adminFilesChanged": 113,
+      "frontendRollback": "/www/backups/010/r34-store-defaults-1a4af645",
+      "storeCount": 10,
+      "storesChanged": 1,
+      "defaults": "delivery_type=2; default_delivery=2",
+      "storeOldValuesBackedUp": false,
+      "backendAndOtherTerminalsUnchanged": true,
+      "publicAssetsAndBrowserBoot": "PASS",
+      "cacheAndDetailReadback": "PASS"
+    }
+  },
+  "productionStoreOldValuesBackedUp": false,
+  "userInstruction": "不用备份原值，直接改",
+  "scope": "Only admin defaults and undeleted-store delivery_type=2/default_delivery=2; no backend or financial facts changed",
+  "existingFunctions": "All other platform source identical to accepted live R62 baseline; all instance backend files, permissions, upgrades and other terminal entries unchanged",
+  "frontendRollback": "Per-instance manifests and file-only backup paths in verified receipts; no store-value rollback copy per user instruction"
+}

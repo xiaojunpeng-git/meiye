@@ -1,0 +1,13 @@
+{
+  "site": "010",
+  "database": "mohe_010_app",
+  "mode": "verify",
+  "existingStores": 10,
+  "changedStores": 0,
+  "remainingMismatches": 0,
+  "cacheAndDetailVerified": 10,
+  "otherColumnsSHA256": "52c21131b71eb319a30f39d54c5ebd8946a75b5c3c81e8d6217cf2697a1ac6a5",
+  "deletedStoresUnchanged": true,
+  "oldValuesBackedUp": false,
+  "result": "PASS"
+}

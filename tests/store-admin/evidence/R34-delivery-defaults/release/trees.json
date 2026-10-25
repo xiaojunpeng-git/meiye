@@ -1,0 +1,15 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "head": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "baselineCommit": "008cfef2378612ecf94cea8a22a70826e76b84aa",
+  "baselineTree": "77be095a7cda58737bc951722d7a356aa56e3dc8",
+  "acceptedLiveSource": "3c1302f3f75162cdab42fff8d7399221c58c5cdb",
+  "candidateTree": "66682ff4762498b5e60bf7af7d9465244ebb3f9a",
+  "paths": [
+    "前端代码/admin/src/pages/store/addStore/index.vue",
+    "前端代码/admin/src/pages/store/region/components/StoreFormModal.vue"
+  ],
+  "sharedIndexSHA256": "af0bae9ffd5dff64adbda605829a5e4b1c58e4fe66b853dfe00fd54d6e5030cc",
+  "pmAccepted": true,
+  "scope": "R34 defaults only; existing-store two-field update authorized, no old-value backup per latest instruction"
+}

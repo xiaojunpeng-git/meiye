@@ -1,0 +1,24 @@
+{
+  "commit": "1a4af645e4361222ea188ddf0510d691e92d9333",
+  "branch": "release/r34-store-delivery-defaults-20261026",
+  "tree": "f52757067a943334989c5c607b325fd3f9c7abad",
+  "parent": "008cfef2378612ecf94cea8a22a70826e76b84aa",
+  "files": [
+    "scripts/r34-release-browser.cjs",
+    "scripts/r34-release-build.cjs",
+    "scripts/r34-release-install.php",
+    "scripts/r34-release-prepare.py",
+    "scripts/r34-release-public.py",
+    "scripts/r34-release.py",
+    "scripts/r34-store-defaults.php",
+    "tests/store-admin/evidence/R34-delivery-defaults/fixed-files.json",
+    "tests/store-admin/evidence/R34-delivery-defaults/initial.json",
+    "tests/store-admin/evidence/R34-delivery-defaults/scope.patch",
+    "tests/store-admin/evidence/R34-delivery-defaults/verification.json",
+    "tests/store-admin/evidence/R34-delivery-defaults/验收说明.md",
+    "前端代码/admin/src/pages/store/addStore/index.vue",
+    "前端代码/admin/src/pages/store/region/components/StoreFormModal.vue"
+  ],
+  "sharedHEADAndIndexUntouched": true,
+  "acceptance": "user tested and accepted R34; authorized deployment, push and existing-store two-field update; explicitly no old-value backup"
+}

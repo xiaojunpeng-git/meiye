@@ -1,0 +1,13 @@
+{
+  "site": "008",
+  "database": "mohe_008",
+  "mode": "verify",
+  "existingStores": 130,
+  "changedStores": 0,
+  "remainingMismatches": 0,
+  "cacheAndDetailVerified": 130,
+  "otherColumnsSHA256": "7e608e8498cfef251f8e6dc78176e3376d4ec453db4bee419fe0f3a55e0c524f",
+  "deletedStoresUnchanged": true,
+  "oldValuesBackedUp": false,
+  "result": "PASS"
+}
