@@ -16,10 +16,15 @@
                         <Option :value="2">已完成</Option>
                         <Option :value="3">未完成</Option>
                     </Select>
-                    <Button type="primary" @click="userSearchs()">查询</Button>
                 </FormItem>
-                 <FormItem >
-
+                <FormItem label="拼团商品ID：">
+                    <Input v-model.trim="formValidate.cid" class="input-add" clearable placeholder="输入拼团商品ID" @on-enter="userSearchs" />
+                </FormItem>
+                <FormItem label="拼团编号：">
+                    <Input v-model.trim="formValidate.group_id" class="input-add" clearable placeholder="输入具体团编号" @on-enter="userSearchs" />
+                </FormItem>
+                <FormItem>
+                    <Button type="primary" @click="userSearchs()">查询</Button>
                 </FormItem>
             </Form>
             </div>
@@ -61,7 +66,6 @@
                 </template>
                 <template slot-scope="{ row }" slot="action">
                     <a @click="Info(row)" >查看详情</a>
-                    <a style="margin-left:12px" @click="exportGroup(row)">导出</a>
                     <a v-if="row.status === 1" style="margin-left:12px" @click="completeGroup(row)">立即成团</a>
                 </template>
             </Table>
@@ -72,7 +76,7 @@
         </Card>
 
         <!-- 详情模态框-->
-        <Modal v-model="modals" class="tableBox"  scrollable  footer-hide closable title="查看详情" :mask-closable="false"  width="1150">
+        <Modal v-model="modals" class="combination-participants-modal" scrollable footer-hide closable title="查看详情" :mask-closable="false" width="1150">
             <Table ref="selection" :columns="columns2" :data="tabList3" :loading="loading2"
                    no-data-text="暂无数据" highlight-row max-height="600" size="small"
                    no-filtered-data-text="暂无筛选结果">
@@ -103,11 +107,10 @@
 
 <script>
     import formatBusinessMoney from '@/utils/formatBusinessMoney.js';
-    import exportExcel from '@/utils/newToExcel.js';
     import cardsData from '@/components/cards/cards';
     import { mapState } from 'vuex';
     import { formatDate } from '@/utils/validate';
-    import { combineListApi, orderPinkListApi, statisticsApi, combinationParticipantRefundApi, combinationCompleteApi, combinationGroupExportApi } from '@/api/marketing';
+    import { combineListApi, orderPinkListApi, statisticsApi, combinationParticipantRefundApi, combinationCompleteApi } from '@/api/marketing';
     import timeOptions from "@/utils/timeOptions";
     export default {
         name: 'combinalist',
@@ -137,6 +140,8 @@
                 formValidate: {
                     status: '',
                     data: '',
+                    cid: '',
+                    group_id: '',
                     page: 1,
                     limit: 15
                 },
@@ -202,31 +207,35 @@
                     {
                         title: '用户名称',
                         slot: 'nickname',
-                        minWidth: 150
+                        width: 170
                     },
                     {
                         title: '用户头像',
-                        slot: 'avatar'
+                        slot: 'avatar', width: 80
                     },
                     {
                         title: '订单编号',
-                        key: 'order_id'
+                        key: 'order_id', width: 185
                     },
                     {
                         title: '金额',
+                        width: 90,
                         render: (h, params) => h('span', formatBusinessMoney(params.row.paid_amount))
                     },
                     {
                         title: '退款状态及操作',
-                        slot: 'action', minWidth: 180
+                        slot: 'action', width: 190
                     },
-                    { title: '富友订单号', key: 'fuyou_order_no', minWidth: 185 },
-                    { title: '富友支付交易号', key: 'fuyou_transaction_id', minWidth: 200 },
-                    { title: '富友退款流水号', key: 'channel_refund_id', minWidth: 200 },
-                    { title: '富友退款追踪号', key: 'fuyou_refund_trace_no', minWidth: 180 },
-                    { title: '商户退款单号', key: 'refund_no', minWidth: 200
-
-                    }
+                    ...[
+                        ['富友订单号', 'fuyou_order_no'], ['富友支付交易号', 'fuyou_transaction_id'],
+                        ['富友退款流水号', 'channel_refund_id'], ['富友退款追踪号', 'fuyou_refund_trace_no'],
+                        ['商户退款单号', 'refund_no']
+                    ].map(([title, key]) => ({
+                        title, key, width: 205,
+                        // The table stays compact while full payment references remain inspectable on hover.
+                        render: (h, { row }) => h('span', { attrs: { title: row[key] || '—' },
+                            class: 'combination-participants-modal__reference' }, row[key] || '—')
+                    }))
                 ],
                 rows: {}
             }
@@ -247,13 +256,6 @@
             this.getStatistics();
         },
         methods: {
-            // Export rows and the exact template column order both come from the server, never current-page data.
-            exportGroup(row) {
-                return combinationGroupExportApi(row.id).then(res => {
-                    const data = res.data;
-                    exportExcel(data.header, data.filekey, data.filename, data.export);
-                }).catch(error => this.$Message.error(error.msg || '导出失败'));
-            },
             // Completion fills only missing seats and leaves real participants' paid orders untouched.
             completeGroup(row) {
                 this.$Modal.confirm({ title: '立即成团', content: '将自动补齐缺少的虚拟名额并使拼团成功，是否继续？',
@@ -366,4 +368,30 @@
 				height 100%
 			}
 		}    
+</style>
+
+<style lang="stylus">
+// Scope the compact cells to this dialog; wide payment references scroll inside the result table.
+.combination-participants-modal
+    .ivu-modal
+        max-width calc(100vw - 24px)
+    .ivu-modal-body
+        padding 12px
+    .ivu-table-header th
+        height 42px !important
+        white-space nowrap
+    .ivu-table-cell
+        padding 6px 10px !important
+        white-space nowrap
+        overflow hidden
+        text-overflow ellipsis
+        line-height 20px
+    .ivu-table-row td
+        height 48px
+    &__reference
+        display inline-block
+        max-width 100%
+        overflow hidden
+        text-overflow ellipsis
+        vertical-align middle
 </style>

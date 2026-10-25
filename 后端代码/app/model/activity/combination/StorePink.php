@@ -81,7 +81,14 @@ class StorePink extends BaseModel
      */
     public function searchCidAttr($query, $value, $data)
     {
-        $query->where('cid', $value);
+        // The optional activity filter must not turn an unfiltered group list into cid=0.
+        if ($value !== '') $query->where('cid', (int)$value);
+    }
+
+    /** Group number is the root record ID; keep filtering in SQL so page and total stay aligned. */
+    public function searchGroupIdAttr($query, $value, $data)
+    {
+        if ($value !== '') $query->where('id', (int)$value);
     }
 
     /**

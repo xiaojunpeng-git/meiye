@@ -164,11 +164,13 @@ class StoreCombinationServices extends BaseServices
         $data['image'] = $data['images'][0] ?? '';
         $data['images'] = json_encode($data['images']);
         $data['price'] = max(array_column($detail, 'price'));
-        $data['quota'] = $data['quota_show'] = array_sum(array_column($detail, 'quota'));
-        if ($data['quota'] > $productInfo['stock']) {
-            throw new ValidateException('限量不能超过商品库存');
-        }
-        $data['stock'] = array_sum(array_column($detail, 'stock'));
+        // Activity places are independent from warehouse quantity. Only products that forbid negative
+        // inventory need their configured group places capped by current catalog stock.
+        $protectPhysicalStock = $this->requiresCatalogStockCap($productInfo);
+        [$detail, $data['quota'], $data['stock']] = $this->prepareGroupCapacity(
+            $detail, $protectPhysicalStock, (int)$productInfo['stock']
+        );
+        $data['quota_show'] = $data['quota'];
         unset($data['section_time'], $data['description'], $data['attrs'], $data['items']);
         /** @var StoreDescriptionServices $storeDescriptionServices */
         $storeDescriptionServices = app()->make(StoreDescriptionServices::class);
@@ -203,6 +205,40 @@ class StoreCombinationServices extends BaseServices
         });
 
 		$this->dao->cacheTag()->clear();
+    }
+
+    /** The catalog stock cap mirrors the product's saved inventory and negative-stock switches. */
+    private function requiresCatalogStockCap($productInfo): bool
+    {
+        return (int)$productInfo['product_type'] === 0
+            && (int)($productInfo['is_inventory'] ?? 1) === 1
+            && (int)($productInfo['allow_negative_stock'] ?? 1) !== 1;
+    }
+
+    /**
+     * Validate whole group places and derive the activity stock used by purchase/refund locks.
+     * Inventory-disabled/negative-allowed products and rights use configured group places as
+     * their saleable capacity; physical stock is checked separately when its setting requires it.
+     *
+     * @return array{0: array, 1: int, 2: int} Normalized SKU rows, total quota and activity stock.
+     */
+    private function prepareGroupCapacity(array $detail, bool $protectPhysicalStock, int $productStock): array
+    {
+        if (!$detail) throw new ValidateException('请选择拼团规格');
+        $quota = 0;
+        $stock = 0;
+        foreach ($detail as &$sku) {
+            $rawQuota = (string)($sku['quota'] ?? '');
+            if (!preg_match('/^[1-9][0-9]*$/D', $rawQuota)) throw new ValidateException('拼团限量必须为大于0的整数');
+            $skuQuota = (int)$rawQuota;
+            $quota += $skuQuota;
+            // Every group SKU's stock is its own remaining places. Catalog stock is only an optional cap.
+            $sku['stock'] = $skuQuota;
+            $stock += $skuQuota;
+        }
+        unset($sku);
+        if ($protectPhysicalStock && $quota > $productStock) throw new ValidateException('限量不能超过商品库存');
+        return [$detail, $quota, $stock];
     }
 
     /**

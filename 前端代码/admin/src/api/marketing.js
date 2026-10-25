@@ -13,6 +13,11 @@ export function combinationGroupExportApi(id) {
   return request({ url: `marketing/combination/order_pink/${id}/export`, method: 'get' });
 }
 
+// An activity export includes every group and real participant, not just the visible page.
+export function combinationActivityExportApi(id) {
+  return request({ url: `marketing/combination/activity/${id}/export`, method: 'get' });
+}
+
 // Group management shares the existing record access.
 export function combinationCompleteApi(id) {
   return request({ url: `marketing/combination/order_pink/${id}/complete`, method: 'post' });

@@ -224,7 +224,14 @@ class StoreCombination extends AuthController
         $where = $this->request->getMore([
             ['status', ''],
             ['data', '', '', 'time'],
+            ['cid', ''],
+            ['group_id', ''],
         ]);
+        // Both identifiers must narrow the authenticated list; malformed values never become broad searches.
+        foreach (['cid', 'group_id'] as $key) {
+            if ($where[$key] !== '' && (!ctype_digit((string)$where[$key]) || (int)$where[$key] <= 0))
+                throw new \think\exception\ValidateException('请输入有效的拼团编号');
+        }
         /** @var StorePinkServices $storePinkServices */
         $storePinkServices = app()->make(StorePinkServices::class);
         $list = $storePinkServices->systemPage($where);
@@ -235,6 +242,12 @@ class StoreCombination extends AuthController
     public function exportGroup($id)
     {
         return $this->success((new \app\services\activity\combination\CombinationRecordServices())->export((int)$id));
+    }
+
+    /** Export every real participant of one activity, independent of the current statistics tab or page. */
+    public function exportActivity($id)
+    {
+        return $this->success((new \app\services\activity\combination\CombinationRecordServices())->exportActivity((int)$id));
     }
 
     /** Virtual seats are management evidence, never paid participants. */
