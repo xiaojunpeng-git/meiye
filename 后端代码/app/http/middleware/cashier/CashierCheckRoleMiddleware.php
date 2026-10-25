@@ -86,6 +86,7 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
     {
         $path = ltrim($path, '/');
         // 独立菜单同时约束直连接口，隐藏导航不能替代后端鉴权。
+        if (strpos($path, 'cashierapi/v3/management/store-settings') === 0) return 'cashier.v3.management.store_profile';
         if (strpos($path, 'cashierapi/v3/customer-care/') === 0) return 'cashier.v3.care';
         if (strpos($path, 'cashierapi/v3/report/') === 0) return 'cashier.v3.data';
         if (strpos($path, 'cashierapi/v3/management/room-settings') === 0 || strpos($path, 'cashierapi/v3/management/service-names') === 0) return 'cashier.v3.management.rooms';

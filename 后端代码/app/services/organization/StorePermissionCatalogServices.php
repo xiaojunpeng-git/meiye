@@ -24,6 +24,7 @@ final class StorePermissionCatalogServices
                 $node['children'] = [
                     ['id'=>301060,'title'=>'人员管理','feature_code'=>'cashier.v3.management.staff','children'=>$node['children']],
                     ['id'=>301061,'title'=>'房间设置','feature_code'=>'cashier.v3.management.rooms'],
+                    ['id'=>301063,'title'=>'门店设置','feature_code'=>'cashier.v3.management.store_profile'],
                     ['id'=>301062,'title'=>'经营看板','feature_code'=>'cashier.v3.management.dashboard'],
                 ];
             }
@@ -155,6 +156,21 @@ final class StorePermissionCatalogServices
             $json=json_encode($rows,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
             Db::name(self::TABLE)->where('id',1)->update(['rules_json'=>$json,'revision'=>(int)$before['revision']+1,'updated_at'=>time()]);
             Db::name('store_v3_permission_audit')->insert(['operator_id'=>0,'action'=>'INITIALIZE_NAVIGATION_ITEMS','before_json'=>$before['rules_json'],'after_json'=>$json,'created_at'=>time()]);
+        });
+    }
+
+    /** Explicit R59 catalog installation; no position grants or organization changes. */
+    public function initializeStoreProfilePermission(): void
+    {
+        Db::transaction(function(){
+            $before=Db::name(self::TABLE)->where('id',1)->lock(true)->find();
+            if(!$before)throw new \RuntimeException('请先初始化门店端权限目录');
+            $rows=json_decode($before['rules_json'],true);if(!is_array($rows))throw new \RuntimeException('权限目录无效');
+            foreach($rows as $row)if((int)$row['id']===301063){if(($row['feature_code']??'')!=='cashier.v3.management.store_profile')throw new \RuntimeException('门店设置权限编号冲突');return;}
+            $rows[]=self::definitions()[301063];$this->validateRows($rows);
+            $json=json_encode($rows,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+            Db::name(self::TABLE)->where('id',1)->update(['rules_json'=>$json,'revision'=>(int)$before['revision']+1,'updated_at'=>time()]);
+            Db::name('store_v3_permission_audit')->insert(['operator_id'=>0,'action'=>'R59_STORE_PROFILE_PERMISSION','before_json'=>$before['rules_json'],'after_json'=>$json,'created_at'=>time()]);
         });
     }
 

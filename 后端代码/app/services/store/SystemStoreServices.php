@@ -126,6 +126,9 @@ class SystemStoreServices extends BaseServices
             throw new ValidateException('获取门店信息失败');
         }
         $storeInfo = $storeInfo->toArray();
+        // Return the master fingerprint before display formatting, so platform edits
+        // detect store-side changes without sharing an independent profile copy.
+        $storeInfo['expected_store_profile_version'] = (new StoreProfileSettingsServices())->version($storeInfo);
         if ($storeInfo['store_rate_type'] == 1) {//默认
             $finance = $this->getStoreFinanceConfig();
             $storeInfo = array_merge($storeInfo, $finance);
@@ -991,6 +994,9 @@ class SystemStoreServices extends BaseServices
      */
     public function saveStore(int $id, array $data, array $staff_data = [])
     {
+        // Strip transport-only concurrency metadata; it must never become a DB column.
+        $expectedProfileVersion = (string)($data['expected_store_profile_version'] ?? '');
+        unset($data['expected_store_profile_version']);
         /** @var SystemRegionAgentServices $regionServices */
         $regionServices = app()->make(SystemRegionAgentServices::class);
         /** @var SystemRegionManageServices $manageServices */
@@ -1044,7 +1050,16 @@ class SystemStoreServices extends BaseServices
                 throw new AdminException('门店信息不存在');
             }
         }
-        $res = $this->transaction(function () use ($id, $data, $staff_data, $storeInfo, $region, $regionServices) {
+        $res = $this->transaction(function () use ($id, $data, $staff_data, $storeInfo, $region, $regionServices, $expectedProfileVersion) {
+            // Lock the same master row as the store settings writer. Existing legacy
+            // callers remain compatible; the updated platform form supplies this token.
+            if ($id && $expectedProfileVersion !== '') {
+                $currentProfile = Db::name('system_store')->where('id', $id)->where('is_del', 0)->lock(true)->find();
+                if (!$currentProfile || !preg_match('/^[a-f0-9]{64}$/D', $expectedProfileVersion)
+                    || !hash_equals((new StoreProfileSettingsServices())->version($currentProfile), $expectedProfileVersion)) {
+                    throw new AdminException('门店资料已被其他人修改，请重新加载后再保存。');
+                }
+            }
             $is_synchronous = 0;
             if ($id) {
                 $is_new = 0;

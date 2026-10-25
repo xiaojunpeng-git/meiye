@@ -146,6 +146,15 @@ Route::group('cashierapi/v3/management', function () {
     StationOpenMiddleware::class,
 ])->middleware(\app\http\middleware\SystemLogMiddleware::class, 'cashier');
 
+// 独立门店设置权限与会话门店共同约束全部读写；组织委托会话只读。
+Route::group('cashierapi/v3/management/store-settings', function () {
+    Route::get('', 'store.system.StoreProfileSettings/index')->option(['real_name'=>'V3读取本店基础设置']);
+    Route::put('', 'store.system.StoreProfileSettings/save')->option(['real_name'=>'V3保存本店基础设置']);
+    Route::get('cities', 'store.system.StoreProfileSettings/cities')->option(['real_name'=>'V3门店地区选项']);
+    Route::post('image', 'store.system.StoreProfileSettings/upload')->option(['real_name'=>'V3上传本店照片']);
+})->middleware([AuthTokenMiddleware::class,ForceStoreSessionMiddleware::class,CashierCheckRoleMiddleware::class,InstallMiddleware::class,AllowOriginMiddleware::class,StationOpenMiddleware::class])
+    ->middleware(\app\http\middleware\SystemLogMiddleware::class,'cashier');
+
 // 房间资料控制器属于既有门店控制器命名空间 app\controller\store，不能放在
 // 上面的 cashier.v3.* 控制器前缀组内，否则会被解析为
 // app\controller\cashier\v3\store\system\RoomSettings。

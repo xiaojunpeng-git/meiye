@@ -281,6 +281,8 @@ class SystemStore extends AuthController
             ['erp_shop_id', 0],
             ['name', ''],
             ['space_num', ''],
+            // Store/platform edits share one authoritative basic-profile fingerprint.
+            ['expected_store_profile_version', ''],
             ['introduction', ''],
             ['is_show', 1],
 			['delivery_type', []],//配送类型1:快递发货2同城配送3到店自提

@@ -298,6 +298,7 @@ const EMPTY_BOOTSTRAP = {
     'cashier.v3.targets': false,
     'cashier.v3.management.staff': false,
     'cashier.v3.management.rooms': false,
+    'cashier.v3.management.store_profile': false,
     'cashier.v3.management.dashboard': false,
 
     'cashier.v3.member.create': false,
@@ -493,6 +494,7 @@ const DEV_PREVIEW_BOOTSTRAP = {
     'cashier.v3.targets': true,
     'cashier.v3.management.staff': true,
     'cashier.v3.management.rooms': true,
+    'cashier.v3.management.store_profile': true,
     'cashier.v3.management.dashboard': true,
 
     'cashier.v3.member.create': true,

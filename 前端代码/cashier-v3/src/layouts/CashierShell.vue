@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BadgeDollarSign from '@lucide/vue/dist/esm/icons/badge-dollar-sign.mjs'
 import CalendarDays from '@lucide/vue/dist/esm/icons/calendar-days.mjs'
@@ -51,6 +51,15 @@ import { responseDataBlock } from '@/services/cashierV3EntitlementDraftContract'
 const route = useRoute()
 const router = useRouter()
 const state = useCashierV3State()
+// The settings page has its own authenticated identity projection. Keep it local
+// to this route rather than replacing a cashier draft/root business snapshot.
+const storeSettingsNavigation = ref(null)
+provide('store-settings-navigation', storeSettingsNavigation)
+const settingsNavigation = computed(() => {
+  const value = storeSettingsNavigation.value
+  return route.name === 'cashier-v3-store-settings' && value?.contextId === state.stateContextId
+    && (!state.currentStore?.id || Number(state.currentStore.id) === Number(value.store_id)) ? value : null
+})
 // Fixed-source mode hides attribution inputs, not entitlement/card provenance.
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const isOperationHelpOpen = ref(false)
@@ -315,6 +324,7 @@ const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter
 const managementFeatureDefinitions = [
   { key: 'staff', featureCode: 'cashier.v3.management.staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
   { key: 'room-settings', featureCode: 'cashier.v3.management.rooms', label: '房间设置', to: { name: 'cashier-v3-room-settings' } },
+  { key: 'store-settings', featureCode: 'cashier.v3.management.store_profile', label: '门店设置', to: { name: 'cashier-v3-store-settings' } },
   { key: 'business-dashboard', featureCode: 'cashier.v3.management.dashboard', label: '经营看板', to: { name: 'cashier-v3-business-dashboard' } }
 ]
 const isInventoryWorkspaceOpen = ref(false)
@@ -2762,10 +2772,10 @@ onBeforeUnmount(() => {
     />
     <StoreTopNavigation
       :entries="topNavigationEntries"
-      :rules="state.navigationRules"
-      :store-name="state.storeName"
-      :operator="operatorLabel"
-      :operator-profile="state.operator.profile"
+      :rules="settingsNavigation?.navigation?.rules || state.navigationRules"
+      :store-name="settingsNavigation?.profile?.name || state.storeName"
+      :operator="settingsNavigation?.operator?.name || operatorLabel"
+      :operator-profile="settingsNavigation?.operator || state.operator.profile"
       :can-switch-stores="canSwitchStores"
       :pending-hang-count="pendingHangCount"
       :inventory-open="isInventoryWorkspaceOpen"

@@ -39,7 +39,7 @@ class CashierV3FeatureResolver
         'cashier.v3.reservation',
         'cashier.v3.member',
         'cashier.v3.fund', 'cashier.v3.care', 'cashier.v3.data', 'cashier.v3.targets',
-        'cashier.v3.management.staff', 'cashier.v3.management.rooms', 'cashier.v3.management.dashboard',
+        'cashier.v3.management.staff', 'cashier.v3.management.rooms', 'cashier.v3.management.store_profile', 'cashier.v3.management.dashboard',
         'cashier.v3.hang',
         'cashier.v3.order_center',
         'cashier.v3.management_center',
