@@ -39,6 +39,7 @@ final class CashierV3OrderCenterRecordQueryServices
         'card_extension',
         'project_replacement',
         'project_upgrade',
+        'card_to_balance',
     ];
 
     /** @var callable|null function(string $operation, array $context): array */
@@ -258,7 +259,11 @@ final class CashierV3OrderCenterRecordQueryServices
             ->leftJoin('system_store s', 's.id = r.store_id')
             ->leftJoin('system_store_staff st', 'st.id = r.staff_id');
         $this->applyStoreScope($query, 'r.store_id', $criteria['allowedStoreIds']);
-        $this->applyBusinessDateRange($query, 'r.business_date', $criteria);
+        // 历史充值用原支付/创建时间承接日期；不回写业务表，不产生 V3 资金事实。
+        $dateExpression = CashierV3HistoricalRechargeDate::sql();
+        foreach (['businessDateFrom' => '>=', 'businessDateTo' => '<='] as $key => $comparison) {
+            if (!empty($criteria[$key])) $query->whereRaw($dateExpression . ' ' . $comparison . ' ?', [$criteria[$key]]);
+        }
         $this->applyKeyword($query, $criteria['keyword'], [
             'r.order_id', 'u.real_name', 'u.nickname', 'u.phone', 's.name', 'st.staff_name',
         ]);
@@ -281,12 +286,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 ->whereNotExists($this->rechargeLifecycleOperationQuery($tenantId, ['void']));
         }
         $total = (int)(clone $query)->count('r.id');
-        $rows = $this->pageRows($query, $criteria, 'r.business_date', 'r.id', implode(',', [
+        $rows = $this->pageRows($query, $criteria, 'business_date', 'r.id', implode(',', [
             'r.id', 'r.order_id', 'r.uid', 'r.store_id', 'r.staff_id', 'r.price', 'r.give_price',
             'r.refund_price', 'r.recharge_type', 'r.combination_info', 'r.remarks', 'r.channel_type', 'r.paid', 'r.terminal_action',
             'r.business_source_primary_id', 'r.business_source_primary_name_snapshot',
             'r.business_source_secondary_id', 'r.business_source_secondary_name_snapshot', 'r.business_source_label_snapshot',
-            'r.business_date', 'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
+            $dateExpression . ' AS business_date', 'r.pay_time', 'r.add_time', 'u.real_name', 'u.nickname', 'u.phone',
             's.name AS store_name', 'st.staff_name',
         ]));
         $rechargeEconomics = $this->readRechargeEconomics($rows);
@@ -2278,8 +2283,12 @@ final class CashierV3OrderCenterRecordQueryServices
                 'memberId' => (int)($row['member_id_after'] ?: $row['member_id_before'] ?: $row['origin_member_id']),
                 'memberName' => $row['member_name_after_snapshot'],
                 'sourceCard' => $this->cardOperationSourceContent($row),
-                'targetContent' => $row['target_catalog_name_snapshot'],
-                'amount' => $this->centsToMoney((int)$row['settlement_delta_cents']),
+                'targetContent' => $row['operation_type'] === 'card_to_balance'
+                    ? '会员赠金余额' : $row['target_catalog_name_snapshot'],
+                // Conversion is not an upgrade collection: show the transferred
+                // value without fabricating a payable delta or cash receipt.
+                'amount' => $this->centsToMoney((int)($row['operation_type'] === 'card_to_balance'
+                    ? $row['source_remaining_value_cents'] : $row['settlement_delta_cents'])),
                 'salesOrderNo' => $row['sales_order_no'],
                 'storeName' => $row['store_name_snapshot'],
                 'operatorName' => $row['operator_name_snapshot'],
@@ -2707,6 +2716,7 @@ final class CashierV3OrderCenterRecordQueryServices
             'card_extension' => '卡延期',
             'project_replacement' => '项目替换',
             'project_upgrade' => '项目升级',
+            'card_to_balance' => '卡转余额',
         ];
         return $labels[$type] ?? $type;
     }
