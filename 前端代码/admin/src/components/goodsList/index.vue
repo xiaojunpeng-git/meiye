@@ -66,14 +66,14 @@
           </div>
         </viewer>
       </template>
-	  <template slot-scope="{ row }" slot="product_type" v-if="row.hasOwnProperty('product_type')">
-	  	<span v-if="row.product_type==0">产品</span>
-	  	<span v-if="row.product_type==1">卡密商品</span>
-	  	<span v-if="row.product_type==3">虚拟商品</span>
+    <template slot-scope="{ row }" slot="product_type" v-if="row.hasOwnProperty('product_type')">
+      <span v-if="row.product_type==0">产品</span>
+      <span v-if="row.product_type==1">卡密商品</span>
+      <span v-if="row.product_type==3">虚拟商品</span>
 		<span v-if="row.product_type==4">次卡商品</span>
 		<span v-if="row.product_type==5">卡项</span>
-		<span v-if="row.product_type==6">预约商品</span>
-	  </template>
+		<span v-if="row.product_type==6">{{ chooseType === 3 ? '项目' : '预约商品' }}</span>
+    </template>
     </Table>
     <div class="acea-row row-right page">
       <Page
@@ -104,12 +104,12 @@ import { liveGoods } from '@/api/live';
 export default {
   name: 'index',
   props: {
-    // Only DIY opts in. Other picker consumers keep their existing contract.
+    // Explicit consumers (DIY/group purchase) narrow catalog types; other pickers keep their contract.
     catalogTypes: { type: Array, default: null },
     goodsType: {
-	  type: Number,
-	  default: 0
-	  },
+      type: Number,
+      default: 0
+    },
     storeType: {
       type: Number,
       default: 0
@@ -182,7 +182,7 @@ export default {
         store_name: '',
         is_new: this.is_new,
         choose_type: this.chooseType,
-		    store_label_id: ''
+        store_label_id: ''
         // is_integral: 1,
       },
       total: 0,
@@ -214,9 +214,9 @@ export default {
           minWidth: 200
         },
         {
-		  title: '商品类型',
-		  slot: 'product_type',
-		  minWidth: 100
+          title: '商品类型',
+          slot: 'product_type',
+          minWidth: 100
         },
         {
           title: '商品分类',

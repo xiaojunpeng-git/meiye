@@ -179,6 +179,12 @@ export default {
       component: () => import('@/pages/setting/systemAdmin/index')
     },
     {
+      path: 'store-permissions',
+      name: `${pre}storePermissions`,
+      meta: { auth: ['setting-system-menus', 'setting-store-permissions'], title: '门店端权限规则' },
+      component: () => import('@/pages/setting/storePermissions/index.vue')
+    },
+    {
       path: 'system_menus/index',
       name: `${pre}systemMenus`,
       meta: {
