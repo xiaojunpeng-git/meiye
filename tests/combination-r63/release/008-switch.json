@@ -1,0 +1,17 @@
+{
+  "site": "008",
+  "commit": "f7989c57868b3ac98f21360ae476554a16a57ca0",
+  "baseline": {
+    "app/services/order/StoreCartServices.php": "58cb8625b86a95c96153a4cc999fda8972c81f3a7bb342da30d8dd2810649b75",
+    "app/services/order/StoreOrderCreateServices.php": "422babaafffe69056724a7057dfce24e25a4cc3c224773308063fddb3e351ca1",
+    "app/services/activity/combination/StoreCombinationServices.php": "71fd4ca1c3086d5c08e1d8b7e25f3b9ece953eabd9686a586c3b7c21d11a97e7",
+    "mohe/services/CacheService.php": "a4eda7a8c5fdb8530e13dab4e7bed25539684ca7edca2c35b12bc016d42f0149"
+  },
+  "backendCandidate": {
+    "app/services/order/StoreCartServices.php": "552a48a7b77031f7d6cbc2c7bfd658e6be42130c3a33a0086585df71b80d10ae",
+    "app/services/order/StoreOrderCreateServices.php": "5cd9780ce3435e258e6b0c699f73d3d3c29c5e102126c42b489fd25dec436475"
+  },
+  "backup": "/www/backups/008/r63-combination-cart-f7989c57",
+  "result": "PASS",
+  "output": "R63_SWITCH_PASS"
+}
