@@ -11,25 +11,30 @@ use think\facade\Db;
 final class MobileAuthRevocationServices
 {
     /**
-     * The caller may run inside an existing personnel/authorization transaction.
-     * A failure is deliberately rethrown so the original change rolls back too.
+     * Ensures the security state required by a merchant session exists.
+     *
+     * This is deliberately separate from revocation: historical employees may
+     * already have a valid mobile authorization projection but predate the
+     * session-state migration. Bootstrapping their state must not be reported
+     * as a permission change or revoke an otherwise valid session.
+     *
+     * @return array{state:array,lease:array}
      */
-    public function revokeAllInCurrentTransaction(int $employeeId, string $reason, int $actorEmployeeId = 0, string $requestId = ''): void
+    public function ensureStateAndLeaseInCurrentTransaction(int $employeeId): array
     {
-        if ($employeeId <= 0 || !in_array($reason, ['AUTH_CHANGED', 'EMPLOYEE_DISABLED', 'ADMIN_SIGN_OUT_ALL', 'SIGNED_OUT'], true)) {
-            throw MobileApiException::business('AUTH_REQUIRED', '商家会话撤销参数无效。');
+        if ($employeeId <= 0) {
+            throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '员工认证状态不存在。');
         }
-        $now = time();
         $employee = Db::name('employee')->where('id', $employeeId)->lock(true)->find();
         if (!$employee) {
             throw MobileApiException::business('EMPLOYEE_NOT_FOUND', '员工认证状态不存在。');
         }
         if (!$this->tableExists('employee_mobile_auth_state')) {
-            return;
+            throw MobileApiException::business('AUTH_REQUIRED', '员工认证状态表不可用。');
         }
+
+        $now = time();
         $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
-        // 新建员工不会经过历史迁移。首次变更手机授权时，在同一事务补齐
-        // 认证版本状态，随后仍按统一撤销链路推进版本和租约。
         if (!$state) {
             try {
                 Db::name('employee_mobile_auth_state')->insert([
@@ -41,23 +46,49 @@ final class MobileAuthRevocationServices
                     'updated_at' => $now,
                 ]);
             } catch (\Throwable $exception) {
-                // 并发的首次授权可能已写入唯一状态行，重新加锁读取即可。
+                // A concurrent bootstrap may already have inserted the state.
             }
             $state = Db::name('employee_mobile_auth_state')->where('employee_id', $employeeId)->lock(true)->find();
         }
         if (!$state) {
             throw MobileApiException::business('AUTH_REQUIRED', '员工认证状态初始化失败。');
         }
+
         $lease = Db::name('mobile_merchant_lease')->where('employee_id', $employeeId)->lock(true)->find();
         if (!$lease) {
             try {
-                Db::name('mobile_merchant_lease')->insert(['employee_id' => $employeeId, 'current_session_id' => null, 'current_epoch' => 1, 'state' => 'EMPTY', 'created_at' => $now, 'updated_at' => $now]);
+                Db::name('mobile_merchant_lease')->insert([
+                    'employee_id' => $employeeId,
+                    'current_session_id' => null,
+                    'current_epoch' => 1,
+                    'state' => 'EMPTY',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
             } catch (\Throwable $exception) {
-                // A concurrent issuer may have inserted the unique lease. Re-lock below.
+                // A concurrent session issuer may already have created it.
             }
             $lease = Db::name('mobile_merchant_lease')->where('employee_id', $employeeId)->lock(true)->find();
         }
-        if (!$lease) throw MobileApiException::business('AUTH_REQUIRED', '商家会话租约不可用。');
+        if (!$lease) {
+            throw MobileApiException::business('AUTH_REQUIRED', '商家会话租约不可用。');
+        }
+        return ['state' => $state, 'lease' => $lease];
+    }
+
+    /**
+     * The caller may run inside an existing personnel/authorization transaction.
+     * A failure is deliberately rethrown so the original change rolls back too.
+     */
+    public function revokeAllInCurrentTransaction(int $employeeId, string $reason, int $actorEmployeeId = 0, string $requestId = ''): void
+    {
+        if ($employeeId <= 0 || !in_array($reason, ['AUTH_CHANGED', 'EMPLOYEE_DISABLED', 'ADMIN_SIGN_OUT_ALL', 'SIGNED_OUT'], true)) {
+            throw MobileApiException::business('AUTH_REQUIRED', '商家会话撤销参数无效。');
+        }
+        $now = time();
+        $bootstrapped = $this->ensureStateAndLeaseInCurrentTransaction($employeeId);
+        $state = $bootstrapped['state'];
+        $lease = $bootstrapped['lease'];
         $endState = $reason === 'EMPLOYEE_DISABLED' ? 'EMPLOYEE_DISABLED' : ($reason === 'ADMIN_SIGN_OUT_ALL' ? 'ADMIN_SIGNED_OUT' : 'AUTH_REVOKED');
         $endCause = $reason === 'ADMIN_SIGN_OUT_ALL' ? 'ADMIN_SIGN_OUT_ALL' : ($reason === 'EMPLOYEE_DISABLED' ? 'EMPLOYEE_DISABLED' : 'AUTH_CHANGED');
         Db::name('mobile_merchant_session')->where('employee_id', $employeeId)->where('state', 'ACTIVE')->lock(true)->select();
@@ -85,9 +116,11 @@ final class MobileAuthRevocationServices
 
     private function tableExists(string $table): bool
     {
+        $connection = Db::connect();
+        $prefixedTable = (string)$connection->getConfig('prefix') . $table;
         $row = Db::query(
             'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
-            [$table]
+            [$prefixedTable]
         );
         return (int)($row[0]['c'] ?? 0) > 0;
     }
