@@ -1,0 +1,8 @@
+{
+  "site": "010",
+  "commit": "8953c22e654fb63025873273ae999cf61b9e8294",
+  "backup": "/www/backups/010.cc3798.com/20261026-r63-member-final-8953c22e",
+  "result": "PASS",
+  "output": "BACKUP_VERIFIED\n{\"instance\":\"010\",\"commit\":\"8953c22e654fb63025873273ae999cf61b9e8294\",\"result\":\"PASS\",\"files\":505,\"databaseWrites\":0,\"protectedFrontendsUnchanged\":true}\n{\"instance\":\"010\",\"commit\":\"8953c22e654fb63025873273ae999cf61b9e8294\",\"result\":\"PASS\",\"files\":505,\"databaseWrites\":0,\"protectedFrontendsUnchanged\":true}\n",
+  "time": "2026-10-25T17:52:17.497Z"
+}

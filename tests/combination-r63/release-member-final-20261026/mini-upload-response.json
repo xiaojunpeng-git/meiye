@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "tool": "upload",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "taskId": "confirmation_upload_c24efaac-a055-42b8-891c-2c304b1df54f",
+    "taskType": "confirmation_upload",
+    "status": "pending",
+    "message": "Waiting for user confirmation."
+  }
+}

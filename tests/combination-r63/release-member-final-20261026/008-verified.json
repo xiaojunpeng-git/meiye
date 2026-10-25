@@ -1,0 +1,38 @@
+{
+  "site": "008",
+  "commit": "8953c22e654fb63025873273ae999cf61b9e8294",
+  "result": "PASS",
+  "backup": "/www/backups/008.cc3798.com/20261026-r63-member-final-8953c22e",
+  "filesVerified": 505,
+  "publicAssets": {
+    "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+    "/static/js/chunk-vendors.af736f78.js": "f206d3bb9fbf68805df0919fba249683f3f531475005f3e24d16ed4745ae99b0",
+    "/static/js/index.538d8835.js": "2d84cbe3d005ef72bb3003d2394b689cc45ed2ae42fe39dcfd6cb45ca4f3bb31"
+  },
+  "api": {
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "900b0c2c829ea3e7bcdfe6b744a2b2e80162504aa164119292e9d6b372df3ea5",
+      "rows": null
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "0c156e776daec8abf2f414646e47564b6139883310d0f141b7507dd9619b35ca",
+      "rows": null
+    },
+    "/api/store/list?is_select=1&page=1&limit=20": {
+      "status": 200,
+      "dataSha256": "cd3fe14518def57c4704583cabb148c3169df884c8d7dfedbd74b43d6bd43da0",
+      "rows": 20
+    },
+    "/api/combination/list?page=1&limit=5": {
+      "status": 200,
+      "dataSha256": "d7a8292696f0ef74360490a886239db92b59d40a56db7a1b62adc495977899c9",
+      "rows": 1
+    }
+  },
+  "databaseWrites": 0,
+  "configUnchanged": true,
+  "adminCashierUnchanged": true,
+  "time": "2026-10-25T17:51:23.246Z"
+}

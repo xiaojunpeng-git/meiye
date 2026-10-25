@@ -1,0 +1,196 @@
+{
+  "task": "R63-00063",
+  "businessCommit": "8953c22e654fb63025873273ae999cf61b9e8294",
+  "tree": "c4df77da9b21bf821353489d2a3831d579fd09d1",
+  "newChanges": [
+    "取消会员端配送与自提选择，统一购买门店",
+    "拼团详情价格独立展示、清晰排版"
+  ],
+  "retainedBaseline": [
+    "既有购物车入口隐藏",
+    "拼团统一购买与第三方支付",
+    "成团后消费单据可见性",
+    "预约定制服务与门店地区筛选"
+  ],
+  "sites": {
+    "rh": {
+      "site": "rh",
+      "commit": "8953c22e654fb63025873273ae999cf61b9e8294",
+      "result": "PASS",
+      "backup": "/www/backups/rh.cc3798.com/20261026-r63-member-final-8953c22e",
+      "filesVerified": 505,
+      "publicAssets": {
+        "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+        "/static/js/chunk-vendors.af736f78.js": "f206d3bb9fbf68805df0919fba249683f3f531475005f3e24d16ed4745ae99b0",
+        "/static/js/index.538d8835.js": "2d84cbe3d005ef72bb3003d2394b689cc45ed2ae42fe39dcfd6cb45ca4f3bb31"
+      },
+      "api": {
+        "/api/diy/get_diy/0": {
+          "status": 200,
+          "dataSha256": "790d440c5cde99ccb2abef8091a1a93bf672fdaae87dc77c43446b1ce53ec438",
+          "rows": null
+        },
+        "/api/menu/user": {
+          "status": 200,
+          "dataSha256": "e0659e2f155247ef5a10cffd5ac2f15cf9fc0fb4f8777b0b3572ff0a84d20f39",
+          "rows": null
+        },
+        "/api/store/list?is_select=1&page=1&limit=20": {
+          "status": 200,
+          "dataSha256": "bd74c7a2b53f0705f2007e77e8ac4a601429d8a3fa9eceae97a13216c8418401",
+          "rows": 20
+        },
+        "/api/combination/list?page=1&limit=5": {
+          "status": 200,
+          "dataSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "rows": 0
+        }
+      },
+      "databaseWrites": 0,
+      "configUnchanged": true,
+      "adminCashierUnchanged": true,
+      "time": "2026-10-25T17:48:30.397Z"
+    },
+    "008": {
+      "site": "008",
+      "commit": "8953c22e654fb63025873273ae999cf61b9e8294",
+      "result": "PASS",
+      "backup": "/www/backups/008.cc3798.com/20261026-r63-member-final-8953c22e",
+      "filesVerified": 505,
+      "publicAssets": {
+        "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+        "/static/js/chunk-vendors.af736f78.js": "f206d3bb9fbf68805df0919fba249683f3f531475005f3e24d16ed4745ae99b0",
+        "/static/js/index.538d8835.js": "2d84cbe3d005ef72bb3003d2394b689cc45ed2ae42fe39dcfd6cb45ca4f3bb31"
+      },
+      "api": {
+        "/api/diy/get_diy/0": {
+          "status": 200,
+          "dataSha256": "900b0c2c829ea3e7bcdfe6b744a2b2e80162504aa164119292e9d6b372df3ea5",
+          "rows": null
+        },
+        "/api/menu/user": {
+          "status": 200,
+          "dataSha256": "0c156e776daec8abf2f414646e47564b6139883310d0f141b7507dd9619b35ca",
+          "rows": null
+        },
+        "/api/store/list?is_select=1&page=1&limit=20": {
+          "status": 200,
+          "dataSha256": "cd3fe14518def57c4704583cabb148c3169df884c8d7dfedbd74b43d6bd43da0",
+          "rows": 20
+        },
+        "/api/combination/list?page=1&limit=5": {
+          "status": 200,
+          "dataSha256": "d7a8292696f0ef74360490a886239db92b59d40a56db7a1b62adc495977899c9",
+          "rows": 1
+        }
+      },
+      "databaseWrites": 0,
+      "configUnchanged": true,
+      "adminCashierUnchanged": true,
+      "time": "2026-10-25T17:51:23.246Z"
+    },
+    "010": {
+      "site": "010",
+      "commit": "8953c22e654fb63025873273ae999cf61b9e8294",
+      "result": "PASS",
+      "backup": "/www/backups/010.cc3798.com/20261026-r63-member-final-8953c22e",
+      "filesVerified": 505,
+      "publicAssets": {
+        "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+        "/static/js/chunk-vendors.af736f78.js": "f206d3bb9fbf68805df0919fba249683f3f531475005f3e24d16ed4745ae99b0",
+        "/static/js/index.538d8835.js": "2d84cbe3d005ef72bb3003d2394b689cc45ed2ae42fe39dcfd6cb45ca4f3bb31"
+      },
+      "api": {
+        "/api/diy/get_diy/0": {
+          "status": 200,
+          "dataSha256": "d37edb7ba2b2bee1f4da4d65c4e1ccc873dda9f0b202bd822b952b73664a9b66",
+          "rows": null
+        },
+        "/api/menu/user": {
+          "status": 200,
+          "dataSha256": "7a6dc122e7b6e8c613d5d32319c9238669d5634ee975de626339c1e98cd9e5b3",
+          "rows": null
+        },
+        "/api/store/list?is_select=1&page=1&limit=20": {
+          "status": 200,
+          "dataSha256": "5fbea7c23a8b0fbcaeaff3edfac5de6137cce07d551243ae708acba5242767db",
+          "rows": 5
+        },
+        "/api/combination/list?page=1&limit=5": {
+          "status": 200,
+          "dataSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "rows": 0
+        }
+      },
+      "databaseWrites": 0,
+      "configUnchanged": true,
+      "adminCashierUnchanged": true,
+      "time": "2026-10-25T17:53:15.951Z"
+    }
+  },
+  "miniUpload": {
+    "status": "pending",
+    "pendingTask": {
+      "taskId": "confirmation_upload_c24efaac-a055-42b8-891c-2c304b1df54f",
+      "tool": "upload",
+      "lastStatus": "pending",
+      "customer": "008",
+      "terminal": "member",
+      "appid": "wx85d4bfd0b4b6aafb",
+      "version": "3.0.63.2",
+      "project": "/private/tmp/r63-group-price-layout-c4df77da/008-member",
+      "commit": "8953c22e654fb63025873273ae999cf61b9e8294",
+      "polls": 0
+    },
+    "uploadedConfirmed": false,
+    "trialBindingConfirmed": false,
+    "reviewSubmitted": false,
+    "productionPublished": false
+  },
+  "checks": [
+    "HBuilderX H5 production build PASS",
+    "HBuilderX 008 member mini build PASS",
+    "direct-purchase-checkout-route PASS",
+    "group-checkout-payment PASS",
+    "group-consumption-visibility-sqlite PASS",
+    "fixed candidate mobile widths 375 and 320: no image/price overlap; no horizontal overflow",
+    "008 WeChat Developer Tools actual simulator screenshot: price is readable and below image",
+    "three-site H5 static fingerprints and public APIs PASS"
+  ],
+  "remoteDatabaseWrites": 0,
+  "otherDirtyWorktreeFilesExcluded": true,
+  "files": {
+    "h5-input.json": "7f37683fbc3756004c9b72588ac352a16f14432c41432198e318ba9a789d493a",
+    "pendingTask.json": "73348303a808d64fd62fe77e679e7e0dc912be574db3f4a314a538033078d612",
+    "candidate-375.png": "1688097bd51649b10c272a4517c06bd12c51912d6c0b65d5e87b96018ece58ef",
+    "008-installed.json": "c5478f453f9854ee1440d02c2e2dad072e8a86e14a2298137e5d26896142d72c",
+    "mini-upload-started.json": "cf82b3a731275b8ac27df60be059fad77bf8904645a3cc3e4a3ac772ada4b4a9",
+    "rh-installed.json": "58f6cd58b60fe8a8fbbd5b2b7bca7b699767d8627d73e789cd00d2f84416df41",
+    "010-after.json": "d564b4d70445712e9d6097d72cfa25cc36c346be4860b9d4fdb5a46adf241775",
+    "010-verified.json": "694a249dd7cd78052ad3cf88cc6f79552f0cab2d3831495a1f23397fe7981e1b",
+    "008-online.png": "0ea11bc146bef0a06ed6328043966453c44d7ed5e2142c39d77a7ffbc11990c7",
+    "010-preswitch.json": "e7391628e6b45f10a313ec8dea6b39db05e72a0b4155889bc3f59fed6564a4e2",
+    "rh-before.json": "49a7fd680f099565aff10bf7e735e8286cc3606ef95df34ec782aa88af83c3b0",
+    "010-before.json": "45d12d39a82bb59bb2704bf8260b6c8292f1ea8c0251f54b9160761dd4246da3",
+    "payload-fingerprint.json": "d3497d2fe45872b9bb551ef5547d72d5835069207c9ecc0daca984f8d6a76565",
+    "h5-complete.json": "37be7f9389e4cac3584a541f7fb783db0899b7071f757ecc7834962e6db85342",
+    "rh-preswitch.json": "5361e18d7fa927f480415175631bb4c8f9743bcd61a9d3019fef4ce0c6441fda",
+    "rh-online.png": "62b1dfd3989b4cd10c9d731e2d0fc9d884c08b72dec8fa4f7a2472737b114dfc",
+    "008-preswitch.json": "ea37c95852459cc9c34e70798e7a13019eb81c4e7d48e48974c6036577d7ad5e",
+    "010-installed.json": "b0098bd73ddc00eecb837277a15e5314acb855fcd207626cbda467806bb62481",
+    "mini-upload-response.json": "b5b88475a014dd076792c479582e52ee913b58077a1a3bd3741b70cd550c6d64",
+    "008-verified.json": "89411444d95c55b43037971ed5436b379073896e3c240f8b561c6565d61075e5",
+    "008-after.json": "360d1b75ec6faa9a5038f36fb3687d5d8dc40e3ae1e7be73073fe6c4e7c4e6b5",
+    "commit.json": "14efe0b8dc8fcadc1c69a92e550cfb0a38d68a5df41e354fa3ceae1f6c522840",
+    "mini-group-price.jpg": "f9366e4950ef91048b1ed26157d8b407c2a383aeabf02e5e32772acc6053c30d",
+    "candidate-320.png": "d394bcd2d6a524656d20af8e96a4fe3b229e5977440e57e228c63fe765bb82b3",
+    "pushed.json": "b8f1d0742492331f9a6e712de84764ca5c649cd51470f2385a37f2e5832b2016",
+    "mini-screenshot-result.json": "54bf39caf9bc05d3cb0013f92754b94b25aed22a162d570026fa8f19ee22b72e",
+    "010-online.png": "8d07121c683aadb469788b49c6a981f4377684c91137aa9dfbc04dfbdf1ad9cc",
+    "008-before.json": "0fb4313c28021ce92a510228282e4091316f0d44917211e1016a756c4dc6443c",
+    "mini-open-page.json": "84d66649c11aca58e937f8e93990b45e79ebf3662262dbcfd57febee0930be8c",
+    "rh-after.json": "cd7eb71a72c8e54dd7d74a65ed8c036a622aa081058a20c1826e0be9f918910e",
+    "rh-verified.json": "1a6ea339dbcc1c8a41cf85c897fd45613332b00965172f684e216e6366da21c2",
+    "mini-verification.json": "972228bfac9254e31256f1b1c958f8864f9c73f35cc0b8fc42f31540391e2ddd"
+  }
+}

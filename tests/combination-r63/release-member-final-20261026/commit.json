@@ -1,0 +1,22 @@
+{
+  "commit": "8953c22e654fb63025873273ae999cf61b9e8294",
+  "parent": "cc31149de80b276c6a0f2ab1ff7dc3d397c2919a",
+  "tree": "c4df77da9b21bf821353489d2a3831d579fd09d1",
+  "branch": "release/r63-group-checkout-20261025",
+  "workspaceHead": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "sharedIndexSha256": "af0bae9ffd5dff64adbda605829a5e4b1c58e4fe66b853dfe00fd54d6e5030cc",
+  "files": {
+    "前端代码/uniapp/components/productWindow/index.vue": "4c6d38dfce6f5f570b8d3e14fb18f2bdd00da17694dda2a729ba0b8bf9f34e02",
+    "前端代码/uniapp/pages/activity/goods_combination_status/index.vue": "5891a5a16f468383b50b9dc4838439c7eb239e9b16663c61c82ffb7de633585d",
+    "前端代码/uniapp/pages/activity/goods_details/index.vue": "c4fda39b21e99b66aa3726cd18e85511dfd281b9b6c16f01f020399b4c864fb6",
+    "前端代码/uniapp/pages/goods/order_confirm/index.vue": "352f57c08396c6812fdf9e23e4fffe6499707b1ab03cc2e45e42c50bb2a8076f",
+    "前端代码/uniapp/pages/goods_details/index.vue": "d361c1019067135994b834ed920fab3519e0caf5f0bfa83f0bb858e558ea15c1",
+    "前端代码/uniapp/pages/index/components/storeList.vue": "cb0c14428555b8559cf351541cf3441e69248bab2a62dd220bd90c7380e23e27",
+    "前端代码/uniapp/pages/store/group_buy/index.vue": "145ef009b5c6c8c56b1b0dda7ca5de76134fe54b66e7ca2a56767d8b7e14d788",
+    "前端代码/uniapp/pages/store/group_cart/cart.vue": "fa438a6043dbaa44fb8afcf29d117ddf51117aa45dc9621dfda680ece611210f",
+    "前端代码/uniapp/pages/store/home/store_cate1.vue": "31f219a5fcca7cb02dcd3082298c758abff20dff36195fc4a36875732b986c1b",
+    "前端代码/uniapp/pages/store/home/store_cate2.vue": "12d05655fc09b299f80dc4e8c8eff57846fe72f85b597f1a173f483ba17edaec"
+  },
+  "databaseMigration": false,
+  "approval": "2026-10-26 产品经理测试通过并明确授权提交、三站部署、push、008会员端体验版上传"
+}

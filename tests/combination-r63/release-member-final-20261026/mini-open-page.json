@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "tool": "simulator_open_page",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "page": "pages/activity/goods_details/index",
+    "query": "id=1&type=3",
+    "scene": 1001
+  }
+}

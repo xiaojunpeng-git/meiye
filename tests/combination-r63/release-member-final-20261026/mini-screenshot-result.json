@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "tool": "simulator_screenshot",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "path": "/private/tmp/r63-member-final-release-20261026/mini-group-price.jpg",
+    "imageWidth": 591,
+    "imageHeight": 1280
+  }
+}
