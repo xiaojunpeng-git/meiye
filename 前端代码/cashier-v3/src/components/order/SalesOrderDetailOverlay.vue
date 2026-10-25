@@ -77,7 +77,9 @@ const props = defineProps({
   },
   attributionChanges: { type: Array, default: () => [] },
   // 默认兼容既有调用；订单管理关闭来源时只撤下客户来源，不移除原卡和单据追溯。
-  businessSourceEnabled: { type: Boolean, default: true }
+  businessSourceEnabled: { type: Boolean, default: true },
+  // Presentation only: historical debt amounts and settlement facts stay intact.
+  debtPaymentEnabled: { type: Boolean, default: true }
 })
 
 const emit = defineEmits(['close', 'void-entitlement-order'])
@@ -265,7 +267,7 @@ function amountRowsForItem(item) {
     { label: '改价优惠', value: pickValue(item, ['priceChangeDiscountAmount', 'changePriceDiscountAmount', 'modifiedPriceDiscountAmount']) },
     { label: '优惠券', value: pickValue(item, ['couponDiscountAmount', 'couponAmount']), note: pickValue(item, ['couponName', 'couponLabel']) },
     { label: '应付', value: pickValue(item, ['payableAmount', 'receivableAmount', 'amountDue']) },
-    { label: '欠款', value: pickValue(item, ['debtAmount', 'outstandingAmount']) },
+    ...(props.debtPaymentEnabled ? [{ label: '欠款', value: pickValue(item, ['debtAmount', 'outstandingAmount']) }] : []),
     { label: '现金业绩', value: pickValue(item, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) }
   ]
   return rows.filter((row) => hasValue(row.value) || hasValue(row.note))
@@ -300,7 +302,7 @@ const amountSummaryRows = computed(() => {
     { label: '优惠券优惠', value: pickValue(summary, ['couponDiscountAmount', 'couponAmount']) },
     { label: '其他优惠', value: pickValue(summary, ['otherDiscountAmount', 'manualDiscountAmount']) },
     { label: '应付金额', value: pickValue(summary, ['payableAmount', 'receivableAmount', 'amountDue']) },
-    { label: '欠款金额', value: pickValue(summary, ['debtAmount', 'outstandingAmount']) },
+    ...(props.debtPaymentEnabled ? [{ label: '欠款金额', value: pickValue(summary, ['debtAmount', 'outstandingAmount']) }] : []),
     { label: '现金业绩', value: pickValue(summary, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) },
     { label: '余额支付', value: pickValue(summary, ['balancePaymentAmount', 'balancePaidAmount']) }
   ]
@@ -380,6 +382,7 @@ const relatedGroups = computed(() => {
   ]
   return groups.filter((group) => {
     // 后端不应为游客下发补交能力；这里再兜底，避免异常旧投影误露入口。
+    if (group.key === 'debt' && !props.debtPaymentEnabled) return false
     if (group.key === 'debt' && (sourceOrder.value.isGuest === true || Number(sourceOrder.value.memberId || 0) <= 0)) return false
     return (!group.permission || canUseCashierV3Operation(group.permission))
       && (group.records.length || group.actionAliases.some(hasAction))

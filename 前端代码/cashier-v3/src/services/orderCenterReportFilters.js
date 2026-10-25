@@ -84,3 +84,22 @@ export function buildOrderReportQuery(original, panel, date, scope, limit, clear
     dateFrom: date.min, businessDateFrom: date.min, dateTo: date.max, businessDateTo: date.max,
     filters: cleared ? [] : filters(query.filters), filterRelation: cleared ? 'all' : (query.filterRelation || 'all') }
 }
+
+/** Stable debt field IDs only; suppress presentation without touching historical
+ * amounts. Saved visible/filter/export preferences remain stored for re-enable.
+ */
+export function orderDebtFields(fields = [], enabled = true) {
+  return fields.filter(field => enabled !== false || field?.key !== 'debt_amount')
+}
+
+export function orderDebtQuery(query = {}, enabled = true) {
+  if (enabled !== false) return query
+  const result = clone(query)
+  const keyOf = item => typeof item === 'string' ? item : item?.field_key || item?.fieldKey || item?.field || item?.key
+  for (const key of ['topFilters', 'topFilterConditions', 'filters', 'quickFilters', 'keywordFilters', 'sorts', 'summaries', 'groups', 'groupBy', 'visibleFields', 'quickFields']) {
+    if (Array.isArray(result[key])) result[key] = result[key].filter(item => keyOf(item) !== 'debt_amount')
+  }
+  if (result.querySettings) result.querySettings = orderDebtQuery(result.querySettings, false)
+  if (result.export && Array.isArray(result.export.fields)) result.export.fields = result.export.fields.filter(key => key !== 'debt_amount')
+  return result
+}

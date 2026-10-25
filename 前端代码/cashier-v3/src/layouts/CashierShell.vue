@@ -2772,6 +2772,7 @@ onBeforeUnmount(() => {
     />
     <StoreTopNavigation
       :entries="topNavigationEntries"
+      :debt-payment-enabled="state.cashier?.debtPaymentEnabled !== false"
       :rules="settingsNavigation?.navigation?.rules || state.navigationRules"
       :store-name="settingsNavigation?.profile?.name || state.storeName"
       :operator="settingsNavigation?.operator?.name || operatorLabel"

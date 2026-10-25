@@ -5,7 +5,7 @@ import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetail
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
-import { orderRecordTypeLabel } from '@/constants/orderRecordTypes'
+import { orderRecordTypeLabel, orderRecordTypeVisible } from '@/constants/orderRecordTypes'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import OrderCenterReportQueryToolbar from '@/components/query/OrderCenterReportQueryToolbar.vue'
@@ -43,7 +43,7 @@ import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi
 import { guideRoundText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
 import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
 import { orderAttributionExpectedValue } from '@/services/orderAttributionExpectedValue'
-import { orderBusinessSourceFields, orderBusinessSourceQuery } from '@/services/orderCenterReportFilters'
+import { orderBusinessSourceFields, orderBusinessSourceQuery, orderDebtFields, orderDebtQuery } from '@/services/orderCenterReportFilters'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const serviceVoidNotice = ref('')
@@ -442,6 +442,10 @@ const FIELD_ALIASES = {
 
 const state = useCashierV3State()
 // 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
+// Reuse the root projection of the existing instance switch; missing initial
+// projection is not an instruction to erase a saved route or historical facts.
+const debtPaymentEnabled = computed(() => state.cashier?.debtPaymentEnabled !== false)
+const orderPresentationFields = fields => orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
 const router = useRouter()
@@ -537,7 +541,8 @@ const availableTabs = computed(() => {
     const matched = ORDER_TABS.find((tab) => tab.key === key || tab.label === key)
     if (matched) readyKeys.add(matched.key)
   })
-  const tabs = ORDER_TABS.filter((tab) => readyKeys.has(tab.key))
+  // Keep source readiness and role gates; the debt switch only narrows visible tabs.
+  const tabs = ORDER_TABS.filter((tab) => readyKeys.has(tab.key) && orderRecordTypeVisible(tab.key, debtPaymentEnabled.value))
   return tabs.length ? tabs : ORDER_TABS.filter((tab) => tab.key === 'sales')
 })
 const activeTab = computed(() => availableTabs.value.find((tab) => tab.key === activeTabKey.value) || availableTabs.value[0])
@@ -590,7 +595,7 @@ const sourceFilterOptions = computed(() => sourceFilterSources.value.flatMap((pr
   }
   return options
 }))
-const queryFields = computed(() => orderBusinessSourceFields(activeTab.value.fields, businessSourceEnabled.value).map((item) => (
+const queryFields = computed(() => orderPresentationFields(activeTab.value.fields).map((item) => (
   activeTabKey.value === 'all' && item.key === 'source'
     ? { ...item, type: 'enum', options: sourceFilterOptions.value }
     : item
@@ -672,7 +677,7 @@ const visibleFields = computed(() => {
 })
 const detailFields = computed(() => {
   // 混合页详情始终使用原业务字段，不能把整张联合字段表塞进一笔充值/退款。
-  if (activeTabKey.value === 'all') return orderBusinessSourceFields(recordTab(genericDetailRecord.value).fields, businessSourceEnabled.value)
+  if (activeTabKey.value === 'all') return orderPresentationFields(recordTab(genericDetailRecord.value).fields)
   // 取消信息只补充在该笔欠款详情，不改变其他业务记录的字段。
   if (activeTabKey.value === 'debt' && genericDetailRecord.value?.cancelledAt) {
     return [...visibleFields.value, field('cancelledAmount', '取消金额', 'money'),
@@ -1219,7 +1224,7 @@ async function submitImportedCardRefund() {
 const unifiedQueryPages = Object.fromEntries(ORDER_TABS.map((tab) => [tab.key, useUnifiedQueryPage({
   pageCode: tab.pageCode,
   pageName: tab.label,
-  baseFields: () => orderBusinessSourceFields(tab.fields, businessSourceEnabled.value),
+  baseFields: () => orderPresentationFields(tab.fields),
   requestAction
 })]))
 const activeUnifiedQuery = computed(() => unifiedQueryPages[activeTabKey.value] || unifiedQueryPages.sales)
@@ -1243,7 +1248,7 @@ const activeQueryCapability = computed(() => {
   }
 })
 const activeQueryFields = computed(() => {
-  const fields = orderBusinessSourceFields(activeUnifiedQuery.value?.fields?.value || queryFields.value, businessSourceEnabled.value)
+  const fields = orderPresentationFields(activeUnifiedQuery.value?.fields?.value || queryFields.value)
   if (activeTabKey.value !== 'all') return fields
   const sourceUi = queryFields.value.find((item) => item.key === 'source')
   // 服务端仍把来源声明为可精确过滤的文本字段；这里只合并下拉选项和页面位置，不能改其查询 key。
@@ -1499,7 +1504,7 @@ function giftVoidRecordId(record) {
 // 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
 const salesOrderListColumnKeys = ['item_name', 'product_category', 'unit_price', 'quantity', 'craftsman', 'salesperson', 'sales_manager', 'guide', 'line_amount', 'receivable_amount', 'debt_amount', 'coupon_discount_amount', 'actual_received_amount', 'payment_method', 'store', 'order_status']
 const salesOrderListColumns = computed(() => {
-  return salesOrderListColumnKeys.map((key) => ORDER_TABS.find((tab) => tab.key === 'sales').fields.find((item) => item.key === key).label)
+  return salesOrderListColumnKeys.filter(key => debtPaymentEnabled.value || key !== 'debt_amount').map((key) => ORDER_TABS.find((tab) => tab.key === 'sales').fields.find((item) => item.key === key).label)
 })
 
 function salesOrderItems(record) {
@@ -2778,7 +2783,7 @@ async function queryRecords(query = {}, resetPage = true) {
   // 只统一读取/刷新，不介入作废和人员调整命令。无新筛选的调用复用最后成功快照。
   const explicitQuery = Object.prototype.hasOwnProperty.call(query, 'topFilters')
   const previous = executedQueryByType.value[recordType] || queryModelByType.value[recordType] || {}
-  query = orderBusinessSourceQuery(mergeQueryRefresh(previous, query), businessSourceEnabled.value)
+  query = orderDebtQuery(orderBusinessSourceQuery(mergeQueryRefresh(previous, query), businessSourceEnabled.value), debtPaymentEnabled.value)
   if (!explicitQuery && previous.page) resetPage = false
   if (recordType !== 'sales') {
     const currentQuery = queryModelByType.value[recordType] || {}
@@ -3787,10 +3792,16 @@ watch(activeTabKey, () => {
 }, { immediate: true })
 
 watch(
-  () => route.fullPath,
+  [() => route.fullPath, debtPaymentEnabled],
   () => {
     const requestedTab = String(route.query.tab || route.query.recordType || '').trim()
     if (!ORDER_TABS.some((item) => item.key === requestedTab)) return
+    // Closing the switch hides both navigation and stale/bookmarked debt tabs.
+    if (!isPlatformReadOnly.value && !orderRecordTypeVisible(requestedTab, debtPaymentEnabled.value)) {
+      activeTabKey.value = 'all'
+      void router.replace({ query: { ...route.query, tab: 'all', recordType: undefined } })
+      return
+    }
     if (!serviceReportDrilldown.value && queryModelByType.value.service?.servicePerformanceDrilldown) {
       queryModelByType.value = { ...queryModelByType.value, service: {} }
     }
@@ -3806,7 +3817,8 @@ watch(
       activeTabKey.value = requestedTab
     }
     if (isPlatformReadOnly.value || state.stateContextId) queryRecords(initialOrderCenterQuery(), true)
-  }
+  },
+  { immediate: true }
 )
 
 let openedSalaryDetailOrderId = ''
@@ -3877,6 +3889,7 @@ onBeforeUnmount(() => {
       :page-name="activeTab.label"
       :source-options="sourceFilterOptions"
       :business-source-enabled="businessSourceEnabled"
+      :debt-payment-enabled="debtPaymentEnabled"
       :fields="activeQueryFields"
       :executed-query="executedQuery"
       :is-query-loading="isOrderQueryLoading"
@@ -4074,7 +4087,7 @@ onBeforeUnmount(() => {
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.receivableAmount ?? record.receivable_amount) }}
             </td>
-            <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
+            <td v-if="debtPaymentEnabled && itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.debtAmount ?? record.debt_amount) }}
             </td>
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
@@ -4229,6 +4242,7 @@ onBeforeUnmount(() => {
       :load-error="salesDetailLoadError"
       :attribution-changes="visibleAttributionChanges"
       :business-source-enabled="businessSourceEnabled"
+      :debt-payment-enabled="debtPaymentEnabled"
       :action-only="salesDetailActionOnly"
       :initial-lifecycle-action="salesDetailFocus.lifecycleAction"
       :focus-personnel-role="salesDetailFocus.personnelRole"

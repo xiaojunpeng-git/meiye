@@ -25,7 +25,7 @@ final class CashierV3OrderCenterUnifiedQueryContract
     ];
 
     /** @return array<string,mixed> */
-    public static function definition(string $pageCode, bool $businessSourceEnabled = true): array
+    public static function definition(string $pageCode, bool $businessSourceEnabled = true, bool $debtPaymentEnabled = true): array
     {
         $type = self::typeForPage($pageCode);
         $definitions = [
@@ -125,6 +125,11 @@ final class CashierV3OrderCenterUnifiedQueryContract
         if (!$businessSourceEnabled) {
             $fields = array_values(array_filter($fields, static function (array $field): bool { return $field[0] !== 'source'; }));
             $keywordFields = array_values(array_filter($keywordFields, static function (string $key): bool { return $key !== 'source'; }));
+        }
+        // The instance debt switch removes the stable display/query/export key,
+        // never historical amounts or unrelated order records.
+        if (!$debtPaymentEnabled && in_array($type, ['all', 'sales', 'recharge'], true)) {
+            $fields = array_values(array_filter($fields, static function (array $field): bool { return $field[0] !== 'debt_amount'; }));
         }
         $registered = [];
         foreach ($fields as $field) {

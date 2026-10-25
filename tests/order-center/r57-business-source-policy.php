@@ -7,6 +7,8 @@ namespace app\services\cashier\v3\config {
     }
 }
 namespace {
+    // The independent R60 debt switch stays enabled in these source-only fixtures.
+    function sys_config(string $name, $default = null) { return $name === 'cashier_debt_pay_switch' ? 1 : $default; }
     $backend = dirname(__DIR__, 2) . '/后端代码';
     spl_autoload_register(static function ($class) use ($backend) {
         if (strpos($class, 'app\\') !== 0) return;

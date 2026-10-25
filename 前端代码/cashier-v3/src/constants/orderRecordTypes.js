@@ -11,3 +11,6 @@ export const ORDER_RECORD_TYPES = Object.freeze([
   { key: 'card_operation', label: '卡操作记录' }
 ])
 export const orderRecordTypeLabel = key => ORDER_RECORD_TYPES.find(type => type.key === key)?.label || ''
+
+/** 开关只撤下欠款相关菜单，不删除历史记录，也不代替原岗位权限。 */
+export const orderRecordTypeVisible = (key, debtPaymentEnabled = true) => debtPaymentEnabled !== false || !['debt', 'supplement'].includes(key)

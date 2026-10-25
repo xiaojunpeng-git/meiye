@@ -178,7 +178,7 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
         }
         if ($keyword === '' && $filters) {
             $policy = (new CashierV3BusinessSourcePolicyServices())->read();
-            $expected = (array)CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode(), ($policy['enabled'] ?? true) !== false)['keywordFields'];
+            $expected = (array)CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode(), ($policy['enabled'] ?? true) !== false, (int)sys_config('cashier_debt_pay_switch', 0) === 1)['keywordFields'];
             if (count($filters) !== count($expected)) {
                 return '';
             }
@@ -427,7 +427,9 @@ abstract class AbstractCashierV3OrderCenterUnifiedQueryProvider implements Unifi
             'record_status' => ['recordStatus', 'statusLabel', 'status'], 'operation_reason' => ['operationReason', 'reason'], 'completed_at' => ['completedAt'],
             'project_count' => ['projectCount'], 'detail_remark' => ['detailRemark'],
         ];
-        $definition = CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode());
+        // Reuse the current field contract for row projection and export; hiding
+        // debt never edits the source record or its historical settlement values.
+        $definition = CashierV3OrderCenterUnifiedQueryContract::definition($this->pageCode(), true, (int)sys_config('cashier_debt_pay_switch', 0) === 1);
         $fields = array_column($definition['fields'], 'key');
         $types = array_column($definition['fields'], 'type', 'key');
         $rows = [];

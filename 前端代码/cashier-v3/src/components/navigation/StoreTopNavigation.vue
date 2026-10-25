@@ -7,12 +7,12 @@ import Store from '@lucide/vue/dist/esm/icons/store.mjs'
 import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
 import StoreFullscreenButton from './StoreFullscreenButton.vue'
 import { configuredNavigationGroups } from '../../../../shared/storeNavigationGroups.js'
-import { ORDER_RECORD_TYPES } from '@/constants/orderRecordTypes'
+import { ORDER_RECORD_TYPES, orderRecordTypeVisible } from '@/constants/orderRecordTypes'
 import { STORE_REPORT_TABS } from '@/constants/storeBusinessReports'
 import { queryStoreBusinessReportCatalog } from '@/services/storeBusinessReportApi'
 import { loadBasicReportCatalog } from '@/services/basicReportApi'
 
-const props = defineProps({ entries: { type: Array, default: () => [] }, rules: { type: Array, default: () => [] }, storeName: String, operator: String, operatorProfile: { type: Object, default: () => ({}) }, canSwitchStores: Boolean, pendingHangCount: Number, inventoryOpen: Boolean, activeInventoryKey: String, contextId: String })
+const props = defineProps({ entries: { type: Array, default: () => [] }, rules: { type: Array, default: () => [] }, storeName: String, operator: String, operatorProfile: { type: Object, default: () => ({}) }, canSwitchStores: Boolean, pendingHangCount: Number, inventoryOpen: Boolean, activeInventoryKey: String, contextId: String, debtPaymentEnabled: { type: Boolean, default: true } })
 const emit = defineEmits(['navigate', 'switch-store', 'password', 'logout'])
 const route = useRoute()
 const root = ref(null)
@@ -38,7 +38,7 @@ const basicReportEntry = computed(() => props.entries.find(item => item.navigati
 const navigationHandlers = computed(() => [
   ...props.entries.filter(entry => entry.key !== 'inventory-presale-claim' && entry.navigationKey !== 'report.basic'),
   ...props.entries.filter(entry => entry.key === 'inventory-presale-claim').map(entry => ({ ...entry, navigationKey: 'inventory.presale_claim' })),
-  ...props.entries.filter(entry => entry.key === 'order').flatMap(entry => ORDER_RECORD_TYPES.map(type => ({ ...entry,
+  ...props.entries.filter(entry => entry.key === 'order').flatMap(entry => ORDER_RECORD_TYPES.filter(type => orderRecordTypeVisible(type.key, props.debtPaymentEnabled)).map(type => ({ ...entry,
     key: `order-${type.key}`, navigationKey: `order.${type.key}`, orderType: type.key,
     to: { ...entry.to, query: { tab: type.key } } }))),
   ...(reportEntry.value ? reports.value.map(report => ({ ...reportEntry.value, key: `report-${report.code}`,

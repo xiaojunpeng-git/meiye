@@ -14,6 +14,8 @@ namespace app\services\metric {
     }
 }
 namespace {
+    // The independent R60 debt switch stays enabled in these source-only fixtures.
+    function sys_config(string $name, $default = null) { return $name === 'cashier_debt_pay_switch' ? 1 : $default; }
     error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
     $backend = dirname(__DIR__, 2) . '/后端代码';
     spl_autoload_register(static function ($class) use ($backend): void {
