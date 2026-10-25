@@ -1,0 +1,76 @@
+{
+  "head": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "remote": "不适用，仅本地开发；真实富友退款未执行",
+  "files": [
+    {
+      "path": "前端代码/admin/src/pages/marketing/storeCombination/create.vue",
+      "sha256": "1a38502b702946aadb9537b28462bd25a00a2c1f5d3d9ab2bf2cca879f893c05",
+      "status": ""
+    },
+    {
+      "path": "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue",
+      "sha256": "87eead008665672e5b9161d11b8f3371fedda0c9a286acd53bea28a1dd8ee2a8",
+      "status": ""
+    },
+    {
+      "path": "前端代码/admin/src/components/goodsList/index.vue",
+      "sha256": "53360af9ca2502788af30a34548980d4ef2efebf81c5308ee3efdf4aa0eeb395",
+      "status": ""
+    },
+    {
+      "path": "前端代码/admin/src/api/marketing.js",
+      "sha256": "ed283a80942018ad9b21bdc196d9fcb555cf5c141930729e46a29240c9d01077",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/StoreCombinationServices.php",
+      "sha256": "c94f1ad43b855d8fe518b0cc92c316c366f570cea20a30623428ec00c2349924",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/StorePinkServices.php",
+      "sha256": "a39dfd2016aab92c1a54b9f24ef640233e8f1deb3e3b8192539e2de53711fa14",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderCreateServices.php",
+      "sha256": "afd242d5415afaeb82910c3eaabf8f03b82ae9bf4dc1f708ee84e1008ac7afc0",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/listener/order/Pay.php",
+      "sha256": "621bf09dd8647f50bd91363d64521b55874e09e0ac5d3ab4000e206efa13e1ce",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/jobs/order/OrderPayHandelJob.php",
+      "sha256": "2299aeeec38ff2a2b9791d58ded150739b87bbb74fb6b4514e3c557376a910dd",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/services/order/StoreReservationOrderServices.php",
+      "sha256": "5f76bf4143534eb982373225f97e9643498f4aceac5c9075d8a0148dde96468f",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderRefundDomainServices.php",
+      "sha256": "9652577cf18b13e66b342da902a4e1da4b4d3df3c506cf92373781815968a10e",
+      "status": ""
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderRefundServices.php",
+      "sha256": "c29739c6c91fd5f05ba53a4b74f874504b9b7180f937721d8b517fffa6569ad4",
+      "status": ""
+    },
+    {
+      "path": "后端代码/route/admin.php",
+      "sha256": "492afa70fc192eb7aae9188cb93c9be7d3e1d1fc3288cc9fc98bb5ac348d01b8",
+      "status": "M 后端代码/route/admin.php"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php",
+      "sha256": "592dd8af6ef252c4a9fa63ca01b6026d17ba1d23d0a039f72c4f98a19f89f9e3",
+      "status": ""
+    }
+  ]
+}

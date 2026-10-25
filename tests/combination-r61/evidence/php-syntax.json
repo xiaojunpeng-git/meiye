@@ -1,0 +1,102 @@
+[
+  {
+    "file": "后端代码/app/services/activity/combination/StoreCombinationServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/activity/combination/StoreCombinationServices.php"
+  },
+  {
+    "file": "后端代码/app/services/activity/combination/StorePinkServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/activity/combination/StorePinkServices.php"
+  },
+  {
+    "file": "后端代码/app/services/order/StoreOrderCreateServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/order/StoreOrderCreateServices.php"
+  },
+  {
+    "file": "后端代码/app/listener/order/Pay.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/listener/order/Pay.php"
+  },
+  {
+    "file": "后端代码/app/jobs/order/OrderPayHandelJob.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/jobs/order/OrderPayHandelJob.php"
+  },
+  {
+    "file": "后端代码/app/services/order/StoreReservationOrderServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/order/StoreReservationOrderServices.php"
+  },
+  {
+    "file": "后端代码/app/services/order/StoreOrderRefundDomainServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/order/StoreOrderRefundDomainServices.php"
+  },
+  {
+    "file": "后端代码/app/services/order/StoreOrderRefundServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/order/StoreOrderRefundServices.php"
+  },
+  {
+    "file": "后端代码/route/admin.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/route/admin.php"
+  },
+  {
+    "file": "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php"
+  },
+  {
+    "file": "后端代码/app/services/activity/combination/CombinationFulfillmentServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/activity/combination/CombinationFulfillmentServices.php"
+  },
+  {
+    "file": "后端代码/app/services/activity/combination/CombinationRefundServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/activity/combination/CombinationRefundServices.php"
+  },
+  {
+    "file": "后端代码/app/services/activity/combination/CombinationGroupManagementServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/activity/combination/CombinationGroupManagementServices.php"
+  },
+  {
+    "file": "后端代码/app/services/activity/combination/CombinationRecordServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/activity/combination/CombinationRecordServices.php"
+  },
+  {
+    "file": "后端代码/app/services/pay/FuyouCombinationRefundGateway.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/pay/FuyouCombinationRefundGateway.php"
+  },
+  {
+    "file": "后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php"
+  },
+  {
+    "file": "后端代码/app/services/order/store/WriteOffOrderServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/order/store/WriteOffOrderServices.php"
+  },
+  {
+    "file": "后端代码/app/services/order/StoreOrderDeliveryServices.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/app/services/order/StoreOrderDeliveryServices.php"
+  },
+  {
+    "file": "后端代码/mohe/services/wechat/HwcPayService.php",
+    "passed": true,
+    "output": "No syntax errors detected in 后端代码/mohe/services/wechat/HwcPayService.php"
+  },
+  {
+    "file": "tests/combination-r61/local-acceptance.php",
+    "passed": true,
+    "output": "No syntax errors detected in tests/combination-r61/local-acceptance.php"
+  }
+]

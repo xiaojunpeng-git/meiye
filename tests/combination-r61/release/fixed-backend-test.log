@@ -1,0 +1,76 @@
+PASS type 0 cannot use paid rights before group completion
+PASS payment job does not issue early
+PASS type 0 fills exactly missing virtual seats
+PASS completion replay adds no fake members
+PASS rights receipt issued once
+PASS group purchase creates no appointment or writeoff
+PASS all purchased uses remain unconsumed
+PASS type 0 signed channel success closes real terminal refund
+PASS type 0 refunds its original activity quota
+PASS late payment job cannot resurrect refunded rights
+PASS original FuYou order/payment/refund references persisted
+PASS refund revokes all unused rights
+PASS refund replay has no channel request
+PASS refund leaves completed group completed
+PASS type 5 cannot use paid rights before group completion
+PASS payment job does not issue early
+PASS type 5 fills exactly missing virtual seats
+PASS completion replay adds no fake members
+PASS rights receipt issued once
+PASS one usable card holder after completion
+PASS group purchase creates no appointment or writeoff
+PASS all purchased uses remain unconsumed
+PASS type 5 signed channel success closes real terminal refund
+PASS type 5 refunds its original activity quota
+PASS late payment job cannot resurrect refunded rights
+PASS original FuYou order/payment/refund references persisted
+PASS refund revokes all unused rights
+PASS refund replay has no channel request
+PASS refund leaves completed group completed
+PASS type 6 cannot use paid rights before group completion
+PASS payment job does not issue early
+PASS type 6 fills exactly missing virtual seats
+PASS completion replay adds no fake members
+PASS rights receipt issued once
+PASS group purchase creates no appointment or writeoff
+PASS all purchased uses remain unconsumed
+PASS type 6 signed channel success closes real terminal refund
+PASS type 6 refunds its original activity quota
+PASS late payment job cannot resurrect refunded rights
+PASS original FuYou order/payment/refund references persisted
+PASS refund revokes all unused rights
+PASS refund replay has no channel request
+PASS refund leaves completed group completed
+PASS channel USERPAYING is not false success
+PASS only signed definitive failure releases rights
+PASS pending/unknown retry queries only
+PASS channel PAYERROR is not false success
+PASS only signed definitive failure releases rights
+PASS channel forged is not false success
+PASS only signed definitive failure releases rights
+PASS pending/unknown retry queries only
+PASS channel timeout is not false success
+PASS only signed definitive failure releases rights
+PASS pending/unknown retry queries only
+PASS channel wrongAmount is not false success
+PASS only signed definitive failure releases rights
+PASS pending/unknown retry queries only
+PASS leader cannot be kicked server-side
+PASS used rights rejected before channel
+PASS local failure retains signed channel confirmation
+PASS local closing recovery never reapplies or requeries confirmed channel
+PASS paid callback creates real group
+PASS payment callback replay creates no duplicate participant
+PASS two paid real members naturally complete the group
+PASS natural completion issues both real members exactly once
+PASS kick pending keeps participant trace until money succeeds
+PASS force completion cannot race an in-flight kick refund
+PASS successful kick refund removes only its participant
+PASS kick does not fail the whole group
+PASS kicked seat is correctly replaced on force completion
+PASS export matches all 16 template columns in order
+PASS export includes refunded participant and excludes virtual placeholders
+PASS export preserves refund state and original expiry after completion
+PASS balance original payment credits once through real terminal ledger
+PASS claimed delivery excludes a simultaneous refund before carrier result
+R61 ACCEPTANCE COMPLETE; all fabricated rows rolled back; no real provider requests.

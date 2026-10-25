@@ -1,0 +1,2267 @@
+diff --git a/tests/combination-r61/README.md b/tests/combination-r61/README.md
+new file mode 100644
+index 00000000..6bb56a0b
+--- /dev/null
++++ b/tests/combination-r61/README.md
+@@ -0,0 +1,79 @@
++# 第61轮拼团开发与本地自测记录
++
++状态：开发与本地自测完成后交产品经理确认验收；未提交、未推送、未部署，未操作线上数据库或真实资金。
++
++## 本轮业务范围
++
++- 产品、卡项、项目参与拼团；支付后先等待成团，成团才激活未消费权益，项目不自动预约或核销。
++- 平台已登录上下文内提供整笔原路退款，不新增独立退款按钮权限；已使用、发货、转让、升级等不满足条件的订单拒绝退款。
++- 富友先受理再签名查询终态；冻结期间不能消费，明确失败可重试，未知状态只查询原退款单。渠道成功后本地关闭失败可恢复，不重复申请退款。
++- 详情展示富友订单号、支付交易号、退款流水号、退款追踪号和商户退款单号；余额退款不伪装富友编号。
++- 仅进行中非团长可踢出，整笔原路退款成功才退出；立即成团只补齐虚拟名额，不生成虚拟支付、订单或权益。
++- 每团导出与用户样例相同的16列，保留已退款/踢出真实成员、排除虚拟名额。列表与导出共用成员事实查询。
++
++## 本地验证
++
++测试入口 `local-acceptance.php` 只允许 Docker mysql/ruihao；主套件自建会员/商品/订单、调用真实业务服务，事务回滚，富友 transport 使用签名模拟。UI固定样本单独提交到本地，均以 R61- 标识，见 ui-fixtures.json / race-fixtures*.json，不含导入用户模板中的业务记录。
++
++- 主套件结果见 evidence/local-acceptance.log，必须存在 R61 ACCEPTANCE COMPLETE 才算通过。
++- 并发退款仅一个执行者发起 apply+query，另一执行者复用同一退款号；并发成团只产生2个虚拟名额、1条审计、1个卡持有权益。最初复测发现死锁，增加限定死锁重试后通过；最终结果见 refund-a/b.log、complete-a/b.log、concurrency-check.json。
++- 页面亲测卡成团、踢出团员、余额原路退款、再次补齐成团、退款编号回显及按团下载。实际下载的 拼团记录-160.xlsx 共16列、2个真实成员，含已退款成员；结果见 export-file-check.json。
++- PHP语法检查、Vue SFC模板/脚本解析、热更新编译和限定本轮文件的差异空白检查通过。原有 CRLF 文件按 cr-at-eol 检查，未批量改换行。
++
++## 已有功能与边界
++
++复用原订单终态退款、余额账本、库存回退和卡权益发放服务，补齐原活动库存/额度恢复，保留非拼团原逻辑。共享工作区含其他任务既有变更，不在本轮提交范围。固定清单只标识本轮触及文件，不能将整文件diff视为全属本轮。
++
++真实富友支付/退款尚未联调，按用户安排留待渼约008上线测试；当前不能声称渠道实测成功。老富友订单缺少原商户证明时不猜测商户发起退款；老已完成团若原截止时间已被历史代码覆盖，导出留空，不编造时间。前端只做整数金额展示，导出保持原金额精度。
++
++## 固定基线
++
++HEAD：`4b4bf53280c952b1368a633458374ea1da4ebb7b`；当前唯一源码正本为美容源码/。远程实例与部署指纹：不适用。固定文件SHA-256见 evidence/fixed-version.json；开始时指纹见 evidence/baseline.json。未创建平行源码、worktree或发布包。
++
++## 分组文件与注释
++
++本轮业务约束注释随下列源码更新（退款终态/幂等、原订单权益、虚拟名额、导出粒度、金额展示等），未新增工程脚本。自动化脚本属于测试目录。
++
++### 前端源码
++
++- `前端代码/admin/src/api/marketing.js`
++- `前端代码/admin/src/components/goodsList/index.vue`
++- `前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue`
++- `前端代码/admin/src/pages/marketing/storeCombination/create.vue`
++- `前端代码/admin/src/utils/formatBusinessMoney.js`
++
++### 后端源码
++
++- `后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php`
++- `后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php`
++- `后端代码/app/jobs/order/OrderPayHandelJob.php`
++- `后端代码/app/listener/order/Pay.php`
++- `后端代码/app/services/activity/combination/CombinationFulfillmentServices.php`
++- `后端代码/app/services/activity/combination/CombinationGroupManagementServices.php`
++- `后端代码/app/services/activity/combination/CombinationRecordServices.php`
++- `后端代码/app/services/activity/combination/CombinationRefundServices.php`
++- `后端代码/app/services/activity/combination/StoreCombinationServices.php`
++- `后端代码/app/services/activity/combination/StorePinkServices.php`
++- `后端代码/app/services/order/StoreOrderCreateServices.php`
++- `后端代码/app/services/order/StoreOrderDeliveryServices.php`
++- `后端代码/app/services/order/StoreOrderRefundDomainServices.php`
++- `后端代码/app/services/order/StoreOrderRefundServices.php`
++- `后端代码/app/services/order/StoreReservationOrderServices.php`
++- `后端代码/app/services/order/store/WriteOffOrderServices.php`
++- `后端代码/app/services/pay/FuyouCombinationRefundGateway.php`
++- `后端代码/mohe/services/wechat/HwcPayService.php`
++- `后端代码/route/admin.php`
++
++### 数据库迁移
++
++- `后端代码/database/upgrades/2026-10-25-拼团权益退款/01-schema.sql`
++
++### 自动化测试
++
++- `tests/combination-r61/local-acceptance.php`
++
++### 生成物与证据
++
++- evidence/ 下为本地测试日志、指纹、截图与固定样本ID，不是可编辑业务源码。
++- `/Users/xiaojunpeng/Downloads/拼团记录-160.xlsx` 为实际页面下载的本地自建数据导出文件。
++- 无生产构建包、无线上迁移记录。新增SQL包含5张专用表，已在本地应用；将来发布须另行获得迁移授权。
+diff --git a/tests/combination-r61/local-acceptance.php b/tests/combination-r61/local-acceptance.php
+new file mode 100644
+index 00000000..b8112df7
+--- /dev/null
++++ b/tests/combination-r61/local-acceptance.php
+@@ -0,0 +1,249 @@
++<?php
++declare(strict_types=1);
++/** Local-only business acceptance: real MySQL services, fabricated members/orders, signed fake provider, rollback. */
++require (getenv('BACKEND_ROOT') ?: '/var/www/html') . '/vendor/autoload.php';
++use think\facade\Db;
++use think\facade\Event;
++use app\services\activity\combination\CombinationFulfillmentServices;
++use app\services\activity\combination\CombinationRefundServices;
++use app\services\activity\combination\CombinationGroupManagementServices;
++use app\services\activity\combination\StorePinkServices;
++use app\services\pay\FuyouCombinationRefundGateway;
++$app = new think\App((getenv('BACKEND_ROOT') ?: '/var/www/html') . '/'); $app->initialize();
++if (config('database.connections.mysql.hostname') !== 'mysql' || config('database.connections.mysql.database') !== 'ruihao')
++    throw new RuntimeException('Only local Docker ruihao is allowed');
++// No worker can consume rollback fixture IDs. These stubs replace infrastructure, not domain logic.
++$app->instance('queue', new class { public function __call($name,$args){return 1;} });
++foreach (['notice.notice','order.create','order.applyRefund'] as $event) Event::remove($event);
++$app->instance(app\services\order\terminal\RefundOutboxRelayGateServices::class,
++    new class extends app\services\order\terminal\RefundOutboxRelayGateServices { public function assertReadyForTerminalRefund(): void {} });
++class R61Gateway extends FuyouCombinationRefundGateway {
++    public $requests=[]; public $delayMicros=0; public $status='SUCCESS'; public $badSign=false; public $timeout=false; public $wrongAmount=false;
++    public static function local(): self { return new self(['mchntCd'=>'LOCAL_ONLY_R61','mchnt_key'=>'fabricated-local-key']); }
++    protected function postJson(string $url,array $payload): array {
++        $this->requests[]=['url'=>$url,'data'=>$payload];
++        if($this->delayMicros)usleep($this->delayMicros);
++        if ($this->timeout) throw new RuntimeException('local timeout');
++        $query=strpos($url,'refundQuery')!==false;
++        $response=['result_code'=>'000000','result_msg'=>'ok','trans_stat'=>$this->status,'ins_cd'=>'local',
++            'mchnt_cd'=>'LOCAL_ONLY_R61','term_id'=>'88888888','random_str'=>'local-nonce','order_type'=>'WECHAT',
++            'mchnt_order_no'=>$this->original,'refund_order_no'=>$payload['refund_order_no'],
++            'transaction_id'=>'LOCAL_PAYMENT_61','refund_id'=>'LOCAL_REFUND_61','reserved_fy_settle_dt'=>date('Ymd'),
++            'reserved_fy_trace_no'=>'local-trace','reserved_refund_amt'=>$this->wrongAmount?'101':'10000'];
++        $fields=$query?['result_code','result_msg','trans_stat','ins_cd','mchnt_cd','term_id','random_str','order_type','mchnt_order_no','refund_order_no','transaction_id','refund_id','reserved_fy_settle_dt','reserved_fy_trace_no','reserved_refund_amt']
++            :['result_code','mchnt_cd','mchnt_order_no','refund_order_no','reserved_fy_settle_dt','random_str'];
++        $values=array_map(static function($key)use($response){return $response[$key]??'';},$fields);$values[]='fabricated-local-key';
++        $response['sign']=$this->badSign?'forged':md5(implode('|',$values));return $response;
++    }
++    public $original='';
++}
++function check($ok,string $label):void {if(!$ok)throw new RuntimeException('FAIL '.$label);echo 'PASS '.$label."\n";}
++function seed(string $table,array $data):int {
++    // Supply only schema-required fields without borrowing any existing business row.
++    foreach(Db::query('SHOW COLUMNS FROM eb_'.$table) as $field){
++        $key=$field['Field'];if(array_key_exists($key,$data)||$field['Default']!==null||$field['Null']==='YES'||strpos($field['Extra'],'auto_increment')!==false)continue;
++        $data[$key]=preg_match('/int|decimal|float|double/',$field['Type'])?0:'';
++    }
++    return (int)Db::name($table)->insertGetId($data);
++}
++function fixture(int $type,int $people=2,string $payment='weixin'):array {
++    $tag='R61-'.bin2hex(random_bytes(5));$sku=substr(hash('sha256',$tag),0,8);
++    $store=seed('system_store',['name'=>$tag,'is_show'=>1,'is_del'=>0]);
++    $uid=seed('user',['nickname'=>$tag,'real_name'=>$tag,'phone'=>'19900000000','now_money'=>0,'ben_money'=>0,'give_money'=>0]);
++    $pid=seed('store_product',['store_name'=>$tag,'product_type'=>$type,'price'=>100,'stock'=>10,'sales'=>1,'is_show'=>1,'is_verify'=>1,'delivery_type'=>'2','is_del'=>0]);
++    $cid=seed('store_combination',['title'=>$tag,'product_id'=>$pid,'product_type'=>$type,'stock'=>10,'quota'=>10,'quota_show'=>11,'sales'=>1,'people'=>$people,'effective_time'=>1,'virtual'=>100,'is_show'=>1]);
++    $oid=seed('store_order',['uid'=>$uid,'store_id'=>$store,'order_id'=>$tag,'unique'=>$tag,'type'=>3,'product_type'=>$type,'source'=>8,'activity_id'=>$cid,'total_num'=>1,
++        'total_price'=>100,'pay_price'=>100,'paid'=>1,'pay_type'=>$payment,'pay_time'=>time(),'add_time'=>time(),
++        'shipping_type'=>2,'verify_code'=>substr(bin2hex(random_bytes(8)),0,12),'status'=>0,'refund_status'=>0,
++        'yue_pay_price'=>$payment==='yue'?100:0,'cash_pay_price'=>$payment==='yue'?0:100,
++        'paid_ben_amount'=>$payment==='yue'?100:0,'paid_give_amount'=>0,'paid_balance_ready'=>1,'trade_no'=>'LOCAL_PAYMENT_61']);
++    $cart=['id'=>$pid,'cart_num'=>1,'product_id'=>$pid,'product_type'=>$type,'activity_id'=>$cid,'truePrice'=>100,
++        'productInfo'=>['id'=>$cid,'product_id'=>$pid,'store_name'=>$tag,'product_type'=>$type,'price'=>100,'image'=>'',
++            'attrInfo'=>['unique'=>$sku,'write_valid'=>1,'write_times'=>1,'price'=>100,'suk'=>'默认']]];
++    seed('store_order_cart_info',['uid'=>$uid,'oid'=>$oid,'cart_id'=>$pid,'product_id'=>$pid,'product_type'=>$type,'cart_type'=>0,
++        'cart_num'=>1,'surplus_num'=>1,'split_surplus_num'=>1,'write_times'=>1,'write_surplus_times'=>1,'pay_price'=>100,
++        'sku_unique'=>$sku,'cart_info'=>json_encode($cart),'unique'=>$tag,'is_support_refund'=>1]);
++    if($type===5)seed('store_order_cart_info',['uid'=>$uid,'oid'=>$oid,'cart_id'=>$pid+1000000,'product_id'=>$pid,'product_type'=>6,'cart_type'=>2,
++        'cart_num'=>1,'surplus_num'=>1,'split_surplus_num'=>1,'write_times'=>1,'write_surplus_times'=>1,'pay_price'=>100,'sku_unique'=>$sku,
++        'cart_info'=>json_encode($cart),'unique'=>$tag.'C']);
++    seed('store_product_attr_value',['product_id'=>$pid,'type'=>0,'unique'=>$sku,'stock'=>10,'quota'=>10,'quota_show'=>11,'sales'=>1,'price'=>100]);
++    seed('store_product_attr_value',['product_id'=>$cid,'type'=>3,'unique'=>$sku,'stock'=>10,'quota'=>10,'quota_show'=>11,'sales'=>1,'price'=>100]);
++    (new CombinationFulfillmentServices())->register($oid);
++    $pinkId=seed('store_pink',['uid'=>$uid,'nickname'=>$tag,'order_id'=>$tag,'order_id_key'=>$oid,'total_num'=>1,'total_price'=>100,
++        'cid'=>$cid,'pid'=>$pid,'people'=>$people,'price'=>100,'add_time'=>time(),'stop_time'=>time()+3600,'status'=>1]);
++    Db::name('store_order')->where('id',$oid)->update(['pink_id'=>$pinkId]);
++    Db::name('combination_group_origin')->insert(['group_id'=>$pinkId,'expires_at'=>time()+3600,'activity_name'=>$tag]);
++    $channel='13883'.substr(hash('sha256',$tag),0,15);
++    if($payment!=='yue'){
++        seed('fuyou_payment_attempt',['channel_order_no'=>$channel,'business_order_no'=>$tag,'business_type'=>'product','channel'=>'wechat','amount_cents'=>10000,
++            'status'=>'paid','transaction_id'=>'LOCAL_PAYMENT_61','add_time'=>time(),'update_time'=>time()]);
++        Db::name('combination_payment_origin')->insert(['channel_order_no'=>$channel,'merchant_id'=>'LOCAL_ONLY_R61','settled_on'=>date('Ymd')]);
++    }
++    return compact('uid','pid','cid','oid','pinkId','cart','channel');
++}
++/** Each participant buys the same activity SKU; never fabricate unrelated SKU identities when joining. */
++function joinFixture(array $root, array &$member): void {
++    Db::name('store_pink')->where('id',$member['pinkId'])->update(['k_id'=>$root['pinkId'],'cid'=>$root['cid'],'pid'=>$root['pid']]);
++    Db::name('store_order')->where('id',$member['oid'])->update(['pink_id'=>$root['pinkId'],'activity_id'=>$root['cid']]);
++    $member['cart']=$root['cart'];
++    Db::name('store_order_cart_info')->where('oid',$member['oid'])->where('cart_type',0)->update([
++        'product_id'=>$root['pid'],'sku_unique'=>$root['cart']['productInfo']['attrInfo']['unique'],
++        'cart_info'=>json_encode($member['cart'])]);
++}
++if (getenv('R61_MODE') === 'seed-race') {
++    Db::startTrans();try{$refundRace=fixture(6);$completeRace=fixture(5,3,'yue');Db::commit();echo json_encode(compact('refundRace','completeRace'));}
++    catch(\Throwable $e){Db::rollback();throw $e;}exit;
++}
++if (getenv('R61_MODE') === 'worker-refund') {
++    $id=(int)getenv('R61_ORDER');$order=Db::name('store_order')->where('id',$id)->find();
++    if(!$order||strpos($order['order_id'],'R61-')!==0)throw new RuntimeException('Fabricated fixtures only');
++    $gateway=R61Gateway::local();$gateway->original=(string)Db::name('fuyou_payment_attempt')->where('business_order_no',$order['order_id'])->value('channel_order_no');$gateway->delayMicros=600000;
++    $result=(new CombinationRefundServices($gateway))->refundOrder($id,'R61本地并发退款验收',1);
++    echo json_encode(['result'=>$result,'providerRequests'=>count($gateway->requests)]),"\n";exit;
++}
++if (getenv('R61_MODE') === 'worker-complete') {
++    $id=(int)getenv('R61_GROUP');$root=Db::name('store_pink')->where('id',$id)->find();
++    if(!$root||strpos($root['order_id'],'R61-')!==0)throw new RuntimeException('Fabricated fixtures only');
++    echo json_encode((new CombinationGroupManagementServices())->complete($id,1)),"\n";exit;
++}
++if (getenv('R61_MODE') === 'stock') {
++    Db::startTrans();
++    try {
++        $f=fixture(0);(new CombinationGroupManagementServices())->complete($f['pinkId'],1);
++        $g=R61Gateway::local();$g->original=$f['channel'];
++        $r=(new CombinationRefundServices($g))->refundOrder($f['oid'],'本地库存回退诊断',1);
++        echo json_encode($r,JSON_UNESCAPED_UNICODE),"\n";
++        echo json_encode(Db::name('store_order_refund')->where('store_order_id',$f['oid'])->value('cart_info'),JSON_UNESCAPED_UNICODE),"\n";
++        echo json_encode(Db::name('store_product_attr_value')->where('product_id',$f['cid'])->where('type',3)->select()->toArray(),JSON_UNESCAPED_UNICODE),"\n";
++    } finally {Db::rollback();}
++    exit;
++}
++if (getenv('R61_MODE') === 'balance') {
++    Db::startTrans();
++    try {
++        $f=fixture(6,2,'yue');
++        $r=(new CombinationRefundServices())->refundOrder($f['oid'],'本地余额退款诊断',1);
++        if($r['state']!=='success') {
++            try {app()->make(app\services\order\StoreOrderRefundDomainServices::class)->refundConfirmedCombination($f['oid'],['operator_id'=>1,'operator_type'=>'admin','request_token'=>'group:'.$f['oid']]);}
++            catch(\Throwable $e){echo get_class($e).' '.$e->getMessage()."\n".$e->getTraceAsString()."\n";}
++        }
++        echo json_encode($r,JSON_UNESCAPED_UNICODE),"\n";
++    } finally {Db::rollback();}
++    exit;
++}
++if (getenv('R61_MODE') === 'seed-ui') {
++    Db::startTrans();
++    try {
++        $leader=fixture(6,3,'yue');$member=fixture(6,3,'yue');
++        joinFixture($leader,$member);
++        $card=fixture(5,2,'yue');$product=fixture(0,2,'yue');
++        $refunded=fixture(6,2);(new CombinationGroupManagementServices())->complete($refunded['pinkId'],1);
++        $fake=R61Gateway::local();$fake->original=$refunded['channel'];
++        $refund=(new CombinationRefundServices($fake))->refundOrder($refunded['oid'],'R61本地模拟富友退款展示验收',1);
++        if($refund['state']!=='success')throw new RuntimeException('UI refund fixture did not close');
++        $manifest=['localOnly'=>true,'leader'=>$leader,'member'=>$member,'card'=>$card,'product'=>$product,'refunded'=>$refunded];
++        Db::commit();echo json_encode($manifest,JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT)."\n";
++    } catch (\Throwable $error) {Db::rollback();throw $error;}
++    exit;
++}
++Db::startTrans();
++try {
++    $fulfill=new CombinationFulfillmentServices();$groups=new CombinationGroupManagementServices();
++    foreach([0,5,6] as $type){
++        $f=fixture($type,3);$blocked=false;try{$fulfill->assertUsable($f['oid'],true);}catch(think\exception\ValidateException $e){$blocked=true;}
++        check($blocked,'type '.$type.' cannot use paid rights before group completion');
++        (new app\jobs\order\OrderPayHandelJob())->doJob((array)Db::name('store_order')->where('id',$f['oid'])->find());
++        check(!Db::name('user_card_holder')->where('oid',$f['oid'])->count(),'payment job does not issue early');
++        $result=$groups->complete($f['pinkId'],1);check($result['virtual_count']===2,'type '.$type.' fills exactly missing virtual seats');
++        $fulfill->assertUsable($f['oid'],true);
++        $groups->complete($f['pinkId'],1);
++        check((int)Db::name('store_pink')->where('k_id',$f['pinkId'])->where('is_virtual',1)->count()===2,'completion replay adds no fake members');
++        check((int)Db::name('combination_order_fulfillment')->where('order_id',$f['oid'])->where('state','issued')->count()===1,'rights receipt issued once');
++        if($type===5)check((int)Db::name('user_card_holder')->where('oid',$f['oid'])->where('is_del',0)->count()===1,'one usable card holder after completion');
++        check(!Db::name('store_reservation_order')->where('oid',$f['oid'])->count()&&!Db::name('store_order_writeoff')->where('oid',$f['oid'])->count(),'group purchase creates no appointment or writeoff');
++        check((int)Db::name('store_order_cart_info')->where('oid',$f['oid'])->min('write_surplus_times')===1,'all purchased uses remain unconsumed');
++        $gateway=R61Gateway::local();$gateway->original=$f['channel'];$refund=new CombinationRefundServices($gateway);
++        $r=$refund->refundOrder($f['oid'],'本地整单退款验收',1);
++        if($r['state']!=='success')echo 'DEBUG '.json_encode($r).' terminal='.json_encode(Db::name('store_order_terminal_operation')->where('store_order_id',$f['oid'])->find(),JSON_UNESCAPED_UNICODE)."\n";
++        check($r['state']==='success','type '.$type.' signed channel success closes real terminal refund');
++        check((int)Db::name('store_combination')->where('id',$f['cid'])->value('stock')===11,'type '.$type.' refunds its original activity quota');
++        (new app\jobs\order\OrderPayHandelJob())->doJob((array)Db::name('store_order')->where('id',$f['oid'])->find());
++        check(!(int)Db::name('user_card_holder')->where('oid',$f['oid'])->where('is_del',0)->count(),'late payment job cannot resurrect refunded rights');
++        check($r['channel_refund_id']==='LOCAL_REFUND_61'&&$r['fuyou_order_no']===$f['channel']&&$r['fuyou_transaction_id']==='LOCAL_PAYMENT_61','original FuYou order/payment/refund references persisted');
++        check((int)Db::name('store_order_cart_info')->where('oid',$f['oid'])->sum('write_surplus_times')===0,'refund revokes all unused rights');
++        $before=count($gateway->requests);$refund->refundOrder($f['oid'],'重放',1);check(count($gateway->requests)===$before,'refund replay has no channel request');
++        check((int)Db::name('store_pink')->where('id',$f['pinkId'])->value('status')===2,'refund leaves completed group completed');
++    }
++    foreach(['USERPAYING','PAYERROR','forged','timeout','wrongAmount'] as $scenario){
++        $f=fixture(6);$gateway=R61Gateway::local();$gateway->original=$f['channel'];
++        if($scenario==='forged')$gateway->badSign=true;elseif($scenario==='timeout')$gateway->timeout=true;elseif($scenario==='wrongAmount')$gateway->wrongAmount=true;else $gateway->status=$scenario;
++        $service=new CombinationRefundServices($gateway);$r=$service->refundOrder($f['oid'],'异常验收',1);
++        check($r['state']===($scenario==='PAYERROR'?'failed':'pending'),'channel '.$scenario.' is not false success');
++        check((int)Db::name('store_order')->where('id',$f['oid'])->value('refund_status')===($scenario==='PAYERROR'?0:1),'only signed definitive failure releases rights');
++        if($scenario!=='PAYERROR'){
++            $before=count(array_filter($gateway->requests,static function($r){return strpos($r['url'],'commonRefund')!==false;}));
++            $service->refundOrder($f['oid'],'重复查询',1,false);
++            check(count(array_filter($gateway->requests,static function($r){return strpos($r['url'],'commonRefund')!==false;}))===$before,'pending/unknown retry queries only');
++        }
++    }
++    $f=fixture(6);$gateway=R61Gateway::local();$gateway->original=$f['channel'];$service=new CombinationRefundServices($gateway);
++    $blocked=false;try{$service->refundOrder($f['oid'],'踢团长',1,true,$f['pinkId']);}catch(think\exception\ValidateException $e){$blocked=true;}
++    check($blocked&&count($gateway->requests)===0,'leader cannot be kicked server-side');
++    Db::name('store_order_cart_info')->where('oid',$f['oid'])->update(['write_surplus_times'=>0]);
++    $blocked=false;try{$service->refundOrder($f['oid'],'使用后退款',1);}catch(think\exception\ValidateException $e){$blocked=true;}
++    check($blocked&&count($gateway->requests)===0,'used rights rejected before channel');
++    $partial=fixture(6);$gateway=R61Gateway::local();$gateway->original=$partial['channel'];
++    $domain=app()->make(app\services\order\StoreOrderRefundDomainServices::class);
++    $app->instance(app\services\order\StoreOrderRefundDomainServices::class,new class extends app\services\order\StoreOrderRefundDomainServices {
++        public function refundConfirmedCombination(int $orderId,array $input):array{$input['inject_fail_after']='inventory';return parent::refundConfirmedCombination($orderId,$input);}
++    });
++    $service=new CombinationRefundServices($gateway);$r=$service->refundOrder($partial['oid'],'本地渠道成功后收口故障验收',1);
++    check($r['state']==='confirmed','local failure retains signed channel confirmation');
++    $before=count($gateway->requests);$app->instance(app\services\order\StoreOrderRefundDomainServices::class,$domain);
++    $r=$service->refundOrder($partial['oid'],'恢复本地收口',1,false);
++    check($r['state']==='success'&&count($gateway->requests)===$before,'local closing recovery never reapplies or requeries confirmed channel');
++    // Genuine payment callbacks create one root and naturally complete with a second real member.
++    $natural=fixture(6,2,'yue');
++    Db::name('store_pink')->where('id',$natural['pinkId'])->delete();
++    Db::name('combination_group_origin')->where('group_id',$natural['pinkId'])->delete();
++    Db::name('store_order')->where('id',$natural['oid'])->update(['pink_id'=>0]);
++    $pinkService=app()->make(StorePinkServices::class);
++    $paid=(array)Db::name('store_order')->where('id',$natural['oid'])->find();$paid['cartInfo']=[$natural['cart']];
++    check($pinkService->createPink($paid)===true,'paid callback creates real group');
++    $rootId=(int)Db::name('store_pink')->where('order_id_key',$natural['oid'])->value('id');
++    $pinkService->createPink($paid);
++    check((int)Db::name('store_pink')->where('order_id_key',$natural['oid'])->count()===1,'payment callback replay creates no duplicate participant');
++    $join=fixture(6,2,'yue');Db::name('store_pink')->where('id',$join['pinkId'])->delete();
++    Db::name('combination_group_origin')->where('group_id',$join['pinkId'])->delete();
++    $natural['pinkId']=$rootId;joinFixture($natural,$join);
++    $paid=(array)Db::name('store_order')->where('id',$join['oid'])->find();
++    $join['cart']['activity_id']=$natural['cid'];$paid['cartInfo']=[$join['cart']];
++    $pinkService->createPink($paid);
++    check((int)Db::name('store_pink')->where('id',$rootId)->value('status')===2,'two paid real members naturally complete the group');
++    check((int)Db::name('combination_order_fulfillment')->whereIn('order_id',[$natural['oid'],$join['oid']])->where('state','issued')->count()===2,'natural completion issues both real members exactly once');
++    // Two real participants: kick waits for signed refund success, then only that participant leaves.
++    $leader=fixture(6,3);$member=fixture(6,3);
++    joinFixture($leader,$member);
++    $gateway=R61Gateway::local();$gateway->original=$member['channel'];$gateway->status='USERPAYING';
++    $service=new CombinationRefundServices($gateway);
++    $kick=$service->refundOrder($member['oid'],'本地踢人验收',1,true,$leader['pinkId']);
++    check($kick['state']==='pending'&&!(int)Db::name('store_pink')->where('id',$member['pinkId'])->value('is_refund'),'kick pending keeps participant trace until money succeeds');
++    $blocked=false;try{$groups->complete($leader['pinkId'],1);}catch(think\exception\ValidateException $e){$blocked=true;}
++    check($blocked,'force completion cannot race an in-flight kick refund');
++    $gateway->status='SUCCESS';$kick=$service->refundOrder($member['oid'],'查询踢人退款',1,false);
++    check($kick['state']==='success'&&(int)Db::name('store_pink')->where('id',$member['pinkId'])->value('is_refund')>0,'successful kick refund removes only its participant');
++    check((int)Db::name('store_pink')->where('id',$leader['pinkId'])->value('status')===1,'kick does not fail the whole group');
++    $completion=$groups->complete($leader['pinkId'],1);check($completion['virtual_count']===2,'kicked seat is correctly replaced on force completion');
++    $export=(new app\services\activity\combination\CombinationRecordServices())->export($leader['pinkId']);
++    check(count($export['header'])===16&&$export['header']===['门店名称','会员编号','会员姓名','手机号码','拼团编号','拼团名称','支付金额','拼团总数','参加人数','状态','是否团长','支付时间','过期时间','订单号','序号','支付状态'],'export matches all 16 template columns in order');
++    check(count($export['export'])===2,'export includes refunded participant and excludes virtual placeholders');
++    check($export['export'][1]['payment_status']==='已退款'&&$export['export'][0]['expires_at']!=='','export preserves refund state and original expiry after completion');
++    $balance=fixture(6,2,'yue');$moneyBefore=(string)Db::name('user')->where('uid',$balance['uid'])->value('now_money');
++    $balanceRefund=(new CombinationRefundServices())->refundOrder($balance['oid'],'本地余额原路退款',1);
++    if($balanceRefund['state']!=='success')echo 'BALANCE DEBUG '.json_encode($balanceRefund).' terminal='.json_encode(Db::name('store_order_terminal_operation')->where('store_order_id',$balance['oid'])->find(),JSON_UNESCAPED_UNICODE)."\n";
++    check($balanceRefund['state']==='success'&&bcsub((string)Db::name('user')->where('uid',$balance['uid'])->value('now_money'),$moneyBefore,2)==='100.00','balance original payment credits once through real terminal ledger');
++    $physical=fixture(0);$groups->complete($physical['pinkId'],1);$fulfill->claimDelivery($physical['oid']);
++    $blocked=false;try{(new CombinationRefundServices(R61Gateway::local()))->refundOrder($physical['oid'],'发货并发退款',1);}catch(think\exception\ValidateException $e){$blocked=true;}
++    check($blocked,'claimed delivery excludes a simultaneous refund before carrier result');
++    echo "R61 ACCEPTANCE COMPLETE; all fabricated rows rolled back; no real provider requests.\n";
++} finally { Db::rollback(); }
+diff --git a/前端代码/admin/src/api/marketing.js b/前端代码/admin/src/api/marketing.js
+index 6831b452..68627fd8 100644
+--- a/前端代码/admin/src/api/marketing.js
++++ b/前端代码/admin/src/api/marketing.js
+@@ -9,6 +9,20 @@
+ // +----------------------------------------------------------------------
+ import request from '@/plugins/request';
+ 
++export function combinationGroupExportApi(id) {
++  return request({ url: `marketing/combination/order_pink/${id}/export`, method: 'get' });
++}
++
++// Group management shares the existing record access.
++export function combinationCompleteApi(id) {
++  return request({ url: `marketing/combination/order_pink/${id}/complete`, method: 'post' });
++}
++
++// No independent refund permission; the authenticated group record owns this action.
++export function combinationParticipantRefundApi(id, data) {
++  return request({ url: `marketing/combination/order_pink/${id}/refund`, method: 'post', data });
++}
++
+ /**
+  * @description 优惠券制作--列表
+  * @param {Object} param params {Object} 传值参数
+diff --git a/前端代码/admin/src/components/goodsList/index.vue b/前端代码/admin/src/components/goodsList/index.vue
+index 250c7488..e6a181a1 100644
+--- a/前端代码/admin/src/components/goodsList/index.vue
++++ b/前端代码/admin/src/components/goodsList/index.vue
+@@ -66,14 +66,14 @@
+           </div>
+         </viewer>
+       </template>
+-	  <template slot-scope="{ row }" slot="product_type" v-if="row.hasOwnProperty('product_type')">
+-	  	<span v-if="row.product_type==0">产品</span>
+-	  	<span v-if="row.product_type==1">卡密商品</span>
+-	  	<span v-if="row.product_type==3">虚拟商品</span>
++    <template slot-scope="{ row }" slot="product_type" v-if="row.hasOwnProperty('product_type')">
++      <span v-if="row.product_type==0">产品</span>
++      <span v-if="row.product_type==1">卡密商品</span>
++      <span v-if="row.product_type==3">虚拟商品</span>
+ 		<span v-if="row.product_type==4">次卡商品</span>
+ 		<span v-if="row.product_type==5">卡项</span>
+-		<span v-if="row.product_type==6">预约商品</span>
+-	  </template>
++		<span v-if="row.product_type==6">{{ chooseType === 3 ? '项目' : '预约商品' }}</span>
++    </template>
+     </Table>
+     <div class="acea-row row-right page">
+       <Page
+@@ -104,12 +104,12 @@ import { liveGoods } from '@/api/live';
+ export default {
+   name: 'index',
+   props: {
+-    // Only DIY opts in. Other picker consumers keep their existing contract.
++    // Explicit consumers (DIY/group purchase) narrow catalog types; other pickers keep their contract.
+     catalogTypes: { type: Array, default: null },
+     goodsType: {
+-	  type: Number,
+-	  default: 0
+-	  },
++      type: Number,
++      default: 0
++    },
+     storeType: {
+       type: Number,
+       default: 0
+@@ -182,7 +182,7 @@ export default {
+         store_name: '',
+         is_new: this.is_new,
+         choose_type: this.chooseType,
+-		    store_label_id: ''
++        store_label_id: ''
+         // is_integral: 1,
+       },
+       total: 0,
+@@ -214,9 +214,9 @@ export default {
+           minWidth: 200
+         },
+         {
+-		  title: '商品类型',
+-		  slot: 'product_type',
+-		  minWidth: 100
++          title: '商品类型',
++          slot: 'product_type',
++          minWidth: 100
+         },
+         {
+           title: '商品分类',
+diff --git a/前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue b/前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue
+index eb7034bc..4e6f5049 100644
+--- a/前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue
++++ b/前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue
+@@ -61,6 +61,8 @@
+                 </template>
+                 <template slot-scope="{ row }" slot="action">
+                     <a @click="Info(row)" >查看详情</a>
++                    <a style="margin-left:12px" @click="exportGroup(row)">导出</a>
++                    <a v-if="row.status === 1" style="margin-left:12px" @click="completeGroup(row)">立即成团</a>
+                 </template>
+             </Table>
+             <div class="acea-row row-right page">
+@@ -70,7 +72,7 @@
+         </Card>
+ 
+         <!-- 详情模态框-->
+-        <Modal v-model="modals" class="tableBox"  scrollable  footer-hide closable title="查看详情" :mask-closable="false"  width="750">
++        <Modal v-model="modals" class="tableBox"  scrollable  footer-hide closable title="查看详情" :mask-closable="false"  width="1150">
+             <Table ref="selection" :columns="columns2" :data="tabList3" :loading="loading2"
+                    no-data-text="暂无数据" highlight-row max-height="600" size="small"
+                    no-filtered-data-text="暂无筛选结果">
+@@ -86,8 +88,13 @@
+                     </viewer>
+                 </template>
+                 <template slot-scope="{ row, index }" slot="action">
+-                    <Tag color="volcano" v-show="row.is_refund != 0">已退款</Tag>
+-                    <Tag color="cyan" v-show="row.is_refund === 0">未退款</Tag>
++                    <div>{{ row.refund_message || (row.is_refund ? '已退款' : '未退款') }}</div>
++                    <!-- Amount comes from actual paid money. A pending request can only query its original receipt. -->
++                    <Button v-if="row.refund_action" size="small" :loading="refundBusy === row.order_id_key"
++                        @click="refundParticipant(row)">{{ row.refund_action === 'query' ? '查询退款结果' : (row.refund_action === 'retry' ? '重试退款' : '退款') }}</Button>
++                    <Button v-if="rows.status === 1 && row.k_id > 0 && !row.is_virtual && !row.is_refund && row.refund_action === 'refund'"
++                        size="small" style="margin-left:6px" @click="refundParticipant(row, true)">踢出</Button>
++                    <div v-else-if="row.refund_block_reason" style="font-size:12px;color:#999">{{ row.refund_block_reason }}</div>
+                 </template>
+             </Table>
+         </Modal>
+@@ -95,10 +102,12 @@
+ </template>
+ 
+ <script>
++    import formatBusinessMoney from '@/utils/formatBusinessMoney.js';
++    import exportExcel from '@/utils/newToExcel.js';
+     import cardsData from '@/components/cards/cards';
+     import { mapState } from 'vuex';
+     import { formatDate } from '@/utils/validate';
+-    import { combineListApi, orderPinkListApi, statisticsApi } from '@/api/marketing';
++    import { combineListApi, orderPinkListApi, statisticsApi, combinationParticipantRefundApi, combinationCompleteApi, combinationGroupExportApi } from '@/api/marketing';
+     import timeOptions from "@/utils/timeOptions";
+     export default {
+         name: 'combinalist',
+@@ -114,6 +123,7 @@
+         data () {
+             return {
+                 cardLists: [],
++                refundBusy: 0,
+                 modals: false,
+                 options: timeOptions,
+                 grid: {
+@@ -204,11 +214,18 @@
+                     },
+                     {
+                         title: '金额',
+-                        key: 'price'
++                        render: (h, params) => h('span', formatBusinessMoney(params.row.paid_amount))
+                     },
+                     {
+-                        title: '订单状态',
+-                        slot: 'action'
++                        title: '退款状态及操作',
++                        slot: 'action', minWidth: 180
++                    },
++                    { title: '富友订单号', key: 'fuyou_order_no', minWidth: 185 },
++                    { title: '富友支付交易号', key: 'fuyou_transaction_id', minWidth: 200 },
++                    { title: '富友退款流水号', key: 'channel_refund_id', minWidth: 200 },
++                    { title: '富友退款追踪号', key: 'fuyou_refund_trace_no', minWidth: 180 },
++                    { title: '商户退款单号', key: 'refund_no', minWidth: 200
++
+                     }
+                 ],
+                 rows: {}
+@@ -230,6 +247,44 @@
+             this.getStatistics();
+         },
+         methods: {
++            // Export rows and the exact template column order both come from the server, never current-page data.
++            exportGroup(row) {
++                return combinationGroupExportApi(row.id).then(res => {
++                    const data = res.data;
++                    exportExcel(data.header, data.filekey, data.filename, data.export);
++                }).catch(error => this.$Message.error(error.msg || '导出失败'));
++            },
++            // Completion fills only missing seats and leaves real participants' paid orders untouched.
++            completeGroup(row) {
++                this.$Modal.confirm({ title: '立即成团', content: '将自动补齐缺少的虚拟名额并使拼团成功，是否继续？',
++                    onOk: () => combinationCompleteApi(row.id).then(res => {
++                        this.$Message.success(res.data.message); this.getList(); this.getStatistics();
++                    }).catch(error => this.$Message.error(error.msg || '成团失败')) });
++            },
++            // Query/retry states are server-derived; the browser never supplies a refund amount or provider identity.
++            refundParticipant(row, kick = false) {
++                const run = (reason) => {
++                    this.refundBusy = row.order_id_key;
++                    return combinationParticipantRefundApi(this.rows.id, {
++                        order_id: row.order_id_key, reason,
++                        retry: row.refund_action !== 'query', action: kick ? 'kick' : 'refund'
++                    }).then(res => {
++                        this.$Message.info(res.data.message);
++                        this.getList(); this.getStatistics();
++                        this.Info({ ...this.rows, id: res.data.group_id || this.rows.id });
++                    }).catch(error => this.$Message.error(error.msg || '退款处理失败'))
++                      .finally(() => { this.refundBusy = 0; });
++                };
++                if (row.refund_action === 'query') return run(row.refund_reason || '查询拼团退款');
++                let reason = '';
++                this.$Modal.confirm({
++                    title: kick ? '确认退款并踢出团员' : '确认整笔原路退款',
++                    render: h => h('div', [h('p', `订单：${row.order_id}，实际退款：¥${formatBusinessMoney(row.paid_amount)}。退款成功后收回全部未使用权益。`),
++                        h('Input', { props: { type: 'textarea', placeholder: '请输入退款原因', maxlength: 300 },
++                            on: { input: value => { reason = value; } } })]),
++                    onOk: () => { if (!reason.trim()) this.$Message.warning('请填写退款原因'); else return run(reason.trim()); }
++                });
++            },
+             // 拼团统计
+             getStatistics () {
+                 statisticsApi().then(async res => {
+diff --git a/前端代码/admin/src/pages/marketing/storeCombination/create.vue b/前端代码/admin/src/pages/marketing/storeCombination/create.vue
+index 48e2c5f5..b5d66b67 100644
+--- a/前端代码/admin/src/pages/marketing/storeCombination/create.vue
++++ b/前端代码/admin/src/pages/marketing/storeCombination/create.vue
+@@ -294,7 +294,10 @@
+         <!-- 选择商品-->
+         <Modal v-model="modals" title="商品列表" footerHide class="paymentFooter" scrollable width="900"
+             @on-cancel="cancel">
+-            <goods-list ref="goodslist"  :chooseType="3" v-if="modals" @getProductId="getProductId"></goods-list>
++            <RadioGroup v-model="combinationCatalogType" type="button" style="margin-bottom: 16px">
++              <Radio :label="-1">全部</Radio><Radio :label="0">产品</Radio><Radio :label="5">卡项</Radio><Radio :label="6">项目</Radio>
++            </RadioGroup>
++            <goods-list :key="combinationCatalogType" :catalogTypes="combinationCatalogType === -1 ? [0,5,6] : [combinationCatalogType]" ref="goodslist" :chooseType="3" v-if="modals" @getProductId="getProductId"></goods-list>
+         </Modal>
+         <!-- 上传图片-->
+         <Modal v-model="modalPic" width="960px" scrollable footer-hide closable title='上传商品图' :mask-closable="false"
+@@ -320,6 +323,8 @@ export default {
+     components: { goodsList, uploadPictures, WangEditor, freightTemplate },
+     data() {
+         return {
++                // Only narrows this picker; product/SKU identity is still verified by the server.
++                combinationCatalogType: -1,
+           roterPre: Setting.roterPre,
+             template: false,
+             submitOpen: false,
+diff --git a/前端代码/admin/src/utils/formatBusinessMoney.js b/前端代码/admin/src/utils/formatBusinessMoney.js
+new file mode 100644
+index 00000000..8aacd729
+--- /dev/null
++++ b/前端代码/admin/src/utils/formatBusinessMoney.js
+@@ -0,0 +1,7 @@
++// Display only: saved money and exported source precision must never be rounded by this helper.
++const wholeYuan = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
++
++export default function formatBusinessMoney(value) {
++  const amount = Number(value);
++  return Number.isFinite(amount) ? wholeYuan.format(amount) : '—';
++}
+diff --git a/后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php b/后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php
+index cc2976c0..029b9531 100644
+--- a/后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php
++++ b/后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php
+@@ -231,6 +231,33 @@ class StoreCombination extends AuthController
+         return $this->success($list);
+     }
+ 
++    /** Same group identity and participant authority as the visible detail; no page-sized truncation. */
++    public function exportGroup($id)
++    {
++        return $this->success((new \app\services\activity\combination\CombinationRecordServices())->export((int)$id));
++    }
++
++    /** Virtual seats are management evidence, never paid participants. */
++    public function completeGroup($id)
++    {
++        return $this->success((new \app\services\activity\combination\CombinationGroupManagementServices())->complete(
++            (int)$id, (int)$this->request->adminId()));
++    }
++
++    /** Authenticated admin action; order membership and amounts are reloaded server-side. */
++    public function refundParticipant($id)
++    {
++        $orderId = (int)$this->request->post('order_id', 0);
++        $pink = \think\facade\Db::name('store_pink')->where('order_id_key', $orderId)->find();
++        if (!$pink || ((int)$pink['id'] !== (int)$id && (int)$pink['k_id'] !== (int)$id))
++            throw new \think\exception\ValidateException('该订单不属于当前拼团');
++        $reason = (string)$this->request->post('reason', '');
++        $result = (new \app\services\activity\combination\CombinationRefundServices())->refundOrder(
++            $orderId, $reason, (int)$this->request->adminId(), (bool)$this->request->post('retry', false),
++            $this->request->post('action', '') === 'kick' ? (int)$id : 0);
++        return $this->success($result);
++    }
++
+     /**
+      * 拼团人列表
+      * @return mixed
+@@ -240,6 +267,15 @@ class StoreCombination extends AuthController
+         /** @var StorePinkServices $storePinkServices */
+         $storePinkServices = app()->make(StorePinkServices::class);
+         $list = $storePinkServices->getPinkMember($id);
++        // The existing group-record entry owns these actions; no additional refund permission is introduced.
++        foreach ($list as &$participant) {
++            if ((int)$participant['is_virtual'] === 1) {
++                $participant['refund_message'] = '虚拟名额';
++                continue;
++            }
++            $participant = array_merge($participant, (new \app\services\activity\combination\CombinationRefundServices())->describe((int)$participant['order_id_key']));
++        }
++        unset($participant);
+         return $this->success(compact('list'));
+     }
+ 
+diff --git a/后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php b/后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php
+new file mode 100644
+index 00000000..9abbfbf3
+--- /dev/null
++++ b/后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php
+@@ -0,0 +1,35 @@
++<?php
++declare(strict_types=1);
++namespace app\jobs\activity\pink;
++
++use app\services\activity\combination\CombinationFulfillmentServices;
++use app\services\activity\combination\CombinationRefundServices;
++use mohe\basic\BaseJobs;
++use mohe\traits\QueueTrait;
++use think\facade\Db;
++use think\facade\Log;
++
++/** Existing periodic group task rechecks unknown refunds and repairs missed completion issuance. */
++class CombinationRecoveryJob extends BaseJobs
++{
++    use QueueTrait;
++    public function doJob(): bool
++    {
++        // Oldest-first bounded work prevents a permanently pending receipt starving the next batch.
++        $rows = Db::name('combination_order_refund')->whereIn('state', ['sending','pending','confirmed'])
++            ->where('lease_until', '<=', time())->order('updated_at')->limit(20)->select()->toArray();
++        foreach ($rows as $row) {
++            try { (new CombinationRefundServices())->refundOrder((int)$row['order_id'], (string)$row['reason'], (int)$row['operator_id'], false); }
++            catch (\Throwable $error) { Log::warning('拼团退款恢复待处理 oid=' . (int)$row['order_id']); }
++        }
++        $ids = Db::name('combination_order_fulfillment')->alias('f')
++            ->join('store_pink p', 'p.order_id_key=f.order_id')
++            ->where('f.state', 'pending')->where('p.status', 2)->where('p.is_refund', 0)
++            ->order('f.order_id')->limit(20)->column('f.order_id');
++        foreach ($ids as $id) {
++            try { (new CombinationFulfillmentServices())->issue((int)$id); }
++            catch (\Throwable $error) { Log::warning('拼团权益恢复待处理 oid=' . (int)$id); }
++        }
++        return true;
++    }
++}
+diff --git a/后端代码/app/jobs/order/OrderPayHandelJob.php b/后端代码/app/jobs/order/OrderPayHandelJob.php
+index 2e2ff013..7d6a181a 100644
+--- a/后端代码/app/jobs/order/OrderPayHandelJob.php
++++ b/后端代码/app/jobs/order/OrderPayHandelJob.php
+@@ -36,6 +36,22 @@ class OrderPayHandelJob extends BaseJobs
+      * @return bool
+      */
+     public function doJob($orderInfo)
++    {
++        $id = (int)($orderInfo['id'] ?? 0);
++        if ($id && (new \app\services\activity\combination\CombinationFulfillmentServices())->managed($id)) {
++            return \think\facade\Db::transaction(function () use ($id) {
++                $fresh = \think\facade\Db::name('store_order')->where('id', $id)->lock(true)->find();
++                $receipt = \think\facade\Db::name('combination_order_fulfillment')->where('order_id', $id)->find();
++                if (!$fresh || (int)$fresh['refund_status'] !== 0 || (int)$fresh['terminal_action'] !== 0
++                    || !$receipt || $receipt['state'] !== 'pending') return true;
++                return $this->handlePaidOrder($fresh);
++            });
++        }
++        return $this->handlePaidOrder($orderInfo);
++    }
++
++    /** Actual issuance is shared; group callers above hold the refund/consumption order lock. */
++    private function handlePaidOrder($orderInfo)
+     {
+         if (!$orderInfo) {
+             return true;
+@@ -43,6 +59,9 @@ class OrderPayHandelJob extends BaseJobs
+         if (!empty($orderInfo['is_debt_repay'])) {
+             return true;
+         }
++        // Queued payment jobs may arrive before the group completes. Issuance uses this same order lock.
++        if ((new \app\services\activity\combination\CombinationFulfillmentServices())->managed((int)$orderInfo['id'])
++            && !(int)\think\facade\Db::name('store_pink')->where('order_id_key', $orderInfo['id'])->where('status', 2)->where('is_refund', 0)->count()) return true;
+         //待发货状态
+         if ($orderInfo['status'] != 0) {
+             return true;
+diff --git a/后端代码/app/listener/order/Pay.php b/后端代码/app/listener/order/Pay.php
+index 1481e0ca..9195ad7d 100644
+--- a/后端代码/app/listener/order/Pay.php
++++ b/后端代码/app/listener/order/Pay.php
+@@ -72,8 +72,10 @@ class Pay implements ListenerInterface
+         }
+         //写入订单支付记录
+         OrderStatusJob::dispatch([$orderInfo['id'], 'pay_success', ['change_message' => '用户付款成功', 'change_manager_type' => 'user']]);
+-        // 预约商品支付成功后创建预约单并扣次
+-        if (empty($orderInfo['refund_status'])) {
++        // Group purchases are rights, not an implicit service appointment. Completion owns issuance.
++        $groupManaged = (new \app\services\activity\combination\CombinationFulfillmentServices())->managed((int)$orderInfo['id']);
++        // 其他预约商品沿用原支付后预约逻辑。
++        if (!$groupManaged && empty($orderInfo['refund_status'])) {
+             try {
+                 /** @var StoreReservationOrderServices $reservationOrderService */
+                 $reservationOrderService = app()->make(StoreReservationOrderServices::class);
+@@ -90,7 +92,7 @@ class Pay implements ListenerInterface
+         $productType = array_column($cartInfo, 'product_type');
+         if (!empty($orderInfo['is_debt_repay'])) {
+             // 补交订单不生成卡包/核销数据
+-        } elseif (count($productType) == 1) {
++        } elseif (!$groupManaged && count($productType) == 1) {
+             //卡密、虚拟、次卡、卡项商品订单处理
+             OrderPayHandelJob::dispatch([$orderInfo]);
+         }
+diff --git a/后端代码/app/services/activity/combination/CombinationFulfillmentServices.php b/后端代码/app/services/activity/combination/CombinationFulfillmentServices.php
+new file mode 100644
+index 00000000..35c85060
+--- /dev/null
++++ b/后端代码/app/services/activity/combination/CombinationFulfillmentServices.php
+@@ -0,0 +1,79 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\activity\combination;
++
++use app\jobs\order\OrderPayHandelJob;
++use app\services\order\StoreOrderCreateServices;
++use think\exception\ValidateException;
++use think\facade\Db;
++
++/** The receipt gates use; original order/cart snapshots remain the sole rights authority. */
++class CombinationFulfillmentServices
++{
++    /** Called in order creation's transaction, never inferred later from editable activities. */
++    public function register(int $orderId): void
++    {
++        Db::name('combination_order_fulfillment')->insert(['order_id' => $orderId,
++            'state' => 'pending', 'created_at' => time(), 'issued_at' => 0]);
++    }
++
++    public function managed(int $orderId): bool
++    {
++        return (bool)Db::name('combination_order_fulfillment')->where('order_id', $orderId)->find();
++    }
++
++    /** Order lock serializes issue, refund and consumption; a replay never reactivates a used card. */
++    public function issue(int $orderId): void
++    {
++        Db::transaction(function () use ($orderId) {
++            $order = Db::name('store_order')->where('id', $orderId)->lock(true)->find();
++            $receipt = Db::name('combination_order_fulfillment')->where('order_id', $orderId)->lock(true)->find();
++            if (!$receipt || $receipt['state'] !== 'pending') return;
++            if (!$order || !(int)$order['paid'] || (int)$order['refund_status'] !== 0
++                || (int)$order['terminal_action'] !== 0) return;
++            $pink = Db::name('store_pink')->where('order_id_key', $orderId)->find();
++            if (!$pink || (int)$pink['status'] !== 2 || (int)$pink['is_refund'] !== 0) return;
++            $type = (int)$order['product_type'];
++            if ($type === 5) {
++                // Synchronous issuance keeps holder creation and receipt in one transaction.
++                // The job has its own retry-safe holder allocation; no queue gap at completion.
++                (new OrderPayHandelJob())->doJob($order);
++                if (!Db::name('user_card_holder')->where('oid', $orderId)->find())
++                    throw new ValidateException('成团卡权益发放失败，请重试');
++                app()->make(StoreOrderCreateServices::class)->changeOrder(5, $orderId);
++            } elseif ($type === 6) {
++                // Only activate the purchased unconsumed project; do not create a reservation or deduct uses.
++                app()->make(StoreOrderCreateServices::class)->changeOrder(6, $orderId);
++            }
++            Db::name('combination_order_fulfillment')->where('order_id', $orderId)
++                ->update(['state' => 'issued', 'issued_at' => time()]);
++        });
++    }
++
++    /** Claim physical fulfillment before calling a carrier; an uncertain delivery must not race a cash refund. */
++    public function claimDelivery(int $orderId): bool
++    {
++        return Db::transaction(function () use ($orderId) {
++            $order = Db::name('store_order')->where('id', $orderId)->lock(true)->find();
++            $receipt = Db::name('combination_order_fulfillment')->where('order_id', $orderId)->lock(true)->find();
++            if (!$receipt) return false;
++            $this->assertUsable($orderId);
++            if ((int)$order['product_type'] !== 0 || (int)$order['status'] !== 0) throw new ValidateException('该拼团订单不能重复发货');
++            Db::name('combination_order_fulfillment')->where('order_id', $orderId)->update(['state' => 'delivering']);
++            return true;
++        });
++    }
++
++    /** Defense at final writers, not just disabled UI. Caller may request an order row lock. */
++    public function assertUsable(int $orderId, bool $lock = false): void
++    {
++        $order = Db::name('store_order')->where('id', $orderId)->lock($lock)->find();
++        $receipt = Db::name('combination_order_fulfillment')->where('order_id', $orderId)->find();
++        if (!$receipt) return;
++        if ($receipt['state'] !== 'issued' || !$order || (int)$order['refund_status'] !== 0
++            || (int)$order['terminal_action'] !== 0) {
++            throw new ValidateException('拼团尚未完成或订单正在退款，暂不可使用');
++        }
++    }
++}
+diff --git a/后端代码/app/services/activity/combination/CombinationGroupManagementServices.php b/后端代码/app/services/activity/combination/CombinationGroupManagementServices.php
+new file mode 100644
+index 00000000..99922b3a
+--- /dev/null
++++ b/后端代码/app/services/activity/combination/CombinationGroupManagementServices.php
+@@ -0,0 +1,72 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\activity\combination;
++
++use think\exception\ValidateException;
++use think\facade\Db;
++
++/** Management changes group membership only; fake seats never acquire orders, money or rights. */
++class CombinationGroupManagementServices
++{
++    /** One root lock and unique audit make button replay and automatic virtual completion idempotent. */
++    public function complete(int $groupId, int $operatorId, bool $automatic = false): array
++    {
++        // InnoDB can choose either concurrent completion/refund as a deadlock victim.
++        // Retry only a rolled-back deadlock; root/audit/issuance guards keep replay idempotent.
++        for ($attempt = 0; ; $attempt++) {
++            try {
++                return $this->completeOnce($groupId, $operatorId, $automatic);
++            } catch (\Throwable $error) {
++                if ($attempt >= 2 || strpos($error->getMessage(), 'Deadlock found') === false) throw $error;
++            }
++        }
++    }
++
++    /** One database attempt; successful group facts survive a later recoverable issuance failure. */
++    private function completeOnce(int $groupId, int $operatorId, bool $automatic): array
++    {
++        $result = Db::transaction(function () use ($groupId, $operatorId, $automatic) {
++            $root = Db::name('store_pink')->where('id', $groupId)->lock(true)->find();
++            if (!$root || (int)$root['k_id'] !== 0 || (int)$root['uid'] <= 0) throw new ValidateException('拼团不存在或不是团长记录');
++            if ((int)$root['status'] === 2) return ['message' => '该团已成团', 'virtual_count' => 0];
++            if ((int)$root['status'] !== 1 || (int)$root['is_refund'] !== 0 || (!$automatic && (int)$root['stop_time'] < time()))
++                throw new ValidateException('仅进行中的拼团可立即成团');
++            $members = Db::name('store_pink')->where('id|k_id', $groupId)->where('is_refund', 0)->order('id')->select()->toArray();
++            $eligible = [];
++            foreach ($members as $member) {
++                if ((int)$member['is_virtual']) { $eligible[] = $member; continue; }
++                $order = Db::name('store_order')->where('id', (int)$member['order_id_key'])->lock(true)->find();
++                // Do not fill a seat while its current member has a refund in flight: success/failure may still change membership.
++                if (!$order || !(int)$order['paid'] || (int)$order['refund_status'] !== 0 || (int)$order['terminal_action'] !== 0)
++                    throw new ValidateException('团内有退款或支付状态待处理，请处理完成后再成团');
++                $eligible[] = $member;
++            }
++            $missing = (int)$root['people'] - count($eligible);
++            if ($missing < 0 || (int)$root['people'] < 2 || (int)$root['people'] > 1000)
++                throw new ValidateException('拼团人数配置异常');
++            for ($i = 0; $i < $missing; $i++) {
++                Db::name('store_pink')->insert(['uid' => 0, 'nickname' => '虚拟团员', 'avatar' => '',
++                    'order_id' => '', 'order_id_key' => 0, 'total_num' => 0, 'total_price' => 0,
++                    'cid' => $root['cid'], 'pid' => $root['pid'], 'people' => $root['people'], 'price' => 0,
++                    'add_time' => time(), 'stop_time' => time(), 'k_id' => $groupId,
++                    'is_tpl' => 1, 'is_refund' => 0, 'status' => 2, 'is_virtual' => 1]);
++            }
++            Db::name('store_pink')->where('id|k_id', $groupId)->where('is_refund', 0)
++                ->update(['status' => 2, 'stop_time' => time()]);
++            Db::name('combination_force_completion')->insert(['group_id' => $groupId,
++                'operator_id' => $operatorId, 'virtual_count' => $missing, 'created_at' => time()]);
++            return ['message' => '拼团成功', 'virtual_count' => $missing];
++        });
++        // Failed issuance is recoverable from pending receipts. Never roll back a successful group because a notification failed.
++        $this->issueCompleted($groupId);
++        return $result;
++    }
++
++    public function issueCompleted(int $groupId): void
++    {
++        $ids = Db::name('store_pink')->where('id|k_id', $groupId)->where('uid', '>', 0)
++            ->where('status', 2)->where('is_refund', 0)->column('order_id_key');
++        foreach ($ids as $orderId) (new CombinationFulfillmentServices())->issue((int)$orderId);
++    }
++}
+diff --git a/后端代码/app/services/activity/combination/CombinationRecordServices.php b/后端代码/app/services/activity/combination/CombinationRecordServices.php
+new file mode 100644
+index 00000000..7a192296
+--- /dev/null
++++ b/后端代码/app/services/activity/combination/CombinationRecordServices.php
+@@ -0,0 +1,62 @@
++<?php
++declare(strict_types=1);
++namespace app\services\activity\combination;
++
++use think\exception\ValidateException;
++use think\facade\Db;
++
++/** Participant grain is shared by detail and export. Virtual seats never impersonate paying members. */
++class CombinationRecordServices
++{
++    public const HEADERS = ['门店名称','会员编号','会员姓名','手机号码','拼团编号','拼团名称','支付金额',
++        '拼团总数','参加人数','状态','是否团长','支付时间','过期时间','订单号','序号','支付状态'];
++    public const KEYS = ['store_name','member_no','member_name','phone','group_no','group_name','paid_amount',
++        'target_people','joined_people','group_status','leader_role','paid_at','expires_at','order_id','participant_no','payment_status'];
++
++    public function rows(int $groupId): array
++    {
++        $root = Db::name('store_pink')->where('id', $groupId)->where('k_id', 0)->find();
++        if (!$root) throw new ValidateException('拼团不存在');
++        $origin = Db::name('combination_group_origin')->where('group_id', $groupId)->find();
++        $rows = Db::name('store_pink')->alias('p')
++            ->leftJoin('store_order o', 'o.id=p.order_id_key')->leftJoin('user u', 'u.uid=p.uid')
++            ->leftJoin('system_store s', 's.id=o.store_id')->leftJoin('combination_order_refund r', 'r.order_id=o.id')
++            ->where('p.id|p.k_id', $groupId)->order('p.id')
++            ->field('p.*,o.pay_price as paid_amount,o.real_name,o.user_phone,o.paid,o.pay_time,o.refund_status,o.trade_no,u.bar_code,u.real_name as member_real_name,u.phone as member_phone,u.delete_time,s.name as store_name,r.state as refund_state')
++            ->select()->toArray();
++        $joined = count(array_filter($rows, static function ($row) {
++            return !(int)$row['is_virtual'] && (int)$row['paid'] === 1;
++        }));
++        // Old completed groups overwrote their deadline; do not invent one from today's edited activity settings.
++        $expires = $origin ? (int)$origin['expires_at'] : ((int)$root['status'] !== 2 ? (int)$root['stop_time'] : 0);
++        $activity = Db::name('store_combination')->where('id', $root['cid'])->value('title');
++        foreach ($rows as &$row) {
++            $row['member_no'] = (string)($row['bar_code'] ?? '');
++            $row['member_name'] = (string)($row['real_name'] ?: ($row['member_real_name'] ?: $row['nickname']));
++            $row['phone'] = (string)($row['user_phone'] ?: $row['member_phone']);
++            $row['group_no'] = (string)$groupId;
++            $row['group_name'] = (string)($origin['activity_name'] ?? $activity ?? '');
++            $row['paid_amount'] = (int)$row['is_virtual'] ? 0 : (float)($row['paid_amount'] ?? 0);
++            $row['target_people'] = (int)$root['people'];
++            $row['joined_people'] = $joined;
++            $row['group_status'] = [1=>'进行中',2=>'成功',3=>'失败'][(int)$root['status']] ?? '';
++            $row['leader_role'] = (int)$row['id'] === $groupId ? '团长' : '团员';
++            $row['paid_at'] = !empty($row['pay_time']) ? date('Y-m-d H:i:s', (int)$row['pay_time']) : '';
++            $row['expires_at'] = $expires > 0 ? date('Y-m-d H:i:s', $expires) : '';
++            $row['participant_no'] = (string)$row['id'];
++            $row['payment_status'] = (int)$row['refund_status'] === 2 ? '已退款'
++                : ((int)$row['refund_status'] === 1 ? '退款中' : ((int)$row['paid'] ? '已支付' : '未支付'));
++        }
++        unset($row);
++        return $rows;
++    }
++
++    /** Exact 16-column user template. All real participants, including refunded/kicked rows, remain traceable. */
++    public function export(int $groupId): array
++    {
++        $rows = array_values(array_filter($this->rows($groupId), static function ($row) { return !(int)$row['is_virtual']; }));
++        $output = [];
++        foreach ($rows as $row) $output[] = array_intersect_key($row, array_fill_keys(self::KEYS, true));
++        return ['header'=>self::HEADERS,'filekey'=>self::KEYS,'export'=>$output,'filename'=>'拼团记录-'.$groupId];
++    }
++}
+diff --git a/后端代码/app/services/activity/combination/CombinationRefundServices.php b/后端代码/app/services/activity/combination/CombinationRefundServices.php
+new file mode 100644
+index 00000000..0b8dbe12
+--- /dev/null
++++ b/后端代码/app/services/activity/combination/CombinationRefundServices.php
+@@ -0,0 +1,242 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\activity\combination;
++
++use app\services\order\StoreOrderRefundDomainServices;
++use app\services\pay\FuyouCombinationRefundGateway;
++use app\services\pay\PayServices;
++use think\exception\ValidateException;
++use think\facade\Db;
++
++/**
++ * Per-participant whole refund. Application and query are outside DB transactions;
++ * refund_status=1 fences use while result is unknown. The existing terminal domain
++ * remains the only writer of refund money, inventory and reversal facts.
++ */
++class CombinationRefundServices
++{
++    private $gateway;
++    public function __construct(?FuyouCombinationRefundGateway $gateway = null)
++    {
++        $this->gateway = $gateway;
++    }
++
++    private function gateway(): FuyouCombinationRefundGateway
++    {
++        return $this->gateway ?: FuyouCombinationRefundGateway::instance();
++    }
++
++    public static function isGroupOrder(int $orderId): bool
++    {
++        return (bool)Db::name('store_pink')->where('order_id_key', $orderId)->find();
++    }
++
++    /** No amount supplied by the browser is accepted. Admin identity comes from authenticated context. */
++    public function refundOrder(int $orderId, string $reason, int $operatorId = 0, bool $retry = true, int $kickGroupId = 0): array
++    {
++        $reason = trim($reason);
++        if ($reason === '' || mb_strlen($reason) > 300) throw new ValidateException('请填写300字以内退款原因');
++        $send = false;
++        $claimed = false;
++        $receipt = Db::transaction(function () use ($orderId, $reason, $operatorId, $retry, $kickGroupId, &$send, &$claimed) {
++            $memberIdentity = Db::name('store_pink')->where('order_id_key', $orderId)->find();
++            if (!$memberIdentity) throw new ValidateException('拼团订单不存在');
++            $rootId = (int)$memberIdentity['k_id'] ?: (int)$memberIdentity['id'];
++            Db::name('store_pink')->where('id', $rootId)->lock(true)->find();
++            $order = Db::name('store_order')->where('id', $orderId)->lock(true)->find();
++            if (!$order || !self::isGroupOrder($orderId)) throw new ValidateException('拼团订单不存在');
++            $row = Db::name('combination_order_refund')->where('order_id', $orderId)->lock(true)->find();
++            if ($row && $row['state'] === 'success') return $row;
++            if ($row && (int)$row['lease_until'] > time()) return $row;
++            if (!$row || ($row['state'] === 'failed' && $retry)) {
++                if ($kickGroupId > 0) {
++                    $root = Db::name('store_pink')->where('id', $kickGroupId)->lock(true)->find();
++                    $member = Db::name('store_pink')->where('order_id_key', $orderId)->lock(true)->find();
++                    if (!$root || (int)$root['status'] !== 1 || (int)$root['stop_time'] < time()
++                        || (int)$root['is_refund'] !== 0 || !$member || (int)$member['k_id'] !== $kickGroupId
++                        || (int)$member['is_virtual'] !== 0 || (int)$member['uid'] <= 0)
++                        throw new ValidateException('只能踢出进行中拼团的真实非团长成员');
++                }
++                $this->assertUnused($order);
++                $mapping = $this->paymentOrigin($order);
++                $attempt = $row ? (int)$row['attempt'] + 1 : 1;
++                // Prefix follows the actual original channel order, never a customer-name conditional.
++                $prefix = $mapping['channel_order_no'] !== '' ? substr($mapping['channel_order_no'], 0, 5) : 'GROUP';
++                $row = ['order_id' => $orderId, 'refund_no' => $prefix . str_pad((string)random_int(0, 999999999999999), 15, '0', STR_PAD_LEFT),
++                    'attempt' => $attempt, 'state' => $mapping['channel'] === 'balance' ? 'confirmed' : 'sending',
++                    'channel_order_no' => $mapping['channel_order_no'], 'channel' => $mapping['channel'],
++                    'merchant_id' => $mapping['merchant_id'], 'amount_cents' => (int)bcmul((string)$order['pay_price'], '100', 0),
++                    'channel_refund_id' => '', 'fuyou_refund_trace_no' => '', 'channel_transaction_id' => $mapping['channel'] === 'balance' ? '' : (string)($order['trade_no'] ?? ''),
++                    'settled_on' => (string)($mapping['settled_on'] ?? ''), 'operator_id' => $operatorId, 'kick_group_id' => $kickGroupId, 'reason' => $reason,
++                    'lease_until' => time() + 90, 'created_at' => time(), 'updated_at' => time()];
++                if (Db::name('combination_order_refund')->where('order_id', $orderId)->find())
++                    Db::name('combination_order_refund')->where('order_id', $orderId)->update($row);
++                else Db::name('combination_order_refund')->insert($row);
++                // This order row is shared with consumption writers; freeze commits before any network call.
++                Db::name('store_order')->where('id', $orderId)->update(['refund_status' => 1]);
++                $send = $row['state'] === 'sending';
++            } elseif ($row['state'] === 'failed') return $row;
++            else {
++                Db::name('combination_order_refund')->where('order_id', $orderId)->update(['lease_until' => time() + 90]);
++            }
++            $claimed = true;
++            return $row;
++        });
++        if (!$claimed) return $this->present($receipt);
++        try {
++            if ($send) {
++                // Persist sending BEFORE calling; a crash can only query, never send again blindly.
++                try { $this->gateway()->apply($receipt); }
++                catch (\Throwable $error) { /* Unknown is not failure; query the same refund number below. */ }
++                Db::name('combination_order_refund')->where('order_id', $orderId)->where('refund_no', $receipt['refund_no'])->update(['state' => 'pending']);
++            }
++            if (in_array($receipt['state'], ['sending','pending'], true)) {
++                $result = $this->gateway()->query($receipt);
++                Db::transaction(function () use ($orderId, $result, $receipt) {
++                    Db::name('store_order')->where('id', $orderId)->lock(true)->find();
++                    Db::name('combination_order_refund')->where('order_id', $orderId)
++                        ->where('refund_no', $receipt['refund_no'])->update($result + ['updated_at' => time()]);
++                    if ($result['state'] === 'failed') {
++                        // Only a signed PAYERROR releases use. Unknown/invalid replies stay frozen.
++                        Db::name('store_order')->where('id', $orderId)->where('refund_status', 1)->update(['refund_status' => 0]);
++                    }
++                });
++                $receipt = array_merge($receipt, $result);
++            }
++            if ($receipt['state'] === 'confirmed') {
++                $domain = app()->make(StoreOrderRefundDomainServices::class);
++                $result = $domain->refundConfirmedCombination($orderId, [
++                    'operator_id' => (int)$receipt['operator_id'], 'operator_type' => $operatorId ? 'admin' : 'system',
++                    'source_type' => 4, 'refund_reason' => (string)$receipt['reason'],
++                    'refund_explain' => (string)$receipt['reason'], 'request_token' => 'group:' . $orderId,
++                ]);
++                if (!empty($result['ok']) && ($result['message'] ?? '') === '退款成功') {
++                    Db::transaction(function () use ($orderId) {
++                        Db::name('store_order')->where('id', $orderId)->lock(true)->find();
++                        // Historical project/card orders need the same explicit revocation as new ones.
++                        Db::name('user_card_holder')->where('oid', $orderId)->update(['is_del' => 1]);
++                        Db::name('store_order_cart_info')->where('oid', $orderId)
++                            ->update(['write_surplus_times' => 0, 'surplus_num' => 0, 'is_writeoff' => 1]);
++                        Db::name('combination_order_fulfillment')->where('order_id', $orderId)->update(['state' => 'refunded']);
++                        Db::name('combination_order_refund')->where('order_id', $orderId)
++                            ->update(['state' => 'success', 'updated_at' => time()]);
++                    });
++                }
++            }
++        } catch (\Throwable $error) {
++            // Channel success survives local errors and is retried through the existing terminal domain.
++            \think\facade\Log::warning('拼团退款待查询或收口 oid=' . $orderId . ' ' . get_class($error));
++        } finally {
++            Db::name('combination_order_refund')->where('order_id', $orderId)->where('refund_no', $receipt['refund_no'])->update(['lease_until' => 0, 'updated_at' => time()]);
++        }
++        return $this->present((array)Db::name('combination_order_refund')->where('order_id', $orderId)->find());
++    }
++
++    /** Used by generic refund entries as well: no second refund path may bypass this receipt. */
++    public static function assertChannelConfirmed(array $order): void
++    {
++        $row = Db::name('combination_order_refund')->where('order_id', (int)$order['id'])->find();
++        if (!$row || !in_array($row['state'], ['confirmed','success'], true)
++            || (int)$row['amount_cents'] !== (int)bcmul((string)$order['pay_price'], '100', 0))
++            throw new ValidateException('拼团退款尚未取得原支付渠道成功回执');
++    }
++
++    /** Full-unused policy is checked again under the same order/holder/cart locks as the freeze. */
++    public function assertUnused(array $order): void
++    {
++        $id = (int)$order['id'];
++        if ((int)$order['store_id'] <= 0 || !Db::name('system_store')->where('id', (int)$order['store_id'])->count())
++            throw new ValidateException('订单缺少可核实的交易门店，不能快捷退款');
++        // Preflight authoritative payment parts before any external request or freeze.
++        app()->make(StoreOrderRefundDomainServices::class)->resolveAndValidateRefundMoney(
++            $order, ['refund_amount' => (string)$order['pay_price']], false);
++        if (!(int)$order['paid'] || (int)$order['refund_status'] !== 0 || (int)$order['terminal_action'] !== 0
++            || (int)$order['is_del'] || (int)$order['is_system_del'] || (int)$order['pid'] !== 0
++            || (int)$order['status'] !== 0 || (int)$order['card_upgrade_use_oid'] !== 0
++            || bccomp((string)$order['pay_price'], '0', 2) <= 0)
++            throw new ValidateException('仅支持已支付且未使用、未发货、未退款的完整拼团订单');
++        $fulfillment = Db::name('combination_order_fulfillment')->where('order_id', $id)->find();
++        if ($fulfillment && !in_array($fulfillment['state'], ['pending','issued'], true))
++            throw new ValidateException('产品已进入发货或领取流程，不能快捷全额退款');
++        if (Db::name('store_order')->where('pid', $id)->count()
++            || Db::name('store_order_writeoff')->where('oid', $id)->where('status', 0)->count()
++            || Db::name('store_reservation_order')->where('oid', $id)->where('is_del', 0)->where('is_system_del', 0)->count()
++            || Db::name('store_order_refund')->where('store_order_id', $id)->where('is_cancel', 0)->where('is_del', 0)->count())
++            throw new ValidateException('订单已有使用、预约或售后记录，不能快捷全额退款');
++        foreach (Db::name('user_card_holder')->where('oid', $id)->lock(true)->select()->toArray() as $holder) {
++            if ((int)$holder['uid'] !== (int)$order['uid'] || (int)$holder['write_surplus_times'] !== (int)$holder['write_times'])
++                throw new ValidateException('卡项已使用或转让，不能快捷全额退款');
++        }
++        foreach (Db::name('store_order_cart_info')->where('oid', $id)->lock(true)->select()->toArray() as $cart) {
++            if ((int)$cart['cart_type'] === 0) {
++                // Verify restorable original activity/SKU before sending money, not after channel success.
++                if ((int)$order['activity_id'] <= 0 || !Db::name('store_product_attr_value')
++                    ->where('product_id', (int)$order['activity_id'])->where('type', 3)
++                    ->where('unique', (string)$cart['sku_unique'])->lock(true)->find())
++                    throw new ValidateException('原拼团规格凭据不完整，不能快捷退款');
++                if (!(int)$cart['is_support_refund']) throw new ValidateException('该商品未开启退款，不能快捷退款');
++            }
++            if ((int)$cart['is_writeoff'] !== 0 || (int)$cart['refund_num'] > 0
++                || ((int)$cart['write_times'] > 0 && (int)$cart['write_surplus_times'] !== (int)$cart['write_times']))
++                throw new ValidateException('权益已有使用或变更，不能快捷全额退款');
++        }
++        if (Db::name('cashier_v3_card_operation')->where('origin_order_id', $id)->count())
++            throw new ValidateException('卡项已有升级、替换或转余额操作，不能快捷全额退款');
++    }
++
++    /** Match successful channel mapping and original merchant proof; never infer FuYou from pay_type alone. */
++    private function paymentOrigin(array $order): array
++    {
++        if ($order['pay_type'] === PayServices::YUE_PAY)
++            return ['channel' => 'balance', 'channel_order_no' => '', 'merchant_id' => ''];
++        $mappings = Db::name('fuyou_payment_attempt')->alias('p')
++            ->join('combination_payment_origin o', 'o.channel_order_no=p.channel_order_no')
++            ->where('p.business_order_no', (string)$order['order_id'])->where('p.business_type', 'product')
++            ->where('p.status', 'paid')->where('p.transaction_id', (string)$order['trade_no'])
++            ->where('p.amount_cents', (int)bcmul((string)$order['pay_price'], '100', 0))
++            ->field('p.channel,p.channel_order_no,o.merchant_id,o.settled_on')->select()->toArray();
++        if (count($mappings) !== 1 || !in_array($mappings[0]['channel'], ['wechat','alipay'], true))
++            throw new ValidateException('原支付渠道凭据不完整，不能直接调用富友退款');
++        if ((string)$mappings[0]['merchant_id'] !== $this->gateway()->merchantId())
++            throw new ValidateException('原支付商户与当前配置不一致，不能跨商户退款');
++        return $mappings[0];
++    }
++
++    public function present(array $row): array
++    {
++        $state = (string)($row['state'] ?? '');
++        $participant = !empty($row['order_id']) ? Db::name('store_pink')->where('order_id_key', (int)$row['order_id'])->find() : null;
++        return ['state' => $state, 'group_id' => $participant ? ((int)$participant['k_id'] ?: (int)$participant['id']) : 0, 'refund_no' => (string)($row['refund_no'] ?? ''),
++            'channel_refund_id' => (string)($row['channel_refund_id'] ?? ''),
++            'fuyou_refund_trace_no' => (string)($row['fuyou_refund_trace_no'] ?? ''),
++            'amount' => bcdiv((string)($row['amount_cents'] ?? 0), '100', 2),
++            'fuyou_order_no' => (string)($row['channel_order_no'] ?? ''),
++            'fuyou_transaction_id' => ($row['channel'] ?? '') === 'balance' ? '' : (string)($row['channel_transaction_id'] ?? ''),
++            'message' => $state === 'success' ? '退款成功' : ($state === 'failed' ? '退款失败，可重试' : '退款处理中，请查询结果')];
++    }
++
++    /** Read-only eligibility and receipt projection for exactly one participant order. */
++    public function describe(int $orderId): array
++    {
++        $order = Db::name('store_order')->where('id', $orderId)->find();
++        if (!$order) return ['refund_block_reason' => '订单不存在'];
++        $receipt = Db::name('combination_order_refund')->where('order_id', $orderId)->find();
++        $view = $this->present($receipt ?: []);
++        $view['paid_amount'] = (string)$order['pay_price'];
++        $view['refund_action'] = '';
++        $view['refund_reason'] = (string)($receipt['reason'] ?? '');
++        $view['refund_message'] = $receipt ? $view['message'] : ((int)$order['refund_status'] === 2 ? '已退款' : '未退款');
++        if ($receipt && !in_array($receipt['state'], ['success','failed'], true)) $view['refund_action'] = 'query';
++        elseif (!$receipt || $receipt['state'] === 'failed') {
++            try {
++                Db::transaction(function () use ($order) { $this->assertUnused($order); });
++                $this->paymentOrigin($order);
++                $view['refund_action'] = $receipt ? 'retry' : 'refund';
++            } catch (\Throwable $error) {
++                $view['refund_block_reason'] = $error instanceof ValidateException ? $error->getMessage() : '订单暂不满足直接退款条件';
++            }
++        }
++        return $view;
++    }
++}
+diff --git a/后端代码/app/services/activity/combination/StoreCombinationServices.php b/后端代码/app/services/activity/combination/StoreCombinationServices.php
+index 71b37690..2fa47120 100644
+--- a/后端代码/app/services/activity/combination/StoreCombinationServices.php
++++ b/后端代码/app/services/activity/combination/StoreCombinationServices.php
+@@ -107,6 +107,8 @@ class StoreCombinationServices extends BaseServices
+         if ($productInfo['is_vip_product'] || $productInfo['is_presale_product']) {
+             throw new AdminException('该商品是预售或svip专享');
+         }
++        // Activity type is authoritative; clients cannot turn arbitrary virtual goods into rights.
++        if (!in_array((int)$productInfo['product_type'], [0, 5, 6], true)) throw new AdminException('拼团仅支持产品、卡项和项目');
+         $data['product_type'] = $productInfo['product_type'];
+ 		if ($data['product_type'] == 4 && !$data['delivery_type']) {
+ 			$data['delivery_type'] = $productInfo['delivery_type'];
+@@ -125,7 +127,9 @@ class StoreCombinationServices extends BaseServices
+         $data['specs'] = is_array($specs) ? json_encode($specs) : $specs;
+ 		$data['applicable_type'] = $productInfo['applicable_type'];
+ 		$data['applicable_store_id'] = $productInfo['applicable_store_id'];
+-        if (in_array($data['product_type'], [1, 2, 3, 4])) {
++        if (in_array((int)$data['product_type'], [5, 6], true)) {
++            // Rights need neither freight nor an address; actual use remains a later service event.
++            $data['delivery_type'] = '2';
+             $data['freight'] = 1;
+             $data['temp_id'] = 0;
+             $data['postage'] = 0;
+@@ -147,6 +151,12 @@ class StoreCombinationServices extends BaseServices
+         }
+         $description = $data['description'];
+         $detail = $data['attrs'];
++        // New group prices use whole yuan; quantities and group sizes are whole counts.
++        foreach ($detail as $sku) {
++            $price = (string)($sku['price'] ?? '');
++            if (!preg_match('/^[0-9]+(?:\.0{1,2})?$/D', $price) || bccomp($price, '0', 2) <= 0)
++                throw new AdminException('拼团价格必须为大于0的整数元');
++        }
+         $items = $data['items'];
+         $data['start_time'] = strtotime($data['section_time'][0]);
+         $data['stop_time'] = strtotime($data['section_time'][1]);
+@@ -425,28 +435,24 @@ class StoreCombinationServices extends BaseServices
+      */
+     public function decCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0, bool $decProductStock = false)
+     {
+-		if (!$CombinationId) return true;
+-        $product_id = $this->dao->value(['id' => $CombinationId], 'product_id');
+-		$res = true;
+-		if ($product_id) {
+-			if ($unique) {
+-				/** @var StoreProductAttrValueServices $skuValueServices */
+-				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
+-				//减去拼团商品的sku库存增加销量（活动额度）
+-				$res = $res && $skuValueServices->decProductAttrStock($CombinationId, $unique, $num, 3);
+-
+-				if ($decProductStock) {
+-					$sku = $skuValueServices->value(['product_id' => $CombinationId, 'unique' => $unique, 'type' => 3], 'suk');
+-					$productUnique = $skuValueServices->value(['suk' => $sku, 'product_id' => $product_id, 'type' => 0], 'unique');
+-					/** @var StoreProductServices $services */
+-					$services = app()->make(StoreProductServices::class);
+-					$res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
+-				}
+-			}
+-			//减去拼团商品库存
+-			$res = $res && $this->dao->decStockIncSales(['id' => $CombinationId, 'type' => 3], $num);
+-		}
+-        return $res;
++        if ($num <= 0 || $CombinationId <= 0) throw new ValidateException('拼团库存参数错误');
++        return \think\facade\Db::transaction(function () use ($num, $CombinationId, $unique, $store_id, $decProductStock) {
++            $activity = \think\facade\Db::name('store_combination')->where('id', $CombinationId)->lock(true)->find();
++            $sku = \think\facade\Db::name('store_product_attr_value')->where('product_id', $CombinationId)
++                ->where('type', 3)->where('unique', $unique)->lock(true)->find();
++            if (!$activity || !$sku || (int)$activity['stock'] < $num || (int)$activity['quota'] < $num
++                || (int)$sku['stock'] < $num || (int)$sku['quota'] < $num) throw new ValidateException('拼团剩余名额不足');
++            $values = app()->make(StoreProductAttrValueServices::class);
++            if (!$values->decProductAttrStock($CombinationId, $unique, $num, 3)) throw new ValidateException('拼团规格扣减失败');
++            // Here type=3 is the SKU namespace, not store_combination.type (platform/store/supplier ownership).
++            \think\facade\Db::name('store_combination')->where('id', $CombinationId)
++                ->dec('stock', $num)->dec('quota', $num)->inc('sales', $num)->update();
++            if ($decProductStock) {
++                $original = $values->value(['suk' => $sku['suk'], 'product_id' => (int)$activity['product_id'], 'type' => 0], 'unique');
++                return app()->make(StoreProductServices::class)->decProductStock($num, (int)$activity['product_id'], (string)$original, $store_id);
++            }
++            return true;
++        });
+     }
+ 
+     /**
+@@ -459,30 +465,23 @@ class StoreCombinationServices extends BaseServices
+      */
+     public function incCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0, bool $incProductStock = false)
+     {
+-		if (!$CombinationId) return true;
+-        $product_id = $this->dao->value(['id' => $CombinationId], 'product_id');
+-        $res = false;
+-		if ($product_id) {
+-			if ($unique) {
+-				/** @var StoreProductAttrValueServices $skuValueServices */
+-				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
+-				//增加拼团商品的sku库存,减去销量
+-				$res = false !== $skuValueServices->incProductAttrStock($CombinationId, $unique, $num, 3);
+-
+-				//拼团商品sku
+-				$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $CombinationId, 'type' => 3], 'suk');
+-				//平台商品sku unique
+-				$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
+-
+-				/** @var StoreProductServices $services */
+-				$services = app()->make(StoreProductServices::class);
+-				//增加当前普通商品sku的库存,减去销量
+-				if ($incProductStock) { $res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id); }
+-			}
+-			//增加拼团库存
+-			$res = $res && $this->dao->incStockDecSales(['id' => $CombinationId, 'type' => 3], $num);
+-		}
+-        return $res;
++        if ($num <= 0 || $CombinationId <= 0) throw new ValidateException('拼团库存参数错误');
++        return \think\facade\Db::transaction(function () use ($num, $CombinationId, $unique, $store_id, $incProductStock) {
++            $activity = \think\facade\Db::name('store_combination')->where('id', $CombinationId)->lock(true)->find();
++            $sku = \think\facade\Db::name('store_product_attr_value')->where('product_id', $CombinationId)
++                ->where('type', 3)->where('unique', $unique)->lock(true)->find();
++            if (!$activity || !$sku) throw new ValidateException('原拼团规格无法核实，不能回退其他规格库存');
++            $values = app()->make(StoreProductAttrValueServices::class);
++            if (!$values->incProductAttrStock($CombinationId, $unique, $num, 3)) throw new ValidateException('拼团规格回退失败');
++            // Terminal inventory step deduplicates this restoration; virtual members never enter this method.
++            \think\facade\Db::name('store_combination')->where('id', $CombinationId)
++                ->inc('stock', $num)->inc('quota', $num)->dec('sales', min($num, (int)$activity['sales']))->update();
++            if ($incProductStock) {
++                $original = $values->value(['suk' => $sku['suk'], 'product_id' => (int)$activity['product_id'], 'type' => 0], 'unique');
++                return app()->make(StoreProductServices::class)->incProductStock($num, (int)$activity['product_id'], (string)$original, $store_id);
++            }
++            return true;
++        });
+     }
+ 
+ 	/**
+@@ -515,13 +514,11 @@ class StoreCombinationServices extends BaseServices
+         $pink = $pinkService->getPinkUserOne($id);
+         if (!$pink) throw new ValidateException('参数错误');
+         $pink = $pink->toArray();
+-        if (isset($pink['is_refund']) && $pink['is_refund']) {
+-            if ($pink['is_refund'] != $pink['id']) {
+-                $id = $pink['is_refund'];
+-                return $this->getPinkInfo($uid, $id, $user);
+-            } else {
+-                throw new ValidateException('订单已退款');
+-            }
++        if (!empty($pink['is_refund'])) {
++            // is_refund is a tinyint marker, never a group-id storage slot. A transferred leader follows k_id.
++            if ((int)$pink['k_id'] > 0) return $this->getPinkInfo($uid, (int)$pink['k_id'], $user);
++            // Other paid members may still view a completed group after its leader receives a refund.
++            if ((int)$pink['status'] !== 2) throw new ValidateException('订单已退款');
+         }
+         [$pinkAll, $pinkT, $count, $idAll, $uidAll] = $pinkService->getPinkMemberAndPinkK($pink);
+         if ($pinkT['status'] == 2) {
+diff --git a/后端代码/app/services/activity/combination/StorePinkServices.php b/后端代码/app/services/activity/combination/StorePinkServices.php
+index 80ab71f9..7a585092 100644
+--- a/后端代码/app/services/activity/combination/StorePinkServices.php
++++ b/后端代码/app/services/activity/combination/StorePinkServices.php
+@@ -58,7 +58,7 @@ class StorePinkServices extends BaseServices
+         $list = $this->dao->getList($where, $page, $limit);
+         $time = time();
+         foreach ($list as &$item) {
+-            $item['count_people'] = $this->dao->count(['k_id' => $item['id']]) + 1;
++            $item['count_people'] = $this->dao->count(['k_id' => $item['id'], 'is_refund' => 0]) + ((int)$item['is_refund'] === 0 ? 1 : 0);
+             //状态为进行中，实际已经结束的
+             if ($item['status'] == 1 && $item['stop_time'] < $time) {
+                 $item['status'] = $item['count_people'] >= $item['people'] ? 2 : 3;
+@@ -77,7 +77,7 @@ class StorePinkServices extends BaseServices
+     public function getStatistics()
+     {
+         $res = [
+-            ['col' => 6, 'count' => $this->dao->count(), 'name' => '参与人数(人)', 'className' => 'ios-speedometer-outline'],
++            ['col' => 6, 'count' => $this->dao->getCount([['uid', '>', 0]]), 'name' => '参与人数(人)', 'className' => 'ios-speedometer-outline'],
+             ['col' => 6, 'count' => $this->dao->count(['k_id' => 0, 'status' => 2]), 'name' => '成团数量(个)', 'className' => 'md-rose'],
+         ];
+         return compact('res');
+@@ -90,7 +90,7 @@ class StorePinkServices extends BaseServices
+      */
+     public function getPinkMember(int $id)
+     {
+-        return $this->dao->getList(['k_id' => $id]);
++        return (new CombinationRecordServices())->rows($id);
+     }
+ 
+     /**
+@@ -100,40 +100,34 @@ class StorePinkServices extends BaseServices
+      */
+     public function setRefundPink($order)
+     {
+-        $res = true;
+-        if ($order['pink_id']) {
+-            $id = $order['pink_id'];
+-        } else {
++        // Use the participant's order identity, not uid: the same member can join different groups.
++        $row = $this->dao->getOne(['order_id_key' => (int)$order['id']]);
++        if (!$row || (int)$row['is_refund'] !== 0) return true;
++        $id = (int)$row['id'];
++        if ((int)$row['status'] === 2) {
++            // A completed group remains completed for everyone else, including its leader.
++            $this->dao->update($id, ['is_refund' => 1]);
+             return true;
+         }
+-        //正在拼团 团长
+-        $count = $this->dao->getOne(['id' => $id, 'uid' => $order['uid']]);
+-        //正在拼团 团员
+-        $countY = $this->dao->getOne(['k_id' => $id, 'uid' => $order['uid']]);
+-        if (!$count && !$countY) {
+-            return $res;
+-        }
+-        if ($count) {//团长
+-            //判断团内是否还有其他人  如果有  团长为第二个进团的人
+-            $kCount = $this->dao->getPinking(['k_id' => $id]);
+-            if ($kCount) {
+-                $res11 = $this->dao->update($id, ['k_id' => $kCount['id']], 'k_id');
+-                $res12 = $this->dao->update($kCount['id'], ['stop_time' => $count['add_time'] + 86400]);
+-                $res1 = $res11 && $res12;
+-                $res2 = $this->dao->update($id, ['stop_time' => time() - 1, 'is_refund' => $kCount['id']]);
+-            } else {
+-                $res1 = true;
+-                $res2 = $this->dao->update($id, ['stop_time' => time() - 1, 'is_refund' => $id, 'status' => 3]);
++        $root = (int)$row['k_id'] ?: $id;
++        if ((int)$row['k_id'] === 0) {
++            $next = $this->dao->getOne(['k_id' => $id, 'is_refund' => 0]);
++            if ($next) {
++                $nextId = (int)$next['id'];
++                $this->dao->update(['k_id' => $id], ['k_id' => $nextId]);
++                $this->dao->update($nextId, ['k_id' => 0, 'stop_time' => (int)$row['stop_time']]);
++                $origin = \think\facade\Db::name('combination_group_origin')->where('group_id', $id)->find();
++                if ($origin && !\think\facade\Db::name('combination_group_origin')->where('group_id', $nextId)->count()) {
++                    $origin['group_id'] = $nextId;
++                    \think\facade\Db::name('combination_group_origin')->insert($origin);
++                }
++                $this->dao->update($id, ['k_id' => $nextId]);
++                \think\facade\Db::name('store_order')->where('pink_id', $root)->update(['pink_id' => $nextId]);
+             }
+-            //修改结束时间为前一秒
+-            $res = $res1 && $res2;
+-        } else if ($countY) {//团员
+-            $res = $this->dao->update($countY['id'], ['stop_time' => time() - 1, 'is_refund' => $id, 'status' => 3]);
+         }
+-        if ($res) {
+-            CacheService::setStock(md5((string)$id), 1, 3, false);
+-        }
+-        return $res;
++        $this->dao->update($id, ['is_refund' => 1, 'status' => 3]);
++        CacheService::setStock(md5((string)$root), 1, 3, false);
++        return true;
+     }
+ 
+     /**
+@@ -210,6 +204,10 @@ class StorePinkServices extends BaseServices
+ 		$pinkAll = $this->dao->getPinkUserList(['k_id' => $pinkT['id'], 'is_refund' => 0]);
+         $count = count($pinkAll) + 1;
+         $count = $pinkT['people'] - $count;
++        $pinkAll = array_values(array_filter($pinkAll, static function ($row) {
++            return (int)\think\facade\Db::name('store_order')->where('id', (int)$row['order_id_key'])->value('refund_status') === 0;
++        }));
++        $count = (int)$pinkT['people'] - count($pinkAll) - 1;
+ 		//收集拼团用户id和拼团id
+ 		$idAll = $uidAll = [];
+ 		if ($pinkAll) {
+@@ -243,47 +241,11 @@ class StorePinkServices extends BaseServices
+ 				/** @var StoreOrderServices $orderService */
+ 				$orderService = app()->make(StoreOrderServices::class);
+                 $orders = $orderService->getColumn([['id', 'in', $oids]], '*', 'id');
+-                $refundData = [
+-                    'refund_reason' => '拼团时间超时',
+-                    'refund_explain' => '拼团时间超时',
+-                    'refund_img' => json_encode([]),
+-                ];
+-				/** @var StoreOrderRefundServices $orderRefundService */
+-				$orderRefundService = app()->make(StoreOrderRefundServices::class);
+-                $refundeOrder = $orderRefundService->getColumn([
+-                    ['store_order_id', 'IN', $oids],
+-                    ['refund_type', 'in', [0, 1, 2, 4, 5]],
+-                    ['is_cancel', '=', 0],
+-                    ['is_del', '=', 0]
+-                ], 'id,store_order_id', 'store_order_id');
+                 foreach ($pinkAll as $v) {
+-                    if (isset($orders[$v['order_id_key']]) && $order = $orders[$v['order_id_key']]) {
+-                        if (in_array($v['order_id_key'], $refundeOrder)) {
+-                            continue;
+-                        }
+-                        $res1 = $res2 = true;
+-                        try {
+-							//申请退款
+-                            $refundId = $orderRefundService->applyRefund((int)$order['id'], (int)$order['uid'], $order, [], 1, (float)$order['pay_price'], $refundData);
+-							if ($refundId) {//申请退款成功，自动退款
+-								$refund_data = ['pay_price' => $order['pay_price'], 'refund_price' => $order['pay_price']];
+-								$res1 = $orderRefundService->agreeRefund((int)$refundId, $refund_data);
+-								//修改退款单状态
+-								$res1 = $res1 && $orderRefundService->update((int)$refundId, ['refund_type' => 6, 'refunded_price' => $order['pay_price'], 'refunded_time' => time()]);
+-								//修改订单状态
+-								$res1 = $res1 && $orderService->update((int)$order['id'], ['refund_status' => 2, 'refund_type' => 6]);
+-							}
+-                        } catch (\Throwable $e) {
+-							$res1 = false;
+-                        }
+-                        $res2 = $this->dao->getCount([['uid', '=', $v['uid']], ['is_tpl', '=', 0], ['k_id|id', '=', $pinkT['id']]]);
+-                        if ($res1 && $res2) {
+-                            if ($isIds) array_push($pinkIds, $v['id']);
+-                            $this->orderPinkAfterNo($pinkT['uid'], $pinkT['id'], false, $orders[$v['order_id_key']]['is_channel']);
+-                        } else {
+-                            if ($isRunErr) return $pinkBool;
+-                        }
+-                    }
++                    if (!isset($orders[$v['order_id_key']])) continue;
++                    $result = (new CombinationRefundServices())->refundOrder((int)$v['order_id_key'], '拼团时间超时', 0, false);
++                    // An accepted external application is not success. Recovery continues querying the same receipt.
++                    if ($result['state'] === 'success' && $isIds) $pinkIds[] = $v['id'];
+                 }
+             }
+             if ($isIds) return $pinkIds;
+@@ -355,7 +317,9 @@ class StorePinkServices extends BaseServices
+     {
+         $pinkBool = 6;
+         try {
+-            if (!$this->dao->getCount([['id', 'in', $idAll], ['is_refund', '=', 1]])) {
++            $orderIds = $this->dao->getColumn([['id', 'in', $idAll]], 'order_id_key');
++            if (\think\facade\Db::name('store_order')->whereIn('id', $orderIds)->where('refund_status', '<>', 0)->count()) return $pinkBool;
++            if (!$this->dao->getCount([['id', 'in', $idAll], ['is_refund', '<>', 0]])) {
+                 $this->dao->update([['id', 'in', $idAll]], ['stop_time' => time(), 'status' => 2]);
+                 if (in_array($uid, $uidAll)) {
+                     if ($this->dao->getCount([['uid', 'in', $uidAll], ['is_tpl', '=', 0], ['k_id|id', '=', $pinkT['id']]]))
+@@ -398,7 +362,9 @@ class StorePinkServices extends BaseServices
+         $storeOrder=StoreOrder::whereIn('order_id',$order_ids)->select();
+         foreach ($storeOrder as $k=>$v){
+             $order_channels[$v['order_id']]=$v['is_channel'];
+-            $storeOrderCreateServices->changeOrder($v['product_type'],$v['id']);
++            $fulfillment = new CombinationFulfillmentServices();
++            if ($fulfillment->managed((int)$v['id'])) $fulfillment->issue((int)$v['id']);
++            else $storeOrderCreateServices->changeOrder($v['product_type'],$v['id']);
+         }
+         if (!$pinkList) return false;
+         foreach ($pinkList as $item) {
+@@ -421,6 +387,34 @@ class StorePinkServices extends BaseServices
+      * @return mixed
+      */
+     public function createPink(array $orderInfo)
++    {
++        $late = false;
++        $result = \think\facade\Db::transaction(function () use ($orderInfo, &$late) {
++            $order = \think\facade\Db::name('store_order')->where('id', (int)$orderInfo['id'])->lock(true)->find();
++            if (!$order || !(int)$order['paid'] || (int)$order['refund_status'] !== 0) return false;
++            if ($this->dao->getOne(['order_id_key' => (int)$orderInfo['id']])) return true;
++            if ((int)$order['pink_id'] > 0) {
++                $root = \think\facade\Db::name('store_pink')->where('id', (int)$order['pink_id'])->lock(true)->find();
++                if (!$root || (int)$root['status'] !== 1 || (int)$root['is_refund'] !== 0 || (int)$root['stop_time'] < time()) {
++                    $late = true;
++                    // Keep late payment auditable; recovery refunds this order, never issues free rights.
++                    $this->dao->save(['uid' => $order['uid'], 'nickname' => '', 'avatar' => '',
++                        'order_id' => $order['order_id'], 'order_id_key' => $order['id'],
++                        'total_num' => $order['total_num'], 'total_price' => $order['pay_price'],
++                        'k_id' => $order['pink_id'], 'cid' => $order['activity_id'],
++                        'pid' => 0, 'people' => 0, 'price' => $order['pay_price'],
++                        'stop_time' => time(), 'add_time' => time(), 'status' => 3]);
++                    return false;
++                }
++            }
++            return $this->createPinkLocked($orderInfo);
++        });
++        if ($late) (new CombinationRefundServices())->refundOrder((int)$orderInfo['id'], '支付完成时拼团已结束', 0, false);
++        return $result;
++    }
++
++    /** Root/order locks serialize payment callback replay and concurrent final participants. */
++    private function createPinkLocked(array $orderInfo)
+     {
+         /** @var StoreCombinationServices $services */
+         $services = app()->make(StoreCombinationServices::class);
+@@ -486,6 +480,9 @@ class StorePinkServices extends BaseServices
+                 $pink['stop_time'] = time() + $product->effective_time * 3600;//结束时间
+                 $pink['add_time'] = time();//开团时间
+                 $res1 = $this->dao->save($pink);
++                // Snapshot the original deadline before completion changes stop_time into completion time.
++                \think\facade\Db::name('combination_group_origin')->insert(['group_id' => (int)$res1['id'],
++                    'expires_at' => (int)$pink['stop_time'], 'activity_name' => (string)$product['title']]);
+                 $res2 = $orderServices->update($orderInfo['id'], ['pink_id' => $res1['id']]);
+                 $res = $res1 && $res2;
+                 $pink['id'] = $res1['id'];
+@@ -552,41 +549,8 @@ class StorePinkServices extends BaseServices
+                 throw new ValidateException('拼团已完成，无法取消');
+             }
+         }
+-        /** @var StoreOrderServices $orderService */
+-        $orderService = app()->make(StoreOrderServices::class);
+-        /** @var StoreOrderRefundServices $orderRefundService */
+-        $orderRefundService = app()->make(StoreOrderRefundServices::class);
+-        //取消开团
+-        $order = $orderService->get($pinkT['order_id_key']);
+-        $refundData = [
+-            'refund_reason' => '用户手动取消拼团',
+-            'refund_explain' => '用户手动取消拼团',
+-            'refund_img' => json_encode([]),
+-        ];
+-        try {
+-			//申请退款
+-			$refundId = $orderRefundService->applyRefund((int)$order['id'], (int)$order['uid'], $order, [], 1, (float)$order['pay_price'], $refundData);
+-			if ($refundId) {//申请退款成功，自动退款
+-				$refund_data = ['pay_price' => $order['pay_price'], 'refund_price' => $order['pay_price']];
+-				$res1 = $orderRefundService->agreeRefund((int)$refundId, $refund_data);
+-				//修改退款单状态
+-				$res1 = $res1 && $orderRefundService->update((int)$refundId, ['refund_type' => 6, 'refunded_price' => $order['pay_price'], 'refunded_time' => time()]);
+-				//修改订单状态
+-				$res1 = $res1 && $orderService->update((int)$order['id'], ['refund_status' => 2, 'refund_type' => 6]);
+-			}
+-        } catch (\Throwable $e) {
+-            $res1 = true;
+-        }
+-        $res2 = $this->dao->getCount([['uid', '=', $pinkT['uid']], ['k_id|id', '=', $pinkT['id']]]);
+-        if ($res1 && $res2) {
+-            $this->orderPinkAfterNo($pinkT['uid'], $pinkT['id'], true, $order->is_channel);
+-        }
+-        //当前团有人的时候
+-        if (is_array($nextPinkT)) {
+-            $this->dao->update($nextPinkT['id'], ['k_id' => 0, 'status' => 1, 'stop_time' => $pinkT['stop_time']]);
+-            $this->dao->update($pinkT['id'], ['k_id' => $nextPinkT['id']], 'k_id');
+-            $orderService->update($nextPinkT['order_id'], ['pink_id' => $nextPinkT['id']], 'order_id');
+-        }
++        $result = (new CombinationRefundServices())->refundOrder((int)$pinkT['order_id_key'], '用户手动取消拼团', 0);
++        if ($result['state'] !== 'success') throw new ValidateException($result['message']);
+         return true;
+     }
+ 
+@@ -612,6 +576,8 @@ class StorePinkServices extends BaseServices
+      */
+     public function useStatusPink()
+     {
++        // Reuse the existing periodic group scheduler; no new customer cron or external trigger required.
++        \app\jobs\activity\pink\CombinationRecoveryJob::dispatch([]);
+         $pinkEndCount = $this->dao->pinkListEnd()->count();
+         if (!$pinkEndCount) {
+             return true;
+@@ -633,53 +599,13 @@ class StorePinkServices extends BaseServices
+      */
+     public function virtualCombination($pinkId)
+     {
+-        $pinkInfo = $this->dao->get($pinkId);
+-        $people = $pinkInfo['people'];
+-        $count = $this->dao->count(['k_id' => $pinkId]) + 1;
+-        $percent1 = bcdiv((string)$count, (string)$people, 2) * 100;
+-        /** @var StoreCombinationServices $services */
+-        $services = app()->make(StoreCombinationServices::class);
+-        $percent2 = $services->value(['id' => $pinkInfo['cid']], 'virtual');
+-        if ($percent1 >= $percent2) {
+-            $time = time();
+-            $num = $people - $count;
+-            $data = [];
+-			$defaultData = [
+-				'uid' => 0,
+-				'avatar' => sys_config('h5_avatar'),
+-				'order_id' => 0,
+-				'order_id_key' => 0,
+-				'total_num' => 0,
+-				'total_price' => 0,
+-				'cid' => $pinkInfo['cid'],
+-				'pid' => $pinkInfo['pid'],
+-				'people' => $people,
+-				'price' => 0,
+-				'add_time' => $time,
+-				'stop_time' => $time,
+-				'k_id' => $pinkInfo['id'],
+-				'is_tpl' => 1,
+-				'is_refund' => 0,
+-				'status' => 2,
+-				'is_virtual' => 1
+-			];
+-            mt_srand();
+-            for ($i = 0; $i < $num; $i++) {
+-				$defaultData['nickname'] = substr(md5(time() . rand(1000, 9999)), 0, 12);
+-				$data[$i] = $defaultData;
+-            }
+-            //添加虚拟团员
+-            $this->dao->saveAll($data);
+-            //更改团员状态为拼团成功
+-            $this->dao->update($pinkId, ['stop_time' => $time, 'status' => 2], 'k_id');
+-            //更改团长为拼团成功
+-            $this->dao->update($pinkId, ['stop_time' => $time, 'status' => 2]);
+-            $uidAll = $this->dao->getColumn([['id|k_id', '=', $pinkId]], 'uid');
+-            $this->orderPinkAfter($uidAll, $pinkId);
+-            return true;
+-        } else {
+-            return false;
+-        }
++        $root = $this->dao->get((int)$pinkId);
++        if (!$root || (int)$root['status'] !== 1 || (int)$root['people'] < 2) return false;
++        $count = $this->dao->count(['k_id' => (int)$pinkId, 'is_refund' => 0]) + 1;
++        $threshold = app()->make(StoreCombinationServices::class)->value(['id' => $root['cid']], 'virtual');
++        if ($count * 100 < (int)$root['people'] * (float)$threshold) return false;
++        (new CombinationGroupManagementServices())->complete((int)$pinkId, 0, true);
++        return true;
+     }
+ 
+     /**
+diff --git a/后端代码/app/services/order/StoreOrderCreateServices.php b/后端代码/app/services/order/StoreOrderCreateServices.php
+index 995aee77..b2fcf9be 100644
+--- a/后端代码/app/services/order/StoreOrderCreateServices.php
++++ b/后端代码/app/services/order/StoreOrderCreateServices.php
+@@ -337,6 +337,10 @@ class StoreOrderCreateServices extends BaseServices
+         $order = $this->transaction(function () use ($cartIds, $couponId, $orderInfo, $cartInfo, $key, $userInfo, $useIntegral, $priceData, $type, $activity_id, $uid, $addressId, $promotions_give, $storeId, $reservationInfo,$product_type) {
+             //创建订单
+             $order = $this->dao->save($orderInfo);
++            // Every newly created group order waits for completion; historical orders are not backfilled.
++            if ((int)$type === 3) {
++                (new \app\services\activity\combination\CombinationFulfillmentServices())->register((int)$order['id']);
++            }
+             if ($couponId) {
+                 /** @var StoreCouponUserServices $couponServices */
+                 $couponServices = app()->make(StoreCouponUserServices::class);
+diff --git a/后端代码/app/services/order/StoreOrderDeliveryServices.php b/后端代码/app/services/order/StoreOrderDeliveryServices.php
+index 26fa5c1b..c2778db0 100644
+--- a/后端代码/app/services/order/StoreOrderDeliveryServices.php
++++ b/后端代码/app/services/order/StoreOrderDeliveryServices.php
+@@ -264,6 +264,18 @@ class StoreOrderDeliveryServices extends BaseServices
+      */
+     public function doDelivery(int $id, $orderInfo, array $data)
+     {
++        $groups = new \app\services\activity\combination\CombinationFulfillmentServices();
++        $claimed = $groups->claimDelivery($id);
++        // If the carrier call fails after acceptance, keep delivering to block a conflicting refund until reconciled.
++        $result = $this->executeDelivery($id, $orderInfo, $data);
++        if ($claimed) \think\facade\Db::name('combination_order_fulfillment')->where('order_id', $id)->update(['state' => 'delivered']);
++        return $result;
++    }
++
++    /** Existing carrier/stock behavior; only group orders add the claim above. */
++    private function executeDelivery(int $id, $orderInfo, array $data)
++    {
++
+         $type = (int)$data['type'];
+         unset($data['type']);
+         //获取购物车内的商品标题
+diff --git a/后端代码/app/services/order/StoreOrderRefundDomainServices.php b/后端代码/app/services/order/StoreOrderRefundDomainServices.php
+index d9fb4472..e12a02ca 100644
+--- a/后端代码/app/services/order/StoreOrderRefundDomainServices.php
++++ b/后端代码/app/services/order/StoreOrderRefundDomainServices.php
+@@ -20,6 +20,12 @@ class StoreOrderRefundDomainServices extends BaseServices
+ {
+     public function refundWholeOrder(array $input): array
+     {
++        // All group refund entry points share the original-payment receipt, including automatic jobs.
++        $groupId = (int)($input['store_order_id'] ?? 0);
++        if (\app\services\activity\combination\CombinationRefundServices::isGroupOrder($groupId)) {
++            return (new \app\services\activity\combination\CombinationRefundServices())->refundOrder(
++                $groupId, (string)($input['refund_reason'] ?? '拼团整单退款'), (int)($input['operator_id'] ?? 0));
++        }
+         /** @var StoreOrderTerminalOperationServices $terminal */
+         $terminal = app()->make(StoreOrderTerminalOperationServices::class);
+         $terminal->assertWholeOrderOnly($input);
+@@ -37,6 +43,21 @@ class StoreOrderRefundDomainServices extends BaseServices
+         return $this->executeWholeRefund($order, $money, $plan, $input, 0);
+     }
+ 
++    /** Only server-persisted original-channel confirmation may enter local financial closing. */
++    public function refundConfirmedCombination(int $orderId, array $input): array
++    {
++        $order = $this->loadSalesOrder($orderId);
++        \app\services\activity\combination\CombinationRefundServices::assertChannelConfirmed($order);
++        $input['refund_amount'] = (string)$order['pay_price'];
++        $input['refund_amount_provided'] = true;
++        $money = $this->resolveAndValidateRefundMoney($order, $input, false);
++        $plan = $this->buildPaymentPlan($order, $money, $input);
++        $money['refund_ben'] = $plan['refund_ben'];
++        $money['refund_give'] = $plan['refund_give'];
++        $money['balance_total'] = $plan['balance_total'];
++        return $this->executeWholeRefund($order, $money, $plan, $input, 0);
++    }
++
+     public function agreeAfterSaleRefund(int $refundId, array $input): array
+     {
+         $refundRow = Db::name('store_order_refund')->where('id', $refundId)->find();
+@@ -823,7 +844,9 @@ class StoreOrderRefundDomainServices extends BaseServices
+             }
+         }
+ 
+-        if (!$parkNeedManual && bccomp($balanceTotal, '0', 2) > 0) {
++        // Group refunds return previously spent balance, so today's remaining wallet is not a credit ceiling.
++        if (!$parkNeedManual && bccomp($balanceTotal, '0', 2) > 0
++            && !\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
+             $this->assertAvailableBalanceLimits((int)$order['uid'], $refundBen, $refundGive);
+         }
+ 
+@@ -1001,7 +1024,11 @@ class StoreOrderRefundDomainServices extends BaseServices
+ 
+             // —— 2) 余额退回（幂等键=操作号+业务类型；锁行再验当前上限）——
+             if (bccomp((string)$money['balance_total'], '0', 2) > 0 && !$balanceDone) {
++                // A group purchase refund CREDITS the original balance parts; it does not withdraw today's balance.
++                // Original paid-part caps remain validated above; the atomic balance writer locks and deduplicates the credit.
++                if (!\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
+                 $this->assertAvailableBalanceLimits((int)$order['uid'], $money['refund_ben'], $money['refund_give']);
++                }
+                 $idemKey = $opNo . ':pay_product_refund';
+                 $refundServices->setItem('terminal_authorized', 1)
+                     ->setItem('terminal_balance_idempotency_key', $idemKey);
+diff --git a/后端代码/app/services/order/StoreOrderRefundServices.php b/后端代码/app/services/order/StoreOrderRefundServices.php
+index 42760ddf..f22384a8 100644
+--- a/后端代码/app/services/order/StoreOrderRefundServices.php
++++ b/后端代码/app/services/order/StoreOrderRefundServices.php
+@@ -28,8 +28,8 @@ use app\services\user\UserCardHolderServices;
+ use app\services\other\ExpressServices;
+ use app\services\pay\PayServices;
+ use app\services\product\product\StoreProductServices;
+-use app\services\product\inventory\ProductInventoryChangeServices;
+-use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
++use app\services\product\inventory\ProductInventoryChangeServices;
++use app\services\cashier\v3\CashierV3BusinessDocumentNumberServices;
+ use app\services\store\SystemStoreServices;
+ use app\services\supplier\SystemSupplierServices;
+ use app\services\user\UserBillServices;
+@@ -453,15 +453,15 @@ class StoreOrderRefundServices extends BaseServices
+         /** @var StoreOrderCartInfoServices $storeOrderCartInfoServices */
+         $storeOrderCartInfoServices = app()->make(StoreOrderCartInfoServices::class);
+ 
+-        $res3 = $this->save($refundData);
+-        if (!$res3) {
+-            throw new ValidateException('添加退款申请失败');
+-        }
+-        $this->allocateCashierRefundDocumentNoInTx(
+-            (int)$res3->id,
+-            (int)$order['store_id'],
+-            (int)$refundData['add_time']
+-        );
++        $res3 = $this->save($refundData);
++        if (!$res3) {
++            throw new ValidateException('添加退款申请失败');
++        }
++        $this->allocateCashierRefundDocumentNoInTx(
++            (int)$res3->id,
++            (int)$order['store_id'],
++            (int)$refundData['add_time']
++        );
+         $res4 = true;
+         if ($cart_ids) {
+             foreach ($cart_ids as $cart) {
+@@ -481,30 +481,30 @@ class StoreOrderRefundServices extends BaseServices
+         if (!$res4) {
+             throw new ValidateException('添加退款申请失败');
+         }
+-        return (int)$res3->id;
+-    }
+-
+-    /**
+-     * Legacy refunds do not carry a tenant column and their order_id remains
+-     * the historical payment/refund reference. Store the new display number
+-     * separately, in the same transaction, without rewriting either field.
+-     */
+-    private function allocateCashierRefundDocumentNoInTx(int $refundId, int $storeId, int $occurredAt): void
+-    {
+-        if ($refundId <= 0 || $storeId <= 0 || $occurredAt <= 0) {
+-            throw new ValidateException('退款单号资料无效');
+-        }
+-        (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
+-            '0',
+-            CashierV3BusinessDocumentNumberServices::REFUND,
+-            'legacy_store_order_refund',
+-            (string)$refundId,
+-            date('Y-m-d', $occurredAt),
+-            $occurredAt
+-        );
+-    }
+-
+-    /**
++        return (int)$res3->id;
++    }
++
++    /**
++     * Legacy refunds do not carry a tenant column and their order_id remains
++     * the historical payment/refund reference. Store the new display number
++     * separately, in the same transaction, without rewriting either field.
++     */
++    private function allocateCashierRefundDocumentNoInTx(int $refundId, int $storeId, int $occurredAt): void
++    {
++        if ($refundId <= 0 || $storeId <= 0 || $occurredAt <= 0) {
++            throw new ValidateException('退款单号资料无效');
++        }
++        (new CashierV3BusinessDocumentNumberServices())->allocateForSourceInTx(
++            '0',
++            CashierV3BusinessDocumentNumberServices::REFUND,
++            'legacy_store_order_refund',
++            (string)$refundId,
++            date('Y-m-d', $occurredAt),
++            $occurredAt
++        );
++    }
++
++    /**
+      * 事务提交成功后的缓存清理、Job、事件（禁止在外层事务未提交前调用）。
+      */
+     public function dispatchApplyRefundAfterCommit(array $order, int $refundId, array $refundData, bool $isSync = true): void
+@@ -676,15 +676,15 @@ class StoreOrderRefundServices extends BaseServices
+             //添加退款数据
+             /** @var StoreOrderRefundServices $storeOrderRefundServices */
+             $storeOrderRefundServices = app()->make(StoreOrderRefundServices::class);
+-            $res3 = $storeOrderRefundServices->save($refundData);
+-            if (!$res3) {
+-                throw new ValidateException('添加退款申请失败');
+-            }
+-            $storeOrderRefundServices->allocateCashierRefundDocumentNoInTx(
+-                (int)$res3->id,
+-                (int)$order['store_id'],
+-                (int)$refundData['add_time']
+-            );
++            $res3 = $storeOrderRefundServices->save($refundData);
++            if (!$res3) {
++                throw new ValidateException('添加退款申请失败');
++            }
++            $storeOrderRefundServices->allocateCashierRefundDocumentNoInTx(
++                (int)$res3->id,
++                (int)$order['store_id'],
++                (int)$refundData['add_time']
++            );
+             $res4 = true;
+             if ($cart_ids) {
+                 //修改订单商品退款信息
+@@ -902,7 +902,8 @@ class StoreOrderRefundServices extends BaseServices
+         if (!$this->integralAndCouponBack($order, $recoverCouponFlag)) {
+             throw new ValidateException('回退积分和优惠卷失败');
+         }
+-        if ($order['pid'] == 0 && $order['type'] == 3) {
++        if ($order['pid'] == 0 && ($order['type'] == 3
++            || \app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id']))) {
+             /** @var StorePinkServices $pinkServices */
+             $pinkServices = app()->make(StorePinkServices::class);
+             if (!$pinkServices->setRefundPink($order)) {
+@@ -939,6 +940,13 @@ class StoreOrderRefundServices extends BaseServices
+ 
+     public function runPerformanceRollback($order): void
+     {
++        // This step and its terminal completion marker are one transaction: rights cannot survive a refund.
++        if (\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
++            \think\facade\Db::name('user_card_holder')->where('oid', (int)$order['id'])->update(['is_del' => 1]);
++            \think\facade\Db::name('store_order_cart_info')->where('oid', (int)$order['id'])
++                ->update(['write_surplus_times' => 0, 'surplus_num' => 0, 'is_writeoff' => 1]);
++            \think\facade\Db::name('combination_order_fulfillment')->where('order_id', (int)$order['id'])->update(['state' => 'refunded']);
++        }
+         if ($order['type'] == 11) {
+             /** @var UserCardHolderServices $cardHolderServices */
+             $cardHolderServices = app()->make(UserCardHolderServices::class);
+@@ -1218,6 +1226,11 @@ class StoreOrderRefundServices extends BaseServices
+      */
+     public function executeExternalChannelRefund(array $order, array $refundData, string $externalAmount, string $externalPayType = ''): void
+     {
++        // FuYou group money has already been confirmed by signed refundQuery. Never call WeChat again.
++        if (\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
++            \app\services\activity\combination\CombinationRefundServices::assertChannelConfirmed($order);
++            return;
++        }
+         if (bccomp($externalAmount, '0', 2) <= 0) {
+             return;
+         }
+@@ -1490,7 +1503,10 @@ class StoreOrderRefundServices extends BaseServices
+             $unique = (string)($info['productInfo']['attrInfo']['unique'] ?? $info['product_attr_unique'] ?? $info['sku_unique'] ?? '');
+             $cart_num = (float)($info['cart_num'] ?? 0);
+             $cart_num_i = (int)ceil($cart_num);
+-            switch ((int)($orderArr['type'] ?? 0)) {
++            // Activated card/project orders retain their group origin even after legacy type changes to 11/0.
++            $activityType = \app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$orderArr['id'])
++                ? 3 : (int)($orderArr['type'] ?? 0);
++            switch ($activityType) {
+                 case 1:
+                     $res5 = $res5 && $seckillServices->incSeckillStock($cart_num_i, $activity_id, $unique, $store_id, false);
+                     break;
+@@ -1533,26 +1549,26 @@ class StoreOrderRefundServices extends BaseServices
+                     $paid = (int)($orderArr['paid'] ?? 0);
+                     $orderSalesHandled = (int)($orderArr['sales_handled'] ?? 0);
+                     if ($paid === 1 && $orderSalesHandled === 1) {
+-                        /** @var StoreProductServices $productServices */
+-                        $productServices = app()->make(StoreProductServices::class);
+-						$salesLines = [];
+-                        foreach ($refundCartLines as $cart) {
++                        /** @var StoreProductServices $productServices */
++                        $productServices = app()->make(StoreProductServices::class);
++						$salesLines = [];
++                        foreach ($refundCartLines as $cart) {
+                             $cart = $inventoryChange->enrichCartWithInventorySnapshot(is_array($cart) ? $cart : []);
+                             try {
+                                 [$productId, $unique] = $inventoryChange->resolveInventoryTarget($cart);
+                             } catch (\Throwable $e) {
+                                 continue;
+                             }
+-	                            $num = (string)($cart['cart_num'] ?? 0);
+-	                            if ($productId <= 0 || bccomp($num, '0', 4) <= 0) continue;
+-	                            $salesLines[] = [
+-	                                'product_id' => $productId,
+-	                                'unique' => $unique,
+-	                                'num' => (int)ceil((float)$num),
+-	                            ];
+-	                        }
+-	                        $productServices->decProductSalesBatch($salesLines, $store_id);
+-                        Db::name('store_order_refund')->where('id', $refundId)->update(['sales_refunded' => 1]);
++	                            $num = (string)($cart['cart_num'] ?? 0);
++	                            if ($productId <= 0 || bccomp($num, '0', 4) <= 0) continue;
++	                            $salesLines[] = [
++	                                'product_id' => $productId,
++	                                'unique' => $unique,
++	                                'num' => (int)ceil((float)$num),
++	                            ];
++	                        }
++	                        $productServices->decProductSalesBatch($salesLines, $store_id);
++                        Db::name('store_order_refund')->where('id', $refundId)->update(['sales_refunded' => 1]);
+                     }
+                 }
+             }
+diff --git a/后端代码/app/services/order/StoreReservationOrderServices.php b/后端代码/app/services/order/StoreReservationOrderServices.php
+index bd83e21d..83c2e98d 100644
+--- a/后端代码/app/services/order/StoreReservationOrderServices.php
++++ b/后端代码/app/services/order/StoreReservationOrderServices.php
+@@ -1960,6 +1960,8 @@ class StoreReservationOrderServices extends BaseServices
+             $reservationTimeInfo, $serviceDurationMinutes, $addonItems, $reservationInfo, $custom_form,
+             $primaryStaffId, $staffChoose, $reservation_time, $createOrderServices, $orderServices, $addonDeductionList
+         ) {
++            // Purchased group rights must be issued and not refund-frozen before reservation deducts uses.
++            (new \app\services\activity\combination\CombinationFulfillmentServices())->assertUsable((int)$oid, true);
+             $ids = [];
+             $giftDetailIds = [(int)$reservationOrderInfo['cart_info_id']];
+             foreach ($addonDeductionList as $addon) $giftDetailIds[] = (int)($addon['cart_info_id'] ?? 0);
+@@ -2105,6 +2107,8 @@ class StoreReservationOrderServices extends BaseServices
+      */
+     protected function shouldCreateReservationFromPaidOrder(array $orderInfo, array $cartData): bool
+     {
++        // Even a delayed old payment job must not deduct group-purchased project rights.
++        if ((new \app\services\activity\combination\CombinationFulfillmentServices())->managed((int)($orderInfo['id'] ?? 0))) return false;
+         if (!empty($orderInfo['refund_status'])) {
+             return false;
+         }
+diff --git a/后端代码/app/services/order/store/WriteOffOrderServices.php b/后端代码/app/services/order/store/WriteOffOrderServices.php
+index 00bd824a..a6bd6a8c 100644
+--- a/后端代码/app/services/order/store/WriteOffOrderServices.php
++++ b/后端代码/app/services/order/store/WriteOffOrderServices.php
+@@ -952,6 +952,8 @@ class WriteOffOrderServices extends BaseServices
+             'defer_side_effects' => !empty($extra['defer_side_effects']),
+         ];
+         $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price, $writeoffPayload, $reservationOid, $salonHasProject, $writeOffRecordServices, $writeoffCartSnapshot, $isAuto) {
++            // Recheck after locking the order shared with group refund freeze; stale UI cannot consume rights.
++            (new \app\services\activity\combination\CombinationFulfillmentServices())->assertUsable((int)$orderInfo['id'], true);
+             if ($cartIds) {//选择商品、件数核销
+                 $writeoffSum = 0;
+                 foreach ($cartIds as $cart) {
+diff --git a/后端代码/app/services/pay/FuyouCombinationRefundGateway.php b/后端代码/app/services/pay/FuyouCombinationRefundGateway.php
+new file mode 100644
+index 00000000..41bc7fcf
+--- /dev/null
++++ b/后端代码/app/services/pay/FuyouCombinationRefundGateway.php
+@@ -0,0 +1,90 @@
++<?php
++declare(strict_types=1);
++
++namespace app\services\pay;
++
++use mohe\services\wechat\HwcPayService;
++use think\exception\ValidateException;
++
++/**
++ * AggregatePay commonRefund/refundQuery adapter. A successful application is
++ * deliberately not a successful refund. Only a signed query closes money facts.
++ * Protocol: https://fundwx.fuiou.com/doc/#/aggregatePay/api (2.4 / 2.13).
++ */
++class FuyouCombinationRefundGateway extends HwcPayService
++{
++    public function merchantId(): string { return (string)$this->config['mchntCd']; }
++
++    /** Input comes exclusively from the locked participant order/payment mapping. */
++    public function apply(array $receipt): void
++    {
++        $data = $this->base($receipt);
++        $data += ['mchnt_order_no' => $receipt['channel_order_no'],
++            'refund_order_no' => $receipt['refund_no'],
++            'order_type' => $receipt['channel'] === 'alipay' ? 'ALIPAY' : 'WECHAT',
++            'total_amt' => (string)$receipt['amount_cents'], 'refund_amt' => (string)$receipt['amount_cents']];
++        if (!empty($receipt['settled_on'])) $data['reserved_origi_dt'] = $receipt['settled_on'];
++        $data['sign'] = $this->sign($data, ['mchnt_cd','order_type','mchnt_order_no','refund_order_no',
++            'total_amt','refund_amt','term_id','random_str','version']);
++        $response = $this->postJson('https://aipay-cloud.fuioupay.com/aggregatePay/commonRefund', $data);
++        $this->verify($response, ['result_code','mchnt_cd','mchnt_order_no','refund_order_no',
++            'reserved_fy_settle_dt','random_str'], $receipt);
++        // Even a verified rejection stays queryable; no new refund number on a timeout.
++        if ((string)($response['result_code'] ?? '') !== '000000') {
++            throw new ValidateException('富友退款申请未确认，请查询原退款单结果');
++        }
++    }
++
++    /** Returns pending/confirmed/failed; unsigned or mismatched responses never unlock rights. */
++    public function query(array $receipt): array
++    {
++        $data = $this->base($receipt);
++        $data['refund_order_no'] = $receipt['refund_no'];
++        $data['sign'] = $this->sign($data, ['mchnt_cd','refund_order_no','term_id','random_str','version']);
++        $response = $this->postJson('https://aipay-cloud.fuioupay.com/aggregatePay/refundQuery', $data);
++        $this->verify($response, ['result_code','result_msg','trans_stat','ins_cd','mchnt_cd',
++            'term_id','random_str','order_type','mchnt_order_no','refund_order_no','transaction_id',
++            'refund_id','reserved_fy_settle_dt','reserved_fy_trace_no','reserved_refund_amt'], $receipt);
++        $state = 'pending';
++        if ((string)($response['result_code'] ?? '') === '000000') {
++            if (($response['trans_stat'] ?? '') === 'SUCCESS') {
++                // The immutable request/no identifies the whole refund; verify amount when returned by the protocol.
++                if (isset($response['reserved_refund_amt']) && (string)$response['reserved_refund_amt'] !== ''
++                    && (string)$response['reserved_refund_amt'] !== (string)$receipt['amount_cents']) {
++                    throw new ValidateException('富友退款金额核对不一致，保留处理中');
++                }
++                $state = 'confirmed';
++            } elseif (($response['trans_stat'] ?? '') === 'PAYERROR') $state = 'failed';
++        }
++        return ['state' => $state, 'channel_refund_id' => (string)($response['refund_id'] ?? ''),
++            'fuyou_refund_trace_no' => (string)($response['reserved_fy_trace_no'] ?? '')];
++    }
++
++    /** Merchant affinity is persisted; a later settings change may not reroute old money. */
++    private function base(array $receipt): array
++    {
++        if ($this->merchantId() === '' || $this->config['mchnt_key'] === ''
++            || !hash_equals($this->merchantId(), (string)$receipt['merchant_id'])) {
++            throw new ValidateException('原退款商户与当前富友配置不一致');
++        }
++        return ['version' => '1.0', 'mchnt_cd' => $this->merchantId(),
++            'term_id' => '88888888', 'random_str' => $this->getRandom(32)];
++    }
++
++    private function sign(array $data, array $fields): string
++    {
++        $values = array_map(static function ($field) use ($data) { return (string)($data[$field] ?? ''); }, $fields);
++        $values[] = $this->config['mchnt_key'];
++        return md5(implode('|', $values));
++    }
++
++    private function verify(array $response, array $fields, array $receipt): void
++    {
++        if (empty($response['sign']) || !hash_equals($this->sign($response, $fields), strtolower((string)$response['sign']))
++            || (string)($response['mchnt_cd'] ?? '') !== (string)$receipt['merchant_id']
++            || (string)($response['mchnt_order_no'] ?? '') !== (string)$receipt['channel_order_no']
++            || (string)($response['refund_order_no'] ?? '') !== (string)$receipt['refund_no']) {
++            throw new ValidateException('富友退款回执校验失败，保留处理中');
++        }
++    }
++}
+diff --git a/后端代码/database/upgrades/2026-10-25-拼团权益退款/01-schema.sql b/后端代码/database/upgrades/2026-10-25-拼团权益退款/01-schema.sql
+new file mode 100644
+index 00000000..db0696a5
+--- /dev/null
++++ b/后端代码/database/upgrades/2026-10-25-拼团权益退款/01-schema.sql
+@@ -0,0 +1,56 @@
++-- New orders opt in at creation. Historical orders are never retroactively issued rights.
++CREATE TABLE IF NOT EXISTS `eb_combination_group_origin` (
++ `group_id` INT UNSIGNED NOT NULL,
++ `expires_at` INT UNSIGNED NOT NULL,
++ `activity_name` VARCHAR(255) NOT NULL,
++ PRIMARY KEY (`group_id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开团名称及原到期时间，成团不得覆盖';
++
++CREATE TABLE IF NOT EXISTS `eb_combination_force_completion` (
++ `group_id` INT UNSIGNED NOT NULL,
++ `operator_id` INT UNSIGNED NOT NULL DEFAULT 0,
++ `virtual_count` INT UNSIGNED NOT NULL,
++ `created_at` INT UNSIGNED NOT NULL,
++ PRIMARY KEY (`group_id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='人工或规则补齐虚拟名额成团审计';
++
++CREATE TABLE IF NOT EXISTS `eb_combination_payment_origin` (
++ `channel_order_no` VARCHAR(30) NOT NULL,
++ `merchant_id` VARCHAR(32) NOT NULL,
++ `settled_on` VARCHAR(8) NOT NULL DEFAULT '',
++ PRIMARY KEY (`channel_order_no`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='拼团支付原商户及渠道交易日期，不存密钥';
++
++CREATE TABLE IF NOT EXISTS `eb_combination_order_fulfillment` (
++ `order_id` INT UNSIGNED NOT NULL,
++ `state` VARCHAR(16) NOT NULL DEFAULT 'pending',
++ `created_at` INT UNSIGNED NOT NULL,
++ `issued_at` INT UNSIGNED NOT NULL DEFAULT 0,
++ PRIMARY KEY (`order_id`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='拼团成团发放凭据，权益仍以原订单明细为准';
++
++-- One current refund workflow per participant order; retries keep the same channel number
++-- until a signed PAYERROR proves failure. No money or entitlement facts are copied here.
++CREATE TABLE IF NOT EXISTS `eb_combination_order_refund` (
++ `order_id` INT UNSIGNED NOT NULL,
++ `refund_no` VARCHAR(30) NOT NULL,
++ `attempt` INT UNSIGNED NOT NULL DEFAULT 1,
++ `state` VARCHAR(24) NOT NULL,
++ `channel_order_no` VARCHAR(30) NOT NULL DEFAULT '',
++ `channel` VARCHAR(16) NOT NULL DEFAULT '',
++ `amount_cents` BIGINT UNSIGNED NOT NULL,
++ `merchant_id` VARCHAR(32) NOT NULL DEFAULT '',
++ `channel_refund_id` VARCHAR(64) NOT NULL DEFAULT '',
++ `fuyou_refund_trace_no` VARCHAR(64) NOT NULL DEFAULT '',
++ `channel_transaction_id` VARCHAR(100) NOT NULL DEFAULT '',
++ `settled_on` VARCHAR(8) NOT NULL DEFAULT '',
++ `operator_id` INT UNSIGNED NOT NULL DEFAULT 0,
++ `kick_group_id` INT UNSIGNED NOT NULL DEFAULT 0,
++ `reason` VARCHAR(300) NOT NULL DEFAULT '',
++ `lease_until` INT UNSIGNED NOT NULL DEFAULT 0,
++ `created_at` INT UNSIGNED NOT NULL,
++ `updated_at` INT UNSIGNED NOT NULL,
++ PRIMARY KEY (`order_id`),
++ UNIQUE KEY `uq_combination_refund_no` (`refund_no`),
++ KEY `idx_combination_refund_recovery` (`state`,`updated_at`)
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='拼团整单退款执行及渠道确认凭据';
+diff --git a/后端代码/mohe/services/wechat/HwcPayService.php b/后端代码/mohe/services/wechat/HwcPayService.php
+index dda49d25..64d6cd9c 100644
+--- a/后端代码/mohe/services/wechat/HwcPayService.php
++++ b/后端代码/mohe/services/wechat/HwcPayService.php
+@@ -278,6 +278,11 @@ class HwcPayService
+             ? (new \app\services\member\MemberCommerceServices())->paid($orderId, (int)$data['order_amt'], $tradeNo, $channel)
+             : (bool)Event::until('pay.notify', [$notify, $eventChannel]);
+         if ($settled) {
++            // The signed callback's settlement date is authoritative for refunds beyond 30 days.
++            if ($successAction === 'product' && Db::name('store_order')->where('order_id', $orderId)->where('activity_id', '>', 0)->count()) {
++                Db::name('combination_payment_origin')->where('channel_order_no', $channelOrderNo)
++                    ->update(['settled_on' => (string)$data['reserved_fy_settle_dt']]);
++            }
+             Db::name('fuyou_payment_attempt')
+                 ->where('channel_order_no', $channelOrderNo)
+                 ->update([
+@@ -392,6 +397,11 @@ class HwcPayService
+                     'add_time' => $now,
+                     'update_time' => $now,
+                 ]);
++                // Persist original merchant identity only for new group payment attempts.
++                if ($successAction === 'product' && Db::name('store_order')->where('order_id', $orderId)->where('type', 3)->count()) {
++                    Db::name('combination_payment_origin')->insert(['channel_order_no' => $channelOrderNo,
++                        'merchant_id' => $this->config['mchntCd'], 'settled_on' => '']);
++                }
+                 return $channelOrderNo;
+             } catch (\Throwable $e) {
+                 // 唯一键碰撞可重试；表未升级或数据库异常最终统一失败，绝不退回不合规业务单号。
+diff --git a/后端代码/route/admin.php b/后端代码/route/admin.php
+index e5dffbb6..b02204b6 100644
+--- a/后端代码/route/admin.php
++++ b/后端代码/route/admin.php
+@@ -936,6 +936,10 @@ Route::group('adminapi', function () {
+         Route::put('combination/set_status/:id/:status', 'v1.marketing.combination.StoreCombination/set_status')->option(['real_name' => '修改拼团商品状态']);
+         //参与拼团列表
+         Route::get('combination/combine/list', 'v1.marketing.combination.StoreCombination/combine_list')->option(['real_name' => '参与拼团列表']);
++        Route::get('combination/order_pink/:id/export', 'v1.marketing.combination.StoreCombination/exportGroup')->option(['real_name' => '单团记录导出']);
++        Route::post('combination/order_pink/:id/complete', 'v1.marketing.combination.StoreCombination/completeGroup')->option(['real_name' => '拼团补齐虚拟名额成团']);
++        // Uses the existing authenticated group-record access, without a separate refund capability.
++        Route::post('combination/order_pink/:id/refund', 'v1.marketing.combination.StoreCombination/refundParticipant')->option(['real_name' => '拼团参与订单退款']);
+         //拼团人列表
+         Route::get('combination/order_pink/:id', 'v1.marketing.combination.StoreCombination/order_pink')->option(['real_name' => '拼团人列表']);
+         //拼团统计

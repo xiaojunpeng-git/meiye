@@ -1,0 +1,28 @@
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1142 CREATE command denied to user 'mohe_010_app'@'localhost' for table 'eb_combination_group_origin' in /www/backups/010/r61-combination-98e0d80e/migrate.php:34
+Stack trace:
+#0 /www/backups/010/r61-combination-98e0d80e/migrate.php(34): PDO->exec()
+#1 {main}
+  thrown in /www/backups/010/r61-combination-98e0d80e/migrate.php on line 34
+Command failed: ssh -q -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 mohe-server /www/server/php/74/bin/php '/www/backups/010/r61-combination-98e0d80e/migrate.php' '/www/backups/010/r61-combination-98e0d80e' 'migrate' '25615e158e996e7073451f3f566b7afe0d12fb9de1bbca940442ba944b6a1855'
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
+PHP Fatal error:  Uncaught PDOException: SQLSTATE[42000]: Syntax error or access violation: 1142 CREATE command denied to user 'mohe_010_app'@'localhost' for table 'eb_combination_group_origin' in /www/backups/010/r61-combination-98e0d80e/migrate.php:34
+Stack trace:
+#0 /www/backups/010/r61-combination-98e0d80e/migrate.php(34): PDO->exec()
+#1 {main}
+  thrown in /www/backups/010/r61-combination-98e0d80e/migrate.php on line 34
+

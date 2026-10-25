@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "url": "https://008.cc3798.com/admin/login",
+  "page": "账号登录/登录表单可见",
+  "errors": [],
+  "scope": "anonymous actual browser boot; no production login or business writes"
+}

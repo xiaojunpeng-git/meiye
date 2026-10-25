@@ -1,0 +1,15 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "configuredDebtEnabled": true,
+  "checks": [
+    "all live registry and enabled/disabled whitelist",
+    "sales live registry and enabled/disabled whitelist",
+    "recharge live registry and enabled/disabled whitelist",
+    "existing source policy retained",
+    "R58 custom service contract retained",
+    "R59 current-store settings readable"
+  ],
+  "businessWrites": 0,
+  "configChanged": false
+}

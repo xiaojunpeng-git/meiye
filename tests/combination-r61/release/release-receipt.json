@@ -1,0 +1,80 @@
+{
+  "result": "PASS",
+  "round": 61,
+  "date": "2026-10-25",
+  "businessCommit": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+  "sourceTree": "11df6ea624dd92e12da38d58f38f4a0efd6af14d",
+  "branch": "release/r61-combination-20261025",
+  "orderedSteps": [
+    "scoped commit",
+    "rh backup/migrate/deploy/verify",
+    "push",
+    "008 backup/migrate/deploy/verify",
+    "010 backup/migrate/deploy/verify"
+  ],
+  "sites": {
+    "rh": {
+      "result": "PASS",
+      "backup": "/www/backups/rh/r61-combination-98e0d80e-retry1",
+      "workflowTables": 5,
+      "platformAssetsChanged": true,
+      "cashierAndMobileEntriesUnchanged": true,
+      "realMoneyTest": false,
+      "businessWrites": 0,
+      "browserErrors": []
+    },
+    "008": {
+      "result": "PASS",
+      "backup": "/www/backups/008/r61-combination-98e0d80e",
+      "workflowTables": 5,
+      "platformAssetsChanged": true,
+      "cashierAndMobileEntriesUnchanged": true,
+      "realMoneyTest": false,
+      "businessWrites": 0,
+      "browserErrors": []
+    },
+    "010": {
+      "result": "PASS",
+      "backup": "/www/backups/010/r61-combination-98e0d80e-retry1",
+      "workflowTables": 5,
+      "platformAssetsChanged": true,
+      "cashierAndMobileEntriesUnchanged": true,
+      "realMoneyTest": false,
+      "businessWrites": 0,
+      "browserErrors": []
+    }
+  },
+  "files": [
+    "tests/combination-r61/README.md",
+    "tests/combination-r61/local-acceptance.php",
+    "前端代码/admin/src/api/marketing.js",
+    "前端代码/admin/src/components/goodsList/index.vue",
+    "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue",
+    "前端代码/admin/src/pages/marketing/storeCombination/create.vue",
+    "前端代码/admin/src/utils/formatBusinessMoney.js",
+    "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php",
+    "后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php",
+    "后端代码/app/jobs/order/OrderPayHandelJob.php",
+    "后端代码/app/listener/order/Pay.php",
+    "后端代码/app/services/activity/combination/CombinationFulfillmentServices.php",
+    "后端代码/app/services/activity/combination/CombinationGroupManagementServices.php",
+    "后端代码/app/services/activity/combination/CombinationRecordServices.php",
+    "后端代码/app/services/activity/combination/CombinationRefundServices.php",
+    "后端代码/app/services/activity/combination/StoreCombinationServices.php",
+    "后端代码/app/services/activity/combination/StorePinkServices.php",
+    "后端代码/app/services/order/StoreOrderCreateServices.php",
+    "后端代码/app/services/order/StoreOrderDeliveryServices.php",
+    "后端代码/app/services/order/StoreOrderRefundDomainServices.php",
+    "后端代码/app/services/order/StoreOrderRefundServices.php",
+    "后端代码/app/services/order/StoreReservationOrderServices.php",
+    "后端代码/app/services/order/store/WriteOffOrderServices.php",
+    "后端代码/app/services/pay/FuyouCombinationRefundGateway.php",
+    "后端代码/database/upgrades/2026-10-25-拼团权益退款/01-schema.sql",
+    "后端代码/mohe/services/wechat/HwcPayService.php",
+    "后端代码/route/admin.php"
+  ],
+  "realFuyouPending": true,
+  "platformEntrySHA256": "fe395a2760bf732e64aac8afc29d146701eca0c1e9819b0d43c1904c8f7522de",
+  "sharedHEAD": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "sharedIndexSHA256": "053e951e6bd4d36358eb283ff4c96953218a72793540159b5533da830e4c94d2"
+}

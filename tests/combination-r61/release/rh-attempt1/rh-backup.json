@@ -1,0 +1,6 @@
+{
+  "directory": "/www/backups/rh/r61-combination-98e0d80e",
+  "manifestSHA256": "5aea57f50e5608191e109d62dead55deaf59b79ed660d210409d9b2a3a81833f",
+  "databaseBackup": "Independent five-table absence/schema/data snapshot and upgrade-log identity; no historical tables changed",
+  "rollback": "Restore exact file manifest; retain additive workflow tables and recorded facts"
+}

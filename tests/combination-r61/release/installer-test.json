@@ -1,0 +1,36 @@
+{
+  "result": "PASS",
+  "checks": [
+    {
+      "mode": "backup",
+      "expectedSuccess": true,
+      "passed": true
+    },
+    {
+      "mode": "install",
+      "expectedSuccess": false,
+      "passed": true
+    },
+    {
+      "mode": "install",
+      "expectedSuccess": true,
+      "passed": true
+    },
+    {
+      "mode": "verify",
+      "expectedSuccess": true,
+      "passed": true
+    },
+    {
+      "mode": "rollback",
+      "expectedSuccess": true,
+      "passed": true
+    },
+    {
+      "mode": "install",
+      "expectedSuccess": false,
+      "passed": true
+    }
+  ],
+  "scope": "test-only filesystem path substitution; canonical installer unchanged"
+}

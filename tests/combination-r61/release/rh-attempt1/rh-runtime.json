@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "exportColumns": 16,
+  "existingGroupExportRows": 0,
+  "domainAndRecoveryLoadable": true,
+  "businessWrites": 0,
+  "providerRequests": 0
+}

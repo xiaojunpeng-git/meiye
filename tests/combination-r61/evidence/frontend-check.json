@@ -1,0 +1,1 @@
+{"results":[{"file":"src/pages/marketing/storeCombination/create.vue","passed":true},{"file":"src/pages/marketing/storeCombination/combinaList.vue","passed":true},{"file":"src/components/goodsList/index.vue","passed":true},{"file":"src/api/marketing.js","passed":true},{"file":"src/utils/formatBusinessMoney.js","passed":true}],"moneyDisplay":["13","12","—"]}

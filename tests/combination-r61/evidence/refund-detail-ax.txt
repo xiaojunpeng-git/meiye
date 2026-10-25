@@ -1,0 +1,230 @@
+Browser tab: 2, Title: "拼团列表 - 多门店", URL: "http://localhost:18081/admin/marketing/store_combination/combina_list".
+1 AXWebArea 拼团列表 - 多门店, URL: localhost:18081/admin/marketing/store_combination/combina_list
+	2 container app
+		3 container
+			4 link localhost:18081/admin/home/
+			182 text 
+			6 button  进入门店
+				183 text 
+				8 text 进入门店
+			184 text 
+			185 text 
+			11 AXWebArea about:blank
+		12 container
+			13 container
+				14 container
+					15 container
+						16 text 拼团商品 拼团列表
+					17 AXWebArea about:blank
+			18 button (collapsed) 展开 , Secondary Actions: Expand
+				19 text 展开 
+				186 text 
+			21 container
+				22 text 时间选择：
+				23 container
+					187 text 
+					25 text field
+				26 text 拼团状态：
+				27 container
+					28 container
+						29 text 请选择 
+					30 button 查询
+			74 container
+				188 text  5 参与人数(人)
+			76 container
+				189 text  3 成团数量(个)
+			31 container
+				32 table
+					33 row
+						34 cell
+							35 text 头像
+						36 cell
+							37 text 开团团长
+						38 cell
+							39 text 开团时间
+						40 cell
+							41 text 拼团商品
+						42 cell
+							43 text 几人团
+						44 cell
+							45 text 几人参加
+						46 cell
+							47 text 结束时间
+						48 cell
+							49 text 状态
+				78 table
+					79 row
+						80 cell
+							81 text R61-cc6d46e6d9 / 1137854
+						82 cell
+							83 text 2026-10-25 19:36
+						84 cell
+							85 text R61-cc6d46e6d9 / 98
+						86 cell
+							87 text 3
+						88 cell
+							89 text 3
+						90 cell
+							91 text 2026-10-25 19:42
+						92 cell
+							190 text 已完成
+					94 row
+						95 cell
+							96 text R61-27f89a3656 / 1137856
+						97 cell
+							98 text 2026-10-25 19:36
+						99 cell
+							100 text R61-27f89a3656 / 100
+						101 cell
+							102 text 2
+						103 cell
+							104 text 2
+						105 cell
+							106 text 2026-10-25 19:40
+						107 cell
+							181 text 已完成
+					109 row
+						110 cell
+							111 text R61-e5e2e27284 / 1137857
+						112 cell
+							113 text 2026-10-25 19:36
+						114 cell
+							115 text R61-e5e2e27284 / 101
+						116 cell
+							117 text 2
+						118 cell
+							119 text 1
+						120 cell
+							121 text 2026-10-25 20:36
+						122 cell
+							123 text 进行中
+					124 row
+						125 cell
+							126 text R61-d3b2debfca / 1137858
+						127 cell
+							128 text 2026-10-25 19:36
+						129 cell
+							130 text R61-d3b2debfca / 102
+						131 cell
+							132 text 2
+						133 cell
+							134 text 1
+						135 cell
+							136 text 2026-10-25 19:36
+						137 cell
+							138 text 已完成
+				52 table
+					53 row
+						54 cell
+							55 text 操作
+				139 table
+					140 row
+						141 cell
+							142 container
+								143 link 查看详情
+									144 text 查看详情
+								145 link 导出
+									146 text 导出
+					149 row
+						150 cell
+							151 container
+								152 link 查看详情
+									153 text 查看详情
+								154 link 导出
+									155 text 导出
+					158 row
+						159 cell
+							160 container
+								161 link 查看详情
+									162 text 查看详情
+								163 link 导出
+									164 text 导出
+								165 link 立即成团
+									166 text 立即成团
+					167 row
+						168 cell
+							169 container
+								170 link 查看详情
+									171 text 查看详情
+								172 link 导出
+									173 text 导出
+				56 AXWebArea about:blank
+			57 content list
+				58 text 共 4 条
+				59 container 上一页
+					191 text 
+				61 text 1
+				62 container 下一页
+					192 text 
+				64 container
+					65 text 跳至 
+					66 text field (settable) 1
+					67 text  页
+		176 container
+			177 link Description: 官网, Value: mohe.com/
+			178 link Description:  社区, Value: q.mohe.com/
+			179 link Description:  文档, Value: doc.mohe.com/
+			180 text Copyright © 2014-2024 5
+	193 container
+		194 container
+			195 link 
+				196 text 
+			197 text 查看详情
+			198 table
+				199 row
+					200 cell
+						201 text ID
+					202 cell
+						203 text 用户名称
+					204 cell
+						205 text 用户头像
+					206 cell
+						207 text 订单编号
+					208 cell
+						209 text 金额
+					210 cell
+						211 text 退款状态及操作
+					212 cell
+						213 text 富友订单号
+					214 cell
+						215 text 富友支付交易号
+					216 cell
+						217 text 富友退款流水号
+					218 cell
+						219 text 富友退款追踪号
+					220 cell
+						221 text 商户退款单号
+			222 table
+				223 row
+					224 cell
+						225 text 164
+					226 cell
+						227 text R61-d3b2debfca / 1137858
+					228 cell
+						229 text R61-d3b2debfca
+					230 cell
+						231 text 100
+					232 cell
+						233 text 退款成功
+					234 cell
+						235 text 1388398ed71334b3b014
+					236 cell
+						237 text LOCAL_PAYMENT_61
+					238 cell
+						239 text LOCAL_REFUND_61
+					240 cell
+						241 text local-trace
+					242 cell
+						243 text 13883568561494438266
+				244 row
+					245 cell
+						246 text 165
+					247 cell
+						248 text 虚拟团员 / 0
+					249 cell
+						250 text 0
+					251 cell
+						252 text 虚拟名额
+			253 AXWebArea about:blank
+
+The focused UI element is 1 AXWebArea 拼团列表 - 多门店, URL: localhost:18081/admin/marketing/store_combination/combina_list

@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "queueEnabled": true,
+  "queueWorkers": 6,
+  "process": "Swoole restarted and health-checked; integrated queue workers enabled",
+  "providerRequests": 0
+}

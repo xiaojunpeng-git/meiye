@@ -1,0 +1,122 @@
+{
+  "head": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "remote": "不适用，仅本地开发；未调用真实富友退款",
+  "files": [
+    {
+      "path": "tests/combination-r61/local-acceptance.php",
+      "sha256": "b797d9e2cf13f562b894780d91831dbf6d5972f27db11828104ad847fb9c2067"
+    },
+    {
+      "path": "前端代码/admin/src/api/marketing.js",
+      "sha256": "32f32d0d599d36c0d04ae1125e7760b4dd848b2ac859a54bce087c1138213d82"
+    },
+    {
+      "path": "前端代码/admin/src/components/goodsList/index.vue",
+      "sha256": "6edab605d8adc02d3f889a618c06b67efd123d85fb1bc9cb63d7d6eb2753f5eb"
+    },
+    {
+      "path": "前端代码/admin/src/pages/marketing/storeCombination/combinaList.vue",
+      "sha256": "3e6beda4b6763a7854a5169b6c876ae1c1dad19efc7437a4ea42eff646dc4b31"
+    },
+    {
+      "path": "前端代码/admin/src/pages/marketing/storeCombination/create.vue",
+      "sha256": "bf378c3d46104223c18fbaa01f4d26ae8aba4906da363bf1e9ea504ea266f258"
+    },
+    {
+      "path": "前端代码/admin/src/utils/formatBusinessMoney.js",
+      "sha256": "b2b05dd7c747f32ffdad8dfcb2314b411ee23546eeafaa3cac418728d39a83a7"
+    },
+    {
+      "path": "后端代码/app/controller/admin/v1/marketing/combination/StoreCombination.php",
+      "sha256": "3096898b8de0bc59be4281b2843229238c63eb1536ab112a6c6a808bce04b04c"
+    },
+    {
+      "path": "后端代码/app/jobs/activity/pink/CombinationRecoveryJob.php",
+      "sha256": "5b4de8bb82e65262866c9175bab6aa3dad161e10214d9dcf6a151505244dc9dd"
+    },
+    {
+      "path": "后端代码/app/jobs/order/OrderPayHandelJob.php",
+      "sha256": "8fcd2c225966ccaf51c4a5f899b91742445f37725fde3843ba1cdd326bac9763"
+    },
+    {
+      "path": "后端代码/app/listener/order/Pay.php",
+      "sha256": "3820e7b84af3d8269e67e9b0c44389cf1bf9cde82486bd9ff8b9eaf9157935e6"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationFulfillmentServices.php",
+      "sha256": "508bb7392769ad72d03af149665112d7ba2568194783376d06f7c57f905e40c5"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationGroupManagementServices.php",
+      "sha256": "2f2f2d908382b208a9dcc2bc344c114e2c73dbcc686763688764a00a650196fe"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationRecordServices.php",
+      "sha256": "38ba0f2e718fc1a0c6b3f8a180abbf3ebfac8949c08e6d90472563294cad3cd9"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/CombinationRefundServices.php",
+      "sha256": "705a1d450614b37bb7f383a30a03c2a7d9cc12086b82b865554904b647d64a1c"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/StoreCombinationServices.php",
+      "sha256": "9e307b3b2529567b0b92c9fa75df94d8012714b86b85f5df0afb898f7db8be98"
+    },
+    {
+      "path": "后端代码/app/services/activity/combination/StorePinkServices.php",
+      "sha256": "449c1e6e563935289884381b39480e13b86d9a2f7baebe28d19fe5de92fc120c"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderCreateServices.php",
+      "sha256": "422babaafffe69056724a7057dfce24e25a4cc3c224773308063fddb3e351ca1"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderDeliveryServices.php",
+      "sha256": "78ea9c4df723e13dbdb5fb8ec9ef46a54ff2f79ce1a2b3d0b3ccd88511fb6106"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderRefundDomainServices.php",
+      "sha256": "43d86dbf75f3b8dd3744859f5807a6b1e27a275c2a893c9aa5eae78f3210967f"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreOrderRefundServices.php",
+      "sha256": "1e132e9817a243203e332a329099d80675eddfe36e9492376518864396fe71ed"
+    },
+    {
+      "path": "后端代码/app/services/order/StoreReservationOrderServices.php",
+      "sha256": "14f8756bd94f59cdd5bbbed092a0c0921e5e3713e350947a6a42f1454d42442a"
+    },
+    {
+      "path": "后端代码/app/services/order/store/WriteOffOrderServices.php",
+      "sha256": "378e9f81a2135c1b850be3e908ede18e13f1620a68ff0515f5352ebeaed49e67"
+    },
+    {
+      "path": "后端代码/app/services/pay/FuyouCombinationRefundGateway.php",
+      "sha256": "9224cd4d5526f8612559d96d9ffce395e3722ce7047bcade3963ae0719bef868"
+    },
+    {
+      "path": "后端代码/database/upgrades/2026-10-25-拼团权益退款/01-schema.sql",
+      "sha256": "c533b04b54472b6cf19ebc7a18366230f96b7851196928a4f475db576a01232c"
+    },
+    {
+      "path": "后端代码/mohe/services/wechat/HwcPayService.php",
+      "sha256": "eebc627026e9518366bad985bb94c817854d8db96b7144013f06aeae59ae0484"
+    },
+    {
+      "path": "后端代码/route/admin.php",
+      "sha256": "3f9268724e31efa402ee6132897c3fb9b275e2df6b0ff354dd6ac670441da976"
+    },
+    {
+      "path": "tests/combination-r61/README.md",
+      "sha256": "cfcb9775dbe84b71ffe8a4abf46e15f6fc4e2b3ed96565a6d1015e9d60afc5f5"
+    }
+  ],
+  "validation": {
+    "businessAssertions": 75,
+    "concurrentRefundAndCompletion": "PASS",
+    "actual16ColumnDownload": "PASS",
+    "realFuyou": "not run",
+    "frontendCompile": "PASS",
+    "diffWhitespace": "PASS (cr-at-eol)"
+  }
+}

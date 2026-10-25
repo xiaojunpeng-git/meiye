@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "site": "008",
+  "entryStatus": 200,
+  "assets": [
+    "/view_admin/css/chunk-vendors.48272356.css",
+    "/view_admin/css/app.153d9d27.css",
+    "/view_admin/js/chunk-vendors.33283ef6.js",
+    "/view_admin/js/app.39807cd1.js"
+  ],
+  "anonymousOperationsRejected": true,
+  "realMoneyTest": false
+}

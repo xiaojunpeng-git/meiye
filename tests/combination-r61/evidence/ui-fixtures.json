@@ -1,0 +1,158 @@
+{
+    "localOnly": true,
+    "leader": {
+        "uid": 1137854,
+        "pid": 625919,
+        "cid": 98,
+        "oid": 2327784,
+        "pinkId": 160,
+        "cart": {
+            "id": 625919,
+            "cart_num": 1,
+            "product_id": 625919,
+            "product_type": 6,
+            "activity_id": 98,
+            "truePrice": 100,
+            "productInfo": {
+                "id": 98,
+                "product_id": 625919,
+                "store_name": "R61-cc6d46e6d9",
+                "product_type": 6,
+                "price": 100,
+                "image": "",
+                "attrInfo": {
+                    "unique": "82abbf89",
+                    "write_valid": 1,
+                    "write_times": 1,
+                    "price": 100,
+                    "suk": "默认"
+                }
+            }
+        },
+        "channel": "1388382abbf897f0b9cb"
+    },
+    "member": {
+        "uid": 1137855,
+        "pid": 625920,
+        "cid": 99,
+        "oid": 2327785,
+        "pinkId": 161,
+        "cart": {
+            "id": 625919,
+            "cart_num": 1,
+            "product_id": 625919,
+            "product_type": 6,
+            "activity_id": 98,
+            "truePrice": 100,
+            "productInfo": {
+                "id": 98,
+                "product_id": 625919,
+                "store_name": "R61-cc6d46e6d9",
+                "product_type": 6,
+                "price": 100,
+                "image": "",
+                "attrInfo": {
+                    "unique": "82abbf89",
+                    "write_valid": 1,
+                    "write_times": 1,
+                    "price": 100,
+                    "suk": "默认"
+                }
+            }
+        },
+        "channel": "13883e84f53c58c9cc2c"
+    },
+    "card": {
+        "uid": 1137856,
+        "pid": 625921,
+        "cid": 100,
+        "oid": 2327786,
+        "pinkId": 162,
+        "cart": {
+            "id": 625921,
+            "cart_num": 1,
+            "product_id": 625921,
+            "product_type": 5,
+            "activity_id": 100,
+            "truePrice": 100,
+            "productInfo": {
+                "id": 100,
+                "product_id": 625921,
+                "store_name": "R61-27f89a3656",
+                "product_type": 5,
+                "price": 100,
+                "image": "",
+                "attrInfo": {
+                    "unique": "dc3167e0",
+                    "write_valid": 1,
+                    "write_times": 1,
+                    "price": 100,
+                    "suk": "默认"
+                }
+            }
+        },
+        "channel": "13883dc3167e0d09cce6"
+    },
+    "product": {
+        "uid": 1137857,
+        "pid": 625922,
+        "cid": 101,
+        "oid": 2327787,
+        "pinkId": 163,
+        "cart": {
+            "id": 625922,
+            "cart_num": 1,
+            "product_id": 625922,
+            "product_type": 0,
+            "activity_id": 101,
+            "truePrice": 100,
+            "productInfo": {
+                "id": 101,
+                "product_id": 625922,
+                "store_name": "R61-e5e2e27284",
+                "product_type": 0,
+                "price": 100,
+                "image": "",
+                "attrInfo": {
+                    "unique": "95cc34c2",
+                    "write_valid": 1,
+                    "write_times": 1,
+                    "price": 100,
+                    "suk": "默认"
+                }
+            }
+        },
+        "channel": "1388395cc34c2bc6c341"
+    },
+    "refunded": {
+        "uid": 1137858,
+        "pid": 625923,
+        "cid": 102,
+        "oid": 2327788,
+        "pinkId": 164,
+        "cart": {
+            "id": 625923,
+            "cart_num": 1,
+            "product_id": 625923,
+            "product_type": 6,
+            "activity_id": 102,
+            "truePrice": 100,
+            "productInfo": {
+                "id": 102,
+                "product_id": 625923,
+                "store_name": "R61-d3b2debfca",
+                "product_type": 6,
+                "price": 100,
+                "image": "",
+                "attrInfo": {
+                    "unique": "98ed7133",
+                    "write_valid": 1,
+                    "write_times": 1,
+                    "price": 100,
+                    "suk": "默认"
+                }
+            }
+        },
+        "channel": "1388398ed71334b3b014"
+    }
+}

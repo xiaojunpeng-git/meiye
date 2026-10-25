@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "livePlatformRuntimeAssetsMatchPriorCanonicalBuild": true,
+  "baselineBusinessSourceIdentical": true,
+  "normalizedBaselineByteComparison": true,
+  "webpackFilenameOnlyDifferences": {
+    "view_admin/js/chunk-0f56252a.0fcd75d1.js": "view_admin/js/chunk-0f56252a.0be9f1b2.js",
+    "view_admin/js/app.13e50aec.js": "view_admin/js/app.97c898fb.js"
+  },
+  "baselineAssets": 1230,
+  "candidateAssets": 1230,
+  "fixedBackendAssertions": 75,
+  "fixedBackendPassed": true
+}

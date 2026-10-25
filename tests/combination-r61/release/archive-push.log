@@ -1,0 +1,23 @@
+node:child_process:929
+    throw err;
+    ^
+
+Error: Command failed: git hash-object -w --stdin
+    at checkExecSyncError (node:child_process:890:11)
+    at Object.execFileSync (node:child_process:926:15)
+    at git (/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r61-combination-release-archive.cjs:5:100)
+    at Object.<anonymous> (/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r61-combination-release-archive.cjs:13:101)
+    at Module._compile (node:internal/modules/cjs/loader:1364:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1422:10)
+    at Module.load (node:internal/modules/cjs/loader:1203:32)
+    at Module._load (node:internal/modules/cjs/loader:1019:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:128:12) {
+  status: null,
+  signal: 'SIGTERM',
+  output: [ null, Buffer(0) [Uint8Array] [], Buffer(0) [Uint8Array] [] ],
+  pid: 61951,
+  stdout: Buffer(0) [Uint8Array] [],
+  stderr: Buffer(0) [Uint8Array] []
+}
+
+Node.js v18.20.8
