@@ -405,16 +405,37 @@ class StoreCartServices extends BaseServices
                 break;
         }
         if (in_array($type, [1, 2, 3, 4])) {
-            //根商品规格库存
-            $product_stock = $attrValueServices->value(['product_id' => $productInfo['product_id'], 'suk' => $attrInfo['suk'], 'type' => 0], 'stock');
-            if ($product_stock < $cartNum) {
-                throw new ValidateException('商品库存不足' . $cartNum);
+            // 拼团名额始终校验；根商品实物库存只约束开启库存且不允许负库存的普通产品。
+            // 卡项、项目和关闭库存管理的商品已有独立活动名额，不能被根 SKU 的 0 库存阻断。
+            $checkCatalogStock = true;
+            if ($type === 3) {
+                /** @var StoreProductServices $productServices */
+                $productServices = app()->make(StoreProductServices::class);
+                $catalogProduct = $productServices->get((int)$productInfo['product_id'], ['product_type', 'is_inventory', 'allow_negative_stock']);
+                if (!$catalogProduct) {
+                    throw new ValidateException('拼团商品不存在');
+                }
+                $checkCatalogStock = self::requiresCombinationCatalogStock($catalogProduct);
+            }
+            if ($checkCatalogStock) {
+                $product_stock = $attrValueServices->value(['product_id' => $productInfo['product_id'], 'suk' => $attrInfo['suk'], 'type' => 0], 'stock');
+                if ($product_stock < $cartNum) {
+                    throw new ValidateException('商品库存不足' . $cartNum);
+                }
             }
             if (!CacheService::checkStock($unique, (int)$cartNum, $type)) {
                 throw new ValidateException('商品库存不足' . $cartNum . ',无法购买请选择其他商品!');
             }
         }
         return [$attrInfo, $unique, $cartNum, $productInfo];
+    }
+
+    /** Match group creation's catalog inventory policy while retaining the activity's own quota lock. */
+    private static function requiresCombinationCatalogStock($catalogProduct): bool
+    {
+        return (int)$catalogProduct['product_type'] === 0
+            && (int)($catalogProduct['is_inventory'] ?? 1) === 1
+            && (int)($catalogProduct['allow_negative_stock'] ?? 1) !== 1;
     }
 
     /**

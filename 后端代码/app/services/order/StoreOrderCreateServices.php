@@ -545,8 +545,14 @@ class StoreOrderCreateServices extends BaseServices
                     || ((int)($cart['cart_type'] ?? 0) > 0)
                     || bccomp((string)($cart['pay_price'] ?? '0'), '0', 2) === 0
                     || (array_key_exists('price', $cart) && bccomp((string)$cart['price'], '0', 2) === 0);
+                // 卡项和项目不扣根商品实物库存，但拼团仍须在事务内扣独立活动名额。
+                // 否则无实物库存的卡项可反复开团，超过平台配置的拼团限量。
+                if ($skipStock && $type === 3 && $cartItemType === 3) {
+                    $res5 = $res5 && $pinkServices->decCombinationStock($cart_num, $activity_id, $unique, $store_id, false);
+                    continue;
+                }
                 // 库存改造：下单不扣实物库存、不加销量；实物与销量在支付成功处理。
-                // 营销活动仍可在下单时扣活动额度（活动 SKU/主表），不得扣实物。
+                // 其他营销活动沿用既有额度规则，不让卡项的零库存变成实物扣减。
                 if ($skipStock) {
                     continue;
                 }

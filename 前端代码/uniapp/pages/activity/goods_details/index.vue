@@ -1375,8 +1375,10 @@
 						  url: '/pages/goods/order_confirm/index?new=1&spid='+this.spid+'&cartId=' + res.data.cartId+'&delivery_type='+that.delivery_type+'&addressId='+that.addressId+'&store_id='+(that.delivery_type == 1 ? 0 : that.store_id)+'&store_name='+that.store_name+'&product_id=' + id
 						});
 					}).catch(err => {
+						// 购物车校验失败时展示后端业务原因，便于会员重新选择规格或联系门店。
+						const message = typeof err === 'string' ? err : (err && (err.msg || err.message)) || '加入拼团失败，请稍后重试';
 						return this.$util.Tips({
-							title: err
+							title: message
 						});
 					});
 				}else{
