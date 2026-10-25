@@ -952,6 +952,8 @@ class WriteOffOrderServices extends BaseServices
             'defer_side_effects' => !empty($extra['defer_side_effects']),
         ];
         $data = $this->transaction(function () use ($isEnd,$orderInfo, $staff_id, $data, $cartIds, $cartInfoServices, $cartData, $auth, $cartInfo, $price, $writeoffPayload, $reservationOid, $salonHasProject, $writeOffRecordServices, $writeoffCartSnapshot, $isAuto) {
+            // Recheck after locking the order shared with group refund freeze; stale UI cannot consume rights.
+            (new \app\services\activity\combination\CombinationFulfillmentServices())->assertUsable((int)$orderInfo['id'], true);
             if ($cartIds) {//选择商品、件数核销
                 $writeoffSum = 0;
                 foreach ($cartIds as $cart) {

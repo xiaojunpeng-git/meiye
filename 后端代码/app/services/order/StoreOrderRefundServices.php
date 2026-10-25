@@ -902,7 +902,8 @@ class StoreOrderRefundServices extends BaseServices
         if (!$this->integralAndCouponBack($order, $recoverCouponFlag)) {
             throw new ValidateException('回退积分和优惠卷失败');
         }
-        if ($order['pid'] == 0 && $order['type'] == 3) {
+        if ($order['pid'] == 0 && ($order['type'] == 3
+            || \app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id']))) {
             /** @var StorePinkServices $pinkServices */
             $pinkServices = app()->make(StorePinkServices::class);
             if (!$pinkServices->setRefundPink($order)) {
@@ -939,6 +940,13 @@ class StoreOrderRefundServices extends BaseServices
 
     public function runPerformanceRollback($order): void
     {
+        // This step and its terminal completion marker are one transaction: rights cannot survive a refund.
+        if (\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
+            \think\facade\Db::name('user_card_holder')->where('oid', (int)$order['id'])->update(['is_del' => 1]);
+            \think\facade\Db::name('store_order_cart_info')->where('oid', (int)$order['id'])
+                ->update(['write_surplus_times' => 0, 'surplus_num' => 0, 'is_writeoff' => 1]);
+            \think\facade\Db::name('combination_order_fulfillment')->where('order_id', (int)$order['id'])->update(['state' => 'refunded']);
+        }
         if ($order['type'] == 11) {
             /** @var UserCardHolderServices $cardHolderServices */
             $cardHolderServices = app()->make(UserCardHolderServices::class);
@@ -1218,6 +1226,11 @@ class StoreOrderRefundServices extends BaseServices
      */
     public function executeExternalChannelRefund(array $order, array $refundData, string $externalAmount, string $externalPayType = ''): void
     {
+        // FuYou group money has already been confirmed by signed refundQuery. Never call WeChat again.
+        if (\app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$order['id'])) {
+            \app\services\activity\combination\CombinationRefundServices::assertChannelConfirmed($order);
+            return;
+        }
         if (bccomp($externalAmount, '0', 2) <= 0) {
             return;
         }
@@ -1490,7 +1503,10 @@ class StoreOrderRefundServices extends BaseServices
             $unique = (string)($info['productInfo']['attrInfo']['unique'] ?? $info['product_attr_unique'] ?? $info['sku_unique'] ?? '');
             $cart_num = (float)($info['cart_num'] ?? 0);
             $cart_num_i = (int)ceil($cart_num);
-            switch ((int)($orderArr['type'] ?? 0)) {
+            // Activated card/project orders retain their group origin even after legacy type changes to 11/0.
+            $activityType = \app\services\activity\combination\CombinationRefundServices::isGroupOrder((int)$orderArr['id'])
+                ? 3 : (int)($orderArr['type'] ?? 0);
+            switch ($activityType) {
                 case 1:
                     $res5 = $res5 && $seckillServices->incSeckillStock($cart_num_i, $activity_id, $unique, $store_id, false);
                     break;

@@ -9,6 +9,20 @@
 // +----------------------------------------------------------------------
 import request from '@/plugins/request';
 
+export function combinationGroupExportApi(id) {
+  return request({ url: `marketing/combination/order_pink/${id}/export`, method: 'get' });
+}
+
+// Group management shares the existing record access.
+export function combinationCompleteApi(id) {
+  return request({ url: `marketing/combination/order_pink/${id}/complete`, method: 'post' });
+}
+
+// No independent refund permission; the authenticated group record owns this action.
+export function combinationParticipantRefundApi(id, data) {
+  return request({ url: `marketing/combination/order_pink/${id}/refund`, method: 'post', data });
+}
+
 /**
  * @description 优惠券制作--列表
  * @param {Object} param params {Object} 传值参数

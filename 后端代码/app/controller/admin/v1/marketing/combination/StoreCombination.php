@@ -231,6 +231,33 @@ class StoreCombination extends AuthController
         return $this->success($list);
     }
 
+    /** Same group identity and participant authority as the visible detail; no page-sized truncation. */
+    public function exportGroup($id)
+    {
+        return $this->success((new \app\services\activity\combination\CombinationRecordServices())->export((int)$id));
+    }
+
+    /** Virtual seats are management evidence, never paid participants. */
+    public function completeGroup($id)
+    {
+        return $this->success((new \app\services\activity\combination\CombinationGroupManagementServices())->complete(
+            (int)$id, (int)$this->request->adminId()));
+    }
+
+    /** Authenticated admin action; order membership and amounts are reloaded server-side. */
+    public function refundParticipant($id)
+    {
+        $orderId = (int)$this->request->post('order_id', 0);
+        $pink = \think\facade\Db::name('store_pink')->where('order_id_key', $orderId)->find();
+        if (!$pink || ((int)$pink['id'] !== (int)$id && (int)$pink['k_id'] !== (int)$id))
+            throw new \think\exception\ValidateException('该订单不属于当前拼团');
+        $reason = (string)$this->request->post('reason', '');
+        $result = (new \app\services\activity\combination\CombinationRefundServices())->refundOrder(
+            $orderId, $reason, (int)$this->request->adminId(), (bool)$this->request->post('retry', false),
+            $this->request->post('action', '') === 'kick' ? (int)$id : 0);
+        return $this->success($result);
+    }
+
     /**
      * 拼团人列表
      * @return mixed
@@ -240,6 +267,15 @@ class StoreCombination extends AuthController
         /** @var StorePinkServices $storePinkServices */
         $storePinkServices = app()->make(StorePinkServices::class);
         $list = $storePinkServices->getPinkMember($id);
+        // The existing group-record entry owns these actions; no additional refund permission is introduced.
+        foreach ($list as &$participant) {
+            if ((int)$participant['is_virtual'] === 1) {
+                $participant['refund_message'] = '虚拟名额';
+                continue;
+            }
+            $participant = array_merge($participant, (new \app\services\activity\combination\CombinationRefundServices())->describe((int)$participant['order_id_key']));
+        }
+        unset($participant);
         return $this->success(compact('list'));
     }
 

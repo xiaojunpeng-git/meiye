@@ -1960,6 +1960,8 @@ class StoreReservationOrderServices extends BaseServices
             $reservationTimeInfo, $serviceDurationMinutes, $addonItems, $reservationInfo, $custom_form,
             $primaryStaffId, $staffChoose, $reservation_time, $createOrderServices, $orderServices, $addonDeductionList
         ) {
+            // Purchased group rights must be issued and not refund-frozen before reservation deducts uses.
+            (new \app\services\activity\combination\CombinationFulfillmentServices())->assertUsable((int)$oid, true);
             $ids = [];
             $giftDetailIds = [(int)$reservationOrderInfo['cart_info_id']];
             foreach ($addonDeductionList as $addon) $giftDetailIds[] = (int)($addon['cart_info_id'] ?? 0);
@@ -2105,6 +2107,8 @@ class StoreReservationOrderServices extends BaseServices
      */
     protected function shouldCreateReservationFromPaidOrder(array $orderInfo, array $cartData): bool
     {
+        // Even a delayed old payment job must not deduct group-purchased project rights.
+        if ((new \app\services\activity\combination\CombinationFulfillmentServices())->managed((int)($orderInfo['id'] ?? 0))) return false;
         if (!empty($orderInfo['refund_status'])) {
             return false;
         }

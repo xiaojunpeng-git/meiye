@@ -107,6 +107,8 @@ class StoreCombinationServices extends BaseServices
         if ($productInfo['is_vip_product'] || $productInfo['is_presale_product']) {
             throw new AdminException('该商品是预售或svip专享');
         }
+        // Activity type is authoritative; clients cannot turn arbitrary virtual goods into rights.
+        if (!in_array((int)$productInfo['product_type'], [0, 5, 6], true)) throw new AdminException('拼团仅支持产品、卡项和项目');
         $data['product_type'] = $productInfo['product_type'];
 		if ($data['product_type'] == 4 && !$data['delivery_type']) {
 			$data['delivery_type'] = $productInfo['delivery_type'];
@@ -125,7 +127,9 @@ class StoreCombinationServices extends BaseServices
         $data['specs'] = is_array($specs) ? json_encode($specs) : $specs;
 		$data['applicable_type'] = $productInfo['applicable_type'];
 		$data['applicable_store_id'] = $productInfo['applicable_store_id'];
-        if (in_array($data['product_type'], [1, 2, 3, 4])) {
+        if (in_array((int)$data['product_type'], [5, 6], true)) {
+            // Rights need neither freight nor an address; actual use remains a later service event.
+            $data['delivery_type'] = '2';
             $data['freight'] = 1;
             $data['temp_id'] = 0;
             $data['postage'] = 0;
@@ -147,6 +151,12 @@ class StoreCombinationServices extends BaseServices
         }
         $description = $data['description'];
         $detail = $data['attrs'];
+        // New group prices use whole yuan; quantities and group sizes are whole counts.
+        foreach ($detail as $sku) {
+            $price = (string)($sku['price'] ?? '');
+            if (!preg_match('/^[0-9]+(?:\.0{1,2})?$/D', $price) || bccomp($price, '0', 2) <= 0)
+                throw new AdminException('拼团价格必须为大于0的整数元');
+        }
         $items = $data['items'];
         $data['start_time'] = strtotime($data['section_time'][0]);
         $data['stop_time'] = strtotime($data['section_time'][1]);
@@ -425,28 +435,24 @@ class StoreCombinationServices extends BaseServices
      */
     public function decCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0, bool $decProductStock = false)
     {
-		if (!$CombinationId) return true;
-        $product_id = $this->dao->value(['id' => $CombinationId], 'product_id');
-		$res = true;
-		if ($product_id) {
-			if ($unique) {
-				/** @var StoreProductAttrValueServices $skuValueServices */
-				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
-				//减去拼团商品的sku库存增加销量（活动额度）
-				$res = $res && $skuValueServices->decProductAttrStock($CombinationId, $unique, $num, 3);
-
-				if ($decProductStock) {
-					$sku = $skuValueServices->value(['product_id' => $CombinationId, 'unique' => $unique, 'type' => 3], 'suk');
-					$productUnique = $skuValueServices->value(['suk' => $sku, 'product_id' => $product_id, 'type' => 0], 'unique');
-					/** @var StoreProductServices $services */
-					$services = app()->make(StoreProductServices::class);
-					$res = $res && $services->decProductStock($num, (int)$product_id, (string)$productUnique, $store_id);
-				}
-			}
-			//减去拼团商品库存
-			$res = $res && $this->dao->decStockIncSales(['id' => $CombinationId, 'type' => 3], $num);
-		}
-        return $res;
+        if ($num <= 0 || $CombinationId <= 0) throw new ValidateException('拼团库存参数错误');
+        return \think\facade\Db::transaction(function () use ($num, $CombinationId, $unique, $store_id, $decProductStock) {
+            $activity = \think\facade\Db::name('store_combination')->where('id', $CombinationId)->lock(true)->find();
+            $sku = \think\facade\Db::name('store_product_attr_value')->where('product_id', $CombinationId)
+                ->where('type', 3)->where('unique', $unique)->lock(true)->find();
+            if (!$activity || !$sku || (int)$activity['stock'] < $num || (int)$activity['quota'] < $num
+                || (int)$sku['stock'] < $num || (int)$sku['quota'] < $num) throw new ValidateException('拼团剩余名额不足');
+            $values = app()->make(StoreProductAttrValueServices::class);
+            if (!$values->decProductAttrStock($CombinationId, $unique, $num, 3)) throw new ValidateException('拼团规格扣减失败');
+            // Here type=3 is the SKU namespace, not store_combination.type (platform/store/supplier ownership).
+            \think\facade\Db::name('store_combination')->where('id', $CombinationId)
+                ->dec('stock', $num)->dec('quota', $num)->inc('sales', $num)->update();
+            if ($decProductStock) {
+                $original = $values->value(['suk' => $sku['suk'], 'product_id' => (int)$activity['product_id'], 'type' => 0], 'unique');
+                return app()->make(StoreProductServices::class)->decProductStock($num, (int)$activity['product_id'], (string)$original, $store_id);
+            }
+            return true;
+        });
     }
 
     /**
@@ -459,30 +465,23 @@ class StoreCombinationServices extends BaseServices
      */
     public function incCombinationStock(int $num, int $CombinationId, string $unique, int $store_id = 0, bool $incProductStock = false)
     {
-		if (!$CombinationId) return true;
-        $product_id = $this->dao->value(['id' => $CombinationId], 'product_id');
-        $res = false;
-		if ($product_id) {
-			if ($unique) {
-				/** @var StoreProductAttrValueServices $skuValueServices */
-				$skuValueServices = app()->make(StoreProductAttrValueServices::class);
-				//增加拼团商品的sku库存,减去销量
-				$res = false !== $skuValueServices->incProductAttrStock($CombinationId, $unique, $num, 3);
-
-				//拼团商品sku
-				$suk = $skuValueServices->value(['unique' => $unique, 'product_id' => $CombinationId, 'type' => 3], 'suk');
-				//平台商品sku unique
-				$productUnique = $skuValueServices->value(['suk' => $suk, 'product_id' => $product_id, 'type' => 0], 'unique');
-
-				/** @var StoreProductServices $services */
-				$services = app()->make(StoreProductServices::class);
-				//增加当前普通商品sku的库存,减去销量
-				if ($incProductStock) { $res = $res && $services->incProductStock($num, (int)$product_id, (string)$productUnique, $store_id); }
-			}
-			//增加拼团库存
-			$res = $res && $this->dao->incStockDecSales(['id' => $CombinationId, 'type' => 3], $num);
-		}
-        return $res;
+        if ($num <= 0 || $CombinationId <= 0) throw new ValidateException('拼团库存参数错误');
+        return \think\facade\Db::transaction(function () use ($num, $CombinationId, $unique, $store_id, $incProductStock) {
+            $activity = \think\facade\Db::name('store_combination')->where('id', $CombinationId)->lock(true)->find();
+            $sku = \think\facade\Db::name('store_product_attr_value')->where('product_id', $CombinationId)
+                ->where('type', 3)->where('unique', $unique)->lock(true)->find();
+            if (!$activity || !$sku) throw new ValidateException('原拼团规格无法核实，不能回退其他规格库存');
+            $values = app()->make(StoreProductAttrValueServices::class);
+            if (!$values->incProductAttrStock($CombinationId, $unique, $num, 3)) throw new ValidateException('拼团规格回退失败');
+            // Terminal inventory step deduplicates this restoration; virtual members never enter this method.
+            \think\facade\Db::name('store_combination')->where('id', $CombinationId)
+                ->inc('stock', $num)->inc('quota', $num)->dec('sales', min($num, (int)$activity['sales']))->update();
+            if ($incProductStock) {
+                $original = $values->value(['suk' => $sku['suk'], 'product_id' => (int)$activity['product_id'], 'type' => 0], 'unique');
+                return app()->make(StoreProductServices::class)->incProductStock($num, (int)$activity['product_id'], (string)$original, $store_id);
+            }
+            return true;
+        });
     }
 
 	/**
@@ -515,13 +514,11 @@ class StoreCombinationServices extends BaseServices
         $pink = $pinkService->getPinkUserOne($id);
         if (!$pink) throw new ValidateException('参数错误');
         $pink = $pink->toArray();
-        if (isset($pink['is_refund']) && $pink['is_refund']) {
-            if ($pink['is_refund'] != $pink['id']) {
-                $id = $pink['is_refund'];
-                return $this->getPinkInfo($uid, $id, $user);
-            } else {
-                throw new ValidateException('订单已退款');
-            }
+        if (!empty($pink['is_refund'])) {
+            // is_refund is a tinyint marker, never a group-id storage slot. A transferred leader follows k_id.
+            if ((int)$pink['k_id'] > 0) return $this->getPinkInfo($uid, (int)$pink['k_id'], $user);
+            // Other paid members may still view a completed group after its leader receives a refund.
+            if ((int)$pink['status'] !== 2) throw new ValidateException('订单已退款');
         }
         [$pinkAll, $pinkT, $count, $idAll, $uidAll] = $pinkService->getPinkMemberAndPinkK($pink);
         if ($pinkT['status'] == 2) {

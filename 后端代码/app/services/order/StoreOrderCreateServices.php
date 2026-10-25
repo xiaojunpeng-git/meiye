@@ -337,6 +337,10 @@ class StoreOrderCreateServices extends BaseServices
         $order = $this->transaction(function () use ($cartIds, $couponId, $orderInfo, $cartInfo, $key, $userInfo, $useIntegral, $priceData, $type, $activity_id, $uid, $addressId, $promotions_give, $storeId, $reservationInfo,$product_type) {
             //创建订单
             $order = $this->dao->save($orderInfo);
+            // Every newly created group order waits for completion; historical orders are not backfilled.
+            if ((int)$type === 3) {
+                (new \app\services\activity\combination\CombinationFulfillmentServices())->register((int)$order['id']);
+            }
             if ($couponId) {
                 /** @var StoreCouponUserServices $couponServices */
                 $couponServices = app()->make(StoreCouponUserServices::class);

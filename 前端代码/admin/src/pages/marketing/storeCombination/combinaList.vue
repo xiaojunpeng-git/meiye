@@ -61,6 +61,8 @@
                 </template>
                 <template slot-scope="{ row }" slot="action">
                     <a @click="Info(row)" >查看详情</a>
+                    <a style="margin-left:12px" @click="exportGroup(row)">导出</a>
+                    <a v-if="row.status === 1" style="margin-left:12px" @click="completeGroup(row)">立即成团</a>
                 </template>
             </Table>
             <div class="acea-row row-right page">
@@ -70,7 +72,7 @@
         </Card>
 
         <!-- 详情模态框-->
-        <Modal v-model="modals" class="tableBox"  scrollable  footer-hide closable title="查看详情" :mask-closable="false"  width="750">
+        <Modal v-model="modals" class="tableBox"  scrollable  footer-hide closable title="查看详情" :mask-closable="false"  width="1150">
             <Table ref="selection" :columns="columns2" :data="tabList3" :loading="loading2"
                    no-data-text="暂无数据" highlight-row max-height="600" size="small"
                    no-filtered-data-text="暂无筛选结果">
@@ -86,8 +88,13 @@
                     </viewer>
                 </template>
                 <template slot-scope="{ row, index }" slot="action">
-                    <Tag color="volcano" v-show="row.is_refund != 0">已退款</Tag>
-                    <Tag color="cyan" v-show="row.is_refund === 0">未退款</Tag>
+                    <div>{{ row.refund_message || (row.is_refund ? '已退款' : '未退款') }}</div>
+                    <!-- Amount comes from actual paid money. A pending request can only query its original receipt. -->
+                    <Button v-if="row.refund_action" size="small" :loading="refundBusy === row.order_id_key"
+                        @click="refundParticipant(row)">{{ row.refund_action === 'query' ? '查询退款结果' : (row.refund_action === 'retry' ? '重试退款' : '退款') }}</Button>
+                    <Button v-if="rows.status === 1 && row.k_id > 0 && !row.is_virtual && !row.is_refund && row.refund_action === 'refund'"
+                        size="small" style="margin-left:6px" @click="refundParticipant(row, true)">踢出</Button>
+                    <div v-else-if="row.refund_block_reason" style="font-size:12px;color:#999">{{ row.refund_block_reason }}</div>
                 </template>
             </Table>
         </Modal>
@@ -95,10 +102,12 @@
 </template>
 
 <script>
+    import formatBusinessMoney from '@/utils/formatBusinessMoney.js';
+    import exportExcel from '@/utils/newToExcel.js';
     import cardsData from '@/components/cards/cards';
     import { mapState } from 'vuex';
     import { formatDate } from '@/utils/validate';
-    import { combineListApi, orderPinkListApi, statisticsApi } from '@/api/marketing';
+    import { combineListApi, orderPinkListApi, statisticsApi, combinationParticipantRefundApi, combinationCompleteApi, combinationGroupExportApi } from '@/api/marketing';
     import timeOptions from "@/utils/timeOptions";
     export default {
         name: 'combinalist',
@@ -114,6 +123,7 @@
         data () {
             return {
                 cardLists: [],
+                refundBusy: 0,
                 modals: false,
                 options: timeOptions,
                 grid: {
@@ -204,11 +214,18 @@
                     },
                     {
                         title: '金额',
-                        key: 'price'
+                        render: (h, params) => h('span', formatBusinessMoney(params.row.paid_amount))
                     },
                     {
-                        title: '订单状态',
-                        slot: 'action'
+                        title: '退款状态及操作',
+                        slot: 'action', minWidth: 180
+                    },
+                    { title: '富友订单号', key: 'fuyou_order_no', minWidth: 185 },
+                    { title: '富友支付交易号', key: 'fuyou_transaction_id', minWidth: 200 },
+                    { title: '富友退款流水号', key: 'channel_refund_id', minWidth: 200 },
+                    { title: '富友退款追踪号', key: 'fuyou_refund_trace_no', minWidth: 180 },
+                    { title: '商户退款单号', key: 'refund_no', minWidth: 200
+
                     }
                 ],
                 rows: {}
@@ -230,6 +247,44 @@
             this.getStatistics();
         },
         methods: {
+            // Export rows and the exact template column order both come from the server, never current-page data.
+            exportGroup(row) {
+                return combinationGroupExportApi(row.id).then(res => {
+                    const data = res.data;
+                    exportExcel(data.header, data.filekey, data.filename, data.export);
+                }).catch(error => this.$Message.error(error.msg || '导出失败'));
+            },
+            // Completion fills only missing seats and leaves real participants' paid orders untouched.
+            completeGroup(row) {
+                this.$Modal.confirm({ title: '立即成团', content: '将自动补齐缺少的虚拟名额并使拼团成功，是否继续？',
+                    onOk: () => combinationCompleteApi(row.id).then(res => {
+                        this.$Message.success(res.data.message); this.getList(); this.getStatistics();
+                    }).catch(error => this.$Message.error(error.msg || '成团失败')) });
+            },
+            // Query/retry states are server-derived; the browser never supplies a refund amount or provider identity.
+            refundParticipant(row, kick = false) {
+                const run = (reason) => {
+                    this.refundBusy = row.order_id_key;
+                    return combinationParticipantRefundApi(this.rows.id, {
+                        order_id: row.order_id_key, reason,
+                        retry: row.refund_action !== 'query', action: kick ? 'kick' : 'refund'
+                    }).then(res => {
+                        this.$Message.info(res.data.message);
+                        this.getList(); this.getStatistics();
+                        this.Info({ ...this.rows, id: res.data.group_id || this.rows.id });
+                    }).catch(error => this.$Message.error(error.msg || '退款处理失败'))
+                      .finally(() => { this.refundBusy = 0; });
+                };
+                if (row.refund_action === 'query') return run(row.refund_reason || '查询拼团退款');
+                let reason = '';
+                this.$Modal.confirm({
+                    title: kick ? '确认退款并踢出团员' : '确认整笔原路退款',
+                    render: h => h('div', [h('p', `订单：${row.order_id}，实际退款：¥${formatBusinessMoney(row.paid_amount)}。退款成功后收回全部未使用权益。`),
+                        h('Input', { props: { type: 'textarea', placeholder: '请输入退款原因', maxlength: 300 },
+                            on: { input: value => { reason = value; } } })]),
+                    onOk: () => { if (!reason.trim()) this.$Message.warning('请填写退款原因'); else return run(reason.trim()); }
+                });
+            },
             // 拼团统计
             getStatistics () {
                 statisticsApi().then(async res => {

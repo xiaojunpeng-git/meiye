@@ -278,6 +278,11 @@ class HwcPayService
             ? (new \app\services\member\MemberCommerceServices())->paid($orderId, (int)$data['order_amt'], $tradeNo, $channel)
             : (bool)Event::until('pay.notify', [$notify, $eventChannel]);
         if ($settled) {
+            // The signed callback's settlement date is authoritative for refunds beyond 30 days.
+            if ($successAction === 'product' && Db::name('store_order')->where('order_id', $orderId)->where('activity_id', '>', 0)->count()) {
+                Db::name('combination_payment_origin')->where('channel_order_no', $channelOrderNo)
+                    ->update(['settled_on' => (string)$data['reserved_fy_settle_dt']]);
+            }
             Db::name('fuyou_payment_attempt')
                 ->where('channel_order_no', $channelOrderNo)
                 ->update([
@@ -392,6 +397,11 @@ class HwcPayService
                     'add_time' => $now,
                     'update_time' => $now,
                 ]);
+                // Persist original merchant identity only for new group payment attempts.
+                if ($successAction === 'product' && Db::name('store_order')->where('order_id', $orderId)->where('type', 3)->count()) {
+                    Db::name('combination_payment_origin')->insert(['channel_order_no' => $channelOrderNo,
+                        'merchant_id' => $this->config['mchntCd'], 'settled_on' => '']);
+                }
                 return $channelOrderNo;
             } catch (\Throwable $e) {
                 // 唯一键碰撞可重试；表未升级或数据库异常最终统一失败，绝不退回不合规业务单号。
