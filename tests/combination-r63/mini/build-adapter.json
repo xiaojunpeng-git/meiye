@@ -1,0 +1,12 @@
+{
+  "commit": "626ff440b6f6d1ec6535dc09ca34f9ce9cccb8cc",
+  "tree": "5d1eb196f37fa8c8631b4c63ae1989301119c0c4",
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "origin": "https://008.cc3798.com",
+  "base": "/private/tmp/r63-card-group-mini-008-member-5d1eb196",
+  "originalBuilderSHA256": "8c90909e9e56a874109d67f694a708f0226e0158ce2eddca71a531aa43f25545",
+  "adaptedBuilderSHA256": "10fb6a50585c8d132b473ef996f47fe10ee9db9a3e0bb1fe41e179d84d9b8cf2",
+  "readonly": true
+}

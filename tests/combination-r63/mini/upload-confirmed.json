@@ -1,0 +1,16 @@
+{
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "version": "3.0.63",
+  "commit": "626ff440b6f6d1ec6535dc09ca34f9ce9cccb8cc",
+  "taskId": "confirmation_upload_a65a0013-4943-4b83-ba23-002c0db36660",
+  "status": "success",
+  "detail": "execution_success",
+  "uploadConfirmed": true,
+  "trialBindingConfirmed": false,
+  "submittedForReview": false,
+  "publishedProduction": false,
+  "totalSize": 10278522,
+  "mainSize": 2025836
+}
