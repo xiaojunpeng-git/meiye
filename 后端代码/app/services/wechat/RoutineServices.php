@@ -77,8 +77,8 @@ class RoutineServices extends BaseServices
 		$user = $wechatUserServices->getAuthUserInfo($openid, $userType);
 		$userInfoKey = md5($openid . '_' . time() . '_rouine');
 		CacheService::setTokenBucket($userInfoKey, $createData, 7200);
-		$bindPhone = false;
-		if (sys_config('store_user_mobile') && (($user && $user['phone'] == '') || !$user)) $bindPhone = true;
+		// 手机号是会员端身份的一部分，不再允许租户开关把未绑定会员放行到业务页面。
+		$bindPhone = !$user || trim((string)($user['phone'] ?? '')) === '';
 		return ['bindPhone' => $bindPhone, 'key' => $userInfoKey];
 	}
 
@@ -321,6 +321,10 @@ class RoutineServices extends BaseServices
         if (!$user || !isset($user['uid']) || !$user['uid']) {
             throw new ValidateException('获取用户信息失败');
         }
+		// 小程序会员必须先完成微信手机号授权，所有 token 发放路径统一从这里收口。
+		if ($userType === 'routine' && trim((string)($user['phone'] ?? '')) === '') {
+			throw new ValidateException('请先授权手机号');
+		}
 		$uid = (int)$user['uid'];
         $token = $this->createToken($uid, $userType, $user['pwd']);
         if (!$token) {
@@ -435,17 +439,11 @@ class RoutineServices extends BaseServices
         /** @var WechatUserServices $wechatUserServices */
         $wechatUserServices = app()->make(WechatUserServices::class);
         $user = $wechatUserServices->getAuthUserInfo($openid, $userType);
-        if (!$user) {
-            //获取是否强制绑定手机号
-            $storeUserMobile = sys_config('store_user_mobile');
-            if ($notLogin || $storeUserMobile) {
-                $userInfoKey = md5($openid . '_' . time() . '_routine');
-                CacheService::setTokenBucket($userInfoKey, $createData, 7200);
-                return ['auth_login' => 1, 'key' => $userInfoKey];
-            } else {
-                //写入用户信息
-                $user = $wechatUserServices->wechatOauthAfter($createData);
-            }
+		if (!$user || trim((string)($user['phone'] ?? '')) === '') {
+			// 新会员和历史未绑定手机号会员都只返回授权凭证，不签发可浏览业务页的 token。
+			$userInfoKey = md5($openid . '_' . time() . '_routine');
+			CacheService::setTokenBucket($userInfoKey, $createData, 7200);
+			return ['auth_login' => 1, 'key' => $userInfoKey];
         } else {
             //更新用户信息
             $wechatUserServices->wechatUpdata([$user['uid'], ['spread_uid' => $spread_uid]]);

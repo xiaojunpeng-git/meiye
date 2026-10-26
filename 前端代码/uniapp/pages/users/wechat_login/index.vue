@@ -6,19 +6,13 @@
 		<view class="system-height" :style="{ height: statusBarHeight }"></view>
 		<!-- #ifdef MP -->
 		<view class="title-bar height-add" >
-			<view class="icon" @click="back" v-if="!isHome">
-				<image src="../static/left.png"></image>
-			</view>
-			<view class="icon" @click="home" v-else>
-				<image src="../static/home.png"></image>
-			</view>
-			商城登录
+			会员登录
 		</view>
 		<!-- #endif -->
 		<view class="merchant-msg">
 			<img :src="configData.logo_url" />
 			<view class="name">
-				{{configData.site_name}}
+				{{memberSiteName}}
 			</view>
 		</view>
 		<view class="wechat-login">
@@ -27,7 +21,8 @@
 				<button hover-class="none" @click="wechatLogin" class="bg-color btn1">授权登录</button>
 				<!-- #endif -->
 				<!-- #ifdef MP -->
-				<template v-if="configData.wechat_auth_switch">
+				<!-- 手机号授权是会员端强制入口，不能再由后台开关或短信登录绕过。 -->
+				<template>
 					<button hover-class="none" v-if="authPreparing" disabled class="bg-color btn1">正在准备登录...</button>
 					<button hover-class="none" v-else-if="!authReady" @tap="userLogin"
 						class="bg-color btn1">重新准备登录</button>
@@ -36,8 +31,7 @@
 					<button hover-class="none" v-else @tap="getAuthLogin"
 						class="bg-color btn1">授权登录</button>
 				</template>
-				<button v-if="configData.phone_auth_switch" hover-class="none" @click="phoneLogin" class="btn2">手机号登录</button>
-				<view class="acea-row row-center-wrapper fs-30 text--w111-999" @click="goHome">取消登录</view>
+				<view class="acea-row row-center-wrapper fs-30 text--w111-999">授权手机号后方可进入会员端</view>
 				<!-- #endif -->
 			</view>
 		</view>
@@ -48,7 +42,7 @@
 				与<text class="font-num" @click="privacy('privacy')">《隐私协议》</text>
 			</checkbox-group>
 			<view v-else>
-				登录注册即同意商城
+				登录注册即同意会员服务
 				<text class="font-num" @tap="privacy('user')">《用户协议》</text>与<text class="font-num" @click="privacy('privacy')">《隐私协议》</text>
 			</view>
 		</view>
@@ -125,6 +119,14 @@
 			editUserModal,
 			privacyAgreementPopup
 		},
+		computed: {
+			/**
+			 * 登录页只展示会员端名称，避免平台全局名称带“后台”字样时误导会员。
+			 */
+			memberSiteName() {
+				return (this.configData && this.configData.member_site_name) || '会员中心';
+			}
+		},
 		onLoad(options) {
 			this.colorData();
 			if (uni.getUserProfile) {
@@ -182,9 +184,7 @@
 				uni.reLaunch({ url: '/pages/user/index' });
 			},
 			goHome(){
-				uni.switchTab({
-					url: '/pages/index/index'
-				});
+				this.showPhoneAuthorizationRequired();
 			},
 			wechatAuthLogin(d, back_url) {
 				let that = this;
@@ -309,15 +309,20 @@
 				this.protocol = true
 			},
 			onReject() {
-				uni.navigateBack();
+				this.showPhoneAuthorizationRequired();
 			},
 			back() {
-				uni.navigateBack();
+				this.showPhoneAuthorizationRequired();
 			},
 			home() {
-				uni.switchTab({
-					url: '/pages/index/index'
-				})
+				this.showPhoneAuthorizationRequired();
+			},
+			// 强制手机号授权模式下拒绝、取消或返回都不能进入业务页面。
+			showPhoneAuthorizationRequired() {
+				uni.showToast({
+					title: '请先授权手机号',
+					icon: 'none'
+				});
 			},
 			// 弹窗关闭
 			maskClose() {
@@ -343,6 +348,7 @@
 			// 小程序获取手机号码
 			getphonenumber(e) {
 				if(e.detail.errMsg == 'getPhoneNumber:fail user deny'){
+					this.showPhoneAuthorizationRequired();
 					return false
 				}
 				if (!this.protocol) {

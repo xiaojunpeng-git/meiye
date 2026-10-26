@@ -39,8 +39,18 @@ class AuthTokenMiddleware implements MiddlewareInterface
                 return app('json')->make($e->getCode(), $e->getMessage());
         }
 
+		// 旧 token 也必须立即服从手机号强制门禁；可选登录接口按游客处理，强制登录接口直接拒绝。
+		if (!is_null($authInfo)
+			&& ($authInfo['tokenData']['type'] ?? '') === 'routine'
+			&& trim((string)($authInfo['user']['phone'] ?? '')) === '') {
+			if ($force) {
+				return app('json')->make(410000, '请先授权手机号');
+			}
+			$authInfo = null;
+		}
+
 		if (!is_null($authInfo)) {
-			$request->user = function (string $key = null) use (&$authInfo) {
+			$request->user = function (?string $key = null) use (&$authInfo) {
 				if ($key) {
 					return $authInfo['user'][$key] ?? '';
 				}
