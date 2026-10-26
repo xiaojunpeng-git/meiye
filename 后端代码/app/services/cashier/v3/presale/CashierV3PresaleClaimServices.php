@@ -439,11 +439,18 @@ final class CashierV3PresaleClaimServices
         if ($keyword !== '') {
             $query->where(function ($inner) use ($keyword): void {
                 $like = '%' . $keyword . '%';
-                $inner->whereLike('claim.claim_no', $like)
-                    ->whereOr('claimable.source_order_no_snapshot', 'like', $like)
-                    ->whereOr('claimable.member_name_snapshot', 'like', $like)
-                    ->whereOr('claimable.member_phone_snapshot', 'like', $like)
-                    ->whereOr('claimable.product_name_snapshot', 'like', $like);
+                // 出库单号采用 ASCII 排序规则；中文词匹配它会使整页查询报排序规则冲突。
+                // 中文只查可含中文的历史会员和品名快照，英文数字仍可查全部字段。
+                if (preg_match('/[^\x00-\x7F]/', $keyword) === 1) {
+                    $inner->whereLike('claimable.member_name_snapshot', $like)
+                        ->whereOr('claimable.product_name_snapshot', 'like', $like);
+                } else {
+                    $inner->whereLike('claim.claim_no', $like)
+                        ->whereOr('claimable.source_order_no_snapshot', 'like', $like)
+                        ->whereOr('claimable.member_name_snapshot', 'like', $like)
+                        ->whereOr('claimable.member_phone_snapshot', 'like', $like)
+                        ->whereOr('claimable.product_name_snapshot', 'like', $like);
+                }
             });
         }
         $count = (int)(clone $query)->count();
