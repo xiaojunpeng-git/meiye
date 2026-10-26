@@ -1,0 +1,18 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "baselineTree": "589c741ce55d014195b832d157aef76af7062d3c",
+  "candidateTree": "f1912ec12c154d97fd9bb98a136091fd0904536d",
+  "paths": [
+    "前端代码/admin/src/pages/product/productAdd/index.vue",
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "backendPaths": [
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "sourceParents": [
+    "65e6bda2ce97ea281164cfae1ca7b5e3e4e619e4",
+    "eca9c914f1a00ddb2ccde1e41f416a2a40f0a6e7",
+    "79f0c95d"
+  ],
+  "preserved": "R19已验收平台完整子树+R68我的拼团链接配置；010保留已验收菜单CSS源码，不编辑生成物"
+}

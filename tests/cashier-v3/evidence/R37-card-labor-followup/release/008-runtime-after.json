@@ -1,0 +1,63 @@
+{
+  "site": "008",
+  "mode": "after",
+  "result": "PASS",
+  "effectiveMode": 0,
+  "configSHA256": "c473665ccc5866df3e6b2b7b17434aa57f073dfea283204de09cf6cb0b9718bd",
+  "relatedRows": 2,
+  "relatedSHA256": "d5d4dc0549b99355b817ffd853409e3bcc51eb9638fcd1f1063b7a894944f6de",
+  "responses": {
+    "0": "2e6d6bd764a59b0c4fca4e84f98932d7c868459ca8e80b9591fe8b01bb448548",
+    "158": "081c46fc779d3e9fdefa3d83c6fabc5f887dde85bb1091258d1052392581dc32",
+    "192": "97903bd174e5d129dfff4d49edf557d237197422c1e61179f93caeaaae6b0c61"
+  },
+  "cases": [
+    {
+      "id": 0,
+      "mode": 0,
+      "visible": true
+    },
+    {
+      "id": 0,
+      "mode": 1,
+      "visible": false
+    },
+    {
+      "id": 0,
+      "mode": null,
+      "visible": true
+    },
+    {
+      "id": 158,
+      "mode": 0,
+      "visible": true
+    },
+    {
+      "id": 158,
+      "mode": 1,
+      "visible": false
+    },
+    {
+      "id": 158,
+      "mode": null,
+      "visible": true
+    },
+    {
+      "id": 192,
+      "mode": 0,
+      "visible": true
+    },
+    {
+      "id": 192,
+      "mode": 1,
+      "visible": false
+    },
+    {
+      "id": 192,
+      "mode": null,
+      "visible": true
+    }
+  ],
+  "readOnly": true,
+  "businessWrites": 0
+}

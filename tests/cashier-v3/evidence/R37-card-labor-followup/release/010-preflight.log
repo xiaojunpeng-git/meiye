@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r37-card-release.py", line 70, in <module>
+    if mode=='preflight':preflight(sys.argv[2])
+  File "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r37-card-release.py", line 23, in preflight
+    assert probe(s)==read(s+'-before.json'),'LIVE_BASELINE_CHANGED';a=smoke(s,'before');b=smoke(s,'candidate');keys=['effectiveMode','configSHA256','relatedRows','relatedSHA256','responses'];assert all(a[k]==b[k]for k in keys),'ORIGINAL_DATA_OR_RESPONSE_CHANGED';save(s+'-preflight.json',{'result':'PASS','site':s,'originalResponsesAndFeesUnchanged':True,'configurationUnchanged':True,'readOnly':True});print('PREFLIGHT PASS',s,flush=True)
+AssertionError: LIVE_BASELINE_CHANGED

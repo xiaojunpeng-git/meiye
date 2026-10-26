@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "existingSource": "31aafac2aa966cc4244dd021c472d1cd687dc2fc",
+  "baseline": "227740cf1a80636392e68e93bcc7f0cbc874151f",
+  "candidate": "7008df7aaebecdb0ba203c42a514f11cf8285014",
+  "onlyDifference": [
+    "前端代码/admin/src/pages/product/productAdd/index.vue",
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "scopePatchSHA256": "5534d60c0b16071ebfdb177e39e3199f6e1acf7b8a1bae4a3a6798991019df80",
+  "candidateFileSHA256": {
+    "前端代码/admin/src/pages/product/productAdd/index.vue": "1a1ced7a4f858462430e9bf2186af2fc4592a51b1a85cd59a82bef76f40b8576",
+    "后端代码/app/services/product/product/StoreProductServices.php": "16aa3aa36bd69eb92441deadf6dabf767da96a4ec5cfd42078e7233a305fbc6c"
+  },
+  "status": "需补验，未发布"
+}

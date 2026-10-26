@@ -1,0 +1,7 @@
+{
+  "result": "PASS",
+  "candidateTree": "d6a4ca75e16386e2c78dafe182f979e6aa04aacd",
+  "originalAcceptedTest": "31aafac2 project-card-default-selection",
+  "output": "PASS configured amount, missing-source unit price, explicit zero, saved manual value\n",
+  "legacyCommissionUI": "matches 604ab026"
+}

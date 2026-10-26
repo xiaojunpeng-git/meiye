@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "originalAcceptedTest": "31aafac2:tests/customer-010/js/project-card-default-selection.mjs",
+  "candidateTree": "7008df7aaebecdb0ba203c42a514f11cf8285014",
+  "output": "PASS configured amount, missing-source unit price, explicit zero, saved manual value\n",
+  "cases": [
+    "170元项目默认值",
+    "缺源保留默认单价",
+    "明确0元值",
+    "既有卡内手改66元值不覆盖"
+  ]
+}

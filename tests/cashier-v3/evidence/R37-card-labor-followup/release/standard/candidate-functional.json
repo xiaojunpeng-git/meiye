@@ -1,0 +1,57 @@
+{
+  "result": "PASS",
+  "cases": [
+    {
+      "rule": "normal",
+      "visible": true,
+      "result": "PASS"
+    },
+    {
+      "rule": "normal",
+      "visible": false,
+      "result": "PASS"
+    },
+    {
+      "rule": "choice_kind",
+      "visible": true,
+      "result": "PASS"
+    },
+    {
+      "rule": "choice_kind",
+      "visible": false,
+      "result": "PASS"
+    },
+    {
+      "rule": "choice_count",
+      "visible": true,
+      "result": "PASS"
+    },
+    {
+      "rule": "choice_count",
+      "visible": false,
+      "result": "PASS"
+    },
+    {
+      "rule": "time",
+      "visible": true,
+      "result": "PASS"
+    },
+    {
+      "rule": "time",
+      "visible": false,
+      "result": "PASS"
+    },
+    {
+      "rule": "combination",
+      "visible": true,
+      "result": "PASS"
+    },
+    {
+      "rule": "combination",
+      "visible": false,
+      "result": "PASS"
+    }
+  ],
+  "cardLaborFeePreserved": 25,
+  "combinationColumns": "PASS"
+}

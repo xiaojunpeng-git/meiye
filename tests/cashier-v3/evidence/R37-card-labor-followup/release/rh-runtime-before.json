@@ -1,0 +1,17 @@
+{
+  "site": "rh",
+  "mode": "before",
+  "result": "PASS",
+  "effectiveMode": 0,
+  "configSHA256": "4bb99e85738ea9e6373b64eac24d20ae7b52cbdc10f86b717759ffe3af6a380c",
+  "relatedRows": 0,
+  "relatedSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "responses": {
+    "0": "b89ebd432d9602dd3ae0ce95680392698fc74204f62c0778639a49a73b2915a1",
+    "79689": "af6751f2e941814f6fccd1b99a9e5f858d9f82a57ab43409158a870511f26b43",
+    "79690": "257d58c17ccd474d460af32740981acd61a4caaa17319e233731054a3e885242"
+  },
+  "cases": [],
+  "readOnly": true,
+  "businessWrites": 0
+}

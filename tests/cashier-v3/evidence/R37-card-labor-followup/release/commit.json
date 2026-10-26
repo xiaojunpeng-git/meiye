@@ -1,0 +1,33 @@
+{
+  "commit": "eb178be21ce8bc5e09c49aab37039813648ad307",
+  "branch": "release/r37-card-labor-followup-20261027",
+  "tree": "1742704c3eb22fb5c79147461ad98a4c604591a5",
+  "styledCommit": null,
+  "paths": [
+    "scripts/r37-card-baseline-proof.py",
+    "scripts/r37-card-merge-010.py",
+    "scripts/r37-card-merged-build.cjs",
+    "scripts/r37-card-release-archive.py",
+    "scripts/r37-card-release-build.cjs",
+    "scripts/r37-card-release-install.php",
+    "scripts/r37-card-release-prepare.py",
+    "scripts/r37-card-release-public.py",
+    "scripts/r37-card-release-smoke.php",
+    "scripts/r37-card-release.py",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/backend-verification.json",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/browser-verification.json",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/card-labor-hidden.png",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/fixed-files.json",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/initial.json",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/scope.patch",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/verification.json",
+    "tests/cashier-v3/evidence/R37-card-labor-followup/验收说明.md",
+    "tests/cashier-v3/js/r37-card-labor-display.mjs",
+    "tests/cashier-v3/php/r37-card-labor-display.php",
+    "前端代码/admin/src/pages/product/productAdd/index.vue",
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "sharedHEADAndIndexUntouched": true,
+  "scope": "Only R37-00002 two-file patch, tests and evidence; preserve R19/R68 and 010 accepted public menu style",
+  "acceptance": "产品经理测试无问题，授权只提交本补漏，瑞昊部署验证后push再008、010"
+}

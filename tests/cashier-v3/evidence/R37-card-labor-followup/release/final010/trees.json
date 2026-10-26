@@ -1,0 +1,21 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "baselineTree": "ba2b0bfe3daf9ddde1b675c2af7292a820faecc0",
+  "candidateTree": "d6a4ca75e16386e2c78dafe182f979e6aa04aacd",
+  "paths": [
+    "前端代码/admin/src/pages/product/productAdd/index.vue",
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "backendPaths": [
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "sourceParents": [
+    "604ab02607726b3c62e616969e1159dd729f107c",
+    "31aafac2aa966cc4244dd021c472d1cd687dc2fc",
+    "65e6bda2ce97ea281164cfae1ca7b5e3e4e619e4",
+    "eca9c914f1a00ddb2ccde1e41f416a2a40f0a6e7",
+    "79f0c95d"
+  ],
+  "preserved": "31aafac2项目/卡项默认业绩；ea743c57旧提成字段退役；R19/R68平台已上线功能及010基础报表菜单样式全部保留，仅应用显示补漏",
+  "pmReacceptanceRequired": true
+}

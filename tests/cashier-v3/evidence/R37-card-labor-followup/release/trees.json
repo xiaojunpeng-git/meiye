@@ -1,0 +1,94 @@
+{
+  "head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "baselineCommit": "ac501ae67b5f66c7a43dd4a81e55ed31ae341559",
+  "plans": {
+    "standard": {
+      "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+      "baselineTree": "589c741ce55d014195b832d157aef76af7062d3c",
+      "candidateTree": "f1912ec12c154d97fd9bb98a136091fd0904536d",
+      "paths": [
+        "前端代码/admin/src/pages/product/productAdd/index.vue",
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "backendPaths": [
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "sourceParents": [
+        "65e6bda2ce97ea281164cfae1ca7b5e3e4e619e4",
+        "eca9c914f1a00ddb2ccde1e41f416a2a40f0a6e7",
+        "79f0c95d"
+      ],
+      "preserved": "R19已验收平台完整子树+R68我的拼团链接配置；010保留已验收菜单CSS源码，不编辑生成物"
+    },
+    "styled": {
+      "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+      "baselineTree": "1174c8d75e0edfc61c6b2a016208db841b98525f",
+      "candidateTree": "969f46a4febe4191a5fa2f6df18977124ffbca9b",
+      "paths": [
+        "前端代码/admin/src/pages/product/productAdd/index.vue",
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "backendPaths": [
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "sourceParents": [
+        "65e6bda2ce97ea281164cfae1ca7b5e3e4e619e4",
+        "eca9c914f1a00ddb2ccde1e41f416a2a40f0a6e7",
+        "79f0c95d"
+      ],
+      "preserved": "R19已验收平台完整子树+R68我的拼团链接配置；010保留已验收菜单CSS源码，不编辑生成物"
+    },
+    "merged010": {
+      "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+      "baselineTree": "227740cf1a80636392e68e93bcc7f0cbc874151f",
+      "candidateTree": "7008df7aaebecdb0ba203c42a514f11cf8285014",
+      "paths": [
+        "前端代码/admin/src/pages/product/productAdd/index.vue",
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "backendPaths": [
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "sourceParents": [
+        "31aafac2aa966cc4244dd021c472d1cd687dc2fc",
+        "65e6bda2ce97ea281164cfae1ca7b5e3e4e619e4",
+        "eca9c914f1a00ddb2ccde1e41f416a2a40f0a6e7",
+        "79f0c95d"
+      ],
+      "preserved": "保留31aafac2已上线默认业绩两文件完整内容，仅应用R37-00002显示补丁；保留R19/R68既有平台功能和010菜单CSS",
+      "pmReacceptanceRequired": true
+    },
+    "final010": {
+      "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+      "baselineTree": "ba2b0bfe3daf9ddde1b675c2af7292a820faecc0",
+      "candidateTree": "d6a4ca75e16386e2c78dafe182f979e6aa04aacd",
+      "paths": [
+        "前端代码/admin/src/pages/product/productAdd/index.vue",
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "backendPaths": [
+        "后端代码/app/services/product/product/StoreProductServices.php"
+      ],
+      "sourceParents": [
+        "604ab02607726b3c62e616969e1159dd729f107c",
+        "31aafac2aa966cc4244dd021c472d1cd687dc2fc",
+        "65e6bda2ce97ea281164cfae1ca7b5e3e4e619e4",
+        "eca9c914f1a00ddb2ccde1e41f416a2a40f0a6e7",
+        "79f0c95d"
+      ],
+      "preserved": "31aafac2项目/卡项默认业绩；ea743c57旧提成字段退役；R19/R68平台已上线功能及010基础报表菜单样式全部保留，仅应用显示补漏",
+      "pmReacceptanceRequired": true
+    }
+  },
+  "siteVariants": {
+    "rh": "standard",
+    "008": "standard",
+    "010": "final010"
+  },
+  "paths": [
+    "前端代码/admin/src/pages/product/productAdd/index.vue",
+    "后端代码/app/services/product/product/StoreProductServices.php"
+  ],
+  "sharedIndexSHA256": "91ef8064310468bba5ac3ba58005c349bd986287ccaf4d0a75451438f72699e2",
+  "sourceR68RuntimeBaseline": "c3e77bce39723e307377d089a22fedacebcc2972"
+}

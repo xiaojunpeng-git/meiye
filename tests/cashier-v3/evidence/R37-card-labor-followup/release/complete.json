@@ -1,0 +1,35 @@
+{
+  "round": 37,
+  "closure": "R37-00002",
+  "sourceCommit": "eb178be21ce8bc5e09c49aab37039813648ad307",
+  "result": "PARTIAL_010_REACCEPTANCE_PENDING",
+  "pending": [
+    "010"
+  ],
+  "instances": {
+    "rh": {
+      "site": "rh",
+      "commit": "eb178be21ce8bc5e09c49aab37039813648ad307",
+      "result": "PASS",
+      "sourceTree": "f1912ec12c154d97fd9bb98a136091fd0904536d",
+      "rollback": "/www/backups/rh/r37-card-labor-eb178be2",
+      "existingFunctionsPreserved": true,
+      "configurationAndCardFeesUnchanged": true,
+      "businessWrites": 0,
+      "timeUTC": "2026-10-26T20:40:39.161112+00:00"
+    },
+    "008": {
+      "site": "008",
+      "commit": "eb178be21ce8bc5e09c49aab37039813648ad307",
+      "result": "PASS",
+      "sourceTree": "f1912ec12c154d97fd9bb98a136091fd0904536d",
+      "rollback": "/www/backups/008/r37-card-labor-eb178be2",
+      "existingFunctionsPreserved": true,
+      "configurationAndCardFeesUnchanged": true,
+      "businessWrites": 0,
+      "timeUTC": "2026-10-26T20:45:11.501089+00:00"
+    }
+  },
+  "finishedAtUTC": "2026-10-26T20:46:33.758455+00:00",
+  "configuration": "配置值不变，无数据库写入"
+}

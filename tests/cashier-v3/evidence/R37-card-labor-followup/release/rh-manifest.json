@@ -1,0 +1,48 @@
+{
+  "site": "rh",
+  "commit": "eb178be21ce8bc5e09c49aab37039813648ad307",
+  "sourceTree": "f1912ec12c154d97fd9bb98a136091fd0904536d",
+  "targets": {
+    "app/services/product/product/StoreProductServices.php": {
+      "before": "f2235d44ec375d9605772b347c570b8c707f2ea959ed1072d8b0a5bb3fab49b8",
+      "after": "08397bb6421698aa598217552744391cb7704e09d046d763c407c6add89a3878"
+    },
+    "public/view_admin/css/chunk-1cc239dc.3dea413d.css": {
+      "before": null,
+      "after": "51f204cf15403fd5ef78041f6b61665f71fa5b17359415552bfd0c62317229fb"
+    },
+    "public/view_admin/css/chunk-1cc239dc.3dea413d.css.gz": {
+      "before": null,
+      "after": "45d9b9bae3326a6af190eaf1a993d4a3ef6ebfcb622572ae7c730af1655e2739"
+    },
+    "public/view_admin/js/app.1a901d60.js": {
+      "before": null,
+      "after": "aa3e324ba0327d4a68989e355b73b58782bfca9eb1d3223f05131cf6b868f5fc"
+    },
+    "public/view_admin/js/app.1a901d60.js.gz": {
+      "before": null,
+      "after": "6736714ca027b77fb06077d86f2cc7aed89b8203d2b04c9eca016d74d45b0e1e"
+    },
+    "public/view_admin/js/chunk-0f56252a.3be07914.js": {
+      "before": null,
+      "after": "109635e61441932e40f37abfb0d151efc6cdc1052b69c3e19208601e91d67ca8"
+    },
+    "public/view_admin/js/chunk-0f56252a.3be07914.js.gz": {
+      "before": null,
+      "after": "43ed65f88dc3dbb7b0dc303e218573fe2a49f5ade62d891c9636282d60f08e32"
+    },
+    "public/view_admin/js/chunk-1cc239dc.0c5ecdd7.js": {
+      "before": null,
+      "after": "5f07ed9a22e0880c5634d6b2a9ee72c4b33dc1f32d3cb497e1715823a4e43937"
+    },
+    "public/view_admin/js/chunk-1cc239dc.0c5ecdd7.js.gz": {
+      "before": null,
+      "after": "24709a2c73009747c81129a6413d637306170fb4624f3792b4d6e5bde6ac0b89"
+    },
+    "public/system.html": {
+      "before": "501c80aad2589c81f0e5fc282423f070a7354a2af44c90c6bb89cc0d1c8dcefa",
+      "after": "2572d10ba773ef550ad91faade9dbff156a4cd6d1ade90181f9c46fcaae8184a"
+    }
+  },
+  "scope": "R37-00002 only; no DB/config mutations; preserve 010 menu style, R68 link options and all other deployed functions"
+}
