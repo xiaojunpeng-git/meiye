@@ -1,0 +1,18 @@
+{
+  "acceptedBy": "product_manager",
+  "task": "R64",
+  "businessFiles": {
+    "前端代码/uniapp/pages/activity/goods_details/index.vue": "513cb800b8fe602a42219ab29da50fb1c36a867f26d74d1b3d9cb13f64759a66",
+    "后端代码/app/controller/api/v1/order/StoreOrder.php": "df524e48f5480d20974f3f02f4b740bfb1f3dea404af8e22d58de64a02502f1f",
+    "后端代码/app/services/order/StoreOrderServices.php": "05b7958638ca5d5fdf199a12bbf95b7fb1ef6fa7ac8362b193ced30b2a33fc80"
+  },
+  "candidateTree": "5ee534c7c590a7e05a7a22ff76f2394d9072125e",
+  "preservedBaselineCommit": "d1192eae5f9180af4f560d5e7643693824c978e9",
+  "targets": [
+    "rh",
+    "008",
+    "010"
+  ],
+  "databaseMigration": false,
+  "miniUpload": false
+}

@@ -1,0 +1,12 @@
+{
+  "site": "rh.cc3798.com",
+  "directoryMode": "0o755",
+  "publicApis": {
+    "/api/diy/get_diy/0": 200,
+    "/api/combination/list?page=1&limit=1": 200
+  },
+  "restartAuthorized": true,
+  "restartCompleted": true,
+  "verifiedAt": "2026-10-26T10:48:53.175146",
+  "realPaymentTested": false
+}

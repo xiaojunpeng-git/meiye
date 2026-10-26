@@ -707,7 +707,6 @@
 				posterbackgd: '/static/images/posterbackgd.png',
 				actionSheetHidden: false,
 				cart_num: '',
-				homeTop: 20,
 				returnShow: true,
 				H5ShareBox: false, //公众号分享图片
 				routineContact: 0,
@@ -827,18 +826,7 @@
 			} else {
 				this.getActivityDetail();
 			}
-			this.$nextTick(() => {
-				// #ifdef MP
-				const menuButton = uni.getMenuButtonBoundingClientRect();
-				const query = uni.createSelectorQuery().in(this);
-				query
-					.select('#home')
-					.boundingClientRect(data => {
-						this.homeTop = menuButton.top * 2 + menuButton.height - data.height;
-					})
-					.exec();
-				// #endif
-			})
+			// 顶部导航已由 menuButtonStyle 定位；不再查询不存在的 #home 节点，避免规格页初始化抛错。
 			if(this.isLogin){
 				silenceBindingSpread()
 			}

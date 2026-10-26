@@ -2625,11 +2625,12 @@ HTML;
         $uid = (int)$user['uid'];
         /** @var UserAddressServices $addressServices */
         $addressServices = app()->make(UserAddressServices::class);
-        if ($addressId) {
+        // 购买门店订单没有收货地址，不能读取会员旧地址触发地址升级或配送计费。
+        if ($shipping_type !== 2 && $addressId) {
             $addr = $addressServices->getAdderssCache($addressId);
         }
         //没传地址id或地址已删除未找到 ||获取默认地址
-        if (!$addr) {
+        if ($shipping_type !== 2 && !$addr) {
             $addr = $addressServices->getUserDefaultAddressCache($uid);
         }
         $data['upgrade_addr'] = 0;

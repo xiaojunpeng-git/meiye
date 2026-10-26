@@ -1,0 +1,4 @@
+PASS worker rejects inaccessible class directory
+PASS directory access repair loads class without changing code
+Run this probe as the actual non-root HTTP worker account.
+PASS root probe cannot masquerade as worker verification

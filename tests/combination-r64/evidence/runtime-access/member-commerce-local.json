@@ -1,0 +1,16 @@
+{
+  "command": "docker exec -i mohe-app php < tests/member-checkout/local-boundaries.php",
+  "result": "PASS",
+  "checks": [
+    "legacy-list-excludes-technical-carriers",
+    "whole-yuan-group-allocation",
+    "defaults-version-audit-replay",
+    "no-affiliation-requires-choice",
+    "balance-issue-idempotency",
+    "combined-confirmed-callback-once",
+    "cancel-unsubmitted-releases-hold",
+    "recharge-external-only-and-callback"
+  ],
+  "database": "local Docker mysql/ruihao, transaction rollback",
+  "realPayment": false
+}
