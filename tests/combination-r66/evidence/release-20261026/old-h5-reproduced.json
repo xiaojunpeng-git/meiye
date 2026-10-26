@@ -1,0 +1,6 @@
+{
+  "result": "PASS",
+  "files": 505,
+  "source": "73e941b3bb9ddbe1ad0bef0ac243a7dfca84592d",
+  "note": "Immutable previous source/path reproduces every live member H5 file byte-for-byte"
+}

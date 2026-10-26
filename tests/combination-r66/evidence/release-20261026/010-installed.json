@@ -1,0 +1,8 @@
+{
+  "site": "010",
+  "commit": "3a8f67036b11b2d7ad439f5dfc4c678effdee304",
+  "backup": "/www/backups/010.cc3798.com/20261026-r66-share-3a8f6703",
+  "result": "PASS",
+  "output": "BACKUP_VERIFIED\n{\"instance\":\"010\",\"commit\":\"3a8f67036b11b2d7ad439f5dfc4c678effdee304\",\"result\":\"PASS\",\"files\":268,\"databaseWrites\":0,\"platformAndCashierUnchanged\":true}\n{\"instance\":\"010\",\"commit\":\"3a8f67036b11b2d7ad439f5dfc4c678effdee304\",\"result\":\"PASS\",\"files\":268,\"databaseWrites\":0,\"platformAndCashierUnchanged\":true}\n",
+  "time": "2026-10-26T08:48:46.991Z"
+}

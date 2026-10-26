@@ -1,0 +1,11 @@
+{
+  "taskId": "confirmation_upload_6f8536d8-7bc0-434d-ba10-2d6d6b8b070d",
+  "tool": "upload",
+  "lastStatus": "pending",
+  "project": "/private/tmp/r66-home-release/build/008-member",
+  "version": "3.0.66",
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "sourceCommit": "3a8f67036b11b2d7ad439f5dfc4c678effdee304"
+}
