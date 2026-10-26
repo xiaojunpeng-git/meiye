@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Info from '@lucide/vue/dist/esm/icons/info.mjs'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import {
   formatMoney,
   openCashierV3QueryEntitySelector,
@@ -55,6 +56,11 @@ const localScope = ref({
   end: '',
   organization: null,
   store: null
+})
+// The shared picker changes dates only; organization and query timing stay put.
+const queryPeriod = computed({
+  get: () => ({ min: localScope.value.start, max: localScope.value.end }),
+  set: range => { localScope.value.start = range.min; localScope.value.end = range.max }
 })
 
 watch(
@@ -301,14 +307,7 @@ function aggregationLabel() {
     </header>
 
     <section class="business-dashboard-filter" aria-label="运营概况筛选条件">
-      <label>
-        <span>开始日期</span>
-        <input v-model="localScope.start" type="date">
-      </label>
-      <label>
-        <span>结束日期</span>
-        <input v-model="localScope.end" type="date">
-      </label>
+      <div><UnifiedQueryDateRange v-model="queryPeriod" label="运营概况查询周期" /></div>
       <template v-if="isPlatform">
         <label class="business-dashboard-select-field">
           <span>组织</span>

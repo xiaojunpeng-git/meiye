@@ -13,7 +13,8 @@ const props = defineProps({
   label: { type: String, default: '查询周期' },
   mode: { type: String, default: 'range' },
   allowClear: { type: Boolean, default: true },
-  minDate: { type: String, default: '' }
+  minDate: { type: String, default: '' },
+  maxDate: { type: String, default: '' }
 })
 const emit = defineEmits(['update:modelValue', 'change'])
 const opened = ref(false), trigger = ref(null), panel = ref(null)
@@ -22,7 +23,8 @@ const leftMonth = ref(new Date()), position = ref({})
 const months = computed(() => [0, 1].map(offset => new Date(leftMonth.value.getFullYear(), leftMonth.value.getMonth() + offset, 1, 12)))
 const caption = computed(() => props.modelValue.min && props.modelValue.max ? `${props.modelValue.min} 至 ${props.modelValue.max}` : '自定义时间')
 const valid = computed(() => parseDateKey(draft.value.min) && parseDateKey(draft.value.max)
-  && draft.value.min <= draft.value.max && (!props.minDate || draft.value.min >= props.minDate))
+  && draft.value.min <= draft.value.max && (!props.minDate || draft.value.min >= props.minDate)
+  && (!props.maxDate || draft.value.max <= props.maxDate))
 const shortcuts = computed(() => props.mode === 'month'
   ? periodOptions.filter(([key]) => ['lastMonth', 'month'].includes(key))
   : props.mode === 'year'
@@ -60,9 +62,21 @@ async function open() {
   window.addEventListener('scroll', place, true)
 }
 function move(amount) { leftMonth.value = new Date(leftMonth.value.getFullYear(), leftMonth.value.getMonth() + amount, 1, 12) }
-function preset(key) { draft.value = periodRange(key); leftMonth.value = parseDateKey(draft.value.min); selectingEnd.value = false; hoverDay.value = '' }
+// A bounded daily report must not acquire future dates via a shortcut. Natural
+// month/year modes remain complete periods; unbounded existing callers keep
+// their original calendar boundaries and behavior.
+function shortcutRange(key) {
+  const range = periodRange(key)
+  if (props.maxDate && props.mode === 'range' && range.max > props.maxDate) range.max = props.maxDate
+  return range
+}
+function unavailableRange(key) {
+  const range = shortcutRange(key)
+  return (props.minDate && range.min < props.minDate) || (props.maxDate && range.max > props.maxDate) || range.min > range.max
+}
+function preset(key) { draft.value = shortcutRange(key); leftMonth.value = parseDateKey(draft.value.min); selectingEnd.value = false; hoverDay.value = '' }
 function select(day) {
-  if (props.minDate && day < props.minDate) return
+  if ((props.minDate && day < props.minDate) || (props.maxDate && day > props.maxDate)) return
   // 月报和年报仍按完整自然周期查询，不能把任意日范围显示成另一套统计结果。
   if (props.mode === 'month' || props.mode === 'year') {
     const year = Number(day.slice(0, 4))
@@ -105,7 +119,7 @@ onBeforeUnmount(() => close(false))
   </button>
   <Teleport to="body">
     <section v-if="opened" ref="panel" class="uq-period-panel" :style="position" role="dialog" aria-modal="true" :aria-label="`${label}选择`" tabindex="-1" @keydown="keyboard">
-      <aside class="uq-period-shortcuts" aria-label="快捷周期"><button v-for="[key, text] in shortcuts" :key="key" type="button" :disabled="Boolean(minDate) && periodRange(key).min < minDate" @click="preset(key)">{{ text }}</button></aside>
+      <aside class="uq-period-shortcuts" aria-label="快捷周期"><button v-for="[key, text] in shortcuts" :key="key" type="button" :disabled="Boolean(unavailableRange(key))" @click="preset(key)">{{ text }}</button></aside>
       <div class="uq-period-main">
         <div class="uq-period-calendars">
           <section v-for="(month, index) in months" :key="dateKey(month)" class="uq-period-month">
@@ -115,7 +129,7 @@ onBeforeUnmount(() => close(false))
               <div :class="{ 'uq-period-mobile-next': index === 0 }"><button type="button" aria-label="下一月" @click="move(1)"><ChevronRight :size="18" /></button><button type="button" aria-label="下一年" @click="move(12)"><ChevronsRight :size="18" /></button></div>
             </header>
             <div class="uq-period-grid"><span v-for="weekday in ['日','一','二','三','四','五','六']" :key="weekday" class="uq-period-weekday">{{ weekday }}</span>
-              <button v-for="day in monthDays(month)" :key="day.key" type="button" :aria-label="day.key" :aria-pressed="day.key === draft.min || day.key === draft.max" :disabled="Boolean(minDate) && day.key < minDate" :class="{ 'is-outside': day.outside, 'is-range': inRange(day.key), 'is-endpoint': day.key === draft.min || day.key === draft.max, 'is-today': day.key === today }" @click="select(day.key)" @mouseenter="hoverDay = day.key">{{ day.day }}</button>
+              <button v-for="day in monthDays(month)" :key="day.key" type="button" :aria-label="day.key" :aria-pressed="day.key === draft.min || day.key === draft.max" :disabled="(Boolean(minDate) && day.key < minDate) || (Boolean(maxDate) && day.key > maxDate)" :class="{ 'is-outside': day.outside, 'is-range': inRange(day.key), 'is-endpoint': day.key === draft.min || day.key === draft.max, 'is-today': day.key === today }" @click="select(day.key)" @mouseenter="hoverDay = day.key">{{ day.day }}</button>
             </div>
           </section>
         </div>

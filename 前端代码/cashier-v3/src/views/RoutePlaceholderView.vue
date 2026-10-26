@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import AlertCircle from '@lucide/vue/dist/esm/icons/circle-alert.mjs'
 import ChartNoAxesCombined from '@lucide/vue/dist/esm/icons/chart-no-axes-combined.mjs'
 import ClipboardCheck from '@lucide/vue/dist/esm/icons/clipboard-check.mjs'
@@ -60,6 +61,16 @@ const customerMemberId = ref('')
 const recordKeyword = ref('')
 const recordFollowedFrom = ref('')
 const recordFollowedTo = ref('')
+// Task and follow-up dates are independent drafts. Confirming either picker
+// never executes a query or changes the other tab's date/permission scope.
+const taskQueryPeriod = computed({
+  get: () => ({ min: taskPlannedFrom.value, max: taskPlannedTo.value }),
+  set: range => { taskPlannedFrom.value = range.min; taskPlannedTo.value = range.max }
+})
+const recordQueryPeriod = computed({
+  get: () => ({ min: recordFollowedFrom.value, max: recordFollowedTo.value }),
+  set: range => { recordFollowedFrom.value = range.min; recordFollowedTo.value = range.max }
+})
 const recordStream = ref('human')
 const recordDataScope = ref('normal')
 const projection = ref(null)
@@ -1107,7 +1118,7 @@ onBeforeUnmount(() => window.removeEventListener('cashier-v3:member-selector-sel
               <button v-if="permissions.canViewAllTasks" type="button" :class="{ 'care-segment__active': activeTaskScope === 'all' }" @click="selectTaskScope('all')">全部任务</button>
             </div>
             <select v-model="taskStatus" class="care-select" aria-label="任务状态"><option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
-            <label class="care-time-range"><span>计划时间</span><input v-model="taskPlannedFrom" type="date" aria-label="计划开始日期" @change="$event.target.blur()"><span>至</span><input v-model="taskPlannedTo" type="date" aria-label="计划结束日期" @change="$event.target.blur()"></label>
+            <div class="care-time-range"><span>计划时间</span><UnifiedQueryDateRange v-model="taskQueryPeriod" label="计划时间查询周期" /></div>
             <button type="submit" class="care-button care-button--primary">查询</button>
             <button v-if="permissions.canCreateTask" type="button" class="care-button" @click="openCreateTaskPage"><Plus :size="15" aria-hidden="true" />新增任务</button>
           </div>
@@ -1148,7 +1159,7 @@ onBeforeUnmount(() => window.removeEventListener('cashier-v3:member-selector-sel
 
       <section v-else-if="activeTab === 'records'" class="care-workspace" aria-label="客情记录">
         <form class="care-query" @submit.prevent="loadCareProjection">
-          <div class="care-query__row"><label class="care-search"><Search :size="16" aria-hidden="true" /><input v-model="recordKeyword" placeholder="搜索会员、跟进内容或跟进人"></label><label class="care-time-range"><span>跟进时间</span><input v-model="recordFollowedFrom" type="date" aria-label="跟进开始日期" @change="$event.target.blur()"><span>至</span><input v-model="recordFollowedTo" type="date" aria-label="跟进结束日期" @change="$event.target.blur()"></label><div class="care-segment" aria-label="数据状态"><button type="button" :class="{ 'care-segment__active': recordDataScope === 'normal' }" @click="recordDataScope = 'normal'; loadCareProjection()">正常数据</button><button type="button" :class="{ 'care-segment__active': recordDataScope === 'all' }" @click="recordDataScope = 'all'; loadCareProjection()">全部数据</button></div><button class="care-button care-button--primary">查询</button><button v-if="permissions.canCreateRecord" type="button" class="care-button" @click="openCommand('create-care-record')"><Plus :size="15" aria-hidden="true" />新增记录</button></div>
+          <div class="care-query__row"><label class="care-search"><Search :size="16" aria-hidden="true" /><input v-model="recordKeyword" placeholder="搜索会员、跟进内容或跟进人"></label><div class="care-time-range"><span>跟进时间</span><UnifiedQueryDateRange v-model="recordQueryPeriod" label="跟进时间查询周期" /></div><div class="care-segment" aria-label="数据状态"><button type="button" :class="{ 'care-segment__active': recordDataScope === 'normal' }" @click="recordDataScope = 'normal'; loadCareProjection()">正常数据</button><button type="button" :class="{ 'care-segment__active': recordDataScope === 'all' }" @click="recordDataScope = 'all'; loadCareProjection()">全部数据</button></div><button class="care-button care-button--primary">查询</button><button v-if="permissions.canCreateRecord" type="button" class="care-button" @click="openCommand('create-care-record')"><Plus :size="15" aria-hidden="true" />新增记录</button></div>
           <div class="care-query__row care-query__row--filters"><span class="care-query__hint">任务需先开始再完成；手工记录提交后不可编辑。作废仅用于会员、内容或结果录错，原记录和审计会保留。</span><span class="care-query__as-of">数据时间 {{ care.dataAsOf || '—' }}</span></div>
         </form>
         <main class="care-table-wrap">
@@ -1227,8 +1238,6 @@ onBeforeUnmount(() => window.removeEventListener('cashier-v3:member-selector-sel
 .care-segment .care-segment__active { background:#fff; color:#176fd1; font-weight:700; box-shadow:0 1px 3px rgba(29, 43, 61, .1); }
 .care-select { height:37px; padding:0 28px 0 10px; border:1px solid #cfd8e3; border-radius:6px; background:#fff; color:#465364; font-size:13px; }
 .care-time-range { display:inline-flex; flex:none; height:37px; align-items:center; gap:6px; color:#657283; font-size:12px; white-space:nowrap; }
-.care-time-range input { width:174px; height:37px; padding:0 8px; border:1px solid #cfd8e3; border-radius:6px; background:#fff; color:#465364; font:inherit; }
-.care-time-range input:focus { outline:none; border-color:#4096ff; box-shadow:0 0 0 3px rgba(64, 150, 255, .1); }
 .care-button { display:inline-flex; flex:none; height:37px; align-items:center; justify-content:center; gap:5px; padding:0 13px; border:1px solid #cfd8e3; border-radius:6px; background:#fff; color:#465364; font-size:13px; font-weight:600; }
 .care-button--primary { border-color:#176fd1; background:#176fd1; color:#fff; }
 .care-filter { display:inline-flex; height:29px; align-items:center; gap:6px; padding:0 10px; border:1px solid transparent; border-radius:5px; background:transparent; color:#667384; font-size:12px; }

@@ -1,3 +1,4 @@
+import { storeNavigationGroup } from '../../../shared/storeNavigationGroups.js'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import CashierShell from '@/layouts/CashierShell.vue'
 import CashierWorkbenchView from '@/views/CashierWorkbenchView.vue'
@@ -12,6 +13,7 @@ import ManagementCenterView from '@/views/ManagementCenterView.vue'
 import BusinessDashboardView from '@/views/BusinessDashboardView.vue'
 import StoreTargetDashboardView from '@/views/StoreTargetDashboardView.vue'
 import StoreBusinessReportView from '@/views/StoreBusinessReportView.vue'
+import BasicReportsView from '@/views/BasicReportsView.vue'
 import MemberDashboardView from '@/views/MemberDashboardView.vue'
 import GroupManagementDashboardView from '@/views/GroupManagementDashboardView.vue'
 import ProductDashboardView from '@/views/ProductDashboardView.vue'
@@ -21,31 +23,35 @@ import EmployeeDashboardView from '@/views/EmployeeDashboardView.vue'
 import ConsumptionTierConfigView from '@/views/ConsumptionTierConfigView.vue'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
+import StoreSettingsView from '@/views/StoreSettingsView.vue'
 import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
 import StoreLoginView from '@/views/StoreLoginView.vue'
 import FundManagementView from '@/views/FundManagementView.vue'
 import PresaleClaimView from '@/views/PresaleClaimView.vue'
 import { bootstrapCashierV3Workbench, hasCashierV3Session } from '@/services/cashierV3SessionLifecycle'
-import { canUseCashierV3Feature } from '@/services/cashierV3Bridge'
+import { canUseCashierV3Feature, useCashierV3State } from '@/services/cashierV3Bridge'
 
 const routeFeatureCodes = Object.freeze({
+  'cashier-v3-basic-reports': 'cashier.v3.data',
   'cashier-v3-cashier': 'cashier.v3.cashier',
   'cashier-v3-writeoff': 'cashier.v3.writeoff',
   'cashier-v3-replacement': 'cashier.v3.writeoff',
   'cashier-v3-room': 'cashier.v3.room',
   'cashier-v3-reservation': 'cashier.v3.reservation',
   'cashier-v3-member': 'cashier.v3.member',
-  'cashier-v3-care': 'cashier.v3.member',
-  'cashier-v3-fund': 'cashier.v3.member',
+  'cashier-v3-care': 'cashier.v3.care',
+  'cashier-v3-fund': 'cashier.v3.fund',
   'cashier-v3-presale-claim': 'cashier.v3.inventory.outbound',
   'cashier-v3-hang': 'cashier.v3.hang',
   'cashier-v3-order-center': 'cashier.v3.order_center',
-  'cashier-v3-management-center': 'cashier.v3.management_center',
-  'cashier-v3-staff-list': 'cashier.v3.management_center',
-  'cashier-v3-room-settings': 'cashier.v3.management_center',
-  'cashier-v3-business-dashboard': 'cashier.v3.management_center',
-  'cashier-v3-store-target-dashboard': 'cashier.v3.management_center',
-  'cashier-v3-store-business-reports': 'cashier.v3.management_center'
+  'cashier-v3-management-center': 'cashier.v3.management.staff',
+  'cashier-v3-inventory-entry': 'cashier.v3.inventory.overview',
+  'cashier-v3-staff-list': 'cashier.v3.management.staff',
+  'cashier-v3-room-settings': 'cashier.v3.management.rooms',
+  'cashier-v3-store-settings': 'cashier.v3.management.store_profile',
+  'cashier-v3-business-dashboard': 'cashier.v3.management.dashboard',
+  'cashier-v3-store-target-dashboard': 'cashier.v3.targets',
+  'cashier-v3-store-business-reports': 'cashier.v3.data'
 })
 
 const defaultRouteNames = Object.freeze([
@@ -54,15 +60,29 @@ const defaultRouteNames = Object.freeze([
   'cashier-v3-room',
   'cashier-v3-reservation',
   'cashier-v3-member',
-  'cashier-v3-order-center',
-  'cashier-v3-management-center'
+  'cashier-v3-fund', 'cashier-v3-care', 'cashier-v3-order-center',
+  'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard',
+  'cashier-v3-store-settings',
+  'cashier-v3-store-business-reports', 'cashier-v3-store-target-dashboard', 'cashier-v3-inventory-entry', 'cashier-v3-presale-claim'
 ])
 
-function firstGrantedRouteName() {
-  return defaultRouteNames.find((routeName) => canUseCashierV3Feature(routeFeatureCodes[routeName])) || ''
+export function firstGrantedRouteName() {
+  // 登录后的首屏与当前已授权导航排序一致；未知功能码不能注入新路由。
+  const rows = useCashierV3State().navigationRules || []
+  const rules = new Map(rows.map(row => [row.feature_code, row]))
+  // 首屏服从后台配置的大类与功能顺序，不另设前端分类优先级。
+  const rank = (name) => {
+    const code = routeFeatureCodes[name]
+    const group = storeNavigationGroup(rows, code)
+    return [group?.sort ?? 99999, rules.get(code)?.sort ?? 99999]
+  }
+  const sorted = [...defaultRouteNames].sort((a, b) => rank(a)[0] - rank(b)[0] || rank(a)[1] - rank(b)[1])
+  return sorted.find((routeName) => canUseCashierV3Feature(routeFeatureCodes[routeName])) || ''
 }
 
 const routes = [
+  { path: '/platform/basic-reports/:report?', name: 'cashier-v3-platform-basic-reports', component: BasicReportsView, meta: { platformReport: true, title: '基础报表' } },
+  { path: '/entry', name: 'cashier-v3-entry', component: RoutePlaceholderView },
   { path: '/login', name: 'cashier-v3-login', component: StoreLoginView, meta: { title: '门店端登录' } },
   {
     path: '/platform/reports/:report?',
@@ -131,6 +151,7 @@ const routes = [
     component: CashierShell,
     redirect: '/cashier',
     children: [
+      { path: 'inventory', name: 'cashier-v3-inventory-entry', component: RoutePlaceholderView, meta: { title: '库存' } },
       {
         path: 'cashier',
         name: 'cashier-v3-cashier',
@@ -220,6 +241,12 @@ const routes = [
         meta: { title: '房间设置', description: '维护当前门店房间基础资料。' }
       },
       {
+        path: 'management-center/store-settings',
+        name: 'cashier-v3-store-settings',
+        component: StoreSettingsView,
+        meta: { title: '门店设置', description: '维护当前门店基础信息，组织归属由平台管理。' }
+      },
+      {
         path: 'management-center/business-dashboard',
         name: 'cashier-v3-business-dashboard',
         component: BusinessDashboardView,
@@ -236,6 +263,10 @@ const routes = [
         name: 'cashier-v3-store-business-reports',
         component: StoreBusinessReportView,
         meta: { title: '门店运营', description: '门店运营报表统一读取 V3 事实、指标与数据权限服务。' }
+      },
+      {
+        path: 'data/basic-reports/:report?', name: 'cashier-v3-basic-reports', component: BasicReportsView,
+        meta: { title: '基础报表' }
       }
     ]
   }

@@ -145,6 +145,8 @@ class CashierV3RootStateContract
             'sessionMode' => (string)($extras['sessionMode'] ?? 'store_staff'),
             'storeName' => (string)($extras['storeName'] ?? ''),
             'currentStore' => $extras['currentStore'] ?? ['id' => null, 'name' => ''],
+            'navigationRules' => $extras['navigationRules'] ?? [],
+            'storeDisplayOptions' => $extras['storeDisplayOptions'] ?? ['salesAttributionEnabled' => true, 'experienceEnabled' => true, 'craftsmanExcludeCountsEnabled' => true],
             'featurePermissions' => $extras['featurePermissions'] ?? new \stdClass(),
             'operationPermissions' => $extras['operationPermissions'] ?? new \stdClass(),
             'workspace' => $extras['workspace'] ?? [
@@ -154,6 +156,9 @@ class CashierV3RootStateContract
                 'serverTime' => null,
             ],
             'operator' => $extras['operator'] ?? ['name' => '', 'account' => '', 'roleName' => ''],
+            'businessSourcePolicy' => $extras['businessSourcePolicy'] ?? ['enabled' => true, 'inheritPrevious' => true, 'mode' => 'previous', 'configured' => false],
+            'businessSourceDefaults' => $extras['businessSourceDefaults'] ?? $emptyObj(),
+            'businessSourceDefaultsMemberId' => (int)($extras['businessSourceDefaultsMemberId'] ?? 0),
             'pendingHangCount' => (int)($extras['pendingHangCount'] ?? 0),
             'cashier' => $extras['cashier'] ?? $emptyObj(),
             'serviceCompletion' => $extras['serviceCompletion'] ?? [

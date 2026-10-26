@@ -1,25 +1,16 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BadgeDollarSign from '@lucide/vue/dist/esm/icons/badge-dollar-sign.mjs'
-import Boxes from '@lucide/vue/dist/esm/icons/boxes.mjs'
 import CalendarDays from '@lucide/vue/dist/esm/icons/calendar-days.mjs'
 import ChartNoAxesCombined from '@lucide/vue/dist/esm/icons/chart-no-axes-combined.mjs'
-import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
-import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
 import ClipboardList from '@lucide/vue/dist/esm/icons/clipboard-list.mjs'
 import DoorOpen from '@lucide/vue/dist/esm/icons/door-open.mjs'
 import HeartHandshake from '@lucide/vue/dist/esm/icons/heart-handshake.mjs'
 import WalletCards from '@lucide/vue/dist/esm/icons/wallet-cards.mjs'
-import KeyRound from '@lucide/vue/dist/esm/icons/key-round.mjs'
-import LogOut from '@lucide/vue/dist/esm/icons/log-out.mjs'
-import PanelLeftClose from '@lucide/vue/dist/esm/icons/panel-left-close.mjs'
-import PanelLeftOpen from '@lucide/vue/dist/esm/icons/panel-left-open.mjs'
 import ReceiptText from '@lucide/vue/dist/esm/icons/receipt-text.mjs'
-import Settings from '@lucide/vue/dist/esm/icons/settings.mjs'
-import Store from '@lucide/vue/dist/esm/icons/store.mjs'
-import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import Users from '@lucide/vue/dist/esm/icons/users.mjs'
+import StoreTopNavigation from '@/components/navigation/StoreTopNavigation.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import MemberSelectorOverlay from '@/components/common/MemberSelectorOverlay.vue'
 import MemberSummaryCard from '@/components/common/MemberSummaryCard.vue'
@@ -28,6 +19,8 @@ import MemberDebtOverlay from '@/components/member/MemberDebtOverlay.vue'
 import MemberDebtReminderOverlay from '@/components/member/MemberDebtReminderOverlay.vue'
 import DirectGiftOverlay from '@/components/member/DirectGiftOverlay.vue'
 import RechargeOverlay from '@/components/member/RechargeOverlay.vue'
+import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
+import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import QueryEntitySelectorOverlay from '@/components/query/QueryEntitySelectorOverlay.vue'
 import RoomAssignmentOverlay from '@/components/room/RoomAssignmentOverlay.vue'
 import ServiceCompletionOverlay from '@/components/service/ServiceCompletionOverlay.vue'
@@ -54,16 +47,36 @@ import {
   salesOrderProjectionFromResult
 } from '@/services/cashierV3OrderProjectionContract'
 import { responseDataBlock } from '@/services/cashierV3EntitlementDraftContract'
+import { recentCashierMemberKey } from '@/services/recentCashierMembers'
 
 const route = useRoute()
 const router = useRouter()
 const state = useCashierV3State()
+// The settings page has its own authenticated identity projection. Keep it local
+// to this route rather than replacing a cashier draft/root business snapshot.
+const storeSettingsNavigation = ref(null)
+provide('store-settings-navigation', storeSettingsNavigation)
+const settingsNavigation = computed(() => {
+  const value = storeSettingsNavigation.value
+  return route.name === 'cashier-v3-store-settings' && value?.contextId === state.stateContextId
+    && (!state.currentStore?.id || Number(state.currentStore.id) === Number(value.store_id)) ? value : null
+})
+// Fixed-source mode hides attribution inputs, not entitlement/card provenance.
+const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const isOperationHelpOpen = ref(false)
 const toolbarBusinessDate = ref(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()))
 const toolbarBusinessDateReason = ref('')
 const toolbarBusinessSource = ref({ displayNameSnapshot: '', primarySourceId: 0, secondarySourceId: 0 })
 const isMemberSelectorOpen = ref(false)
 const memberSelectorContext = ref('cashier')
+// 只在收银选客入口启用本机最近会员；账号或门店身份缺失时不共用缓存。
+const recentMemberHistoryKey = computed(() => memberSelectorContext.value === 'cashier'
+  ? recentCashierMemberKey(state.operator?.account,
+    state.currentStore?.id || state.storeId || state.store?.id)
+  : '')
+// Identify a browser-local customer choice across the async summary read;
+// selecting A, then B, then A still constitutes three distinct draft choices.
+const cashierCustomerSelectionEpoch = ref(0)
 let memberSelectorQuerySequence = 0
 const memberSelectorRequiresMember = ref(false)
 // 推荐人查询独立于主会员选择器。新建会员面板本身位于主选择器内部，
@@ -77,6 +90,9 @@ const isMemberDetailOpen = ref(false)
 const memberDetailInitialTab = ref('profile')
 const memberDetailFallback = ref({})
 const isMemberDetailLoading = ref(false)
+// A failed authority read is not an empty history. Keep query failure separate
+// from the last successful detail, and accept it only for the latest request.
+const memberDetailLoadError = ref('')
 const activeMemberDetailId = ref(null)
 let memberDetailLoadSequence = 0
 const isDebtReminderOpen = ref(false)
@@ -114,11 +130,11 @@ const pendingMemberTopAction = ref(null)
 const memberSelectorInitialView = ref('selector')
 const isCardOperationMenuOpen = ref(false)
 const rechargeSession = ref(null)
+const rechargeSourceSelector = ref(null)
 const isRechargeSubmitting = ref(false)
 const directGiftSession = ref(null)
 const isDirectGiftSubmitting = ref(false)
 const uiFeedback = ref(null)
-const isAccountMenuOpen = ref(false)
 const isPasswordDialogOpen = ref(false)
 const isPasswordSubmitting = ref(false)
 const passwordChange = ref({ account: '', currentPassword: '', newPassword: '', confirmation: '' })
@@ -293,11 +309,6 @@ watch(
   { immediate: true }
 )
 
-const sidebarPreferenceKey = 'cashier-v3-sidebar-collapsed'
-const isSidebarCollapsed = ref(readSidebarPreference())
-const isInventoryMenuExpanded = ref(false)
-const managementRouteNames = ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard']
-const isManagementMenuExpanded = ref(managementRouteNames.includes(route.name))
 // 库存工作区与收银台共用当前 V3 会话；初始化时就读取，避免 HMR/路由重载
 // 期间库存组件先于点击事件挂载而拿到空 token。
 const inventorySessionToken = ref(readStoreV3SessionToken())
@@ -316,14 +327,15 @@ const inventoryFeatureItems = [
   { key: 'presale-claim', label: '会员领用', featureCode: 'cashier.v3.inventory.outbound', to: { name: 'cashier-v3-presale-claim' } }
 ]
 const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter((entry) => canUseFeature(entry.featureCode)))
-const managementFeatureItems = [
-  { key: 'staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
-  { key: 'room-settings', label: '房间设置', to: { name: 'cashier-v3-room-settings' } },
-  { key: 'business-dashboard', label: '经营看板', to: { name: 'cashier-v3-business-dashboard' } }
+const managementFeatureDefinitions = [
+  { key: 'staff', featureCode: 'cashier.v3.management.staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
+  { key: 'room-settings', featureCode: 'cashier.v3.management.rooms', label: '房间设置', to: { name: 'cashier-v3-room-settings' } },
+  { key: 'store-settings', featureCode: 'cashier.v3.management.store_profile', label: '门店设置', to: { name: 'cashier-v3-store-settings' } },
+  { key: 'business-dashboard', featureCode: 'cashier.v3.management.dashboard', label: '经营看板', to: { name: 'cashier-v3-business-dashboard' } }
 ]
 const isInventoryWorkspaceOpen = ref(false)
 const activeInventoryFeatureKey = ref('overview')
-const menuItems = [
+const menuDefinitions = [
   {
     key: 'cashier',
     label: '收银',
@@ -336,41 +348,41 @@ const menuItems = [
   { key: 'room', label: '房间', icon: DoorOpen, featureCode: 'cashier.v3.room', to: { name: 'cashier-v3-room' } },
   { key: 'reservation', label: '预约', icon: CalendarDays, featureCode: 'cashier.v3.reservation', to: { name: 'cashier-v3-reservation' } },
   { key: 'member', label: '会员', icon: Users, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-member' } },
-  { key: 'fund', label: '费用', icon: WalletCards, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-fund' } },
-  { key: 'care', label: '客情', icon: HeartHandshake, featureCode: 'cashier.v3.member', to: { name: 'cashier-v3-care' } },
+  { key: 'fund', label: '费用', icon: WalletCards, featureCode: 'cashier.v3.fund', to: { name: 'cashier-v3-fund' } },
+  { key: 'care', label: '客情', icon: HeartHandshake, featureCode: 'cashier.v3.care', to: { name: 'cashier-v3-care' } },
   { key: 'order', label: '订单', icon: ReceiptText, featureCode: 'cashier.v3.order_center', to: { name: 'cashier-v3-order-center' } },
-  {
-    key: 'management',
-    label: '管理',
-    icon: Settings,
-    featureCode: 'cashier.v3.management_center',
-    to: { name: 'cashier-v3-staff-list' },
-    activeRouteNames: ['cashier-v3-management-center', 'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard']
-  },
-  {
-    key: 'data',
-    label: '数据',
-    icon: ChartNoAxesCombined,
-    featureCode: 'cashier.v3.management_center',
-    to: { name: 'cashier-v3-store-business-reports' },
-    activeRouteNames: ['cashier-v3-store-business-reports']
-  },
   {
     key: 'targets',
     label: '目标',
     icon: ChartNoAxesCombined,
-    featureCode: 'cashier.v3.management_center',
+    featureCode: 'cashier.v3.targets',
     to: { name: 'cashier-v3-store-target-dashboard' }
   },
-  {
-    key: 'inventory',
-    label: '库存',
-    icon: Boxes,
-    // 库存入口只由已授权的库存子功能决定，不继承收银或管理权限；
-    // 子功能和接口仍各自校验门店、仓位及成本字段权限。
-    submenu: inventoryFeatureItems
-  }
+
 ]
+// 仅合并权威展示元数据，路由/图标/动作白名单始终来自现有源码。
+function configuredNavigation(items) {
+  const rules = new Map((state.navigationRules || []).map(row => [row.feature_code, row]))
+  return items.map((item, index) => {
+    const code = item.featureCode
+    const rule = rules.get(code)
+    return { ...item, label: rule?.title || item.label, sort: rule?.sort ?? index * 10 }
+  }).sort((a, b) => a.sort - b.sort)
+}
+// 五类入口与快捷栏只组合已有页面，不建立另一份路由、授权或业务工作台。
+const topNavigationEntries = computed(() => [
+  ...configuredNavigation(menuDefinitions).filter(item => canUseFeature(item.featureCode)),
+  ...configuredNavigation(managementFeatureDefinitions).filter(item => canUseFeature(item.featureCode)),
+  ...(canUseFeature('cashier.v3.data') ? [{ key: 'reports', label: '全部报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-store-business-reports' } }] : []),
+  ...(canUseFeature('cashier.v3.data') ? [{ key: 'basic-reports', navigationKey: 'report.basic', label: '基础报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-basic-reports' } }] : []),
+  ...visibleInventoryFeatureItems.value.map(entry => ({ ...entry, key: 'inventory-' + entry.key, inventory: entry }))
+])
+function navigateTopMenu(entry) {
+  if (!entry || !canUseFeature(entry.featureCode)) return
+  if (entry.inventory && !entry.to) { openInventoryWorkspace(entry.inventory); return }
+  closeInventoryWorkspace()
+  if (entry.to) void router.push(entry.to)
+}
 const cashierWorkflowTabs = [
   { key: 'checkout', label: '结账收款', icon: '¥', featureCode: 'cashier.v3.cashier.checkout', to: { name: 'cashier-v3-cashier' } },
   { key: 'replacement', label: '项目替换', icon: '↔', featureCode: 'cashier.v3.writeoff', to: { name: 'cashier-v3-replacement' } }
@@ -382,6 +394,8 @@ const cardOperationItems = Object.freeze([
   { key: 'card-extension', label: '卡延期', featureCode: 'cashier.v3.cashier.card.extend' },
   { key: 'card-transfer', label: '卡转让', featureCode: 'cashier.v3.cashier.card.transfer' },
   { key: 'card-disable', label: '卡停用', featureCode: 'cashier.v3.cashier.card.disable' },
+  // 转余额有独立权限；不可借停用权限开放资金权益操作。
+  { key: 'card-to-balance', label: '卡转余额', featureCode: 'cashier.v3.cashier.card.to_balance' },
   { key: 'card-enable', label: '卡启用', featureCode: 'cashier.v3.cashier.card.enable' },
   { key: 'project-replacement', label: '项目替换', featureCode: 'cashier.v3.cashier.card.project_replace' },
   { key: 'project-upgrade', label: '项目升级', featureCode: 'cashier.v3.cashier.card.project_upgrade' }
@@ -425,64 +439,20 @@ const allowedServiceCompletionActions = new Set([
   'save-service-line-craftsmen'
 ])
 
-function readSidebarPreference() {
-  if (typeof window === 'undefined') return false
-  try {
-    return window.localStorage.getItem(sidebarPreferenceKey) === '1'
-  } catch {
-    return false
-  }
-}
-
-function persistSidebarPreference() {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(sidebarPreferenceKey, isSidebarCollapsed.value ? '1' : '0')
-  } catch {
-    // The visual state still works when browser storage is unavailable.
-  }
-}
-
-function toggleSidebar() {
-  isSidebarCollapsed.value = !isSidebarCollapsed.value
-  persistSidebarPreference()
-}
-
-function toggleInventoryMenu() {
-  isInventoryMenuExpanded.value = !isInventoryMenuExpanded.value
-}
-
-function toggleManagementMenu() {
-  isManagementMenuExpanded.value = !isManagementMenuExpanded.value
-}
-
 function openInventoryWorkspace(entry = visibleInventoryFeatureItems.value[0]) {
   if (!entry || !canUseFeature(entry.featureCode)) return
   activeInventoryFeatureKey.value = entry.key
   inventorySessionToken.value = readStoreV3SessionToken()
-  isInventoryMenuExpanded.value = true
   isInventoryWorkspaceOpen.value = true
 }
+// 库存是独立工作台：只有库存权限的账号登录后直接打开其首个已授权子功能。
+watch(() => route.name, (name) => {
+  if (name === 'cashier-v3-inventory-entry') openInventoryWorkspace()
+}, { immediate: true })
+
 
 function closeInventoryWorkspace() {
   isInventoryWorkspaceOpen.value = false
-}
-
-function isInventoryFeatureActive(entry) {
-  if (entry?.to?.name) return route.name === entry.to.name
-  return activeInventoryFeatureKey.value === entry?.key && isInventoryWorkspaceOpen.value
-}
-
-function isManagementFeatureActive(entry) {
-  return route.name === entry?.to?.name
-}
-
-function isMenuItemActive(item) {
-  if (!item || !item.to || !item.to.name) return false
-  const activeRouteNames = Array.isArray(item.activeRouteNames) && item.activeRouteNames.length
-    ? item.activeRouteNames
-    : [item.to.name]
-  return activeRouteNames.includes(route?.name || '')
 }
 
 const isCashierPage = computed(() => route.name === 'cashier-v3-cashier')
@@ -639,9 +609,6 @@ watch(
   () => route.name,
   (routeName) => {
     isCardOperationMenuOpen.value = false
-    if (managementRouteNames.includes(routeName)) {
-      isManagementMenuExpanded.value = true
-    }
     // 收银台 V3 的充值由 CashierWorkbenchView 统一接管，离开旧页面时
     // 清掉 Shell 兼容充值状态，避免旧弹层在路由切换后重新覆盖新 Checkout。
     if (routeName === 'cashier-v3-cashier') rechargeSession.value = null
@@ -854,7 +821,7 @@ async function openCashierMemberTopAction(action) {
       if (isCashierPage.value) {
         window.dispatchEvent(new CustomEvent('cashier-v3:open-recharge', { detail: normalizedOverlay }))
       } else {
-        rechargeSession.value = normalizedOverlay
+        void beginRechargeSession(normalizedOverlay)
       }
     }
   }
@@ -863,14 +830,59 @@ async function openCashierMemberTopAction(action) {
 
 async function submitRecharge(payload = {}) {
   if (isRechargeSubmitting.value || !rechargeSession.value) return
+  const source = rechargeSession.value.businessSourceSnapshot || {}
+  if (Number(source.primarySourceId || 0) <= 0) {
+    return { result: { status: 'failed', message: source.configurationError || '本次充值来源尚未确认，请重新进入充值。' } }
+  }
   isRechargeSubmitting.value = true
   try {
-    const result = await requestCashierV3Action('submit-recharge', payload)
+    const result = await requestCashierV3Action('submit-recharge', { ...payload, businessSource: { ...source } })
     if (isSucceededResult(result)) rechargeSession.value = null
     return result
   } finally {
     isRechargeSubmitting.value = false
   }
+}
+
+/** The non-cashier recharge entry confirms its own per-member/kind choice.
+ * It cannot borrow the cashier's purchase choice or another member's defaults.
+ */
+async function beginRechargeSession(session) {
+  const memberId = Number(session?.member?.memberId || session?.member?.id || session?.balance?.memberId || 0)
+  const rootMatches = Number(state.businessSourceDefaultsMemberId ?? -1) === memberId
+  // Fixed source configuration is shared by members of this instance; only
+  // previous-source suggestions require an exact member match.
+  const defaults = session?.sourceDefaults || session?.member?.sourceDefaults
+    || (rootMatches || !businessSourceEnabled.value ? state.businessSourceDefaults : {}) || {}
+  // Retry loading the directory without replacing this recharge's selection.
+  rechargeSession.value = { ...session, businessSourceSnapshot: { ...(session?.businessSourceSnapshot || defaults.recharge || {}) } }
+  if (!businessSourceEnabled.value) {
+    rechargeSourceSelector.value = null
+    return
+  }
+  const selectedSession = rechargeSession.value
+  rechargeSourceSelector.value = { sources: [], ...selectedSession.businessSourceSnapshot, loadError: '' }
+  const selector = rechargeSourceSelector.value
+  try {
+    const catalog = await loadCheckoutBusinessCatalog()
+    if (selectedSession === rechargeSession.value && selector === rechargeSourceSelector.value) selector.sources = catalog.sources
+  } catch (error) {
+    if (selector === rechargeSourceSelector.value) selector.loadError = String(error?.message || '客户来源加载失败，请重试。')
+  }
+}
+
+function confirmRechargeSource(selection) {
+  const selector = rechargeSourceSelector.value
+  const primary = (selector?.sources || []).find((item) => Number(item.id) === Number(selection.primarySourceId))
+  const secondary = (primary?.children || []).find((item) => Number(item.id) === Number(selection.secondarySourceId))
+  if (!rechargeSession.value || !primary || (Number(primary.requireSecondary) === 1 && !secondary)) return
+  rechargeSession.value.businessSourceSnapshot = {
+    primarySourceId: Number(primary.id), primarySourceNameSnapshot: String(primary.name),
+    secondarySourceId: Number(secondary?.id || 0), secondarySourceNameSnapshot: String(secondary?.name || ''),
+    displayNameSnapshot: [primary.name, secondary?.name].filter(Boolean).join(' / '),
+    rewardAmountCents: Number(selection.rewardAmountCents || 0)
+  }
+  rechargeSourceSelector.value = null
 }
 
 async function submitDirectGift(payload = {}) {
@@ -967,6 +979,25 @@ async function queryMemberSelector(query) {
   return result
 }
 
+/** 最近会员沿用会员选择器的只读权限查询，但不覆盖当前分页结果。 */
+async function queryRecentMemberSelector({ memberIds, memberScope }) {
+  const result = await requestCashierV3Action('query-member-selector', {
+    selectorContext: 'cashier',
+    selectorEntry: 'cashier',
+    memberScope,
+    recentMemberIds: memberIds,
+    page: 1,
+    pageSize: 10,
+    preserveRootState: true,
+    silent: true
+  })
+  if (!isSucceededResult(result)) {
+    throw new Error(resultEnvelope(result)?.result?.message || '最近选择读取失败。')
+  }
+  const projection = resultEnvelope(result)?.data
+  return { records: Array.isArray(projection?.records) ? projection.records : [] }
+}
+
 async function selectMemberFromSelector(record) {
   if (['card-transfer', 'customer-care', 'customer-care-record', 'reservation', 'member-referrer', 'imported-card-refund'].includes(memberSelectorContext.value)) {
     // 转让和预约都只回填选择结果。预约没有收银工作台上下文，也不需要
@@ -982,6 +1013,8 @@ async function selectMemberFromSelector(record) {
     // cashier_workspace，也不能从服务端读取一份待回放的购物车投影。
     // 本次结账的唯一服务端写入发生在最终确认时提交的完整快照。
     applyLocalCashierCustomerSelection({ customerMode: 'member', member: record })
+    const selectionEpoch = cashierCustomerSelectionEpoch.value
+    const selectionStoreId = String(state.currentStore?.id || state.storeId || state.store?.id || '')
     // The member row is already authoritative for this browser draft. Close
     // the selector immediately so a late selector response cannot replace the
     // selected member with the guest root projection.
@@ -1000,6 +1033,13 @@ async function selectMemberFromSelector(record) {
         preserveRootState: true,
         silent: true
       })
+      // A late history/default response must not select an old member again or
+      // open their source dialog after the cashier has moved to another draft.
+      if (selectionEpoch !== cashierCustomerSelectionEpoch.value
+        || String(memberDetailId(cashierMember.value) || '') !== String(memberId)
+        || selectionStoreId !== String(state.currentStore?.id || state.storeId || state.store?.id || '')) {
+        return { result: { status: 'success' } }
+      }
       if (isSucceededResult(summaryResult)) {
         const summary = responseDataBlock(summaryResult)?.memberSummary
         if (summary && typeof summary === 'object') {
@@ -1072,6 +1112,7 @@ function emptyLocalCashierCart() {
 }
 
 function applyLocalCashierCustomerSelection({ customerMode, member = null } = {}) {
+  cashierCustomerSelectionEpoch.value += 1
   const isMember = customerMode === 'member' && memberDetailId(member)
   state.cashier = {
     ...(state.cashier || {}),
@@ -1367,6 +1408,7 @@ function closeMemberDetail() {
   isMemberDetailOpen.value = false
   memberDetailFallback.value = {}
   isMemberDetailLoading.value = false
+  memberDetailLoadError.value = ''
   activeMemberDetailId.value = null
   memberDetailInitialTab.value = 'profile'
 }
@@ -1520,6 +1562,7 @@ async function loadMemberDetailTab(payload = {}) {
   if (!payload.memberId) return { success: false, message: '未找到会员。' }
   const loadSequence = ++memberDetailLoadSequence
   isMemberDetailLoading.value = true
+  memberDetailLoadError.value = ''
   try {
     const result = await requestCashierV3Action('load-member-detail-tab', {
       memberId: payload.memberId,
@@ -1531,14 +1574,22 @@ async function loadMemberDetailTab(payload = {}) {
       silent: true
     })
     const detail = memberDetailFromResponse(result)
-    if (loadSequence === memberDetailLoadSequence
-      && isMemberDetailOpen.value
-      && isSucceededResult(result)
-      && detail
-      && String(memberDetailId(detail)) === String(activeMemberDetailId.value)) {
-      memberDetailFallback.value = mergeMemberDetail(memberDetailFallback.value, detail)
+    if (loadSequence === memberDetailLoadSequence && isMemberDetailOpen.value) {
+      if (isSucceededResult(result) && detail
+        && String(memberDetailId(detail)) === String(activeMemberDetailId.value)) {
+        memberDetailFallback.value = mergeMemberDetail(memberDetailFallback.value, detail)
+      } else {
+        // Do not expose raw server exceptions, or present cached/seeded empty
+        // arrays as the authoritative answer to a failed tab query.
+        memberDetailLoadError.value = '本次查询未完成，请重试。'
+      }
     }
     return result
+  } catch {
+    if (loadSequence === memberDetailLoadSequence && isMemberDetailOpen.value) {
+      memberDetailLoadError.value = '本次查询未完成，请重试。'
+    }
+    return { result: { status: 'failed', message: '会员详情查询未完成。' } }
   } finally {
     if (loadSequence === memberDetailLoadSequence) isMemberDetailLoading.value = false
   }
@@ -2420,7 +2471,6 @@ function clearCashierNegativeState() {
 }
 
 function openPasswordDialog() {
-  isAccountMenuOpen.value = false
   passwordChange.value = { account: String(state.operator.account || ''), currentPassword: '', newPassword: '', confirmation: '' }
   passwordChangeError.value = ''
   isPasswordDialogOpen.value = true
@@ -2461,7 +2511,6 @@ async function submitPasswordChange() {
 
 async function logoutCurrentAccount() {
   if (!window.confirm('确定退出当前账号吗？')) return
-  isAccountMenuOpen.value = false
   try {
     await logoutStoreV3()
   } catch (_) {
@@ -2558,7 +2607,8 @@ async function handleUiResult(event) {
         detail: overlay
       }))
     } else {
-      rechargeSession.value = typeof overlay === 'object' ? overlay : null
+      if (typeof overlay === 'object') void beginRechargeSession(overlay)
+      else rechargeSession.value = null
     }
   }
   if (canApplyUiDirective && overlayName === 'direct-gift') {
@@ -2691,7 +2741,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="cashier-shell" :class="{ 'cashier-shell--sidebar-collapsed': isSidebarCollapsed }">
+  <div class="cashier-shell cashier-shell--top-navigation">
     <div v-if="isStoreSwitchOpen" class="cashier-account-dialog-backdrop" @click.self="closeStoreSwitch">
       <section class="cashier-account-dialog cashier-store-switch-dialog" aria-label="切换门店" role="dialog" aria-modal="true">
         <header><h2>切换门店</h2><button type="button" class="cashier-account-dialog__close" aria-label="关闭" :disabled="isStoreSwitchLoading" @click="closeStoreSwitch">×</button></header>
@@ -2721,12 +2771,22 @@ onBeforeUnmount(() => {
       </form>
     </div>
     <RechargeOverlay
-      v-if="rechargeSession && !isCashierPage"
+      v-if="rechargeSession && !rechargeSourceSelector && !isCashierPage"
       :session="rechargeSession"
       :business-date="toolbarBusinessDate"
       :submitting="isRechargeSubmitting"
       @close="rechargeSession = null"
       @submit="submitRecharge"
+    />
+    <CheckoutBusinessSourceOverlay
+      v-if="businessSourceEnabled && rechargeSourceSelector && rechargeSession && !isCashierPage"
+      :sources="rechargeSourceSelector.sources"
+      :primary-source-id="rechargeSourceSelector.primarySourceId || 0"
+      :secondary-source-id="rechargeSourceSelector.secondarySourceId || 0"
+      :load-error="rechargeSourceSelector.loadError"
+      @confirm="confirmRechargeSource"
+      @close="rechargeSession = null; rechargeSourceSelector = null"
+      @retry="beginRechargeSession(rechargeSession)"
     />
     <DirectGiftOverlay
       v-if="directGiftSession"
@@ -2735,161 +2795,34 @@ onBeforeUnmount(() => {
       @close="directGiftSession = null"
       @submit="submitDirectGift"
     />
-    <aside class="cashier-sidebar" :class="{ 'cashier-sidebar--collapsed': isSidebarCollapsed }" aria-label="门店端菜单">
-      <button v-if="canSwitchStores" type="button" class="cashier-brand cashier-brand--switchable" :title="isSidebarCollapsed ? `切换门店：${state.storeName}` : undefined" aria-label="切换门店" @click="openStoreSwitch">
-        <span class="cashier-brand__mark" aria-hidden="true"><RefreshCw :size="21" :stroke-width="1.9" /></span>
-        <span v-if="!isSidebarCollapsed" class="cashier-brand__copy"><strong>{{ state.storeName }}</strong></span>
-      </button>
-      <div v-else class="cashier-brand" :title="isSidebarCollapsed ? state.storeName : undefined">
-        <span class="cashier-brand__mark" aria-hidden="true"><Store :size="21" :stroke-width="1.9" /></span>
-        <div v-if="!isSidebarCollapsed" class="cashier-brand__copy"><strong>{{ state.storeName }}</strong></div>
-      </div>
-
-      <nav id="cashier-primary-nav" class="cashier-nav" aria-label="日常业务">
-        <span v-if="!isSidebarCollapsed" class="cashier-nav__section">日常业务</span>
-        <template v-for="item in menuItems" :key="item.key">
-          <div v-if="item.key === 'management' && canUseFeature(item.featureCode)" class="cashier-management-group">
-            <div class="cashier-management-entry" :class="{ 'cashier-management-entry--open': isManagementMenuExpanded }">
-              <RouterLink
-                :to="item.to"
-                class="cashier-nav__item cashier-nav__item--management"
-                :class="{ 'cashier-nav__item--active': isMenuItemActive(item) }"
-                :aria-label="item.label"
-                :title="isSidebarCollapsed ? item.label : undefined"
-                @click="closeInventoryWorkspace"
-              >
-                <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-                <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-              </RouterLink>
-              <button
-                v-if="!isSidebarCollapsed"
-                type="button"
-                class="cashier-management-toggle"
-                :aria-label="isManagementMenuExpanded ? '收起管理功能' : '展开管理功能'"
-                :aria-expanded="isManagementMenuExpanded"
-                @click="toggleManagementMenu"
-              >
-                <ChevronDown class="cashier-nav__management-chevron" :class="{ 'cashier-nav__management-chevron--open': isManagementMenuExpanded }" :size="16" aria-hidden="true" />
-              </button>
-            </div>
-            <div v-if="isManagementMenuExpanded && !isSidebarCollapsed" class="cashier-management-grid" aria-label="管理功能">
-              <RouterLink
-                v-for="entry in managementFeatureItems"
-                :key="entry.key"
-                class="cashier-management-grid__item"
-                :class="{ 'cashier-management-grid__item--active': isManagementFeatureActive(entry) }"
-                :to="entry.to"
-                @click="closeInventoryWorkspace"
-              >{{ entry.label }}</RouterLink>
-            </div>
-          </div>
-          <div v-else-if="item.key === 'inventory' && item.submenu && visibleInventoryFeatureItems.length" class="cashier-inventory-group">
-            <div class="cashier-inventory-entry" :class="{ 'cashier-inventory-entry--open': isInventoryMenuExpanded }">
-              <a
-                href="#/cashier"
-                class="cashier-nav__item cashier-nav__item--inventory"
-                :aria-label="item.label"
-                :title="isSidebarCollapsed ? item.label : undefined"
-                @click.prevent="openInventoryWorkspace()"
-              >
-                <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-                <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-              </a>
-              <button
-                v-if="!isSidebarCollapsed"
-                type="button"
-                class="cashier-inventory-toggle"
-                :aria-label="isInventoryMenuExpanded ? '收起库存功能' : '展开库存功能'"
-                :aria-expanded="isInventoryMenuExpanded"
-                @click="toggleInventoryMenu"
-              >
-                <ChevronDown class="cashier-nav__inventory-chevron" :class="{ 'cashier-nav__inventory-chevron--open': isInventoryMenuExpanded }" :size="16" aria-hidden="true" />
-              </button>
-            </div>
-            <div v-if="isInventoryMenuExpanded && !isSidebarCollapsed" class="cashier-inventory-grid" aria-label="库存管理功能">
-              <template v-for="entry in visibleInventoryFeatureItems" :key="entry.key">
-                <RouterLink
-                  v-if="entry.to"
-                  class="cashier-inventory-grid__item"
-                  :class="{ 'cashier-inventory-grid__item--active': isInventoryFeatureActive(entry) }"
-                  :to="entry.to"
-                  @click="closeInventoryWorkspace"
-                >{{ entry.label }}</RouterLink>
-                <a
-                  v-else
-                  class="cashier-inventory-grid__item"
-                  :class="{ 'cashier-inventory-grid__item--active': isInventoryFeatureActive(entry) }"
-                  href="#/cashier"
-                  @click.prevent="openInventoryWorkspace(entry)"
-                >{{ entry.label }}</a>
-              </template>
-            </div>
-          </div>
-          <a
-            v-else-if="canUseFeature(item.featureCode) && item.href"
-            :href="item.href"
-            class="cashier-nav__item"
-            :aria-label="item.label"
-            :title="isSidebarCollapsed ? item.label : undefined"
-            @click="closeInventoryWorkspace"
-          >
-            <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-            <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-          </a>
-          <RouterLink
-            v-else-if="canUseFeature(item.featureCode) && item.to"
-            :to="item.to"
-            class="cashier-nav__item"
-            :class="{ 'cashier-nav__item--active': isMenuItemActive(item) }"
-            :aria-label="item.label"
-            :title="isSidebarCollapsed ? item.label : undefined"
-            @click="closeInventoryWorkspace"
-            >
-            <component :is="item.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-            <span v-if="!isSidebarCollapsed" class="cashier-nav__label">{{ item.label }}</span>
-            <span
-              v-if="item.key === 'hang' && pendingHangCount > 0"
-              class="cashier-nav__badge"
-              :aria-label="`待结账挂单 ${pendingHangCount} 笔`"
-            >{{ pendingHangCount }}</span>
-          </RouterLink>
-        </template>
-      </nav>
-
-      <div class="cashier-sidebar__footer">
-        <div class="cashier-account" :class="{ 'cashier-account--open': isAccountMenuOpen }">
-          <button type="button" class="cashier-account__trigger" :aria-expanded="isAccountMenuOpen" :title="operatorLabel" @click="isAccountMenuOpen = !isAccountMenuOpen">
-          <CircleUserRound class="cashier-account__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
-          <div v-if="!isSidebarCollapsed" class="cashier-account__copy">
-            <span class="cashier-account__label">V26083001</span>
-            <strong>{{ operatorLabel }}</strong>
-          </div>
-          </button>
-          <div v-if="isAccountMenuOpen" class="cashier-account__menu" role="menu">
-            <button type="button" role="menuitem" @click="openPasswordDialog"><KeyRound :size="16" aria-hidden="true" />修改密码</button>
-            <button type="button" role="menuitem" @click="logoutCurrentAccount"><LogOut :size="16" aria-hidden="true" />退出登录</button>
-          </div>
-        </div>
-        <button
-          type="button"
-          class="cashier-sidebar-toggle"
-          :aria-label="isSidebarCollapsed ? '展开菜单栏' : '收起菜单栏'"
-          :aria-expanded="!isSidebarCollapsed"
-          aria-controls="cashier-primary-nav"
-          :title="isSidebarCollapsed ? '展开菜单栏' : '收起菜单栏'"
-          @click="toggleSidebar"
-        >
-          <PanelLeftOpen v-if="isSidebarCollapsed" :size="16" :stroke-width="2" aria-hidden="true" />
-          <PanelLeftClose v-else :size="16" :stroke-width="2" aria-hidden="true" />
-        </button>
-      </div>
-    </aside>
+    <StoreTopNavigation
+      :entries="topNavigationEntries"
+      :debt-payment-enabled="state.cashier?.debtPaymentEnabled !== false"
+      :rules="settingsNavigation?.navigation?.rules || state.navigationRules"
+      :store-name="settingsNavigation?.profile?.name || state.storeName"
+      :operator="settingsNavigation?.operator?.name || operatorLabel"
+      :operator-profile="settingsNavigation?.operator || state.operator.profile"
+      :can-switch-stores="canSwitchStores"
+      :pending-hang-count="pendingHangCount"
+      :inventory-open="isInventoryWorkspaceOpen"
+      :active-inventory-key="activeInventoryFeatureKey"
+      :context-id="state.stateContextId"
+      @navigate="navigateTopMenu"
+      @switch-store="openStoreSwitch"
+      @password="openPasswordDialog"
+      @logout="logoutCurrentAccount"
+    />
 
     <section class="cashier-main" :class="{ 'cashier-main--workflow': isCashierWorkflowPage || isInventoryWorkspaceOpen, 'cashier-main--headerless': isHeaderlessPage }">
       <header v-if="!isCashierWorkflowPage && !isInventoryWorkspaceOpen && !isHeaderlessPage" class="cashier-main__header">
         <div class="cashier-page-identity">
-          <div>
+          <div :class="{ 'presale-header-identity': route.name === 'cashier-v3-presale-claim' }">
             <h1>{{ pageTitle }}</h1>
+            <nav v-if="route.name === 'cashier-v3-presale-claim'" class="presale-header-tabs" aria-label="会员领用页签">
+              <button type="button" :class="{ 'is-active': route.query.tab !== 'records' }" :aria-current="route.query.tab !== 'records' ? 'page' : undefined" @click="router.push({ name: 'cashier-v3-presale-claim', query: { ...route.query, tab: undefined } })">会员领用</button>
+              <!-- 领用记录属于操作权限；与列表明细及服务端读取权限保持一致。 -->
+              <button v-if="canUseCashierV3Operation('cashier.v3.inventory.presale_claim.detail')" type="button" :class="{ 'is-active': route.query.tab === 'records' }" :aria-current="route.query.tab === 'records' ? 'page' : undefined" @click="router.push({ name: 'cashier-v3-presale-claim', query: { ...route.query, tab: 'records' } })">领用记录</button>
+            </nav>
           </div>
         </div>
 
@@ -2916,6 +2849,7 @@ onBeforeUnmount(() => {
           <section class="cashier-workflow-toolbar__member-block" aria-label="本次办理会员">
             <MemberSummaryCard
               :member="cashierMember"
+              :debt-payment-enabled="state.cashier?.debtPaymentEnabled === true"
               :customer-mode="isGuestCustomer ? 'guest' : (cashierMember ? 'member' : 'unselected')"
               :show-actions="false"
               :show-empty-actions="false"
@@ -2976,6 +2910,7 @@ onBeforeUnmount(() => {
                 >
               </label>
               <button
+                v-if="businessSourceEnabled"
                 type="button"
                 class="cashier-workflow-context-source"
                 aria-label="选择客户来源"
@@ -3035,6 +2970,7 @@ onBeforeUnmount(() => {
         <div v-else-if="isCashierWorkflowPage" class="cashier-workflow-toolbar cashier-workflow-toolbar--legacy" aria-label="当前办理会员与收银功能">
           <MemberSummaryCard
             :member="workflowMember"
+            :debt-payment-enabled="state.cashier?.debtPaymentEnabled === true"
             :customer-mode="isGuestCustomer ? 'guest' : (workflowMember ? 'member' : 'unselected')"
             :show-actions="false"
             :show-empty-actions="false"
@@ -3126,6 +3062,8 @@ onBeforeUnmount(() => {
     :current-store-name="state.storeName || ''"
     :initial-view="memberSelectorInitialView"
     :on-query="queryMemberSelector"
+    :on-query-recent="memberSelectorContext === 'cashier' ? queryRecentMemberSelector : null"
+    :recent-history-key="recentMemberHistoryKey"
     :on-select="selectMemberFromSelector"
     :on-select-guest="selectGuestOrderFromSelector"
     :on-create-member="createMemberFromSelector"
@@ -3155,6 +3093,7 @@ onBeforeUnmount(() => {
     :detail="memberDetail"
     :initial-tab="memberDetailInitialTab"
     :is-loading="isMemberDetailLoading"
+    :load-error="memberDetailLoadError"
     :on-action="handleMemberDetailAction"
     @tab-change="loadMemberDetailTab"
     @close="closeMemberDetail"
@@ -3172,6 +3111,8 @@ onBeforeUnmount(() => {
     v-if="isMemberDebtOpen && activeDebtMember"
     :member="activeDebtMember"
     :snapshot="memberDebtSnapshot"
+    :business-source-policy="state.businessSourcePolicy || {}"
+    :source-defaults="activeDebtMember.sourceDefaults || (!businessSourceEnabled || Number(state.businessSourceDefaultsMemberId ?? -1) === Number(activeDebtMember.memberId || activeDebtMember.id || 0) ? state.businessSourceDefaults : {}) || {}"
     :initial-debt-id="initialDebtRecordId"
     :business-date="toolbarBusinessDate"
     :is-loading="isMemberDebtLoading"
@@ -3262,168 +3203,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.cashier-nav__item--management {
-  width: 100%;
-  background: transparent;
-}
-
-.cashier-management-group {
-  display: grid;
-  gap: 4px;
-}
-
-.cashier-management-entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: 10px;
-}
-
-.cashier-management-entry--open {
-  border-color: rgba(185, 212, 255, .26);
-  background: rgba(234, 244, 255, .1);
-}
-
-.cashier-management-entry--open .cashier-nav__item--management {
-  color: #fff;
-}
-
-.cashier-management-toggle {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, .76);
-}
-
-.cashier-management-toggle:hover {
-  background: rgba(234, 244, 255, .12);
-  color: #fff;
-}
-
-.cashier-nav__management-chevron {
-  flex: none;
-  transition: transform .16s ease;
-}
-
-.cashier-nav__management-chevron--open {
-  transform: rotate(180deg);
-}
-
-.cashier-management-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px 8px;
-  padding: 1px 4px 8px;
-}
-
-.cashier-management-grid__item {
-  min-width: 0;
-  padding: 5px 7px;
-  border-radius: 6px;
-  color: rgba(255, 255, 255, .72);
-  font-size: 13px;
-  line-height: 20px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.cashier-management-grid__item:hover {
-  background: rgba(234, 244, 255, .1);
-  color: #fff;
-}
-
-.cashier-management-grid__item--active {
-  background: rgba(143, 199, 255, .2);
-  color: #fff;
-}
-
-.cashier-nav__item--inventory {
-  width: 100%;
-  background: transparent;
-}
-
-.cashier-inventory-group {
-  display: grid;
-  gap: 4px;
-}
-
-.cashier-inventory-entry {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: 10px;
-}
-
-.cashier-inventory-entry--open {
-  border-color: rgba(185, 212, 255, .26);
-  background: rgba(234, 244, 255, .1);
-}
-
-.cashier-inventory-entry--open .cashier-nav__item--inventory {
-  color: #fff;
-}
-
-.cashier-inventory-toggle {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, .76);
-}
-
-.cashier-inventory-toggle:hover {
-  background: rgba(234, 244, 255, .12);
-  color: #fff;
-}
-
-.cashier-nav__inventory-chevron {
-  flex: none;
-  transition: transform .16s ease;
-}
-
-.cashier-nav__inventory-chevron--open {
-  transform: rotate(180deg);
-}
-
-.cashier-inventory-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px 8px;
-  padding: 1px 4px 8px;
-}
-
-.cashier-inventory-grid__item {
-  min-width: 0;
-  padding: 5px 7px;
-  border-radius: 6px;
-  color: rgba(255, 255, 255, .72);
-  font-size: 13px;
-  line-height: 20px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.cashier-inventory-grid__item:hover {
-  background: rgba(234, 244, 255, .1);
-  color: #fff;
-}
-
-.cashier-inventory-grid__item--active {
-  background: rgba(143, 199, 255, .2);
-  color: #fff;
-}
-
 .cashier-inventory-workspace {
   width: 100%;
   height: 100%;

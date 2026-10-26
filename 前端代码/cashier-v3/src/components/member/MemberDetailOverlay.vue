@@ -1,7 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Info from '@lucide/vue/dist/esm/icons/info.mjs'
+import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import { formatMoney } from '@/services/cashierV3Bridge'
+import { formatReportMoney, UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 
 /**
  * 会员详情全页面前端壳。
@@ -19,7 +21,7 @@ import { formatMoney } from '@/services/cashierV3Bridge'
  *   member: {
  *     id, name, phone, memberNo, statusLabel, storeName, exclusiveServiceStaff,
  *     accountBalance, principalBalance, giftBalance, currentPoints, cardBenefitAmount, remainingProjectTimes,
- *     remainingProjectAmount, activeCardCount, totalConsumptionAmount,
+ *     remainingProjectAmount, activeCardCount, totalRechargeAmount, totalConsumptionAmount,
  *     visitCount, latestPurchaseDate, latestVisitDate
  *   },
  *   profile: { basicFields, customFields, relation, latestVisit, careReminder },
@@ -73,6 +75,12 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  // Only the parent knows whether the authority request succeeded. An error
+  // suppresses data/empty states until a fresh successful query replaces it.
+  loadError: {
+    type: String,
+    default: ''
   },
   onAction: {
     type: Function,
@@ -203,6 +211,12 @@ const tabKeywordPlaceholder = computed(() => {
 const hasStatusFilter = computed(() => ['assets', 'gift', 'coupons', 'care'].includes(activeTab.value))
 // 当前有效的赠送与优惠券不受日期限制；查看全部历史时才按日期收窄。
 const showDateRange = computed(() => !['assets', 'care', 'gift', 'coupons'].includes(activeTab.value) || tabStatus.value === '')
+// Confirming a period only updates this tab's query draft; query/retry keeps
+// using the same dateFrom/dateTo contract and active/unfinished exceptions.
+const tabPeriod = computed({
+  get: () => ({ min: tabDateFrom.value, max: tabDateTo.value }),
+  set: range => { tabDateFrom.value = range.min; tabDateTo.value = range.max }
+})
 
 watch(
   () => props.initialTab,
@@ -230,6 +244,9 @@ const headerStats = computed(() => [
   { ...metric('剩余项目次数', summaryValue(['remainingProjectTimes', 'remainingTimes']), 'times'), tooltip: '剩余项目次数不计算时间卡的次数' },
   metric('剩余项目金额', summaryValue(['remainingProjectAmount', 'remainingAmount']), 'money'),
   { label: '有效卡数量', value: numberText(summaryValue(['activeCardCount', 'validCardCount']), ' 张') },
+  // Recharge principal is aggregated by the backend fact reader, not inferred
+  // from the currently loaded recharge history or remaining account balance.
+  metric('充值总额', summaryValue(['totalRechargeAmount']), 'money'),
   metric('总消费金额', summaryValue(['totalConsumptionAmount', 'totalPurchaseAmount']), 'money'),
   { label: '到店次数', value: numberText(summaryValue(['visitCount']), ' 次') },
   metric('当前积分', summaryValue(['currentPoints', 'points', 'pointBalance']), 'number')
@@ -423,6 +440,12 @@ function switchTab(tab) {
 
 function queryActiveTab() {
   if (!isSearchableTab.value) return
+  retryActiveTab()
+}
+
+// Retry the same member/tab and filters, including non-searchable overview;
+// never reset dates or issue a business mutation to recover a failed read.
+function retryActiveTab() {
   emit('tab-change', {
     tab: activeTab.value,
     memberId: memberId.value,
@@ -872,13 +895,9 @@ async function triggerAction(action, context = {}) {
       </nav>
 
       <form v-if="hasDetail && !isLoading && isSearchableTab" class="member-detail-overlay__query" @submit.prevent="queryActiveTab">
-        <label v-if="showDateRange" class="member-detail-overlay__date-range">
-          <div>
-            <input v-model="tabDateFrom" type="date" aria-label="开始日期" />
-            <em>至</em>
-            <input v-model="tabDateTo" type="date" aria-label="结束日期" />
-          </div>
-        </label>
+        <div v-if="showDateRange" class="member-detail-overlay__date-range">
+          <UnifiedQueryDateRange v-model="tabPeriod" label="会员记录查询周期" />
+        </div>
         <label>
           <input v-model="tabKeyword" type="search" maxlength="80" :placeholder="tabKeywordPlaceholder" />
         </label>
@@ -901,6 +920,14 @@ async function triggerAction(action, context = {}) {
         <div v-if="isLoading" class="member-detail-overlay__loading">
           <span class="member-detail-overlay__loading-dot" />
           正在加载会员详情…
+        </div>
+
+        <div v-else-if="loadError" class="member-detail-overlay__empty" role="alert">
+          <strong>会员详情查询失败</strong>
+          <span>{{ loadError }}</span>
+          <button type="button" class="button button--secondary member-detail-overlay__retry" title="重新查询会员详情" aria-label="重新查询会员详情" @click="retryActiveTab">
+            <RefreshCw :size="16" aria-hidden="true" />
+          </button>
         </div>
 
         <div v-else-if="!hasDetail" class="member-detail-overlay__empty">
@@ -1360,7 +1387,9 @@ async function triggerAction(action, context = {}) {
             <tbody>
               <tr v-for="record in cardHistory.records" :key="record.key">
                 <td>{{ new Date(record.time * 1000).toLocaleString('zh-CN') }}</td>
-                <td>{{ record.type }}</td><td>{{ record.content }}</td><td>{{ record.amount || '—' }}</td>
+                <td>{{ record.type }}</td><td>{{ record.content }}</td>
+                <!-- History retains exact backend values; only display uses the shared whole-yuan formatter. -->
+                <td>{{ hasValue(record.amount) && record.amount !== '—' ? formatReportMoney(record.amount) : '—' }}</td>
                 <td class="member-detail-overlay__detail-remark">{{ text(record.detailRemark) }}</td>
                 <td>{{ record.store || '—' }}</td><td>{{ record.operatorName || '—' }}</td><td>{{ record.result || '—' }}</td>
               </tr>
@@ -1578,7 +1607,7 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__stats {
   display: grid;
-  grid-template-columns: repeat(10, minmax(104px, 1fr));
+  grid-template-columns: repeat(11, minmax(104px, 1fr));
   overflow-x: auto;
   border-bottom: 1px solid #eaecf0;
   background: #fbfcfe;
@@ -1671,17 +1700,6 @@ async function triggerAction(action, context = {}) {
 
 .member-detail-overlay__query .member-detail-overlay__date-range {
   min-width: 250px;
-}
-
-.member-detail-overlay__date-range > div {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.member-detail-overlay__date-range em {
-  font-style: normal;
-  color: #98a2b3;
 }
 
 .member-detail-overlay__query .member-detail-overlay__status-filter {
@@ -2030,6 +2048,16 @@ async function triggerAction(action, context = {}) {
   font-size: 16px;
 }
 
+.member-detail-overlay__retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  flex: 0 0 36px;
+}
+
 .member-detail-overlay__loading-dot {
   width: 22px;
   height: 22px;
@@ -2067,7 +2095,7 @@ async function triggerAction(action, context = {}) {
 
 @media (max-width: 1240px) {
   .member-detail-overlay__stats {
-    grid-template-columns: repeat(10, minmax(128px, 1fr));
+    grid-template-columns: repeat(11, minmax(128px, 1fr));
   }
 
   .member-detail-overlay__card-meta {

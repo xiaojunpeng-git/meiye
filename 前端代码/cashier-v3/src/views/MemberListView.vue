@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import TablePagination from '@/components/common/TablePagination.vue'
 import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
-import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
+import MemberReportQueryToolbar from '@/components/query/MemberReportQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@/composables/useUnifiedQueryPage'
 import {
   canUseCashierV3Operation,
@@ -108,9 +108,16 @@ const queryDataAsOf = computed(() => memberCenter.value.dataAsOf
 const defaultVisibleFieldKeys = computed(() => queryFields.value.filter((field) => field.defaultVisible !== false).map((field) => field.key))
 const configuredVisibleFieldKeys = ref([...defaultVisibleFieldKeys.value])
 const queryFieldMap = computed(() => new Map(queryFields.value.map((field) => [field.key, field])))
-const visibleFields = computed(() => configuredVisibleFieldKeys.value
-  .map((key) => queryFieldMap.value.get(key))
-  .filter(Boolean))
+const visibleFields = computed(() => {
+  // 仅调整列表展示，不删除标签元数据或改写账号已保存的筛选/导出配置。
+  // 两列都获准显示时，会员编号紧邻建档时间；不擅自补回被配置隐藏的列。
+  const keys = configuredVisibleFieldKeys.value.filter((key) => key !== 'member_tag')
+  if (keys.includes('member_no') && keys.includes('created_at')) {
+    keys.splice(keys.indexOf('member_no'), 1)
+    keys.splice(keys.indexOf('created_at'), 0, 'member_no')
+  }
+  return keys.map((key) => queryFieldMap.value.get(key)).filter(Boolean)
+})
 const summaryEntries = computed(() => {
   const source = memberCenter.value.summaries
   if (!source || typeof source !== 'object' || Array.isArray(source)) return []
@@ -330,30 +337,6 @@ async function handleMemberMutationSaved({ member = null, payload = {} } = {}) {
   await handleMemberCreated({ member, payload })
 }
 
-async function saveMemberQuerySettings(settings, options = {}) {
-  const commandContext = queryCapability.value?.commandContext
-  if (!commandContext) {
-    return {
-      result: {
-        status: 'failed',
-        code: 'QUERY_PREFERENCE_VERSION_REQUIRED',
-        message: '查询设置版本尚未加载，请关闭设置后刷新页面再试。'
-      }
-    }
-  }
-  const stateContextId = state.stateContextId
-  const result = await requestAction('save-member-query-settings', {
-    pageCode: MEMBER_QUERY_PAGE_CODE,
-    settings,
-    ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
-    ...(commandContext ? { commandContexts: [commandContext] } : {})
-  })
-  if (unifiedQueryActionSucceeded(result) && stateContextId === state.stateContextId) {
-    await unifiedQuery.load({ silent: true })
-  }
-  return result
-}
-
 let memberQuerySequence = 0
 
 function clearMemberQueryResult(message = '') {
@@ -366,19 +349,29 @@ function clearMemberQueryResult(message = '') {
 async function queryMembers(query = {}, resetPage = true) {
   const sequence = ++memberQuerySequence
   const stateContextId = state.stateContextId
-  const requestedLimit = Math.max(1, Number(query.limit || query.pageSize) || pageSize.value)
-  const nextQuery = {
-    // 分页只能继承已经成功执行的查询；草稿控件或一次失败请求都不能成为导出／分页基线。
-    ...cloneUnifiedQuerySnapshot(lastSuccessfulQuery.value),
-    ...cloneUnifiedQuerySnapshot(query),
-    page: resetPage ? 1 : Math.max(1, Number(query.page) || page.value),
-    limit: requestedLimit
-  }
-  delete nextQuery.pageSize
   selectedMemberIds.value = []
   isQueryLoading.value = true
   queryError.value = ''
   try {
+    // 初始化和重试共用同一条能力读取路径；失败须显示真实错误，不能伪装成空列表。
+    // 仅在服务端重新授权字段后查询，绝不以本地字段白名单降级绕过权限。
+    if (queryCapability.value.enabled !== true) {
+      const capability = await unifiedQuery.load({ silent: true })
+      if (sequence !== memberQuerySequence || stateContextId !== state.stateContextId) return
+      if (capability?.enabled !== true) {
+        clearMemberQueryResult(capability?.reason || '会员筛选字段加载失败，请重试。')
+        return
+      }
+    }
+    const requestedLimit = Math.max(1, Number(query.limit || query.pageSize) || pageSize.value)
+    const nextQuery = {
+      // 分页只能继承已经成功执行的查询；草稿控件或一次失败请求都不能成为导出／分页基线。
+      ...cloneUnifiedQuerySnapshot(lastSuccessfulQuery.value || initialQueryPayload(queryCapability.value)),
+      ...cloneUnifiedQuerySnapshot(query),
+      page: resetPage ? 1 : Math.max(1, Number(query.page) || page.value),
+      limit: requestedLimit
+    }
+    delete nextQuery.pageSize
     const result = await requestAction('query-members', nextQuery)
     if (sequence !== memberQuerySequence || stateContextId !== state.stateContextId) return result
     const projection = extractUnifiedQueryMemberProjection(result)
@@ -441,21 +434,15 @@ function initialQueryPayload(capability) {
   }
 }
 
-let memberBootstrapSequence = 0
 watch(
   () => state.stateContextId,
   async (stateContextId) => {
-    const bootstrapSequence = ++memberBootstrapSequence
     memberQuerySequence += 1
     clearMemberQueryResult()
     isQueryLoading.value = false
     unifiedQuery.reset()
     if (!stateContextId) return
-    const loadedCapability = await unifiedQuery.load({ silent: true })
-    if (bootstrapSequence !== memberBootstrapSequence
-      || stateContextId !== state.stateContextId
-      || loadedCapability?.enabled !== true) return
-    await queryMembers(initialQueryPayload(loadedCapability), true)
+    await queryMembers({}, true)
   },
   { immediate: true }
 )
@@ -669,34 +656,23 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
 
 <template>
   <section class="member-list-page" :class="{ 'member-list-page--batch': canBatchOperate, 'member-list-page--insights': hasQueryInsights }" aria-label="会员列表">
-    <UnifiedQueryToolbar
-      search-placeholder="搜索会员姓名、完整手机号或会员编号"
-      settings-button-label="查询设置"
-      :status-options="statusOptions"
+    <!-- A context change remounts drafts and export tasks; member/store data
+         must never inherit another operator's in-progress filter state. -->
+    <MemberReportQueryToolbar
+      :key="state.stateContextId || ''"
       :fields="queryFields"
-      :page-code="MEMBER_QUERY_PAGE_CODE"
-      page-name="会员列表"
+      :status-options="statusOptions"
       :result-count="total"
       :page-size="pageSize"
-      :current-page="page"
       :current-page-count="records.length"
       :data-as-of="queryDataAsOf"
       :query-capability="queryCapability"
+      :capability-message="unifiedQuery.loadError.value"
       :executed-query="lastSuccessfulQuery"
       :is-query-loading="isQueryLoading"
       :state-context-key="state.stateContextId || ''"
-      default-sort-field="建档时间"
-      lock-store-selector
-      :current-store="state.currentStore"
       :settings="effectiveQuerySettings"
       @query="queryMembers"
-      @settings-applied="applyQuerySettings"
-      :on-save-settings="saveMemberQuerySettings"
-      :on-save-field-aliases="unifiedQuery.saveFieldAliases"
-      :on-save-custom-field="unifiedQuery.saveCustomField"
-      :on-change-custom-field-status="unifiedQuery.changeCustomFieldStatus"
-      :on-archive-custom-field="unifiedQuery.archiveCustomField"
-      :on-upgrade-saved-query-field-reference="unifiedQuery.upgradeSavedQueryFieldReference"
       :on-create-export="unifiedQuery.createExport"
       :on-query-export-task="unifiedQuery.queryExportTask"
       :on-download-export="downloadMemberExport"
@@ -704,7 +680,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
       <template #primary-actions>
         <button v-if="canCreateMember" type="button" class="button button--primary" @click="openMemberCreator()">新增会员</button>
       </template>
-    </UnifiedQueryToolbar>
+    </MemberReportQueryToolbar>
 
     <p v-if="isQueryLoading" class="member-list-query-message" role="status">正在查询会员数据…</p>
     <p v-else-if="queryError" class="member-list-query-message member-list-query-message--error" role="alert">{{ queryError }}</p>
@@ -752,7 +728,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
           </tr>
         </tbody>
       </table>
-      <div v-if="!records.length" class="member-list-empty">暂无符合条件的会员，请调整查询条件或新增会员。</div>
+      <div v-if="!records.length && !queryError && !isQueryLoading" class="member-list-empty">暂无符合条件的会员，请调整查询条件或新增会员。</div>
     </main>
     <TablePagination :total="total" :page="page" :page-size="pageSize" @change="changeMemberPage" />
 

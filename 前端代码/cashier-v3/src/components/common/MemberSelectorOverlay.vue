@@ -2,6 +2,7 @@
 import CornerDownLeft from '@lucide/vue/dist/esm/icons/corner-down-left.mjs'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
+import { readRecentCashierMemberIds, rememberRecentCashierMember } from '@/services/recentCashierMembers'
 
 /**
  * 会员记录由后端查询接口提供；组件不计算会员权益、余额或业务状态。
@@ -35,6 +36,14 @@ const props = defineProps({
   onQuery: {
     type: Function,
     default: null
+  },
+  onQueryRecent: {
+    type: Function,
+    default: null
+  },
+  recentHistoryKey: {
+    type: String,
+    default: ''
   },
   onSelect: {
     type: Function,
@@ -101,6 +110,17 @@ const activeView = ref(props.initialView === 'creator' ? 'creator' : 'selector')
 const memberScope = ref('store')
 const isSelectingGuest = ref(false)
 let querySequence = 0
+let recentQuerySequence = 0
+const recentRecords = ref([])
+const recentLoading = ref(false)
+
+function historyStorage() {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
 
 const isBusy = computed(() => props.isLoading || isQuerying.value || isSelectingGuest.value)
 const pageCount = computed(() => Math.max(1, Math.ceil(props.total / Math.max(1, props.pageSize))))
@@ -111,6 +131,40 @@ const dialogTitle = computed(() => activeView.value === 'creator' ? '添加会�
 watch(() => props.initialView, (view) => {
   activeView.value = view === 'creator' ? 'creator' : 'selector'
 })
+
+watch(() => props.recentHistoryKey, () => {
+  loadRecentMembers()
+})
+
+/**
+ * 本地只记 ID。每次展示和切换本店/全部时，都由服务端按当前账号权限、
+ * 门店范围及最新会员状态重新读取，不能把本地缓存当作可选择的会员资料。
+ */
+async function loadRecentMembers() {
+  const sequence = ++recentQuerySequence
+  recentRecords.value = []
+  if (!props.recentHistoryKey || typeof props.onQueryRecent !== 'function') return
+  const ids = readRecentCashierMemberIds(historyStorage(), props.recentHistoryKey)
+  if (!ids.length) return
+  recentLoading.value = true
+  try {
+    const result = await props.onQueryRecent({ memberIds: ids, memberScope: memberScope.value })
+    if (sequence !== recentQuerySequence) return
+    const byId = new Map((Array.isArray(result?.records) ? result.records : [])
+      .filter((record) => !isUnavailable(record))
+      .map((record) => [String(record.id ?? record.memberId ?? ''), record]))
+    recentRecords.value = ids.map((id) => byId.get(id)).filter(Boolean)
+  } catch {
+    // 最近记录是便捷入口；读取失败时隐藏，不影响常规会员查询。
+  } finally {
+    if (sequence === recentQuerySequence) recentLoading.value = false
+  }
+}
+
+function recentLabel(record) {
+  const phone = String(record.phone || '').trim()
+  return `${record.name || '未命名会员'}${phone ? ` · ${phone.slice(-4)}` : ''}`
+}
 
 function memberStatus(record) {
   return record?.status || record?.statusLabel || record?.statusCode || '—'
@@ -170,6 +224,7 @@ function changeScope(scope) {
   if (memberScope.value === nextScope) return
   memberScope.value = nextScope
   runQuery(1)
+  loadRecentMembers()
 }
 
 function submitQuery() {
@@ -185,10 +240,12 @@ function clearQuery() {
 // 才会发起请求，首次打开会把尚未加载误显示成“暂无可显示的会员”。
 onMounted(() => {
   runQuery(1)
+  loadRecentMembers()
 })
 
 onBeforeUnmount(() => {
   querySequence += 1
+  recentQuerySequence += 1
 })
 
 async function selectMember(record) {
@@ -209,6 +266,11 @@ async function selectMember(record) {
       return
     }
 
+    // 仅成功选客后记录会员 ID；游客、失败和仅浏览查询结果均不进入历史。
+    if (props.recentHistoryKey) {
+      rememberRecentCashierMember(historyStorage(), props.recentHistoryKey,
+        record.id ?? record.memberId ?? record.uid)
+    }
     // 选择成功只关闭当前弹窗；由调用方决定后续页面状态，不在此组件内跳转路由。
     emit('close', { reason: 'selected', record })
   } catch (error) {
@@ -298,6 +360,23 @@ async function handleCreated(payload = {}) {
         </button>
         <button v-if="allowCreate" type="button" class="member-selector__button member-selector__button--create" :disabled="isBusy || selectingRecordId !== null" @click="openCreator">添加会员</button>
       </form>
+
+      <div v-if="recentHistoryKey" class="member-selector__recent" aria-label="最近选择的会员">
+        <span class="member-selector__recent-title">最近选择</span>
+        <div class="member-selector__recent-list">
+          <span v-if="recentLoading" class="member-selector__recent-empty">读取中…</span>
+          <span v-else-if="!recentRecords.length" class="member-selector__recent-empty">暂无最近选择</span>
+          <button
+            v-for="record in recentRecords"
+            :key="record.id ?? record.memberId"
+            type="button"
+            class="member-selector__recent-member"
+            :disabled="isBusy || selectingRecordId !== null"
+            :title="`选择${recentLabel(record)}`"
+            @click="selectMember(record)"
+          >{{ recentLabel(record) }}</button>
+        </div>
+      </div>
 
       <div class="member-selector__feedback" aria-live="polite">
         <p v-if="queryError" class="member-selector__message member-selector__message--error" role="alert">{{ queryError }}</p>
@@ -472,6 +551,61 @@ async function handleCreated(payload = {}) {
   padding: 18px 28px;
   border-bottom: 1px solid #edf0f5;
   background: #fbfcfe;
+}
+
+.member-selector__recent {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+  gap: 12px;
+  padding: 6px 28px;
+  border-bottom: 1px solid #edf0f5;
+  background: #fff;
+}
+
+.member-selector__recent-title {
+  flex: 0 0 auto;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.member-selector__recent-list {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.member-selector__recent-empty {
+  color: #98a2b3;
+  font-size: 13px;
+}
+
+.member-selector__recent-member {
+  flex: 0 0 auto;
+  max-width: 160px;
+  overflow: hidden;
+  padding: 5px 10px;
+  border: 1px solid #dbe5f4;
+  border-radius: 999px;
+  background: #f7faff;
+  color: #315fd6;
+  cursor: pointer;
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+
+.member-selector__recent-member:hover:not(:disabled) {
+  border-color: #9eb8eb;
+  background: #edf4ff;
+}
+
+.member-selector__recent-member:disabled {
+  cursor: not-allowed;
+  opacity: .52;
 }
 
 .member-selector__search-field {
@@ -759,6 +893,7 @@ async function handleCreated(payload = {}) {
 
   .member-selector__header,
   .member-selector__search,
+  .member-selector__recent,
   .member-selector__feedback,
   .member-selector__footer {
     padding-right: 16px;

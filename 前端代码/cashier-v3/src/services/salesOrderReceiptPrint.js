@@ -104,13 +104,21 @@ function isEntitlementItem(item) {
 
 function entitlementRemainingTimes(item) {
   return pickValue(item, [
-    'remainingTimes',
-    'remaining_times',
     'remainingTimesAfter',
     'remaining_times_after',
+    'remainingTimes',
+    'remaining_times',
     'availableTimes',
     'available_times'
   ])
+}
+
+// Browser and persisted checkout line IDs differ; source identity remains stable.
+function entitlementReceiptSourceKey(line) {
+  const type = line.entitlementInstanceType || 'card_holder'
+  const instance = String(line.entitlementInstanceId || '')
+  const detail = String(line.entitlementSourceDetailId || '')
+  return instance && detail ? `${type}:${instance}:${detail}` : ''
 }
 
 function paymentName(line) {
@@ -408,7 +416,7 @@ export function buildSalesOrderReceiptHtml(order = {}, options = {}) {
 </html>`
 }
 
-export function salesOrderReceiptFromCheckout(checkout = {}) {
+export function salesOrderReceiptFromCheckout(checkout = {}, submission) {
   const source = checkout && typeof checkout === 'object' ? checkout : {}
   const snapshot = source.orderSnapshot && typeof source.orderSnapshot === 'object'
     ? source.orderSnapshot
@@ -423,6 +431,16 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
   const serviceRoles = new Set(['service', 'service_line'])
   const paymentRoles = new Set(['payment', 'balance_payment'])
   const entitlementLines = lines.filter((line) => entitlementRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()) || line?.businessTag === '权益')
+  // Only the committed receipt owns post-writeoff counts. Never subtract the
+  // displayed quantity or fall back to the pre-checkout count after settlement.
+  const completion = submission?.entitlementCompletion
+  const completed = (submission?.requestStatus || submission?.checkoutRequest?.requestStatus) === 'succeeded'
+    && (completion?.persistenceStatus === 'persisted' || completion?.receiptStatus === 'completed')
+  const committedRows = completed && Array.isArray(completion.receiptEntitlements) ? completion.receiptEntitlements : []
+  const committedRemaining = new Map(committedRows.map((row) => [String(row.lineId), row.remainingTimesAfter]))
+  const remainingBySource = new Map(committedRows
+    .filter((row) => entitlementReceiptSourceKey(row))
+    .map((row) => [entitlementReceiptSourceKey(row), row.remainingTimesAfter]))
   const serviceLines = lines.filter((line) => serviceRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
   const paymentLines = lines.filter((line) => paymentRoles.has(String(line?.lineRole || line?.kind || '').toLowerCase()))
   const salesLines = lines.filter((line) => {
@@ -454,7 +472,18 @@ export function salesOrderReceiptFromCheckout(checkout = {}) {
     orderNote: pickValue(source, ['orderNote']) || pickValue(snapshot, ['orderNote', 'remark', 'note']),
     items: [
       ...salesLines,
-      ...entitlementLines.map((line) => ({ ...line, businessTag: '权益' }))
+      ...entitlementLines.map((line) => {
+        if (submission === undefined) return { ...line, businessTag: '权益' }
+        const remaining = committedRemaining.get(String(line.lineId || line.id || ''))
+          ?? remainingBySource.get(entitlementReceiptSourceKey(line))
+        return {
+          ...line,
+          businessTag: '权益',
+          remainingTimes: null, remaining_times: null,
+          availableTimes: null, available_times: null, remaining_times_after: null,
+          remainingTimesAfter: Number.isInteger(remaining) && remaining >= 0 ? remaining : null
+        }
+      })
     ],
     serviceRecords,
     receiptMode: serviceRecords.length && !salesLines.length && !entitlementLines.length ? 'service' : serviceRecords.length ? 'mixed' : 'sales',

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import Calculator from '@lucide/vue/dist/esm/icons/calculator.mjs'
 import PencilLine from '@lucide/vue/dist/esm/icons/pencil-line.mjs'
+import UnifiedQueryDateRange from './UnifiedQueryDateRange.vue'
 import {
   unifiedQueryActionIdempotencyKey,
   unifiedQueryActionMessage,
@@ -557,6 +558,14 @@ function isRangeFilter(filter) {
   return filter.operator === 'between'
 }
 
+// Calendar ranges retain the existing between/value/valueTo contract. A single
+// date, numeric range, or precise datetime/time field keeps its original editor.
+function applyFilterPeriod(filter, range) {
+  filter.value = range.min
+  filter.valueTo = range.max
+  isDirty.value = true
+}
+
 function isNullFilter(filter) {
   return filter.operator === 'is_null' || filter.operator === 'is_not_null'
 }
@@ -1000,6 +1009,9 @@ async function save() {
                     <option :value="false">否</option>
                   </select>
                   <span v-else-if="isNullFilter(filter)" class="query-settings-filter-no-value">无需填写筛选值</span>
+                  <div v-else-if="isRangeFilter(filter) && inputType(filter) === 'date'" class="query-settings-period">
+                    <UnifiedQueryDateRange :model-value="{ min: filter.value || '', max: filter.valueTo || '' }" :label="`${fieldLabel(filter.field)}筛选周期`" @change="applyFilterPeriod(filter, $event)" />
+                  </div>
                   <template v-else-if="isRangeFilter(filter)">
                     <input v-model="filter.value" :type="inputType(filter)" :placeholder="rangeStartPlaceholder(filter)" @input="isDirty = true">
                     <input v-model="filter.valueTo" :type="inputType(filter)" :placeholder="rangeEndPlaceholder(filter)" @input="isDirty = true">
@@ -1232,6 +1244,10 @@ async function save() {
 
 .query-settings-rules {
   display: grid;
+  /* Wrapped period controls must contribute their full height; the rules
+     column scrolls instead of shrinking cards over the following section. */
+  grid-template-rows: none;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 12px;
 }
@@ -1260,6 +1276,11 @@ async function save() {
 .query-settings-filter-list {
   display: grid;
   gap: 8px;
+}
+
+.query-settings-period {
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 .query-settings-sort-row select,
