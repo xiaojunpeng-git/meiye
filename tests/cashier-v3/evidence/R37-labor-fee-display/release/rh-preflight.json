@@ -1,0 +1,8 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "existingFormUnchanged": true,
+  "existingConfigsUnchanged": true,
+  "baselineReproducesLive": true,
+  "candidatePayloadParity": true
+}

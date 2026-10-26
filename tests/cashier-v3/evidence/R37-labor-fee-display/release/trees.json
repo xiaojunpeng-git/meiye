@@ -1,0 +1,141 @@
+{
+  "head": "4d49aa7b8f2fff6abe5ba714a8efc1a0c22d340f",
+  "baselineCommit": "e9d7d9e415d3cf8034de72598e3af0b118db9f40",
+  "sites": {
+    "rh": {
+      "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+      "baselineTree": "266a0193173696bb55a24dfeca1ee1f4fb963184",
+      "candidateTree": "5e852a99b53048f990aa9cc07c16a7403ca3d7eb",
+      "acceptedFrontendTree": "8eacb60601809ec02a0a104113294e1d1676f54b",
+      "paths": [
+        "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue",
+        "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+        "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js",
+        "前端代码/cashier-v3/src/styles/base.css",
+        "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+        "前端代码/cashier-v3/src/views/OrderCenterView.vue",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+        "后端代码/app/services/system/config/SystemConfigServices.php",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php",
+        "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql"
+      ],
+      "backendPaths": [
+        "后端代码/app/services/system/config/SystemConfigServices.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php"
+      ],
+      "migration": "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql",
+      "candidateFiles": {
+        "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": "78bc249481f0717ed44495d29ac4f715594a9fd7a16556334f1ef98fd40f9746",
+        "前端代码/cashier-v3/src/services/cashierV3Bridge.js": "73650c574887e28159c03fc8aeda0e91be07498b1ae6c5711d464cf71f47bce1",
+        "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js": "84279fb08ed361457fba0c03e66159f1f32a7b3c88be57bbb9149e50445830c5",
+        "前端代码/cashier-v3/src/styles/base.css": "382a45c5dc2421cb9a609708867a0293370f9d3f0e556b52b6600cc9ee9d6475",
+        "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": "7264afa8fae5795433e42f7688408370981f33d1f045a0cd1ce141f785cbcd00",
+        "前端代码/cashier-v3/src/views/OrderCenterView.vue": "17676ed0ab83f7d5b1f8d9544721be6263d1db6953682f33c315937b90e2ae04",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": "2a8d17ad5036d0435ac4ce42fb2916b7218adc4eb54f3ee8899ac2c7017974af",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php": "8411d0a4e64834d9445ef61366e76b9dbc4faa82d3262184c89075e2b700b7df",
+        "后端代码/app/services/system/config/SystemConfigServices.php": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php": "ffe0dbe3bd139a9a1915bd2bc6d311c43a4b30cf408f732486b0571bd3ad8213",
+        "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql": "4ae50fb992999c00bcac7572aebfadcd21eec859b898b83b2de410da7bf0d09e"
+      },
+      "preserved": "All other frontend blobs retain this site accepted R20 release; only R37 patch applied, existing report/claim differences retained"
+    },
+    "008": {
+      "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+      "baselineTree": "7863bee78303ea72ee77304c646d4f6ade6c1b20",
+      "candidateTree": "3c271a5c1ddca36b33d1c4e2903d52facb637507",
+      "acceptedFrontendTree": "d128cf4117f584ffe4dd986abf3e84e76e21618d",
+      "paths": [
+        "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue",
+        "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+        "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js",
+        "前端代码/cashier-v3/src/styles/base.css",
+        "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+        "前端代码/cashier-v3/src/views/OrderCenterView.vue",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+        "后端代码/app/services/system/config/SystemConfigServices.php",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php",
+        "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql"
+      ],
+      "backendPaths": [
+        "后端代码/app/services/system/config/SystemConfigServices.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php"
+      ],
+      "migration": "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql",
+      "candidateFiles": {
+        "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": "78bc249481f0717ed44495d29ac4f715594a9fd7a16556334f1ef98fd40f9746",
+        "前端代码/cashier-v3/src/services/cashierV3Bridge.js": "73650c574887e28159c03fc8aeda0e91be07498b1ae6c5711d464cf71f47bce1",
+        "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js": "84279fb08ed361457fba0c03e66159f1f32a7b3c88be57bbb9149e50445830c5",
+        "前端代码/cashier-v3/src/styles/base.css": "382a45c5dc2421cb9a609708867a0293370f9d3f0e556b52b6600cc9ee9d6475",
+        "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": "7264afa8fae5795433e42f7688408370981f33d1f045a0cd1ce141f785cbcd00",
+        "前端代码/cashier-v3/src/views/OrderCenterView.vue": "17676ed0ab83f7d5b1f8d9544721be6263d1db6953682f33c315937b90e2ae04",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": "2a8d17ad5036d0435ac4ce42fb2916b7218adc4eb54f3ee8899ac2c7017974af",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php": "8411d0a4e64834d9445ef61366e76b9dbc4faa82d3262184c89075e2b700b7df",
+        "后端代码/app/services/system/config/SystemConfigServices.php": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php": "ffe0dbe3bd139a9a1915bd2bc6d311c43a4b30cf408f732486b0571bd3ad8213",
+        "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql": "4ae50fb992999c00bcac7572aebfadcd21eec859b898b83b2de410da7bf0d09e"
+      },
+      "preserved": "All other frontend blobs retain this site accepted R20 release; only R37 patch applied, existing report/claim differences retained"
+    },
+    "010": {
+      "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+      "baselineTree": "ab1bd3e0bb05e8905f5440f810f727a2ac5b298e",
+      "candidateTree": "47b8305cca1f7f0e7525a8b012617eec0b3afd43",
+      "acceptedFrontendTree": "485c10c964c38ae59c244587196aa4dd8cbe3b76",
+      "paths": [
+        "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue",
+        "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+        "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js",
+        "前端代码/cashier-v3/src/styles/base.css",
+        "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+        "前端代码/cashier-v3/src/views/OrderCenterView.vue",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+        "后端代码/app/services/system/config/SystemConfigServices.php",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php",
+        "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql"
+      ],
+      "backendPaths": [
+        "后端代码/app/services/system/config/SystemConfigServices.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php"
+      ],
+      "migration": "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql",
+      "candidateFiles": {
+        "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue": "78bc249481f0717ed44495d29ac4f715594a9fd7a16556334f1ef98fd40f9746",
+        "前端代码/cashier-v3/src/services/cashierV3Bridge.js": "c34949efc785e0f15e03b620abcc4fcd16ac73a923a60e2f8323e802d9af910d",
+        "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js": "84279fb08ed361457fba0c03e66159f1f32a7b3c88be57bbb9149e50445830c5",
+        "前端代码/cashier-v3/src/styles/base.css": "382a45c5dc2421cb9a609708867a0293370f9d3f0e556b52b6600cc9ee9d6475",
+        "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue": "7264afa8fae5795433e42f7688408370981f33d1f045a0cd1ce141f785cbcd00",
+        "前端代码/cashier-v3/src/views/OrderCenterView.vue": "17676ed0ab83f7d5b1f8d9544721be6263d1db6953682f33c315937b90e2ae04",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": "2a8d17ad5036d0435ac4ce42fb2916b7218adc4eb54f3ee8899ac2c7017974af",
+        "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php": "8411d0a4e64834d9445ef61366e76b9dbc4faa82d3262184c89075e2b700b7df",
+        "后端代码/app/services/system/config/SystemConfigServices.php": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8",
+        "后端代码/app/validate/admin/setting/SystemConfigValidate.php": "ffe0dbe3bd139a9a1915bd2bc6d311c43a4b30cf408f732486b0571bd3ad8213",
+        "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql": "4ae50fb992999c00bcac7572aebfadcd21eec859b898b83b2de410da7bf0d09e"
+      },
+      "preserved": "All other frontend blobs retain this site accepted R20 release; only R37 patch applied, existing report/claim differences retained"
+    }
+  },
+  "paths": [
+    "前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue",
+    "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+    "前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js",
+    "前端代码/cashier-v3/src/styles/base.css",
+    "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+    "前端代码/cashier-v3/src/views/OrderCenterView.vue",
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+    "后端代码/app/services/system/config/SystemConfigServices.php",
+    "后端代码/app/validate/admin/setting/SystemConfigValidate.php",
+    "后端代码/database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql"
+  ],
+  "sharedIndexSHA256": "91ef8064310468bba5ac3ba58005c349bd986287ccaf4d0a75451438f72699e2",
+  "acceptance": "2026-10-27 产品经理测试无问题；仅R37提交，瑞昊部署验证后push，再008、010"
+}

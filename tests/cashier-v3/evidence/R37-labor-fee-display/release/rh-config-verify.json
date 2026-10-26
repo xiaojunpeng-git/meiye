@@ -1,0 +1,10 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "inserted": true,
+  "id": 838,
+  "value": 0,
+  "otherConfigurationUnchanged": true,
+  "backup": "/www/backups/rh/r37-labor-display-5722f99e/config-before.json",
+  "businessWrites": 0
+}

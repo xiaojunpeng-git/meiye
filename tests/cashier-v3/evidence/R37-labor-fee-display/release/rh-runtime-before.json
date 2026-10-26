@@ -1,0 +1,12 @@
+{
+  "site": "rh",
+  "mode": "before",
+  "result": "PASS",
+  "config": null,
+  "effective": 0,
+  "existingFormSHA256": "fe67fc46516d98556b042e712f44fb2e371b15bddd9247260977147675e02807",
+  "otherConfigSHA256": "d2fa6bd760d63c55c23ea9edf321aefb3f3435d92c60d19f156c55660bba46b4",
+  "rootVisibilityCases": [],
+  "readOnly": true,
+  "businessWrites": 0
+}

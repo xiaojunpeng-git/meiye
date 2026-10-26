@@ -1,0 +1,25 @@
+{
+  "site": "008",
+  "mode": "candidate",
+  "result": "PASS",
+  "config": null,
+  "effective": 0,
+  "existingFormSHA256": "ce4167991c87ad01691552cf09604a8258c7350cbc44108deb13eeb286100d55",
+  "otherConfigSHA256": "8f9415d7ef958edec11cc845d0d7f677a9340b5f41aec8a7cb166e3f4281ac31",
+  "rootVisibilityCases": [
+    {
+      "mode": 0,
+      "visible": true
+    },
+    {
+      "mode": 1,
+      "visible": false
+    },
+    {
+      "mode": null,
+      "visible": true
+    }
+  ],
+  "readOnly": true,
+  "businessWrites": 0
+}

@@ -1,0 +1,41 @@
+{
+  "site": "rh",
+  "commit": "5722f99e0caaf5319824eea20826f374247d4ea2",
+  "sourceTree": "5e852a99b53048f990aa9cc07c16a7403ca3d7eb",
+  "baselineTree": "266a0193173696bb55a24dfeca1ee1f4fb963184",
+  "targets": {
+    "app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": {
+      "before": "492b0fb8a44af2c89244ec9aff25a333d4a97313b13c22fcd99d77336d99b9dd",
+      "after": "2a8d17ad5036d0435ac4ce42fb2916b7218adc4eb54f3ee8899ac2c7017974af"
+    },
+    "app/services/cashier/v3/projection/CashierV3RootStateContract.php": {
+      "before": "07f393bdfeb1ade34ca4df4880f366f6f64e4e7ad4e3e95948a81c3a631e4cd8",
+      "after": "8411d0a4e64834d9445ef61366e76b9dbc4faa82d3262184c89075e2b700b7df"
+    },
+    "app/services/system/config/SystemConfigServices.php": {
+      "before": "51ac512d9bb28f897614df912da468245e61a268a55495ea05a52f2048a5a09c",
+      "after": "b5944b7f97d921253c10adffe5a7e82efa151d0670b2914675bd4767fafcd3f8"
+    },
+    "app/validate/admin/setting/SystemConfigValidate.php": {
+      "before": "b86abe6f70679a2016c9c2e2b899a4d5fc88b99b6ec3e7252fe72c8364197ff9",
+      "after": "ffe0dbe3bd139a9a1915bd2bc6d311c43a4b30cf408f732486b0571bd3ad8213"
+    },
+    "database/upgrades/2026-10-27-手工费算法显隐/01-正式升级.sql": {
+      "before": null,
+      "after": "4ae50fb992999c00bcac7572aebfadcd21eec859b898b83b2de410da7bf0d09e"
+    },
+    "public/view_cashier_v3/assets/index-938eb726.js": {
+      "before": null,
+      "after": "d53b529b78137ec687a3ebf40008ebc978d201a95bbad3764fad0c52a356a9c0"
+    },
+    "public/view_cashier_v3/assets/index-e6cd1a80.css": {
+      "before": null,
+      "after": "e6cd1a804e662cc3faa3627a5e6295876679347cb1cdcbae92c51c39f46a9d9a"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "a1e78acf77d2a0b682fee70a00c5a58b2f33e0498ce42f3f969984e87dff998b",
+      "after": "0fa8bd75ddb140e2e1013c7ec6986ce483311c5d8aba5f04b347cd58d5c8611b"
+    }
+  },
+  "scope": "R37 explicit display fields only; preserve all previous site features; add config default0 without changing existing config values"
+}
