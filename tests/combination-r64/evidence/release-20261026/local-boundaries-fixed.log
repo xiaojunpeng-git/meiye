@@ -1,0 +1,8 @@
+PASS legacy-list-excludes-technical-carriers
+PASS whole-yuan-group-allocation
+PASS defaults-version-audit-replay
+PASS no-affiliation-requires-choice
+PASS balance-issue-idempotency
+PASS combined-confirmed-callback-once
+PASS cancel-unsubmitted-releases-hold
+PASS recharge-external-only-and-callback

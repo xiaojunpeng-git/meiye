@@ -1,0 +1,22 @@
+{
+  "base": "5ad41e4b11ef7c0568def88e8ec4f0e4e8b82c12",
+  "preservedHotfix": "1fee16c9780c89b1dcec71c16b059d4e836818bc",
+  "baselineCommit": "d1192eae5f9180af4f560d5e7643693824c978e9",
+  "baselineFiles": [
+    "后端代码/app/services/member/MemberCommerceBenefitsServices.php",
+    "tests/member-checkout/round6-benefits.php",
+    "tests/member-checkout/round6-benefits-static.cjs"
+  ],
+  "tree": "5ee534c7c590a7e05a7a22ff76f2394d9072125e",
+  "files": [
+    "前端代码/uniapp/pages/activity/goods_details/index.vue",
+    "后端代码/app/controller/api/v1/order/StoreOrder.php",
+    "后端代码/app/services/order/StoreOrderServices.php",
+    "tests/combination-r64/checkout-local.php",
+    "tests/combination-r64/confirm-page-contract.mjs",
+    "scripts/unified-query-runtime-readability.php",
+    "tests/combination-r64/runtime-access.mjs",
+    "tests/combination-r64/README.md"
+  ],
+  "acceptedBusinessTree": "f517174bd70522b7c1f24560fa0c5bd0df0e0a0c"
+}

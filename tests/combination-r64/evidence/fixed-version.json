@@ -3,7 +3,7 @@
   "workspaceHead": "1feff9d4daf73279c5a604af4afc139d23585aa9",
   "acceptedBase": "5ad41e4b11ef7c0568def88e8ec4f0e4e8b82c12",
   "tree": "f517174bd70522b7c1f24560fa0c5bd0df0e0a0c",
-  "status": "development_and_local_self_tests_complete",
+  "status": "pm_accepted_committed_deployed_and_verified_three_instances",
   "remoteWrites": 4,
   "databaseMigration": false,
   "files": {
@@ -31,12 +31,24 @@
   },
   "limitations": [
     "No real third-party payment or production order was created",
-    "Not committed, deployed, pushed or uploaded; pending PM acceptance"
+    "This release does not include a mini-program upload"
   ],
   "remoteScope": "Authorized directory chmod on RH/008 plus one PHP service restart each; no business/database/code writes",
   "additionalFiles": {
     "scripts/unified-query-runtime-readability.php": "d7f30f71a9d465dec405953eab61a864203a14ca8eaffd52892f79551de37227",
     "tests/combination-r64/runtime-access.mjs": "4965d611d86b376b3c2b56df6040f5978b031c0df74f9e5777631df9f80738fb"
   },
-  "operationalRepair": "runtime-access/"
+  "operationalRepair": "runtime-access/",
+  "release": {
+    "commit": "572c2902f842ed20ea0e6caf69a70ab438156e15",
+    "tree": "72b4cc7f46768bd874a1c1cbb25c7cb8384a3169",
+    "targets": [
+      "rh",
+      "008",
+      "010"
+    ],
+    "databaseMigration": false,
+    "miniUpload": false,
+    "record": "release-20261026/README.md"
+  }
 }

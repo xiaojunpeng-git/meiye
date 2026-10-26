@@ -1,0 +1,39 @@
+{
+  "site": "008",
+  "commit": "572c2902f842ed20ea0e6caf69a70ab438156e15",
+  "result": "PASS",
+  "backup": "/www/backups/008.cc3798.com/20261026-r64-member-checkout-572c2902",
+  "filesVerified": 266,
+  "publicAssets": {
+    "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+    "/static/js/chunk-vendors.9724b678.js": "ef5e6ac9d10f3f297e991c422b83327ebaf48b579f2801a96c47b8d7fe465afd",
+    "/static/js/index.3ff431d6.js": "49a4c802a10f4899b8bbb5347d94ec5a380843ff6a2a3acc007e29dda3d691be"
+  },
+  "api": {
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "4a8192a199d733e7ad85ae67edbfe42009a30580cae6055d2cc828fbac1bc8cc",
+      "rows": null
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "0c156e776daec8abf2f414646e47564b6139883310d0f141b7507dd9619b35ca",
+      "rows": null
+    },
+    "/api/store/list?is_select=1&page=1&limit=20": {
+      "status": 200,
+      "dataSha256": "cd3fe14518def57c4704583cabb148c3169df884c8d7dfedbd74b43d6bd43da0",
+      "rows": 20
+    },
+    "/api/combination/list?page=1&limit=5": {
+      "status": 200,
+      "dataSha256": "d7a8292696f0ef74360490a886239db92b59d40a56db7a1b62adc495977899c9",
+      "rows": 1
+    }
+  },
+  "databaseWrites": 0,
+  "configUnchanged": true,
+  "adminCashierUnchanged": true,
+  "runtimeClasses": 79,
+  "time": "2026-10-26T03:03:25.524Z"
+}

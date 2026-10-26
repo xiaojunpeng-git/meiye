@@ -1,0 +1,8 @@
+{
+  "site": "010",
+  "commit": "572c2902f842ed20ea0e6caf69a70ab438156e15",
+  "backup": "/www/backups/010.cc3798.com/20261026-r64-member-checkout-572c2902",
+  "result": "PASS",
+  "output": "BACKUP_VERIFIED\n{\"instance\":\"010\",\"commit\":\"572c2902f842ed20ea0e6caf69a70ab438156e15\",\"result\":\"PASS\",\"files\":266,\"databaseWrites\":0,\"protectedFrontendsUnchanged\":true}\n{\"instance\":\"010\",\"commit\":\"572c2902f842ed20ea0e6caf69a70ab438156e15\",\"result\":\"PASS\",\"files\":266,\"databaseWrites\":0,\"protectedFrontendsUnchanged\":true}\n",
+  "time": "2026-10-26T03:03:36.874Z"
+}
