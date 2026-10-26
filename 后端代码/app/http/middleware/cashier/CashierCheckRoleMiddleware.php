@@ -62,7 +62,10 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
                 throw new AuthException(ApiErrorCode::ERR_AUTH);
             }
             $requiredFeature = $this->directOperationFeature($path, $method);
-            if ($requiredFeature !== '' && !in_array($requiredFeature, $features, true)) {
+            // 已有“数据”岗位保留基础报表访问；新分组独立授权只开放 basic 路径。
+            $legacyBasicGrant = $requiredFeature === 'cashier.v3.basic_reports'
+                && in_array('cashier.v3.data', $features, true);
+            if ($requiredFeature !== '' && !in_array($requiredFeature, $features, true) && !$legacyBasicGrant) {
                 throw new AuthException('当前账号没有该功能的操作权限，请联系管理员。', 403);
             }
             return $next($request);
@@ -88,6 +91,7 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
         // 独立菜单同时约束直连接口，隐藏导航不能替代后端鉴权。
         if (strpos($path, 'cashierapi/v3/management/store-settings') === 0) return 'cashier.v3.management.store_profile';
         if (strpos($path, 'cashierapi/v3/customer-care/') === 0) return 'cashier.v3.care';
+        if (strpos($path, 'cashierapi/v3/report/basic/') === 0) return 'cashier.v3.basic_reports';
         if (strpos($path, 'cashierapi/v3/report/') === 0) return 'cashier.v3.data';
         if (strpos($path, 'cashierapi/v3/management/room-settings') === 0 || strpos($path, 'cashierapi/v3/management/service-names') === 0) return 'cashier.v3.management.rooms';
         if (strpos($path, 'cashierapi/v3/management/staff') === 0 || $path === 'cashierapi/v3/management/file/upload') {

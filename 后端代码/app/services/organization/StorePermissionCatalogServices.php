@@ -44,6 +44,10 @@ final class StorePermissionCatalogServices
             }
         };
         $walk($tree);
+        // 基础报表分组本身只负责展示；岗位保存这个正编号后才授予门店端报表能力。
+        // 其业务祖先不绑定旧“数据”功能，避免旧功能停用使新分组无法授权。
+        $flat[301202] = ['id'=>301202,'title'=>'基础报表查询','feature_code'=>'cashier.v3.basic_reports',
+            'parent_id'=>-29023,'sort'=>0,'enabled'=>1];
         return $flat;
     }
 
@@ -88,7 +92,7 @@ final class StorePermissionCatalogServices
         $items[-29020]=['id'=>-29020,'title'=>'员工薪资汇总月报表','navigation_key'=>'report.phase_six_salary_summary','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>190];
         $items[-29021]=['id'=>-29021,'title'=>'员工薪资明细月报表','navigation_key'=>'report.phase_six_salary_detail','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>200];
         $items[-29022]=['id'=>-29022,'title'=>'六维数据分析表','navigation_key'=>'report.six_dimension_analysis','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>210];
-        // R51基础报表是数据中心内与“数据”并列的heading，不新增顶部大类或可授权功能。
+        // 展示分组继续不保存负编号；岗位勾选它时级联到正编号 301202。
         $items[-29023]=['id'=>-29023,'title'=>'基础报表','navigation_key'=>'','owner_feature'=>'cashier.v3.data','parent_id'=>-2804,'sort'=>30];
         $basicIds = self::basicReportNavigationIds();
         foreach (\app\services\report\BasicReportCatalogServices::entries() as $index => $entry) {
@@ -273,6 +277,30 @@ final class StorePermissionCatalogServices
         });
     }
 
+    /** 显式安装基础报表岗位能力；只补目录节点，不预授予任何已有岗位。 */
+    public function initializeBasicReportPermission(): void
+    {
+        Db::transaction(function () {
+            $before = Db::name(self::TABLE)->where('id', 1)->lock(true)->find();
+            if (!$before) throw new \RuntimeException('请先初始化门店端权限目录');
+            $rows = json_decode((string)$before['rules_json'], true);
+            if (!is_array($rows)) throw new \RuntimeException('门店端权限目录格式无效');
+            foreach ($rows as $row) {
+                if ((int)($row['id'] ?? 0) !== 301202) continue;
+                if (($row['feature_code'] ?? '') !== 'cashier.v3.basic_reports') throw new \RuntimeException('基础报表权限编号冲突');
+                return;
+            }
+            $rows[] = self::definitions()[301202];
+            $this->validateRows($rows);
+            $json = json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            Db::name(self::TABLE)->where('id', 1)->update(['rules_json'=>$json,
+                'revision'=>(int)$before['revision']+1,'updated_at'=>time()]);
+            Db::name('store_v3_permission_audit')->insert(['operator_id'=>0,
+                'action'=>'INSTALL_BASIC_REPORT_PERMISSION','before_json'=>$before['rules_json'],
+                'after_json'=>$json,'created_at'=>time()]);
+        });
+    }
+
     /** 显式、幂等的元数据升级；不改岗位授权，只为旧目录建立可配置的顶部大类。 */
     public function initializeNavigationGroups(): void
     {
@@ -445,7 +473,9 @@ final class StorePermissionCatalogServices
         $allowed = []; $definitions=self::definitions();
         foreach ($definitions as $id=>$def) {
             $enabled = true;
-            while ($id) {
+            // 独立业务能力可挂在展示分组下；业务祖先只沿正编号检查，
+            // 负编号展示祖先由下方 displayId 循环按实际配置检查。
+            while ($id && isset($definitions[$id])) {
                 if (empty($rows[$id]['enabled'])) { $enabled=false; break; }
                 $id = $definitions[$id]['parent_id'];
             }

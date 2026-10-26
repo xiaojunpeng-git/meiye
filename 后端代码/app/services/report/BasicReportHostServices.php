@@ -21,6 +21,8 @@ final class BasicReportHostServices
             'store_id' => $actorKind === 'store' ? $stores[0] : 0, 'organization_id' => '',
             'visible_store_ids' => $stores, 'ancestor_organization_ids' => [],
             'permission_version' => hash('sha256', json_encode([$actorKind, $operatorId, $stores, $mode, $write])),
+            // 统一查询提供器仍用旧 data 内部能力码；门店/平台宿主先校验真实菜单权限，
+            // 此上下文只供已通过的基础报表查询使用，不能作为岗位授权来源。
             'granted_features' => ['cashier.v3.data'], 'scope_dimensions' => [],
             'query_cutoff_date' => $today, 'data_as_of' => time(),
         ], ['pageCode' => $pageCode]);

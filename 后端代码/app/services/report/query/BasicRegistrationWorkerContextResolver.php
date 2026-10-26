@@ -24,13 +24,16 @@ class BasicRegistrationWorkerContextResolver extends MemberUnifiedQueryWorkerCon
             $profile = $this->currentOperatorProfile($task, $operator, $store);
             $resolver = app()->make(CashierV3FeatureResolver::class);
             $features = !empty($profile['_cashier_v3_delegated']) ? $resolver->resolveVisibleFeatures($profile) : $resolver->resolveGrantedFeatures($profile);
-            if (!in_array('cashier.v3.data', $features, true)) throw $this->permissionRevoked();
+            // 导出任务重新核实基础报表独立授权，同时兼容原“数据”岗位授权。
+            if (!in_array('cashier.v3.basic_reports', $features, true)
+                && !in_array('cashier.v3.data', $features, true)) throw $this->permissionRevoked();
             $dispatcher = CashierV3Bootstrap::dispatcher();
             $operatorScope = $dispatcher->scopeResolver()->operatorScope($store, $operator);
             $scope = $dispatcher->dataScopeFactory()->build($store, $operator, $profile, '0', $operatorScope->organizationId());
-            $visible = $scope->visibleStoreIds();
-            if ($visible !== null && !in_array($store, array_map('intval', $visible), true)) throw $this->permissionRevoked();
-            return BasicReportHostServices::context([$store], $scope->authorizationMode(), $operator, 'store', false, 0, $this->pageCode());
+            // 门店查询与导出共用当前登录门店；岗位菜单已授权时不再套用员工个人数据范围。
+            $mode = $scope->authorizationMode();
+            $readMode = in_array($mode, ['none', 'self_participant'], true) ? 'stores' : $mode;
+            return BasicReportHostServices::context([$store], $readMode, $operator, 'store', false, 0, $this->pageCode());
         }
         $admin = Db::name('system_admin')->where('id', $operator)->where('status', 1)->find();
         if (!$admin || !empty($admin['is_del']) || (int)($admin['type'] ?? 0) !== 0) throw $this->permissionRevoked();

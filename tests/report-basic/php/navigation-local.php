@@ -2,7 +2,11 @@
 /** R51真实本地MySQL临时配置表测试；同名临时表遮蔽持久表，禁止复写客户元数据或岗位授权。 */
 $root = getenv('BACKEND_ROOT') ?: getcwd();
 require $root . '/vendor/autoload.php';
-(new \think\App())->initialize();
+// Worktree tests share dependency vendor with the primary checkout; load the candidate catalog explicitly.
+require $root . '/app/services/organization/StorePermissionCatalogServices.php';
+$app = new \think\App($root . '/');
+if ($envPath = getenv('BEAUTY_LOCAL_ENV')) $app->env->load($envPath);
+$app->initialize();
 
 use think\facade\Db;
 use app\services\organization\StorePermissionCatalogServices as Catalog;
@@ -81,7 +85,7 @@ try {
         navigation51check($byId[-29023]['navigation_key'] === '' && $byId[-29023]['parent_id'] === -2804 && $byId[-29023]['sort'] === 30, 'Old stable leaf becomes data-center heading');
         navigation51check($byId[-29023]['enabled'] === $enabled && $byId[-29023]['title'] === '基础报表原名', 'Heading enabled and configured title preserved');
         navigation51check($byId[-33003] === $old[-33003], 'Existing disabled child configuration preserved');
-        navigation51check(count(array_filter($byId, static function ($row) { return $row['parent_id'] === -29023; })) === 21, 'All twenty-one children are direct heading children');
+        navigation51check(count(array_filter($byId, static function ($row) { return $row['parent_id'] === -29023 && $row['id'] < 0; })) === 21, 'All twenty-one navigation children remain under the heading');
         navigation51check(count($catalog->validateRows($snapshot['rules'])) === count($defaults), 'Existing public validation accepts heading and direct report children');
         foreach ($old as $id => $row) if ($id !== -29023) navigation51check($byId[$id] === $row, 'Existing rule unchanged: '.$id);
         navigation51check(Db::name('job_position_channel_rule')->order('id')->select()->toArray() === $grants, 'Every channel grant and version untouched');
