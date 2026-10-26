@@ -1,0 +1,10 @@
+{
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "apiOrigin": "https://008.cc3798.com",
+  "sourceCommit": "846c4c4f4f766964cfc6924ee5a94904081e4c60",
+  "tree": "20761f106cd7c9d1f7f4cbb9f609d46d4401e88b",
+  "project": "/private/tmp/r65-embedded-launch/build/008-member",
+  "version": "3.0.65.1"
+}

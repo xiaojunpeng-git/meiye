@@ -1,0 +1,11 @@
+{
+  "taskId": "confirmation_upload_17d2f479-cf9a-4ebd-abc5-ea1246617d55",
+  "tool": "upload",
+  "lastStatus": "pending",
+  "project": "/private/tmp/r65-embedded-launch/build/008-member",
+  "version": "3.0.65.1",
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "sourceCommit": "846c4c4f4f766964cfc6924ee5a94904081e4c60"
+}
