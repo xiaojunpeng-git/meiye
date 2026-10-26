@@ -1,0 +1,5 @@
+PASS no page lifecycle event: launch clears spinner and delayed paid navigates
+PASS no native callbacks: button queries status instead of charging again
+PASS full-screen hide/show resumes same order without duplicate charge
+PASS rejected provider launch restores the original payment entry
+PASS opening success is never payment success; pending remains query-only

@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "tool": "automation_evaluate",
+  "clientName": "Codex",
+  "result": {
+    "success": true,
+    "result": {
+      "result": {
+        "orderId": "LOCAL-R65-ONLY",
+        "paying": false,
+        "checkingPayment": false,
+        "awaitingPaymentConfirmation": false,
+        "destination": {
+          "msg": "支付成功",
+          "url": "/pages/goods/order_pay_status/index?order_id=LOCAL-R65-ONLY"
+        }
+      }
+    }
+  }
+}

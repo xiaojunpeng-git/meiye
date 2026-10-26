@@ -1,0 +1,10 @@
+{
+  "releasedBase": "60f709d25c3d6c9b83812fe3993aea71dcf9faa3",
+  "tree": "d6dd0dcef8f2407d94784a9db202878a6edd8373",
+  "files": {
+    "前端代码/uniapp/pages/goods/cashier/index.vue": "cc0dbd407684bcd9af33805ce22157201f8517b8906eec0b5b790103cbfc5e63"
+  },
+  "status": "local fix; not yet PM accepted or deployed",
+  "previousUploadedVersion": "3.0.65",
+  "previousUploadTaskStatus": "success"
+}

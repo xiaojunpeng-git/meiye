@@ -106,6 +106,7 @@
 				checkingPayment: false,
 				paymentCheckTimer: null,
 				paymentCheckRun: 0,
+				paymentPageVisible: true,
 				isGroupOrder: false,
 				payTypeList:[]
 			}
@@ -129,12 +130,13 @@
 			this.getCashierOrder();
 		},
 		onShow() {
+			this.paymentPageVisible = true;
 			// Returning from the provider means only that its UI closed. The order's
 			// authenticated server state, not referrer data, decides payment success.
 			if (this.awaitingPaymentConfirmation) this.checkPaymentAfterReturn();
 		},
-		onHide() { this.stopPaymentCheck(); },
-		onUnload() { this.stopPaymentCheck(); },
+		onHide() { this.paymentPageVisible = false; this.stopPaymentCheck(); },
+		onUnload() { this.paymentPageVisible = false; this.stopPaymentCheck(); },
 		methods: {
 			stopPaymentCheck() {
 				if (this.paymentCheckTimer !== null) clearTimeout(this.paymentCheckTimer);
@@ -383,11 +385,21 @@
             // #ifdef MP
             uni.hideLoading();
             that.awaitingPaymentConfirmation = true;
+            // A prepared provider request is no longer being initiated. Clear
+            // that spinner before opening the provider, even if no page-show
+            // event is delivered on return; further taps can only read status.
+            that.paying = false;
             uni.setStorageSync('fy_pay_type', that.is_bak == 1 ? 'isBack' : that.fromType);
             wx.openEmbeddedMiniProgram({
               appId: jsConfig.app_id,
               path: `/pages/qrPay/qrPay?t=${encodeURIComponent(qr_code)}`,
               envVersion: 'release',
+              success: () => {
+                // Opening the provider is not proof of payment. Start the same
+                // authoritative read while visible without relying on onShow.
+                // Full-screen navigation resumes it through onShow instead.
+                if (that.paymentPageVisible) that.checkPaymentAfterReturn();
+              },
               fail: (error) => {
 				that.$util.Tips({
                   title: (error && error.errMsg) || '未能打开富友支付'
