@@ -84,16 +84,18 @@ final class GroupManagementDashboardServices
                 'aggregation_caught_up' => false,
             ];
         }
-        // 进度只比较已设置目标的门店×月份；普通经营业绩卡仍按完整筛选范围展示。
+        // 有目标时只比较已设置目标的门店×月份；完全无目标时由目标服务返回
+        // 授权范围内的真实完成值，目标和完成率保持空值而不是伪造为零。
         $goalProgress = (new \app\services\target\TargetSchemeReportServices())->groupProgress(
             ['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year, $range['end']
         );
         $monthTargets = $goalProgress['month_targets'];
-        $currentTarget = array_sum($monthTargets);
-        $yearTarget = array_sum($goalProgress['year_targets']);
+        $currentTarget = $monthTargets ? array_sum($monthTargets) : null;
+        $yearTarget = $goalProgress['year_targets'] ? array_sum($goalProgress['year_targets']) : null;
         $monthActual = $goalProgress['month_actual'];
         $yearActual = $goalProgress['year_actual'];
         $targetedStoreIds = array_map('intval', array_keys($monthTargets));
+        $rankingStoreIds = $targetedStoreIds ?: $scope['store_ids'];
         $sections = $this->performanceSections($scope, $range, $categoryTree, $categoryIds);
 
         return [
@@ -107,11 +109,15 @@ final class GroupManagementDashboardServices
             'categories' => $sections['categories'],
             'sources' => $this->sources($scope['store_ids'], $range, $cashRows, $serviceRows, $categoryIds),
             'goals' => [
-                'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, '只比较本月已设置全店实际业绩目标的门店；完成值来自相同门店的统一事实，不随商品分类筛选改变。'),
-                'year' => $this->goalProjection('本年目标进度', $yearTarget, $yearActual, '全年目标汇总已配置月份；完成值只统计这些门店和月份截至所选日期的统一事实。'),
-                'source_explanation' => '目标由已关联集团管理看板的生效目标方案提供；未配置目标的门店和月份不进入达成率。',
+                'month' => $this->goalProjection('本月目标进度', $currentTarget, $monthActual, $monthTargets
+                    ? '只比较本月已设置全店实际业绩目标的门店；完成值来自相同门店的统一事实，不随商品分类筛选改变。'
+                    : '本月未设置目标；完成值来自授权门店的统一事实，目标、剩余目标和达成率不可计算。'),
+                'year' => $this->goalProjection('本年目标进度', $yearTarget, $yearActual, $goalProgress['year_targets']
+                    ? '全年目标汇总已配置月份；完成值只统计这些门店和月份截至所选日期的统一事实。'
+                    : '本年未设置目标；完成值来自授权门店截至所选日期的统一事实，目标、剩余目标和达成率不可计算。'),
+                'source_explanation' => '目标由已关联集团管理看板的生效目标方案提供；有目标时只比较对应门店和月份，完全无目标时展示授权范围的实际业绩，目标、剩余目标和达成率显示 -。',
             ],
-            'rankings' => $this->rankings($targetedStoreIds, $monthTargets, $goalProgress['month_store_actuals'], $range['end']),
+            'rankings' => $this->rankings($rankingStoreIds, $monthTargets, $goalProgress['month_store_actuals'], $range['end']),
             'alerts' => $this->alerts($targetedStoreIds, $monthTargets, $goalProgress['month_store_actuals']),
             'field_explanations' => $this->fieldExplanations(),
             'target_management' => $this->targets->yearTargets(['tenant_id' => $scope['tenant_id'], 'store_ids' => $scope['store_ids']], $year),
@@ -415,7 +421,7 @@ final class GroupManagementDashboardServices
         $qualifiedDays = $market->marketQualifiedMemberDays($stores, $range);
         $dealCounts = [];
         foreach ($qualifiedDays as $day) {
-            // 分类筛选只显示原单首次达标时最大现金分摊分类的人数。
+            // 分类筛选只显示达标参与现金分摊最大的分类的人数。
             if ($categoryIds !== [] && !in_array((int)($day['category_id'] ?? 0), $categoryIds, true)) continue;
             $sourceId = (int)$day['business_source_primary_id'];
             $dealCounts[$sourceId] = ($dealCounts[$sourceId] ?? 0) + 1;
@@ -439,7 +445,7 @@ final class GroupManagementDashboardServices
             if ($code === 'A') $item['active_customer_count'] = count($activeMembers);
             $out[] = $item;
         }
-        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按原销售单独立累计成功现金收款，在首次达到平台设置的来源门槛之日计一次，跨店补交归原销售门店。同一会员同日跨单跨店只计一次，多天可累计，游客不计；旧导入及旧卡录入原单补交不推动门槛，退款不改变人数资格。按商品分类筛选人数时，资格只归首次达标时该单现金分摊最多的分类。实际业绩金额仍按成功现金收款减现金退款及各自业务日期统计。'];
+        return ['records' => $out, 'source_explanation' => '按实际启用的一级业务来源动态展示；仅来源 A 展示活客数。进店数及活客只按非体验完成服务统计，不受人员“不算人数人次”开关影响；成交人数按同一会员当天新消费跨单累计成功现金收款，未计过的原单补交按原单累计，参与过跨单达标的每张原单后续补交不再计人数，在首次达到平台设置的来源门槛之日计一次，跨店补交归原销售门店。同一会员同日跨单跨店只计一次，多天可累计，游客不计；旧导入及旧卡录入原单补交不推动门槛，退款不改变人数资格。按商品分类筛选人数时，资格只归首次达标时参与现金分摊最多的分类。实际业绩金额仍按成功现金收款减现金退款及各自业务日期统计。'];
     }
 
     private function rankings(array $stores, array $targets, array $actual, string $asOfDate): array
@@ -447,7 +453,7 @@ final class GroupManagementDashboardServices
         if (!$stores) return ['company' => ['title' => '分公司目标排行', 'records' => []],
             'city_manager' => ['title' => '城市经理目标排行', 'records' => []],
             'store' => ['title' => '门店目标排行', 'records' => []],
-            'source_explanation' => '当前范围没有已配置月目标的门店。'];
+            'source_explanation' => '当前权限范围没有门店。'];
         $storeNames = Db::name('system_store')->whereIn('id', $stores)->column('name', 'id');
         $dimensionRows = [];
         $this->organizationDimensions->beginCurrentDimensionSnapshot();
@@ -460,8 +466,38 @@ final class GroupManagementDashboardServices
         } finally {
             $this->organizationDimensions->endCurrentDimensionSnapshot();
         }
-        $build = function (string $dimension) use ($stores, $actual, $targets, $storeNames, $dimensionRows): array { $rows = []; foreach ($stores as $storeId) { $key = $dimension === 'store' ? (string)$storeId : (string)($dimensionRows[$storeId][$dimension] ?? '未配置'); $name = $dimension === 'store' ? (string)($storeNames[$storeId] ?? ('门店' . $storeId)) : $key; if (!isset($rows[$key])) $rows[$key] = ['name' => $name, 'target_amount_cents' => 0, 'actual_performance_cents' => 0]; $rows[$key]['target_amount_cents'] += (int)($targets[$storeId] ?? 0); $rows[$key]['actual_performance_cents'] += (int)($actual[$storeId] ?? 0); } foreach ($rows as &$row) $row['achievement_rate'] = $row['target_amount_cents'] > 0 ? round($row['actual_performance_cents'] / $row['target_amount_cents'] * 100, 1) : null; unset($row); usort($rows, static function ($a, $b): int { return ($b['achievement_rate'] ?? -1) <=> ($a['achievement_rate'] ?? -1) ?: strcmp($a['name'], $b['name']); }); return $rows; };
-        return ['company' => ['title' => '分公司目标排行', 'records' => $build('company')], 'city_manager' => ['title' => '城市经理目标排行', 'records' => $build('city_manager')], 'store' => ['title' => '门店目标排行', 'records' => $build('store')], 'source_explanation' => '只展示本月已设置全店实际业绩目标的门店；目标按当前组织归属汇总，完成值按相同门店的统一事实计算。'];
+        // 分组行只汇总传入的同一门店集合；全范围没有目标时保留组织排行和实际业绩，
+        // 但缺失的分母仍为 null，不能用 0 元目标或 0% 完成率冒充已配置目标。
+        $build = function (string $dimension) use ($stores, $actual, $targets, $storeNames, $dimensionRows): array {
+            $rows = [];
+            foreach ($stores as $storeId) {
+                $key = $dimension === 'store' ? (string)$storeId : (string)($dimensionRows[$storeId][$dimension] ?? '未配置');
+                $name = $dimension === 'store' ? (string)($storeNames[$storeId] ?? ('门店' . $storeId)) : $key;
+                if (!isset($rows[$key])) $rows[$key] = ['name' => $name, 'target_amount_cents' => null, 'actual_performance_cents' => 0];
+                if (array_key_exists($storeId, $targets)) {
+                    $rows[$key]['target_amount_cents'] = (int)($rows[$key]['target_amount_cents'] ?? 0) + (int)$targets[$storeId];
+                }
+                $rows[$key]['actual_performance_cents'] += (int)($actual[$storeId] ?? 0);
+            }
+            foreach ($rows as &$row) {
+                $target = $row['target_amount_cents'];
+                $row['achievement_rate'] = $target !== null && $target > 0
+                    ? round($row['actual_performance_cents'] / $target * 100, 1) : null;
+            }
+            unset($row);
+            usort($rows, static function ($a, $b): int {
+                return ($b['achievement_rate'] ?? -1) <=> ($a['achievement_rate'] ?? -1)
+                    ?: $b['actual_performance_cents'] <=> $a['actual_performance_cents']
+                    ?: strcmp($a['name'], $b['name']);
+            });
+            return $rows;
+        };
+        return ['company' => ['title' => '分公司目标排行', 'records' => $build('company')],
+            'city_manager' => ['title' => '城市经理目标排行', 'records' => $build('city_manager')],
+            'store' => ['title' => '门店目标排行', 'records' => $build('store')],
+            'source_explanation' => $targets
+                ? '只展示本月已设置全店实际业绩目标的门店；目标按当前组织归属汇总，完成值按相同门店的统一事实计算。'
+                : '本月未设置目标；按授权门店的实际业绩展示排行，目标和完成率显示 -。'];
     }
 
     private function alerts(array $stores, array $targets, array $actual): array
@@ -483,7 +519,14 @@ final class GroupManagementDashboardServices
 
     private function metric(string $code,string $name,$value,string $type,string $explanation):array{return['metric_code'=>$code,'name'=>$name,'value_cents'=>$type==='money'?$value:null,'value'=>$type==='count'?$value:null,'value_type'=>$type,'drilldown'=>in_array($code,['cash_performance','refund_performance','actual_performance','consumption_performance'],true)?['metric_code'=>$code]:null,'source_explanation'=>$explanation];}
     private function sum(array $rows,string $key):int{$sum=0;foreach($rows as$row)$sum+=(int)($row[$key]??0);return$sum;}
-    private function goalProjection(string $title,int $target,int $actual,string $explanation):array{$rate=$target>0?round($actual/$target*100,1):null;return['title'=>$title,'target_amount_cents'=>$target,'actual_performance_cents'=>$actual,'remaining_amount_cents'=>max(0,$target-$actual),'achievement_rate'=>$rate,'source_explanation'=>$explanation];}
+    /** 缺少目标行时分母和剩余值保持 null；显示层统一将不可计算字段渲染为 -。 */
+    private function goalProjection(string $title, ?int $target, int $actual, string $explanation): array
+    {
+        $rate = $target !== null && $target > 0 ? round($actual / $target * 100, 1) : null;
+        return ['title' => $title, 'target_amount_cents' => $target, 'actual_performance_cents' => $actual,
+            'remaining_amount_cents' => $target === null ? null : max(0, $target - $actual),
+            'achievement_rate' => $rate, 'source_explanation' => $explanation];
+    }
     private function filterSchema(array $roots):array{$options=[['value'=>0,'label'=>'全部商品']];foreach($roots as$row)$options[]=['value'=>(int)$row['id'],'label'=>(string)$row['name']];return[['key'=>'start_date','label'=>'开始日期','type'=>'date','source_explanation'=>'包含开始当天。'],['key'=>'end_date','label'=>'截止日期','type'=>'date','source_explanation'=>'包含截止当天。'],['key'=>'category_id','label'=>'商品分类','type'=>'select','options'=>$options,'source_explanation'=>'只显示已开启统计的一级商品分类；选择后包含全部下级分类。'],['key'=>'store_ids','label'=>'组织 / 门店','type'=>'scope_picker','source_explanation'=>'当前账号权限范围由后端强制，选择只能缩小范围。']];}
     private function fieldExplanations(): array
     {
