@@ -278,6 +278,8 @@ const EMPTY_BOOTSTRAP = {
     name: '当前门店'
   },
   navigationRules: [],
+  // 未升级的实例默认保留现有收银按钮与订单列；明确的 false 才隐藏。
+  storeDisplayOptions: { salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true },
   // Old, unmigrated servers retain their previous source behavior; current
   // servers explicitly provide false for fixed-source mode, never truthy-fallback.
   businessSourcePolicy: { enabled: true, inheritPrevious: true, mode: 'previous', configured: false },
@@ -1944,6 +1946,11 @@ function normalizeBootstrap(rawBootstrap = {}) {
       name: incomingCurrentStore.name || incomingCurrentStore.storeName || raw.storeName || base.currentStore.name
     },
     navigationRules: Array.isArray(raw.navigationRules) ? raw.navigationRules : [],
+    storeDisplayOptions: {
+      salesAttributionEnabled: raw.storeDisplayOptions?.salesAttributionEnabled !== false,
+      experienceEnabled: raw.storeDisplayOptions?.experienceEnabled !== false,
+      craftsmanExcludeCountsEnabled: raw.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false
+    },
     businessSourcePolicy: raw.businessSourcePolicy && typeof raw.businessSourcePolicy.enabled === 'boolean'
       ? { ...raw.businessSourcePolicy } : { ...base.businessSourcePolicy },
     businessSourceDefaults: raw.businessSourceDefaults && typeof raw.businessSourceDefaults === 'object'

@@ -145,6 +145,12 @@ class CashierV3RootDomainAssembler
             ],
             // 菜单展示和岗位目录读取同一份配置，客户端只消费名称/排序，不接收可执行路由。
             'navigationRules' => (new \app\services\organization\StorePermissionCatalogServices())->snapshot()['rules'],
+            // 实例级展示开关随每次权威根投影下发；缺少配置时保持原有入口可见。
+            'storeDisplayOptions' => [
+                'salesAttributionEnabled' => (int)sys_config('cashier_sales_attribution_switch', 1) === 1,
+                'experienceEnabled' => (int)sys_config('cashier_experience_switch', 1) === 1,
+                'craftsmanExcludeCountsEnabled' => (int)sys_config('cashier_craftsman_exclude_counts_switch', 1) === 1,
+            ],
             'featurePermissions' => $features ?: new \stdClass(),
             'operationPermissions' => $operationFeatures ?: new \stdClass(),
             'readOnly' => $dataScope->isReadOnlySession(),

@@ -35,7 +35,9 @@
         :value="item.value"
         :name="item.name"
         :index="index"
-      ></component>
+      >
+        <template #store-settings><slot name="store-settings"></slot></template>
+      </component>
     </template>
   </div>
 </template>
