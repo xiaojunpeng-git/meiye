@@ -1,0 +1,8 @@
+{
+  "productManagerAnswer": "确认验收，仅部署008并验证原预约",
+  "acceptedPatch": "58816e48411c5d484824c0a062db2ac6e38250d0b427ad130ec9af492a55abe0",
+  "scope": "Precise local commit, back up and deploy the one accepted backend file to 008, then confirm only existing reservation YY2610260001 using its retained request",
+  "releaseBase": "232dd50b16dbcabc88717ee81c972de8b3b26d33",
+  "releaseBaseReason": "Canonical accepted source exactly matching the current 008 reservation module; retains already deployed source-policy and color functionality without including unrelated dirty workspace changes",
+  "notAuthorized": ["RH deployment", "push", "new reservation", "card consumption", "new card", "direct production business-data repair", "frontend changes"]
+}

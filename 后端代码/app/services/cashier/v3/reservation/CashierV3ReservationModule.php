@@ -816,9 +816,12 @@ final class CashierV3ReservationModule
                 ? self::positive($project['entitlementSourceDetailId'] ?? $project['sourceDetailId'] ?? 0, '已购项目缺少权益明细。')
                 : 0;
             $quantity = max(1, min(1000, (int)($project['quantity'] ?? 1)));
-            // Service duration is catalog authority. Client-provided duration
-            // is presentation-only and cannot change resource reservations.
-            $duration = self::projectDuration($projectId, $storeId);
+            // Client-provided duration remains presentation-only. Already purchased
+            // rights do not require a new on-sale store copy; occupation below still
+            // validates ownership, cross-store eligibility and available times.
+            $duration = $source === 'card'
+                ? self::purchasedProjectDuration($projectId)
+                : self::projectDuration($projectId, $storeId);
             $total += $duration * $quantity;
             $name = trim((string)($project['name'] ?? $project['projectName'] ?? ''));
             $plans[] = ['projectId' => $projectId, 'skuId' => $skuId, 'name' => $name === '' ? '项目 ' . $projectId : $name, 'source' => $source, 'entitlementSourceDetailId' => $detailId, 'quantity' => $quantity, 'duration' => $duration];
@@ -826,6 +829,25 @@ final class CashierV3ReservationModule
         return [$plans, $total];
     }
 
+    /**
+     * Read scheduling minutes only, never modify historical card values. Hidden or
+     * unsynchronized purchased projects remain usable; missing durations fall back
+     * to the parent configuration and finally 60 minutes. Database errors propagate
+     * rather than pretending that an unavailable database is a missing duration.
+     */
+    private static function purchasedProjectDuration(int $projectId): int
+    {
+        $product = Db::name('store_product')->where('id', $projectId)
+            ->field('id,pid,project_service_duration')->find();
+        $duration = (int)($product['project_service_duration'] ?? 0);
+        if ($duration <= 0 && (int)($product['pid'] ?? 0) > 0) {
+            $duration = (int)Db::name('store_product')->where('id', (int)$product['pid'])
+                ->value('project_service_duration');
+        }
+        return $duration > 0 ? $duration : StoreProductReservationServices::DEFAULT_PROJECT_SERVICE_DURATION;
+    }
+
+    /** Unpaid selections still require an existing store-available product. */
     private static function projectDuration(int $projectId, int $storeId): int
     {
         try {

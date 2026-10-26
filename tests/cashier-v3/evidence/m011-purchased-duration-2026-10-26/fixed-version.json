@@ -1,0 +1,47 @@
+{
+  "task": "M011-20261026-PURCHASED-DURATION",
+  "status": "Development and local tests complete; awaiting product-manager fixed-version acceptance and 008-only deployment authorization",
+  "baselineHead": "1feff9d4daf73279c5a604af4afc139d23585aa9",
+  "deployedSourceCommit": "232dd50b16dbcabc88717ee81c972de8b3b26d33",
+  "deployedSourceSha256": "fb0017cca68d6bd947907aa576307bec3014c9b52d7c7c6c936301165dc3a9c9",
+  "patchSha256": "58816e48411c5d484824c0a062db2ac6e38250d0b427ad130ec9af492a55abe0",
+  "scope": "Only purchased reservation project duration resolution. Read original project duration, fall back to its parent and then 60 minutes. Do not require a new store-product copy for existing purchased rights. Unpaid selections retain original store lookup and rejection semantics.",
+  "files": {
+    "backend": [{"path": "后端代码/app/services/cashier/v3/reservation/CashierV3ReservationModule.php", "sha256": "c0032ebd5ddd57f5553ce9418196613c3d5190f5ef85b1bb60bf6ec8493d2321"}],
+    "tests": [
+      {"path": "tests/cashier-v3/php/m011-purchased-reservation-duration.php", "sha256": "afa083f8d66072306f46cad627d4a1777b1dfcadaabcf5ce0095bb46adc25ab8"},
+      {"path": "tests/cashier-v3/php/m011-purchased-duration-mysql.php", "sha256": "d89f48a91bbe16351e362882cb086b4a5dbde8908a26d62f880ec6c4619a2cbb"}
+    ],
+    "frontend": [], "migrations": [], "engineeringScripts": [], "generatedBuilds": []
+  },
+  "tests": {
+    "php74Syntax": "PASS",
+    "logicCases": 16,
+    "realMysqlCases": 8,
+    "mysqlProtection": "Local Docker mysql:3306 only; connection-local temporary product table, READ ONLY transaction for permanent tables; rollback and temporary-table cleanup",
+    "cardTotalsBeforeAndAfter": "unchanged",
+    "existingEntitlementContract": "PASS 8 checks",
+    "existingTimeWindowContract": "PASS 8 checks",
+    "existingDebtLimitContract": "PASS 3 checks",
+    "existingLifecycleContract": "Preexisting failure at the same document-context assertion on both deployed prepatch source and candidate; 7 preceding assertions pass on both"
+  },
+  "preservedExistingFunctions": ["Deployed source policy", "Reservation color marks", "Entitlement ownership/cross-store/debt/validity checks", "Original reservation identity and explicit start/end times", "Occupation and conflict checks", "Idempotency and transaction boundaries", "All card amounts, remaining uses and validity dates"],
+  "otherTaskChanges": "Shared HEAD lacks portions of the already deployed reservation source/colour changes. Prepatch in-memory reconstruction exactly matches the canonical accepted 232dd50b blob and current 008 deployed hash. Only fixed.patch belongs to this round; do not stage or deploy unrelated dirty work.",
+  "commentsUpdated": "CashierV3ReservationModule: distinguish purchased duration read from unpaid store lookup, explain default 60 and preservation of separate entitlement authority; genuine database failures still propagate",
+  "dataArchitecture": {
+    "authority": "Original project duration configuration; parent configuration and fixed 60-minute fallback; client duration ignored",
+    "writeBoundary": "Reader performs product SELECTs only. No card, order, balance, stock, usage or financial fact writes",
+    "reservationConfirmation": "Not yet executed with the candidate; existing confirmation command, transaction and permission boundaries are unchanged",
+    "historicalFacts": "No rewrite or migration; no metadata version fields added",
+    "performance": "At most two primary-key reads per purchased project"
+  },
+  "nextAuthorizedProposal": {
+    "target": "008 only",
+    "deployment": "After explicit acceptance, precise local commit, independently back up the one deployed PHP file and switch only that file; preserve all other backend/frontend/configuration files",
+    "validation": "Use the still-open original reservation id=5, YY2610260001, and its retained request RESERVATION-873fc431-e379-4c44-bfe5-dc78f83005ab. Check database state first. If already confirmed, do not submit again. Otherwise perform one existing-reservation confirmation, never create-reservation.",
+    "notIncluded": ["RH deployment", "push", "frontend deployment", "new reservation", "new card", "card consumption", "direct production DB edits"]
+  },
+  "committed": false,
+  "deployed": false,
+  "originalReservationConfirmedByCandidate": false
+}
