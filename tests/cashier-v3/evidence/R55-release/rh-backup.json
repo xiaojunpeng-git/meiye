@@ -1,0 +1,7 @@
+{
+  "directory": "/www/backups/rh/r55-member-list-3b078c16",
+  "manifestSHA256": "86248e0ef08080764dcd1128a23a4e076a4dd0cd854df981ef74fde95302c3b7",
+  "independentFileBackup": true,
+  "databaseBackup": "Not applicable: static-only deployment, no database mutation.",
+  "rollback": "Pinned install.php rollback"
+}

@@ -1,0 +1,357 @@
+{
+  "site": "rh",
+  "commit": "232dd50b16dbcabc88717ee81c972de8b3b26d33",
+  "tree": "c3a85bf3f85ff40cb94362268260153f41bf5d4a",
+  "previewAuthorized": false,
+  "backendAllowlist": [
+    "app/controller/admin/v1/system/MemberCommerceSettings.php",
+    "app/services/cashier/v3/cashier/CashierV3MemberDebtProjectionServices.php",
+    "app/services/cashier/v3/config/CashierV3BusinessSourcePolicyServices.php",
+    "app/services/cashier/v3/member/CashierV3MemberModule.php",
+    "app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php",
+    "app/services/cashier/v3/member/CashierV3RechargeModule.php",
+    "app/services/cashier/v3/order/AbstractCashierV3OrderCenterUnifiedQueryProvider.php",
+    "app/services/cashier/v3/order/CashierV3OrderCenterQueryExecutionServices.php",
+    "app/services/cashier/v3/order/CashierV3OrderCenterUnifiedQueryContract.php",
+    "app/services/cashier/v3/order/CashierV3OrderCenterUnifiedQueryRegistrar.php",
+    "app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+    "app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+    "app/services/cashier/v3/reservation/CashierV3ReservationDetailQueryServices.php",
+    "app/services/cashier/v3/reservation/CashierV3ReservationModule.php",
+    "app/services/cashier/v3/settlement/CashierV3CheckoutBusinessConfigProjectionServices.php",
+    "app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php",
+    "app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php",
+    "app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php",
+    "app/services/cashier/v3/settlement/CashierV3RechargeDebtRepaymentServices.php",
+    "app/services/member/MemberCommerceSettingsServices.php",
+    "app/services/query/UnifiedQueryRuntime.php"
+  ],
+  "targets": {
+    "formal/app/controller/admin/v1/system/MemberCommerceSettings.php": {
+      "before": "1c94afc45b13371bc7ba0b93e30acf5d7efdf444984c2a87af0ca4ae5ba3e89d",
+      "after": "1844e1d245a3a7ee41f424a2d0aef6d9faedee11f2b20e1a35ccd24bdaf29ab5"
+    },
+    "formal/app/services/cashier/v3/cashier/CashierV3MemberDebtProjectionServices.php": {
+      "before": "4be13dfb639d40b993cfd4d611a6931d272ce227b447a60ff5db0379bb80e47d",
+      "after": "1b4d8f26d2aad9a31e8b0c6b245e01ac8344204329af13c720e4e84d7d90b5b3"
+    },
+    "formal/app/services/cashier/v3/config/CashierV3BusinessSourcePolicyServices.php": {
+      "before": null,
+      "after": "19ed817085da54c330c96dc70b6443657e78c0c386e47b147254e08e1e958ba3"
+    },
+    "formal/app/services/cashier/v3/member/CashierV3MemberModule.php": {
+      "before": "011b600f5e62d8c2ac5899a78c3b1b5645861c580b7e043e0ec45d14786c8153",
+      "after": "5e72719df96b531ffda4f5955cf237cd982c1701df198f7caae55052a1302c46"
+    },
+    "formal/app/services/cashier/v3/member/CashierV3RechargeCheckoutModule.php": {
+      "before": "2b9184d635504481bfb92e118e36229f227943230970c92a6010574947102e79",
+      "after": "b6c66df238055d5d2712c85a8ec1124ef0a172a14fe8583155ab385f15b71f0d"
+    },
+    "formal/app/services/cashier/v3/member/CashierV3RechargeModule.php": {
+      "before": "82041354f4ced5620b5e2e1d49543ce2115628e5796b3e81be8921c4bf8b461f",
+      "after": "83e4f2322c9de3d6e09329fb47398f0612b3e27de6390671d63253837b7503f7"
+    },
+    "formal/app/services/cashier/v3/order/AbstractCashierV3OrderCenterUnifiedQueryProvider.php": {
+      "before": "d10843d00e4efa7bcb003f23e3e6495f90a8424fed92fcafa525654c5c515141",
+      "after": "8b6efcf9caf4f7c7955d022586dd3d80a929c3918fc65976f86b2c1f69f7b0ca"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3OrderCenterQueryExecutionServices.php": {
+      "before": "beb7bbafc7054cd4d12431802edfccafd2ce5a77e11f5b7afb0b40f0627dede0",
+      "after": "38482014c5d8336b54486d85b5932cac28be0af3f24e1dfaa430a1b3b89f7a62"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3OrderCenterUnifiedQueryContract.php": {
+      "before": "478e4f750975849e20b9822eac4d576f333550a5cfd763f6d1f91c1d1cb3732a",
+      "after": "463d7e228a7e4de52a4b9586fabc37853f66e98b53bd2ba98adc89bf87fd6fd1"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3OrderCenterUnifiedQueryRegistrar.php": {
+      "before": "2ec649fe21399e25679395a9109e5c68198588153ac711316e4a7f0d9b69b753",
+      "after": "956151b7ddbc5023310b4702610dbf2b3446f0e5267736ed083eef37427b5229"
+    },
+    "formal/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php": {
+      "before": "6585102178bc8eff1449c36f67d790b1112c8ba879d7abbebdc966d55661e3bc",
+      "after": "c6340ab59e0ddb754f2ee71dbe7b39ce4871c41d5df032ad5acccacd026eac65"
+    },
+    "formal/app/services/cashier/v3/projection/CashierV3RootStateContract.php": {
+      "before": "76c39ee42ab09bd934cdf51d82db0de7b110e1ce680d2d5634f35e3dfc47f419",
+      "after": "264c4ef0f33fe92acbee84330e4eaaa3df8b2e583e546416b211a9968fc741ff"
+    },
+    "formal/app/services/cashier/v3/reservation/CashierV3ReservationDetailQueryServices.php": {
+      "before": "ff8ee0c9a254e3521cfaafe6ad3853f7427585246a38469f8985093b3f5db6d1",
+      "after": "d3b0e0cfc7252d1f55f13a636729545c1888cf753a3ae0fdf3083064b10eb7fa"
+    },
+    "formal/app/services/cashier/v3/reservation/CashierV3ReservationModule.php": {
+      "before": "d617305f98f0e0bdd6a6df2f65a193e0874f903916f2800d11838c62a73561f9",
+      "after": "fb0017cca68d6bd947907aa576307bec3014c9b52d7c7c6c936301165dc3a9c9"
+    },
+    "formal/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessConfigProjectionServices.php": {
+      "before": "404681010b9d0725b247968f69ff344d0ace62e3b4f0149868bc0213edd0f662",
+      "after": "ae346edff5741f3efd3d8c4f86ea451dae2277e0fe6eec89dbb645cce60c380f"
+    },
+    "formal/app/services/cashier/v3/settlement/CashierV3CheckoutBusinessSourceSelectionServices.php": {
+      "before": "cce6c786dd2ad778cb4388c8d354695eefb822749bab5971e43e56f6fbe3d3d6",
+      "after": "df8ea79050c5d908a4482b5e677309b06afb86f4d6bfc9a5e2c966ca5739e712"
+    },
+    "formal/app/services/cashier/v3/settlement/CashierV3CheckoutPreparationServices.php": {
+      "before": "dc46c4499f274eb6ca69cf06e0066300e6f6bdc00c31de22827d3f56ef81add7",
+      "after": "d12a6c12f4cd2d401ea78ab9b3435f4c670819052cc35bc3e61a27d9d1b3083a"
+    },
+    "formal/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php": {
+      "before": "a1171868c7d2705fce4e75cc23548ec31639b3c712f7a409c8a562e6d29292e6",
+      "after": "b90d8180c46289136a606964203f71e3349162806ab6d2988ab7236f36e0f1d7"
+    },
+    "formal/app/services/cashier/v3/settlement/CashierV3RechargeDebtRepaymentServices.php": {
+      "before": "970d32fac91835a74a2c77dde013b9709c16a48dd7ebb95ed9630fb715249535",
+      "after": "3227e6b2fc5b82118f1118db7a892337459d2fc24c5631a05606bff181b7bc7f"
+    },
+    "formal/app/services/member/MemberCommerceSettingsServices.php": {
+      "before": "3b24ac77eb9694a3db9e00882a69606f4b3a8e7e6c0d75560a19c08d1615ca87",
+      "after": "997ce01ef03fe77d59b7b0e2aa7ebff3fc69ca0cdb6c3b202f5fd8cdec47561d"
+    },
+    "formal/app/services/query/UnifiedQueryRuntime.php": {
+      "before": "8f02a13f6f674e57ee34c6562f6e4a7b32c9c980416c950b5867808e19c1af3f",
+      "after": "d3f8397043e72a44571e64fd398fafeb4ccb56e381a861d75abc47c45eedb7ec"
+    },
+    "formal/public/view_admin/css/chunk-34b31090.2c82f6fc.css": {
+      "before": null,
+      "after": "7e01d50163e6aea4480763193511f630fe9b3fea6d7c25c0ea95816c5afd57b5"
+    },
+    "formal/public/view_admin/js/app.13e50aec.js": {
+      "before": null,
+      "after": "dbac3ddd7f4b4b9664a1a6352781d7f0a3b38a40e13e9f8e6457285f2fbfc684"
+    },
+    "formal/public/view_admin/js/app.13e50aec.js.gz": {
+      "before": null,
+      "after": "f9c48cb2873b67e6173f388d544792066a5c9d89396ff7ae8aac5d249b8fae68"
+    },
+    "formal/public/view_admin/js/chunk-0f56252a.0fcd75d1.js": {
+      "before": null,
+      "after": "109635e61441932e40f37abfb0d151efc6cdc1052b69c3e19208601e91d67ca8"
+    },
+    "formal/public/view_admin/js/chunk-0f56252a.0fcd75d1.js.gz": {
+      "before": null,
+      "after": "43ed65f88dc3dbb7b0dc303e218573fe2a49f5ade62d891c9636282d60f08e32"
+    },
+    "formal/public/view_admin/js/chunk-34b31090.d687838c.js": {
+      "before": null,
+      "after": "47003f6ae54dc92b07f1618191e7fe0ab752772263289b69f6b1d6175c7da9b1"
+    },
+    "formal/public/view_admin/js/chunk-34b31090.d687838c.js.gz": {
+      "before": null,
+      "after": "aa92610bded33685dd5ed2cd8c5b1752b035183846c45f1e454891ecb55cff35"
+    },
+    "formal/public/system.html": {
+      "before": "9f7d09eaced4bbaa7a3974fb9e70de7c688c544d0cdd70dc803d3843544b29b3",
+      "after": "784d835beccd82e7b715cd31c7ceed6b84880c28b35fa4332c9af001c7112074"
+    },
+    "formal/public/view_cashier_v3/assets/index-bd61fc13.js": {
+      "before": null,
+      "after": "26d8954c4c0483fcdf5ee5397c655f16efed2fa0ef006c77f6f7ddfc91e8559f"
+    },
+    "formal/public/view_cashier_v3/assets/index-c0e7e220.css": {
+      "before": null,
+      "after": "c0e7e220bb38a1d20b47cf0612ecd39c21a8ce53b0b064b5c991c11782711398"
+    },
+    "formal/public/view_cashier_v3/index.html": {
+      "before": "c7dd45063ff4234cb74686c4f0177f00a5b7cdbdb944a5e89e93fafe7b843621",
+      "after": "6b80e44be60ea21323407f6568ed959fc43c2b1ad84e6d9f394bdaab5c4ae8a3"
+    },
+    "formal/public/view_mobile_v3/assets/index-BgCW0F5G.css": {
+      "before": null,
+      "after": "e14317ff2a0f523e3a09f44039b2367146e8938bcf718fa8f0f83c68f0f6003d"
+    },
+    "formal/public/view_mobile_v3/assets/index-CJvEVwYK.css": {
+      "before": null,
+      "after": "b1507bd2e26e615efa61e718c229d81f010fbf3f0687d052dae42073b9fe7b97"
+    },
+    "formal/public/view_mobile_v3/assets/index-CbZrlOt9.js": {
+      "before": null,
+      "after": "80fae88b39b50ec77f00245ef133cb8acdd6460daaabbf4464dcf5e673b008ef"
+    },
+    "formal/public/view_mobile_v3/assets/index-VwBATWoh.css": {
+      "before": null,
+      "after": "7883437c483f8d6267d6fbebf9d74489af66e4cf4bd6b853a979c6c55736091c"
+    },
+    "formal/public/view_mobile_v3/assets/merchant-primary-tab-bar.CmnDydYf.js": {
+      "before": null,
+      "after": "cd651abcb58e2485ea9117e9087689fa6d2c6adde23832d19bc0ec4a0c552240"
+    },
+    "formal/public/view_mobile_v3/assets/merchant-route-guard.FJrb5qJE.js": {
+      "before": null,
+      "after": "72809e35765fb747d5bc75b5b4fb748ec8f67953c08f5bf2e6c3d29972067fdd"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-customer-care-client.DHpVCVHd.js": {
+      "before": null,
+      "after": "fb829ec4bd038279dcf710ed0a26c8e7216e7575eb6372257e73e1fe765bf937"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-customer-client.CjLN_lNw.js": {
+      "before": null,
+      "after": "0d7eb8d3f0389bff636ec22efbde68f085e42df36c8d481a0da236fd38ed2916"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-growth-client.BAXG5svw.js": {
+      "before": null,
+      "after": "20ed8d2872670a7fec7fe97ea6335a081a05b3f06f63355ba3d9843d9b92bc4f"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-home-client.Sap_fuFQ.js": {
+      "before": null,
+      "after": "96e4ade8a97a6c430b7dc85f0b360a204907d5523bbc629bbaf81f17dfc23f25"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-http.CS41B5Rt.js": {
+      "before": null,
+      "after": "8b7d22d21b142a796c2932bf845528afb3740019c94fea2d92b6bacd44c223a1"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-merchant-profile-client.CTdo7pEf.js": {
+      "before": null,
+      "after": "140a76a7fe247ebb9414a8f958fd16e438645569e698638efb58e6da741f0cd9"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-merchant-session-client.DIpNx0Xq.js": {
+      "before": null,
+      "after": "4c3fcbfb4e43eb7e65e63d0f39abc8ca9829a9dcdd5f8bca150ca057f67e1dc6"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-navigation.DBJZjr1V.js": {
+      "before": null,
+      "after": "bf2244c38229db0091966f0fe1c9739b5d4dd9a805bc4c74adfeb84ebb050c6a"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-reservation-client.NZBA1kFv.js": {
+      "before": null,
+      "after": "9d1e9e3bf22baa53a8a5e972bb2bcacccabc70415f846c9afe6d5bd2445ef0e5"
+    },
+    "formal/public/view_mobile_v3/assets/mobile-warehouse-client.C_KvOP3P.js": {
+      "before": null,
+      "after": "afacdd1c82d2a0faa95fbb7a60cedcb744557a1b5052b1630214cef844a8a98e"
+    },
+    "formal/public/view_mobile_v3/assets/mohe-ai-entry.Ygmbb1pf.js": {
+      "before": null,
+      "after": "7c3266d2c6bfd9a78bd9f0b09a55ae67ab83961e05ce40e3c6f715749a471320"
+    },
+    "formal/public/view_mobile_v3/assets/src-app-pages-bootstrap-index.U-NjGCy5.js": {
+      "before": null,
+      "after": "12d68b95cf72f6eea61fd3ce6309f5ac22ef2d9bcea9ab7a016d8bf0ff638315"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-account-index.Do_rdcyd.js": {
+      "before": null,
+      "after": "f5ff95eeae35421b0e885481af9b0f3102a9bed53f7cdde52417329a71787579"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-category-ranking-index.DnKKaJa3.js": {
+      "before": null,
+      "after": "5f7ab26bad8a034487f09baa1469c3256b7f62e5bb68d9b3555881075f6cd0ef"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-customer-care-index.BGBsgDUj.js": {
+      "before": null,
+      "after": "c4a10abea1f5c2966534bd9e905208c19c007839ab94d0ed5ad8a42950e89023"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-customer-detail-index.BminltX8.js": {
+      "before": null,
+      "after": "06f21b05f8cd19828006170991135c70f3a2084c31030301e65ab565feafdf4d"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-customer-order-detail-index.CYSC4WEQ.js": {
+      "before": null,
+      "after": "d5b8c67f4442dcd0c991a5136bd45cf62f331fa1a969e96518b70a6d83f1b209"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-customer-profile-index.BiJniY8_.js": {
+      "before": null,
+      "after": "2de37699b7d9efafd4c042365671a56ad2f01d639bca835681e182ae80d5133b"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-customer-settings-index.lCgvxl9L.js": {
+      "before": null,
+      "after": "14ef0c5388fc549716ea6819807e0f8864b6a30dbda18bff75808cb9328428fb"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-customers-index.B66eGMcJ.js": {
+      "before": null,
+      "after": "2dac3f56f79c98aac49a6e860a19e6b56bb1dab9a91a405d5cee9df2168287cf"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-employee-performance-index.BayPcHCP.js": {
+      "before": null,
+      "after": "59f044557cb416936ad804f0262bad2e6277fb70d86aeeed2c8f14fe1db6a049"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-engineering-index.CzozO3LZ.js": {
+      "before": null,
+      "after": "b2103bcfcc791f2654781ee9852d3a8a4a2f6460a7a8b996eebd154d1fbdbc63"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-goals-index.BmmZotb5.js": {
+      "before": null,
+      "after": "7c6110f82dbe36e271538a1dc4f89edfd80aa81eb50ca0f7606e235c12d86805"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-appraisal.CzedEKoF.js": {
+      "before": null,
+      "after": "6ac63efdaffe03d2dd958f048876375ee11588f219dd5b185b4a2d835f4d8db0"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-exam.D04IL-Ca.js": {
+      "before": null,
+      "after": "e6b7acdca425ff8bef8614a06b2df5ffba31e87fc003128e9e6dca8b5e3536c5"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-history.B8_V8ZGj.js": {
+      "before": null,
+      "after": "36a84d4574f4f493be30c2083efe9aec22588635b4b74b21c0abb19dfafe878a"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-index.crf2n6p8.js": {
+      "before": null,
+      "after": "f7d0e820df9379335ffcf8ec7bf57461a16ec973f74f7063f2b82d2d4bf4682f"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-inspection.DxAV-faX.js": {
+      "before": null,
+      "after": "ce5bdf2a7a5731cd9765443f7a7778865bcd4f589a296751a38c908158c1fde3"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-knowledge.Bvfl64vm.js": {
+      "before": null,
+      "after": "4e46161ac77432fd100a0d930b1de1a417f3fa943dbeee0eb9c25a6866aa8bfe"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-learn.CAdZr5sV.js": {
+      "before": null,
+      "after": "d383d87c3feb2f3818f76b0e71e52d24750b648532a2b0a1a3f848340c42215d"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-profile.BOdBoaZL.js": {
+      "before": null,
+      "after": "3a4f3baffdf902dcceb70cf719106e08ea3ed636853ab421b7889defa5c03342"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-resource.BEZzJtMa.js": {
+      "before": null,
+      "after": "34b7ba709e980dfc43506f7f16dca9311ab72ee29c459cb440081178fcb44cfe"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-growth-work.DBvT5ZGI.js": {
+      "before": null,
+      "after": "64bd65016fa13275d1a354b0741df9a419c89f7ae4192c001d4e75aa034d78f7"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-home-index.CxXklTI1.js": {
+      "before": null,
+      "after": "c8aa4e20e01a22ed955229a46382eb1a3a243f186f6ecd2219007c1a7f2e666d"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-member-dashboard-index.DTZJTj9Q.js": {
+      "before": null,
+      "after": "17b307611ca13c9b07edc4af754d18e41c1fcd1fabec72ac3ff1b83d5f7c7465"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-product-dashboard-index.4FsvvvNU.js": {
+      "before": null,
+      "after": "42e255fa455767ff2df6631e5d18b8df1f98a2181a8abcb7499145a0c4f1b00d"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-profile-index.DO2_RlOe.js": {
+      "before": null,
+      "after": "83915ff2e4cdd5a1c0fbe5b3865b769c511760f24ce58db19da9dd61d84fd271"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-reservation-confirmations-index.Oy5mMETZ.js": {
+      "before": null,
+      "after": "4026ad743060ab10e3ba309556ba32b2a2d59fb12890884445254d2ad955762b"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-reservations-index.BNtD97Wy.js": {
+      "before": null,
+      "after": "9a57106c705fd3a62b24c3f100b7439bc3dd4c1001243885941d388f56474299"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-scope-index.C7JSKNvS.js": {
+      "before": null,
+      "after": "b8af0b4a1e593d8849995805894e5b4d936b88e413207320e141d4966707b816"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-warehouse-index.BPCCdDTX.js": {
+      "before": null,
+      "after": "d74b315b72958db303eaf09e4fc40b032d2faef32d3db092b6680852b4f44435"
+    },
+    "formal/public/view_mobile_v3/assets/src-merchant-pages-workbench-index.DdUeUxdo.js": {
+      "before": null,
+      "after": "3c0cf83139c5bfe0b1a07039431f954f9b9b1b495a3754f262aed26de8aad2ff"
+    },
+    "formal/public/view_mobile_v3/index.html": {
+      "before": "e648b430cd31e264e8e8f62c13350efd6e630c7a3a17b8dd86c537479f7ca1a8",
+      "after": "2de886803c5e1de28d87d7364276ef665a83158c0612a46b869d63d42426e27a"
+    }
+  },
+  "migrationSHA256": "b9bd42c807444d08d739a424b758aa68cd0cacc43f66d62762d6e0af69924921",
+  "settingsBackup": "Complete affected configuration table and schema; no financial table is modified."
+}

@@ -262,7 +262,7 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
             ->field(
                 'receipt_id,tenant_id,organization_id,store_id,member_id,operator_id,'
                 . 'workspace_id,state_context_id,checkout_request_id,command_idempotency_key,'
-                . 'plan_fingerprint,status,settled_at,completed_at'
+                . 'plan_fingerprint,status,settled_at,completed_at,result_json'
             )
             ->find());
     }
@@ -401,10 +401,14 @@ final class ThinkPhpCashierV3CheckoutResultReadRepository implements CashierV3Ch
 
     private function entitlementReceiptResult(array $receipt): array
     {
+        // Result queries reuse the frozen completion receipt, never today's card balance.
+        $stored = json_decode((string)($receipt['result_json'] ?? ''), true);
         return [
             'receiptId' => (string)$receipt['receipt_id'],
             'receiptStatus' => (string)$receipt['status'],
             'planFingerprint' => (string)$receipt['plan_fingerprint'],
+            'receiptEntitlements' => is_array($stored['receiptEntitlements'] ?? null)
+                ? $stored['receiptEntitlements'] : [],
         ];
     }
 

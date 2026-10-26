@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "publicationComplete": false,
+  "pendingSites": [
+    "010"
+  ],
+  "archiveCommit": "75782fa1e83c0b4bd452f941003279e5abdefd3e",
+  "deployedBusinessCommit": "5fd8225287b31944894975deacb166d230f6e71f",
+  "files": 99,
+  "sharedIndexUntouched": true
+}

@@ -141,6 +141,9 @@ class CashierV3PermissionPolicyRegistry
                 'card_transfer' => 'cashier.v3.cashier.card.transfer',
                 'card_disable' => 'cashier.v3.cashier.card.disable',
                 'card_enable' => 'cashier.v3.cashier.card.enable',
+                // Converting restricted rights into a reusable wallet needs
+                // its own explicit grant, not merely view/disable permission.
+                'card_to_balance' => 'cashier.v3.cashier.card.to_balance',
                 'project_replacement' => 'cashier.v3.cashier.card.project_replace',
                 'project_upgrade' => 'cashier.v3.cashier.card.project_upgrade',
             ];

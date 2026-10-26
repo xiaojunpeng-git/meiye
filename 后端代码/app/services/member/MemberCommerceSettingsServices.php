@@ -23,6 +23,10 @@ final class MemberCommerceSettingsServices
     {
         $row = Db::name('member_commerce_settings')->where('id', 1)->find();
         if (!$row) throw new ValidateException('会员交易默认来源尚未配置。');
+        // Missing policy columns identify an unmigrated instance, not a request
+        // to turn sources off. New migrations explicitly start in manual mode.
+        $row += ['source_enabled' => 1, 'inherit_previous' => 1,
+            'repayment_primary_id' => 0, 'repayment_secondary_id' => 0];
         $row['sources'] = (new CashierV3BusinessConfigServices())->checkoutCatalog()['sources'];
         return $row;
     }
@@ -37,6 +41,11 @@ final class MemberCommerceSettingsServices
             foreach (['purchase_primary_id','purchase_secondary_id','recharge_primary_id','recharge_secondary_id','version'] as $field) {
                 $hashInput[$field] = (int)($input[$field] ?? 0);
             }
+            // Include only submitted policy fields in the idempotency hash;
+            // an old client omitting them must preserve, never reset, the policy.
+            foreach (['source_enabled', 'inherit_previous', 'repayment_primary_id', 'repayment_secondary_id'] as $field) {
+                if (array_key_exists($field, $input)) $hashInput[$field] = $this->policyInteger($field, $input[$field]);
+            }
             $hash = hash('sha256', json_encode($hashInput));
             $row = Db::name('member_commerce_settings')->where('id', 1)->lock(true)->find();
             $audit = Db::name('member_commerce_settings_audit')->where('command_key', $key)->find();
@@ -48,10 +57,20 @@ final class MemberCommerceSettingsServices
                 throw new ValidateException('默认来源已变化，请刷新后重试。');
             }
             $changes = [];
-            foreach (['purchase','recharge'] as $kind) {
-                $primary = (int)($input[$kind . '_primary_id'] ?? 0);
-                $secondary = (int)($input[$kind . '_secondary_id'] ?? 0);
-                $this->validateSource($primary, $secondary);
+            foreach (['source_enabled', 'inherit_previous', 'repayment_primary_id', 'repayment_secondary_id'] as $field) {
+                if (!array_key_exists($field, $input)) continue;
+                if (!array_key_exists($field, $row)) throw new ValidateException('请先完成业务来源设置升级，再保存。');
+                $changes[$field] = $this->policyInteger($field, $input[$field]);
+            }
+            $enabled = (int)($changes['source_enabled'] ?? $row['source_enabled'] ?? 1) === 1;
+            foreach (['purchase','recharge','repayment'] as $kind) {
+                if ($kind === 'repayment' && !array_key_exists('repayment_primary_id', $row)) continue;
+                $primary = (int)($input[$kind . '_primary_id'] ?? $row[$kind . '_primary_id'] ?? 0);
+                $secondary = (int)($input[$kind . '_secondary_id'] ?? $row[$kind . '_secondary_id'] ?? 0);
+                // Fixed mode must be executable without any hidden manual
+                // prompt; active manual mode may keep unused defaults empty.
+                if (!$enabled || $primary > 0 || $secondary > 0) $this->validateSource($primary, $secondary);
+                if ($primary < 0 || $secondary < 0) throw new ValidateException('来源配置无效。');
                 $changes[$kind . '_primary_id'] = $primary;
                 $changes[$kind . '_secondary_id'] = $secondary;
             }
@@ -69,10 +88,19 @@ final class MemberCommerceSettingsServices
     /** Freeze a resolved source on the order; callbacks never reread defaults. */
     public function source(string $kind): array
     {
-        if (!in_array($kind, ['purchase','recharge'], true)) throw new ValidateException('交易类型无效。');
+        if (!in_array($kind, ['purchase','recharge','repayment'], true)) throw new ValidateException('交易类型无效。');
         $row = Db::name('member_commerce_settings')->where('id', 1)->lock(true)->find();
         if (!$row) throw new ValidateException('会员交易默认来源尚未配置。');
         return $this->validateSource((int)$row[$kind . '_primary_id'], (int)$row[$kind . '_secondary_id']);
+    }
+
+    private function policyInteger(string $field, $value): int
+    {
+        if (is_bool($value)) $value = (int)$value;
+        if (!is_int($value) && !(is_string($value) && preg_match('/^\d+$/D', $value))) throw new ValidateException('来源设置必须使用有效整数。');
+        $value = (int)$value;
+        if ($value < 0 || (in_array($field, ['source_enabled', 'inherit_previous'], true) && $value > 1)) throw new ValidateException('来源设置开关无效。');
+        return $value;
     }
 
     private function validateSource(int $primary, int $secondary): array

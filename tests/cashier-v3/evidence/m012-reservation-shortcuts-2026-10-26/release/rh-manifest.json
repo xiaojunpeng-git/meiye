@@ -1,0 +1,26 @@
+{
+  "site": "rh",
+  "commit": "dd1ead7436202882f21cb06e42757d5bf4e49c20",
+  "sourceTree": "d1adcc61f2640f948e4a1a12f4e7c37e7a4844e4",
+  "binding": "rh",
+  "targets": {
+    "app/services/cashier/v3/reservation/CashierV3ReservationPartitionProvider.php": {
+      "before": "bf52d4f475ed8931ca88e34bf2ec61b7da82ec665d004e47696bc0f6b94857d7",
+      "after": "0517613481cd3775bc9523b8fdbd446d25491b829e4793219b186d6423efba0f"
+    },
+    "public/view_cashier_v3/assets/index-1d11192d.css": {
+      "before": null,
+      "after": "1d11192dc61a51fb0babd029f9c6d0e35d5e4869a6c482b9ff9c3faa5c65674e"
+    },
+    "public/view_cashier_v3/assets/index-b5112bdd.js": {
+      "before": null,
+      "after": "4c87a4a11f7d51276620a8f327dcd4f2dc274106ddf456456bb94be0bfaed542"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "9333df8d75e2bcf869331b91392a9ec3263bf9dd217a23017769ae352b2727eb",
+      "after": "5eeafc9750ab0594ee0e5f33fa6d8b044840c2bfb79a0b03a07ef78f6d8234fc"
+    }
+  },
+  "noDatabaseWrites": true,
+  "acceptedPatch": "f43cbd4d"
+}

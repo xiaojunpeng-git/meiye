@@ -1,0 +1,149 @@
+{
+  "site": "008",
+  "commit": "5fd8225287b31944894975deacb166d230f6e71f",
+  "candidateTree": "0ff03c6478b16b36683ff58f680b8250b8f35d46",
+  "targets": {
+    "formal/app/services/cashier/v3/CashierV3RequestNormalizer.php": {
+      "before": "8d1bf8abd917ea5e1ca8e59467390230a4eac51d29069dc01a048074b3e75298",
+      "after": "68d4ee775f2626e0ede16916561850daa7d2f3533c3914b3859ff02df5673b7c"
+    },
+    "formal/app/services/cashier/v3/CashierV3CommandGatewayServices.php": {
+      "before": "d51a67a266bcd78ca538cae70b68983a7222299c9ba6e36a61b471f5f472abeb",
+      "after": "d9a62727648b528f427b6c04a1698dabe03a23a3af7bb07ad6367117bda3bc5b"
+    },
+    "formal/app/services/cashier/v3/card/CashierV3CardOperationModule.php": {
+      "before": "aa15e9bba144bbe19b89583797353042ff640c142c2bc279f484145a4871ba7f",
+      "after": "4584170122ece1338189b3f05ff634b45fe7a650cf80506e024e33168c357fb0"
+    },
+    "formal/app/services/cashier/v3/card/CashierV3CardOperationResourceDiscovery.php": {
+      "before": "1a4261b8400497204cae12b8a929c582686a85fa7de38435b4a877475bd30773",
+      "after": "a90031b9936e945236664d4c86d5c6803463c242840512c37b38ba5b11b43b75"
+    },
+    "formal/app/services/cashier/v3/card/CashierV3CardToBalanceServices.php": {
+      "before": null,
+      "after": "ddc8b12cd4aa1731d95228a523deab1a971d322517f376263b8716e438c33ade"
+    },
+    "formal/app/services/cashier/v3/card/CashierV3CardConversionGuard.php": {
+      "before": null,
+      "after": "d9405b093b2a0c00f94e110297c759f79a251bb779431612b67067f93e348386"
+    },
+    "formal/app/services/cashier/v3/permission/CashierV3PermissionPolicyRegistry.php": {
+      "before": "614eafc83c263df379c6d43315a02cca95c6e1a559886a7fcc2bd08e425c245d",
+      "after": "d05a91f7c89153b0bf939a86ad35d669d080dc9a9fbdcbda44bbeb69394a67aa"
+    },
+    "formal/app/services/cashier/v3/permission/CashierV3FeatureResolver.php": {
+      "before": "39a523dfd2bd50e52850409399ef4911086b46bdb8b09169c33b5ed9a5efa1ce",
+      "after": "6dfe7f8d0d7b97f18719d080f1f3185bc8faa29b8637a0f3d5e7a89504a5862b"
+    },
+    "formal/app/services/organization/JobPositionPolicyServices.php": {
+      "before": "8a8ae14b087896f852e95d9e9c172a1c809f785be69cf98275db10437782f5b4",
+      "after": "250b5780564a8e2f00634f6f0db3b32d5121b7eed3d3135ca5e6a8b3f0d97146"
+    },
+    "formal/app/services/organization/StorePermissionCatalogServices.php": {
+      "before": "0c925dafe02c6389fe6e0f866f9b0bb5b21b2c1d8ce9ea75e95b593283a6a754",
+      "after": "a452b6abb3494d0124517b3575e06c91c3a608496b56cc2acd305422dce6b152"
+    },
+    "formal/app/services/user/UserBalanceAtomicServices.php": {
+      "before": "439e794d4c8ba9724b05f4a0c38bf2e77bd89a6325db44684eb974f103e7a66a",
+      "after": "944168ae315f749cc20293feb83c3dff1de1a7f9bf18095b4e147908a6e18a41"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php": {
+      "before": "ec0cf3238747ecbf6a8fac84a22b81cb7e768713117242bf5184720184998214",
+      "after": "2db385b55a051afb0a3795cf842a7a2a3fdc98ef9462b8bdba017d45565cb14f"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3UnifiedRefundServices.php": {
+      "before": "e689726f396c18395d796bad08af49e228761cd5d255f41917a3054ec2b5721f",
+      "after": "76be807ac7ae77d886743d458af1145d48dacbb4ff86b69749ec0a2b234d7320"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3ServiceRecordVoidServices.php": {
+      "before": "39e9987cff4180439e8734d12be63af7cd7d22fd2b7f99111fcf9def0672b986",
+      "after": "f7d3e27ba6d5d5c4593f2916b589c45d2b3b1e855af36c719024c4861c86b71e"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3OrderCenterVoidServices.php": {
+      "before": "1ec813c6dc9883842b1a2f5bdd17a3d52890982e07189e6f1204ea5bf7695ef3",
+      "after": "47d02a196fb44b5d59649a20848590d23b946e3298f000d85890d8cfcb98e232"
+    },
+    "formal/app/services/cashier/v3/order/CashierV3DebtRestorationServices.php": {
+      "before": "aade3357ec5ebf8fc55ee774536ce5ba03b055509816d820091a0339292e9d1f",
+      "after": "030ae5eb93a590cd6081199ded3ef672be8180fc36233aa715e0add6257a0091"
+    },
+    "formal/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php": {
+      "before": "49aa233602ddf9fe4c00185ec6b893cd1b6e78bdcdfed4dbbe5a50e310993bae",
+      "after": "e1fa9cb1422caecc819a0b6e8d6f42b82ccf5ea6c45d73667d3c1183c091ed07"
+    },
+    "formal/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php": {
+      "before": "dab569eb984304e9f2d157b92c5f44a529f0b74f190ba69c3ded2f08c3b1b268",
+      "after": "de911e73c1e925c090c0bcfff902b40d139c41dacf6b83ead4d5e8c9f6abea1a"
+    },
+    "formal/app/services/order/StoreOrderWriteOffServices.php": {
+      "before": "e9a6b6a719d9d96aa845d23bd6f9ac2f2b3d9d55433732b50792827dd500a9ac",
+      "after": "629784aa74c6e9b937dd9e530dd3e6ef183386f91e452e211bc3b4425b8a9b51"
+    },
+    "formal/app/services/order/BatchWriteoffServices.php": {
+      "before": "fd8c2a3f40a5838d21467b755abd8e57f1d19c97e96f4916d891f004455ebd7c",
+      "after": "681dd8cc450c5957378a89db72e54a8a12441074bd7bbe4a6dfcffd83450e0bd"
+    },
+    "formal/app/services/order/StoreOrderRollbackServices.php": {
+      "before": "a86480b3c673312104a8b5d9b8955a509c460a9f82602979191dd7ad7d25f0a6",
+      "after": "e4141f175f297a04e28bece7ad8b7f04f02c45a5d6c56cd250af63a26ff81de8"
+    },
+    "formal/app/services/order/StoreOrderTerminalOperationServices.php": {
+      "before": "78eac551ea35df7e3e83f59f2eb704455b96ee211dbd7823dcebb3b68e027b13",
+      "after": "fc9bbb01a3b3caafcaef7df8be86294ff1566c934b8143457f4f5472beca443f"
+    },
+    "formal/app/services/order/StoreDebtServices.php": {
+      "before": "e543dd6a1da0cf5efc2a55a50051d2d91f1615c1d999cec071bdea7ed4e8525b",
+      "after": "6c976323f33e6b81cb9a62da39d2b6ee62753f23a18167c8fcba13ac50d88d3a"
+    },
+    "formal/app/services/cashier/v3/card/CashierV3CardOperationAuthorityServices.php": {
+      "before": "3ffd138e97b6a9f08613dda067131377416ce9bba767e9cfa7153aa9894eb8e4",
+      "after": "f27d1323e8b465f1e79c2a422b773633af539d9d251409517ed3f85e7c714838"
+    },
+    "formal/app/services/cashier/v3/cashier/CashierV3EntitlementResourceVersionProvider.php": {
+      "before": "76abf62962acb0c208fce8d4fa8b0ee38db0171799183ce5ff12499fd916ee32",
+      "after": "392684e35a1582eeb878e1e90bdfad9da8fd08ad5fc1100e764ced6de0c590a8"
+    },
+    "formal/app/services/cashier/v3/permission/CashierV3StaffFeatureOverrideServices.php": {
+      "before": "d0e1d330b3b80fb9b67eaa341e9967cd65592b0c5f3b01a194473ba62967eb12",
+      "after": "18bb1bb54e19235cce7294b2aeabc1a3cded36465bc416a6c2044eda21daf297"
+    },
+    "formal/database/upgrades/2026-10-24-卡转余额/01-权限目录.php": {
+      "before": null,
+      "after": "a45b456ee006bfe5d39e5ff2575597a6c401c8ee3b9c2a0984082dc7db03dfd9"
+    },
+    "formal/database/upgrades/2026-10-24-卡转余额/02-已有收银岗位开通.php": {
+      "before": null,
+      "after": "036ef63c7f2978e15c36056a3266dcfcf9a8a2a59f712458eb71e0d01b3b96af"
+    },
+    "formal/database/upgrades/2026-10-24-卡转余额/03-补交关联锁定索引.php": {
+      "before": null,
+      "after": "4c3d92facc4ff4e456ffd4588adebf5108d5448807744cbf20d2bfe15215f509"
+    },
+    "formal/app/services/cashier/v3/card/CashierV3CardOperationKernel.php": {
+      "before": "f1d31cdc390eb53cf944962089d10352eedb5789f9e5da3ddffa1d38220a391a",
+      "after": "f1d31cdc390eb53cf944962089d10352eedb5789f9e5da3ddffa1d38220a391a"
+    },
+    "formal/public/view_cashier_v3/assets/exceljs.min-a0d233a6.js": {
+      "before": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "after": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    "formal/public/view_cashier_v3/assets/index-2a9cee22.js": {
+      "before": null,
+      "after": "90ffb3ff37079444fcc438c55050fe7ad01978b33b19b51017cade4c23e3b566"
+    },
+    "formal/public/view_cashier_v3/assets/index-fc98d845.css": {
+      "before": null,
+      "after": "fc98d845ec32327f4f69a6d1c90a9749469a56bb384bad3f334e5de666da0ed1"
+    },
+    "formal/public/view_cashier_v3/assets/login-beauty-quiet-826510a5.png": {
+      "before": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "after": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    "formal/public/view_cashier_v3/index.html": {
+      "before": "144bd52420a42d11fe32cf0892e621195d86a0c104ea3573914b0ff41e4d15e9",
+      "after": "367510fa7184959635995d6aa2b1dafb931477ad98baa3043c790e34bf95fcbd"
+    }
+  },
+  "database": "independent full backup; explicit catalog, cashier grants and two indexes; no historical business writes",
+  "platformStatic": "unchanged"
+}

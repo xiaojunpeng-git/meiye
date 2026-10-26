@@ -1,0 +1,42 @@
+{
+  "site": "010",
+  "phase": "before",
+  "checks": [
+    "pre-release target reader baseline"
+  ],
+  "reports": {
+    "group_dashboard": {
+      "rows": 0,
+      "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+    },
+    "store_target": {
+      "rows": 0,
+      "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+    },
+    "target_analysis": {
+      "rows": 0,
+      "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+    },
+    "target_monthly": {
+      "rows": 0,
+      "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+    },
+    "target_store": {
+      "rows": 0,
+      "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+    },
+    "merchant_target_analysis": {
+      "rows": 0,
+      "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+    },
+    "operations_performance_comparison": {
+      "rows": 0,
+      "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+    }
+  },
+  "retainedMethods": {
+    "schemeVoid": false,
+    "schemeDelete": false
+  },
+  "writes": false
+}

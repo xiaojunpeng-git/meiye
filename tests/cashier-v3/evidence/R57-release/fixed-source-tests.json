@@ -1,0 +1,129 @@
+{
+  "tree": "c3a85bf3f85ff40cb94362268260153f41bf5d4a",
+  "target": "/Users/xiaojunpeng/.cache/mohe-r57-source-policy-tests/c3a85bf3f85ff40cb94362268260153f41bf5d4a",
+  "sourceStable": true,
+  "result": "PASS",
+  "results": [
+    {
+      "file": "tests/platform-admin/js/r57-business-source-settings.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/mobile-vue3/js/r57-h5-get-query.test.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/r57-selected-member-source.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/order-center/r57-business-source-policy.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/r57-checkout-source-policy.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/r57-reservation-source-policy.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/local-checkout-source-replay-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/checkout-source-required-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/checkout-reservation-completion-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/reservation-lifecycle-frontend-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/order-center-entitlement-card-source-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/debt-repayment-original-source-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/recharge-overlay-frontend-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/business-source-checkout-frontend-contract.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/js/r11-reservation-default-schedule.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/mobile-vue3/js/reservation-page.test.mjs",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/platform-admin/php/r57-business-source-settings.php",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/order-center/r57-source-runtime-cache.php",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/php/r57-selected-member-source-projection.php",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/php/r57-checkout-source-policy.php",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/php/r57-reservation-source-policy.php",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/php/recharge-checkout-contract.php",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/php/repayment-source-snapshot-contract.php",
+      "passed": true,
+      "status": 0
+    },
+    {
+      "file": "tests/cashier-v3/php/r57-business-source-policy.php",
+      "passed": true,
+      "status": 0
+    }
+  ],
+  "businessWrites": false
+}

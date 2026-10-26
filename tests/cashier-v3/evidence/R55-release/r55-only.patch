@@ -1,0 +1,842 @@
+diff --git a/scripts/r55-member-filters-verify.cjs b/scripts/r55-member-filters-verify.cjs
+new file mode 100644
+index 00000000..bcb3959f
+--- /dev/null
++++ b/scripts/r55-member-filters-verify.cjs
+@@ -0,0 +1,70 @@
++// Local-only verification of canonical hot sources. This is not an isolated
++// release candidate and does not authorize commit, remote access or deployment.
++const fs = require('fs'), path = require('path'), cp = require('child_process'), crypto = require('crypto');
++const root = path.resolve(__dirname, '..'); process.chdir(root);
++const evidence = 'tests/cashier-v3/evidence/R55-member-filters';
++const runtime = '/Users/xiaojunpeng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node';
++const output = '/private/tmp/mohe-r55-member-filters-build-20261024';
++const files = [
++  '前端代码/cashier-v3/src/views/MemberListView.vue',
++  '前端代码/cashier-v3/src/components/query/MemberReportQueryToolbar.vue',
++  '前端代码/cashier-v3/src/services/memberReportFilters.js',
++  '前端代码/shared/unified-query-vue3/src/components/UnifiedReportQueryToolbar.vue',
++  '前端代码/shared/unified-query-vue3/src/contracts/reportFilters.js',
++  'tests/cashier-v3/js/r55-member-filters.mjs',
++  'tests/cashier-v3/php/r55-member-filter-metadata.php',
++  'tests/cashier-v3/js/unified-query-frontend-contract.mjs',
++  'tests/report-basic/js/report-filter-contract.mjs',
++  'scripts/r55-member-filters-verify.cjs'
++];
++const hash = b => crypto.createHash('sha256').update(b).digest('hex');
++const digests = () => Object.fromEntries(files.map(file => [file, hash(fs.readFileSync(file))]));
++const before = digests();
++// Preserve the existing global-suite failure instead of loosening an unrelated
++// facade line-count assertion. Both old and updated tests stop before R55 logic.
++const globalTest = 'tests/cashier-v3/js/unified-query-frontend-contract.mjs';
++const baseline = JSON.parse(fs.readFileSync(path.join(evidence, 'baseline.json')));
++const baselineSource = cp.execFileSync('git', ['cat-file', 'blob', baseline.files[globalTest].blob]).toString();
++const globalRuns = {};
++for (const [variant, source] of [['baseline', baselineSource], ['current', fs.readFileSync(globalTest, 'utf8')]]) {
++  const url = require('url').pathToFileURL(path.join(root, globalTest)).href;
++  const result = cp.spawnSync(runtime, ['--input-type=module'], { input: source.replaceAll('import.meta.url', JSON.stringify(url)), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
++  const log = (result.stdout || '') + (result.stderr || '');
++  fs.writeFileSync(path.join(evidence, 'global-contract-' + variant + '.log'), log);
++  if (result.status === 0 || !log.includes('工具栏 facade 仅保留宿主适配')) throw Error('Global suite failure changed; inspect instead of masking it');
++  globalRuns[variant] = { status: result.status, failure: '工具栏 facade 仅保留宿主适配' };
++}
++const tasks = [
++  ['member-browser', ['tests/cashier-v3/js/r55-member-filters.mjs']],
++  ['report-regression', ['tests/report-basic/js/report-filter-contract.mjs']],
++  ['period-contract', ['tests/unified-query/js/date-range-contract.mjs']],
++  ['member-create-retained', ['tests/cashier-v3/js/member-list-creator-contract.mjs']],
++  ['member-edit-retained', ['tests/cashier-v3/js/member-edit-conflict-contract.mjs']],
++  ['member-save-retained', ['tests/cashier-v3/js/r43-member-save-dialog-contract.mjs']],
++  ['member-export-retained', ['tests/cashier-v3/js/r20-member-export-download-contract.mjs']],
++  ['checkout-prebuild', ['tests/cashier-v3/js/entitlement-experience-checkout-snapshot.mjs']],
++  ['build', [path.join(root, '前端代码/cashier-v3/node_modules/vite/bin/vite.js'), 'build', '--outDir', output, '--emptyOutDir']]
++];
++const results = [];
++for (const [name, args] of tasks) {
++  const result = cp.spawnSync(runtime, args, { cwd: name === 'build' ? path.join(root, '前端代码/cashier-v3') : root,
++    env: { ...process.env, REPORT_FILTER_EVIDENCE_DIR: path.join(root, evidence, 'report-regression') }, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 180000 });
++  fs.writeFileSync(path.join(evidence, name + '.log'), (result.stdout || '') + (result.stderr || ''));
++  results.push({ name, result: result.status === 0 ? 'PASS' : 'FAIL' });
++  console.log(name, results.at(-1).result);
++  if (result.status !== 0) throw Error(name + ' failed: ' + result.stderr);
++}
++const after = digests(); if (JSON.stringify(before) !== JSON.stringify(after)) throw Error('Source changed during verification');
++const assets = {};
++const scan = dir => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
++  const file = path.join(dir, entry.name); if (entry.isDirectory()) scan(file);
++  else if (entry.isFile()) assets[path.relative(output, file)] = hash(fs.readFileSync(file));
++  else throw Error('Unexpected generated asset');
++} }; scan(output);
++const record = { head: cp.execFileSync('git', ['rev-parse', 'HEAD']).toString().trim(), files: after, sourceStable: true,
++  knownGlobalSuite: { result: 'PRE_EXISTING_FAILURE', globalRuns, changedFacade: false },
++  results, build: { source: path.join(root, '前端代码/cashier-v3'), hotEntry: 'http://127.0.0.1:18091/view_cashier_v3/#/member', output, assets },
++  scope: 'R55 local member list filters only; excludes unrelated hot-workspace changes from future commit/deployment',
++  onlineInstances: 'Not applicable: no remote access', databaseMigration: false, commit: false, push: false, deployment: false };
++fs.writeFileSync(path.join(evidence, 'fixed-files.json'), JSON.stringify(record, null, 2));
++console.log('R55_LOCAL_FIXED_PASS files=' + files.length);
+diff --git a/tests/cashier-v3/js/r55-member-filters.mjs b/tests/cashier-v3/js/r55-member-filters.mjs
+new file mode 100644
+index 00000000..ae5b9f41
+--- /dev/null
++++ b/tests/cashier-v3/js/r55-member-filters.mjs
+@@ -0,0 +1,200 @@
++import assert from 'node:assert/strict'
++import fs from 'node:fs'
++import path from 'node:path'
++import { createRequire } from 'node:module'
++import { fileURLToPath, pathToFileURL } from 'node:url'
++import { execFileSync } from 'node:child_process'
++import crypto from 'node:crypto'
++
++// Actual MemberListView, actual query composable/toolbar/period/export/pagination.
++// Only transport and the unrelated unopened member editor are isolated fixtures.
++const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
++const front = path.join(root, '前端代码/cashier-v3'), shared = path.join(root, '前端代码/shared/unified-query-vue3/src')
++const require = createRequire(path.join(front, 'package.json'))
++const { parse, compileScript, compileStyle } = require('@vue/compiler-sfc'), { build } = require('esbuild')
++const { chromium } = require('/Users/xiaojunpeng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
++const evidence = path.join(root, 'tests/cashier-v3/evidence/R55-member-filters')
++const backend = JSON.parse(execFileSync('php', ['tests/cashier-v3/php/r55-member-filter-metadata.php'], { cwd: root, encoding: 'utf8' }))
++fs.writeFileSync(path.join(evidence, 'backend-contract.json'), JSON.stringify(backend, null, 2))
++const helperSource = fs.readFileSync(path.join(front, 'src/services/memberReportFilters.js'), 'utf8')
++  .replace("'@mohe/unified-query-vue3'", JSON.stringify(pathToFileURL(path.join(shared, 'contracts/unifiedQueryContract.js')).href))
++const { memberReportFields, memberReportDraftSnapshot, buildMemberReportQuery } = await import('data:text/javascript;base64,' + Buffer.from(helperSource).toString('base64'))
++let checks = 0
++const check = (value, message) => { assert.ok(value, message); checks++ }
++const fields = [...backend.fields, { key: 'r55_extra', label: '动态扩展字段', type: 'text', capabilities: { filter: true, export: true } },
++  { key: 'r55_display_only', label: '仅显示字段', type: 'text', capabilities: { filter: false } },
++  { key: 'r55_hidden', label: '内部隐藏字段', type: 'text', hidden: true, capabilities: { filter: true } }]
++check(memberReportFields(fields).length === backend.fields.length + 1, 'all authorized fields, not just three quick inputs')
++check(memberReportFields(fields).find(f => f.key === 'account_balance').filter.type === 'number', 'amount type uses numeric bounds')
++check(memberReportFields(fields).find(f => f.key === 'latest_visit_date').filter.range, 'date uses period picker')
++const original = { pageCode: 'member_list', page: 3, limit: 20, keyword: 'original', dataScope: 'all', store_ids: [9], fieldVersions: { r55_extra: 1 }, filters: [{ field: 'phone', operator: 'contains', value: 'seed' }], filterRelation: 'any', topFilters: [{ field: 'member_no', operator: 'contains', value: '100' }], sorts: [{ field: 'created_at', direction: 'desc' }] }
++const before = JSON.stringify(original)
++const built = buildMemberReportQuery(original, { filters: [{ field: 'account_balance', operator: 'gte', value: 0 }] }, ' draft ', 'normal', 20)
++check(built.page === 1 && built.keyword === 'draft' && built.dataScope === 'normal', 'explicit query resets page and preserves keyword')
++assert.deepEqual(built.filters, original.filters); checks++
++check(built.filterRelation === 'any' && JSON.stringify(original) === before, 'saved OR filters and external query are not mutated')
++assert.deepEqual(built.store_ids, [9]); checks++
++assert.deepEqual(memberReportDraftSnapshot(original).filters, original.topFilters); checks++
++assert.deepEqual(buildMemberReportQuery(original, { filters: [] }, 'keyword', 'all', 20, true).filters, []); checks++
++
++const styles = [fs.readFileSync(path.join(front, 'src/styles/base.css'), 'utf8')]
++const bridge = `import {reactive} from 'vue';
++  const fields=${JSON.stringify(fields)};
++  const state=reactive({stateContextId:'r55-context',operator:{account:'fixture'},currentStore:{id:9,name:'Local fixture store'},memberCenter:{canBatchOperate:false,statusOptions:[{value:'disabled',label:'已停用',normal:false}]}});
++  window.fixture={state,queries:[],exports:[],fail:false,fields,capabilityFailure:false,capabilityDelay:0};
++  export const useCashierV3State=()=>state;
++  export const canUseCashierV3Operation=()=>true;
++  export const formatMoney=value=>'¥'+Math.round(Number(value||0)).toLocaleString('en-US');
++  export const openCashierV3QueryEntitySelector=async()=>null;
++  export async function requestCashierV3Action(action,payload={}){
++    if(action==='query-unified-query-capabilities'){
++      const failure=window.fixture.capabilityFailure,delay=window.fixture.capabilityDelay;
++      if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
++      if(failure)throw new Error('请登录');
++      return{result:{status:'success'},data:{pageCode:'member_list',enabled:true,schemaVersion:1,fields,commandContext:{kind:'query_preference',id:'member_list'},queryCutoffDate:'2026-10-24',export:true,exportCapability:{enabled:true,format:'xlsx',allowCurrentQuery:true,allowCurrentPage:true},querySettings:{visibleFields:['member_name','phone','member_no','birthday','member_tag','account_balance','active_card_count','created_at'],sorts:[{field:'created_at',direction:'desc'}],filters:[{field:'phone',operator:'contains',value:'seed'}],filterRelation:'any'}}};
++    }
++    if(action==='query-members'){
++      window.fixture.queries.push(JSON.parse(JSON.stringify(payload)));
++      if(window.fixture.fail)return{result:{status:'failed',message:'Local fixture read failure'}};
++      const total=window.fixture.empty?0:45,page=payload.page||1,limit=payload.limit||20;
++      const records=Array.from({length:Math.max(0,Math.min(limit,total-(page-1)*limit))},(_,n)=>({id:(page-1)*limit+n+1,name:'Fixture member '+((page-1)*limit+n+1),phone:'13000000000',memberNo:'TEST'+n,accountBalance:n,activeCardCount:1}));
++      return{result:{status:'success'},data:{memberCenter:{records,total,page,pageSize:limit}}};
++    }
++    if(action==='create-unified-query-export'){window.fixture.exports.push(JSON.parse(JSON.stringify(payload)));return{result:{status:'failed',message:'Fixture creates no export task'}};}
++    throw Error('Unexpected fixture action '+action);
++  }`
++const bundle = await build({
++  stdin: { contents: `import{createApp,h}from'vue';import View from './src/views/MemberListView.vue';createApp({render:()=>h(View)}).mount('#app')`, resolveDir: front, loader: 'js' },
++  plugins: [{ name: 'r55-real-sfc', setup(builder) {
++    builder.onResolve({ filter: /^@\/services\/cashierV3Bridge$/ }, () => ({ path: 'bridge', namespace: 'r55' }))
++    builder.onResolve({ filter: /MemberCreatorPanel\.vue$/ }, () => ({ path: 'unopened-editor', namespace: 'r55' }))
++    builder.onResolve({ filter: /^@mohe\/unified-query-vue3(?:\/(contract|composable))?$/ }, args => ({ path: args.path.endsWith('/contract') ? path.join(shared, 'contracts/unifiedQueryContract.js') : args.path.endsWith('/composable') ? path.join(shared, 'composables/useUnifiedQueryPage.js') : path.join(shared, 'index.js') }))
++    builder.onResolve({ filter: /^@\// }, args => ({ path: path.join(front, 'src', args.path.slice(2)) + (path.extname(args.path) ? '' : '.js') }))
++    builder.onLoad({ filter: /.*/, namespace: 'r55' }, args => ({ contents: args.path === 'bridge' ? bridge : 'export default {render(){return null}}', loader: 'js', resolveDir: front }))
++    builder.onLoad({ filter: /\.vue$/ }, args => {
++      const { descriptor, errors } = parse(fs.readFileSync(args.path, 'utf8'), { filename: args.path }); assert.deepEqual(errors, [])
++      const id = crypto.createHash('sha256').update(args.path).digest('hex').slice(0, 10)
++      const script = compileScript(descriptor, { id, inlineTemplate: true, genDefaultAs: 'Component' })
++      for (const style of descriptor.styles) { const out = compileStyle({ source: style.content, filename: args.path, id: 'data-v-' + id, scoped: style.scoped }); assert.deepEqual(out.errors, []); styles.push(out.code) }
++      return { contents: script.content + '\nComponent.__scopeId="data-v-' + id + '";export default Component;', loader: 'js', resolveDir: path.dirname(args.path) }
++    })
++  } }], nodePaths: [path.join(front, 'node_modules')], bundle: true, write: false, format: 'iife', platform: 'browser'
++})
++const browser = await chromium.launch({ headless: true, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
++const views = []
++try {
++  for (const width of [1480, 610, 375]) {
++    const page = await browser.newPage({ viewport: { width, height: 1009 } }), errors = []
++    page.on('pageerror', e => errors.push(e.message))
++    await page.setContent('<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div></body></html>')
++    // Existing cashier shell intentionally has a desktop minimum width. Isolate
++    // this view's container for small-width component tests, without editing it.
++    await page.addStyleTag({ content: styles.join('\n') + '\nhtml,body,#app{min-width:0;width:100%}body{margin:0}#app{height:100vh;overflow:hidden}' })
++    await page.addScriptTag({ content: bundle.outputFiles[0].text })
++    await page.getByRole('button', { name: '更多筛选', exact: true }).waitFor()
++    await page.getByRole('button', { name: '导出', exact: true }).waitFor()
++    await page.screenshot({ path: path.join(evidence, 'collapsed-' + width + '.png') })
++    check(await page.locator('input').count() === 1, 'collapsed toolbar has only comprehensive keyword input')
++    check(await page.getByRole('searchbox', { name: '综合查询' }).getAttribute('placeholder') === '搜索会员姓名、完整手机号或会员姓名首字母', 'keyword hint advertises existing name initials search rather than member number')
++    const headings = await page.locator('thead th').allTextContents()
++    check(!headings.includes('会员标签'), 'member tag is removed from list columns')
++    check(headings.indexOf('会员编号') >= 0 && headings[headings.indexOf('会员编号') + 1] === '建档时间', 'member number immediately precedes creation date')
++    for (const name of ['查询设置', '重置', '收起']) check(await page.getByRole('button', { name, exact: true }).count() === 0, 'removed ' + name)
++    const more = await page.getByRole('button', { name: '更多筛选', exact: true }).boundingBox(), queryButton = await page.getByRole('button', { name: '查询', exact: true }).boundingBox()
++    check(more.x < queryButton.x && more.y === queryButton.y, 'more filters immediately left of query')
++    await page.getByRole('button', { name: '下一页', exact: true }).click()
++    await page.waitForFunction(() => window.fixture.queries.at(-1).page === 2)
++    check(await page.locator('tbody tr').count() === 20, 'actual host renders second server page')
++    const executed = await page.evaluate(() => window.fixture.queries.at(-1))
++    await page.getByRole('button', { name: '更多筛选', exact: true }).click()
++    check(await page.getByLabel('动态扩展字段筛选').count() === 1, 'non-quick metadata dynamically creates a filter')
++    check(await page.getByLabel('仅显示字段筛选').count() === 0 && await page.getByLabel('内部隐藏字段筛选').count() === 0, 'display/hidden fields cannot become filters')
++    await page.getByLabel('会员姓名筛选', { exact: true }).fill('Draft member')
++    await page.getByLabel('账户余额最小值').fill('0')
++    await page.getByRole('searchbox', { name: '综合查询' }).fill('Draft keyword')
++    check(await page.evaluate(() => window.fixture.queries.length) === 2, 'edits stay draft')
++    await page.getByRole('button', { name: '最近到店日期周期', exact: true }).click()
++    const calendar = page.getByRole('dialog', { name: '最近到店日期周期选择', exact: true })
++    await calendar.getByRole('button', { name: '上月', exact: true }).click()
++    await calendar.getByRole('button', { name: '确定', exact: true }).click()
++    check(await page.evaluate(() => window.fixture.queries.length) === 2, 'confirmed calendar is still unsubmitted filter draft')
++    await page.getByRole('button', { name: '导出', exact: true }).click()
++    await page.getByRole('button', { name: '创建导出任务', exact: true }).click()
++    await page.waitForFunction(() => window.fixture.exports.length === 1)
++    const exported = await page.evaluate(() => window.fixture.exports[0].query)
++    check(exported.page === 2 && exported.keyword === executed.keyword && exported.topFilters.length === 0, 'export uses successful second-page snapshot, not draft')
++    await page.getByRole('button', { name: '取消', exact: true }).click()
++    await page.getByRole('button', { name: '查询', exact: true }).click()
++    await page.waitForFunction(() => window.fixture.queries.length === 3)
++    const query = await page.evaluate(() => window.fixture.queries.at(-1))
++    check(query.page === 1 && query.keyword === 'Draft keyword' && query.filterRelation === 'any', 'query resets page and preserves saved OR relation')
++    check(query.topFilters.some(f => f.field === 'account_balance' && f.operator === 'gte' && f.value === 0), 'zero bound retained')
++    check(query.topFilters.some(f => f.field === 'latest_visit_date' && f.operator === 'gte' && f.value === '2026-09-01'), 'period start serialized')
++    check(query.topFilters.some(f => f.field === 'latest_visit_date' && f.operator === 'lte' && f.value === '2026-09-30'), 'period end serialized')
++    await page.getByLabel('会员姓名筛选', { exact: true }).fill('Retry draft')
++    await page.evaluate(() => { window.fixture.fail = true })
++    await page.getByRole('button', { name: '查询', exact: true }).click()
++    await page.getByRole('alert').waitFor()
++    check(await page.getByRole('button', { name: '导出', exact: true }).count() === 0, 'failure disables export')
++    check(await page.getByLabel('会员姓名筛选', { exact: true }).inputValue() === 'Retry draft', 'failure keeps retry draft')
++    await page.evaluate(() => { window.fixture.fail = false })
++    await page.getByRole('button', { name: '查询', exact: true }).click()
++    await page.getByRole('button', { name: '导出', exact: true }).waitFor()
++    const count = await page.evaluate(() => window.fixture.queries.length)
++    await page.getByRole('button', { name: '清空筛选', exact: true }).click()
++    check(await page.evaluate(() => window.fixture.queries.length) === count, 'clear changes only draft')
++    await page.getByRole('button', { name: '查询', exact: true }).click()
++    await page.waitForFunction(n => window.fixture.queries.length > n, count)
++    const cleared = await page.evaluate(() => window.fixture.queries.at(-1))
++    check(cleared.filters.length === 0 && cleared.topFilters.length === 0 && cleared.keyword === 'Draft keyword', 'clear removes extra filters without erasing keyword')
++    await page.getByRole('button', { name: '全部数据', exact: true }).click()
++    await page.waitForFunction(() => window.fixture.queries.at(-1).dataScope === 'all')
++    await page.getByRole('combobox', { name: '其他状态', exact: true }).selectOption('disabled')
++    await page.waitForFunction(() => window.fixture.queries.at(-1).businessStatus === 'disabled')
++    check(await page.getByRole('combobox', { name: '其他状态', exact: true }).inputValue() === 'disabled', 'all-data business status shortcut retained')
++    await page.getByRole('button', { name: '下一页', exact: true }).click()
++    await page.getByRole('button', { name: '下一页', exact: true }).click()
++    await page.waitForFunction(() => window.fixture.queries.at(-1).page === 3)
++    check(await page.locator('tbody tr').count() === 5, 'last page renders server remainder')
++    check(await page.getByRole('button', { name: '下一页', exact: true }).isDisabled(), 'last-page boundary disabled')
++    await page.evaluate(() => { window.fixture.empty = true })
++    await page.getByRole('button', { name: '查询', exact: true }).click()
++    await page.waitForFunction(() => window.fixture.queries.at(-1).page === 1)
++    await page.locator('.member-list-wrap').screenshot({ path: path.join(evidence, 'empty-' + width + '.png') })
++    await page.evaluate(() => { window.fixture.empty = false })
++    await page.getByRole('button', { name: '查询', exact: true }).click()
++    await page.getByRole('button', { name: '下一页', exact: true }).waitFor()
++    await page.screenshot({ path: path.join(evidence, 'expanded-' + width + '.png') })
++    const pagination = await page.locator('.table-pagination').boundingBox()
++    check(pagination && pagination.y + pagination.height <= 1009, 'pagination remains inside viewport with expanded filters')
++    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no page-level horizontal overflow')
++    await page.evaluate(() => { window.fixture.state.stateContextId = 'r55-other-context' })
++    await page.getByRole('button', { name: '更多筛选', exact: true }).waitFor()
++    check(await page.getByRole('searchbox', { name: '综合查询' }).inputValue() === '', 'account/store context remount clears previous draft')
++    // 元数据失败/延迟与真空结果必须区分；入口稳定，但绝不能渲染未授权的本地字段。
++    await page.evaluate(() => { window.fixture.capabilityFailure = true; window.fixture.state.stateContextId = 'r55-failed-context' })
++    await page.getByRole('alert').filter({ hasText: '请登录' }).waitFor()
++    check(await page.getByRole('button', { name: '更多筛选', exact: true }).isVisible(), 'capability failure retains filter entry')
++    check(await page.locator('.member-list-empty').count() === 0, 'initialization failure is not represented as no matching members')
++    const queryCount = await page.evaluate(() => window.fixture.queries.length)
++    await page.getByRole('button', { name: '更多筛选', exact: true }).click()
++    check(await page.getByLabel('会员姓名筛选', { exact: true }).count() === 0, 'capability failure never falls back to local unauthorized fields')
++    await page.screenshot({ path: path.join(evidence, 'capability-failed-' + width + '.png') })
++    await page.evaluate(() => { window.fixture.capabilityFailure = false; window.fixture.capabilityDelay = 250 })
++    await page.getByRole('button', { name: '查询', exact: true }).click()
++    check(await page.getByRole('button', { name: '收起筛选', exact: true }).isVisible(), 'filter entry remains during metadata reload')
++    await page.getByLabel('会员姓名筛选', { exact: true }).waitFor()
++    await page.getByRole('button', { name: '导出', exact: true }).waitFor()
++    check(await page.evaluate(n => window.fixture.queries.length === n + 1, queryCount), 'retry reloads capability then performs exactly one member query')
++    check(await page.locator('tbody tr').count() === 20, 'successful retry restores actual member projection')
++    check(errors.length === 0, 'no Vue/runtime errors'); views.push({ width, result: 'PASS' }); await page.close()
++  }
++} catch (error) {
++  for (const [index, context] of browser.contexts().entries()) for (const page of context.pages()) {
++    await page.screenshot({ path: path.join(evidence, 'failed-' + index + '.png') }).catch(() => {})
++    fs.writeFileSync(path.join(evidence, 'failed-' + index + '.txt'), await page.locator('body').innerText())
++  }
++  throw error
++} finally { await browser.close() }
++fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify({ result: 'PASS', checks, views, backendChecks: backend.checks, transport: 'isolated fixture; real MemberListView and query components', financialWrites: 0 }, null, 2))
++console.log('R55_MEMBER_FILTERS_PASS checks=' + checks)
+diff --git a/tests/cashier-v3/js/unified-query-frontend-contract.mjs b/tests/cashier-v3/js/unified-query-frontend-contract.mjs
+index bd972bc5..961fe072 100644
+--- a/tests/cashier-v3/js/unified-query-frontend-contract.mjs
++++ b/tests/cashier-v3/js/unified-query-frontend-contract.mjs
+@@ -493,9 +493,14 @@ assert.match(memberSource, /:executed-query="lastSuccessfulQuery"/, '工具栏
+ assert.match(memberSource, /role="alert"/, '查询失败以页面级可访问错误提示呈现')
+ assert.doesNotMatch(memberSource, /queryModel/, '失败请求不得通过 queryModel 伪装为已执行查询')
+ assert.match(memberSource, /await unifiedQuery\.load\(\{ silent: true \}\)[\s\S]*?await queryMembers\(initialQueryPayload/, 'stateContext 就绪后先加载服务端能力，再执行首屏真实查询')
+-assert.match(memberSource, /unifiedQueryActionSucceeded\(result\)[\s\S]*?await unifiedQuery\.load/, '保存查询设置成功后刷新 capability 与命令版本')
+-assert.equal((memberSource.match(/<UnifiedQueryToolbar/g) || []).length, 1, '会员列表只接入一个统一查询工具栏')
+-assert.match(memberSource, /settings-button-label="查询设置"/, '会员列表把唯一工具栏入口命名为查询设置')
++// R55 explicitly replaces member query settings/quick inputs with standard
++// inline filters; other pages still exercise the original toolbar above.
++assert.doesNotMatch(memberSource, /saveMemberQuerySettings|settings-button-label="查询设置"/, '会员列表不再保留已撤下的设置入口或无调用保存分支')
++assert.equal((memberSource.match(/<MemberReportQueryToolbar/g) || []).length, 1, '会员列表只接入一个标准筛选工具栏')
++const memberToolbarSource = fs.readFileSync(path.join(frontend, 'components/query/MemberReportQueryToolbar.vue'), 'utf8')
++assert.match(memberToolbarSource, /UnifiedReportQueryToolbar/, '会员更多筛选复用统一报表控件')
++assert.match(memberToolbarSource, /memberReportFields\(props\.fields\)/, '筛选项来自服务端字段白名单')
++assert.match(memberToolbarSource, /cloneUnifiedQuerySnapshot\(props\.executedQuery\)/, '会员导出继续冻结成功查询而非筛选草稿')
+ assert.doesNotMatch(memberSource, /@click="isSettingsOpen = true"/, '会员列表不另建重复的页面级查询设置按钮')
+ 
+ const settingsSource = fs.readFileSync(path.join(sharedFrontend, 'components/UnifiedQuerySettingsDrawer.vue'), 'utf8')
+diff --git a/tests/cashier-v3/php/r55-member-filter-metadata.php b/tests/cashier-v3/php/r55-member-filter-metadata.php
+new file mode 100644
+index 00000000..d87b0f92
+--- /dev/null
++++ b/tests/cashier-v3/php/r55-member-filter-metadata.php
+@@ -0,0 +1,39 @@
++<?php
++/** Real member registrar/executor contract; no application config or database. */
++$backend = dirname(__DIR__, 3) . '/后端代码';
++spl_autoload_register(static function ($class) use ($backend) {
++    if (strpos($class, 'app\\') !== 0) return;
++    $file = $backend . '/' . str_replace('\\', '/', $class) . '.php';
++    if (is_file($file)) require_once $file;
++});
++$registry = new \app\services\query\UnifiedQueryPageRegistry();
++(new \app\services\query\provider\MemberUnifiedQueryPageRegistrar())->register($registry);
++$registry->freeze();
++$fields = $registry->fieldsForCapability('member_list', []);
++$executor = new \app\services\query\UnifiedQueryExecutionServices($registry,
++    new \app\services\query\StructuredExpressionValidator($registry), new \app\services\query\StructuredExpressionEvaluator());
++$checks = 0;
++foreach ($fields as $field) {
++    if (!$field['capabilities']['filter']) continue;
++    $type = $field['type'];
++    $number = in_array($type, ['amount', 'integer', 'decimal'], true);
++    $yes = $number ? 200 : ($type === 'date' ? '2026-10-24' : ($type === 'datetime' ? '2026-10-24 12:30:22' : 'R55_TARGET'));
++    $no = $number ? 100 : ($type === 'date' ? '2026-10-23' : ($type === 'datetime' ? '2026-10-23 12:30:22' : 'R55_OTHER'));
++    $query = ['topFilters' => [['field' => $field['key'], 'operator' => $number ? 'gte' : ($type === 'text' ? 'contains' : 'eq'), 'value' => $yes]]];
++    $result = $executor->execute('member_list', [['member_id' => 1, $field['key'] => $yes], ['member_id' => 2, $field['key'] => $no]], [], $query, ['query_cutoff_date' => '2026-10-24'], static fn() => true);
++    if (array_column($result['rows'], 'member_id') !== [1]) throw new RuntimeException('Member filter not effective: ' . $field['key']);
++    $checks++;
++}
++$rows = []; for ($i = 1; $i <= 45; $i++) $rows[] = ['member_id' => $i, 'member_name' => 'R55_TARGET_' . $i, 'account_balance' => $i, 'store' => $i === 45 ? 'other' : 'allowed'];
++$query = ['page' => 2, 'limit' => 20, 'topFilters' => [['field' => 'account_balance', 'operator' => 'gte', 'value' => 0]]];
++$result = $executor->execute('member_list', $rows, [], $query, ['query_cutoff_date' => '2026-10-24'], static fn($row) => $row['store'] === 'allowed');
++if ((int)$result['pagination']['total'] !== 44 || count($result['rows']) !== 20) throw new RuntimeException('Pagination/scope mismatch');
++$checks++;
++$export = $executor->execute('member_list', $rows, [], $query + ['export' => ['scope' => 'query', 'fields' => ['member_name']]], ['query_cutoff_date' => '2026-10-24'], static fn($row) => $row['store'] === 'allowed');
++if (count($export['exportRows']) !== 44 || (int)$export['pagination']['total'] !== 44) throw new RuntimeException('Export/scope mismatch');
++$checks++;
++try {
++    $executor->execute('member_list', $rows, [], ['topFilters' => [['field' => 'unregistered_secret', 'operator' => 'eq', 'value' => 1]]], ['query_cutoff_date' => '2026-10-24'], static fn() => true);
++    throw new RuntimeException('Unknown filter was accepted');
++} catch (\app\services\query\UnifiedQueryException $error) { $checks++; }
++echo json_encode(['result' => 'PASS', 'checks' => $checks, 'fields' => $fields, 'databaseWrites' => 0], JSON_UNESCAPED_UNICODE), PHP_EOL;
+diff --git a/tests/report-basic/js/report-filter-contract.mjs b/tests/report-basic/js/report-filter-contract.mjs
+index 9a572864..c6b43965 100644
+--- a/tests/report-basic/js/report-filter-contract.mjs
++++ b/tests/report-basic/js/report-filter-contract.mjs
+@@ -68,6 +68,7 @@ assert.deepEqual(reportFilterDraft(fields, { filters: [{ field: 'amount', operat
+ const require = createRequire(path.join(repo, '前端代码/cashier-v3/package.json'))
+ const { parse, compileScript, compileStyle } = require('@vue/compiler-sfc')
+ const { build } = require('esbuild')
++const childStyles = []
+ const { chromium } = require(process.env.PLAYWRIGHT_ROOT || path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'))
+ const filename = path.join(shared, 'components/UnifiedReportQueryToolbar.vue')
+ const { descriptor, errors } = parse(readFileSync(filename, 'utf8'), { filename })
+@@ -85,6 +86,22 @@ const bundled = await build({
+       'leading-controls': () => [h('button', { class: 'button' }, '当前权限范围'), h('label', { class: 'date' }, ['从', h('input', { type: 'date', value: '2026-10-01' })]), h('label', { class: 'date' }, ['至', h('input', { type: 'date', value: '2026-10-23' })])],
+       'primary-actions': () => ['列名取值来源', '刷新', '导出'].map(label => h('button', { class: 'button' }, label))
+     }) }).mount('#app');`, resolveDir: path.dirname(filename), loader: 'js' },
++  // The shared toolbar may import real controls (for example the period
++  // picker). Compile those SFCs too; never stub a dependency to make tests pass.
++  plugins: [{ name: 'report-filter-sfc', setup(builder) {
++    builder.onLoad({ filter: /\.vue$/ }, args => {
++      const { descriptor, errors } = parse(readFileSync(args.path, 'utf8'), { filename: args.path })
++      assert.deepEqual(errors, [])
++      const id = createHash('sha256').update(args.path).digest('hex').slice(0, 10)
++      const child = compileScript(descriptor, { id, inlineTemplate: true, genDefaultAs: 'Component' })
++      for (const entry of descriptor.styles) {
++        const compiled = compileStyle({ source: entry.content, filename: args.path, id: `data-v-${id}`, scoped: entry.scoped })
++        assert.deepEqual(compiled.errors, [])
++        childStyles.push(compiled.code)
++      }
++      return { contents: `${child.content}\nComponent.__scopeId='data-v-${id}';export default Component`, loader: 'js', resolveDir: path.dirname(args.path) }
++    })
++  } }],
+   nodePaths: [path.join(repo, '前端代码/cashier-v3/node_modules')], bundle: true, write: false, format: 'iife', platform: 'browser'
+ })
+ const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
+@@ -98,6 +115,7 @@ try {
+     page.on('pageerror', error => errors.push(error.message))
+     await page.setContent('<html><head><meta charset="utf-8"></head><body><div id="app"></div></body></html>')
+     await page.addStyleTag({ content: `body{margin:0;padding:12px;background:#f5f7fa;font:13px Arial}*{box-sizing:border-box}.button{border:1px solid #d8e0ea;border-radius:6px;padding:6px 11px;background:white;color:#515a6e;cursor:pointer}.button--primary{background:#2d8cf0;color:white;border-color:#2d8cf0}.date{display:flex;align-items:center;gap:6px}.date input{width:116px;min-height:34px;border:1px solid #d8e0ea;border-radius:6px;padding:6px 8px}${style.code}` })
++    await page.addStyleTag({ content: childStyles.join('\n') })
+     await page.addScriptTag({ content: bundled.outputFiles[0].text })
+     const toggle = page.getByRole('button', { name: '更多筛选', exact: true })
+     await toggle.waitFor()
+diff --git a/前端代码/cashier-v3/src/components/query/MemberReportQueryToolbar.vue b/前端代码/cashier-v3/src/components/query/MemberReportQueryToolbar.vue
+new file mode 100644
+index 00000000..68e81cce
+--- /dev/null
++++ b/前端代码/cashier-v3/src/components/query/MemberReportQueryToolbar.vue
+@@ -0,0 +1,94 @@
++<script setup>
++import { computed, nextTick, ref, watch } from 'vue'
++import Download from '@lucide/vue/dist/esm/icons/download.mjs'
++import { UnifiedReportQueryToolbar, UnifiedQueryExportDrawer, cloneUnifiedQuerySnapshot } from '@mohe/unified-query-vue3'
++import { memberReportFields, memberReportDraftSnapshot, buildMemberReportQuery } from '@/services/memberReportFilters'
++
++// Member-only host for the shared statistics filter UI. Do not change any other
++// page's toolbar, or build/export a query from unsubmitted panel drafts.
++const props = defineProps({
++  fields: { type: Array, default: () => [] }, executedQuery: { type: Object, default: null },
++  statusOptions: { type: Array, default: () => [] },
++  queryCapability: { type: Object, default: () => ({}) }, settings: { type: Object, default: () => ({}) },
++  capabilityMessage: { type: String, default: '' },
++  isQueryLoading: Boolean, pageSize: { type: Number, default: 20 },
++  resultCount: { type: Number, default: 0 }, currentPageCount: { type: Number, default: 0 },
++  dataAsOf: { type: String, default: '' }, stateContextKey: { type: [String, Number], default: '' },
++  onCreateExport: Function, onQueryExportTask: Function, onDownloadExport: Function
++})
++const emit = defineEmits(['query'])
++const toolbar = ref(null), keyword = ref(''), scope = ref('normal'), original = ref({}), cleared = ref(false)
++const businessStatus = ref('')
++const statuses = computed(() => props.statusOptions.map(option => typeof option === 'string'
++  ? { value: option, label: option } : { value: option.value ?? option.label, label: option.label ?? option.value }))
++const exportOpen = ref(false), exportTask = ref(null)
++const fields = computed(() => props.queryCapability.enabled === true && props.queryCapability.pageCode === 'member_list'
++  ? memberReportFields(props.fields) : [])
++const panelQuery = computed(() => memberReportDraftSnapshot(props.executedQuery))
++watch(() => props.executedQuery, query => {
++  // Failed reads disable export, but retain the last draft for a safe retry.
++  if (query == null || (query.pageCode && query.pageCode !== 'member_list')) return
++  original.value = cloneUnifiedQuerySnapshot(query)
++  keyword.value = query.keyword || ''
++  scope.value = query.dataScope === 'all' ? 'all' : 'normal'
++  businessStatus.value = query.businessStatus || ''
++  cleared.value = false
++}, { immediate: true, deep: true })
++function query(panel) {
++  emit('query', buildMemberReportQuery(original.value, panel, keyword.value, scope.value, props.pageSize, cleared.value, businessStatus.value))
++}
++async function changeScope(value) {
++  if (props.isQueryLoading || scope.value === value) return
++  scope.value = value
++  // Preserve the original all-data status shortcut; returning to normal must
++  // clear an incompatible business status, not leave an invisible restriction.
++  if (value === 'normal') businessStatus.value = ''
++  await nextTick()
++  toolbar.value?.submitQuery()
++}
++const exportFields = computed(() => props.fields.filter(field => !field.hidden && field.key !== 'id' && field.capabilities?.export === true))
++const canExport = computed(() => {
++  const capability = props.queryCapability
++  return capability.enabled === true && capability.pageCode === 'member_list'
++    && capability.commandContext?.kind && capability.commandContext?.id
++    && props.executedQuery && (!props.executedQuery.pageCode || props.executedQuery.pageCode === 'member_list')
++    && Object.keys(props.executedQuery).length > 0 && !props.isQueryLoading
++    && capability.exportCapability?.enabled === true
++    && (capability.exportCapability.allowCurrentQuery === true || capability.exportCapability.allowCurrentPage === true)
++    && exportFields.value.length > 0
++})
++function createExport(configuration) {
++  if (!canExport.value || !props.onCreateExport) return { status: 'failed', message: '请先完成一次成功查询。' }
++  return props.onCreateExport({ query: cloneUnifiedQuerySnapshot(props.executedQuery), configuration })
++}
++</script>
++
++<template>
++  <UnifiedReportQueryToolbar ref="toolbar" :fields="fields" page-code="member_list" :executed-query="panelQuery" :is-query-loading="isQueryLoading" keep-filter-toggle :filter-message="capabilityMessage || (isQueryLoading ? '正在加载筛选字段…' : '暂无可用筛选字段。')" @query="query" @clear="cleared = true">
++    <template #leading-controls>
++      <label class="member-report-search"><span class="sr-only">综合查询</span><input v-model="keyword" type="search" placeholder="搜索会员姓名、完整手机号或会员姓名首字母" autocomplete="off" @keyup.enter="toolbar?.submitQuery()" /></label>
++    </template>
++    <template #primary-actions>
++      <div class="member-report-scope" role="group" aria-label="数据范围">
++        <button v-for="option in [{ value: 'normal', label: '正常数据' }, { value: 'all', label: '全部数据' }]" :key="option.value" type="button" :aria-pressed="scope === option.value" :disabled="isQueryLoading" @click="changeScope(option.value)">{{ option.label }}</button>
++      </div>
++      <select v-if="scope === 'all' && statuses.length" v-model="businessStatus" class="member-report-status" aria-label="其他状态" :disabled="isQueryLoading" @change="toolbar?.submitQuery()">
++        <option value="">其他状态</option><option v-for="option in statuses" :key="option.value" :value="option.value">{{ option.label }}</option>
++      </select>
++      <button v-if="canExport" type="button" class="button button--secondary" @click="exportOpen = true"><Download :size="16" />导出</button>
++      <slot name="primary-actions" />
++    </template>
++  </UnifiedReportQueryToolbar>
++  <UnifiedQueryExportDrawer v-if="exportOpen && canExport" :key="stateContextKey" :fields="exportFields" :visible-field-keys="settings.visibleFields || []" page-name="会员列表" :result-count="resultCount" :page-size="pageSize" :current-page-count="currentPageCount" :data-as-of="dataAsOf || queryCapability.dataAsOf" :export-capability="queryCapability.exportCapability" :initial-task="exportTask" :on-create="createExport" :on-query-task="onQueryExportTask" :on-download="onDownloadExport" @close="exportOpen = false" @task-change="exportTask = $event" />
++</template>
++
++<style scoped>
++.unified-report-query-toolbar { flex: none; }
++.member-report-search { display: flex; min-width: 0; width: 360px; max-width: 100%; }
++.member-report-search input { width: 100%; min-width: 0; min-height: 34px; padding: 7px 10px; border: 1px solid #d8e0ea; border-radius: 6px; box-sizing: border-box; font: inherit; }
++.member-report-scope { display: inline-flex; flex: none; min-height: 34px; border: 1px solid #d8e0ea; border-radius: 6px; overflow: hidden; }
++.member-report-scope button { border: 0; padding: 6px 12px; background: #f2f5f9; color: #475569; cursor: pointer; font: inherit; }
++.member-report-scope button[aria-pressed="true"] { background: #086ad8; color: white; }
++.member-report-scope button:disabled { cursor: wait; }
++.member-report-status { min-height: 34px; border: 1px solid #d8e0ea; border-radius: 6px; padding: 6px 8px; font: inherit; background: white; }
++</style>
+diff --git a/前端代码/cashier-v3/src/services/memberReportFilters.js b/前端代码/cashier-v3/src/services/memberReportFilters.js
+new file mode 100644
+index 00000000..a0209ac8
+--- /dev/null
++++ b/前端代码/cashier-v3/src/services/memberReportFilters.js
+@@ -0,0 +1,45 @@
++import { cloneUnifiedQuerySnapshot } from '@mohe/unified-query-vue3'
++
++const list = value => Array.isArray(value) ? value : []
++
++/** Only backend-authorized, active fields become controls. Visible columns and
++ * old quick-field preferences cannot grant filtering or change field identity.
++ */
++export function memberReportFields(fields = []) {
++  const seen = new Set()
++  return fields.filter(field => {
++    if (!field?.key || field.key === 'id' || field.hidden || seen.has(field.key)
++      || (field.status && field.status !== 'active') || field.capabilities?.filter !== true) return false
++    seen.add(field.key)
++    return true
++  }).map(field => {
++    const type = field.queryType || field.type || 'text'
++    const inputType = ['integer', 'decimal', 'amount', 'money', 'number', 'count'].includes(type) ? 'number'
++      : ['datetime', 'date_time'].includes(type) ? 'datetime-local' : ['enum', 'date', 'month'].includes(type) ? type : 'text'
++    const options = type === 'boolean' ? [{ value: true, label: '是' }, { value: false, label: '否' }]
++      : field.filter?.options || field.options || []
++    return { ...field, defaultQuick: false, filter: { ...field.filter, enabled: true,
++      type: type === 'boolean' ? 'enum' : inputType, range: inputType === 'date', options } }
++  })
++}
++
++/** Panel values are AND quick conditions. Preserve saved advanced filters and
++ * their OR relation separately; opening a panel never changes query semantics.
++ */
++export function memberReportDraftSnapshot(query, pageCode = 'member_list') {
++  if (query == null) return null
++  if (query.pageCode && query.pageCode !== pageCode) return { pageCode, filters: [] }
++  return { pageCode, limit: query.limit || 20, filters: list(query.topFilters).map(filter => cloneUnifiedQuerySnapshot(filter)) }
++}
++
++/** Same query contract for list, pagination and export; only the query button
++ * promotes a draft. Clear removes extra conditions, never keyword/scope/rights.
++ */
++export function buildMemberReportQuery(original, panel, keyword, dataScope, limit, cleared = false, businessStatus = original?.businessStatus || '') {
++  const query = cloneUnifiedQuerySnapshot(original)
++  return { ...query, pageCode: 'member_list', page: 1, limit,
++    keyword: String(keyword || '').trim(), dataScope: dataScope === 'all' ? 'all' : 'normal',
++    businessStatus: dataScope === 'all' ? businessStatus : '',
++    topFilters: list(panel.filters), filters: cleared ? [] : list(query.filters),
++    filterRelation: cleared ? 'all' : (query.filterRelation || 'all') }
++}
+diff --git a/前端代码/cashier-v3/src/views/MemberListView.vue b/前端代码/cashier-v3/src/views/MemberListView.vue
+index df0b6604..0966ae50 100644
+--- a/前端代码/cashier-v3/src/views/MemberListView.vue
++++ b/前端代码/cashier-v3/src/views/MemberListView.vue
+@@ -2,7 +2,7 @@
+ import { computed, nextTick, ref, watch } from 'vue'
+ import TablePagination from '@/components/common/TablePagination.vue'
+ import MemberCreatorPanel from '@/components/member/MemberCreatorPanel.vue'
+-import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
++import MemberReportQueryToolbar from '@/components/query/MemberReportQueryToolbar.vue'
+ import { useUnifiedQueryPage } from '@/composables/useUnifiedQueryPage'
+ import {
+   canUseCashierV3Operation,
+@@ -108,9 +108,16 @@ const queryDataAsOf = computed(() => memberCenter.value.dataAsOf
+ const defaultVisibleFieldKeys = computed(() => queryFields.value.filter((field) => field.defaultVisible !== false).map((field) => field.key))
+ const configuredVisibleFieldKeys = ref([...defaultVisibleFieldKeys.value])
+ const queryFieldMap = computed(() => new Map(queryFields.value.map((field) => [field.key, field])))
+-const visibleFields = computed(() => configuredVisibleFieldKeys.value
+-  .map((key) => queryFieldMap.value.get(key))
+-  .filter(Boolean))
++const visibleFields = computed(() => {
++  // 仅调整列表展示，不删除标签元数据或改写账号已保存的筛选/导出配置。
++  // 两列都获准显示时，会员编号紧邻建档时间；不擅自补回被配置隐藏的列。
++  const keys = configuredVisibleFieldKeys.value.filter((key) => key !== 'member_tag')
++  if (keys.includes('member_no') && keys.includes('created_at')) {
++    keys.splice(keys.indexOf('member_no'), 1)
++    keys.splice(keys.indexOf('created_at'), 0, 'member_no')
++  }
++  return keys.map((key) => queryFieldMap.value.get(key)).filter(Boolean)
++})
+ const summaryEntries = computed(() => {
+   const source = memberCenter.value.summaries
+   if (!source || typeof source !== 'object' || Array.isArray(source)) return []
+@@ -330,30 +337,6 @@ async function handleMemberMutationSaved({ member = null, payload = {} } = {}) {
+   await handleMemberCreated({ member, payload })
+ }
+ 
+-async function saveMemberQuerySettings(settings, options = {}) {
+-  const commandContext = queryCapability.value?.commandContext
+-  if (!commandContext) {
+-    return {
+-      result: {
+-        status: 'failed',
+-        code: 'QUERY_PREFERENCE_VERSION_REQUIRED',
+-        message: '查询设置版本尚未加载，请关闭设置后刷新页面再试。'
+-      }
+-    }
+-  }
+-  const stateContextId = state.stateContextId
+-  const result = await requestAction('save-member-query-settings', {
+-    pageCode: MEMBER_QUERY_PAGE_CODE,
+-    settings,
+-    ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+-    ...(commandContext ? { commandContexts: [commandContext] } : {})
+-  })
+-  if (unifiedQueryActionSucceeded(result) && stateContextId === state.stateContextId) {
+-    await unifiedQuery.load({ silent: true })
+-  }
+-  return result
+-}
+-
+ let memberQuerySequence = 0
+ 
+ function clearMemberQueryResult(message = '') {
+@@ -366,19 +349,29 @@ function clearMemberQueryResult(message = '') {
+ async function queryMembers(query = {}, resetPage = true) {
+   const sequence = ++memberQuerySequence
+   const stateContextId = state.stateContextId
+-  const requestedLimit = Math.max(1, Number(query.limit || query.pageSize) || pageSize.value)
+-  const nextQuery = {
+-    // 分页只能继承已经成功执行的查询；草稿控件或一次失败请求都不能成为导出／分页基线。
+-    ...cloneUnifiedQuerySnapshot(lastSuccessfulQuery.value),
+-    ...cloneUnifiedQuerySnapshot(query),
+-    page: resetPage ? 1 : Math.max(1, Number(query.page) || page.value),
+-    limit: requestedLimit
+-  }
+-  delete nextQuery.pageSize
+   selectedMemberIds.value = []
+   isQueryLoading.value = true
+   queryError.value = ''
+   try {
++    // 初始化和重试共用同一条能力读取路径；失败须显示真实错误，不能伪装成空列表。
++    // 仅在服务端重新授权字段后查询，绝不以本地字段白名单降级绕过权限。
++    if (queryCapability.value.enabled !== true) {
++      const capability = await unifiedQuery.load({ silent: true })
++      if (sequence !== memberQuerySequence || stateContextId !== state.stateContextId) return
++      if (capability?.enabled !== true) {
++        clearMemberQueryResult(capability?.reason || '会员筛选字段加载失败，请重试。')
++        return
++      }
++    }
++    const requestedLimit = Math.max(1, Number(query.limit || query.pageSize) || pageSize.value)
++    const nextQuery = {
++      // 分页只能继承已经成功执行的查询；草稿控件或一次失败请求都不能成为导出／分页基线。
++      ...cloneUnifiedQuerySnapshot(lastSuccessfulQuery.value || initialQueryPayload(queryCapability.value)),
++      ...cloneUnifiedQuerySnapshot(query),
++      page: resetPage ? 1 : Math.max(1, Number(query.page) || page.value),
++      limit: requestedLimit
++    }
++    delete nextQuery.pageSize
+     const result = await requestAction('query-members', nextQuery)
+     if (sequence !== memberQuerySequence || stateContextId !== state.stateContextId) return result
+     const projection = extractUnifiedQueryMemberProjection(result)
+@@ -441,21 +434,15 @@ function initialQueryPayload(capability) {
+   }
+ }
+ 
+-let memberBootstrapSequence = 0
+ watch(
+   () => state.stateContextId,
+   async (stateContextId) => {
+-    const bootstrapSequence = ++memberBootstrapSequence
+     memberQuerySequence += 1
+     clearMemberQueryResult()
+     isQueryLoading.value = false
+     unifiedQuery.reset()
+     if (!stateContextId) return
+-    const loadedCapability = await unifiedQuery.load({ silent: true })
+-    if (bootstrapSequence !== memberBootstrapSequence
+-      || stateContextId !== state.stateContextId
+-      || loadedCapability?.enabled !== true) return
+-    await queryMembers(initialQueryPayload(loadedCapability), true)
++    await queryMembers({}, true)
+   },
+   { immediate: true }
+ )
+@@ -669,34 +656,23 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
+ 
+ <template>
+   <section class="member-list-page" :class="{ 'member-list-page--batch': canBatchOperate, 'member-list-page--insights': hasQueryInsights }" aria-label="会员列表">
+-    <UnifiedQueryToolbar
+-      search-placeholder="搜索会员姓名、完整手机号或会员编号"
+-      settings-button-label="查询设置"
+-      :status-options="statusOptions"
++    <!-- A context change remounts drafts and export tasks; member/store data
++         must never inherit another operator's in-progress filter state. -->
++    <MemberReportQueryToolbar
++      :key="state.stateContextId || ''"
+       :fields="queryFields"
+-      :page-code="MEMBER_QUERY_PAGE_CODE"
+-      page-name="会员列表"
++      :status-options="statusOptions"
+       :result-count="total"
+       :page-size="pageSize"
+-      :current-page="page"
+       :current-page-count="records.length"
+       :data-as-of="queryDataAsOf"
+       :query-capability="queryCapability"
++      :capability-message="unifiedQuery.loadError.value"
+       :executed-query="lastSuccessfulQuery"
+       :is-query-loading="isQueryLoading"
+       :state-context-key="state.stateContextId || ''"
+-      default-sort-field="建档时间"
+-      lock-store-selector
+-      :current-store="state.currentStore"
+       :settings="effectiveQuerySettings"
+       @query="queryMembers"
+-      @settings-applied="applyQuerySettings"
+-      :on-save-settings="saveMemberQuerySettings"
+-      :on-save-field-aliases="unifiedQuery.saveFieldAliases"
+-      :on-save-custom-field="unifiedQuery.saveCustomField"
+-      :on-change-custom-field-status="unifiedQuery.changeCustomFieldStatus"
+-      :on-archive-custom-field="unifiedQuery.archiveCustomField"
+-      :on-upgrade-saved-query-field-reference="unifiedQuery.upgradeSavedQueryFieldReference"
+       :on-create-export="unifiedQuery.createExport"
+       :on-query-export-task="unifiedQuery.queryExportTask"
+       :on-download-export="downloadMemberExport"
+@@ -704,7 +680,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
+       <template #primary-actions>
+         <button v-if="canCreateMember" type="button" class="button button--primary" @click="openMemberCreator()">新增会员</button>
+       </template>
+-    </UnifiedQueryToolbar>
++    </MemberReportQueryToolbar>
+ 
+     <p v-if="isQueryLoading" class="member-list-query-message" role="status">正在查询会员数据…</p>
+     <p v-else-if="queryError" class="member-list-query-message member-list-query-message--error" role="alert">{{ queryError }}</p>
+@@ -752,7 +728,7 @@ async function downloadMemberExport({ url, fileName, task } = {}) {
+           </tr>
+         </tbody>
+       </table>
+-      <div v-if="!records.length" class="member-list-empty">暂无符合条件的会员，请调整查询条件或新增会员。</div>
++      <div v-if="!records.length && !queryError && !isQueryLoading" class="member-list-empty">暂无符合条件的会员，请调整查询条件或新增会员。</div>
+     </main>
+     <TablePagination :total="total" :page="page" :page-size="pageSize" @change="changeMemberPage" />
+ 
+diff --git a/前端代码/shared/unified-query-vue3/src/components/UnifiedReportQueryToolbar.vue b/前端代码/shared/unified-query-vue3/src/components/UnifiedReportQueryToolbar.vue
+index 76fd21b4..9fe050fd 100644
+--- a/前端代码/shared/unified-query-vue3/src/components/UnifiedReportQueryToolbar.vue
++++ b/前端代码/shared/unified-query-vue3/src/components/UnifiedReportQueryToolbar.vue
+@@ -1,13 +1,17 @@
+ <script setup>
+ import { computed, ref, watch } from 'vue'
+ import { cloneUnifiedQuerySnapshot } from '../contracts/unifiedQueryContract.js'
+-import { buildReportFilterQuery, reportFilterDraft, reportFilterFields, reportFilterOptions, reportFilterType } from '../contracts/reportFilters.js'
++import { buildReportFilterQuery, reportFilterDraft, reportFilterFields, reportFilterIsRange, reportFilterOptions, reportFilterType } from '../contracts/reportFilters.js'
++import UnifiedQueryDateRange from './UnifiedQueryDateRange.vue'
+ 
+ // 报表专用外观独立于旧 UnifiedQueryToolbar，既有消费者不会因新标准改变呈现。
+ const props = defineProps({
+   fields: { type: Array, default: () => [] },
+   pageCode: { type: String, default: '' },
+   isQueryLoading: { type: Boolean, default: false },
++  // 元数据尚未返回也可保留入口；不因此生成或授权任何筛选字段。
++  keepFilterToggle: { type: Boolean, default: false },
++  filterMessage: { type: String, default: '' },
+   executedQuery: { type: Object, default: () => ({}) }
+ })
+ const emit = defineEmits(['query', 'clear'])
+@@ -33,7 +37,7 @@ watch([() => props.pageCode, () => JSON.stringify(props.executedQuery), filterFi
+     const restored = reportFilterDraft(props.fields, snapshot.value)
+     draft.value = Object.fromEntries(filterFields.value.map((field) => {
+       const value = draft.value[field.key]
+-      const sameShape = reportFilterType(field) === 'number' ? value && typeof value === 'object' : typeof value !== 'object'
++      const sameShape = reportFilterIsRange(field) ? value && typeof value === 'object' : typeof value !== 'object'
+       return [field.key, Object.hasOwn(draft.value, field.key) && sameShape ? value : restored[field.key]]
+     }))
+   }
+@@ -67,15 +71,17 @@ defineExpose({ submitQuery })
+   <section class="unified-report-query-toolbar" aria-label="报表查询条件">
+     <div class="unified-report-query-toolbar__primary">
+       <div v-if="$slots['leading-controls']" class="unified-report-query-toolbar__leading"><slot name="leading-controls" /></div>
+-      <button v-if="filterFields.length" type="button" class="button button--secondary unified-report-query-toolbar__toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起筛选' : '更多筛选' }}</button>
++      <button v-if="filterFields.length || keepFilterToggle" type="button" class="button button--secondary unified-report-query-toolbar__toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起筛选' : '更多筛选' }}</button>
+       <button type="button" class="button button--primary unified-report-query-toolbar__query" :disabled="isQueryLoading" :aria-busy="isQueryLoading" @click="submitQuery">{{ isQueryLoading ? '查询中' : '查询' }}</button>
+       <div v-if="$slots['primary-actions']" class="unified-report-query-toolbar__actions" aria-label="报表操作"><slot name="primary-actions" /></div>
+     </div>
++    <p v-if="expanded && !filterFields.length && filterMessage" class="unified-report-query-toolbar__error" role="status">{{ filterMessage }}</p>
+     <div v-if="expanded && filterFields.length" class="unified-report-query-toolbar__panel" aria-label="报表高级筛选">
+       <div class="unified-report-query-toolbar__fields" @keydown.enter.prevent="submitQuery">
+         <label v-for="field in filterFields" :key="field.key" class="unified-report-query-toolbar__field" :class="{ 'unified-report-query-toolbar__field--range': reportFilterType(field) === 'number' }">
+           <span>{{ field.label || field.key }}</span>
+-          <span v-if="reportFilterType(field) === 'number'" class="unified-report-query-toolbar__range">
++          <UnifiedQueryDateRange v-if="reportFilterType(field) === 'date' && reportFilterIsRange(field)" v-model="draft[field.key]" :label="`${field.label || field.key}周期`" />
++          <span v-else-if="reportFilterType(field) === 'number'" class="unified-report-query-toolbar__range">
+             <input v-model="draft[field.key].min" type="number" step="any" placeholder="最小值" :aria-label="`${field.label || field.key}最小值`">
+             <span>至</span>
+             <input v-model="draft[field.key].max" type="number" step="any" placeholder="最大值" :aria-label="`${field.label || field.key}最大值`">
+diff --git a/前端代码/shared/unified-query-vue3/src/contracts/reportFilters.js b/前端代码/shared/unified-query-vue3/src/contracts/reportFilters.js
+index d2c95ee2..babf5e55 100644
+--- a/前端代码/shared/unified-query-vue3/src/contracts/reportFilters.js
++++ b/前端代码/shared/unified-query-vue3/src/contracts/reportFilters.js
+@@ -22,6 +22,12 @@ export function reportFilterType(field) {
+   return ['enum', 'date', 'month', 'datetime-local'].includes(type) ? type : 'text'
+ }
+ 
++// Date-range behavior is explicitly opted into by field metadata. Existing
++// report single-date controls retain their equality semantics unchanged.
++export function reportFilterIsRange(field) {
++  return reportFilterType(field) === 'number' || (reportFilterType(field) === 'date' && field.filter?.range === true)
++}
++
+ // 保留 0、false 等合法枚举值，禁止用显示标签替代后端 option.value。
+ export function reportFilterOptions(field) {
+   const options = field.filter?.options || field.options || []
+@@ -34,7 +40,7 @@ export function reportFilterOptions(field) {
+ }
+ 
+ function supportsFilter(field, filter) {
+-  return reportFilterType(field) === 'number'
++  return reportFilterIsRange(field)
+     ? ['eq', 'gte', 'lte', 'between'].includes(filter.operator)
+     : filter.operator === (reportFilterType(field) === 'text' ? 'contains' : 'eq')
+ }
+@@ -42,13 +48,13 @@ function supportsFilter(field, filter) {
+ // 外部查询复用统一 parser 的字段别名、操作符和 between 格式；恢复时不修改原快照。
+ export function reportFilterDraft(fields, query = {}) {
+   const available = reportFilterFields(fields)
+-  const draft = Object.fromEntries(available.map((field) => [field.key, reportFilterType(field) === 'number' ? { min: '', max: '' } : '']))
++  const draft = Object.fromEntries(available.map((field) => [field.key, reportFilterIsRange(field) ? { min: '', max: '' } : '']))
+   for (const raw of Array.isArray(query?.filters) ? query.filters : []) {
+     const filter = normalizeUnifiedQueryFilter(raw)
+     const field = available.find((item) => item.key === filter?.field)
+     if (!field || !supportsFilter(field, filter)) continue
+     // datetime-local 只在控件使用 T；后端事实与筛选仍用同一秒精度时间表达。
+-    if (reportFilterType(field) !== 'number') draft[field.key] = reportFilterType(field) === 'datetime-local'
++    if (!reportFilterIsRange(field)) draft[field.key] = reportFilterType(field) === 'datetime-local'
+       ? String(filter.value || '').replace(' ', 'T') : filter.value
+     else {
+       const range = draft[field.key]
+@@ -72,12 +78,15 @@ export function buildReportFilterQuery(fields, draft, executedQuery = {}, pageCo
+   })
+   for (const field of available) {
+     const value = draft[field.key]
+-    if (reportFilterType(field) === 'number') {
++    if (reportFilterIsRange(field)) {
+       const range = value || {}
+       const bounds = [range.min, range.max].filter(hasValue)
+-      if (bounds.some((bound) => !Number.isFinite(Number(bound)))) throw new Error(`${field.label || field.key}请输入有效数值`)
+-      if (hasValue(range.min) && hasValue(range.max) && Number(range.min) > Number(range.max)) {
+-        throw new Error(`${field.label || field.key}的最小值不能大于最大值`)
++      const date = reportFilterType(field) === 'date'
++      if (date ? bounds.some(bound => !/^\d{4}-\d{2}-\d{2}$/.test(String(bound))) : bounds.some(bound => !Number.isFinite(Number(bound)))) {
++        throw new Error(`${field.label || field.key}请输入有效${date ? '日期' : '数值'}`)
++      }
++      if (hasValue(range.min) && hasValue(range.max) && (date ? String(range.min) > String(range.max) : Number(range.min) > Number(range.max))) {
++        throw new Error(`${field.label || field.key}的${date ? '开始日期不能晚于结束日期' : '最小值不能大于最大值'}`)
+       }
+       if (hasValue(range.min)) filters.push({ field: field.key, operator: 'gte', value: range.min })
+       if (hasValue(range.max)) filters.push({ field: field.key, operator: 'lte', value: range.max })

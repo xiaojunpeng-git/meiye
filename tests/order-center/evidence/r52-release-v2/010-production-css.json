@@ -1,0 +1,48 @@
+[
+  {
+    "site": "010",
+    "viewport": {
+      "width": 1515,
+      "height": 1009
+    },
+    "cssName": "assets/index-94db9e1f.css",
+    "cssSHA256": "94db9e1fa16452248c8280a729c3632658d057e791c1669d94b37d82729ca9fe",
+    "dimensions": {
+      "overflow": "auto",
+      "width": 1458,
+      "height": 732,
+      "scrollWidth": 2902,
+      "scrollHeight": 1222
+    },
+    "offsets": [
+      400,
+      200
+    ],
+    "scope": "data-v-28859c32",
+    "result": "PASS",
+    "fixture": "real candidate Vue DOM; synthetic rows; production CSS bytes"
+  },
+  {
+    "site": "010",
+    "viewport": {
+      "width": 960,
+      "height": 720
+    },
+    "cssName": "assets/index-94db9e1f.css",
+    "cssSHA256": "94db9e1fa16452248c8280a729c3632658d057e791c1669d94b37d82729ca9fe",
+    "dimensions": {
+      "overflow": "auto",
+      "width": 903,
+      "height": 443,
+      "scrollWidth": 2902,
+      "scrollHeight": 1222
+    },
+    "offsets": [
+      400,
+      200
+    ],
+    "scope": "data-v-28859c32",
+    "result": "PASS",
+    "fixture": "real candidate Vue DOM; synthetic rows; production CSS bytes"
+  }
+]

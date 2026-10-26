@@ -1,0 +1,9 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "files": {
+    "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue": "9f81e5060a411f4710ee96ee3abaa325be00d2d5bf990784b4fa7f2b7a2a5300",
+    "前端代码/cashier-v3/src/styles/base.css": "fcba48defe6e15225909192e445624bedead3827197264f76c77ada3927e84e6"
+  },
+  "existingStatus": " M 前端代码/cashier-v3/src/styles/base.css\n M 前端代码/cashier-v3/src/views/StoreBusinessReportView.vue\n",
+  "remote": "not applicable"
+}

@@ -159,6 +159,10 @@ final class CashierV3MemberDebtProjectionServices
                 'member' => [
                     'id' => (string)$memberId,
                     'memberId' => $memberId,
+                    // Debt may be opened outside the cashier's active member.
+                    // Supply that authorized member's per-kind source choices.
+                    'sourceDefaults' => (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())
+                        ->initialChoices($scope->tenantId(), $operator->storeId(), $memberId),
                     'name' => $name !== '' ? $name : '未命名会员',
                     'phone' => (string)($member['phone'] ?? ''),
                     'memberNo' => (string)($member['bar_code'] ?? ''),

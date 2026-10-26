@@ -1,0 +1,25 @@
+{
+  "commit": "711a7f8a951b26a3dfe17e32797c44d6768ef1d6",
+  "branch": "release/r29-fund-summary-20261024",
+  "baselineCommit": "1f4bd522bcf38b9fc944ba7d1e2a2a15244b9212",
+  "head": "4edd7a8125a79a227a8222ebed71cb31c82b4c82",
+  "sourceSha256": "ef6ac05973584d0d5d0fc72ab7a60f663e44252b06e19d27c7ae7087d06ddff3",
+  "actualFiles": [
+    "scripts/r29-fund-instance.php",
+    "scripts/r29-fund-release.py",
+    "scripts/r29-fund-smoke.php",
+    "tests/fund-management/evidence/R29-ledger-summary/browser-export.log",
+    "tests/fund-management/evidence/R29-ledger-summary/fixed-files.json",
+    "tests/fund-management/evidence/R29-ledger-summary/http-xlsx-readback.log",
+    "tests/fund-management/evidence/R29-ledger-summary/initial.json",
+    "tests/fund-management/evidence/R29-ledger-summary/round.patch",
+    "tests/fund-management/evidence/R29-ledger-summary/xlsx-summary.log",
+    "tests/fund-management/evidence/R29-ledger-summary/验收说明.md",
+    "tests/fund-management/js/r29-ledger-export-summary.cjs",
+    "tests/fund-management/php/r29-ledger-export-http-readback.php",
+    "tests/fund-management/php/r29-ledger-export-summary.php",
+    "后端代码/app/services/fund/StoreFundServices.php"
+  ],
+  "sharedIndexUntouched": true,
+  "pmAccepted": true
+}

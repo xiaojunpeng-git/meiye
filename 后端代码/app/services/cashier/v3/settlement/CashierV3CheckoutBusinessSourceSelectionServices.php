@@ -7,12 +7,13 @@ use app\services\cashier\v3\CashierV3DataScopeContext;
 use app\services\cashier\v3\CashierV3OperatorScope;
 use app\services\cashier\v3\CashierV3TransactionGuard;
 use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
+use app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices;
 use think\facade\Db;
 
 /**
  * A business source is an order-level checkout choice, separate from the
- * checkout's technical source-document references. It has its own optimistic
- * version so changing the choice never rebuilds payment or line drafts.
+ * checkout's technical source-document references. Snapshot checkout captures
+ * this choice once; legacy edit commands retain their existing guarded path.
  */
 final class CashierV3CheckoutBusinessSourceSelectionServices
 {
@@ -74,17 +75,9 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             if ($kind !== self::KIND_SALE) {
                 return self::emptySelection();
             }
-            $request = (array)Db::name('cashier_v3_checkout_request')
-                ->where('request_id', $requestId)
-                ->where('tenant_id', $tenantId)
-                ->where('store_id', $storeId)
-                ->field('member_id')->find();
-            return $this->latestNormalMemberSource(
-                $tenantId,
-                $storeId,
-                (int)($request['member_id'] ?? 0),
-                true
-            );
+            // Settlement consumes the prepared choice only. An empty choice must
+            // never acquire a different member-history/default source here.
+            throw self::invalid('business_source_snapshot_missing', '本次客户来源尚未确认，请返回重新选择。');
         }
         $this->config->assertCheckoutSourceAllowed((int)$row['primary_source_id'], (string)$row['primary_source_name_snapshot']);
         return self::rowProjection($row);
@@ -101,6 +94,32 @@ final class CashierV3CheckoutBusinessSourceSelectionServices
             return self::emptySelection();
         }
         return self::rowProjection($row);
+    }
+
+    /** Resolve defaults only while materializing the one authoritative snapshot. */
+    public function prepareChoice(string $kind, string $tenantId, int $storeId, int $memberId, array $candidate): array
+    {
+        return (new CashierV3BusinessSourcePolicyServices())->resolveChoice(
+            $kind, $tenantId, $storeId, $memberId, $candidate
+        );
+    }
+
+    /** Validate a confirmed choice against the directory, never reread policy
+     * defaults or member history during final settlement. Preparation owns defaults.
+     */
+    public function validateConfirmedChoice(string $kind, string $tenantId, int $storeId, int $memberId, array $source): array
+    {
+        $primaryId = (int)($source['primarySourceId'] ?? 0);
+        $secondaryId = (int)($source['secondarySourceId'] ?? 0);
+        if ($tenantId === '' || $storeId <= 0 || $primaryId <= 0 || $secondaryId < 0) {
+            throw self::invalid('business_source_confirmation_invalid', '请选择本次业务的有效客户来源。');
+        }
+        $this->config->assertCheckoutSourceAllowed($primaryId);
+        $resolved = $this->config->resolveSourceSnapshot($primaryId, $secondaryId, true);
+        // IDs are checked against the directory, but names already confirmed
+        // in this bill remain its historical snapshot. Older ID-only clients
+        // receive names from the authority at their first materialization.
+        return $source + $resolved;
     }
 
     /**

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BadgeDollarSign from '@lucide/vue/dist/esm/icons/badge-dollar-sign.mjs'
 import CalendarDays from '@lucide/vue/dist/esm/icons/calendar-days.mjs'
@@ -19,6 +19,8 @@ import MemberDebtOverlay from '@/components/member/MemberDebtOverlay.vue'
 import MemberDebtReminderOverlay from '@/components/member/MemberDebtReminderOverlay.vue'
 import DirectGiftOverlay from '@/components/member/DirectGiftOverlay.vue'
 import RechargeOverlay from '@/components/member/RechargeOverlay.vue'
+import CheckoutBusinessSourceOverlay from '@/components/cashier/CheckoutBusinessSourceOverlay.vue'
+import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import QueryEntitySelectorOverlay from '@/components/query/QueryEntitySelectorOverlay.vue'
 import RoomAssignmentOverlay from '@/components/room/RoomAssignmentOverlay.vue'
 import ServiceCompletionOverlay from '@/components/service/ServiceCompletionOverlay.vue'
@@ -49,12 +51,26 @@ import { responseDataBlock } from '@/services/cashierV3EntitlementDraftContract'
 const route = useRoute()
 const router = useRouter()
 const state = useCashierV3State()
+// The settings page has its own authenticated identity projection. Keep it local
+// to this route rather than replacing a cashier draft/root business snapshot.
+const storeSettingsNavigation = ref(null)
+provide('store-settings-navigation', storeSettingsNavigation)
+const settingsNavigation = computed(() => {
+  const value = storeSettingsNavigation.value
+  return route.name === 'cashier-v3-store-settings' && value?.contextId === state.stateContextId
+    && (!state.currentStore?.id || Number(state.currentStore.id) === Number(value.store_id)) ? value : null
+})
+// Fixed-source mode hides attribution inputs, not entitlement/card provenance.
+const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const isOperationHelpOpen = ref(false)
 const toolbarBusinessDate = ref(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()))
 const toolbarBusinessDateReason = ref('')
 const toolbarBusinessSource = ref({ displayNameSnapshot: '', primarySourceId: 0, secondarySourceId: 0 })
 const isMemberSelectorOpen = ref(false)
 const memberSelectorContext = ref('cashier')
+// Identify a browser-local customer choice across the async summary read;
+// selecting A, then B, then A still constitutes three distinct draft choices.
+const cashierCustomerSelectionEpoch = ref(0)
 let memberSelectorQuerySequence = 0
 const memberSelectorRequiresMember = ref(false)
 // 推荐人查询独立于主会员选择器。新建会员面板本身位于主选择器内部，
@@ -68,6 +84,9 @@ const isMemberDetailOpen = ref(false)
 const memberDetailInitialTab = ref('profile')
 const memberDetailFallback = ref({})
 const isMemberDetailLoading = ref(false)
+// A failed authority read is not an empty history. Keep query failure separate
+// from the last successful detail, and accept it only for the latest request.
+const memberDetailLoadError = ref('')
 const activeMemberDetailId = ref(null)
 let memberDetailLoadSequence = 0
 const isDebtReminderOpen = ref(false)
@@ -105,6 +124,7 @@ const pendingMemberTopAction = ref(null)
 const memberSelectorInitialView = ref('selector')
 const isCardOperationMenuOpen = ref(false)
 const rechargeSession = ref(null)
+const rechargeSourceSelector = ref(null)
 const isRechargeSubmitting = ref(false)
 const directGiftSession = ref(null)
 const isDirectGiftSubmitting = ref(false)
@@ -304,6 +324,7 @@ const visibleInventoryFeatureItems = computed(() => inventoryFeatureItems.filter
 const managementFeatureDefinitions = [
   { key: 'staff', featureCode: 'cashier.v3.management.staff', label: '人员管理', to: { name: 'cashier-v3-staff-list' } },
   { key: 'room-settings', featureCode: 'cashier.v3.management.rooms', label: '房间设置', to: { name: 'cashier-v3-room-settings' } },
+  { key: 'store-settings', featureCode: 'cashier.v3.management.store_profile', label: '门店设置', to: { name: 'cashier-v3-store-settings' } },
   { key: 'business-dashboard', featureCode: 'cashier.v3.management.dashboard', label: '经营看板', to: { name: 'cashier-v3-business-dashboard' } }
 ]
 const isInventoryWorkspaceOpen = ref(false)
@@ -367,6 +388,8 @@ const cardOperationItems = Object.freeze([
   { key: 'card-extension', label: '卡延期', featureCode: 'cashier.v3.cashier.card.extend' },
   { key: 'card-transfer', label: '卡转让', featureCode: 'cashier.v3.cashier.card.transfer' },
   { key: 'card-disable', label: '卡停用', featureCode: 'cashier.v3.cashier.card.disable' },
+  // 转余额有独立权限；不可借停用权限开放资金权益操作。
+  { key: 'card-to-balance', label: '卡转余额', featureCode: 'cashier.v3.cashier.card.to_balance' },
   { key: 'card-enable', label: '卡启用', featureCode: 'cashier.v3.cashier.card.enable' },
   { key: 'project-replacement', label: '项目替换', featureCode: 'cashier.v3.cashier.card.project_replace' },
   { key: 'project-upgrade', label: '项目升级', featureCode: 'cashier.v3.cashier.card.project_upgrade' }
@@ -792,7 +815,7 @@ async function openCashierMemberTopAction(action) {
       if (isCashierPage.value) {
         window.dispatchEvent(new CustomEvent('cashier-v3:open-recharge', { detail: normalizedOverlay }))
       } else {
-        rechargeSession.value = normalizedOverlay
+        void beginRechargeSession(normalizedOverlay)
       }
     }
   }
@@ -801,14 +824,59 @@ async function openCashierMemberTopAction(action) {
 
 async function submitRecharge(payload = {}) {
   if (isRechargeSubmitting.value || !rechargeSession.value) return
+  const source = rechargeSession.value.businessSourceSnapshot || {}
+  if (Number(source.primarySourceId || 0) <= 0) {
+    return { result: { status: 'failed', message: source.configurationError || '本次充值来源尚未确认，请重新进入充值。' } }
+  }
   isRechargeSubmitting.value = true
   try {
-    const result = await requestCashierV3Action('submit-recharge', payload)
+    const result = await requestCashierV3Action('submit-recharge', { ...payload, businessSource: { ...source } })
     if (isSucceededResult(result)) rechargeSession.value = null
     return result
   } finally {
     isRechargeSubmitting.value = false
   }
+}
+
+/** The non-cashier recharge entry confirms its own per-member/kind choice.
+ * It cannot borrow the cashier's purchase choice or another member's defaults.
+ */
+async function beginRechargeSession(session) {
+  const memberId = Number(session?.member?.memberId || session?.member?.id || session?.balance?.memberId || 0)
+  const rootMatches = Number(state.businessSourceDefaultsMemberId ?? -1) === memberId
+  // Fixed source configuration is shared by members of this instance; only
+  // previous-source suggestions require an exact member match.
+  const defaults = session?.sourceDefaults || session?.member?.sourceDefaults
+    || (rootMatches || !businessSourceEnabled.value ? state.businessSourceDefaults : {}) || {}
+  // Retry loading the directory without replacing this recharge's selection.
+  rechargeSession.value = { ...session, businessSourceSnapshot: { ...(session?.businessSourceSnapshot || defaults.recharge || {}) } }
+  if (!businessSourceEnabled.value) {
+    rechargeSourceSelector.value = null
+    return
+  }
+  const selectedSession = rechargeSession.value
+  rechargeSourceSelector.value = { sources: [], ...selectedSession.businessSourceSnapshot, loadError: '' }
+  const selector = rechargeSourceSelector.value
+  try {
+    const catalog = await loadCheckoutBusinessCatalog()
+    if (selectedSession === rechargeSession.value && selector === rechargeSourceSelector.value) selector.sources = catalog.sources
+  } catch (error) {
+    if (selector === rechargeSourceSelector.value) selector.loadError = String(error?.message || '客户来源加载失败，请重试。')
+  }
+}
+
+function confirmRechargeSource(selection) {
+  const selector = rechargeSourceSelector.value
+  const primary = (selector?.sources || []).find((item) => Number(item.id) === Number(selection.primarySourceId))
+  const secondary = (primary?.children || []).find((item) => Number(item.id) === Number(selection.secondarySourceId))
+  if (!rechargeSession.value || !primary || (Number(primary.requireSecondary) === 1 && !secondary)) return
+  rechargeSession.value.businessSourceSnapshot = {
+    primarySourceId: Number(primary.id), primarySourceNameSnapshot: String(primary.name),
+    secondarySourceId: Number(secondary?.id || 0), secondarySourceNameSnapshot: String(secondary?.name || ''),
+    displayNameSnapshot: [primary.name, secondary?.name].filter(Boolean).join(' / '),
+    rewardAmountCents: Number(selection.rewardAmountCents || 0)
+  }
+  rechargeSourceSelector.value = null
 }
 
 async function submitDirectGift(payload = {}) {
@@ -920,6 +988,8 @@ async function selectMemberFromSelector(record) {
     // cashier_workspace，也不能从服务端读取一份待回放的购物车投影。
     // 本次结账的唯一服务端写入发生在最终确认时提交的完整快照。
     applyLocalCashierCustomerSelection({ customerMode: 'member', member: record })
+    const selectionEpoch = cashierCustomerSelectionEpoch.value
+    const selectionStoreId = String(state.currentStore?.id || state.storeId || state.store?.id || '')
     // The member row is already authoritative for this browser draft. Close
     // the selector immediately so a late selector response cannot replace the
     // selected member with the guest root projection.
@@ -938,6 +1008,13 @@ async function selectMemberFromSelector(record) {
         preserveRootState: true,
         silent: true
       })
+      // A late history/default response must not select an old member again or
+      // open their source dialog after the cashier has moved to another draft.
+      if (selectionEpoch !== cashierCustomerSelectionEpoch.value
+        || String(memberDetailId(cashierMember.value) || '') !== String(memberId)
+        || selectionStoreId !== String(state.currentStore?.id || state.storeId || state.store?.id || '')) {
+        return { result: { status: 'success' } }
+      }
       if (isSucceededResult(summaryResult)) {
         const summary = responseDataBlock(summaryResult)?.memberSummary
         if (summary && typeof summary === 'object') {
@@ -1010,6 +1087,7 @@ function emptyLocalCashierCart() {
 }
 
 function applyLocalCashierCustomerSelection({ customerMode, member = null } = {}) {
+  cashierCustomerSelectionEpoch.value += 1
   const isMember = customerMode === 'member' && memberDetailId(member)
   state.cashier = {
     ...(state.cashier || {}),
@@ -1305,6 +1383,7 @@ function closeMemberDetail() {
   isMemberDetailOpen.value = false
   memberDetailFallback.value = {}
   isMemberDetailLoading.value = false
+  memberDetailLoadError.value = ''
   activeMemberDetailId.value = null
   memberDetailInitialTab.value = 'profile'
 }
@@ -1458,6 +1537,7 @@ async function loadMemberDetailTab(payload = {}) {
   if (!payload.memberId) return { success: false, message: '未找到会员。' }
   const loadSequence = ++memberDetailLoadSequence
   isMemberDetailLoading.value = true
+  memberDetailLoadError.value = ''
   try {
     const result = await requestCashierV3Action('load-member-detail-tab', {
       memberId: payload.memberId,
@@ -1469,14 +1549,22 @@ async function loadMemberDetailTab(payload = {}) {
       silent: true
     })
     const detail = memberDetailFromResponse(result)
-    if (loadSequence === memberDetailLoadSequence
-      && isMemberDetailOpen.value
-      && isSucceededResult(result)
-      && detail
-      && String(memberDetailId(detail)) === String(activeMemberDetailId.value)) {
-      memberDetailFallback.value = mergeMemberDetail(memberDetailFallback.value, detail)
+    if (loadSequence === memberDetailLoadSequence && isMemberDetailOpen.value) {
+      if (isSucceededResult(result) && detail
+        && String(memberDetailId(detail)) === String(activeMemberDetailId.value)) {
+        memberDetailFallback.value = mergeMemberDetail(memberDetailFallback.value, detail)
+      } else {
+        // Do not expose raw server exceptions, or present cached/seeded empty
+        // arrays as the authoritative answer to a failed tab query.
+        memberDetailLoadError.value = '本次查询未完成，请重试。'
+      }
     }
     return result
+  } catch {
+    if (loadSequence === memberDetailLoadSequence && isMemberDetailOpen.value) {
+      memberDetailLoadError.value = '本次查询未完成，请重试。'
+    }
+    return { result: { status: 'failed', message: '会员详情查询未完成。' } }
   } finally {
     if (loadSequence === memberDetailLoadSequence) isMemberDetailLoading.value = false
   }
@@ -2494,7 +2582,8 @@ async function handleUiResult(event) {
         detail: overlay
       }))
     } else {
-      rechargeSession.value = typeof overlay === 'object' ? overlay : null
+      if (typeof overlay === 'object') void beginRechargeSession(overlay)
+      else rechargeSession.value = null
     }
   }
   if (canApplyUiDirective && overlayName === 'direct-gift') {
@@ -2657,12 +2746,22 @@ onBeforeUnmount(() => {
       </form>
     </div>
     <RechargeOverlay
-      v-if="rechargeSession && !isCashierPage"
+      v-if="rechargeSession && !rechargeSourceSelector && !isCashierPage"
       :session="rechargeSession"
       :business-date="toolbarBusinessDate"
       :submitting="isRechargeSubmitting"
       @close="rechargeSession = null"
       @submit="submitRecharge"
+    />
+    <CheckoutBusinessSourceOverlay
+      v-if="businessSourceEnabled && rechargeSourceSelector && rechargeSession && !isCashierPage"
+      :sources="rechargeSourceSelector.sources"
+      :primary-source-id="rechargeSourceSelector.primarySourceId || 0"
+      :secondary-source-id="rechargeSourceSelector.secondarySourceId || 0"
+      :load-error="rechargeSourceSelector.loadError"
+      @confirm="confirmRechargeSource"
+      @close="rechargeSession = null; rechargeSourceSelector = null"
+      @retry="beginRechargeSession(rechargeSession)"
     />
     <DirectGiftOverlay
       v-if="directGiftSession"
@@ -2673,10 +2772,11 @@ onBeforeUnmount(() => {
     />
     <StoreTopNavigation
       :entries="topNavigationEntries"
-      :rules="state.navigationRules"
-      :store-name="state.storeName"
-      :operator="operatorLabel"
-      :operator-profile="state.operator.profile"
+      :debt-payment-enabled="state.cashier?.debtPaymentEnabled !== false"
+      :rules="settingsNavigation?.navigation?.rules || state.navigationRules"
+      :store-name="settingsNavigation?.profile?.name || state.storeName"
+      :operator="settingsNavigation?.operator?.name || operatorLabel"
+      :operator-profile="settingsNavigation?.operator || state.operator.profile"
       :can-switch-stores="canSwitchStores"
       :pending-hang-count="pendingHangCount"
       :inventory-open="isInventoryWorkspaceOpen"
@@ -2779,6 +2879,7 @@ onBeforeUnmount(() => {
                 >
               </label>
               <button
+                v-if="businessSourceEnabled"
                 type="button"
                 class="cashier-workflow-context-source"
                 aria-label="选择客户来源"
@@ -2958,6 +3059,7 @@ onBeforeUnmount(() => {
     :detail="memberDetail"
     :initial-tab="memberDetailInitialTab"
     :is-loading="isMemberDetailLoading"
+    :load-error="memberDetailLoadError"
     :on-action="handleMemberDetailAction"
     @tab-change="loadMemberDetailTab"
     @close="closeMemberDetail"
@@ -2975,6 +3077,8 @@ onBeforeUnmount(() => {
     v-if="isMemberDebtOpen && activeDebtMember"
     :member="activeDebtMember"
     :snapshot="memberDebtSnapshot"
+    :business-source-policy="state.businessSourcePolicy || {}"
+    :source-defaults="activeDebtMember.sourceDefaults || (!businessSourceEnabled || Number(state.businessSourceDefaultsMemberId ?? -1) === Number(activeDebtMember.memberId || activeDebtMember.id || 0) ? state.businessSourceDefaults : {}) || {}"
     :initial-debt-id="initialDebtRecordId"
     :business-date="toolbarBusinessDate"
     :is-loading="isMemberDebtLoading"

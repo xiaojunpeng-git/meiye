@@ -24,6 +24,7 @@ use app\services\cashier\v3\registry\CashierV3ContextPolicy;
 use app\services\product\product\StoreProductReservationServices;
 use think\facade\Db;
 use app\services\cashier\v3\config\CashierV3BusinessConfigServices;
+use app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices;
 
 /** V3 reservation authority. All state changes are gateway-owned transactions. */
 final class CashierV3ReservationModule
@@ -92,7 +93,18 @@ final class CashierV3ReservationModule
                     $contexts[] = ['kind' => 'cashier_workspace', 'id' => $workspaceId, 'expectedVersion' => $workspaceVersion];
                 }
 
+                // 独立编辑器也返回策略；草稿携带同一展示策略，不依赖根投影是否已加载。
+                $sourcePolicy = new CashierV3BusinessSourcePolicyServices();
+                $policy = $sourcePolicy->read();
+                if ($mode === 'create' || (int)($draft['businessSourcePrimaryId'] ?? 0) <= 0) {
+                    $initialSource = $sourcePolicy->initialChoice('purchase', $dataScope->tenantId(), $operator->storeId(), $selectedMemberId);
+                    $draft['businessSourcePrimaryId'] = (int)($initialSource['primarySourceId'] ?? 0);
+                    $draft['businessSourceSecondaryId'] = (int)($initialSource['secondarySourceId'] ?? 0);
+                    $draft['businessSourceLabel'] = (string)($initialSource['displayNameSnapshot'] ?? '');
+                }
+                $draft['businessSourcePolicy'] = $policy;
                 return ['data' => ['editor' => [
+                    'businessSourcePolicy' => $policy,
                     'preparationReady' => true,
                     'preparationRequestId' => (string)($payload['preparationRequestId'] ?? ''),
                     'preparationToken' => bin2hex(random_bytes(16)),
@@ -151,6 +163,9 @@ final class CashierV3ReservationModule
                 $memberId = self::positive($payload['memberId'] ?? 0, '请选择会员。');
                 return ['data' => ['reservationProjectCatalog' => [
                     'memberId' => $memberId,
+                    // 更换会员后的建议只供未确认草稿使用；客户端以请求序号及会员 ID 防止旧响应串用。
+                    'businessSourcePolicy' => (new CashierV3BusinessSourcePolicyServices())->read(),
+                    'initialBusinessSource' => (new CashierV3BusinessSourcePolicyServices())->initialChoice('purchase', $scope['data_scope']->tenantId(), $scope['operator_scope']->storeId(), $memberId),
                     'catalogOptions' => self::catalogOptions(
                         $catalog,
                         $entitlementProjection,
@@ -350,7 +365,7 @@ final class CashierV3ReservationModule
             throw new CashierV3CommandException(CashierV3ResultCode::INVALID_COMMAND_CONTEXT, '门店工作台只能创建门店预约。');
         }
         // 预约来源由门店确认一次，后续完成服务只复制这份历史快照。
-        $source = self::reservationBusinessSource($reservation);
+        $source = self::reservationBusinessSource($reservation, $tenant, $operator->storeId(), $memberId);
         $lifecycle = new CashierV3ReservationLifecycleServices();
         $lifecycle->assertStaffAvailabilityInTx($operator->storeId(), 0, $artisanStaffIds, $when, $endAt);
         $lifecycle->assertRoomAvailabilityInTx($tenant, $operator->storeId(), 0, $room['id'], $when, $endAt);
@@ -624,12 +639,14 @@ final class CashierV3ReservationModule
         return $row;
     }
 
-    /** Resolve IDs against the current catalog in the reservation write transaction. */
-    private static function reservationBusinessSource(array $reservation): array
+    /** 新业务来源在预约事务内按统一策略落库；fixed 不信任前端提交的来源 ID。 */
+    private static function reservationBusinessSource(array $reservation, string $tenantId, int $storeId, int $memberId): array
     {
         $primaryId = (int)($reservation['businessSourcePrimaryId'] ?? 0);
         $secondaryId = (int)($reservation['businessSourceSecondaryId'] ?? 0);
-        $snapshot = (new CashierV3BusinessConfigServices())->resolveSourceSnapshot($primaryId, $secondaryId, true);
+        $snapshot = (new CashierV3BusinessSourcePolicyServices())->resolveChoice('purchase', $tenantId, $storeId, $memberId, [
+            'primarySourceId' => $primaryId, 'secondarySourceId' => $secondaryId,
+        ]);
         return [
             'business_source_primary_id' => $snapshot['primarySourceId'],
             'business_source_primary_name_snapshot' => $snapshot['primarySourceNameSnapshot'],
@@ -657,12 +674,17 @@ final class CashierV3ReservationModule
     private static function sourceForEdit(array $reservation, array $header): array
     {
         $existing = self::sourceFromHeader($header);
+        // 配置切换只影响新选择，不能覆盖既有预约；无来源的会员预约在确认时补齐固定来源。
+        $policy = (new CashierV3BusinessSourcePolicyServices())->read();
+        if (!$policy['enabled']) {
+            return $existing['business_source_primary_id'] > 0 ? $existing : self::reservationBusinessSource($reservation, (string)$header['tenant_id'], (int)$header['store_id'], (int)$header['member_id']);
+        }
         if (!array_key_exists('businessSourcePrimaryId', $reservation)) return $existing;
         if ((int)$reservation['businessSourcePrimaryId'] === $existing['business_source_primary_id']
             && (int)($reservation['businessSourceSecondaryId'] ?? 0) === $existing['business_source_secondary_id']) {
             return $existing;
         }
-        return self::reservationBusinessSource($reservation);
+        return self::reservationBusinessSource($reservation, (string)$header['tenant_id'], (int)$header['store_id'], (int)$header['member_id']);
     }
 
     private static function editorDraft(array $header, array $options): array
@@ -794,9 +816,12 @@ final class CashierV3ReservationModule
                 ? self::positive($project['entitlementSourceDetailId'] ?? $project['sourceDetailId'] ?? 0, '已购项目缺少权益明细。')
                 : 0;
             $quantity = max(1, min(1000, (int)($project['quantity'] ?? 1)));
-            // Service duration is catalog authority. Client-provided duration
-            // is presentation-only and cannot change resource reservations.
-            $duration = self::projectDuration($projectId, $storeId);
+            // Client-provided duration remains presentation-only. Already purchased
+            // rights do not require a new on-sale store copy; occupation below still
+            // validates ownership, cross-store eligibility and available times.
+            $duration = $source === 'card'
+                ? self::purchasedProjectDuration($projectId)
+                : self::projectDuration($projectId, $storeId);
             $total += $duration * $quantity;
             $name = trim((string)($project['name'] ?? $project['projectName'] ?? ''));
             $plans[] = ['projectId' => $projectId, 'skuId' => $skuId, 'name' => $name === '' ? '项目 ' . $projectId : $name, 'source' => $source, 'entitlementSourceDetailId' => $detailId, 'quantity' => $quantity, 'duration' => $duration];
@@ -804,6 +829,25 @@ final class CashierV3ReservationModule
         return [$plans, $total];
     }
 
+    /**
+     * Read scheduling minutes only, never modify historical card values. Hidden or
+     * unsynchronized purchased projects remain usable; missing durations fall back
+     * to the parent configuration and finally 60 minutes. Database errors propagate
+     * rather than pretending that an unavailable database is a missing duration.
+     */
+    private static function purchasedProjectDuration(int $projectId): int
+    {
+        $product = Db::name('store_product')->where('id', $projectId)
+            ->field('id,pid,project_service_duration')->find();
+        $duration = (int)($product['project_service_duration'] ?? 0);
+        if ($duration <= 0 && (int)($product['pid'] ?? 0) > 0) {
+            $duration = (int)Db::name('store_product')->where('id', (int)$product['pid'])
+                ->value('project_service_duration');
+        }
+        return $duration > 0 ? $duration : StoreProductReservationServices::DEFAULT_PROJECT_SERVICE_DURATION;
+    }
+
+    /** Unpaid selections still require an existing store-available product. */
     private static function projectDuration(int $projectId, int $storeId): int
     {
         try {

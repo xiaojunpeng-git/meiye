@@ -23,6 +23,7 @@ import EmployeeDashboardView from '@/views/EmployeeDashboardView.vue'
 import ConsumptionTierConfigView from '@/views/ConsumptionTierConfigView.vue'
 import StaffListView from '@/views/StaffListView.vue'
 import RoomSettingsView from '@/views/RoomSettingsView.vue'
+import StoreSettingsView from '@/views/StoreSettingsView.vue'
 import RoutePlaceholderView from '@/views/RoutePlaceholderView.vue'
 import StoreLoginView from '@/views/StoreLoginView.vue'
 import FundManagementView from '@/views/FundManagementView.vue'
@@ -47,6 +48,7 @@ const routeFeatureCodes = Object.freeze({
   'cashier-v3-inventory-entry': 'cashier.v3.inventory.overview',
   'cashier-v3-staff-list': 'cashier.v3.management.staff',
   'cashier-v3-room-settings': 'cashier.v3.management.rooms',
+  'cashier-v3-store-settings': 'cashier.v3.management.store_profile',
   'cashier-v3-business-dashboard': 'cashier.v3.management.dashboard',
   'cashier-v3-store-target-dashboard': 'cashier.v3.targets',
   'cashier-v3-store-business-reports': 'cashier.v3.data'
@@ -60,6 +62,7 @@ const defaultRouteNames = Object.freeze([
   'cashier-v3-member',
   'cashier-v3-fund', 'cashier-v3-care', 'cashier-v3-order-center',
   'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard',
+  'cashier-v3-store-settings',
   'cashier-v3-store-business-reports', 'cashier-v3-store-target-dashboard', 'cashier-v3-inventory-entry', 'cashier-v3-presale-claim'
 ])
 
@@ -236,6 +239,12 @@ const routes = [
         name: 'cashier-v3-room-settings',
         component: RoomSettingsView,
         meta: { title: '房间设置', description: '维护当前门店房间基础资料。' }
+      },
+      {
+        path: 'management-center/store-settings',
+        name: 'cashier-v3-store-settings',
+        component: StoreSettingsView,
+        meta: { title: '门店设置', description: '维护当前门店基础信息，组织归属由平台管理。' }
       },
       {
         path: 'management-center/business-dashboard',

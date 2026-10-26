@@ -1,0 +1,19 @@
+{
+  "round": "R29-00001",
+  "initialHead": "4f13dba0eac686adf2a029bac6dffc011a920c3a",
+  "fixedHead": "4edd7a8125a79a227a8222ebed71cb31c82b4c82",
+  "files": {
+    "后端代码/app/services/fund/StoreFundServices.php": "ef6ac05973584d0d5d0fc72ab7a60f663e44252b06e19d27c7ae7087d06ddff3",
+    "tests/fund-management/php/r29-ledger-export-summary.php": "6c4a95638aeb508fd6f4d6d403a042a5763106b21462a78329dfb7f5cc7f005c",
+    "tests/fund-management/php/r29-ledger-export-http-readback.php": "e5fbe45d8eb76400f10252365705249ef187973e6146417d80e932880c3892dc",
+    "tests/fund-management/js/r29-ledger-export-summary.cjs": "2d5dd4accc55df5f7f743eb9b211dc57cfb44f2dbaf76d11582043c93a53e1db"
+  },
+  "patchSha256": "855c9574c6b3e48fb77863f5f9d228ddca795bf160f9b24a357d19e8cb1dba94",
+  "testResults": [
+    "real XLSX 101 authorized fixture rows; summaries and cross-page balance retained; neighboring store excluded; all fixtures rolled back",
+    "actual UI download with 32 existing ledger rows; bytes and every summary matched real HTTP projection",
+    "test token revoked; generated export and private temporary payload removed"
+  ],
+  "status": "development and self-test complete; pending product manager acceptance",
+  "remote": "not applicable; no deployment/push authorization for Round29"
+}

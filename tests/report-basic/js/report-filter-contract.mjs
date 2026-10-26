@@ -68,6 +68,7 @@ assert.deepEqual(reportFilterDraft(fields, { filters: [{ field: 'amount', operat
 const require = createRequire(path.join(repo, '前端代码/cashier-v3/package.json'))
 const { parse, compileScript, compileStyle } = require('@vue/compiler-sfc')
 const { build } = require('esbuild')
+const childStyles = []
 const { chromium } = require(process.env.PLAYWRIGHT_ROOT || path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'))
 const filename = path.join(shared, 'components/UnifiedReportQueryToolbar.vue')
 const { descriptor, errors } = parse(readFileSync(filename, 'utf8'), { filename })
@@ -85,10 +86,27 @@ const bundled = await build({
       'leading-controls': () => [h('button', { class: 'button' }, '当前权限范围'), h('label', { class: 'date' }, ['从', h('input', { type: 'date', value: '2026-10-01' })]), h('label', { class: 'date' }, ['至', h('input', { type: 'date', value: '2026-10-23' })])],
       'primary-actions': () => ['列名取值来源', '刷新', '导出'].map(label => h('button', { class: 'button' }, label))
     }) }).mount('#app');`, resolveDir: path.dirname(filename), loader: 'js' },
+  // The shared toolbar may import real controls (for example the period
+  // picker). Compile those SFCs too; never stub a dependency to make tests pass.
+  plugins: [{ name: 'report-filter-sfc', setup(builder) {
+    builder.onLoad({ filter: /\.vue$/ }, args => {
+      const { descriptor, errors } = parse(readFileSync(args.path, 'utf8'), { filename: args.path })
+      assert.deepEqual(errors, [])
+      const id = createHash('sha256').update(args.path).digest('hex').slice(0, 10)
+      const child = compileScript(descriptor, { id, inlineTemplate: true, genDefaultAs: 'Component' })
+      for (const entry of descriptor.styles) {
+        const compiled = compileStyle({ source: entry.content, filename: args.path, id: `data-v-${id}`, scoped: entry.scoped })
+        assert.deepEqual(compiled.errors, [])
+        childStyles.push(compiled.code)
+      }
+      return { contents: `${child.content}\nComponent.__scopeId='data-v-${id}';export default Component`, loader: 'js', resolveDir: path.dirname(args.path) }
+    })
+  } }],
   nodePaths: [path.join(repo, '前端代码/cashier-v3/node_modules')], bundle: true, write: false, format: 'iife', platform: 'browser'
 })
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
-const evidence = path.join(repo, 'tests/report-basic/evidence')
+// 跨轮回归可独立输出证据，避免覆盖已经归档的历史截图和记录。
+const evidence = process.env.REPORT_FILTER_EVIDENCE_DIR || path.join(repo, 'tests/report-basic/evidence')
 mkdirSync(evidence, { recursive: true })
 try {
   for (const width of [1515, 610, 375]) {
@@ -97,6 +115,7 @@ try {
     page.on('pageerror', error => errors.push(error.message))
     await page.setContent('<html><head><meta charset="utf-8"></head><body><div id="app"></div></body></html>')
     await page.addStyleTag({ content: `body{margin:0;padding:12px;background:#f5f7fa;font:13px Arial}*{box-sizing:border-box}.button{border:1px solid #d8e0ea;border-radius:6px;padding:6px 11px;background:white;color:#515a6e;cursor:pointer}.button--primary{background:#2d8cf0;color:white;border-color:#2d8cf0}.date{display:flex;align-items:center;gap:6px}.date input{width:116px;min-height:34px;border:1px solid #d8e0ea;border-radius:6px;padding:6px 8px}${style.code}` })
+    await page.addStyleTag({ content: childStyles.join('\n') })
     await page.addScriptTag({ content: bundled.outputFiles[0].text })
     const toggle = page.getByRole('button', { name: '更多筛选', exact: true })
     await toggle.waitFor()

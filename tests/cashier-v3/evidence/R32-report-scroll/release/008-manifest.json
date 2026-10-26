@@ -1,0 +1,29 @@
+{
+  "site": "008",
+  "commit": "f51f9f388bfe35f54640a596965bd5c1d2e6dbb5",
+  "sourceTree": "af3a9df80ca5cbb0535ad68a4ea072ef593211fe",
+  "targets": {
+    "public/view_cashier_v3/assets/exceljs.min-a0d233a6.js": {
+      "before": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+      "after": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329"
+    },
+    "public/view_cashier_v3/assets/index-8891c13c.js": {
+      "before": null,
+      "after": "66ac01004e82cc22af2171af20cacce96389f6f6c239e5a4c0a8fe059439e46c"
+    },
+    "public/view_cashier_v3/assets/index-d415fc06.css": {
+      "before": null,
+      "after": "d415fc06fc184f53d3d4035cef447ae215dee72f316a4ce736eb56245785caec"
+    },
+    "public/view_cashier_v3/assets/login-beauty-quiet-826510a5.png": {
+      "before": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+      "after": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "cf3b2795aedffe0a357eed2fd828d83ebf96cd48ca71e12e17d5f8d27a159128",
+      "after": "3ce201a019e6e4f355f490ecdc44a5c262754af14a4121a72b110e473a1e4d03"
+    }
+  },
+  "preview": "unchanged; formal only",
+  "database": "no migration"
+}

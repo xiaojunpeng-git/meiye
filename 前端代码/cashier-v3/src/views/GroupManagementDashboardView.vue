@@ -68,6 +68,18 @@ function formatRate(rate) {
   return Number.isFinite(value) ? `${value.toFixed(1).replace(/\.0$/, '')}%` : '-'
 }
 
+// 缺少目标分母时完成率不可计算；空值不能被 Number(null) 误判为低于 80%。
+function isLowTargetRate(rate) {
+  return rate !== null && rate !== undefined && rate !== '' && Number(rate) < 80
+}
+
+// 年度目标明细沿用旧接口的零合计；只有存在目标行时才将零显示为真实目标。
+function formatAnnualTarget(store) {
+  return store?.months?.some((month) => month.target_amount_cents !== '')
+    ? formatMoney(store.annual_target_cents)
+    : '-'
+}
+
 function formatTrendValue(cents) {
   const value = Number(cents)
   if (!Number.isFinite(value)) return '-'
@@ -434,7 +446,7 @@ onBeforeUnmount(() => {
 
       <section class="group-dashboard__target-progress-grid" aria-label="本月与本年目标进度"><article v-for="card in targetProgressCards" :key="card.key" class="dashboard-target-progress-panel"><header><div><h2>{{ card.title }}</h2><span>{{ card.subtitle }}</span></div><button type="button" class="dashboard-link" @click="openTargetDrawer">查看明细</button></header><div class="dashboard-target-progress-panel__body"><div class="dashboard-target-progress-panel__metrics"><article v-for="metric in card.metrics" :key="metric.key" :class="`goal-summary-card goal-summary-card--${metric.tone}`"><component :is="metric.icon" :size="17" aria-hidden="true" /><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong></article></div><div class="dashboard-target-donut" :style="{ '--target-rate': Math.max(0, Math.min(Number(card.rate) || 0, 100)) }"><div><strong>{{ formatRate(card.rate) }}</strong><span>达成率</span></div></div></div></article></section>
 
-      <section class="group-dashboard__target-rank-grid"><article v-for="rank in targetRankings" :key="rank.key" class="dashboard-panel"><header><div><h2>{{ rank.title || '-' }}</h2><span>目标 / 实际业绩 / 完成率</span></div><button type="button" class="dashboard-link" @click="showConditions(rank.title || '组织目标排行统计条件', {}, dashboard?.rankings?.source_explanation)">查看条件</button></header><div class="dashboard-target-rank-list"><button v-for="(row, index) in rank.records" :key="row.name" type="button" @click="showConditions(rank.title || '组织目标排行统计条件', { 组织: row.name }, dashboard?.rankings?.source_explanation)"><em>{{ index + 1 }}</em><span>{{ row.name }}</span><small>{{ formatMoney(row.target_amount_cents) }} / {{ formatMoney(row.actual_performance_cents) }}</small><strong :class="{ 'is-low': Number(row.achievement_rate) < 80 }">{{ formatRate(row.achievement_rate) }}</strong><i class="dashboard-target-rank__progress" :class="{ 'is-low': Number(row.achievement_rate) < 80 }"><b :style="{ width: `${Math.min(Math.max(Number(row.achievement_rate) || 0, 0), 100)}%` }"></b></i></button><p v-if="!rank.records.length" class="dashboard-empty">暂无排行数据。</p></div></article></section>
+      <section class="group-dashboard__target-rank-grid"><article v-for="rank in targetRankings" :key="rank.key" class="dashboard-panel"><header><div><h2>{{ rank.title || '-' }}</h2><span>目标 / 实际业绩 / 完成率</span></div><button type="button" class="dashboard-link" @click="showConditions(rank.title || '组织目标排行统计条件', {}, dashboard?.rankings?.source_explanation)">查看条件</button></header><div class="dashboard-target-rank-list"><button v-for="(row, index) in rank.records" :key="row.name" type="button" @click="showConditions(rank.title || '组织目标排行统计条件', { 组织: row.name }, dashboard?.rankings?.source_explanation)"><em>{{ index + 1 }}</em><span>{{ row.name }}</span><small>{{ formatMoney(row.target_amount_cents) }} / {{ formatMoney(row.actual_performance_cents) }}</small><strong :class="{ 'is-low': isLowTargetRate(row.achievement_rate) }">{{ formatRate(row.achievement_rate) }}</strong><i class="dashboard-target-rank__progress" :class="{ 'is-low': isLowTargetRate(row.achievement_rate) }"><b :style="{ width: `${Math.min(Math.max(Number(row.achievement_rate) || 0, 0), 100)}%` }"></b></i></button><p v-if="!rank.records.length" class="dashboard-empty">暂无排行数据。</p></div></article></section>
 
     </template>
 
@@ -473,7 +485,7 @@ onBeforeUnmount(() => {
           <p v-else-if="targetLoading" class="dashboard-state">正在加载门店月度目标...</p>
           <div v-else class="target-monthly-table">
             <div class="target-monthly-table__header"><span>门店</span><span v-for="month in targetMonths" :key="month">{{ month }} 月</span><span>年度合计</span></div>
-            <div v-for="store in targetRows" :key="store.store_id" class="target-monthly-table__row"><strong>{{ store.store_name }}</strong><span v-for="cell in store.months" :key="cell.subject_key">{{ cell.target_amount_cents === '' ? '-' : formatMoney(cell.target_amount_cents) }}</span><b>{{ formatMoney(store.annual_target_cents) }}</b></div>
+            <div v-for="store in targetRows" :key="store.store_id" class="target-monthly-table__row"><strong>{{ store.store_name }}</strong><span v-for="cell in store.months" :key="cell.subject_key">{{ cell.target_amount_cents === '' ? '-' : formatMoney(cell.target_amount_cents) }}</span><b>{{ formatAnnualTarget(store) }}</b></div>
             <p v-if="!targetRows.length" class="dashboard-empty">当前权限范围没有目标门店。</p>
           </div>
         </section></div>

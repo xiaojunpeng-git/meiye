@@ -24,6 +24,7 @@ final class StorePermissionCatalogServices
                 $node['children'] = [
                     ['id'=>301060,'title'=>'人员管理','feature_code'=>'cashier.v3.management.staff','children'=>$node['children']],
                     ['id'=>301061,'title'=>'房间设置','feature_code'=>'cashier.v3.management.rooms'],
+                    ['id'=>301063,'title'=>'门店设置','feature_code'=>'cashier.v3.management.store_profile'],
                     ['id'=>301062,'title'=>'经营看板','feature_code'=>'cashier.v3.management.dashboard'],
                 ];
             }
@@ -155,6 +156,85 @@ final class StorePermissionCatalogServices
             $json=json_encode($rows,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
             Db::name(self::TABLE)->where('id',1)->update(['rules_json'=>$json,'revision'=>(int)$before['revision']+1,'updated_at'=>time()]);
             Db::name('store_v3_permission_audit')->insert(['operator_id'=>0,'action'=>'INITIALIZE_NAVIGATION_ITEMS','before_json'=>$before['rules_json'],'after_json'=>$json,'created_at'=>time()]);
+        });
+    }
+
+    /** Explicit R59 catalog installation; no position grants or organization changes. */
+    public function initializeStoreProfilePermission(): void
+    {
+        Db::transaction(function(){
+            $before=Db::name(self::TABLE)->where('id',1)->lock(true)->find();
+            if(!$before)throw new \RuntimeException('请先初始化门店端权限目录');
+            $rows=json_decode($before['rules_json'],true);if(!is_array($rows))throw new \RuntimeException('权限目录无效');
+            foreach($rows as $row)if((int)$row['id']===301063){if(($row['feature_code']??'')!=='cashier.v3.management.store_profile')throw new \RuntimeException('门店设置权限编号冲突');return;}
+            $rows[]=self::definitions()[301063];$this->validateRows($rows);
+            $json=json_encode($rows,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+            Db::name(self::TABLE)->where('id',1)->update(['rules_json'=>$json,'revision'=>(int)$before['revision']+1,'updated_at'=>time()]);
+            Db::name('store_v3_permission_audit')->insert(['operator_id'=>0,'action'=>'R59_STORE_PROFILE_PERMISSION','before_json'=>$before['rules_json'],'after_json'=>$json,'created_at'=>time()]);
+        });
+    }
+
+    /** R53 only installs the conversion leaf; never changes grants or existing metadata. */
+    public function initializeCardToBalancePermission(): void
+    {
+        Db::transaction(function () {
+            $before = Db::name(self::TABLE)->where('id', 1)->lock(true)->find();
+            if (!$before) throw new \RuntimeException('请先初始化门店端权限规则');
+            $rows = json_decode((string)$before['rules_json'], true);
+            if (!is_array($rows)) throw new \RuntimeException('门店端权限目录格式无效');
+            foreach ($rows as $row) {
+                if ((int)($row['id'] ?? 0) === 301051) {
+                    if (($row['feature_code'] ?? '') !== 'cashier.v3.cashier.card.to_balance') {
+                        throw new \RuntimeException('卡转余额权限编号冲突');
+                    }
+                    return;
+                }
+            }
+            $rows[] = self::definitions()[301051];
+            // Validate completeness without normalizing/reordering established nodes.
+            $this->validateRows($rows);
+            $json = json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            Db::name(self::TABLE)->where('id', 1)->update(['rules_json' => $json,
+                'revision' => (int)$before['revision'] + 1, 'updated_at' => time()]);
+            Db::name('store_v3_permission_audit')->insert(['operator_id' => 0,
+                'action' => 'INITIALIZE_CARD_TO_BALANCE', 'before_json' => $before['rules_json'],
+                'after_json' => $json, 'created_at' => time()]);
+        });
+    }
+
+    /**
+     * PM-approved R53 backfill: append the new leaf only to already-enabled
+     * cashier positions. Never enable another channel, position or parent.
+     * This explicit migration is not called by normal login/menu reads.
+     */
+    public function grantCardToBalanceToExistingCashierPositions(): int
+    {
+        return Db::transaction(function (): int {
+            $this->snapshot();
+            $rows = Db::name('job_position_channel_rule')->alias('r')
+                ->join('position p', 'p.id=r.position_id')
+                ->where('r.channel', 'store_v3')->where('r.status', 1)
+                ->where('p.status', 1)->where('p.use_store', 1)
+                ->field('r.*')->order('r.id asc')->lock(true)->select()->toArray();
+            $changes = [];
+            foreach ($rows as $row) {
+                $ids = array_map('intval', explode(',', (string)$row['rules']));
+                if (in_array(301051, $ids, true)
+                    || !in_array('cashier.v3.cashier', self::explicitFeatures($ids), true)) continue;
+                $rules = rtrim((string)$row['rules'], ',') . ',301051';
+                $after = ['rules' => $rules, 'version' => (int)$row['version'] + 1, 'update_time' => time()];
+                if ((int)Db::name('job_position_channel_rule')->where('id', (int)$row['id'])
+                    ->where('version', (int)$row['version'])->update($after) !== 1) {
+                    throw new \RuntimeException('岗位授权已变化，请重新执行卡转余额权限补齐');
+                }
+                $changes[] = ['before' => $row, 'after' => array_replace($row, $after)];
+            }
+            if ($changes) Db::name('store_v3_permission_audit')->insert(['operator_id' => 0,
+                'action' => 'R53_GRANT_CARD_TO_BALANCE',
+                'before_json' => json_encode(array_column($changes, 'before'), JSON_UNESCAPED_UNICODE),
+                'after_json' => json_encode(array_column($changes, 'after'), JSON_UNESCAPED_UNICODE),
+                'created_at' => time()]);
+            return count($changes);
         });
     }
 

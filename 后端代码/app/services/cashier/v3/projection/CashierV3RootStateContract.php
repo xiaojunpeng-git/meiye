@@ -155,6 +155,9 @@ class CashierV3RootStateContract
                 'serverTime' => null,
             ],
             'operator' => $extras['operator'] ?? ['name' => '', 'account' => '', 'roleName' => ''],
+            'businessSourcePolicy' => $extras['businessSourcePolicy'] ?? ['enabled' => true, 'inheritPrevious' => true, 'mode' => 'previous', 'configured' => false],
+            'businessSourceDefaults' => $extras['businessSourceDefaults'] ?? $emptyObj(),
+            'businessSourceDefaultsMemberId' => (int)($extras['businessSourceDefaultsMemberId'] ?? 0),
             'pendingHangCount' => (int)($extras['pendingHangCount'] ?? 0),
             'cashier' => $extras['cashier'] ?? $emptyObj(),
             'serviceCompletion' => $extras['serviceCompletion'] ?? [

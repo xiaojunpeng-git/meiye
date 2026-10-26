@@ -1,0 +1,7 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "rangeChecks": 17,
+  "realSkuRead": 1,
+  "productionWrites": 0
+}

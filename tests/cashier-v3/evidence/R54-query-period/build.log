@@ -1,0 +1,20 @@
+vite v4.5.14 building for production...
+transforming...
+✓ 2032 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../../../../../../private/tmp/mohe-r54-query-period-build-20261024/index.html                                  0.48 kB │ gzip:   0.33 kB
+../../../../../../../../private/tmp/mohe-r54-query-period-build-20261024/assets/login-beauty-quiet-826510a5.png  1,159.06 kB
+../../../../../../../../private/tmp/mohe-r54-query-period-build-20261024/assets/index-999ad33b.css                 697.00 kB │ gzip: 104.46 kB
+../../../../../../../../private/tmp/mohe-r54-query-period-build-20261024/assets/exceljs.min-a0d233a6.js            939.05 kB │ gzip: 271.25 kB
+../../../../../../../../private/tmp/mohe-r54-query-period-build-20261024/assets/index-7ef5dcda.js                2,145.90 kB │ gzip: 637.01 kB
+✓ built in 3.03s
+
+(!) outDir /private/tmp/mohe-r54-query-period-build-20261024 is not inside project root and will not be emptied.
+Use --emptyOutDir to override.
+
+
+(!) Some chunks are larger than 500 kBs after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.

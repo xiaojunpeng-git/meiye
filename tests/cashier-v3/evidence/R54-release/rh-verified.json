@@ -1,0 +1,22 @@
+{
+  "result": "PASS",
+  "site": "rh",
+  "commit": "7b38fbc0c2cd6a85f67fc93d3f5d7bdcbb0b623a",
+  "candidateTree": "523cf660337d05188c0de6db871fcc475320edca",
+  "backup": "/www/backups/rh/r54-service-period-7b38fbc0",
+  "files": 8,
+  "publicEntries": 2,
+  "serviceRecords": 12,
+  "businessWrites": 0,
+  "unchanged": [
+    "platform static",
+    "other terminals",
+    "permissions",
+    "migrations",
+    "unrelated backend"
+  ],
+  "limits": [
+    "Anonymous boot and readonly backend tested; no authenticated financial action.",
+    "Anonymous boot and readonly backend tested; no authenticated financial action."
+  ]
+}

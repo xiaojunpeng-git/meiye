@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { formatMoney } from '@/services/cashierV3Bridge'
+import { cardToBalanceUnavailableReason } from '@/services/cardToBalance'
 import {
   entitlementBenefitPoolId,
   entitlementCardHolderId
@@ -80,9 +81,9 @@ const selectorIdentity = computed(() => [
 function sourceContractReady(source = {}) {
   const sourceId = entitlementCardHolderId(source)
   if (!sourceId) return false
-  // 延期、转让、停用、启用只操作卡本身；不应因历史卡没有项目明细
+  // 延期、转让、停用、启用及转余额只操作卡本身；不应因历史卡没有项目明细
   // 或旧的金额/版本坐标而阻止生成本次浏览器快照。
-  if (['card-extension', 'card-transfer', 'card-disable', 'card-enable'].includes(props.operationMode)) return true
+  if (['card-extension', 'card-transfer', 'card-disable', 'card-enable', 'card-to-balance'].includes(props.operationMode)) return true
   if (!Array.isArray(source.projects)) return false
   return source.projects.every((project) => (
     Boolean(project.projectId || project.id)
@@ -116,7 +117,8 @@ function resetSources() {
 
 watch(selectorIdentity, resetSources, { immediate: true })
 watch(() => props.operationMode, (mode) => {
-  sourceFilter.value = mode === 'card-enable' ? 'all' : 'valid'
+  // 转余额允许停用/到期及无余次但有金额的卡，默认必须展示全部卡。
+  sourceFilter.value = ['card-enable', 'card-to-balance'].includes(mode) ? 'all' : 'valid'
 }, { immediate: true })
 
 function isSourceAvailable(source = {}) {
@@ -264,6 +266,18 @@ function sourceCardNo(source = {}) {
   return String(source.fullCardNo || '—').trim() || '—'
 }
 
+// 转余额展示权威实剩金额；其他权益操作仍沿用原有金额和不可用原因。
+function sourceOperationDescription(source = {}) {
+  return props.operationMode === 'card-to-balance'
+    ? cardToBalanceUnavailableReason(source) || sourceCardNo(source)
+    : source.disabledReason || sourceCardNo(source)
+}
+
+function sourceRemainingAmount(source = {}) {
+  if (props.operationMode !== 'card-to-balance') return source.remainingAmount
+  return source.balanceTransfer?.amountCents == null ? null : source.balanceTransfer.amountCents / 100
+}
+
 function sourceExpiryDate(source = {}) {
   return String(source.expiryDate || '—').trim() || '—'
 }
@@ -344,11 +358,24 @@ function sourceOperationLabel() {
     'card-transfer': '转让',
     'card-extension': '延期',
     'card-disable': '停用',
+    'card-to-balance': '转余额',
     'card-enable': '启用'
   }[props.operationMode] || ''
 }
 
 function chooseSourceOperation(source = {}) {
+  if (props.submitting || !selectorReady.value) return
+  // 后端资格只关联本卡欠款；不得套用消费可用性或会员其他卡欠款限制。
+  if (props.operationMode === 'card-to-balance') {
+    const message = cardToBalanceUnavailableReason(source)
+    if (message) {
+      emit('contract-error', { code: 'CARD_TO_BALANCE_UNAVAILABLE', message })
+      return
+    }
+    editingSource.value = clonePlain(source)
+    operationReason.value = ''
+    return
+  }
   if (props.operationMode === 'card-enable') {
     if (String(source.statusCode || '').toLowerCase() !== 'disabled') {
       emit('contract-error', { code: 'CARD_NOT_DISABLED', message: '该卡当前不是停用状态，无需启用。' })
@@ -372,6 +399,8 @@ function operationSourceSelected(source = {}) {
 }
 
 function confirmSourceOperation() {
+  if (props.submitting || !editingSource.value || !selectorReady.value) return
+  if (props.operationMode === 'card-to-balance' && cardToBalanceUnavailableReason(editingSource.value)) return
   if (!operationReason.value.trim()) return
   if (props.operationMode === 'card-extension' && !operationDate.value) return
   emit('operation-confirm', {
@@ -482,7 +511,8 @@ function operationProjectSelected(source = {}, project = {}) {
                 v-if="sourceOperationLabel()"
                 type="button"
                 class="cashier-entitlement-table__add"
-                :disabled="operationMode !== 'card-enable' && !isSourceAvailable(source)"
+                :disabled="submitting || (operationMode === 'card-to-balance' ? Boolean(cardToBalanceUnavailableReason(source)) : operationMode !== 'card-enable' && !isSourceAvailable(source))"
+                :title="operationMode === 'card-to-balance' ? cardToBalanceUnavailableReason(source) || undefined : undefined"
                 @click="chooseSourceOperation(source)"
               >{{ operationMode === 'card-upgrade' && operationSourceSelected(source)
                 ? '已选择'
@@ -497,10 +527,10 @@ function operationProjectSelected(source = {}, project = {}) {
                   <strong>{{ source.name || '卡项' }}</strong>
                   <span class="cashier-entitlement-table__type-tag">{{ sourceTypeLabel(source) }}</span>
                 </div>
-                <small :title="source.disabledReason || sourceCardNo(source)">{{ source.disabledReason || sourceCardNo(source) }}</small>
+                <small :title="sourceOperationDescription(source)">{{ sourceOperationDescription(source) }}</small>
               </div>
               <span>{{ displaySourceRemainingTimes(source) }}</span>
-              <span>{{ displayAmount(source.remainingAmount) }}</span>
+              <span>{{ displayAmount(sourceRemainingAmount(source)) }}</span>
               <span>{{ displayAmount(source.outstandingDebtAmount) }}</span>
               <span>{{ displayAmount(source.cancelledDebtAmount) }}</span>
               <span>{{ displayAmount(source.purchaseAmount) }}</span>
@@ -551,11 +581,17 @@ function operationProjectSelected(source = {}, project = {}) {
         </div>
       </section>
 
-      <div v-if="editingSource" class="cashier-card-operation-editor" role="dialog" :aria-label="operationLabel">
+      <div v-if="editingSource" class="cashier-card-operation-editor" :class="{ 'cashier-card-operation-editor--balance-transfer': operationMode === 'card-to-balance' }" role="dialog" :aria-label="operationLabel">
         <div class="cashier-card-operation-editor__panel">
           <header><strong>{{ operationLabel }} · {{ editingSource.name }}</strong></header>
+          <!-- 金额只读且与确认提交使用同一选卡快照，不允许部分转换。 -->
+          <template v-if="operationMode === 'card-to-balance'">
+            <label>实际剩余金额<output>{{ formatMoney(editingSource.balanceTransfer.amountCents / 100) }}</output></label>
+            <label>转入赠金金额<output>{{ formatMoney(editingSource.balanceTransfer.amountCents / 100) }}</output></label>
+            <p>全额一次转入会员赠金，确认后整卡作废。</p>
+          </template>
           <label v-if="operationMode === 'card-extension'">新的有效期<input v-model="operationDate" type="date"></label>
-          <label>原因<textarea v-model="operationReason" rows="3" placeholder="请填写原因"></textarea></label>
+          <label>原因<textarea v-model="operationReason" rows="3" :maxlength="operationMode === 'card-to-balance' ? 500 : undefined" placeholder="请填写原因"></textarea></label>
           <footer>
             <button type="button" class="button button--secondary" @click="editingSource = null">取消</button>
             <button type="button" class="button button--primary" :disabled="!operationReason.trim() || (operationMode === 'card-extension' && !operationDate)" @click="confirmSourceOperation">确认</button>
@@ -576,6 +612,31 @@ function operationProjectSelected(source = {}, project = {}) {
 </template>
 
 <style scoped>
+/* 只约束本轮卡转余额的小屏弹窗，避免宽权益表把确认按钮推到视口外。 */
+@media (max-width: 600px) {
+  .cashier-card-operation-editor--balance-transfer {
+    position: fixed;
+    box-sizing: border-box;
+    padding: 16px;
+    overflow: auto;
+    z-index: 1000;
+  }
+
+  .cashier-card-operation-editor--balance-transfer .cashier-card-operation-editor__panel {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .cashier-card-operation-editor--balance-transfer textarea {
+    box-sizing: border-box;
+    min-width: 0;
+  }
+}
+
 .cashier-entitlement-table__custom-tag {
   display: inline-flex;
   flex: none;

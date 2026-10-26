@@ -197,6 +197,12 @@ final class CashierV3MemberModule
                     $memberId,
                     $scope['operator_scope']->storeId()
                 );
+                // Local cashier member selection deliberately does not persist
+                // the workspace/root member. Return this selected member's
+                // per-kind defaults with its existing read-only summary instead
+                // of borrowing the root projection's previous member history.
+                $summary['sourceDefaults'] = (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())
+                    ->initialChoices($scope['data_scope']->tenantId(), $scope['operator_scope']->storeId(), $memberId);
                 return ['data' => ['memberSummary' => $summary]];
             });
         }
@@ -259,6 +265,10 @@ final class CashierV3MemberModule
                         $scope['data_scope']
                     );
                     $rechargeOptions = self::rechargeOptions($member);
+                    // The member-list recharge entry may target somebody other
+                    // than the cashier root member; never borrow root defaults.
+                    $member['sourceDefaults'] = (new \app\services\cashier\v3\config\CashierV3BusinessSourcePolicyServices())
+                        ->initialChoices($scope['data_scope']->tenantId(), $scope['operator_scope']->storeId(), $memberId);
                     return [
                         'data' => [
                             'member' => $member,

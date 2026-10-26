@@ -1576,6 +1576,11 @@ final class CashierV3SaleCatalogServices
             'categoryNames' => $categoryNames,
             'unitPriceCents' => $unitPriceCents,
             'originalUnitPriceCents' => $originalUnitPriceCents,
+            // 可售价区间属于改价约束，随同一SKU展示，不生成另一份结账版本。
+            'salePriceRange' => [
+                'minimumCents' => self::moneyToCents($row['sku_price_range_min'] ?? 0, 'price_range_min'),
+                'maximumCents' => self::moneyToCents($row['sku_price_range_max'] ?? 0, 'price_range_max'),
+            ],
             'configuredCostCents' => $configuredCostCents,
             'stock' => $stock,
             'isInventory' => (int)($row['product_is_inventory'] ?? 0) === 1,
@@ -2008,6 +2013,7 @@ final class CashierV3SaleCatalogServices
             'code' => $item['code'],
             'category' => $item['categoryName'],
             'categoryId' => $item['categoryId'],
+            'salePriceRange' => $item['salePriceRange'] ?? ['minimumCents' => 0, 'maximumCents' => 0],
             'price' => self::centsToMoney($item['unitPriceCents']),
             'originalPrice' => self::centsToMoney($item['originalUnitPriceCents']),
             'productVersion' => $item['productVersion'],
@@ -2088,6 +2094,7 @@ final class CashierV3SaleCatalogServices
             'code' => $item['code'],
             'categoryId' => $item['categoryId'],
             'category' => $item['categoryName'],
+            'salePriceRange' => $item['salePriceRange'] ?? ['minimumCents' => 0, 'maximumCents' => 0],
             'unitPrice' => self::centsToMoney($item['unitPriceCents']),
             'originalUnitPrice' => self::centsToMoney($item['originalUnitPriceCents']),
             'serviceSource' => '本次购买',

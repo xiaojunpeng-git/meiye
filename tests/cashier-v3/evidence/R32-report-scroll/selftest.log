@@ -1,0 +1,3 @@
+R32 REPORT SCROLL PASS
+Real Vue component + shared shell CSS; synthetic report rows only.
+Three report routes x two viewports; visible horizontal/vertical scrollbar screenshots, actual horizontal/vertical wheel input, programmatic last-row/last-column reachability, sticky header/summary/fixed-left, stationary query/pagination and empty results verified.

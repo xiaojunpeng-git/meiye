@@ -1,0 +1,7 @@
+{
+  "directory": "/www/backups/008/r57-source-policy-232dd50b",
+  "manifestSHA256": "6235057a8f031bffe1910b09741e45435a99bc70568f183e5721973d437f8343",
+  "settingsTableAndSchemaBackup": true,
+  "independentFileBackup": true,
+  "rollback": "Restore only manifest-listed files; retain backward-compatible columns and migration audit."
+}

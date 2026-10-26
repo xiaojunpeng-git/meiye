@@ -687,6 +687,11 @@ useModalFocusTrap({
         </div>
 
         <template v-else>
+          <section v-if="reservation.customServices?.length" class="reservation-detail__section">
+            <header class="reservation-detail__section-header"><h3>定制服务</h3></header>
+            <dl class="reservation-detail__info-list"><div v-for="item in reservation.customServices" :key="item.id"><dt>{{ item.name }}</dt><dd>× {{ item.quantity }}</dd></div></dl>
+          </section>
+
           <section class="reservation-detail__section">
             <header class="reservation-detail__section-header">
               <h3>会员</h3>
@@ -698,7 +703,8 @@ useModalFocusTrap({
                 <div><dt>会员编号</dt><dd>{{ member.memberNo || '—' }}</dd></div>
                 <div><dt>会员状态</dt><dd>{{ member.status || '—' }}</dd></div>
                 <div><dt>预约来源</dt><dd>{{ reservationSourceLabel }}</dd></div>
-                <div><dt>客户来源</dt><dd>{{ reservation.businessSourceLabel || '未选择' }}</dd></div>
+                <!-- 来源展示按当前策略隐藏，但历史快照仍保留并传递至收银。 -->
+                <div v-if="reservation.businessSourcePolicy?.enabled !== false"><dt>客户来源</dt><dd>{{ reservation.businessSourceLabel || '未选择' }}</dd></div>
                 <div><dt>卡项次数</dt><dd>{{ entitlementOccupationLabel }}</dd></div>
               </dl>
             </div>

@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "site": "010",
+  "commit": "232dd50b16dbcabc88717ee81c972de8b3b26d33",
+  "previousRows": 0,
+  "configurationRowsCreated": 1,
+  "mode": "manual",
+  "fixedSourceIds": 0,
+  "existingBusinessRowsChanged": 0,
+  "auditKey": "20261025-r57-business-source-policy-initialize"
+}

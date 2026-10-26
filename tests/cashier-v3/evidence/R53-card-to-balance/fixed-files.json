@@ -1,0 +1,289 @@
+{
+  "round": 53,
+  "createdAt": "2026-10-24T07:00:01.988Z",
+  "status": "self_tests_completed_pending_product_acceptance",
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "sourceRoot": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "scopeFingerprint": "a59d9ac2098d5f156cdf6c94d768d7d4e22bbf65214bb4ec675ae9e80831b448",
+  "sharedWorkspace": {
+    "statusSha256": "3a16326786ea04348d7938a2ec4e58edae38e9737ab6238ed3c8b215f242f8cd",
+    "statusRows": 2196,
+    "caveat": "Whole-file fingerprints include preexisting shared dirty changes, not an isolated release candidate or authority to commit all differences."
+  },
+  "files": {
+    "frontend": [
+      {
+        "path": "前端代码/cashier-v3/src/layouts/CashierShell.vue",
+        "sha256": "59927ec023d66841742102429bd1a81ab575ad9382c30c00828c056f161eb88c"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/components/cashier/EntitlementSelectorOverlay.vue",
+        "sha256": "3847131800339e79c9136344891de665d090b9763197ed1fcdb14620e04aa091"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/views/CashierWorkbenchView.vue",
+        "sha256": "be677cf4f681bbeb45b7836ac510852634c23fef4ee5f13e618dfa10beee2dde"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+        "sha256": "9fe3518ffadc186c581e8df59407b4c8d3fb63ea85f149ae6331146df65be135"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/services/cardToBalance.js",
+        "sha256": "3ce18cb984fa7de6f2a06ae6c7e5592022827e112654ca37d1d56e2729b12931"
+      },
+      {
+        "path": "前端代码/cashier-v3/src/components/member/MemberDetailOverlay.vue",
+        "sha256": "fc559e9f0f6c9d57fa2be00d29264dceb35e8e3f4926f59c422153cc6dfebb8e"
+      }
+    ],
+    "backend": [
+      {
+        "path": "后端代码/app/services/cashier/v3/CashierV3RequestNormalizer.php",
+        "sha256": "68d4ee775f2626e0ede16916561850daa7d2f3533c3914b3859ff02df5673b7c"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php",
+        "sha256": "d9a62727648b528f427b6c04a1698dabe03a23a3af7bb07ad6367117bda3bc5b"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/card/CashierV3CardOperationModule.php",
+        "sha256": "4584170122ece1338189b3f05ff634b45fe7a650cf80506e024e33168c357fb0"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/card/CashierV3CardOperationResourceDiscovery.php",
+        "sha256": "a90031b9936e945236664d4c86d5c6803463c242840512c37b38ba5b11b43b75"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/card/CashierV3CardToBalanceServices.php",
+        "sha256": "ddc8b12cd4aa1731d95228a523deab1a971d322517f376263b8716e438c33ade"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/card/CashierV3CardConversionGuard.php",
+        "sha256": "d9405b093b2a0c00f94e110297c759f79a251bb779431612b67067f93e348386"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/permission/CashierV3PermissionPolicyRegistry.php",
+        "sha256": "d05a91f7c89153b0bf939a86ad35d669d080dc9a9fbdcbda44bbeb69394a67aa"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/permission/CashierV3FeatureResolver.php",
+        "sha256": "6dfe7f8d0d7b97f18719d080f1f3185bc8faa29b8637a0f3d5e7a89504a5862b"
+      },
+      {
+        "path": "后端代码/app/services/organization/JobPositionPolicyServices.php",
+        "sha256": "250b5780564a8e2f00634f6f0db3b32d5121b7eed3d3135ca5e6a8b3f0d97146"
+      },
+      {
+        "path": "后端代码/app/services/organization/StorePermissionCatalogServices.php",
+        "sha256": "a452b6abb3494d0124517b3575e06c91c3a608496b56cc2acd305422dce6b152"
+      },
+      {
+        "path": "后端代码/app/services/user/UserBalanceAtomicServices.php",
+        "sha256": "944168ae315f749cc20293feb83c3dff1de1a7f9bf18095b4e147908a6e18a41"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php",
+        "sha256": "2db385b55a051afb0a3795cf842a7a2a3fdc98ef9462b8bdba017d45565cb14f"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/CashierV3UnifiedRefundServices.php",
+        "sha256": "76be807ac7ae77d886743d458af1145d48dacbb4ff86b69749ec0a2b234d7320"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/CashierV3ServiceRecordVoidServices.php",
+        "sha256": "f7d3e27ba6d5d5c4593f2916b589c45d2b3b1e855af36c719024c4861c86b71e"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/CashierV3OrderCenterVoidServices.php",
+        "sha256": "47d02a196fb44b5d59649a20848590d23b946e3298f000d85890d8cfcb98e232"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/order/CashierV3DebtRestorationServices.php",
+        "sha256": "030ae5eb93a590cd6081199ded3ef672be8180fc36233aa715e0add6257a0091"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementProjectionServices.php",
+        "sha256": "e1fa9cb1422caecc819a0b6e8d6f42b82ccf5ea6c45d73667d3c1183c091ed07"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+        "sha256": "de911e73c1e925c090c0bcfff902b40d139c41dacf6b83ead4d5e8c9f6abea1a"
+      },
+      {
+        "path": "后端代码/app/services/order/StoreOrderWriteOffServices.php",
+        "sha256": "629784aa74c6e9b937dd9e530dd3e6ef183386f91e452e211bc3b4425b8a9b51"
+      },
+      {
+        "path": "后端代码/app/services/order/BatchWriteoffServices.php",
+        "sha256": "681dd8cc450c5957378a89db72e54a8a12441074bd7bbe4a6dfcffd83450e0bd"
+      },
+      {
+        "path": "后端代码/app/services/order/StoreOrderRollbackServices.php",
+        "sha256": "e4141f175f297a04e28bece7ad8b7f04f02c45a5d6c56cd250af63a26ff81de8"
+      },
+      {
+        "path": "后端代码/app/services/order/StoreOrderTerminalOperationServices.php",
+        "sha256": "fc9bbb01a3b3caafcaef7df8be86294ff1566c934b8143457f4f5472beca443f"
+      },
+      {
+        "path": "后端代码/app/services/order/StoreDebtServices.php",
+        "sha256": "6c976323f33e6b81cb9a62da39d2b6ee62753f23a18167c8fcba13ac50d88d3a"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/card/CashierV3CardOperationAuthorityServices.php",
+        "sha256": "f27d1323e8b465f1e79c2a422b773633af539d9d251409517ed3f85e7c714838"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementResourceVersionProvider.php",
+        "sha256": "392684e35a1582eeb878e1e90bdfad9da8fd08ad5fc1100e764ced6de0c590a8"
+      },
+      {
+        "path": "后端代码/app/services/cashier/v3/permission/CashierV3StaffFeatureOverrideServices.php",
+        "sha256": "18bb1bb54e19235cce7294b2aeabc1a3cded36465bc416a6c2044eda21daf297"
+      }
+    ],
+    "migrations": [
+      {
+        "path": "后端代码/database/upgrades/2026-10-24-卡转余额/01-权限目录.php",
+        "sha256": "a45b456ee006bfe5d39e5ff2575597a6c401c8ee3b9c2a0984082dc7db03dfd9"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-10-24-卡转余额/02-已有收银岗位开通.php",
+        "sha256": "036ef63c7f2978e15c36056a3266dcfcf9a8a2a59f712458eb71e0d01b3b96af"
+      },
+      {
+        "path": "后端代码/database/upgrades/2026-10-24-卡转余额/03-补交关联锁定索引.php",
+        "sha256": "4c3d92facc4ff4e456ffd4588adebf5108d5448807744cbf20d2bfe15215f509"
+      }
+    ],
+    "tests": [
+      {
+        "path": "tests/cashier-v3/php/r53-card-history-sqlite.php",
+        "sha256": "0352974f27c71d30680e96203b567de2677d774825868bb77b24f7a4d4e6d4b0"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-card-origin-lock-order-mysql.php",
+        "sha256": "abf12ef3f77ae72930a596a284d015b9981fc35b9ab5a62cb4e6ae0ddc7199d5"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-card-to-balance-gateway.php",
+        "sha256": "8da56039e01e545a5681a2e9fae3149c1db95b0ed39fba480de0f30bcbaf79f9"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-card-to-balance-mysql.php",
+        "sha256": "77285bfb2e87d793466e11571e1054336f6448d648bcbe21c794c28390c0b8a6"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-conversion-replay-scope.php",
+        "sha256": "34c8cecc25239a8f604a7d0d86b2af55efa718aee494dc3c5e4accf32fd14af7"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-conversion-reversal-guard.php",
+        "sha256": "d21c4df3429523a24e2d0c19682f253d357c11f16edfeef0fd86485903ce9662"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-historical-scope-contract.php",
+        "sha256": "e58f225b1ed535c05e8eb4d2a5a1feacc4f368b5111f270be3ed7d4c2908b31a"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-legacy-reversal-mysql.php",
+        "sha256": "5d19651c4073d612de70da4185e105979a31df817fadd081475bf566d6b91159"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-permission-install-local.php",
+        "sha256": "e71fcdc0db9009c15e7b579cd1df9040f194b6c247ae2d6bbcdd99aa24edf702"
+      },
+      {
+        "path": "tests/cashier-v3/js/r53-card-to-balance-browser.cjs",
+        "sha256": "4c44ba1b6600f09cf1db31ad66933ed4d410910f9459c2db227581f5799fcd05"
+      },
+      {
+        "path": "tests/cashier-v3/js/r15-card-operation-frontend-contract.mjs",
+        "sha256": "a361ac12d0ac1564bc91db253a36706c03c59699723d00c4f713dcd1f4e3b227"
+      },
+      {
+        "path": "tests/cashier-v3/php/r53-card-to-balance-entry.php",
+        "sha256": "5da401b8eb4fe458d02e5cb70357c2db4a2afa055892156080c5a8fd8186c55e"
+      }
+    ]
+  },
+  "build": {
+    "purpose": "temporary local verification only; not an 8080 release",
+    "sourceDevUrl": "http://127.0.0.1:18091/view_cashier_v3/#/cashier",
+    "sourceMountVerified": true,
+    "prebuildChecks": 70,
+    "artifacts": [
+      {
+        "path": "/private/tmp/mohe-r53-entry-fix-20261024/index.html",
+        "sha256": "21c064455422db988919b4fd40828086c3e91569eb41192400067c0002fd66e1"
+      },
+      {
+        "path": "/private/tmp/mohe-r53-entry-fix-20261024/assets/index-26e53267.js",
+        "sha256": "38991b9d0f36fa8aff8c2cf45895236bdbab349feab2a7fded5fccae8a60df3c"
+      },
+      {
+        "path": "/private/tmp/mohe-r53-entry-fix-20261024/assets/index-45035518.css",
+        "sha256": "4503551810ace9f34816bd15e6571739d0c5c1bed3d957f5905421a4e7bd1984"
+      }
+    ]
+  },
+  "tests": {
+    "realGatewayAndCore": 63,
+    "legacyUndoAndRepayment": 19,
+    "originLockOrder": 11,
+    "gatewayNormalizerPermissionContexts": 31,
+    "replayScopeNegatives": 14,
+    "reversalGuards": 12,
+    "cardHistorySqlite": 54,
+    "historyRows": 91,
+    "historicalScopeAdapter": 10,
+    "memberHistoryMoneySfc": 7,
+    "browserViewports": [
+      1480,
+      960,
+      375
+    ],
+    "backendPhp74LintFiles": 26,
+    "localGrantedCashierPositions": 5,
+    "entryActualPositionRootProjection": 5,
+    "entryBrowser": "real login and root normalization plus actual Shell menu computed; granted visible, denied/read-only hidden"
+  },
+  "limits": [
+    "No authenticated full browser-to-database E2E; real gateway/database and isolated browser paths tested separately.",
+    "Registered storeless historical MySQL path lacks fixture/table; policy adapter tested, unknown/wrong marker rejected in MySQL.",
+    "Known preexisting R15 custom-card and upgrade-settlement textual assertion differences not relaxed. R50 historical fixture unavailable.",
+    "Missing immutable historical links cannot be invented.",
+    "No commit, push, remote access or deployment."
+  ],
+  "localSchema": {
+    "indexes": [
+      "store_order.idx_card_conversion_repay_origin",
+      "store_debt_repay.idx_card_conversion_repay_order"
+    ],
+    "beforeSchema": "后端代码/runtime/r53-transfer-indexes-before-20261024-135135-2cf9d4.json",
+    "idempotentSecondRunCreated": 0,
+    "businessRowsModified": 0
+  },
+  "evidence": [
+    {
+      "path": "tests/cashier-v3/evidence/R53-card-to-balance/自测记录.md",
+      "sha256": "c54d9d4c76243f567dc5157611a25606194d43bdc515169521fb75b28b34dc82"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R53-card-to-balance-core-fixed-2026-10-24.json",
+      "sha256": "9bd8627e3846658e4651382a7cd76bb2d480217f8210f7ef531c1dd7054f5c3c"
+    },
+    {
+      "path": "tests/cashier-v3/evidence/R53-card-to-balance-frontend/result.json",
+      "sha256": "adde9a47e75555c83d710fa0fb32e722a0e4948e1a161984e66c47f0bc0958d5"
+    }
+  ],
+  "entryFix": {
+    "cause": "Backend operation catalog and frontend known-operation defaults omitted the newly granted feature; earlier fixture bypassed both filters.",
+    "localOnly": true,
+    "noNewGrant": true,
+    "originalDomainTests": "63 Gateway/core and19 legacy and11 lock-order prior runs; monetary domain and lock code unchanged by entry repair",
+    "latestBuild": "index-26e53267.js"
+  }
+}

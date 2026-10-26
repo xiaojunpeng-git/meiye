@@ -1,0 +1,63 @@
+{
+  "result": "PASS",
+  "results": [
+    {
+      "terminal": "admin",
+      "status": 200,
+      "checked": [
+        {
+          "file": "view_admin/css/chunk-vendors.48272356.css",
+          "sha256": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468"
+        },
+        {
+          "file": "view_admin/css/app.fdd3dd45.css",
+          "sha256": "b1ba25bda22e4cd9bb2448850f4ef4fcc4b1bb5882d9fa7f8af2ce67cfd08076"
+        },
+        {
+          "file": "view_admin/js/chunk-vendors.33283ef6.js",
+          "sha256": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a"
+        },
+        {
+          "file": "view_admin/js/app.13e50aec.js",
+          "sha256": "dbac3ddd7f4b4b9664a1a6352781d7f0a3b38a40e13e9f8e6457285f2fbfc684"
+        }
+      ],
+      "pageErrors": []
+    },
+    {
+      "terminal": "cashier-v3",
+      "status": 200,
+      "checked": [
+        {
+          "file": "assets/index-bd61fc13.js",
+          "sha256": "26d8954c4c0483fcdf5ee5397c655f16efed2fa0ef006c77f6f7ddfc91e8559f"
+        },
+        {
+          "file": "assets/index-c0e7e220.css",
+          "sha256": "c0e7e220bb38a1d20b47cf0612ecd39c21a8ce53b0b064b5c991c11782711398"
+        }
+      ],
+      "pageErrors": []
+    },
+    {
+      "terminal": "mobile",
+      "status": 200,
+      "checked": [
+        {
+          "file": "assets/uni.ff98ee44.css",
+          "sha256": "ff98ee447111dbe49ae6a90e6bb41164ca03048ac66808f0fbd8791f37aba9a9"
+        },
+        {
+          "file": "assets/index-CbZrlOt9.js",
+          "sha256": "80fae88b39b50ec77f00245ef133cb8acdd6460daaabbf4464dcf5e673b008ef"
+        },
+        {
+          "file": "assets/index-CQXQ6p9m.css",
+          "sha256": "81b7774471a5e25e6085d3fa289a6522c87fd67bea637632bc3b7a9009c9ae3e"
+        }
+      ],
+      "pageErrors": []
+    }
+  ],
+  "limit": "Anonymous boot and exact resources; no real financial transaction or reservation confirmation."
+}

@@ -5,13 +5,14 @@ import ChevronDown from '@lucide/vue/dist/esm/icons/chevron-down.mjs'
 import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import Store from '@lucide/vue/dist/esm/icons/store.mjs'
 import CircleUserRound from '@lucide/vue/dist/esm/icons/circle-user-round.mjs'
+import StoreFullscreenButton from './StoreFullscreenButton.vue'
 import { configuredNavigationGroups } from '../../../../shared/storeNavigationGroups.js'
-import { ORDER_RECORD_TYPES } from '@/constants/orderRecordTypes'
+import { ORDER_RECORD_TYPES, orderRecordTypeVisible } from '@/constants/orderRecordTypes'
 import { STORE_REPORT_TABS } from '@/constants/storeBusinessReports'
 import { queryStoreBusinessReportCatalog } from '@/services/storeBusinessReportApi'
 import { loadBasicReportCatalog } from '@/services/basicReportApi'
 
-const props = defineProps({ entries: { type: Array, default: () => [] }, rules: { type: Array, default: () => [] }, storeName: String, operator: String, operatorProfile: { type: Object, default: () => ({}) }, canSwitchStores: Boolean, pendingHangCount: Number, inventoryOpen: Boolean, activeInventoryKey: String, contextId: String })
+const props = defineProps({ entries: { type: Array, default: () => [] }, rules: { type: Array, default: () => [] }, storeName: String, operator: String, operatorProfile: { type: Object, default: () => ({}) }, canSwitchStores: Boolean, pendingHangCount: Number, inventoryOpen: Boolean, activeInventoryKey: String, contextId: String, debtPaymentEnabled: { type: Boolean, default: true } })
 const emit = defineEmits(['navigate', 'switch-store', 'password', 'logout'])
 const route = useRoute()
 const root = ref(null)
@@ -37,7 +38,7 @@ const basicReportEntry = computed(() => props.entries.find(item => item.navigati
 const navigationHandlers = computed(() => [
   ...props.entries.filter(entry => entry.key !== 'inventory-presale-claim' && entry.navigationKey !== 'report.basic'),
   ...props.entries.filter(entry => entry.key === 'inventory-presale-claim').map(entry => ({ ...entry, navigationKey: 'inventory.presale_claim' })),
-  ...props.entries.filter(entry => entry.key === 'order').flatMap(entry => ORDER_RECORD_TYPES.map(type => ({ ...entry,
+  ...props.entries.filter(entry => entry.key === 'order').flatMap(entry => ORDER_RECORD_TYPES.filter(type => orderRecordTypeVisible(type.key, props.debtPaymentEnabled)).map(type => ({ ...entry,
     key: `order-${type.key}`, navigationKey: `order.${type.key}`, orderType: type.key,
     to: { ...entry.to, query: { tab: type.key } } }))),
   ...(reportEntry.value ? reports.value.map(report => ({ ...reportEntry.value, key: `report-${report.code}`,
@@ -54,6 +55,23 @@ const groups = computed(() => configuredNavigationGroups(props.rules, navigation
 const selectedGroup = computed(() => {
   const exact = groups.value.find(group => group.entries.some(row => row.entry?.navigationKey && isActive(row.entry)))
   return exact?.key || groups.value.find(group => group.entries.some(row => row.entry && isActive(row.entry)))?.key || ''
+})
+// 当前位置只读取已授权、已启用的实际导航树；打开其他菜单不改变它。
+// 同一路由优先定位订单类型/报表/库存子入口，再保留配置树中的祖先标题。
+const currentLocation = computed(() => {
+  const group = groups.value.find(item => item.key === selectedGroup.value)
+  if (!group) return []
+  const matches = group.entries.filter(row => row.entry && isActive(row.entry))
+  const specificity = row => (row.entry.orderType || row.entry.reportCode || row.entry.inventory ? 1000 : 0) + row.depth
+  const current = matches.reduce((best, row) => !best || specificity(row) > specificity(best) ? row : best, null)
+  if (!current) return []
+  const ancestors = []
+  for (const row of group.entries) {
+    ancestors.length = row.depth
+    ancestors.push(row.label)
+    if (row === current) return [group.label, ...ancestors]
+  }
+  return []
 })
 function isActive(entry) {
   if (entry.accountAction) return false
@@ -129,15 +147,18 @@ onBeforeUnmount(() => { requestId++; basicRequestId++; document.removeEventListe
       <nav id="cashier-primary-nav" class="store-topbar__groups" aria-label="门店端主菜单" @scroll="positionMenu">
         <button v-for="group in groups" :key="group.key" type="button" class="store-topbar__group" :class="{ 'is-active': selectedGroup === group.key, 'is-open': openGroup === group.key }" :aria-expanded="openGroup === group.key" :aria-controls="'store-menu-' + group.key" @click="toggle(group)">{{ group.label }}<ChevronDown :size="13" /></button>
       </nav>
-
+      <nav v-if="currentLocation.length" class="store-topbar__location" aria-label="当前位置" :title="currentLocation.join(' › ')">
+        <ol><li v-for="(label, index) in currentLocation" :key="index" :aria-current="index === currentLocation.length - 1 ? 'page' : undefined"><span v-if="index" class="store-topbar__location-separator" aria-hidden="true">›</span><span class="store-topbar__location-label">{{ label }}</span></li></ol>
+      </nav>
     </div>
-    <!-- 门店与账号属于第二行上下文；顶部只呈现后台配置的菜单大类。 -->
+    <!-- 门店与账号属于第二行上下文；顶部呈现配置菜单及当前所在层级。 -->
     <div class="store-contextbar">
       <button v-if="canSwitchStores" class="store-topbar__brand" type="button" aria-label="切换门店" @click="emit('switch-store')"><span class="store-topbar__switch-mark" aria-hidden="true"><RefreshCw :size="17" :stroke-width="1.9" /></span><strong>{{ storeName }}</strong></button>
       <div v-else class="store-topbar__brand"><Store :size="21" /><strong>{{ storeName }}</strong></div>
     <nav class="store-quickbar" aria-label="常用快捷入口">
       <button v-for="entry in quickEntries" :key="entry.key" type="button" class="cashier-nav__item" :class="{ 'cashier-nav__item--active': isActive(entry) }" :aria-current="isActive(entry) ? 'page' : undefined" @click="choose(entry)"><component :is="entry.icon" class="cashier-nav__icon" :size="20" :stroke-width="1.9" /><span class="cashier-nav__label">{{ entry.label }}</span><span v-if="entry.key === 'hang' && pendingHangCount > 0" class="cashier-nav__badge">{{ pendingHangCount }}</span></button>
     </nav>
+      <StoreFullscreenButton />
       <button type="button" class="store-topbar__account store-topbar__account-button" aria-label="查看操作员信息" :aria-expanded="openGroup === 'account'" aria-controls="store-operator-profile" @click="openGroup = openGroup === 'account' ? '' : 'account'"><CircleUserRound :size="19" /><span>{{ operator }}</span></button>
     </div>
     <!-- 账号操作不属于业务授权；所属菜单大类停用时仍保留退出入口，避免锁住会话。 -->
@@ -172,13 +193,21 @@ onBeforeUnmount(() => { requestId++; basicRequestId++; document.removeEventListe
 
 <style scoped>
 .store-navigation{position:relative;z-index:30;min-width:0;flex:none;background:#fff}
-.store-topbar{height:40px;display:flex;align-items:center;gap:24px;padding:0 20px;background:#18243a;color:#d8e2f0}
+/* 工作区保留桌面最小宽度；顶部单独限制到视口，避免当前位置落在屏外。 */
+.store-topbar{height:40px;display:flex;align-items:center;gap:24px;padding:0 20px;background:#18243a;color:#d8e2f0;box-sizing:border-box;max-width:100vw}
 .store-topbar__brand{display:flex;align-items:center;gap:9px;max-width:230px;min-width:120px;background:none;border:0;color:#334861;font:inherit;white-space:nowrap}
 /* 切店入口采用紧凑28px浅色方框；只改变图标外观，仍使用原切店操作。 */
 .store-topbar__switch-mark{display:inline-grid;flex:none;width:28px;height:28px;place-items:center;border:1px solid #d9e4ef;border-radius:7px;background:#f0f5fb;color:#6483a5}
 button.store-topbar__brand:hover .store-topbar__switch-mark,button.store-topbar__brand:focus-visible .store-topbar__switch-mark{background:#e4edf7}
 button.store-topbar__brand{cursor:pointer}.store-topbar__brand strong{overflow:hidden;text-overflow:ellipsis}
 .store-topbar__groups{display:flex;align-self:stretch;gap:8px;overflow-x:auto;min-width:0;scrollbar-width:none}
+/* 位置栏位于主菜单右侧；窄屏允许菜单横滑、长名称省略，完整层级仍可悬停查看。 */
+.store-topbar__location{margin-left:auto;min-width:0;max-width:45%;flex:0 1 auto;font-size:12px;color:#aebed3}
+.store-topbar__location ol{display:flex;align-items:center;min-width:0;margin:0;padding:0;list-style:none}
+.store-topbar__location li{display:flex;align-items:center;min-width:0;flex:0 3 auto;white-space:nowrap}
+.store-topbar__location li:last-child{flex:0 1 auto;color:#fff}
+.store-topbar__location-label{overflow:hidden;text-overflow:ellipsis}
+.store-topbar__location-separator{flex:none;margin:0 8px;color:#7f93af}
 .store-topbar__group{display:flex;align-items:center;justify-content:center;gap:7px;padding:0 16px;white-space:nowrap;background:transparent;border:0;border-bottom:3px solid transparent;color:inherit;font:inherit;cursor:pointer}
 .store-topbar__group:hover,.store-topbar__group.is-open{background:#253752;color:#fff}.store-topbar__group.is-active{color:#fff;border-bottom-color:#4096ff}
 .store-topbar__account{margin-left:auto;display:flex;align-items:center;gap:8px;min-width:0;max-width:220px;font-size:13px;white-space:nowrap}.store-topbar__account span{overflow:hidden;text-overflow:ellipsis}
@@ -199,5 +228,5 @@ button.store-topbar__brand{cursor:pointer}.store-topbar__brand strong{overflow:h
 .store-operator-profile{margin:0;padding:4px 2px}.store-operator-profile>div{display:grid;grid-template-columns:56px minmax(0,1fr);gap:12px;padding:9px 10px;font-size:13px;line-height:1.6}.store-operator-profile dt{color:#7a8799}.store-operator-profile dd{margin:0;color:#334861;overflow-wrap:anywhere}
 button:focus-visible{outline:2px solid #4096ff;outline-offset:-2px}
 @media(max-width:900px){.store-topbar{gap:8px;padding:0 10px}.store-topbar__group{padding:0 10px}.store-topbar__account{max-width:110px}.store-topbar__brand{min-width:0;max-width:145px;font-size:13px}}
-@media(max-width:600px){.store-topbar{height:40px;min-height:40px;gap:0}.store-topbar__groups{width:100%;height:40px}.store-topbar__account{max-width:160px}.store-menu{top:40px;width:calc(100vw - 24px)}.store-quickbar{padding:0 8px}.store-quickbar .cashier-nav__item{min-width:74px;padding:0 10px}}
+@media(max-width:600px){.store-topbar{height:40px;min-height:40px;gap:8px}.store-topbar__groups{flex:1; height:40px}.store-topbar__location{max-width:42%}.store-topbar__location-separator{margin:0 4px}.store-topbar__account{max-width:160px}.store-menu{top:40px;width:calc(100vw - 24px)}.store-quickbar{padding:0 8px}.store-quickbar .cashier-nav__item{min-width:74px;padding:0 10px}}
 </style>

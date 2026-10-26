@@ -131,6 +131,10 @@ final class CashierV3OrderCenterVoidServices
             throw self::failure('欠款已取消，不能作废补交记录。', 'supplement_debt_cancelled');
         }
         if ($repaid < $amountCents) throw self::failure('当前欠款金额不足以冲销该补交记录。', 'supplement_debt_projection_mismatch');
+        if ($type === 'sales') {
+            // Do not reopen the receivable after its paid rights moved into a wallet.
+            \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertDebtNotConverted($debt, $scope->tenantId(), $repaymentId);
+        }
 
         $now = time();
         $balanceResult = null;
@@ -308,10 +312,11 @@ final class CashierV3OrderCenterVoidServices
             throw self::failure('项目替换记录不存在或不可作废。', 'replacement_void_original_invalid');
         }
         $operationId = (string)$original['operation_id'];
-        // Match the forward card command's holder -> order -> state lock order.
+        // Match forward conversion/card commands and legacy terminal writers:
+        // origin -> holder -> state, then revalidate the immutable operation.
         // Only inspect/lock operation history after this common serialization point.
-        $holder = (array)Db::name('user_card_holder')->where('id', (int)$original['source_card_holder_id'])->lock(true)->find();
         $order = (array)Db::name('store_order')->where('id', (int)$original['origin_order_id'])->lock(true)->find();
+        $holder = (array)Db::name('user_card_holder')->where('id', (int)$original['source_card_holder_id'])->lock(true)->find();
         $state = (array)Db::name('cashier_v3_card_state')->where('tenant_id', $scope->tenantId())
             ->where('card_holder_id', (int)$original['source_card_holder_id'])->lock(true)->find();
         $lockedOriginal = (array)Db::name('cashier_v3_card_operation')->where('id', (int)$matches[1])

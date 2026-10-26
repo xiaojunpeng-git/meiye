@@ -1886,8 +1886,11 @@ onMounted(async () => {
       </div>
       <label v-else-if="usesNaturalMonthFilter" class="store-business-report__date-field"><span>月份</span><input v-model="selectedMonth" type="month" aria-label="统计月份" :max="today().slice(0, 7)" /></label>
       <template v-else>
-        <label class="store-business-report__date-field"><span>从</span><input v-model="startDate" type="date" aria-label="开始日期" :min="isFirstPhaseReport ? LEGACY_COVERAGE_START : undefined" :max="endDate" /></label>
-        <label class="store-business-report__date-field"><span>至</span><input v-model="endDate" type="date" aria-label="结束日期" :min="startDate" :max="today()" /></label>
+        <div class="store-business-report__period-picker">
+          <!-- Platform daily reports retain the existing coverage/future-date
+               bounds and explicit query/committed-export contract. -->
+          <UnifiedQueryDateRange :model-value="reportDateRange" :mode="reportPeriodMode" :min-date="isFirstPhaseReport ? LEGACY_COVERAGE_START : ''" :max-date="today()" :allow-clear="false" label="报表查询周期" @change="applyReportDateRange" />
+        </div>
       </template>
       <label v-for="field in visibleFilterSchema" :key="field.key">
         <!-- 报表可隐藏重复的可见标题，输入控件仍通过 aria-label 保留可访问语义。 -->
@@ -2115,6 +2118,14 @@ onMounted(async () => {
 .store-business-report__top-summaries { display: flex; flex-wrap: wrap; gap: 12px 28px; border-bottom: 1px solid #e1e8f0; padding: 12px 16px; background: #f8fbff; color: #23364d; font-size: 13px; }
 .store-business-report__top-summaries strong { margin-right: 7px; color: #607086; font-weight: 600; }
 .store-business-report__pending { display: flex; flex-wrap: wrap; gap: 8px 12px; border-bottom: 1px solid #f2d49a; padding: 10px 16px; background: #fff9ed; color: #9a6509; font-size: 12px; }
+/* 结果区独立承载双向滚动；外层固定布局裁剪溢出时，不能让表格直接撑出结果容器。
+   显式保留滚动条轨道，避免系统自动隐藏后宽表无可发现的拖动入口。 */
+.store-business-report__table-scroll { min-width: 0; overflow: auto; scrollbar-gutter: stable; scrollbar-color: #b7bec8 #f3f5f8; }
+.store-business-report__table-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+.store-business-report__table-scroll::-webkit-scrollbar-track { background: #f3f5f8; }
+.store-business-report__table-scroll::-webkit-scrollbar-thumb { border: 2px solid #f3f5f8; border-radius: 6px; background: #b7bec8; }
+.store-business-report__table-scroll::-webkit-scrollbar-thumb:hover { background: #929dab; }
+.store-business-report__table-scroll::-webkit-scrollbar-corner { background: #f3f5f8; }
 .store-business-report--market-detail .store-business-report__table-scroll, .store-business-report--fixed-table .store-business-report__table-scroll { min-height: 0; flex: 1; }
 .store-business-report table { width: 100%; border-collapse: separate; border-spacing: 0; white-space: nowrap; font-size: 13px; }
 .store-business-report th, .store-business-report td { border-bottom: 1px solid #edf1f5; padding: 11px 12px; text-align: left; }
@@ -2155,7 +2166,7 @@ onMounted(async () => {
 .store-business-report__empty, .store-business-report__empty-cell { min-height: 130px; color: #8290a2; font-size: 13px; text-align: center; }
 .store-business-report__empty { display: grid; place-items: center; }
 .store-business-report__empty-cell { padding: 40px; }
-.store-business-report__pagination { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 16px; color: #708096; font-size: 12px; }
+.store-business-report__pagination { flex-shrink: 0; display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 16px; color: #708096; font-size: 12px; }
 .store-business-report__pagination button { min-height: 30px; border: 1px solid #d7e0eb; border-radius: 5px; padding: 4px 9px; background: #fff; color: #445365; cursor: pointer; }
 .store-business-report__pagination button:disabled { cursor: not-allowed; opacity: .45; }
 @media (max-width: 1100px) { .store-business-report__metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

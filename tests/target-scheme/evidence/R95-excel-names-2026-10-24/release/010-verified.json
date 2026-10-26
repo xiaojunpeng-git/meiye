@@ -1,0 +1,64 @@
+{
+  "site": "010",
+  "commit": "0318b28cbc005361a5d17aae647c29424d38eac1",
+  "targets": 10,
+  "unrelatedBackendPreserved": true,
+  "otherTerminalsPreserved": true,
+  "targetDataUnchanged": true,
+  "runtime": {
+    "site": "010",
+    "phase": "after",
+    "checks": [
+      "exact scoped product ID",
+      "exact name and duplicate limit",
+      "invalid ID rejected"
+    ],
+    "reports": {
+      "group_dashboard": {
+        "rows": 0,
+        "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+      },
+      "store_target": {
+        "rows": 0,
+        "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+      },
+      "target_analysis": {
+        "rows": 0,
+        "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+      },
+      "target_monthly": {
+        "rows": 0,
+        "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+      },
+      "target_store": {
+        "rows": 0,
+        "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+      },
+      "merchant_target_analysis": {
+        "rows": 0,
+        "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+      },
+      "operations_performance_comparison": {
+        "rows": 0,
+        "sha256": "60c2f5b50e61517cac640319b7f793e29afda38b5b56a6b2eeb8436d63668828"
+      }
+    },
+    "retainedMethods": {
+      "schemeVoid": true,
+      "schemeDelete": true
+    },
+    "writes": false
+  },
+  "publicBrowser": [
+    {
+      "url": "https://010.cc3798.com/admin/login",
+      "preview": false,
+      "finalUrl": "https://010.cc3798.com/admin/login",
+      "passwordInputs": 1,
+      "runtimeErrors": [],
+      "result": "PASS"
+    }
+  ],
+  "result": "PASS",
+  "time": "2026-10-24T10:17:10.931Z"
+}

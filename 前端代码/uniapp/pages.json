@@ -1159,6 +1159,10 @@
 					}
 				},
 				{
+					"path": "reservation_custom_services/index",
+					"style": { "navigationBarTitleText": "定制服务" }
+				},
+				{
 					"path": "reservation/index",
 					"style": {
 						"navigationBarTitleText": "立即预约",

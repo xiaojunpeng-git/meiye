@@ -1,0 +1,48 @@
+{
+  "head": "df65e60a4d916f0f021ad00576314061eaeab1bf",
+  "files": {
+    "前端代码/cashier-v3/src/components/member/MemberDetailOverlay.vue": "085c2fa2299e0a957572bd4b4272581b9573ed3a2f949a28e9737d089d50d355",
+    "前端代码/cashier-v3/src/views/RoutePlaceholderView.vue": "dd145a5ae3c02f14ffee914679b2f5f57680a709bd0567b58796b10957c8f223",
+    "前端代码/cashier-v3/src/views/BusinessDashboardView.vue": "4547fe72cfb3475f8d8a61ca114aaaa33277a32799bf4d805bee36e97c5819ea",
+    "前端代码/cashier-v3/src/views/EmployeeDashboardView.vue": "1d2596ca84c6af63e3caabcf05839f1d0e91e3cd4b7136952634fec85643b11c",
+    "前端代码/cashier-v3/src/views/StoreTargetDashboardView.vue": "08c8e559f32c5e02b2d00cf646e02f8a4b91a65fb92a434a51a7bae9dd9d2dd9",
+    "前端代码/cashier-v3/src/views/EngineeringManagementView.vue": "3116b6df4024464c94427d358bf7c46029efdf69708d21bc21816eb075d5d45d",
+    "前端代码/cashier-v3/src/views/CustomerAnalyticsView.vue": "21e7ea1ca72e5bdea932c01f45fc2a95277fedb5962a6c4f84233d3428659bff",
+    "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue": "03dce9bbcf882bd3e6b8b8ed489e42918422baaf4ad8e4c9bc07086bda88a434",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryDateRange.vue": "aac1a8e79989e3dbcc5b23f30f94b4e22de668ce683fa37c63be7efd02bbf6c5",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQuerySettingsDrawer.vue": "9481066939bd8da51076e796738b7dcc7785d7ba4376038753d60ee9d9369b9a",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue": "089ebfc7e1c4c10d3d6e7d3ea3cc3dd15353a688e5331ef55ed02bd64d27b955",
+    "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php": "ce5ea5612be853136ae7cdbb3edcee476b315ff1e01d093cb72091e80fabd0ed",
+    "后端代码/app/services/cashier/v3/card/CashierV3CardReadAmountServices.php": "c78ecd68414213640d3a158a224e96da4ef8e31096cd673cd64689ec16cae45c",
+    "后端代码/app/services/cashier/v3/card/CashierV3CardComponentPurchaseAmountAuthority.php": "eda75efb579ca3a132196d46a3cb1035cd56b949f91d94d15f510f1e2e561da5",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3EntitlementActualAmountAllocator.php": "2fd37698ff7a227adc67c504e15cfd3d44b144b867124e9d987b449750f4f722",
+    "scripts/r54-member-service-dependency-gate.cjs": "893b1234643bc1ccc97ed1bca5e656b793dc2ffcddce111fce0383feee96bc67",
+    "tests/cashier-v3/js/r54-member-service-failure.cjs": "0af847ec7301409ea5ac42770029d85e458a710354ebfe525656efcb53a5df2b",
+    "tests/cashier-v3/php/r54-member-service-readonly.php": "b319169d1a8ca5949d01f12427cab4f6dc4d55455ef0df8058f5a6739725e2ee",
+    "后端代码/app/services/cashier/v3/cashier/CashierV3CardOriginDebtResolver.php": "54c4626104a0dd81c6d81112cd3f9e98d26edf4e055b53916f7093b8c4e9ba02",
+    "tests/cashier-v3/js/r54-query-period.cjs": "6b4531da51cc9e0f0b3d154eb563b6f34e83a7a8a13b7d8fbf6a67c1f5d984eb"
+  },
+  "periodScope": [
+    "前端代码/cashier-v3/src/components/member/MemberDetailOverlay.vue",
+    "前端代码/cashier-v3/src/views/RoutePlaceholderView.vue",
+    "前端代码/cashier-v3/src/views/BusinessDashboardView.vue",
+    "前端代码/cashier-v3/src/views/EmployeeDashboardView.vue",
+    "前端代码/cashier-v3/src/views/StoreTargetDashboardView.vue",
+    "前端代码/cashier-v3/src/views/EngineeringManagementView.vue",
+    "前端代码/cashier-v3/src/views/CustomerAnalyticsView.vue",
+    "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQueryDateRange.vue",
+    "前端代码/shared/unified-query-vue3/src/components/UnifiedQuerySettingsDrawer.vue"
+  ],
+  "sourceStable": true,
+  "patchSHA256": "68f6a7901f997b0b76fd7fadf29d06b373326d4761a98a09131da33166ba6b96",
+  "build": {
+    "result": "PASS",
+    "directory": "/private/tmp/mohe-r54-query-period-build-20261024",
+    "entry": "<!doctype html>\n<html lang=\"zh-CN\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\" />\n    <title>新收银台</title>\n    <script type=\"module\" crossorigin src=\"/view_cashier_v3/assets/index-7ef5dcda.js\"></script>\n    <link rel=\"stylesheet\" href=\"/view_cashier_v3/assets/index-999ad33b.css\">\n  </head>\n  <body>\n    <div id=\"app\"></div>\n    \n  </body>\n</html>\n"
+  },
+  "businessScope": "R54 local service-query repair and period controls; existing unrelated shared edits are not authorized for commit/deployment",
+  "commit": false,
+  "push": false,
+  "deployment": false
+}

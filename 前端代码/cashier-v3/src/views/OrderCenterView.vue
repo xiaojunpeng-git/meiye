@@ -5,9 +5,10 @@ import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetail
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
-import { orderRecordTypeLabel } from '@/constants/orderRecordTypes'
+import { orderRecordTypeLabel, orderRecordTypeVisible } from '@/constants/orderRecordTypes'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
+import OrderCenterReportQueryToolbar from '@/components/query/OrderCenterReportQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
 import { queryPreferenceKey, readQueryPreferences, mergeQueryRefresh, normalizeUnifiedQuerySettings } from '@mohe/unified-query-vue3'
 import {
@@ -42,6 +43,7 @@ import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi
 import { guideRoundText, salespeoplePerformanceText, serviceCraftsmenPerformanceText } from '@/services/orderCenterPersonnelDisplay'
 import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
 import { orderAttributionExpectedValue } from '@/services/orderAttributionExpectedValue'
+import { orderBusinessSourceFields, orderBusinessSourceQuery, orderDebtFields, orderDebtQuery } from '@/services/orderCenterReportFilters'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
 const serviceVoidNotice = ref('')
@@ -439,6 +441,13 @@ const FIELD_ALIASES = {
 }
 
 const state = useCashierV3State()
+// 开关只控制客户业务来源入口；历史事实和技术来源保持完整，缺省兼容已启用实例。
+// Reuse the root projection of the existing instance switch; missing initial
+// projection is not an instruction to erase a saved route or historical facts.
+const debtPaymentEnabled = computed(() => state.cashier?.debtPaymentEnabled !== false)
+const orderPresentationFields = fields => orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)
+const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
+const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
 const router = useRouter()
 const route = useRoute()
 const isPlatformReadOnly = computed(() => route.meta.platformReadOnly === true)
@@ -532,7 +541,8 @@ const availableTabs = computed(() => {
     const matched = ORDER_TABS.find((tab) => tab.key === key || tab.label === key)
     if (matched) readyKeys.add(matched.key)
   })
-  const tabs = ORDER_TABS.filter((tab) => readyKeys.has(tab.key))
+  // Keep source readiness and role gates; the debt switch only narrows visible tabs.
+  const tabs = ORDER_TABS.filter((tab) => readyKeys.has(tab.key) && orderRecordTypeVisible(tab.key, debtPaymentEnabled.value))
   return tabs.length ? tabs : ORDER_TABS.filter((tab) => tab.key === 'sales')
 })
 const activeTab = computed(() => availableTabs.value.find((tab) => tab.key === activeTabKey.value) || availableTabs.value[0])
@@ -585,7 +595,7 @@ const sourceFilterOptions = computed(() => sourceFilterSources.value.flatMap((pr
   }
   return options
 }))
-const queryFields = computed(() => activeTab.value.fields.map((item) => (
+const queryFields = computed(() => orderPresentationFields(activeTab.value.fields).map((item) => (
   activeTabKey.value === 'all' && item.key === 'source'
     ? { ...item, type: 'enum', options: sourceFilterOptions.value }
     : item
@@ -629,7 +639,7 @@ const visibleFields = computed(() => {
       if (index >= 0) fields.splice(index, 1)
     }
     const recordNoIndex = fields.findIndex((item) => item.key === 'service_record_no')
-    fields.splice(recordNoIndex >= 0 ? recordNoIndex + 1 : 0, 0, available.get('source'), available.get('sales_order_no'))
+    fields.splice(recordNoIndex >= 0 ? recordNoIndex + 1 : 0, 0, ...['source', 'sales_order_no'].map(key => available.get(key)).filter(Boolean))
   }
   if (activeTabKey.value === 'supplement') {
     // 商品名称来自欠款历史快照，分类则跟随平台端当前商品档案。
@@ -649,7 +659,7 @@ const visibleFields = computed(() => {
     if (sourceIndex >= 0) fields.splice(sourceIndex, 1)
     const orderNoKey = activeTabKey.value === 'recharge' ? 'recharge_order_no' : 'supplement_order_no'
     const orderNoIndex = fields.findIndex((item) => item.key === orderNoKey)
-    fields.splice(orderNoIndex >= 0 ? orderNoIndex + 1 : 0, 0, available.get('source'))
+    if (available.has('source')) fields.splice(orderNoIndex >= 0 ? orderNoIndex + 1 : 0, 0, available.get('source'))
     const salespersonIndex = fields.findIndex((item) => item.key === 'salesperson')
     const amountIndex = fields.findIndex((item) => item.key === (activeTabKey.value === 'recharge' ? 'recharge_amount' : 'supplement_amount'))
     if (salespersonIndex >= 0 && amountIndex >= 0 && salespersonIndex > amountIndex) {
@@ -667,7 +677,7 @@ const visibleFields = computed(() => {
 })
 const detailFields = computed(() => {
   // 混合页详情始终使用原业务字段，不能把整张联合字段表塞进一笔充值/退款。
-  if (activeTabKey.value === 'all') return recordTab(genericDetailRecord.value).fields
+  if (activeTabKey.value === 'all') return orderPresentationFields(recordTab(genericDetailRecord.value).fields)
   // 取消信息只补充在该笔欠款详情，不改变其他业务记录的字段。
   if (activeTabKey.value === 'debt' && genericDetailRecord.value?.cancelledAt) {
     return [...visibleFields.value, field('cancelledAmount', '取消金额', 'money'),
@@ -1214,7 +1224,7 @@ async function submitImportedCardRefund() {
 const unifiedQueryPages = Object.fromEntries(ORDER_TABS.map((tab) => [tab.key, useUnifiedQueryPage({
   pageCode: tab.pageCode,
   pageName: tab.label,
-  baseFields: tab.fields,
+  baseFields: () => orderPresentationFields(tab.fields),
   requestAction
 })]))
 const activeUnifiedQuery = computed(() => unifiedQueryPages[activeTabKey.value] || unifiedQueryPages.sales)
@@ -1238,7 +1248,7 @@ const activeQueryCapability = computed(() => {
   }
 })
 const activeQueryFields = computed(() => {
-  const fields = activeUnifiedQuery.value?.fields?.value || queryFields.value
+  const fields = orderPresentationFields(activeUnifiedQuery.value?.fields?.value || queryFields.value)
   if (activeTabKey.value !== 'all') return fields
   const sourceUi = queryFields.value.find((item) => item.key === 'source')
   // 服务端仍把来源声明为可精确过滤的文本字段；这里只合并下拉选项和页面位置，不能改其查询 key。
@@ -1494,7 +1504,7 @@ function giftVoidRecordId(record) {
 // 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
 const salesOrderListColumnKeys = ['item_name', 'product_category', 'unit_price', 'quantity', 'craftsman', 'salesperson', 'sales_manager', 'guide', 'line_amount', 'receivable_amount', 'debt_amount', 'coupon_discount_amount', 'actual_received_amount', 'payment_method', 'store', 'order_status']
 const salesOrderListColumns = computed(() => {
-  return salesOrderListColumnKeys.map((key) => ORDER_TABS.find((tab) => tab.key === 'sales').fields.find((item) => item.key === key).label)
+  return salesOrderListColumnKeys.filter(key => debtPaymentEnabled.value || key !== 'debt_amount').map((key) => ORDER_TABS.find((tab) => tab.key === 'sales').fields.find((item) => item.key === key).label)
 })
 
 function salesOrderItems(record) {
@@ -1581,6 +1591,7 @@ const editableRefundPersonnelSourceTypes = new Set([...editableRefundSourceTypes
 
 // 列表能力仅决定是否展示蓝色入口；后端仍以当前会话门店、权限及旧值独立判定。
 function canCorrectAttribution(record, field) {
+  if (field === 'source' && !businessSourceEnabled.value) return false
   // 消费订单是页面 feature，不在叶子 operation 快照中；误查 operation 会让有权门店隐藏更正入口。
   // 销售行还须由后端明确授予更正动作，实际写入仍由后端按当前会话与门店重新校验。
   if (isPlatformReadOnly.value || !canUseCashierV3Feature('cashier.v3.order_center')) return false
@@ -1673,6 +1684,7 @@ async function openAttributionEditor(record, field) {
 }
 
 async function loadSourceFilterOptions() {
+  if (!businessSourceEnabled.value) return
   if (sourceFilterSources.value.length) return
   if (sourceFilterRequest) return sourceFilterRequest
   // 下拉只读取当前实例的有效业务来源目录，不提交订单命令，也不依赖归属更正权限。
@@ -2771,7 +2783,7 @@ async function queryRecords(query = {}, resetPage = true) {
   // 只统一读取/刷新，不介入作废和人员调整命令。无新筛选的调用复用最后成功快照。
   const explicitQuery = Object.prototype.hasOwnProperty.call(query, 'topFilters')
   const previous = executedQueryByType.value[recordType] || queryModelByType.value[recordType] || {}
-  query = mergeQueryRefresh(previous, query)
+  query = orderDebtQuery(orderBusinessSourceQuery(mergeQueryRefresh(previous, query), businessSourceEnabled.value), debtPaymentEnabled.value)
   if (!explicitQuery && previous.page) resetPage = false
   if (recordType !== 'sales') {
     const currentQuery = queryModelByType.value[recordType] || {}
@@ -3780,10 +3792,16 @@ watch(activeTabKey, () => {
 }, { immediate: true })
 
 watch(
-  () => route.fullPath,
+  [() => route.fullPath, debtPaymentEnabled],
   () => {
     const requestedTab = String(route.query.tab || route.query.recordType || '').trim()
     if (!ORDER_TABS.some((item) => item.key === requestedTab)) return
+    // Closing the switch hides both navigation and stale/bookmarked debt tabs.
+    if (!isPlatformReadOnly.value && !orderRecordTypeVisible(requestedTab, debtPaymentEnabled.value)) {
+      activeTabKey.value = 'all'
+      void router.replace({ query: { ...route.query, tab: 'all', recordType: undefined } })
+      return
+    }
     if (!serviceReportDrilldown.value && queryModelByType.value.service?.servicePerformanceDrilldown) {
       queryModelByType.value = { ...queryModelByType.value, service: {} }
     }
@@ -3799,7 +3817,8 @@ watch(
       activeTabKey.value = requestedTab
     }
     if (isPlatformReadOnly.value || state.stateContextId) queryRecords(initialOrderCenterQuery(), true)
-  }
+  },
+  { immediate: true }
 )
 
 let openedSalaryDetailOrderId = ''
@@ -3862,8 +3881,40 @@ onBeforeUnmount(() => {
       <button type="button" class="button button--text" @click="leaveSalesReportDrilldown">退出报表筛选</button>
     </p>
 
+    <!-- 门店各订单页复用动态统计筛选；平台只读和报表下钻仍保留原入口及约束。 -->
+    <OrderCenterReportQueryToolbar
+      v-if="!isPlatformReadOnly && !serviceReportDrilldown && !salesReportDrilldown"
+      :key="`${state.stateContextId}:${activeTabKey}`"
+      :page-code="activeTab.pageCode"
+      :page-name="activeTab.label"
+      :source-options="sourceFilterOptions"
+      :business-source-enabled="businessSourceEnabled"
+      :debt-payment-enabled="debtPaymentEnabled"
+      :fields="activeQueryFields"
+      :executed-query="executedQuery"
+      :is-query-loading="isOrderQueryLoading"
+      :page-size="pageSize"
+      :query-capability="activeQueryCapability"
+      :settings="querySettings"
+      :result-count="total"
+      :current-page-count="records.length"
+      :data-as-of="orderCenter.dataAsOf"
+      :on-create-export="createActiveExport"
+      :on-query-export-task="queryActiveExportTask"
+      :on-download-export="downloadActiveExport"
+      @query="queryRecords"
+    >
+      <template #primary-actions>
+        <button
+          v-if="activeTabKey === 'refund' && canUseCashierV3Operation('cashier.v3.order.refund')"
+          type="button"
+          class="button button--secondary"
+          @click="openImportedCardRefundMemberSelector"
+        >退款</button>
+      </template>
+    </OrderCenterReportQueryToolbar>
     <UnifiedQueryToolbar
-      v-if="!serviceReportDrilldown && !salesReportDrilldown"
+      v-else-if="!serviceReportDrilldown && !salesReportDrilldown"
       class="order-center-query-toolbar"
       :key="activeTabKey"
       :search-placeholder="activeTab.searchPlaceholder"
@@ -3910,14 +3961,6 @@ onBeforeUnmount(() => {
           @change="changePlatformOrderScope"
         />
       </template>
-      <template #primary-actions>
-        <button
-          v-if="!isPlatformReadOnly && activeTabKey === 'refund' && canUseCashierV3Operation('cashier.v3.order.refund')"
-          type="button"
-          class="button button--secondary"
-          @click="openImportedCardRefundMemberSelector"
-        >退款</button>
-      </template>
     </UnifiedQueryToolbar>
 
     <p v-if="activeTabKey === 'debt' && debtRestoreError" class="order-center-page__inline-error" role="alert">{{ debtRestoreError }}</p>
@@ -3948,7 +3991,7 @@ onBeforeUnmount(() => {
                 :title="`查看${displayRecordField(record, 'member_name')}的会员详情`"
                 @click="openMemberDetail(record)"
               >{{ displayRecordField(record, 'member_name') }}</button><template v-else>{{ displayRecordField(record, 'member_name') }}</template></span>
-              <span class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：<button v-if="canCorrectAttribution(record, 'source')" type="button" class="order-link" @click="openAttributionEditor(record, 'source')">{{ displayRecordField(record, 'source') }}</button><template v-else>{{ displayRecordField(record, 'source') }}</template></span>
+              <span v-if="businessSourceEnabled" class="sales-order-query-meta sales-order-query-meta--source" :title="displayRecordField(record, 'source')">来源：<button v-if="canCorrectAttribution(record, 'source')" type="button" class="order-link" @click="openAttributionEditor(record, 'source')">{{ displayRecordField(record, 'source') }}</button><template v-else>{{ displayRecordField(record, 'source') }}</template></span>
               <span v-if="record.upgradeTypeLabel" class="sales-order-query-group__upgrade-tag">{{ record.upgradeTypeLabel }}</span>
               <!-- 纯权益可以查看/打印及作废服务，但不进入销售退款。 -->
               <span v-if="!isPlatformReadOnly" class="sales-order-query-group__actions">
@@ -4044,7 +4087,7 @@ onBeforeUnmount(() => {
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.receivableAmount ?? record.receivable_amount) }}
             </td>
-            <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
+            <td v-if="debtPaymentEnabled && itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
               {{ itemMoney(record.debtAmount ?? record.debt_amount) }}
             </td>
             <td v-if="itemIndex === 0" :rowspan="salesOrderItems(record).length" class="sales-order-query-order-cell">
@@ -4197,7 +4240,9 @@ onBeforeUnmount(() => {
       :order="salesDetailOrder"
       :is-loading="isSalesDetailLoading"
       :load-error="salesDetailLoadError"
-      :attribution-changes="attributionChanges"
+      :attribution-changes="visibleAttributionChanges"
+      :business-source-enabled="businessSourceEnabled"
+      :debt-payment-enabled="debtPaymentEnabled"
       :action-only="salesDetailActionOnly"
       :initial-lifecycle-action="salesDetailFocus.lifecycleAction"
       :focus-personnel-role="salesDetailFocus.personnelRole"
@@ -4317,7 +4362,7 @@ onBeforeUnmount(() => {
       :initial-lifecycle-action="initialDetailLifecycleAction"
       :on-lifecycle-action="handleRechargeLifecycleAction"
       :field-action-keys="serviceRecordIsNormal(genericDetailRecord) ? ['craftsman'] : []"
-      :attribution-changes="attributionChanges"
+      :attribution-changes="visibleAttributionChanges"
       :show-debt-changes="activeTabKey === 'debt'"
       :debt-changes="debtChanges"
       :debt-changes-loading="debtChangesLoading"
@@ -4513,7 +4558,7 @@ onBeforeUnmount(() => {
       @confirm="setUnifiedRefundAttribution"
     />
 
-    <div v-if="attributionEditor" class="service-void-modal" role="dialog" aria-modal="true" aria-label="更正订单归属">
+    <div v-if="attributionEditor && (attributionEditor.field !== 'source' || businessSourceEnabled)" class="service-void-modal" role="dialog" aria-modal="true" aria-label="更正订单归属">
       <div class="service-void-modal__backdrop"></div>
       <form class="service-void-modal__panel" @submit.prevent="submitAttributionCorrection">
         <header class="service-void-modal__head"><h2>更正{{ attributionEditor.field === 'source' ? '来源' : '业务日期' }}</h2></header>

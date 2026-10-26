@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "commit": "3b078c16beecdd5779cd3601c7856b7f9bb41d28",
+  "sites": [
+    "rh",
+    "008",
+    "010"
+  ],
+  "sharedIndexUntouched": true,
+  "sharedHeadUntouched": true,
+  "businessWrites": 0
+}

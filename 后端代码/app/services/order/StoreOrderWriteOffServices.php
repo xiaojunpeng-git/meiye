@@ -102,6 +102,10 @@ class StoreOrderWriteOffServices extends BaseServices
                 throw new ValidateException('该核销已撤销');
             }
 
+            // Closed conversion rights cannot be restored through the older
+            // platform/store undo endpoint after their value became gift balance.
+            \app\services\cashier\v3\card\CashierV3CardConversionGuard::assertLegacyOrderNotConverted((int)$writeoff['oid']);
+
             $this->orderDao->update($subOrderId, ['back_reason' => $remark, 'refund_status' => 2]);
             StoreOrderWriteoff::where('id', $linkId)->update(['status' => 1]);
             StaffYeji::where('link_id', $linkId)->where('type', 3)->update(['status' => 1]);

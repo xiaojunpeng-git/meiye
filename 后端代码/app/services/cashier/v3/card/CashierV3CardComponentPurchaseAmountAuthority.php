@@ -19,9 +19,12 @@ final class CashierV3CardComponentPurchaseAmountAuthority
         $amount = $saleAllocations[$cartId] ?? null;
         if ($amount !== null) {
             $amount = (int)$amount;
-            if ($amount < 0) throw new \InvalidArgumentException('card sale allocation is invalid');
-            if ($amount % 100 !== 0) {
-                $snapshot['amountCalculationVersion'] = 'operation-cent-card-sale-actual-amount';
+            // Sale facts may keep cent-level weights for reporting, but every
+            // caller of this writeoff authority must pass the normalized
+            // whole-yuan pool. Rejecting a raw cent allocation here prevents
+            // refunds or service facts from reviving the retired cent path.
+            if ($amount < 0 || $amount % 100 !== 0) {
+                throw new \InvalidArgumentException('card sale allocation must be whole yuan');
             }
             return ['purchaseAmountCents' => $amount, 'allocationSnapshot' => $snapshot];
         }
@@ -38,12 +41,20 @@ final class CashierV3CardComponentPurchaseAmountAuthority
             if (!preg_match('/^(?:0|[1-9][0-9]*)(?:\.0{1,2})?$/D', $raw)) {
                 throw new \InvalidArgumentException('imported paid amount is invalid');
             }
-            return ['purchaseAmountCents' => (int)bcmul($raw, '100', 0), 'allocationSnapshot' => $snapshot];
+            $amount = (int)bcmul($raw, '100', 0);
+            if ($amount % 100 !== 0) {
+                throw new \InvalidArgumentException('imported paid amount must be normalized before use');
+            }
+            return ['purchaseAmountCents' => $amount, 'allocationSnapshot' => $snapshot];
         }
         $raw = trim((string)($cart['pay_price'] ?? '0'));
         if (!preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/D', $raw)) {
             throw new \InvalidArgumentException('card cart paid amount is invalid');
         }
-        return ['purchaseAmountCents' => (int)bcmul($raw, '100', 0), 'allocationSnapshot' => $snapshot];
+        $amount = (int)bcmul($raw, '100', 0);
+        if ($amount % 100 !== 0) {
+            throw new \InvalidArgumentException('card cart paid amount must be normalized before use');
+        }
+        return ['purchaseAmountCents' => $amount, 'allocationSnapshot' => $snapshot];
     }
 }

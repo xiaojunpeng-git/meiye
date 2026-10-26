@@ -1,0 +1,26 @@
+{
+  "site": "008",
+  "commit": "dd1ead7436202882f21cb06e42757d5bf4e49c20",
+  "sourceTree": "82e29bdd3ba29165d6933ed024d468ae3342496e",
+  "binding": "existing-report-month",
+  "targets": {
+    "app/services/cashier/v3/reservation/CashierV3ReservationPartitionProvider.php": {
+      "before": "bf52d4f475ed8931ca88e34bf2ec61b7da82ec665d004e47696bc0f6b94857d7",
+      "after": "0517613481cd3775bc9523b8fdbd446d25491b829e4793219b186d6423efba0f"
+    },
+    "public/view_cashier_v3/assets/index-556bd459.js": {
+      "before": null,
+      "after": "3ece6dd77c06d824b9c800f47bb802b0f0f8fb5c25cd32a42f9c4f7f54ff87a3"
+    },
+    "public/view_cashier_v3/assets/index-66468d68.css": {
+      "before": null,
+      "after": "66468d682453920a4fdbdb327a99410dbd7104ab57f9b1d54b6f05307971dc86"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "627330d15fe5cc4e2928c0484d29845f01acfa4d80bef541116ef5be8c921b4a",
+      "after": "74d5dc13c115c840516c8a08e88a0dcb91520efb8aea058649107a8dc2e0d900"
+    }
+  },
+  "noDatabaseWrites": true,
+  "acceptedPatch": "f43cbd4d"
+}
