@@ -170,6 +170,7 @@ function display(row, field) {
   if (row[field.key] == null) return field.key === 'registered_date' ? '未填写' : '-'
   // 007 两项对账金额显示分、合计显示整数元；导出仍使用后端分精度原值。
   if (active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(row[field.key]).toFixed(2)
+  if (active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(row[field.key])))
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
   return row[field.key] ?? '-'
@@ -178,6 +179,7 @@ function summary(field, index) {
   if (!executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
   if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
+  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.key === 'settlement_total') return String(Math.trunc(Number(amount)))
   if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : amount
   return index === 0 ? '合计' : '-'
 }

@@ -55,6 +55,11 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
             }
             $query = $payload;
             unset($query['start_date'], $query['end_date'], $query['as_of_date']);
+            // 007 跨店结算默认按门店 ID 倒序；仅在请求未显式排序时
+            // 应用该口径，筛选、导出和分页继续共用同一执行器。
+            if (static::CODE === 'basic_cross_store_settlement' && empty($query['sorts'])) {
+                $query['sorts'] = [['fieldKey' => 'store_id', 'direction' => 'desc']];
+            }
             $query['limit'] = 20;
             $summaryChunks = array_chunk($summaries, UnifiedQueryExecutionServices::MAX_SUMMARIES);
             $query['summaries'] = $summaryChunks[0] ?? [];
