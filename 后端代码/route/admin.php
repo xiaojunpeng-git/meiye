@@ -936,6 +936,11 @@ Route::group('adminapi', function () {
         Route::put('combination/set_status/:id/:status', 'v1.marketing.combination.StoreCombination/set_status')->option(['real_name' => '修改拼团商品状态']);
         //参与拼团列表
         Route::get('combination/combine/list', 'v1.marketing.combination.StoreCombination/combine_list')->option(['real_name' => '参与拼团列表']);
+        Route::get('combination/order_pink/:id/export', 'v1.marketing.combination.StoreCombination/exportGroup')->option(['real_name' => '单团记录导出']);
+        Route::get('combination/activity/:id/export', 'v1.marketing.combination.StoreCombination/exportActivity')->option(['real_name' => '拼团活动明细导出']);
+        Route::post('combination/order_pink/:id/complete', 'v1.marketing.combination.StoreCombination/completeGroup')->option(['real_name' => '拼团补齐虚拟名额成团']);
+        // Uses the existing authenticated group-record access, without a separate refund capability.
+        Route::post('combination/order_pink/:id/refund', 'v1.marketing.combination.StoreCombination/refundParticipant')->option(['real_name' => '拼团参与订单退款']);
         //拼团人列表
         Route::get('combination/order_pink/:id', 'v1.marketing.combination.StoreCombination/order_pink')->option(['real_name' => '拼团人列表']);
         //拼团统计
