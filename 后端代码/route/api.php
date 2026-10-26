@@ -16,6 +16,21 @@ use think\Response;
 /**
  * 用户端路由配置
  */
+// Already issued payment requests may contain the platform-entry prefix. Accept
+// only the exact callback routes there, with the same signed callback handler;
+// never redirect a POST or expose the rest of the public API under /admin.
+$paymentAdminPrefix = trim((string)config('admin.admin_prefix'), '/');
+if ($paymentAdminPrefix !== '') {
+    Route::group($paymentAdminPrefix . '/api/pay', function () {
+        Route::any('fynotify/:channel/:type', 'v1.Pay/fyNotify');
+        Route::any('fynotify/:type', 'v1.Pay/fyNotifyLegacy');
+    })->prefix('api.')->middleware([
+        InstallMiddleware::class,
+        AllowOriginMiddleware::class,
+        StationOpenMiddleware::class,
+    ]);
+}
+
 Route::group('api', function () {
 
 	Route::any('wechat/serve', 'v1.wechat.Wechat/serve');//公众号服务

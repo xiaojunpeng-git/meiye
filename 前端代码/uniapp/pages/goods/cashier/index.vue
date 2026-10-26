@@ -36,7 +36,7 @@
 			</view>
 		</view>
 		<view class="w-full h-128 fixed-lb pb-safe flex-center">
-			<view class="w-710 h-80 flex-center rd-40rpx text--w111-fff bg-color fs-28" @click="goPay()">{{ paying ? '正在发起支付' : '确认付款' }}</view>
+			<view class="w-710 h-80 flex-center rd-40rpx text--w111-fff bg-color fs-28" @click="goPay()">{{ paying ? '正在发起支付' : (checkingPayment ? '正在确认支付结果' : (awaitingPaymentConfirmation ? '确认支付结果' : '确认付款')) }}</view>
 		</view>
 		<view v-show="false" v-html="formContent"></view>
 	</view>
@@ -46,7 +46,7 @@
 	import { mapGetters } from "vuex";
 	import countDown from '@/components/countDown';
 	import colors from "@/mixins/color";
-	import { getCashierOrder, orderPay } from "@/api/order";
+	import { getCashierOrder, orderPay, getOrderDetail } from "@/api/order";
 	import { getDebtCashier, debtRepayPay } from "@/api/debt";
 	import { rechargePayAPi, memberCardPayApi } from "@/api/user.js"
 	import { HTTP_REQUEST_URL } from '@/config/app';
@@ -102,6 +102,10 @@
 				],
 				paytype:'',
 				paying: false,
+				awaitingPaymentConfirmation: false,
+				checkingPayment: false,
+				paymentCheckTimer: null,
+				paymentCheckRun: 0,
 				isGroupOrder: false,
 				payTypeList:[]
 			}
@@ -124,7 +128,61 @@
 			if (options.from_type) this.fromType = options.from_type;
 			this.getCashierOrder();
 		},
+		onShow() {
+			// Returning from the provider means only that its UI closed. The order's
+			// authenticated server state, not referrer data, decides payment success.
+			if (this.awaitingPaymentConfirmation) this.checkPaymentAfterReturn();
+		},
+		onHide() { this.stopPaymentCheck(); },
+		onUnload() { this.stopPaymentCheck(); },
 		methods: {
+			stopPaymentCheck() {
+				if (this.paymentCheckTimer !== null) clearTimeout(this.paymentCheckTimer);
+				this.paymentCheckTimer = null;
+				this.paymentCheckRun++;
+				this.checkingPayment = false;
+			},
+			checkPaymentAfterReturn() {
+				if (this.checkingPayment || !this.orderId) return;
+				this.paying = false;
+				// This fix concerns purchase orders. Other payment scenes keep their
+				// existing destinations and can refresh their own state after return.
+				if (this.fromType !== 'order') { this.awaitingPaymentConfirmation = false; return; }
+				this.stopPaymentCheck();
+				this.checkingPayment = true;
+				const run = this.paymentCheckRun;
+				const orderId = this.orderId;
+				let attempts = 0;
+				const check = () => {
+					attempts++;
+					// Bound each read even when the network promise never settles. A late
+					// response must not navigate after timeout, hide, or another check run.
+					const read = new Promise((resolve, reject) => {
+						this.paymentCheckTimer = setTimeout(() => reject(new Error('payment status timeout')), 10000);
+						Promise.resolve().then(() => getOrderDetail(orderId)).then(resolve, reject);
+					});
+					return read.then(res => {
+						if (run !== this.paymentCheckRun || orderId !== this.orderId) return;
+						clearTimeout(this.paymentCheckTimer);
+						this.paymentCheckTimer = null;
+						if (Number(res.data.paid) === 1) {
+							this.stopPaymentCheck();
+							this.awaitingPaymentConfirmation = false;
+							this.pageReject('支付成功', '/pages/goods/order_pay_status/index?order_id=' + encodeURIComponent(orderId));
+						} else if (attempts < 8) {
+							this.paymentCheckTimer = setTimeout(check, 1500);
+						} else {
+							this.stopPaymentCheck();
+							this.$util.Tips({ title: '支付结果待确认，请勿重复付款，可点击确认支付结果' });
+						}
+					}).catch(() => {
+						if (run !== this.paymentCheckRun) return;
+						this.stopPaymentCheck();
+						this.$util.Tips({ title: '暂未查到支付结果，请勿重复付款，请稍后确认' });
+					});
+				};
+				return check();
+			},
       // appPay(qrcode){
       //   // #ifdef MP
       //   //调用富友支付插件
@@ -225,6 +283,9 @@
 			},
 			goPay(){
 				let that = this;
+				// An issued provider request may already have charged the customer.
+				// Retry the status read only; never issue another payment while unknown.
+				if (that.awaitingPaymentConfirmation) return that.checkPaymentAfterReturn();
 				if (that.paying) return;
 				if(that.active == -1) return that.$util.Tips({
 					title: '请选择付款方式'
@@ -321,6 +382,7 @@
           if(qr_code != ''){
             // #ifdef MP
             uni.hideLoading();
+            that.awaitingPaymentConfirmation = true;
             uni.setStorageSync('fy_pay_type', that.is_bak == 1 ? 'isBack' : that.fromType);
             wx.openEmbeddedMiniProgram({
               appId: jsConfig.app_id,
@@ -331,6 +393,7 @@
                   title: (error && error.errMsg) || '未能打开富友支付'
 				});
 				that.paying = false;
+                that.awaitingPaymentConfirmation = false;
               }
             })
             // #endif

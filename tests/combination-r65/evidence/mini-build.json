@@ -1,0 +1,17 @@
+{
+  "commit": "2a85ebbebb32da727f4108c0d36648b600391c45",
+  "target": {
+    "customer": "008",
+    "terminal": "member",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com"
+  },
+  "result": "PASS",
+  "actualOutput": true,
+  "outputSha256": {
+    "pages/goods/cashier/index.js": "5c4bf6137ab9ae7b8efbaf4cbf70dcfe70113025f0d45ab66fc04ea1ae77a030",
+    "pages/goods/cashier/index.wxml": "e23ea64a5c5583353312c416b304104bf65ec2fbae44125f647d9c805fbabd5a",
+    "app.json": "ee5c270ba75276bda668e4d93f768862c71c864dc709b510d787a2c3882c2f69"
+  },
+  "uploaded": false
+}

@@ -1,0 +1,7 @@
+PASS callback origin: https://example.test
+PASS callback origin: https://example.test/admin
+PASS callback origin: https://example.test/admin/
+PASS callback origin: http://localhost:8080/admin?x=1
+PASS invalid callback rejected
+PASS invalid callback rejected
+PASS invalid callback rejected

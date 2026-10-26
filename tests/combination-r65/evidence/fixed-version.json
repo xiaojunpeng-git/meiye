@@ -1,0 +1,11 @@
+{
+  "sharedHead": "40147d669ac4783c76146419578d62e416878178",
+  "releasedBase": "3014c88ab67b576f77a7976ca71be15648dda20e",
+  "tree": "2a85ebbebb32da727f4108c0d36648b600391c45",
+  "files": {
+    "前端代码/uniapp/pages/goods/cashier/index.vue": "0e69c105aba88fb8f7998351a5cb4692483bf21da75089d5b194eb49a77f0bac",
+    "后端代码/mohe/services/wechat/HwcPayService.php": "9570ea4762daeb36e1cbffd9dc555b591dd04495c24d821ff2f8c5136dc12838",
+    "后端代码/route/api.php": "88b124d9d9c608383a2422b8294621bc12476b43538d81c48a4fdf81e33de9a8"
+  },
+  "status": "local-self-test-only; not PM accepted or deployed"
+}

@@ -341,7 +341,17 @@ class HwcPayService
         if (!filter_var($baseUrl, FILTER_VALIDATE_URL)) {
             throw new PayException('富友支付回调域名未配置');
         }
-        return $baseUrl . '/api/pay/fynotify/' . rawurlencode($channel) . '/' . rawurlencode($successAction);
+        // COMMENT_URL may be the platform entry (e.g. /admin), but callbacks
+        // always enter the public API origin. A platform HTML fallback returning
+        // HTTP 200 is not a payment acknowledgement and cannot settle an order.
+        $parts = parse_url($baseUrl);
+        if (!$parts || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['http', 'https'], true)
+            || empty($parts['host']) || isset($parts['user']) || isset($parts['pass'])) {
+            throw new PayException('富友支付回调域名配置无效');
+        }
+        $origin = $parts['scheme'] . '://' . $parts['host']
+            . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        return $origin . '/api/pay/fynotify/' . rawurlencode($channel) . '/' . rawurlencode($successAction);
     }
 
     private function normalizeAction(string $successAction): string

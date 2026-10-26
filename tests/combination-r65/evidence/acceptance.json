@@ -1,0 +1,14 @@
+{
+  "acceptedBy": "product_manager",
+  "acceptedBusinessTree": "2a85ebbebb32da727f4108c0d36648b600391c45",
+  "sequence": [
+    "commit",
+    "deploy-rh-verify",
+    "push",
+    "deploy-008-verify",
+    "deploy-010-verify",
+    "upload-008-member-experience"
+  ],
+  "databaseMigration": false,
+  "historicalPaymentReplay": false
+}

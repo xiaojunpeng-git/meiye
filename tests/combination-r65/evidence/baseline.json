@@ -1,0 +1,18 @@
+{
+  "head": "40147d669ac4783c76146419578d62e416878178",
+  "releasedBase": "3014c88ab67b576f77a7976ca71be15648dda20e",
+  "files": {
+    "\u524d\u7aef\u4ee3\u7801/uniapp/pages/goods/cashier/index.vue": {
+      "sha256": "60610e71d14cece647982198b8c83e415525a956d27b31463fc518c6ab1c6d42",
+      "matchesReleasedSource": true
+    },
+    "\u540e\u7aef\u4ee3\u7801/mohe/services/wechat/HwcPayService.php": {
+      "sha256": "eebc627026e9518366bad985bb94c817854d8db96b7144013f06aeae59ae0484",
+      "matchesReleasedSource": true
+    },
+    "\u540e\u7aef\u4ee3\u7801/route/api.php": {
+      "sha256": "b42bc7446f9074556db433503424212fae94ec8151afdda701548c4fd79b4aa1",
+      "matchesReleasedSource": true
+    }
+  }
+}

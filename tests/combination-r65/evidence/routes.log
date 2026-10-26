@@ -1,0 +1,3 @@
+PASS signed callback guard reached: /api/pay/fynotify/wechat/product
+PASS signed callback guard reached: /admin/api/pay/fynotify/wechat/product
+PASS signed callback guard reached: /admin/api/pay/fynotify/product
