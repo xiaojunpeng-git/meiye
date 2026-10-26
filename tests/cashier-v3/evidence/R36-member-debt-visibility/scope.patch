@@ -1,0 +1,45 @@
+diff --git a/前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue b/前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue
+index abe93c2e..fdb6612d 100644
+--- a/前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue
++++ b/前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue
+@@ -32,6 +32,11 @@ defineProps({
+     type: Boolean,
+     default: false
+   },
++  // 欠款展示复用后端功能开关；关闭时连同金额及还款入口一起隐藏。
++  debtPaymentEnabled: {
++    type: Boolean,
++    default: true
++  },
+   showInlineSelect: {
+     type: Boolean,
+     default: false
+@@ -100,7 +105,7 @@ function openMemberDebt(member) {
+           <div><span>余额：</span><strong>{{ formatPlainAmount(member.accountBalance) }}</strong></div>
+           <div><span>权益金额：</span><strong>{{ formatPlainAmount(cardBenefitAmount(member)) }}</strong></div>
+           <div class="member-card__metric-total"><span>总余额：</span><strong>{{ formatPlainAmount(totalBalanceAmount(member)) }}</strong></div>
+-          <div class="member-card__metric-debt">
++          <div v-if="debtPaymentEnabled" class="member-card__metric-debt">
+             <span>总欠款：</span>
+             <button
+               v-if="hasOutstandingDebt(member)"
+diff --git a/前端代码/cashier-v3/src/layouts/CashierShell.vue b/前端代码/cashier-v3/src/layouts/CashierShell.vue
+index e9c5e040..742d7dab 100644
+--- a/前端代码/cashier-v3/src/layouts/CashierShell.vue
++++ b/前端代码/cashier-v3/src/layouts/CashierShell.vue
+@@ -2819,6 +2819,7 @@ onBeforeUnmount(() => {
+           <section class="cashier-workflow-toolbar__member-block" aria-label="本次办理会员">
+             <MemberSummaryCard
+               :member="cashierMember"
++              :debt-payment-enabled="state.cashier?.debtPaymentEnabled === true"
+               :customer-mode="isGuestCustomer ? 'guest' : (cashierMember ? 'member' : 'unselected')"
+               :show-actions="false"
+               :show-empty-actions="false"
+@@ -2939,6 +2940,7 @@ onBeforeUnmount(() => {
+         <div v-else-if="isCashierWorkflowPage" class="cashier-workflow-toolbar cashier-workflow-toolbar--legacy" aria-label="当前办理会员与收银功能">
+           <MemberSummaryCard
+             :member="workflowMember"
++            :debt-payment-enabled="state.cashier?.debtPaymentEnabled === true"
+             :customer-mode="isGuestCustomer ? 'guest' : (workflowMember ? 'member' : 'unselected')"
+             :show-actions="false"
+             :show-empty-actions="false"

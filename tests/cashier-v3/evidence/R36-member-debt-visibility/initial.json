@@ -1,0 +1,17 @@
+{
+  "head": "416c57e8ce009486ed96a5ed58b7e1e1d1a059b0",
+  "files": {
+    "前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue": {
+      "sha256": "265273e45aa29ad1cd40048df79f26306ccffb40fee2b266a5c56a7a4a0f5c4a",
+      "blob": "abe93c2e93b7555a38af5b184c911931bf9881f0",
+      "status": ""
+    },
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue": {
+      "sha256": "8f35db9384ee88f7000e289a9b07e7b725b80801a77079fca753602d4ac8f946",
+      "blob": "e9c5e040f5b122b4ad2e88d3818f460091f6f5a2",
+      "status": " M 前端代码/cashier-v3/src/layouts/CashierShell.vue\n"
+    }
+  },
+  "scope": "Only member summary debt visibility; preserve pre-existing Shell edits",
+  "online": "not applicable; local only"
+}

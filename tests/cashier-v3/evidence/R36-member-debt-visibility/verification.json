@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "mode": "Actual Vue component SSR render; enabled/disabled and zero/positive debt; no business writes",
+  "checks": [
+    {
+      "enabled": false,
+      "debt": 0,
+      "visible": false,
+      "repayVisible": false,
+      "result": "PASS"
+    },
+    {
+      "enabled": false,
+      "debt": 200,
+      "visible": false,
+      "repayVisible": false,
+      "result": "PASS"
+    },
+    {
+      "enabled": true,
+      "debt": 0,
+      "visible": true,
+      "repayVisible": false,
+      "result": "PASS"
+    },
+    {
+      "enabled": true,
+      "debt": 200,
+      "visible": true,
+      "repayVisible": true,
+      "result": "PASS"
+    }
+  ],
+  "templateAndScriptCompile": "PASS"
+}

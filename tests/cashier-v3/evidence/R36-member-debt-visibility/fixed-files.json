@@ -1,0 +1,14 @@
+{
+  "round": 36,
+  "head": "416c57e8ce009486ed96a5ed58b7e1e1d1a059b0",
+  "files": {
+    "前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue": "003f41d1fa849cb5de0e06fe2b5d0d36db475aa337eb06e06c499a3693eecd82",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue": "81cf7940e3cd2c5f0637eaa53ebde2f4ec0cc5a00460d7fe9e32588ebad279d0"
+  },
+  "patchSHA256": "ad20ca3b0f2297ee9a968bb8985a7e023b59a663ee14584652a3f1b009c6aafd",
+  "tests": "verification.json PASS; actual local browser confirms debt hidden, balances/cart preserved",
+  "scopeBoundary": "Shell had pre-existing edits; only two prop bindings belong to R36; use scope.patch",
+  "acceptance": "development and self-test complete; pending product manager acceptance",
+  "commitPushDeploy": "not performed",
+  "remote": "not applicable"
+}

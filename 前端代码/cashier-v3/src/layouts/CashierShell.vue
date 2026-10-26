@@ -2819,6 +2819,7 @@ onBeforeUnmount(() => {
           <section class="cashier-workflow-toolbar__member-block" aria-label="本次办理会员">
             <MemberSummaryCard
               :member="cashierMember"
+              :debt-payment-enabled="state.cashier?.debtPaymentEnabled === true"
               :customer-mode="isGuestCustomer ? 'guest' : (cashierMember ? 'member' : 'unselected')"
               :show-actions="false"
               :show-empty-actions="false"
@@ -2939,6 +2940,7 @@ onBeforeUnmount(() => {
         <div v-else-if="isCashierWorkflowPage" class="cashier-workflow-toolbar cashier-workflow-toolbar--legacy" aria-label="当前办理会员与收银功能">
           <MemberSummaryCard
             :member="workflowMember"
+            :debt-payment-enabled="state.cashier?.debtPaymentEnabled === true"
             :customer-mode="isGuestCustomer ? 'guest' : (workflowMember ? 'member' : 'unselected')"
             :show-actions="false"
             :show-empty-actions="false"
