@@ -23,6 +23,7 @@ foreach ($catalog as $index => $entry) {
     if ($report['title'] !== $entry['name'] || $report['path'] !== '/report/basic-reports/' . $entry['code']) {
         throw new RuntimeException('菜单与报表目录不一致：' . $entry['code']);
     }
+    if ($report['sort'] < -128 || $report['sort'] > 127) throw new RuntimeException('菜单排序超出 010 tinyint 范围');
 }
 if (inheritedBasicMenuRules('1,2', 3, [4, 5]) !== null) throw new RuntimeException('无基础报表权限的角色被授权');
 if (inheritedBasicMenuRules('1,2', 2, [3, 4, 5]) !== '1,2,3,4,5') throw new RuntimeException('已有权限未继承分组与叶子菜单');

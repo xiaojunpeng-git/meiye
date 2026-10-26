@@ -22,7 +22,8 @@ function basicMenuGroups(): array
             'title' => (string)$entry['name'],
             'auth' => 'admin-report-' . (string)$entry['code'],
             'path' => '/report/basic-reports/' . (string)$entry['code'],
-            'sort' => 1000 - count($groups[$group]['reports']) * 10,
+            // 010 的菜单 sort 为有符号 tinyint；100 到 30 保留目录顺序且不会越界。
+            'sort' => 100 - count($groups[$group]['reports']) * 10,
         ];
     }
     // 本轮范围固定为截图中的三组 21 张表；目录扩容须重新固定候选并验收。
@@ -112,7 +113,8 @@ function ensureMenu(array $parent, string $auth, string $title, string $path, in
 
 $actual = (string)Db::query('SELECT DATABASE() AS db')[0]['db'];
 if ($actual !== $expected) throw new RuntimeException('数据库不符，实际为：' . $actual);
-$result = Db::transaction(static function () use ($codeVersion): array {
+try {
+    $result = Db::transaction(static function () use ($codeVersion): array {
     $reportRoot = uniqueMenu('admin-report');
     $legacy = uniqueMenu('admin-report-basic');
     if ((int)$legacy['pid'] !== (int)$reportRoot['id']) throw new RuntimeException('基础报表原入口不在平台报表菜单下');
@@ -153,5 +155,10 @@ $result = Db::transaction(static function () use ($codeVersion): array {
         ]);
     }
     return ['groups' => 3, 'reports' => $reportCount, 'roles_changed' => $changedRoles];
-});
+    });
+} catch (Throwable $error) {
+    // ThinkPHP CLI 的默认异常页可能以 0 退出；升级失败必须给发布器明确的非零状态。
+    echo json_encode(['error' => 'MIGRATION_FAILED_ROLLED_BACK', 'code' => (string)$error->getCode()]), PHP_EOL;
+    exit(1);
+}
 echo json_encode(['database' => $actual] + $result, JSON_UNESCAPED_UNICODE) . PHP_EOL;
