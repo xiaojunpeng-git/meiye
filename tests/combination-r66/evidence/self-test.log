@@ -1,0 +1,14 @@
+PASS shared generation draws once and releases loading
+PASS preview/save use the actual generated image
+PASS download, canvas and API failures settle without stuck loading
+PASS silent native/network hang has bounded timeout
+PASS friend sharing cancels loading and ignores late poster work
+PASS closing before async preview prevents late popup
+PASS denied album access offers explicit settings; cancel is respected
+PASS album system failures give visible feedback
+PASS preview failures give visible feedback
+PASS friend share always targets current group
+PASS share actions outrank overlays and retain native share button
+PASS legacy renderer callers keep success and error behavior
+PASS server media, bundled artwork and local HTTP retain correct origins
+PASS native packaged paths restore root; temp paths remain unchanged

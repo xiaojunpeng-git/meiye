@@ -1,0 +1,6 @@
+PASS home multiple templates export, QR fetched once, one loading owner
+PASS home save uses generated current template
+PASS home API, missing template/QR, image and export failures settle visibly
+PASS missing measurement uses safe initial dimensions
+PASS home silent native/API hang times out
+PASS leaving home poster prevents late drawing and stale loading

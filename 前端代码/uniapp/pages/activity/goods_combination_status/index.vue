@@ -186,7 +186,7 @@
 				</button>
 				<!-- #endif -->
 				<!-- #ifdef MP -->
-				<button class="item" open-type="share" hover-class="none">
+				<button class="item" open-type="share" hover-class="none" @tap="goFriend">
 					<view class="pictrue">
 						<image src="../../../static/images/weixin.png"></image>
 					</view>
@@ -224,7 +224,7 @@
 			</view>
 			<view class="generateClose flex-center" @tap="posterImageClose">取消</view>
 		</view>
-		<div class="fixed-center" v-if="posters && !posterImageStatus">
+		<div class="fixed-center" v-if="posters && posterLoading">
 			<image class="poster-loading" :src="imgHost + '/statics/images/poster_loading.png'" mode="widthFix" ></image>
 		</div>
 		<view class="poster-mask" v-if="posters"></view>
@@ -274,6 +274,7 @@
 		TOKENNAME,
 		HTTP_REQUEST_URL
 	} from '@/config/app.js';
+	import { resolveServerAssetUrl } from '@/utils/memberAssetUrl';
 	const app = getApp();
 	export default {
 		name: NAME,
@@ -341,6 +342,7 @@
 				skuArr:[],
 				posterImageStatus: false,
 				posterImage: '', //海报路径
+				posterLoading: false, // Only active generation shows the non-blocking indicator.
 				canvasStatus: false, //海报绘图标签
 				codeShow: false,
 				cid: '1',
@@ -423,6 +425,7 @@
 		onShow() {
 			uni.removeStorageSync('form_type_cart');
 		},
+		onUnload() { this.posterImageClose(); },
 		onPageScroll(object) {
 			uni.$emit('scroll');
       this.homeHide = true;
@@ -432,11 +435,14 @@
 		 * 用户点击右上角分享
 		 */
 		onShareAppMessage: function() {
-			let that = this;
+			// Resolve this group's route at tap time; another page must not replace
+			// the invitation through the shared global openPages cache.
+			const user = this.userInfo || {};
 			return {
-				title: '您的好友' + that.userInfo.nickname + '邀请您参团' + that.storeCombination.title,
-				path: app.globalData.openPages,
-				imageUrl: that.storeCombination.image
+				title: '您的好友' + (user.nickname || '') + '邀请您参团' + (this.storeCombination.title || ''),
+				path: '/pages/activity/goods_combination_status/index?id=' + encodeURIComponent(this.pinkId)
+					+ (user.uid ? '&spid=' + encodeURIComponent(user.uid) : ''),
+				imageUrl: this.storeCombination.image
 			};
 		},
 		//#endif
@@ -534,16 +540,17 @@
 					}
 					// #endif
 					this.posters = true;
-					this.getPosterInfo();
+					// Poster generation is independent of native friend sharing.
+					this.getPosterInfo().catch(error => this.posterError(error));
 				}
 			},
 			// 分享关闭
 			listenerActionClose: function() {
-				this.posters = false;
+				this.posterImageClose();
 			},
 			// 小程序关闭分享弹窗；
 			goFriend: function() {
-				this.posters = false;
+				this.posterImageClose();
 			},
 			/**
 			 * 购物车手动填写
@@ -858,140 +865,124 @@
 					});
 				}
 			},
-			//替换安全域名
-			setDomain: function(url) {
-				url = url ? url.toString() : '';
-				//本地调试打开,生产请注销
-				if (url.indexOf('https://') > -1) return url;
-				else return url.replace('http://', 'https://');
+			// Imported mall images use the configured server; packaged artwork stays
+			// local. Local HTTP development must not be rewritten to nonexistent TLS.
+			setDomain(url) {
+				url = resolveServerAssetUrl(url ? String(url) : '', this.imgHost);
+				if (/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$)/i.test(url)) return url;
+				return url.replace(/^http:\/\//, 'https://');
 			},
 			//图片转符合安全域名路径
 			downloadFilestoreImage(url) {
-				url = this.setDomain(url)
-				return new Promise((resolve, reject) => {
-					let that = this;
-					uni.downloadFile({
-						url: url,
-						success: function(res) {
-							resolve(res.tempFilePath);
-						},
-						fail: function() {
-							return that.$util.Tips({
-								title: ''
-							});
-						}
-					});
-				})
+				// getImageInfo accepts both packaged fallback avatars and HTTPS assets;
+				// every failure must reject so the loading state cannot hang forever.
+				if (!url) return Promise.reject(new Error('海报图片地址为空'));
+				return new Promise((resolve, reject) => uni.getImageInfo({
+					src: this.setDomain(url),
+					success: result => {
+						if (!result.path) return reject(new Error('海报图片下载失败'));
+						// WeChat strips the leading slash from packaged image paths.
+						// The canvas performs another image read from this nested page,
+						// so restore app-root paths while preserving native temp files.
+						const path = result.path;
+						resolve(/^(?:pages|static)\//.test(path) ? '/' + path : path);
+					},
+					fail: () => reject(new Error('海报图片加载失败，请稍后重试'))
+				}));
 			},
-			async getPosterInfo() {
-				// #ifdef H5 || APP-PLUS
-				this.from = 'wechat'
-				// #endif
-				// #ifdef MP
-				this.from = 'routine'
-				// #endif
-				let userData = this.$store.state.app.userInfo;
-				if (typeof userData === 'string') {
-					userData = JSON.parse(userData);
-				}
+			getPosterInfo() {
+				if (this.posterImage) return Promise.resolve(this.posterImage);
+				// Preview/save/open share the same in-flight generation; repeated taps
+				// cannot race two canvases or publish a cancelled group's image.
+				if (this._posterPromise) return this._posterPromise;
+				const run = this._posterGeneration = (this._posterGeneration || 0) + 1;
+				this.posterLoading = true;
 				this.canvasStatus = true;
-				getCombinationPosterData(this.pinkId).then(async ({ data }) => {
-					const resData = data;
-					const posterBag = await this.downloadFilestoreImage(`${this.imgHost}/statics/images/activity/posterBag.png`);
-					const posterBagInner = await this.downloadFilestoreImage(`${this.imgHost}/statics/images/activity/posterBagInner.png`);
-					const postertag = await this.downloadFilestoreImage(`${this.imgHost}/statics/images/activity/postertag.png`);
-					const rmbtag = await this.downloadFilestoreImage(`${this.imgHost}/statics/images/activity/rmb.png`);
-					const goods_img = await this.downloadFilestoreImage(resData.image);
-					const avatar = await this.downloadFilestoreImage(userData.avatar);
-					
-					let mp_code;
-					// #ifdef H5 || APP-PLUS
-					// 公众号会返回url,h5环境没有,微信公众号跟h5的二维码需要区分
-					mp_code = resData.url ? resData.url : this.codeSrc;
-					// #endif
-					// #ifdef MP
-					mp_code = await this.downloadFilestoreImage(resData.url);
-					// #endif
-					const arr = [posterBag, goods_img, mp_code, posterBagInner, postertag, avatar, rmbtag];
-					this.$nextTick(() => {
-						this.$util.bargainPosterCanvas(arr, resData.title, resData.label, resData.msg, resData.price, userData, '拼团',
-							(tempFilePath) => {
-								this.posterImage = tempFilePath;
-								this.posterImageStatus = true;
-								this.canvasStatus = false;
-							});
-					})
-				}).catch(err => {
-					this.$util.Tips({
-						title: err
-					},'/pages/activity/goods_bargain/index');
-				})
-			},
-			// 图片预览；
-			getpreviewImage() {
-				if (this.posterImage) {
-					let photoList = [];
-					photoList.push(this.posterImage)
-					uni.previewImage({
-						urls: photoList,
-						current: this.posterImage
-					});
-				} else {
-					this.$util.Tips({
-						title: '您的海报尚未生成'
-					});
-				}
-			},
-			//隐藏海报
-			posterImageClose() {
-				this.posterImageStatus = false;
-				this.posters = false;
-			},
-			// #ifdef MP
-			savePosterPath() {
-				let that = this;
-				uni.getSetting({
-					success(res) {
-						if (!res.authSetting['scope.writePhotosAlbum']) {
-							uni.authorize({
-								scope: 'scope.writePhotosAlbum',
-								success() {
-									uni.saveImageToPhotosAlbum({
-										filePath: that.posterImage,
-										success: function(res) {
-											that.posterImageClose();
-											that.$util.Tips({
-												title: '保存成功',
-												icon: 'success'
-											});
-										},
-										fail: function(res) {
-											that.$util.Tips({
-												title: '保存失败'
-											});
-										}
-									});
-								}
-							});
-						} else {
-							uni.saveImageToPhotosAlbum({
-								filePath: that.posterImage,
-								success: function(res) {
-									that.posterImageClose();
-									that.$util.Tips({
-										title: '保存成功',
-										icon: 'success'
-									});
-								},
-								fail: function(res) {
-									that.$util.Tips({
-										title: '保存失败'
-									});
-								}
-							});
-						}
+				let timer;
+				const timeout = new Promise((resolve, reject) => {
+					this._cancelPoster = () => reject(new Error('已取消海报生成'));
+					timer = setTimeout(() => {
+						if (run === this._posterGeneration) this._posterGeneration++;
+						reject(new Error('海报生成超时，请重试'));
+					}, 15000);
+				});
+				const generate = async () => {
+					let user = this.$store.state.app.userInfo || this.userInfo || {};
+					if (typeof user === 'string') user = JSON.parse(user);
+					const { data } = await getCombinationPosterData(this.pinkId);
+					let code = data.url || this.codeSrc;
+					if (!code) throw new Error('海报二维码暂不可用，请稍后重试');
+					const files = await Promise.all([
+						'/pages/activity/static/poster/posterBag.png', data.image, code,
+						'/pages/activity/static/poster/posterBagInner.png',
+						'/pages/activity/static/poster/postertag.png',
+						user.avatar || '/static/images/def_avatar.png',
+						'/pages/activity/static/poster/rmb.png'
+					].map(url => this.downloadFilestoreImage(url)));
+					if (run !== this._posterGeneration) throw new Error('已取消海报生成');
+					await new Promise(resolve => this.$nextTick(resolve));
+					return new Promise((resolve, reject) => this.$util.bargainPosterCanvas(
+						files, data.title, data.label, data.msg, data.price, user, '拼团', resolve, reject
+					));
+				};
+				const pending = Promise.race([generate(), timeout]).then(path => {
+					if (run !== this._posterGeneration) throw new Error('已取消海报生成');
+					if (!path) throw new Error('海报生成失败，请重试');
+					this.posterImage = path;
+					this.posterImageStatus = true;
+					return path;
+				}).finally(() => {
+					clearTimeout(timer);
+					if (this._posterPromise === pending) {
+						this._posterPromise = null;
+						this._cancelPoster = null;
+						this.posterLoading = false;
+						this.canvasStatus = false;
 					}
 				});
+				this._posterPromise = pending;
+				return pending;
+			},
+			posterError(error) {
+				// Closing the sheet is intentional cancellation, never a failure toast.
+				if (this.posters) this.$util.Tips({ title: (error && error.message) || '海报生成失败，请重试' });
+			},
+			async getpreviewImage() {
+				try {
+					const path = await this.getPosterInfo();
+					if (!this.posters) return;
+					uni.previewImage({ urls: [path], current: path,
+						fail: () => this.$util.Tips({ title: '预览失败，请重试' }) });
+				} catch (error) { this.posterError(error); }
+			},
+			posterImageClose() {
+				this.posters = false;
+				this.posterImageStatus = false;
+				this._posterGeneration = (this._posterGeneration || 0) + 1;
+				const cancel = this._cancelPoster;
+				this._cancelPoster = null;
+				this._posterPromise = null;
+				this.posterLoading = false;
+				this.canvasStatus = false;
+				if (cancel) cancel();
+			},
+			// #ifdef MP
+			async savePosterPath() {
+				try {
+					const path = await this.getPosterInfo();
+					if (!this.posters) return;
+					// Let the platform request album access on first save. A previous
+					// denial gets an explicit settings action rather than a silent return.
+					uni.saveImageToPhotosAlbum({ filePath: path,
+						success: () => { this.posterImageClose(); this.$util.Tips({ title: '保存成功', icon: 'success' }); },
+						fail: error => {
+							if (/auth|denied|authorize/i.test((error && error.errMsg) || '')) {
+								uni.showModal({ title: '需要相册权限', content: '请允许保存图片到相册后重试。', confirmText: '去设置',
+									success: result => { if (result.confirm) uni.openSetting({ fail: () => this.$util.Tips({ title: '无法打开设置，请在微信设置中授权' }) }); } });
+							} else this.$util.Tips({ title: '保存失败，请重试' });
+						}
+					});
+				} catch (error) { this.posterError(error); }
 			},
 			// #endif
 			// #ifdef H5
@@ -1294,12 +1285,13 @@
 		backdrop-filter: blur(5px);
 	}
 	.poster-pop {
+		pointer-events: none;
 		width: 560rpx;
 		height: 850rpx;
 		position: fixed;
 		left: 50%;
 		transform: translateX(-50%);
-		z-index: 399;
+		z-index: 389;
 		top: 50%;
 		margin-top: -559rpx;
 	}
@@ -1348,7 +1340,7 @@
 		position: fixed;
 		left: 0;
 		bottom: 0;
-		z-index: 388;
+		z-index: 390;
 		transform: translate3d(0, 100%, 0);
 		transition: all 0.3s cubic-bezier(0.25, 0.5, 0.5, 0.9);
 		border-top: 1rpx solid #eee;
@@ -1393,6 +1385,8 @@
 		font-size: 24rpx;
 	}
 	.fixed-center{
+		// The loading artwork must never intercept taps on the share actions.
+		pointer-events: none;
 		position: fixed;
 		top: 0;
 		left: 0;

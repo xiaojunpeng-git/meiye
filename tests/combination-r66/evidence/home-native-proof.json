@@ -1,0 +1,32 @@
+{
+  "project": "/private/tmp/r66-home-release/build/008-member",
+  "proof": {
+    "route": "pages/users/user_spread_code/index",
+    "images": [
+      {
+        "width": 310,
+        "height": 473,
+        "bytes": 13310
+      },
+      {
+        "width": 310,
+        "height": 473,
+        "bytes": 134278
+      }
+    ],
+    "pending": false
+  },
+  "saved": {
+    "sameImage": true
+  },
+  "mocks": [
+    "request",
+    "saveImageToPhotosAlbum"
+  ],
+  "native": [
+    "getImageInfo",
+    "createCanvasContext",
+    "canvasToTempFilePath"
+  ],
+  "qr": "Local avatar stand-in, not a real/scannable customer QR"
+}

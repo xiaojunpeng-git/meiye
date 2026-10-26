@@ -1,0 +1,22 @@
+{
+  "sharedHEAD": "416c57e8ce009486ed96a5ed58b7e1e1d1a059b0",
+  "releasedBase": "73e941b3bb9ddbe1ad0bef0ac243a7dfca84592d",
+  "remoteInstances": "not applicable; local repair only",
+  "files": {
+    "前端代码/uniapp/pages/activity/goods_combination_status/index.vue": {
+      "sha256": "5891a5a16f468383b50b9dc4838439c7eb239e9b16663c61c82ffb7de633585d",
+      "matchesReleased": true
+    },
+    "前端代码/uniapp/utils/util.js": {
+      "sha256": "904a93cfd7884b4b10239aa2da711658b370ba9ef94cbdd958f74ed01f45fc8e",
+      "matchesReleased": true
+    }
+  },
+  "homeExtensionBaseline": {
+    "head": "416c57e8ce009486ed96a5ed58b7e1e1d1a059b0",
+    "path": "前端代码/uniapp/pages/users/user_spread_code/index.vue",
+    "HEADSha256": "6c349192b2d505f3dd0bd860b630c4171efbed8a8498f10a667774f2e6a3f0a2",
+    "matchesReleased": true,
+    "note": "Home page had no dirty changes before this extension; remote instances not applicable"
+  }
+}

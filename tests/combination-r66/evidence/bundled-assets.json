@@ -1,0 +1,26 @@
+[
+  {
+    "source": "后端代码/public/statics/images/activity/posterBag.png",
+    "target": "前端代码/uniapp/pages/activity/static/poster/posterBag.png",
+    "sha256": "5f608d0f51bf8a779fb7e0d0dd8f9abbb747ec23e7b8acae632f2c6307af3c2c",
+    "reason": "bundle fixed art in activity subpackage; avoid missing server assets and main-package quota"
+  },
+  {
+    "source": "后端代码/public/statics/images/activity/posterBagInner.png",
+    "target": "前端代码/uniapp/pages/activity/static/poster/posterBagInner.png",
+    "sha256": "36910f8fa18831a8e4bb35ee4c79c698410c948f0b57a15102cbc89b11c842ab",
+    "reason": "bundle fixed art in activity subpackage; avoid missing server assets and main-package quota"
+  },
+  {
+    "source": "后端代码/public/statics/images/activity/postertag.png",
+    "target": "前端代码/uniapp/pages/activity/static/poster/postertag.png",
+    "sha256": "6e690a73e6c36a260b7bf70c6f1b6bd0e5f0df45f1c1bfd1e929fa34d196c955",
+    "reason": "bundle fixed art in activity subpackage; avoid missing server assets and main-package quota"
+  },
+  {
+    "source": "后端代码/public/statics/images/activity/rmb.png",
+    "target": "前端代码/uniapp/pages/activity/static/poster/rmb.png",
+    "sha256": "a97bc797294cb11921753f5a0203ef9196c78df7251f5501ff66fbaa57bc9e05",
+    "reason": "bundle fixed art in activity subpackage; avoid missing server assets and main-package quota"
+  }
+]

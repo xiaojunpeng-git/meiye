@@ -1,0 +1,21 @@
+{
+  "commit": "b79be0ca704ad2b4a5f925ff6a72728e2a3b5195",
+  "target": {
+    "customer": "008",
+    "terminal": "member",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com"
+  },
+  "result": "PASS",
+  "actualOutput": true,
+  "artifacts": {
+    "app.json": "ee5c270ba75276bda668e4d93f768862c71c864dc709b510d787a2c3882c2f69",
+    "project.config.json": "18c5fd064453c606613f1cb8239d04a0ff75d75489d7dd1b4c8e43761a175435",
+    "pages/users/user_spread_code/index.js": "4a122338563370035c21ecd1c856433d604a0e633f9559aeea540a5c2f4d9dae",
+    "pages/users/user_spread_code/index.wxml": "9b263919fb1a702bb7bd72beb4f8ee3f4ed0b65f5f3b0e4230c7638d0dc76af8",
+    "pages/users/user_spread_code/index.wxss": "0dfac184d974277efc1145dedafa22248790052f688fe32b32c7c171fc479472",
+    "pages/activity/goods_combination_status/index.js": "2584b98405e2614a5115eecb321770fd2b7e508ef52b5c8ffa294f22f397b104",
+    "common/vendor.js": "021a0d2fd604b8b384a3356acf666e681869ca3844437624349f0c805d3e21a2"
+  },
+  "warnings": "Existing non-h5 key/subpackage advice and duplicate project.config emission; build completed."
+}

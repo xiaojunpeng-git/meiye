@@ -654,7 +654,8 @@ export default {
 	 *
 	 *
 	 */
-	bargainPosterCanvas: function(arr2, title, label, msg, price, userData, typeText, successFn) {
+	bargainPosterCanvas: function(arr2, title, label, msg, price, userData, typeText, successFn, errorFn) {
+		// Optional error callback lets the caller release its loading state; legacy callers keep their toast.
 		let that = this;
 		const ctx = uni.createCanvasContext('myCanvas');
 		ctx.clearRect(0, 0, 0, 0);
@@ -802,14 +803,14 @@ export default {
 					success: (res) => {
 						successFn && successFn(res.tempFilePath);
 						uni.hideLoading();
-					}
+					},
+					fail: error => { if (errorFn) errorFn(new Error("海报生成失败，请重试")); else that.Tips({ title: "海报生成失败" }); }
 				})
 			});
 		}).catch(err=>{
 			uni.hideLoading();
-			that.Tips({
-				title: '无法获取图片信息'
-			});
+			if (errorFn) errorFn(new Error('无法获取图片信息'));
+			else that.Tips({ title: '无法获取图片信息' });
 		})
 		// uni.getImageInfo({
 		// 	src: arr2[0],
@@ -860,88 +861,82 @@ export default {
 	 * 用户信息分享海报
 	 * @param array arr2 海报素材  1背景 0二维码
 	 * @param string nickname 昵称
-	 * @param string sitename 价格
+	 * @param string sitename 站点名称
 	 * @param function successFn 回调函数
-	 *
-	 *
+	 * @param function errorFn 可选失败回调；加载状态由页面统一管理
+	 * @param object scope 画布所在组件，避免在嵌套页面查找错误画布
 	 */
-	userPosterCanvas: function(arr2, nickname, sitename, index, w, h, successFn) {
+	userPosterCanvas: function(arr2, nickname, sitename, index, w, h, successFn, errorFn, scope) {
 		let that = this;
-		// uni.showLoading({
-		// 	title: '海报生成中',
-		// 	mask: true
-		// });
-		const ctx = uni.createCanvasContext('myCanvas' + index);
+		// All native failures return to the owner; legacy callers retain a toast.
+		const fail = error => {
+			const reason = error instanceof Error ? error : new Error('海报图片生成失败，请重试');
+			if (errorFn) errorFn(reason);
+			else { uni.hideLoading(); that.Tips({ title: reason.message }); }
+		};
+		const ctx = uni.createCanvasContext('myCanvas' + index, scope);
 		ctx.clearRect(0, 0, 0, 0);
-		/**
-		 * 只能获取合法域名下的图片信息,本地调试无法获取
-		 *
-		 */
 		uni.getImageInfo({
 			src: arr2[1],
 			success: function(res) {
-				// const WIDTH = res.width;
-				// const HEIGHT = res.height;
-				ctx.fillStyle = '#fff';
-				ctx.fillRect(0, 0, w, h);
-				ctx.drawImage(arr2[1], 0, 0, w, h);
-				ctx.save();
+				try {
+					ctx.fillStyle = '#fff';
+					ctx.fillRect(0, 0, w, h);
+					ctx.drawImage(arr2[1], 0, 0, w, h);
+					ctx.save();
 
 
-				ctx.drawImage(arr2[0], w-86, 386, 70, 70);
-				ctx.save();
+					ctx.drawImage(arr2[0], w-86, 386, 70, 70);
+					ctx.save();
 
-				ctx.setFontSize(16);
-				ctx.setFillStyle('#333');
-				ctx.fillText(nickname, 45, 414);
-				ctx.save();
+					ctx.setFontSize(16);
+					ctx.setFillStyle('#333');
+					ctx.fillText(nickname, 45, 414);
+					ctx.save();
 
 
-				const CONTENT_ROW_LENGTH = 25;
-				const store_name = '邀请您加入' + sitename;
-				let [contentLeng, contentArray, contentRows] = that.textByteLength(store_name,
-					CONTENT_ROW_LENGTH);
-				if (contentRows > 2) {
-					contentRows = 2;
-					let textArray = contentArray.slice(0, 2);
-					textArray[textArray.length - 1] += '...';
-					contentArray = textArray;
-				}
-				ctx.setTextAlign('left');
-				ctx.setFillStyle('#999999');
-				ctx.setFontSize(12);
-
-				let contentHh = 38;
-				for (let m = 0; m < contentArray.length; m++) {
-					if (m) {
-						ctx.fillText(contentArray[m], 16, 456);
-					} else {
-						ctx.fillText(contentArray[m], 16, 440);
+					const CONTENT_ROW_LENGTH = 25;
+					const store_name = '邀请您加入' + sitename;
+					let [contentLeng, contentArray, contentRows] = that.textByteLength(store_name,
+						CONTENT_ROW_LENGTH);
+					if (contentRows > 2) {
+						contentRows = 2;
+						let textArray = contentArray.slice(0, 2);
+						textArray[textArray.length - 1] += '...';
+						contentArray = textArray;
 					}
-				}
-				ctx.save();
+					ctx.setTextAlign('left');
+					ctx.setFillStyle('#999999');
+					ctx.setFontSize(12);
 
-				that.handleBorderRect(ctx, 16, 396, 24, 24, 12)
-				ctx.clip();
-				ctx.drawImage(arr2[2], 16, 396, 24, 24);
-				ctx.draw(true, function() {
-					uni.canvasToTempFilePath({
-						canvasId: 'myCanvas' + index,
-						fileType: 'png',
-						quality: 1,
-						success: function(res) {
-							uni.hideLoading();
-							successFn && successFn(res.tempFilePath);
+					for (let m = 0; m < contentArray.length; m++) {
+						if (m) {
+							ctx.fillText(contentArray[m], 16, 456);
+						} else {
+							ctx.fillText(contentArray[m], 16, 440);
 						}
-					})
-				});
+					}
+					ctx.save();
+
+					that.handleBorderRect(ctx, 16, 396, 24, 24, 12)
+					ctx.clip();
+					ctx.drawImage(arr2[2], 16, 396, 24, 24);
+					ctx.draw(true, function() {
+						uni.canvasToTempFilePath({
+							canvasId: 'myCanvas' + index,
+							fileType: 'png',
+							quality: 1,
+							success: function(res) {
+								// Loading belongs to the page until every template finishes.
+								if (!res.tempFilePath) return fail(new Error('海报导出结果为空，请重试'));
+								successFn && successFn(res.tempFilePath);
+							},
+							fail
+						}, scope)
+					});
+				} catch (error) { fail(error); }
 			},
-			fail: function(err) {
-				uni.hideLoading();
-				that.Tips({
-					title: ''
-				});
-			}
+			fail
 		})
 	},
 
