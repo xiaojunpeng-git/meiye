@@ -166,6 +166,8 @@ class JobPositionPolicyServices extends BaseServices
         array $adminInfo,
         array $requestCtx
     ): array {
+        // 状态切换属于岗位策略保存；仍校验账号的岗位功能权限，不继承组织通用的超管门禁。
+        app()->make(OrganizationWorkspaceWriteGate::class)->assertJobPositionSavePermission($adminInfo);
         $status = $status === 1 ? 1 : 0;
         $payload = ['position_id' => $positionId, 'status' => $status];
         /** @var OrganizationStrictIdempotencyServices $idem */
@@ -197,7 +199,8 @@ class JobPositionPolicyServices extends BaseServices
                     'msg' => $status === 1 ? '岗位已启用' : '岗位已停用',
                     'data' => ['id' => $positionId, 'status' => $status, 'version' => $version],
                 ];
-            }
+            },
+            false
         );
     }
 
