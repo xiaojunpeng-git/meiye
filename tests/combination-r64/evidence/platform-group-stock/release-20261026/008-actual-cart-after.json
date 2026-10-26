@@ -1,0 +1,12 @@
+{
+    "result": "PASS",
+    "storeId": 108,
+    "activityId": 1,
+    "valid": 1,
+    "invalid": 0,
+    "amount": 1,
+    "reasons": [],
+    "sqlTransaction": "READ ONLY",
+    "ordersCreated": 0,
+    "payments": 0
+}

@@ -18,7 +18,10 @@
   "frontendBusinessChanges": false,
   "productionBusinessWrites": 0,
   "realPayment": false,
-  "status": "local_self_tests_passed_pending_product_manager_acceptance",
-  "committed": false,
-  "deployed": false
+  "status": "pm_accepted_committed_pushed_deployed_and_verified_three_sites",
+  "committed": true,
+  "deployed": true,
+  "releaseCommit": "9b7d2e2773463b1931ee1f7a3e998f9ac7589939",
+  "releaseRecord": "release-20261026/README.md",
+  "actual008QuoteVerified": true
 }

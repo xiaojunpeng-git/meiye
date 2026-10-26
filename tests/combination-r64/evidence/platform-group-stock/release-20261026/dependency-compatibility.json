@@ -1,0 +1,14 @@
+{
+  "008": {
+    "file": "app/services/product/branch/StoreBranchProductServices.php",
+    "liveSourceCommit": "98594e971c88db92bf34f740a9ca9dccbd327355",
+    "candidateSourceCommit": "f50eaa8e1bafdbff399805e2479929cdbae6d9b3",
+    "difference": "Card definition synchronization lock arguments only; isValidStoreProduct/getProductStock and purchase read methods unchanged",
+    "action": "Preserve live file; do not deploy this unrelated sync change"
+  },
+  "010": {
+    "file": "app/services/member/MemberCommerceBenefitsServices.php",
+    "difference": "Known older optional integral-ratio compatibility, not called for group activity quote",
+    "action": "Preserve live file"
+  }
+}

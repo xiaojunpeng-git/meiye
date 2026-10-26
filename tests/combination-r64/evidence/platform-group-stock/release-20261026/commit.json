@@ -1,0 +1,23 @@
+{
+  "commit": "9b7d2e2773463b1931ee1f7a3e998f9ac7589939",
+  "tree": "4451da87d29d3e01112076529c560b6929b79784",
+  "parent": "d5d31236bfb3c02f9b5b8df1f5b8a40d64b985cf",
+  "branch": "release/r64-member-checkout-20261026",
+  "files": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/order/StoreCartServices.php": "d06e33c8effa860f3c1236d7a2635b38cb79cd6806190db1b70f330d065b04a1",
+    "tests/combination-r64/checkout-local.php": "d85aa2a917eabe292c815003bcaf924834c0a7cf754c81e646b73c0f0e05702f",
+    "tests/combination-r64/confirm-page-contract.mjs": "89572011a37535c10c0b23eeece8707c939c7bd23dbf36068e1ecfe843e9ac97",
+    "tests/combination-r64/evidence/platform-group-stock/confirm-responses.json": "8fde52721c4e9c0b7113bb6c6e803ba9681a1d922e66e1de5316243614c40ec8",
+    "tests/combination-r64/evidence/platform-group-stock/legacy-switches-off.log": "2958ba3836bbcfecc414950e98381c2fd934f49c892abb634972dca1a0e5558a",
+    "tests/combination-r64/evidence/platform-group-stock/acceptance.json": "61e294aaa0f9909c215a2365cb95fd747c6cbc7310c2fa021d6daee1bf75c2f4",
+    "tests/combination-r64/evidence/platform-group-stock/fixed-version.json": "41b2572bb9bcc40c29a5039e4a47de0dbeb756cb437af01d61d3bfba234e2087",
+    "tests/combination-r64/evidence/platform-group-stock/after-fix.log": "a9e6cf4ba85b060399a4642137ff96d604212882dca9d93cb4c1a7fcc4d1b522",
+    "tests/combination-r64/evidence/platform-group-stock/008-actual-cart-before.json": "5a133c7bb37dd9a0b2f57434fcbbb38d34fc8df3251d3c62d6dc3098050e8f68",
+    "tests/combination-r64/evidence/platform-group-stock/README.md": "e5defad08e9de438dcc0300e2cfa6b85187889d3265da45c85f84facc92e8ec5",
+    "tests/combination-r64/evidence/platform-group-stock/default-mode.log": "7e07993a4812901fd0027f923dc64e06d382a7bf82ff1dfa7ce436cce4c30abb",
+    "tests/combination-r64/evidence/platform-group-stock/baseline.json": "6dd419432e9c3e3d74003f64e542ed2ae393ce36ec96f053ee093d225f18f525",
+    "tests/combination-r64/evidence/platform-group-stock/frontend-contract.log": "20a051ad78472262acd56db4eb37306f966bac6621c97d4b761651437ce5ca2c",
+    "tests/combination-r64/evidence/platform-group-stock/before-fix.log": "61945d92e34b67da0cc01934186f6982dde7f9cecbb304e450297c049a505d3e",
+    "tests/combination-r64/evidence/platform-group-stock/008-readonly-catalog.json": "715685e8b902fce85fc42540d151ae43070caf320a4f890ebe40a5ed6c968e00"
+  }
+}
