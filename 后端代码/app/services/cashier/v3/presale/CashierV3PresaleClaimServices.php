@@ -225,6 +225,13 @@ final class CashierV3PresaleClaimServices
         return $this->list($scope, $criteria);
     }
 
+    /** Each settled or voided claim is one independently auditable outbound document. */
+    public function listRecordsForStore(int $storeId, int $operatorId, array $criteria, array $sessionInfo = []): array
+    {
+        $scope = $this->storeScope($storeId, $operatorId, false, $sessionInfo);
+        return $this->listRecords($scope, $criteria);
+    }
+
     public function listForPlatform(array $adminInfo, array $criteria): array
     {
         $policy = new InventoryPlatformAccessPolicy();
@@ -394,6 +401,70 @@ final class CashierV3PresaleClaimServices
             $storeId = $this->positiveInt($input['store_id'] ?? 0, 'presale_claim_store_invalid');
             return $this->voidInTx($this->platformScope($adminInfo, $storeId), $claimId, $input, false);
         });
+    }
+
+    /** Read actual claim documents rather than expanding the paged claimable balance list. */
+    private function listRecords(array $scope, array $criteria): array
+    {
+        $page = max(1, min(100000, (int)($criteria['page'] ?? 1)));
+        $limit = max(1, min(100, (int)($criteria['limit'] ?? 20)));
+        $keyword = mb_substr(trim((string)($criteria['keyword'] ?? '')), 0, 80);
+        $sourceKind = strtoupper(trim((string)($criteria['source_kind'] ?? '')));
+        $status = strtoupper(trim((string)($criteria['status'] ?? '')));
+        $startDate = $this->optionalDate((string)($criteria['start_date'] ?? ''), 'presale_claim_business_date_invalid');
+        $endDate = $this->optionalDate((string)($criteria['end_date'] ?? ''), 'presale_claim_business_date_invalid');
+        if ($sourceKind !== '' && !in_array($sourceKind, [self::SOURCE_PRESALE, self::SOURCE_GIFT], true)) {
+            throw new \InvalidArgumentException('presale_claim_source_kind_invalid');
+        }
+        if ($status !== '' && !in_array($status, [self::CLAIM_SETTLED, self::CLAIM_VOIDED], true)) {
+            throw new \InvalidArgumentException('presale_claim_status_invalid');
+        }
+        if ($startDate !== '' && $endDate !== '' && $startDate > $endDate) {
+            throw new \InvalidArgumentException('presale_claim_business_date_range_invalid');
+        }
+        $storeIds = array_values(array_unique(array_filter(array_map('intval', (array)($scope['storeIds'] ?? [])))));
+        if (!$storeIds) return ['list' => [], 'count' => 0, 'page' => 1, 'limit' => $limit, 'data_as_of' => time()];
+
+        // The source line supplies immutable sale/member/product snapshots; claim supplies
+        // this delivery's own date, operator, state, note and generated outbound number.
+        $query = Db::name(self::CLAIM_TABLE)->alias('claim')
+            ->join(self::CLAIMABLE_TABLE . ' claimable',
+                'claimable.tenant_id=claim.tenant_id AND claimable.claimable_line_id=claim.claimable_line_id AND claimable.store_id=claim.store_id')
+            ->where('claim.tenant_id', (string)$scope['tenantId'])
+            ->whereIn('claim.store_id', $storeIds);
+        if ($sourceKind !== '') $query->where('claim.source_kind', $sourceKind);
+        if ($status !== '') $query->where('claim.claim_status', $status);
+        if ($startDate !== '') $query->where('claim.business_date', '>=', $startDate);
+        if ($endDate !== '') $query->where('claim.business_date', '<=', $endDate);
+        if ($keyword !== '') {
+            $query->where(function ($inner) use ($keyword): void {
+                $like = '%' . $keyword . '%';
+                $inner->whereLike('claim.claim_no', $like)
+                    ->whereOr('claimable.source_order_no_snapshot', 'like', $like)
+                    ->whereOr('claimable.member_name_snapshot', 'like', $like)
+                    ->whereOr('claimable.member_phone_snapshot', 'like', $like)
+                    ->whereOr('claimable.product_name_snapshot', 'like', $like);
+            });
+        }
+        $count = (int)(clone $query)->count();
+        $page = min($page, max(1, (int)ceil($count / $limit)));
+        $rows = $query->fieldRaw('claim.claim_id,claim.claimable_line_id,claim.claim_no,claim.quantity,claim.source_kind,claim.claim_status,claim.business_date,claim.occurred_at,claim.operator_name_snapshot,claim.remark,claim.remark_version,claim.voided_at,claim.void_reason_snapshot,claimable.source_order_no_snapshot,claimable.business_date AS sales_date,claimable.member_name_snapshot,claimable.member_phone_snapshot,claimable.product_name_snapshot,claimable.claim_status AS source_status')
+            ->order('claim.id', 'desc')->page($page, $limit)->select()->toArray();
+        return ['list' => array_map(static function (array $row): array {
+            return [
+                'claim_id' => (string)$row['claim_id'], 'claimable_line_id' => (string)$row['claimable_line_id'],
+                // The claim number and inventory outbound document number are minted together.
+                'outbound_document_no' => (string)$row['claim_no'], 'source_kind' => (string)$row['source_kind'],
+                'source_order_no' => (string)$row['source_order_no_snapshot'], 'sales_date' => (string)$row['sales_date'],
+                'member_name' => (string)$row['member_name_snapshot'], 'member_phone' => (string)$row['member_phone_snapshot'],
+                'product_name' => (string)$row['product_name_snapshot'], 'quantity' => (int)$row['quantity'],
+                'business_date' => (string)$row['business_date'], 'occurred_at' => (int)$row['occurred_at'],
+                'operator_name' => (string)$row['operator_name_snapshot'], 'status' => (string)$row['claim_status'],
+                'source_status' => (string)$row['source_status'], 'remark' => (string)$row['remark'],
+                'remark_version' => (int)$row['remark_version'], 'voided_at' => (int)$row['voided_at'],
+                'void_reason' => (string)$row['void_reason_snapshot'],
+            ];
+        }, $rows), 'count' => $count, 'page' => $page, 'limit' => $limit, 'data_as_of' => time()];
     }
 
     private function list(array $scope, array $criteria): array

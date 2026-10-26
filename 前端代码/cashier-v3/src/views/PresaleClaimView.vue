@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import FileClock from '@lucide/vue/dist/esm/icons/file-clock.mjs'
 import PackageCheck from '@lucide/vue/dist/esm/icons/package-check.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
@@ -7,6 +8,7 @@ import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import '@mohe/unified-query-vue3/styles.css'
 import {
   createStorePresaleClaim,
+  listStorePresaleClaimRecords,
   listStorePresaleClaims,
   readStorePresaleClaim,
   updateStorePresaleClaimRemark,
@@ -16,6 +18,8 @@ import {
 import { canUseCashierV3Operation } from '@/services/cashierV3Bridge'
 
 const rows = ref([])
+const route = useRoute()
+const activeTab = computed(() => route.query.tab === 'records' ? 'records' : 'claimable')
 const total = ref(0)
 const page = ref(1)
 const loading = ref(false)
@@ -49,6 +53,18 @@ const sourceVoidTarget = ref(null)
 const sourceVoidReason = ref('')
 const sourceVoidSubmitting = ref(false)
 const sourceVoidError = ref('')
+const recordRows = ref([])
+const recordTotal = ref(0)
+const recordPage = ref(1)
+const recordLoading = ref(false)
+const recordKeyword = ref('')
+const recordSourceKind = ref('')
+const recordStatus = ref('')
+const recordDateRange = ref({ min: '', max: '' })
+const selectedRecord = ref(null)
+const recordDetailOpen = ref(false)
+const recordDetailLoading = ref(false)
+const recordDetail = ref(null)
 
 const pageSize = 20
 const statusOptions = Object.freeze([
@@ -62,6 +78,7 @@ const shouldShowSalesDateFilter = computed(() => status.value !== 'AVAILABLE')
 const canPreviousPage = computed(() => page.value > 1)
 const canNextPage = computed(() => page.value * pageSize < total.value)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const recordTotalPages = computed(() => Math.max(1, Math.ceil(recordTotal.value / pageSize)))
 const sourceLabel = computed(() => sourceKind.value === 'GIFT' ? '赠送产品' : '预售商品')
 const sourceDocumentLabel = computed(() => sourceKind.value === 'GIFT' ? '赠送单号' : '预售订单')
 const sourceQuantityLabel = computed(() => sourceKind.value === 'GIFT' ? '赠送' : '预售')
@@ -114,6 +131,59 @@ async function load(nextPage = page.value) {
 }
 
 function query() { load(1) }
+/** Claim records use their own business date and filters; the source balance view stays intact. */
+async function loadRecords(nextPage = recordPage.value) {
+  if (!canViewClaimDetail.value) return
+  recordLoading.value = true
+  try {
+    const result = await listStorePresaleClaimRecords({
+      page: Math.max(1, Number(nextPage) || 1), limit: pageSize,
+      keyword: recordKeyword.value.trim(), source_kind: recordSourceKind.value,
+      status: recordStatus.value, start_date: recordDateRange.value.min,
+      end_date: recordDateRange.value.max
+    })
+    recordRows.value = Array.isArray(result?.list) ? result.list : []
+    recordTotal.value = Math.max(0, Number(result?.count || 0))
+    recordPage.value = Math.max(1, Number(result?.page || 1))
+  } catch (error) {
+    showFeedback(error?.message || '领用记录加载失败。')
+  } finally {
+    recordLoading.value = false
+  }
+}
+
+function queryRecords() { loadRecords(1) }
+function resetRecords() {
+  recordKeyword.value = ''
+  recordSourceKind.value = ''
+  recordStatus.value = ''
+  recordDateRange.value = { min: '', max: '' }
+  loadRecords(1)
+}
+function applyRecordDateRange(value) {
+  recordDateRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
+  loadRecords(1)
+}
+
+/** Re-read the selected outbound through the existing source-scoped detail permission. */
+async function openRecordDetail(record) {
+  if (!canViewClaimDetail.value) return
+  selectedRecord.value = record
+  recordDetail.value = null
+  recordDetailOpen.value = true
+  recordDetailLoading.value = true
+  try {
+    const result = await readStorePresaleClaim(record.claimable_line_id)
+    const claim = (result?.claims || []).find((item) => item.claim_id === record.claim_id)
+    if (!claim) throw new Error('该领用记录不存在或当前无权查看。')
+    recordDetail.value = { ...record, ...claim, source: result.claimable }
+  } catch (error) {
+    showFeedback(error?.message || '领用记录详情加载失败。')
+  } finally {
+    recordDetailLoading.value = false
+  }
+}
+function closeRecordDetail() { recordDetailOpen.value = false }
 /** 确认后的周期用于服务端销售日筛选，清空周期则恢复不限日期。 */
 function applySalesDateRange(value) {
   salesDateRange.value = { min: String(value?.min || ''), max: String(value?.max || '') }
@@ -282,8 +352,10 @@ async function submitVoid() {
     await voidStorePresaleClaim(voidTarget.value.claim_id, { reason })
     voidOpen.value = false
     showFeedback('领用已作废，库存已按原批次退回。')
-    if (selectedLine.value) await openDetail(selectedLine.value)
+    if (detailOpen.value && selectedLine.value) await openDetail(selectedLine.value)
+    if (recordDetailOpen.value && selectedRecord.value) await openRecordDetail(selectedRecord.value)
     await load()
+    if (activeTab.value === 'records') await loadRecords()
   } catch (error) {
     showFeedback(error?.message || '作废失败。')
   } finally {
@@ -291,12 +363,13 @@ async function submitVoid() {
   }
 }
 
-onMounted(() => load(1))
+onMounted(() => activeTab.value === 'records' ? loadRecords(1) : load(1))
+watch(activeTab, (nextTab) => { if (nextTab === 'records') loadRecords(1); else load(1) })
 </script>
 
 <template>
   <section class="presale-claim-view" aria-label="预售及赠送领用">
-    <form class="presale-claim-filter" @submit.prevent="query">
+    <form v-if="activeTab === 'claimable'" class="presale-claim-filter" @submit.prevent="query">
       <div class="presale-claim-source-switch" role="group" aria-label="领用来源">
         <span class="presale-claim-source-switch__thumb" :class="{ 'is-gift': sourceKind === 'GIFT' }" aria-hidden="true" />
         <button type="button" :class="{ 'is-active': sourceKind === 'PRESALE' }" @click="switchSource('PRESALE')">预售</button>
@@ -318,10 +391,18 @@ onMounted(() => load(1))
       <button class="button button--primary" type="submit">查询</button>
       <button class="button button--secondary" type="button" @click="reset">重置</button>
     </form>
+    <form v-else class="presale-claim-filter presale-claim-filter--records" @submit.prevent="queryRecords">
+      <label><span class="sr-only">领用记录查询</span><input v-model="recordKeyword" type="search" placeholder="出库单号、原订单、会员、手机或商品" /></label>
+      <label><span class="sr-only">领用来源</span><select v-model="recordSourceKind" @change="queryRecords"><option value="">全部来源</option><option value="PRESALE">预售</option><option value="GIFT">赠送</option></select></label>
+      <label><span class="sr-only">领用状态</span><select v-model="recordStatus" @change="queryRecords"><option value="">全部状态</option><option value="SETTLED">已领用</option><option value="VOIDED">已作废</option></select></label>
+      <div class="presale-claim-filter__period"><UnifiedQueryDateRange :model-value="recordDateRange" label="领用日期周期" @change="applyRecordDateRange" /></div>
+      <button class="button button--primary" type="submit">查询</button>
+      <button class="button button--secondary" type="button" @click="resetRecords">重置</button>
+    </form>
 
     <p v-if="feedback" class="presale-feedback" role="status">{{ feedback }}</p>
 
-    <main class="presale-claim-table-wrap" :aria-busy="loading">
+    <main v-if="activeTab === 'claimable'" class="presale-claim-table-wrap" :aria-busy="loading">
       <div class="presale-claim-table-scroll">
         <table class="presale-claim-table">
         <thead>
@@ -357,6 +438,31 @@ onMounted(() => load(1))
         <button class="button button--secondary" type="button" :disabled="!canNextPage || loading" @click="load(page + 1)">下一页</button>
       </div>
     </main>
+    <main v-else class="presale-claim-table-wrap" :aria-busy="recordLoading">
+      <div class="presale-claim-table-scroll">
+        <table class="presale-claim-table presale-claim-record-table">
+          <thead><tr><th>出库单号</th><th>来源</th><th>原订单号</th><th>领用日期</th><th>操作时间</th><th>会员</th><th>商品</th><th class="align-right">数量</th><th>操作人</th><th>状态</th><th>备注</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="row in recordRows" :key="row.claim_id">
+              <td><strong>{{ row.outbound_document_no }}</strong></td><td>{{ row.source_kind === 'GIFT' ? '赠送' : '预售' }}</td><td>{{ row.source_order_no || '-' }}</td>
+              <td>{{ row.business_date }}</td><td>{{ timestamp(row.occurred_at) }}</td>
+              <td><strong>{{ row.member_name || '游客' }}</strong><small>{{ row.member_phone || '-' }}</small></td>
+              <td>{{ row.product_name }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ row.operator_name || '-' }}</td>
+              <td><span class="presale-status" :class="`presale-status--${String(row.status || '').toLowerCase()}`">{{ statusLabel(row.status) }}</span></td>
+              <td class="presale-record-remark">{{ row.remark || '-' }}</td>
+              <td class="presale-claim-table__actions"><button class="button button--text" type="button" @click="openRecordDetail(row)">详情</button><button v-if="row.status === 'SETTLED' && row.source_status !== 'VOIDED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废</button></td>
+            </tr>
+            <tr v-if="!recordLoading && !recordRows.length"><td colspan="12" class="presale-empty">暂无领用记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="presale-pagination">
+        <span>共 {{ recordTotal }} 条 · 每页 {{ pageSize }} 条 · 第 {{ recordPage }} / {{ recordTotalPages }} 页</span>
+        <button class="button button--secondary" type="button" :disabled="recordPage <= 1 || recordLoading" @click="loadRecords(recordPage - 1)">上一页</button>
+        <span>{{ recordPage }}</span>
+        <button class="button button--secondary" type="button" :disabled="recordPage >= recordTotalPages || recordLoading" @click="loadRecords(recordPage + 1)">下一页</button>
+      </div>
+    </main>
 
     <section v-if="claimOpen" class="presale-modal-backdrop" role="presentation" @click.self="closeClaim">
       <div class="presale-modal" role="dialog" aria-modal="true" aria-labelledby="presale-claim-title">
@@ -390,6 +496,29 @@ onMounted(() => load(1))
           </tbody></table>
         </template>
         <footer><button class="button button--secondary" type="button" @click="closeDetail">关闭</button></footer>
+      </div>
+    </section>
+
+    <section v-if="recordDetailOpen" class="presale-modal-backdrop" role="presentation" @click.self="closeRecordDetail">
+      <div class="presale-modal presale-modal--record" role="dialog" aria-modal="true" aria-labelledby="presale-record-detail-title">
+        <header><div><p>领用记录</p><h2 id="presale-record-detail-title">出库详情</h2></div><button class="icon-button" title="关闭" type="button" @click="closeRecordDetail"><X :size="18" /></button></header>
+        <div v-if="recordDetailLoading" class="presale-loading"><FileClock :size="22" />加载中...</div>
+        <dl v-else-if="recordDetail" class="presale-modal__summary presale-record-summary">
+          <dt>出库单号</dt><dd><strong>{{ recordDetail.outbound_document_no }}</strong></dd>
+          <dt>来源</dt><dd>{{ recordDetail.source_kind === 'GIFT' ? '赠送' : '预售' }}</dd>
+          <dt>原订单号</dt><dd>{{ recordDetail.source_order_no || '-' }}</dd>
+          <dt>会员</dt><dd>{{ recordDetail.member_name || '游客' }} · {{ recordDetail.member_phone || '-' }}</dd>
+          <dt>商品</dt><dd>{{ recordDetail.product_name }}</dd>
+          <dt>领用数量</dt><dd>{{ recordDetail.quantity }}</dd>
+          <dt>领用日期</dt><dd>{{ recordDetail.business_date }}</dd>
+          <dt>操作时间</dt><dd>{{ timestamp(recordDetail.occurred_at) }}</dd>
+          <dt>操作人</dt><dd>{{ recordDetail.operator_name || '-' }}</dd>
+          <dt>状态</dt><dd>{{ statusLabel(recordDetail.status) }}</dd>
+          <dt>备注</dt><dd>{{ recordDetail.remark || '-' }}</dd>
+          <template v-if="recordDetail.status === 'VOIDED'"><dt>作废时间</dt><dd>{{ timestamp(recordDetail.voided_at) }}</dd><dt>作废原因</dt><dd>{{ recordDetail.void_reason || '-' }}</dd></template>
+        </dl>
+        <p v-else class="presale-empty">暂无可查看的记录</p>
+        <footer><button class="button button--secondary" type="button" @click="closeRecordDetail">关闭</button></footer>
       </div>
     </section>
 
@@ -438,4 +567,16 @@ onMounted(() => load(1))
 .presale-claim-table-scroll { min-height: 0; flex: 1; overflow: auto; }
 .presale-pagination { flex: 0 0 auto; border-top: 1px solid #e1e7ec; background: #fff; }
 .presale-modal.presale-modal--wide { width: min(1160px, 100%); }
+/* The route owns its two tabs, while CashierShell retains the existing page header. */
+:global(.cashier-page-identity > div.presale-header-identity) { display: flex; align-items: center; gap: 22px; }
+:global(.presale-header-tabs) { display: flex; align-items: center; gap: 6px; }
+:global(.presale-header-tabs button) { border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; background: transparent; color: #667586; font: inherit; cursor: pointer; }
+:global(.presale-header-tabs button.is-active) { border-bottom-color: #167d68; color: #155d50; font-weight: 650; }
+.presale-claim-filter--records { flex-wrap: wrap; }
+.presale-claim-filter--records input { width: min(320px, 100%); }
+.presale-claim-record-table { min-width: 1450px; }
+.presale-record-remark { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presale-modal--record { width: min(560px, 100%); }
+.presale-record-summary { grid-template-columns: 100px minmax(0, 1fr); }
+.presale-record-summary dd { overflow-wrap: anywhere; }
 </style>

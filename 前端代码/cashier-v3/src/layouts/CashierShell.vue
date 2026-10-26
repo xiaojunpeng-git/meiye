@@ -47,6 +47,7 @@ import {
   salesOrderProjectionFromResult
 } from '@/services/cashierV3OrderProjectionContract'
 import { responseDataBlock } from '@/services/cashierV3EntitlementDraftContract'
+import { recentCashierMemberKey } from '@/services/recentCashierMembers'
 
 const route = useRoute()
 const router = useRouter()
@@ -68,6 +69,11 @@ const toolbarBusinessDateReason = ref('')
 const toolbarBusinessSource = ref({ displayNameSnapshot: '', primarySourceId: 0, secondarySourceId: 0 })
 const isMemberSelectorOpen = ref(false)
 const memberSelectorContext = ref('cashier')
+// 只在收银选客入口启用本机最近会员；账号或门店身份缺失时不共用缓存。
+const recentMemberHistoryKey = computed(() => memberSelectorContext.value === 'cashier'
+  ? recentCashierMemberKey(state.operator?.account,
+    state.currentStore?.id || state.storeId || state.store?.id)
+  : '')
 // Identify a browser-local customer choice across the async summary read;
 // selecting A, then B, then A still constitutes three distinct draft choices.
 const cashierCustomerSelectionEpoch = ref(0)
@@ -975,6 +981,25 @@ async function queryMemberSelector(query) {
     }
   }
   return result
+}
+
+/** 最近会员沿用会员选择器的只读权限查询，但不覆盖当前分页结果。 */
+async function queryRecentMemberSelector({ memberIds, memberScope }) {
+  const result = await requestCashierV3Action('query-member-selector', {
+    selectorContext: 'cashier',
+    selectorEntry: 'cashier',
+    memberScope,
+    recentMemberIds: memberIds,
+    page: 1,
+    pageSize: 10,
+    preserveRootState: true,
+    silent: true
+  })
+  if (!isSucceededResult(result)) {
+    throw new Error(resultEnvelope(result)?.result?.message || '最近选择读取失败。')
+  }
+  const projection = resultEnvelope(result)?.data
+  return { records: Array.isArray(projection?.records) ? projection.records : [] }
 }
 
 async function selectMemberFromSelector(record) {
@@ -2795,8 +2820,12 @@ onBeforeUnmount(() => {
     <section class="cashier-main" :class="{ 'cashier-main--workflow': isCashierWorkflowPage || isInventoryWorkspaceOpen, 'cashier-main--headerless': isHeaderlessPage }">
       <header v-if="!isCashierWorkflowPage && !isInventoryWorkspaceOpen && !isHeaderlessPage" class="cashier-main__header">
         <div class="cashier-page-identity">
-          <div>
+          <div :class="{ 'presale-header-identity': route.name === 'cashier-v3-presale-claim' }">
             <h1>{{ pageTitle }}</h1>
+            <nav v-if="route.name === 'cashier-v3-presale-claim'" class="presale-header-tabs" aria-label="会员领用页签">
+              <button type="button" :class="{ 'is-active': route.query.tab !== 'records' }" :aria-current="route.query.tab !== 'records' ? 'page' : undefined" @click="router.push({ name: 'cashier-v3-presale-claim', query: { ...route.query, tab: undefined } })">会员领用</button>
+              <button v-if="canUseFeature('cashier.v3.inventory.presale_claim.detail')" type="button" :class="{ 'is-active': route.query.tab === 'records' }" :aria-current="route.query.tab === 'records' ? 'page' : undefined" @click="router.push({ name: 'cashier-v3-presale-claim', query: { ...route.query, tab: 'records' } })">领用记录</button>
+            </nav>
           </div>
         </div>
 
@@ -3036,6 +3065,8 @@ onBeforeUnmount(() => {
     :current-store-name="state.storeName || ''"
     :initial-view="memberSelectorInitialView"
     :on-query="queryMemberSelector"
+    :on-query-recent="memberSelectorContext === 'cashier' ? queryRecentMemberSelector : null"
+    :recent-history-key="recentMemberHistoryKey"
     :on-select="selectMemberFromSelector"
     :on-select-guest="selectGuestOrderFromSelector"
     :on-create-member="createMemberFromSelector"
