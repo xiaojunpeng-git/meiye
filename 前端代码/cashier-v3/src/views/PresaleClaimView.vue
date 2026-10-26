@@ -441,7 +441,7 @@ watch(activeTab, (nextTab) => { if (nextTab === 'records') loadRecords(1); else 
     <main v-else class="presale-claim-table-wrap" :aria-busy="recordLoading">
       <div class="presale-claim-table-scroll">
         <table class="presale-claim-table presale-claim-record-table">
-          <thead><tr><th>出库单号</th><th>来源</th><th>原订单号</th><th>领用日期</th><th>操作时间</th><th>会员</th><th>商品</th><th class="align-right">数量</th><th>操作人</th><th>状态</th><th>备注</th><th>操作</th></tr></thead>
+          <thead><tr><th>出库单号</th><th>来源</th><th>原订单号</th><th>领用日期</th><th>操作时间</th><th>会员</th><th>商品</th><th class="align-right">数量</th><th>操作人</th><th>状态</th><th>来源单状态</th><th>备注</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in recordRows" :key="row.claim_id">
               <td><strong>{{ row.outbound_document_no }}</strong></td><td>{{ row.source_kind === 'GIFT' ? '赠送' : '预售' }}</td><td>{{ row.source_order_no || '-' }}</td>
@@ -449,10 +449,12 @@ watch(activeTab, (nextTab) => { if (nextTab === 'records') loadRecords(1); else 
               <td><strong>{{ row.member_name || '游客' }}</strong><small>{{ row.member_phone || '-' }}</small></td>
               <td>{{ row.product_name }}</td><td class="align-right">{{ row.quantity }}</td><td>{{ row.operator_name || '-' }}</td>
               <td><span class="presale-status" :class="`presale-status--${String(row.status || '').toLowerCase()}`">{{ statusLabel(row.status) }}</span></td>
+              <!-- 来源单作废只关闭剩余领用权益，已发生的出库仍保持自己的真实状态。 -->
+              <td><span class="presale-status" :class="`presale-status--${String(row.source_status || '').toLowerCase()}`">{{ statusLabel(row.source_status) }}</span></td>
               <td class="presale-record-remark">{{ row.remark || '-' }}</td>
               <td class="presale-claim-table__actions"><button class="button button--text" type="button" @click="openRecordDetail(row)">详情</button><button v-if="row.status === 'SETTLED' && row.source_status !== 'VOIDED' && canVoidClaim" class="button button--text button--danger" type="button" @click="openVoid(row)">作废</button></td>
             </tr>
-            <tr v-if="!recordLoading && !recordRows.length"><td colspan="12" class="presale-empty">暂无领用记录</td></tr>
+            <tr v-if="!recordLoading && !recordRows.length"><td colspan="13" class="presale-empty">暂无领用记录</td></tr>
           </tbody>
         </table>
       </div>
