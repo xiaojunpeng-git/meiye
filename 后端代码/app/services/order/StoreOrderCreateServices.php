@@ -234,7 +234,10 @@ class StoreOrderCreateServices extends BaseServices
             $activity_id = array_unique(array_column($cartInfo, 'product_id'))[0] ?? 0;
         }
         //$shipping_type = 1 快递发货 $shipping_type = 2 门店核销 $shipping_type = 3 门店配送
-        if (!sys_config('store_func_status', 1) || !sys_config('store_self_mention', 1)) $shippingType = 1;
+        // 拼团购买门店归属来自服务端报价，不能因旧自提开关关闭被改写为配送单。
+        // 仅保留该业务的无配送类型；其他历史商城订单仍执行原开关约束。
+        $isGroupStorePurchase = $type === 3 && (int)$shippingType === 2 && (int)$storeId > 0;
+        if (!$isGroupStorePurchase && (!sys_config('store_func_status', 1) || !sys_config('store_self_mention', 1))) $shippingType = 1;
 
         $userAddress = $addressInfo['province'] . ' ' . $addressInfo['city'] . ' ' . $addressInfo['district'] . ' ' . $addressInfo['street'] . ' ' . $addressInfo['detail'];
         $userLocation = trim(($addressInfo['longitude'] ?? '') . ' ' . ($addressInfo['latitude'] ?? ''));

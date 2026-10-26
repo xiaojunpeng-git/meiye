@@ -1,0 +1,16 @@
+PASS no default shipping template fixture
+PASS legacy global switches are disabled
+PASS type 0 confirm succeeds: ok
+
+
+                                           
+  [RuntimeException]                       
+  FAIL type 0 selected item remains valid  
+                                           
+
+
+Exception trace:
+ () at Standard input code:21
+ check64() at Standard input code:58
+
+

@@ -1214,12 +1214,16 @@ class StoreCartServices extends BaseServices
                             }
                             break;
                         case 2:
-                            //不支持到店核销
-                            if (!$store_self_mention) {
+                            // 拼团以服务端购物行的活动身份确认购买门店，不办理旧商城自提。
+                            // 这里只解除旧核销/配送设置的耦合；后续门店归属、SKU库存
+                            // 和前置适用门店校验继续执行，支付/成团也不会因此提前核销。
+                            $isGroupStorePurchase = (int)$item['type'] === 3
+                                && (int)($item['activity_id'] ?? 0) > 0 && $store_id > 0;
+                            if (!$isGroupStorePurchase && !$store_self_mention) {
                                 $item['is_valid'] = 0;
                                 $item['invalid_desc'] = '平台/门店已关闭核销';
                                 $invalid[] = $item;
-                            } elseif (isset($item['productInfo']['delivery_type']) && $item['productInfo']['delivery_type'] && !in_array(2, $item['productInfo']['delivery_type'])) {
+                            } elseif (!$isGroupStorePurchase && isset($item['productInfo']['delivery_type']) && $item['productInfo']['delivery_type'] && !in_array(2, $item['productInfo']['delivery_type'])) {
                                 $item['is_valid'] = 0;
                                 $item['invalid_desc'] = '此商品不支持到店核销';
                                 $invalid[] = $item;

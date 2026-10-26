@@ -1,0 +1,41 @@
+PASS no default shipping template fixture
+PASS legacy global switches are disabled
+PASS type 0 confirm succeeds: ok
+PASS type 0 selected item remains valid
+PASS type 0 full price and zero postage
+PASS type 0 no shipping address dependency
+PASS type 0 other store still rejected
+PASS type 0 applicability still enforced
+PASS type 0 legacy pickup guard retained
+PASS type 0 order creation succeeds: 订单创建成功
+PASS type 0 unpaid order retains selected store and amount
+PASS type 0 group rights remain pending
+PASS type 0 repeated submit returns original order
+PASS type 0 exhausted group quota still rejected
+PASS type 5 confirm succeeds: ok
+PASS type 5 selected item remains valid
+PASS type 5 full price and zero postage
+PASS type 5 no shipping address dependency
+PASS type 5 other store still rejected
+PASS type 5 applicability still enforced
+PASS type 5 legacy pickup guard retained
+PASS type 5 order creation succeeds: 订单创建成功
+PASS type 5 unpaid order retains selected store and amount
+PASS type 5 group rights remain pending
+PASS type 5 repeated submit returns original order
+PASS type 5 exhausted group quota still rejected
+PASS type 6 confirm succeeds: ok
+PASS type 6 selected item remains valid
+PASS type 6 full price and zero postage
+PASS type 6 no shipping address dependency
+PASS type 6 other store still rejected
+PASS type 6 applicability still enforced
+PASS type 6 legacy pickup guard retained
+PASS type 6 order creation succeeds: 订单创建成功
+PASS type 6 unpaid order retains selected store and amount
+PASS type 6 group rights remain pending
+PASS type 6 repeated submit returns original order
+PASS type 6 exhausted group quota still rejected
+PASS legacy shipping guard preserved
+R64 CHECKOUT COMPLETE
+R64 CLEANUP COMPLETE

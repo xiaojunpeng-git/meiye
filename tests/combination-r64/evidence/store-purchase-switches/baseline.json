@@ -1,0 +1,19 @@
+{
+  "head": "1feff9d4daf73279c5a604af4afc139d23585aa9",
+  "releaseBase": "697344de247868c07d9dffab30dcb515232de3bd",
+  "remote": "not applicable for local fix",
+  "files": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/order/StoreCartServices.php": {
+      "before": "552a48a7b77031f7d6cbc2c7bfd658e6be42130c3a33a0086585df71b80d10ae",
+      "released": "552a48a7b77031f7d6cbc2c7bfd658e6be42130c3a33a0086585df71b80d10ae"
+    },
+    "\u540e\u7aef\u4ee3\u7801/app/services/order/StoreOrderCreateServices.php": {
+      "before": "0d3075d9a10ae2e94a043710ed4a219440ba0c022fcb25815a78edf7218248f1",
+      "released": "0d3075d9a10ae2e94a043710ed4a219440ba0c022fcb25815a78edf7218248f1"
+    },
+    "tests/combination-r64/checkout-local.php": {
+      "before": "90b52eed239c2d627c128e6d221a82cf6fb4cd7399506f504323e4e5b296fcc2",
+      "released": "90b52eed239c2d627c128e6d221a82cf6fb4cd7399506f504323e4e5b296fcc2"
+    }
+  }
+}

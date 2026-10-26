@@ -6,6 +6,7 @@ require '/var/www/html/vendor/autoload.php';
 use think\facade\Db;
 use think\facade\Event;
 use mohe\services\CacheService;
+use mohe\services\SystemConfigService;
 use app\services\order\StoreCartServices;
 use app\services\order\StoreOrderServices;
 use app\services\order\StoreOrderCreateServices;
@@ -26,16 +27,25 @@ function seed64(string $table,array $data):int{
 $ddl=Db::query('SHOW CREATE TABLE eb_shipping_templates')[0]['Create Table'];
 Db::execute(preg_replace('/^CREATE TABLE /','CREATE TEMPORARY TABLE ',$ddl,1));
 check64(!app()->make(ShippingTemplatesServices::class)->get(1,['id']),'no default shipping template fixture');
-$redisKeys=[];$stockSkus=[];$quoteResponses=[];Db::startTrans();
+$redisKeys=[];$stockSkus=[];$quoteResponses=[];
+// Explicitly reproduce retired pickup settings; configuration is rolled back
+// with the fixture and its cache is cleared after rollback, never left enabled.
+$legacySwitchesOff=getenv('R64_LEGACY_SWITCHES_OFF')==='1';$failure=null;Db::startTrans();
 try{
+ if($legacySwitchesOff){
+  Db::name('system_config')->whereIn('menu_name',['store_func_status','store_self_mention'])->update(['value'=>json_encode(0)]);
+  SystemConfigService::clear();
+  check64(!sys_config('store_func_status')&&!sys_config('store_self_mention'),'legacy global switches are disabled');
+ }
  $tag='R64-'.bin2hex(random_bytes(5));
- $store=seed64('system_store',['name'=>$tag,'is_show'=>1,'is_del'=>0,'delivery_type'=>'2']);
+ $delivery=$legacySwitchesOff?'1':'2';
+ $store=seed64('system_store',['name'=>$tag,'is_show'=>1,'is_del'=>0,'delivery_type'=>$delivery]);
  $uid=seed64('user',['nickname'=>$tag,'real_name'=>'本地测试','phone'=>'19900000064','belong_store_id'=>$store,'status'=>1,'now_money'=>0,'ben_money'=>0,'give_money'=>0]);
  $user=app()->make(app\services\user\UserServices::class)->get($uid);
  foreach([0,5,6]as $productType){
   $sku=substr(hash('sha256',$tag.$productType),0,7);
   $pid=seed64('store_product',['store_name'=>$tag,'product_type'=>$productType,'type'=>1,'relation_id'=>$store,'price'=>399,'stock'=>10,'sales'=>0,'is_show'=>1,'is_del'=>0,'is_verify'=>1,'delivery_type'=>'2','is_inventory'=>0,'allow_negative_stock'=>1,'applicable_type'=>1]);
-  $cid=seed64('store_combination',['title'=>$tag,'product_id'=>$pid,'product_type'=>$productType,'type'=>0,'relation_id'=>$store,'stock'=>10,'quota'=>10,'quota_show'=>10,'price'=>399,'people'=>3,'effective_time'=>24,'is_show'=>1,'is_del'=>0,'start_time'=>time()-60,'stop_time'=>time()+3600,'once_num'=>10,'num'=>10,'delivery_type'=>'2','applicable_type'=>1]);
+  $cid=seed64('store_combination',['title'=>$tag,'product_id'=>$pid,'product_type'=>$productType,'type'=>0,'relation_id'=>$store,'stock'=>10,'quota'=>10,'quota_show'=>10,'price'=>399,'people'=>3,'effective_time'=>24,'is_show'=>1,'is_del'=>0,'start_time'=>time()-60,'stop_time'=>time()+3600,'once_num'=>10,'num'=>10,'delivery_type'=>$delivery,'applicable_type'=>1]);
   foreach([[0,$pid],[3,$cid]]as [$type,$id])seed64('store_product_attr_value',['product_id'=>$id,'type'=>$type,'unique'=>$sku.($type?'g':'p'),'suk'=>'默认','price'=>399,'stock'=>10,'quota'=>10,'sum_stock'=>10,'quota_show'=>10,'write_times'=>1,'write_valid'=>1]);
   CacheService::setStock($sku.'g',10,3);$stockSkus[]=$sku.'g';
   $cartService=app()->make(StoreCartServices::class);$cartService->setItem('store_id',$store);
@@ -48,6 +58,19 @@ try{
   $data=$res['data'];$quoteResponses[]=['productType'=>$productType,'storeId'=>$store,'cartId'=>(string)$key,'quote'=>$data];check64($data['valid_count']===1&&count($data['cartInfo'])===1,'type '.$productType.' selected item remains valid');
   check64((int)$data['priceGroup']['totalPrice']===399&&(float)$data['priceGroup']['storePostage']===0.0,'type '.$productType.' full price and zero postage');
   check64($data['addressInfo']===[]&&$data['upgrade_addr']===0,'type '.$productType.' no shipping address dependency');
+  if($legacySwitchesOff){
+   // Re-run the real cart validator with negative authority contexts; the group
+   // exception must not open other stores, forbidden applicability or legacy sales.
+   $otherStore=seed64('system_store',['name'=>$tag.'-other','is_show'=>1,'is_del'=>0,'delivery_type'=>'1']);
+   [, $allowed,$denied]=$cartService->handleCartList($uid,$data['cartInfo'],[],2,$otherStore);
+   check64(count($allowed)===0&&count($denied)===1,'type '.$productType.' other store still rejected');
+   $restricted=$data['cartInfo'];$restricted[0]['productInfo']['applicable_type']=2;$restricted[0]['productInfo']['applicable_store_id']=(string)$otherStore;
+   [, $allowed,$denied]=$cartService->handleCartList($uid,$restricted,[],2,$store);
+   check64(count($allowed)===0&&count($denied)===1,'type '.$productType.' applicability still enforced');
+   $legacy=$data['cartInfo'];$legacy[0]['type']=0;$legacy[0]['activity_id']=0;
+   [, $allowed,$denied]=$cartService->handleCartList($uid,$legacy,[],2,$store);
+   check64(count($allowed)===0&&($denied[0]['invalid_desc']??'')==='平台/门店已关闭核销','type '.$productType.' legacy pickup guard retained');
+  }
   $orderKey=$data['orderKey'];$redisKeys[]='user_order_'.$uid.$orderKey;
   $request=(new app\Request())->withServer(['REQUEST_METHOD'=>'POST']);$request->uid=$uid;$request->user=$user;
   $request->withPost(['combinationId'=>$cid,'shipping_type'=>2,'store_id'=>$store,'real_name'=>'本地测试','phone'=>'19900000064','new'=>1,'payType'=>'weixin','from'=>'routine']);
@@ -58,6 +81,11 @@ try{
   check64(Db::name('combination_order_fulfillment')->where('order_id',$order['id'])->value('state')==='pending','type '.$productType.' group rights remain pending');
   $repeat=$controller->create($request,app()->make(StoreOrderCreateServices::class),$orderKey)->getData();
   check64(($repeat['data']['status']??'')==='EXTEND_ORDER'&&Db::name('store_order')->where('unique',$orderKey)->count()===1,'type '.$productType.' repeated submit returns original order');
+  if($legacySwitchesOff){
+   Db::name('store_product_attr_value')->where('product_id',$cid)->where('type',3)->update(['quota'=>0]);
+   $blocked=false;try{$cartService->setCart($uid,$pid,1,$sku.'g',3,true,$cid);}catch(think\exception\ValidateException $error){$blocked=strpos($error->getMessage(),'库存不足')!==false;}
+   check64($blocked,'type '.$productType.' exhausted group quota still rejected');
+  }
  }
  // Old shipping requests must still fail safely; this fix cannot accept missing freight configuration.
  $request=(new app\Request())->withServer(['REQUEST_METHOD'=>'POST']);$request->uid=$uid;$request->user=$user;
@@ -66,10 +94,13 @@ try{
  check64(($res['status']??0)===400&&$res['msg']==='默认模板未配置，无法下单','legacy shipping guard preserved');
  if(getenv('R64_EXPORT_QUOTES')==='1')file_put_contents('/tmp/r64-confirm-responses.json',json_encode($quoteResponses,JSON_UNESCAPED_UNICODE));
  echo "R64 CHECKOUT COMPLETE\n";
-}finally{Db::rollback();foreach($redisKeys as $key)CacheService::redisHandler()->delete((string)$key);foreach($stockSkus as $sku)CacheService::setStock($sku,0,3);}
+}catch(Throwable $error){$failure=$error;echo 'FAIL ',get_class($error),' ', $error->getMessage(),"\n";
+}finally{Db::rollback();if($legacySwitchesOff)SystemConfigService::clear();foreach($redisKeys as $key)CacheService::redisHandler()->delete((string)$key);foreach($stockSkus as $sku)CacheService::setStock($sku,0,3);}
 
 echo "R64 CLEANUP COMPLETE\n";
 // The bundled Swoole emits a deprecation during CLI shutdown. Restore PHP handling
 // after every assertion and cleanup so this infrastructure notice is not promoted to a business failure.
 restore_error_handler();
-exit(0);
+// Framework exception rendering may exit zero in CLI; failed assertions must
+// explicitly fail the regression process after transaction/cache cleanup.
+exit($failure ? 1 : 0);

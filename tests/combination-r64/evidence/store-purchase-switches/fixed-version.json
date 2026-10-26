@@ -1,0 +1,22 @@
+{
+  "base": "697344de247868c07d9dffab30dcb515232de3bd",
+  "workspaceHead": "1feff9d4daf73279c5a604af4afc139d23585aa9",
+  "tree": "b6c34b7da701268fb153f12af7c0760810b0d50e",
+  "patchSha256": "6a3ce2996f4df838d9f82323e9ea40441f39bed752f43ae6d35d8a6ec4307715",
+  "files": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/order/StoreCartServices.php": "f416ae52c0c14217278f3d6327c810fbd9bfd1b49efdda9ca9e4263a16227b2f",
+    "\u540e\u7aef\u4ee3\u7801/app/services/order/StoreOrderCreateServices.php": "c8f31900b52d6588e3f573240bf7d48b0379d5f617f68d2b5c25ae5d3dda85de",
+    "tests/combination-r64/checkout-local.php": "421aa571b106611a8f4d03b48d8817603fdd67004e8d70a9bb7c110929592c20"
+  },
+  "checks": {
+    "legacySwitchesOff": 39,
+    "defaultMode": 26,
+    "actualFrontendHydration": true,
+    "productionDatabaseWrites": 0,
+    "realPayments": 0
+  },
+  "status": "local_self_tests_passed_pending_product_manager_acceptance",
+  "deployed": false,
+  "frontendChanges": false,
+  "databaseMigration": false
+}
