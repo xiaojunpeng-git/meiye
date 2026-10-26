@@ -103,12 +103,20 @@ final class MemberCombinationRecordServices
             return [];
         }
         $ids = implode(',', $groupIds);
-        return Db::name('store_pink')
+        $rows = Db::name('store_pink')
             ->whereRaw('(id IN (' . $ids . ') OR k_id IN (' . $ids . '))')
             ->where('is_refund', 0)
             ->field('IF(k_id=0,id,k_id) as group_id,COUNT(*) as joined_count')
             ->group('group_id')
-            ->column('joined_count', 'group_id');
+            ->select()->toArray();
+
+        // ThinkPHP 的 column() 会重置 SELECT 字段，把 joined_count 聚合别名误当成数据库真实列。
+        // 先保留完整聚合查询结果，再在内存中建立团 ID 到人数的映射，避免线上触发 1054。
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[(int)$row['group_id']] = (int)$row['joined_count'];
+        }
+        return $counts;
     }
 
     /** 退款优先于团状态；到期未成团按失败展示，但查询不会改写历史事实。 */

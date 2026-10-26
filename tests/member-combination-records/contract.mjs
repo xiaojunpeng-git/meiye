@@ -26,6 +26,9 @@ assert.match(service, /leftJoin\('store_order o', 'o\.id=p\.order_id_key'\)/);
 assert.match(service, /'pending'.*'success'.*'failed'.*'refunded'/s);
 assert.match(service, /page\(\$page, \$limit\)/);
 assert.match(service, /order\('p\.add_time desc,p\.id desc'\)/);
+assert.match(service, /field\('IF\(k_id=0,id,k_id\) as group_id,COUNT\(\*\) as joined_count'\)[\s\S]*?select\(\)->toArray\(\)/);
+assert.doesNotMatch(service, /column\('joined_count', 'group_id'\)/);
+assert.match(service, /\$counts\[\(int\)\$row\['group_id'\]\] = \(int\)\$row\['joined_count'\]/);
 
 assert.match(memberApi, /combination\/member\/records/);
 assert.match(pages, /"path": "user_combination_records\/index"/);
