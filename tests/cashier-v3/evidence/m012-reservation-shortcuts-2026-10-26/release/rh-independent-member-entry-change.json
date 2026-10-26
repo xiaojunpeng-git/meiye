@@ -1,0 +1,8 @@
+{
+  "path": "public/index.html",
+  "before": "796f60c4081c90e176ae6f0fce323846804c91e2c93a2cb0040382358eff621c",
+  "after": "6ba12c7dddbddf8fe6750d812c4c57d8f52d72eaf237a0ea4ad5d6c1aad9eb3e",
+  "notDeployedByThisTask": true,
+  "affectedBackendAndCashierIdentical": true,
+  "reacceptanceNotRequired": "Unrelated member H5 entry outside accepted reservation change and deploy targets"
+}

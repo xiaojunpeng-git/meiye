@@ -2690,7 +2690,7 @@
   ],
   "protected": {
     ".env": "281edaa546251318c0c44c99c571de478507edf66d5d9582ce3f0a8b3ab833d0",
-    "public/index.html": "796f60c4081c90e176ae6f0fce323846804c91e2c93a2cb0040382358eff621c",
+    "public/index.html": "6ba12c7dddbddf8fe6750d812c4c57d8f52d72eaf237a0ea4ad5d6c1aad9eb3e",
     "public/view_mobile_v3/index.html": "15e2bf7d0cfb7a535f32da8013aef3b42e10cdf6bb321c42f3c476889d003520",
     "public/view_fund_v3/index.html": "66f76e25a8151c14482b4b4b7ec022f87a3f4f515e53b84061950e9ed42aa380",
     "public/view_inventory_v3/index.html": "54cf428c440f23d105e794750c6e639d9be16aad4f0e2d0af59ee2a65ec1de64"

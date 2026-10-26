@@ -1,0 +1,13 @@
+{
+  "site": "rh",
+  "database": "ruihao",
+  "readOnly": true,
+  "patched": true,
+  "pendingCount": 0,
+  "total": 0,
+  "pageRows": 0,
+  "calendarBlocks": 14,
+  "markedBlocks": 0,
+  "customSnapshotMatch": true,
+  "realCommandExecuted": false
+}
