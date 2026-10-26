@@ -24,6 +24,7 @@ assert.match(benefits, /couponUserIds/);
 assert.match(benefits, /integralAllocations/);
 assert.match(benefits, /salesOrderLineId/);
 assert.match(benefits, /cashier_v3_sales_order_line/);
+assert.match(benefits, /\$ratio === '' \? 0 : self::moneyCents\(\$ratio\)/);
 assert.match(routes, /member\/commerce\/(detail|pay|cancel)\/:id/);
 assert.match(routes, /\[A-Za-z0-9-\]\+/);
 

@@ -25,6 +25,24 @@ $service = new MemberCommerceServices();
 $failed = false;
 Db::startTrans();
 try {
+    // 008 historically stores an empty optional ratio. Preserve purchasing by
+    // treating that state as "points not configured" instead of invalid money.
+    Db::name('system_config')->where('menu_name', 'integral_ratio_status')
+        ->update(['value' => json_encode(1)]);
+    Db::name('system_config')->where('menu_name', 'integral_ratio')
+        ->update(['value' => json_encode('')]);
+    SystemConfigService::clear();
+    $blankRatioQuote = $service->quote($uid, [
+        'store_id' => $storeId,
+        'kind' => 'purchase',
+        'items' => [['product_id' => $productId, 'quantity' => 1]],
+        'coupon_id' => 0,
+        'use_integral' => 0,
+    ]);
+    ok(!(bool)$blankRatioQuote['integralEnabled']
+        && (int)$blankRatioQuote['amountCents'] === (int)$blankRatioQuote['grossAmountCents'],
+        'blank optional integral ratio must disable points without blocking purchase');
+
     foreach ([
         'integral_ratio_status' => 1,
         'integral_ratio' => 1,
