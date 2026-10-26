@@ -1,0 +1,13 @@
+{
+  "commit": "d6dd0dcef8f2407d94784a9db202878a6edd8373",
+  "target": {
+    "customer": "008",
+    "terminal": "member",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com"
+  },
+  "result": "PASS",
+  "actualOutput": true,
+  "uploaded": false,
+  "cashierJsSha256": "a67bd23779b80437ab627134e9a9d142edfc60353d68fd640bfafdc25ca076b9"
+}

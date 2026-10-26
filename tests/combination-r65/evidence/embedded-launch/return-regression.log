@@ -1,0 +1,7 @@
+PASS server paid returns to result without second payment
+PASS delayed callback is polled to paid
+PASS pending read is bounded and manual retry only checks status
+PASS network errors unlock query-only retry
+PASS hung read times out and ignores late paid response
+PASS hidden/unloaded page cancels timers and late navigation
+PASS repeated taps cannot duplicate payment or status run

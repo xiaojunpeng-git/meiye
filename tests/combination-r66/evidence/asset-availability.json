@@ -1,0 +1,59 @@
+{
+  "checkedUrls": [
+    {
+      "url": "https://008.cc3798.com/statics/images/activity/rmb.png",
+      "http": 200,
+      "contentType": "text/html; charset=utf-8",
+      "bodyPrefix": "<!DOCTYPE",
+      "isImage": false
+    },
+    {
+      "url": "https://008.cc3798.com/statics/images/activity/postertag.png",
+      "http": 200,
+      "contentType": "text/html; charset=utf-8",
+      "bodyPrefix": "<!DOCTYPE",
+      "isImage": false
+    },
+    {
+      "url": "https://008.cc3798.com/statics/images/activity/posterBagInner.png",
+      "http": 200,
+      "contentType": "text/html; charset=utf-8",
+      "bodyPrefix": "<!DOCTYPE",
+      "isImage": false
+    },
+    {
+      "url": "https://008.cc3798.com/statics/images/activity/posterBag.png",
+      "http": 200,
+      "contentType": "text/html; charset=utf-8",
+      "bodyPrefix": "<!DOCTYPE",
+      "isImage": false
+    }
+  ],
+  "localBundledArt": [
+    {
+      "file": "前端代码/uniapp/pages/activity/static/poster/rmb.png",
+      "width": 24,
+      "height": 24,
+      "bytes": 593
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/poster/postertag.png",
+      "width": 138,
+      "height": 56,
+      "bytes": 3199
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/poster/posterBagInner.png",
+      "width": 455,
+      "height": 608,
+      "bytes": 11589
+    },
+    {
+      "file": "前端代码/uniapp/pages/activity/static/poster/posterBag.png",
+      "width": 750,
+      "height": 1140,
+      "bytes": 235944
+    }
+  ],
+  "remoteMutations": false
+}

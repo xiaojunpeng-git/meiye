@@ -1,0 +1,12 @@
+node:internal/process/esm_loader:97
+    internalBinding('errors').triggerUncaughtException(
+                              ^
+
+AssertionError [ERR_ASSERTION]: Provider preparation MUST clear the launch spinner without onShow
+    at file:///Users/xiaojunpeng/Desktop/%E9%AD%94%E6%A0%B8/%E7%BE%8E%E4%B8%9A/%E7%BE%8E%E5%AE%B9%E6%BA%90%E7%A0%81/tests/combination-r65/embedded-launch.mjs:33:98 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual'
+}

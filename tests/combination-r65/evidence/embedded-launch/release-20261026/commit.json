@@ -1,0 +1,24 @@
+{
+  "commit": "846c4c4f4f766964cfc6924ee5a94904081e4c60",
+  "tree": "20761f106cd7c9d1f7f4cbb9f609d46d4401e88b",
+  "parent": "60f709d25c3d6c9b83812fe3993aea71dcf9faa3",
+  "branch": "release/r65-member-payment-return-20261026",
+  "acceptedBusinessTree": "d6dd0dcef8f2407d94784a9db202878a6edd8373",
+  "files": {
+    "前端代码/uniapp/pages/goods/cashier/index.vue": "cc0dbd407684bcd9af33805ce22157201f8517b8906eec0b5b790103cbfc5e63",
+    "tests/combination-r65/embedded-launch.mjs": "efd8ec4eb13f65b820b7be5f27d400c7a142dedc2a2339087d0718ed05cc2a84",
+    "tests/combination-r65/evidence/embedded-launch/simulator-after-launch.json": "bb209103d19d22afb8d9a4ee67a58c939907a67e4c57759b17c8af0c120dc4cd",
+    "tests/combination-r65/evidence/embedded-launch/simulator-paid.json": "7dedec208dde264e0ca9ac7292e4c31983f9948e6acad44f7e4ddb4483b25f5c",
+    "tests/combination-r65/evidence/embedded-launch/acceptance.json": "6fbba4ac0c3b2c1f981946389dfcf25946fb3c66cdd7983bb197ae35a91cc4e9",
+    "tests/combination-r65/evidence/embedded-launch/read-only-payment-states.json": "6d6e65ba24cbe992166defab93fa754e6b2bd468359293a1b5cbff74c4de0e94",
+    "tests/combination-r65/evidence/embedded-launch/fixed-version.json": "b366e632b5ac55619ca159f794ee7c3b7d27fa7cfd75bfa22353c9b6bf06638d",
+    "tests/combination-r65/evidence/embedded-launch/return-regression.log": "87344a76ea6d207939daa1f5d0f619736e2f0aa0f62d8817c6faf2562811ea53",
+    "tests/combination-r65/evidence/embedded-launch/README.md": "d3cefbf960f00c0c714c22e76fc5a57f463984f062e870067f7281d46c3f7bb8",
+    "tests/combination-r65/evidence/embedded-launch/baseline.json": "5bebf148ab061fdbc9b40a93dfc2936f17595f22a8ed54ccf49621d31f193e99",
+    "tests/combination-r65/evidence/embedded-launch/simulator-cleanup.json": "8099080bf9700bd623f75222ee7262798e7e66c9a7ed17a6ed060fb63b396c1a",
+    "tests/combination-r65/evidence/embedded-launch/before.log": "4c5624b7945403c12106602706deb4628608ac68ed1be5c36d249252c9c023ca",
+    "tests/combination-r65/evidence/embedded-launch/upload-3.0.65-confirmed.json": "680aed2923f5584590785c954b7fd864d70714db52f92155cffff5a416dd934f",
+    "tests/combination-r65/evidence/embedded-launch/build.json": "34599e69e9511c0ea0b9bd76d721e0a8e30ce9fd9bbebb7d415488bacde7e3e8",
+    "tests/combination-r65/evidence/embedded-launch/after.log": "c8a234e9fbf18212a233e4fa3e20e8b060d8fde1d3b2eefd4edae4719316a466"
+  }
+}

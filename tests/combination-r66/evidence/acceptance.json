@@ -1,0 +1,16 @@
+{
+  "round": 66,
+  "acceptedTree": "b79be0ca704ad2b4a5f925ff6a72728e2a3b5195",
+  "acceptedSourceFiles": {
+    "前端代码/uniapp/pages/activity/goods_combination_status/index.vue": "a8d34d9d2b55a35c450e8c6e1cf5c8930f5c06959838e8ca53a72eb6533d2b1f",
+    "前端代码/uniapp/utils/util.js": "748236c3e3e4a5da03ef4fe5ac48a0da3cfd99dbbb6eada9c8f2b853d3fddca8",
+    "前端代码/uniapp/pages/activity/static/poster/rmb.png": "a97bc797294cb11921753f5a0203ef9196c78df7251f5501ff66fbaa57bc9e05",
+    "前端代码/uniapp/pages/activity/static/poster/postertag.png": "6e690a73e6c36a260b7bf70c6f1b6bd0e5f0df45f1c1bfd1e929fa34d196c955",
+    "前端代码/uniapp/pages/activity/static/poster/posterBagInner.png": "36910f8fa18831a8e4bb35ee4c79c698410c948f0b57a15102cbc89b11c842ab",
+    "前端代码/uniapp/pages/activity/static/poster/posterBag.png": "5f608d0f51bf8a779fb7e0d0dd8f9abbb747ec23e7b8acae632f2c6307af3c2c",
+    "前端代码/uniapp/pages/users/user_spread_code/index.vue": "54c653ece4b0f77bd0ca954fb0dd3cd50f4e60be549952a2fdf5b4dea73db863"
+  },
+  "approval": "用户确认验收通过，只提交这次补丁，部署瑞昊，push，然后部署渼约008和渼约010，再上传渼约008会员端体验版",
+  "time": "2026-10-26T08:43:39.538582+00:00",
+  "noDatabaseMigration": true
+}

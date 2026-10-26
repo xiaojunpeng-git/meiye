@@ -1,0 +1,51 @@
+{
+  "site": "rh",
+  "commit": "846c4c4f4f766964cfc6924ee5a94904081e4c60",
+  "result": "PASS",
+  "backup": "/www/backups/rh.cc3798.com/20261026-r65-embedded-846c4c4f",
+  "filesVerified": 264,
+  "publicAssets": {
+    "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+    "/static/js/chunk-vendors.b93d4521.js": "0d1789da0cf875caa1f5454bf8737827337107aa2077b2c88511220504f45dc7",
+    "/static/js/index.7bc10ce0.js": "59de5b43f033e7c6736815b822d139d35e987bfd958a362868656fb541fa72b5"
+  },
+  "api": {
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "790d440c5cde99ccb2abef8091a1a93bf672fdaae87dc77c43446b1ce53ec438",
+      "rows": null
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "e0659e2f155247ef5a10cffd5ac2f15cf9fc0fb4f8777b0b3572ff0a84d20f39",
+      "rows": null
+    },
+    "/api/store/list?is_select=1&page=1&limit=20": {
+      "status": 200,
+      "dataSha256": "bd74c7a2b53f0705f2007e77e8ac4a601429d8a3fa9eceae97a13216c8418401",
+      "rows": 20
+    },
+    "/api/combination/list?page=1&limit=5": {
+      "status": 200,
+      "dataSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "rows": 0
+    }
+  },
+  "databaseWrites": 0,
+  "configUnchanged": true,
+  "platformAndCashierUnchanged": true,
+  "callbacks": [
+    {
+      "path": "/api/pay/fynotify/wechat/product",
+      "status": 500,
+      "body": "fail"
+    },
+    {
+      "path": "/admin/api/pay/fynotify/wechat/product",
+      "status": 500,
+      "body": "fail"
+    }
+  ],
+  "runtimeClasses": 79,
+  "time": "2026-10-26T06:39:44.022Z"
+}

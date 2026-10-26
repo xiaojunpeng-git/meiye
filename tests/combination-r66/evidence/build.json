@@ -1,0 +1,18 @@
+{
+  "commit": "a871f2bc3fe5cd600a9777d98864d42064f3d48e",
+  "target": {
+    "customer": "008",
+    "terminal": "member",
+    "appid": "wx85d4bfd0b4b6aafb",
+    "origin": "https://008.cc3798.com"
+  },
+  "result": "PASS",
+  "actualOutput": true,
+  "uploaded": false,
+  "files": {
+    "pages/activity/goods_combination_status/index.js": "dea2f4c76c5123e3b922048c201a9374fa502379ee8ff48bcf9324b23bf5eb9a",
+    "pages/activity/goods_combination_status/index.wxml": "7f7c0b83dcd5caf25f444214cee4088367325410118da0d918ad49c77de637ae",
+    "pages/activity/goods_combination_status/index.wxss": "db8b0813f6e577de8b20f1bd77db2897fbe5c8bf820c4d427f6b62a27f4c0388",
+    "common/vendor.js": "5ea9829d5ab573737503120219992f780a5767eee6dabdcd1c14d1933cf5de67"
+  }
+}
