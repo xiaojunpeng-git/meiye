@@ -1,0 +1,58 @@
+{
+  "site": "rh",
+  "database": "ruihao",
+  "databaseVersion": "5.7.44-log",
+  "environment": "b89eb945fa029d397a057428e9a7c69ff6610c6471e72b635af334452a6eee34",
+  "files": {
+    "app/controller/api/v1/order/StoreDebt.php": "d8e46605b440a1a049d9d10f621f14d89e0b2169ba012ae30a2a64cd5a2b9226",
+    "app/services/order/StoreDebtServices.php": "6c976323f33e6b81cb9a62da39d2b6ee62753f23a18167c8fcba13ac50d88d3a",
+    "route/api.php": "88b124d9d9c608383a2422b8294621bc12476b43538d81c48a4fdf81e33de9a8",
+    "public/index.html": "796f60c4081c90e176ae6f0fce323846804c91e2c93a2cb0040382358eff621c",
+    "public/system.html": "1954722ab061671ba2aed07804dce541e63688a0a879c4530aaa5e3fd518a8fe",
+    "public/view_cashier_v3/index.html": "9333df8d75e2bcf869331b91392a9ec3263bf9dd217a23017769ae352b2727eb"
+  },
+  "data": {
+    "eb_store_debt": {
+      "rows": 68095,
+      "sha256": "1b5850a4121aa5431aeaef303dfa00b311aa50d2d891108cf5a345a03e4c4ef2"
+    },
+    "eb_store_debt_item": {
+      "rows": 68121,
+      "sha256": "529fa5cea10598e3f16fb61afbd2970cdfb66ab5c4794d897530410a33c2ba0a"
+    },
+    "eb_store_debt_repay": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eb_system_config": {
+      "rows": 374,
+      "sha256": "daf9b7bfdb813837613befb9050843230e809fedb583a8b3baa7bf9d1618440d"
+    },
+    "eb_diy": {
+      "rows": 13,
+      "sha256": "bbd39e2eeb54003647864db95a3a6c7004e5f722b9a009d9547e6c2db473af08"
+    }
+  },
+  "assets": {
+    "public/index.html": {
+      "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+      "/static/js/chunk-vendors.122ae5ba.js": "c5b8a58858ad913e2ad43310a6648c433fc543257b4e90614d23b47dd65b5bd5",
+      "/static/js/index.3d01593f.js": "2413afd57d5016367ad8f46b09f8fa5956f6600ab379e4ac22718a423d616515"
+    },
+    "public/system.html": {
+      "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+      "/view_admin/css/app.153d9d27.css": "e3196fac4f7768b46a24ff2ec5fb023ac3ac80b503aaa7f7b24ff1663ad3b59f",
+      "/view_admin/js/chunk-vendors.33283ef6.js": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+      "/view_admin/js/app.58f88402.js": "c2576f4c46759ece0cd6ffc5309a3ab2738a0ee4837c21ae7c992fe429362403"
+    },
+    "public/view_cashier_v3/index.html": {
+      "/view_cashier_v3/assets/index-1c0c2c8c.js": "c215e3bbcebe4cc4153b90020a882aeee5c918fcfb3926006d69b8e12cc800b8",
+      "/view_cashier_v3/assets/index-64790256.css": "647902567c30859f92e56b4d0ec7cf1b645e2d01caa193af4f5519dca505a245"
+    }
+  },
+  "upgrade": {
+    "upgrade_key": "20261025-r61-combination-fulfillment-refund",
+    "code_version": "98e0d80ee0da93495636f153e0364e8a1105fb62",
+    "executed_at": "2026-10-25 20:11:49"
+  }
+}

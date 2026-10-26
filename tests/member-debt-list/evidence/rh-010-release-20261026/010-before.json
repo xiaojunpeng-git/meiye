@@ -1,0 +1,58 @@
+{
+  "site": "010",
+  "database": "mohe_010_app",
+  "databaseVersion": "5.7.44",
+  "environment": "91e80aa8d1e9d03bc9583e6bd44ffdaa1709e18ff47fa326d425b653b0f4a9bd",
+  "files": {
+    "app/controller/api/v1/order/StoreDebt.php": "d8e46605b440a1a049d9d10f621f14d89e0b2169ba012ae30a2a64cd5a2b9226",
+    "app/services/order/StoreDebtServices.php": "6c976323f33e6b81cb9a62da39d2b6ee62753f23a18167c8fcba13ac50d88d3a",
+    "route/api.php": "88b124d9d9c608383a2422b8294621bc12476b43538d81c48a4fdf81e33de9a8",
+    "public/index.html": "796f60c4081c90e176ae6f0fce323846804c91e2c93a2cb0040382358eff621c",
+    "public/system.html": "1954722ab061671ba2aed07804dce541e63688a0a879c4530aaa5e3fd518a8fe",
+    "public/view_cashier_v3/index.html": "627330d15fe5cc4e2928c0484d29845f01acfa4d80bef541116ef5be8c921b4a"
+  },
+  "data": {
+    "eb_store_debt": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eb_store_debt_item": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eb_store_debt_repay": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eb_system_config": {
+      "rows": 368,
+      "sha256": "2fbeeaf3562440c46b3401d87ceec070727c39524750a66ea4c4176821418b67"
+    },
+    "eb_diy": {
+      "rows": 13,
+      "sha256": "efec9ea4e59f9cbe6449555966052c18741dbf650a8e47980d2e73804a07bff8"
+    }
+  },
+  "assets": {
+    "public/index.html": {
+      "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+      "/static/js/chunk-vendors.122ae5ba.js": "c5b8a58858ad913e2ad43310a6648c433fc543257b4e90614d23b47dd65b5bd5",
+      "/static/js/index.3d01593f.js": "2413afd57d5016367ad8f46b09f8fa5956f6600ab379e4ac22718a423d616515"
+    },
+    "public/system.html": {
+      "/view_admin/css/chunk-vendors.48272356.css": "4cef2bcf241ac56f92bcb9a27763b52bc2fa36ed56f082c18bce368d6f070468",
+      "/view_admin/css/app.153d9d27.css": "e3196fac4f7768b46a24ff2ec5fb023ac3ac80b503aaa7f7b24ff1663ad3b59f",
+      "/view_admin/js/chunk-vendors.33283ef6.js": "a87f04ccd9f9198d7a43f27a8834cc8a253516cc62688891768603f62f21608a",
+      "/view_admin/js/app.58f88402.js": "c2576f4c46759ece0cd6ffc5309a3ab2738a0ee4837c21ae7c992fe429362403"
+    },
+    "public/view_cashier_v3/index.html": {
+      "/view_cashier_v3/assets/index-51a0bb99.js": "df7d0b57cab6dbc5dda46a23f05c9812e8f2252fe62ce5c3499910accbb5ff43",
+      "/view_cashier_v3/assets/index-21c3afe5.css": "21c3afe58e7671409563b181a0ea30e5816e6530ba1bfc95084467bce352c436"
+    }
+  },
+  "upgrade": {
+    "upgrade_key": "20261026-010-inventory-default-store-locations",
+    "code_version": "40147d669ac4783c76146419578d62e416878178",
+    "executed_at": "2026-10-26 13:09:09"
+  }
+}

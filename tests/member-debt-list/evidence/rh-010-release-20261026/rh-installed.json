@@ -1,0 +1,9 @@
+{
+  "result": "INSTALLED",
+  "sourceCommit": "40147d669ac4783c76146419578d62e416878178",
+  "existingFeatureSource": "7e77f5849911342db250187f8c4471948010da86",
+  "files": 1,
+  "databaseWrites": 0,
+  "time": "2026-10-26T13:23:38+08:00",
+  "directory": "/www/backups/rh.cc3798.com/20261026-member-debt-list-40147d66"
+}
