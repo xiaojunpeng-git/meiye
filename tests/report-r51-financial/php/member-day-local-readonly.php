@@ -73,10 +73,9 @@ try {
             comparisonCheck(comparisonCents($store[$field]) === $sum, 'summary uses only matched member-day population/' . $field);
         }
     }
-    // Exact regression snapshots were captured before the two-report change.
-    // Exclude only request time; preserve metadata, rows, explanations and gaps.
+    // The cross-store projection intentionally changed to per-store net rows.
+    // The unrelated daily reconciliation keeps its exact prior snapshot.
     foreach ([
-        'basic_cross_store_settlement' => '33f8b165cd50240d06de3cd5123efb664036565cac92087834d5df866aced475',
         'basic_daily_reconciliation' => 'a44610c2707782d95489475a204416bcafc5b2bcd714278ac40acf43de760730',
     ] as $code => $baseline) {
         $result = $service->read($code, $stores, $input);

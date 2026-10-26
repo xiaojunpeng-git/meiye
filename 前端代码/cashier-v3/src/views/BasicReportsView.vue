@@ -60,6 +60,10 @@ function openReport(report) {
   if (!report.available) return
   void router.push({ name: route.name, params: { report: report.code } })
 }
+// 跨店历史结算默认核对本年，与原报表查询区间一致；切换其他表仍回到月初。
+function resetReportDates(code) {
+  dates.value = { start_date: code === 'basic_cross_store_settlement' ? today.slice(0, 4) + '-01-01' : today.slice(0, 7) + '-01', end_date: today, as_of_date: today }
+}
 
 /** 在途旧响应不能覆盖新的组织筛选、页码或已退出的报表。 */
 async function run(next = query.value) {
@@ -164,6 +168,8 @@ async function exportRows() {
 }
 function display(row, field) {
   if (row[field.key] == null) return field.key === 'registered_date' ? '未填写' : '-'
+  // 007 两项对账金额显示分、合计显示整数元；导出仍使用后端分精度原值。
+  if (active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(row[field.key]).toFixed(2)
   if (field.money || field.key === 'amount') return formatReportMoney(row[field.key])
   if (field.key === 'registered_date' && !row[field.key]) return '未填写'
   return row[field.key] ?? '-'
@@ -171,6 +177,7 @@ function display(row, field) {
 function summary(field, index) {
   if (!executedQuery.value) return index === 0 ? '合计' : '-'
   const amount = data.value.summaries[`${field.key}:sum`]
+  if (amount != null && active.value?.code === 'basic_cross_store_settlement' && field.money && field.key !== 'settlement_total') return Number(amount).toFixed(2)
   if (amount != null) return field.money || field.key === 'amount' ? formatReportMoney(amount) : amount
   return index === 0 ? '合计' : '-'
 }
@@ -206,6 +213,7 @@ watch(() => route.params.report, async () => {
   data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
   loading.value = false; error.value = ''
   query.value = { page: 1, limit: 20 }; fields.value = active.value?.queryFields || []
+  resetReportDates(active.value?.code)
   if (active.value?.available) {
     try {
       if (platform.value) await refreshScope(active.value.code)
@@ -218,6 +226,7 @@ onMounted(async () => {
   document.documentElement.classList.add('basic-reports-document')
   try {
     catalog.value = await loadBasicReportCatalog(platform.value)
+    resetReportDates(active.value?.code)
     fields.value = active.value?.queryFields || []
     if (platform.value && active.value) await refreshScope(active.value.code)
     if (route.params.report && !active.value) throw new Error('未配置该基础报表')
@@ -236,6 +245,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
     <p v-if="error" class="basic-reports__error" role="alert">{{ error }}</p>
     <p v-else-if="data.complete === false" class="basic-reports__error" role="status">部分计算条件缺失，待核对项目显示为“-”，不计入合计。{{ (data.data_gaps || []).map(gap => gap.label).filter(Boolean).join('；') }}</p>
     <p v-if="data.coverage_start && data.range?.start_date < data.coverage_start" class="basic-reports__error" role="status">本表仅包含 {{ data.coverage_start }} 起纳入统一数据底层的业务，更早历史尚未纳入本表。</p>
+    <p v-if="active?.code === 'basic_cross_store_settlement' && data.source_kind === 'sealed_legacy_settlement_snapshot'" class="basic-reports__snapshot" role="status">{{ data.coverage }}</p>
     <template v-if="!route.params.report">
       <section v-for="group in groups" :key="group" class="basic-reports__group">
         <h2>{{ group }}</h2><div class="basic-reports__directory">
@@ -301,6 +311,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 .basic-reports{height:100%;min-height:0;display:flex;flex-direction:column;background:#fff;padding:12px 16px;gap:12px;color:#35475e;font-size:13px;overflow:auto;letter-spacing:0}
 .basic-reports__header,.basic-reports__header>div{display:flex;align-items:center;gap:10px}.basic-reports__header{justify-content:space-between;flex:none}.basic-reports h1{font-size:18px;margin:0}.basic-reports h2{font-size:14px;margin:0 0 12px}.basic-reports__group{padding:12px 0;border-top:1px solid #e6ebf1}.basic-reports__directory{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.basic-reports__directory button{display:flex;flex-direction:column;justify-content:center;gap:8px;min-height:74px;padding:14px;border:1px solid #dce5ed;border-radius:6px;background:#fff;text-align:left;font:inherit;color:#245e95;cursor:pointer;overflow-wrap:anywhere}.basic-reports__directory button:disabled{color:#7c8898;cursor:default;background:#fafbfd}.basic-reports__directory small{font-size:11px;color:#8c97a6}
 .basic-reports__icon{display:inline-grid;place-items:center;width:32px;height:32px;flex:none;border:1px solid #dce4ec;border-radius:4px;background:#fff;color:#49617d;cursor:pointer}.basic-reports__icon:disabled{opacity:.5;cursor:default}.basic-reports__results{display:flex;flex-direction:column;flex:1;min-height:180px;overflow:hidden;border:1px solid #e0e7ee}.basic-reports__scroll{flex:1;min-height:0;overflow:auto;position:relative}.basic-reports table{min-width:800px;width:100%;border-collapse:separate;border-spacing:0}.basic-reports th,.basic-reports td{padding:12px;text-align:left;white-space:nowrap;border-bottom:1px solid #e7edf3;height:42px;box-sizing:border-box}.basic-reports th{position:sticky;top:0;background:#f2f6fb;color:#53667f;z-index:2}.basic-reports .basic-reports__total th{top:42px;background:#eaf3fc;color:#1f5f8b}.basic-reports td.is-fixed{z-index:1;background:#fff}.basic-reports th.is-fixed{z-index:3}.basic-reports__empty{text-align:center;padding:40px 12px;color:#8491a2}.basic-reports__error{color:#ba2929;margin:0;line-height:1.6}.basic-reports__edit{border:0;background:none;color:#1675d4;cursor:pointer}
+.basic-reports__snapshot{margin:0;color:#687b92;font-size:12px;line-height:1.4}
 .basic-report-dialog{position:fixed;inset:0;z-index:2000;background:#17253e66;display:grid;place-items:center;padding:16px;color:#35475e;font-size:13px}.basic-report-dialog>form,.basic-report-dialog>section{width:min(580px,100%);max-height:calc(100dvh - 32px);overflow:auto;background:#fff;border-radius:6px;padding:20px;box-sizing:border-box}.basic-report-dialog header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.basic-report-dialog h2{font-size:16px;margin:0}.basic-report-dialog__fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.basic-report-dialog label{display:flex;flex-direction:column;gap:7px;min-width:0}.basic-report-dialog input,.basic-report-dialog select{width:100%;min-width:0;box-sizing:border-box;min-height:34px;border:1px solid #dce4ec;border-radius:4px;padding:5px 8px;background:#fff;color:inherit;font:inherit}.basic-report-dialog footer{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.basic-report-dialog dt{font-weight:600;margin-top:15px}.basic-report-dialog dd{margin:6px 0;line-height:1.7;color:#687b92}
 @media(max-width:600px){.basic-reports{padding:10px}.basic-report-dialog__fields{grid-template-columns:minmax(0,1fr)}}
 </style>

@@ -18,6 +18,11 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
     public function query(array $context, array $payload): array
     {
         $stores = BasicRegistrationQueryProvider::stores($context);
+        // The historical cross-store comparison starts at the calendar year;
+        // an omitted date must not silently reduce it to the current month.
+        if (static::CODE === 'basic_cross_store_settlement' && !isset($payload['start_date'])) {
+            $payload['start_date'] = substr((string)$context['query_cutoff_date'], 0, 4) . '-01-01';
+        }
         $input = self::dates($payload, (string)$context['query_cutoff_date']);
         $validationQuery = $payload;
         unset($validationQuery['start_date'], $validationQuery['end_date'], $validationQuery['as_of_date']);
@@ -69,10 +74,11 @@ abstract class BasicBusinessQueryProvider implements UnifiedQueryProvider
                 $result['summaries'] = array_merge($result['summaries'], $part['summaries']);
             }
             return array_merge($result, ['queryFields' => $fields, 'field_sources' => $source['field_sources'],
-                'can_edit' => false, 'source_kind' => 'unified_business_facts', 'range' => $input,
+                'can_edit' => false, 'source_kind' => $source['source_kind'] ?? 'unified_business_facts', 'range' => $input,
                 'table_layout' => ['fixed' => true, 'header_height' => 42, 'summary_position' => 'first_row'],
                 'coverage_start' => array_key_exists('coverage_start', $source) ? $source['coverage_start'] : '2026-08-10',
-                'aggregation_caught_up' => true, 'data_as_of' => time(),
+                'coverage' => $source['coverage'] ?? '',
+                'aggregation_caught_up' => true, 'data_as_of' => $source['data_as_of'] ?? time(),
                 'complete' => $source['complete'] ?? true, 'gaps' => $source['gaps'] ?? [],
                 'data_gaps' => $source['data_gaps'] ?? [],
                 'limitations' => $source['limitations'] ?? [], 'drilldowns' => $source['drilldowns'] ?? [],

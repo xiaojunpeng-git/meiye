@@ -92,9 +92,8 @@ try {
     $repeated = $service->read('basic_balance_order_detail', $stores, $input + ['page' => 999, 'limit' => 1]);
     verify($repeated['rows'] === $detail, 'provider pagination inputs cannot truncate service result');
     $cross = $service->read('basic_cross_store_settlement', $stores, $input);
-    foreach ($cross['rows'] as $pair) {
-        verify(cents($pair['stored_value_payable']) === cents($pair['stored_value_receivable']), 'stored-value endpoints conserve');
-        verify(cents($pair['card_payable']) === cents($pair['card_receivable']), 'card endpoints conserve independently');
+    foreach ($cross['rows'] as $store) {
+        verify(cents($store['settlement_total']) === cents($store['stored_value_settlement']) + cents($store['card_settlement']), 'store net combines both pools');
     }
     echo 'basic_cross_store_settlement rows=' . count($cross['rows'])
         . ' complete=' . ($cross['complete'] ? 'true' : 'false')

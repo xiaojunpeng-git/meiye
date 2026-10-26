@@ -48,10 +48,8 @@ final class BasicFinancialReportServices
         $this->assertCode($code);
         $fields = ['store_id' => ['门店ID', 'number'], 'store_name' => ['门店', 'text']];
         if ($code === 'basic_cross_store_settlement') {
-            $fields += ['source_store_id' => ['结算应付门店ID', 'number'],
-                'target_store_id' => ['权益使用门店ID', 'number'],
-                'stored_value_payable' => ['储值应付', 'money'], 'stored_value_receivable' => ['储值应收', 'money'],
-                'card_payable' => ['次卡应付', 'money'], 'card_receivable' => ['次卡应收', 'money']];
+            $fields += ['stored_value_settlement' => ['储值对账金额', 'money'],
+                'card_settlement' => ['次卡对账金额', 'money'], 'settlement_total' => ['合计', 'money']];
         } elseif (in_array($code, ['basic_balance_order_detail', 'basic_balance_order_summary'], true)) {
             if ($code === 'basic_balance_order_detail') {
                 $fields += ['business_date' => ['业务日期', 'date'], 'member_id' => ['会员ID', 'number'],
@@ -137,6 +135,11 @@ final class BasicFinancialReportServices
             $rows = $cross['rows'];
             $result['data_gaps'] = $cross['data_gaps'];
             $result['complete'] = $cross['data_gaps'] === [];
+            if (isset($cross['data_as_of'])) $result['data_as_of'] = $cross['data_as_of'];
+            if (isset($cross['coverage'])) $result['coverage'] = $cross['coverage'];
+            if (isset($cross['coverage_start'])) $result['coverage_start'] = $cross['coverage_start'];
+            if (isset($cross['source_kind'])) $result['source_kind'] = $cross['source_kind'];
+            $result['metric_version'] = 'r51-cross-store-legacy-net-v1';
         } else {
             $balance = $this->balanceRows($stores, $range);
             if (in_array($code, ['basic_balance_order_detail', 'basic_balance_order_summary'], true)) {
@@ -336,6 +339,10 @@ final class BasicFinancialReportServices
      * does not hide other verified pairs; kua_store=0 is explicitly unmarked. */
     private function crossStore(array $stores, array $range): array
     {
+        // Pure report contracts run without the framework bootstrap; only an
+        // explicitly configured instance may switch to a sealed legacy batch.
+        $batchId = function_exists('config') ? (string)config('basic_report.cross_store_legacy_batch_id', '') : '';
+        if ($batchId !== '') return $this->legacyCrossStore($stores, $range, $batchId);
         $out = [];
         $gaps = [];
         // Older local schemas may lack the historical direction flag. Metadata
@@ -423,7 +430,84 @@ final class BasicFinancialReportServices
             unset($gap['amount_cents']);
         }
         unset($gap);
-        return ['rows' => array_values($out), 'data_gaps' => array_values($gaps)];
+        // The old settlement report is a net amount by store. Preserve the
+        // verified fact direction while projecting both sides into one row per
+        // authorized store; the two sides of each pair must cancel exactly.
+        $rows = $this->emptyCrossStoreRows($enabled);
+        foreach ($out as $pair) {
+            $this->addCrossStoreAmount($rows, (int)$pair['target_store_id'], 'stored_value_settlement', $pair['stored_value_receivable']);
+            $this->addCrossStoreAmount($rows, (int)$pair['source_store_id'], 'stored_value_settlement', -$pair['stored_value_payable']);
+            $this->addCrossStoreAmount($rows, (int)$pair['target_store_id'], 'card_settlement', $pair['card_receivable']);
+            $this->addCrossStoreAmount($rows, (int)$pair['source_store_id'], 'card_settlement', -$pair['card_payable']);
+        }
+        return ['rows' => array_values($rows), 'data_gaps' => array_values($gaps)];
+    }
+
+    /** The sealed 007 order projection is report-only. Its batch identity and
+     * source cutoff are checked before reading; current cashier/order tables are
+     * never overwritten to make historical financial reports agree. */
+    private function legacyCrossStore(array $stores, array $range, string $batchId): array
+    {
+        $batch = ($this->queries)('basic_cross_store_legacy_batch')->where('batch_id', $batchId)->find();
+        if (!$batch || (string)$batch['status'] !== 'sealed') throw new \RuntimeException('跨店历史快照未完成校验');
+        if ($range['start'] < (string)$batch['range_start'] || $range['end'] > (string)$batch['range_end']) {
+            throw new \InvalidArgumentException('跨店历史快照仅支持 ' . $batch['range_start'] . ' 至 ' . $batch['range_end'] . '，超出范围需先补齐事实');
+        }
+        $settings = ($this->queries)('system_store')->whereIn('id', $stores)
+            ->field('id,name,salary_status')->limit(self::MAX_ROWS + 1)->select()->toArray();
+        $this->assertRowCount($settings);
+        $enabled = [];
+        foreach ($settings as $store) {
+            if ((int)$store['salary_status'] === 1) $enabled[(int)$store['id']] = (string)$store['name'];
+        }
+        $rows = $this->emptyCrossStoreRows($enabled);
+        if (!$rows) return ['rows' => [], 'data_gaps' => [], 'data_as_of' => strtotime((string)$batch['captured_at'])];
+        $facts = ($this->queries)('basic_cross_store_legacy_order')->where('batch_id', $batchId)
+            ->whereBetween('business_date', [$range['start'], $range['end']])
+            ->field('source_order_id,store_id,kua_store,order_type,amount_cents')
+            ->limit(self::MAX_ROWS + 1)->select()->toArray();
+        $this->assertRowCount($facts);
+        $seen = [];
+        foreach ($facts as $fact) {
+            $sourceId = (int)$fact['source_order_id'];
+            if ($sourceId < 1 || isset($seen[$sourceId])) throw new \RuntimeException('跨店历史订单身份重复或缺失');
+            $seen[$sourceId] = true;
+            $target = (int)$fact['store_id'];
+            $origin = (int)$fact['kua_store'];
+            // The imported population was already restricted to two
+            // salary-enabled stores. A single-store viewer receives only its
+            // own signed balance, never the counterparty's row or name.
+            if (!isset($rows[$target]) && !isset($rows[$origin])) continue;
+            $type = (int)$fact['order_type'];
+            if (!in_array($type, [0, 2], true)) throw new \RuntimeException('跨店历史订单类型不合法');
+            $field = $type === 0 ? 'stored_value_settlement' : 'card_settlement';
+            $amount = $this->integer($fact['amount_cents']);
+            if (isset($rows[$target])) $this->addCrossStoreAmount($rows, $target, $field, $amount);
+            if (isset($rows[$origin])) $this->addCrossStoreAmount($rows, $origin, $field, -$amount);
+        }
+        return ['rows' => array_values($rows), 'data_gaps' => [],
+            'data_as_of' => strtotime((string)$batch['captured_at']),
+            'source_kind' => 'sealed_legacy_settlement_snapshot',
+            'coverage_start' => (string)$batch['range_start'],
+            'coverage' => '007 只读固定快照；截至 ' . $batch['captured_at'] . '；仅含该时点已成功且未退款/删除的跨店订单'];
+    }
+
+    /** One stable row per salary-enabled store, including zero-settlement stores. */
+    private function emptyCrossStoreRows(array $enabled): array
+    {
+        krsort($enabled, SORT_NUMERIC);
+        $rows = [];
+        foreach ($enabled as $id => $name) $rows[$id] = ['row_id' => 'cross-store:' . $id,
+            'store_id' => $id, 'store_name' => $name, 'stored_value_settlement' => 0,
+            'card_settlement' => 0, 'settlement_total' => 0];
+        return $rows;
+    }
+
+    /** Signed cents are conserved in both columns and the total. */
+    private function addCrossStoreAmount(array &$rows, int $storeId, string $field, int $amount): void
+    {
+        $rows[$storeId][$field] = $this->add($rows[$storeId][$field], $amount);
+        $rows[$storeId]['settlement_total'] = $this->add($rows[$storeId]['settlement_total'], $amount);
     }
 
     /** One directional pair carries equal payable/receivable within each money
@@ -536,10 +620,9 @@ final class BasicFinancialReportServices
             'principal_amount' => '订单支付扣减的本金，退款返还为负数，作废及冲销链不计入。',
             'bonus_amount' => '订单支付扣减的赠金，退款返还为负数，作废及冲销链不计入。',
             'balance_amount' => '订单本金与赠金净扣款之和；保留历史分精度，不包括充值、人工调整或提现退款。',
-            'card_payable' => '成功次卡交易明确保存的对手门店应付，金额取本次真实权益扣减；两店均须参与统计。',
-            'card_receivable' => '实际使用店应收，与同方向次卡应付逐分相等；作废核销不计入，不按消耗或劳动业绩替代。',
-            'stored_value_payable' => '成功普通订单明确保存的跨店对手门店应付，金额取本金和赠金实际净扣款；退款反向计入。',
-            'stored_value_receivable' => '交易门店应收，与同方向储值应付逐分相等；未标记跨店不计入，缺少交易归属单列提示。',
+            'stored_value_settlement' => '成功且未退款、未删除的跨店普通订单余额支付金额：本店交易加，权益所属店减；固定历史批次按007订单原值，保留分精度。',
+            'card_settlement' => '成功且未退款、未删除的跨店次卡订单实付金额：本店交易加，权益所属店减；固定历史批次按007订单原值，保留分精度。',
+            'settlement_total' => '同门店储值对账金额加次卡对账金额；两端均纳入统计时所有门店合计为零。',
             'business_date' => '本笔成功业务实际归属日期；退款使用返还业务日。',
             'store_name' => '余额明细优先显示业务发生时门店名称；无该快照的汇总按已授权门店名称定位。',
         ];

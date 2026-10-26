@@ -119,9 +119,9 @@ $settings = [['id' => 1, 'name' => 'Transaction store', 'salary_status' => 1],
 $factory = static fn(array $rows) => static fn(string $table) => new FinancialFixtureQuery(
     $table === 'system_store' ? $settings : ($table === 'cashier_v3_balance_fact' ? [] : $rows));
 $sameStore = new BasicFinancialReportServices(null, $factory([$card]));
-check($sameStore->read('basic_cross_store_settlement', [1], $input)['rows'], [], 'same-store card is not cross settlement');
+check($sameStore->read('basic_cross_store_settlement', [1], $input)['rows'][0]['settlement_total'], 0, 'same-store card contributes zero net');
 $unauthorized = new BasicFinancialReportServices(null, $factory([array_replace($card, ['kua_store' => 2])]));
-check($unauthorized->read('basic_cross_store_settlement', [1], $input)['rows'], [], 'unauthorized other endpoint is not exposed');
+check($unauthorized->read('basic_cross_store_settlement', [1], $input)['rows'][0]['settlement_total'], 0, 'unauthorized other endpoint is not exposed');
 $missing = new BasicFinancialReportServices(null, $factory([array_replace($card, ['verified_holder_id' => null, 'kua_store' => 2])]));
 $gap = $missing->read('basic_cross_store_settlement', [1, 2], $input);
 check($gap['data_gaps'][0]['code'], 'R51_CARD_IDENTITY_MISSING', 'missing original holder is an explicit gap');
@@ -134,30 +134,30 @@ $cross = new BasicFinancialReportServices(null, static fn(string $table) => new 
 ][$table] ?? []));
 $pair = $cross->read('basic_cross_store_settlement', [1, 2], $input);
 check($pair['complete'], true, 'explicit successful transaction dimensions need no funding lots');
-check($pair['rows'][0]['store_ids'], [2, 1], 'stable payable-to-receivable direction');
-check($pair['rows'][0]['stored_value_payable'], 99.9, 'balance facts include signed refunds in the same pair');
-check($pair['rows'][0]['stored_value_receivable'], 99.9, 'stored-value pool conserves every cent');
-check($pair['rows'][0]['card_payable'], 100.01, 'card pool uses immutable actual entitlement cents');
-check($pair['rows'][0]['card_receivable'], 100.01, 'card pool separately conserves every cent');
+check(array_column($pair['rows'], 'store_id'), [2, 1], 'stable descending store order');
+check($pair['rows'][0]['stored_value_settlement'], -99.9, 'origin store owes signed balance net');
+check($pair['rows'][1]['stored_value_settlement'], 99.9, 'transaction store receives signed balance net');
+check($pair['rows'][0]['card_settlement'], -100.01, 'origin card pool retains cents');
+check($pair['rows'][1]['settlement_total'], 199.91, 'per-store total combines the two pools');
 $unmapped = new BasicFinancialReportServices(null, static fn(string $table) => new FinancialFixtureQuery([
     'system_store' => $settings, 'cashier_v3_balance_fact' => $fixtureRows,
     'store_order' => [], 'cashier_v3_entitlement_writeoff_fact' => [array_replace($card, ['kua_store' => 2])],
 ][$table] ?? []));
 $partial = $unmapped->read('basic_cross_store_settlement', [1, 2], $input);
-check(count($partial['rows']), 1, 'unmapped balance transactions do not hide verified card pair');
+check(count($partial['rows']), 2, 'unmapped balance transactions do not hide verified card net');
 check($partial['data_gaps'][0]['source_count'], 3, 'unmapped transaction count is explicit');
 check($partial['data_gaps'][0]['amount'], 99.9, 'missing-direction amount retains cents and signs');
 $disabled = new BasicFinancialReportServices(null, static fn(string $table) => new FinancialFixtureQuery([
     'system_store' => [array_replace($settings[0], ['salary_status' => 0]), $settings[1]],
     'cashier_v3_entitlement_writeoff_fact' => [array_replace($card, ['kua_store' => 2])],
 ][$table] ?? []));
-check($disabled->read('basic_cross_store_settlement', [1, 2], $input)['rows'], [], 'salary-disabled endpoint excluded');
+check(array_column($disabled->read('basic_cross_store_settlement', [1, 2], $input)['rows'], 'store_id'), [2], 'salary-disabled endpoint excluded');
 $localOnly = new BasicFinancialReportServices(null, static fn(string $table) => new FinancialFixtureQuery([
     'system_store' => $settings, 'cashier_v3_balance_fact' => $fixtureRows,
     'store_order' => [['id' => 10, 'order_id' => 'order-1', 'uid' => 9, 'store_id' => 1, 'kua_store' => 0]],
 ][$table] ?? []));
 $localResult = $localOnly->read('basic_cross_store_settlement', [1, 2], $input);
-check($localResult['rows'], [], 'unmarked local balance orders are not cross-store');
+check(array_column($localResult['rows'], 'settlement_total'), [0, 0], 'unmarked local balance orders are not cross-store');
 check($localResult['complete'], true, 'ordinary local debit does not make settlement unavailable');
 $schemaGap = new BasicFinancialReportServices(null, static fn($table) => new FinancialFixtureQuery([], []));
 check($schemaGap->read('basic_cross_store_settlement', [1], $input)['data_gaps'][0]['code'],
