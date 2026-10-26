@@ -16,10 +16,15 @@
                         <Option :value="2">已完成</Option>
                         <Option :value="3">未完成</Option>
                     </Select>
-                    <Button type="primary" @click="userSearchs()">查询</Button>
                 </FormItem>
-                 <FormItem >
-
+                <FormItem label="拼团商品ID：">
+                    <Input v-model.trim="formValidate.cid" class="input-add" clearable placeholder="输入拼团商品ID" @on-enter="userSearchs" />
+                </FormItem>
+                <FormItem label="拼团编号：">
+                    <Input v-model.trim="formValidate.group_id" class="input-add" clearable placeholder="输入具体团编号" @on-enter="userSearchs" />
+                </FormItem>
+                <FormItem>
+                    <Button type="primary" @click="userSearchs()">查询</Button>
                 </FormItem>
             </Form>
             </div>
@@ -61,6 +66,7 @@
                 </template>
                 <template slot-scope="{ row }" slot="action">
                     <a @click="Info(row)" >查看详情</a>
+                    <a v-if="row.status === 1" style="margin-left:12px" @click="completeGroup(row)">立即成团</a>
                 </template>
             </Table>
             <div class="acea-row row-right page">
@@ -70,7 +76,7 @@
         </Card>
 
         <!-- 详情模态框-->
-        <Modal v-model="modals" class="tableBox"  scrollable  footer-hide closable title="查看详情" :mask-closable="false"  width="750">
+        <Modal v-model="modals" class="combination-participants-modal" scrollable footer-hide closable title="查看详情" :mask-closable="false" width="1150">
             <Table ref="selection" :columns="columns2" :data="tabList3" :loading="loading2"
                    no-data-text="暂无数据" highlight-row max-height="600" size="small"
                    no-filtered-data-text="暂无筛选结果">
@@ -86,8 +92,13 @@
                     </viewer>
                 </template>
                 <template slot-scope="{ row, index }" slot="action">
-                    <Tag color="volcano" v-show="row.is_refund != 0">已退款</Tag>
-                    <Tag color="cyan" v-show="row.is_refund === 0">未退款</Tag>
+                    <div>{{ row.refund_message || (row.is_refund ? '已退款' : '未退款') }}</div>
+                    <!-- Amount comes from actual paid money. A pending request can only query its original receipt. -->
+                    <Button v-if="row.refund_action" size="small" :loading="refundBusy === row.order_id_key"
+                        @click="refundParticipant(row)">{{ row.refund_action === 'query' ? '查询退款结果' : (row.refund_action === 'retry' ? '重试退款' : '退款') }}</Button>
+                    <Button v-if="rows.status === 1 && row.k_id > 0 && !row.is_virtual && !row.is_refund && row.refund_action === 'refund'"
+                        size="small" style="margin-left:6px" @click="refundParticipant(row, true)">踢出</Button>
+                    <div v-else-if="row.refund_block_reason" style="font-size:12px;color:#999">{{ row.refund_block_reason }}</div>
                 </template>
             </Table>
         </Modal>
@@ -95,10 +106,11 @@
 </template>
 
 <script>
+    import formatBusinessMoney from '@/utils/formatBusinessMoney.js';
     import cardsData from '@/components/cards/cards';
     import { mapState } from 'vuex';
     import { formatDate } from '@/utils/validate';
-    import { combineListApi, orderPinkListApi, statisticsApi } from '@/api/marketing';
+    import { combineListApi, orderPinkListApi, statisticsApi, combinationParticipantRefundApi, combinationCompleteApi } from '@/api/marketing';
     import timeOptions from "@/utils/timeOptions";
     export default {
         name: 'combinalist',
@@ -114,6 +126,7 @@
         data () {
             return {
                 cardLists: [],
+                refundBusy: 0,
                 modals: false,
                 options: timeOptions,
                 grid: {
@@ -127,6 +140,8 @@
                 formValidate: {
                     status: '',
                     data: '',
+                    cid: '',
+                    group_id: '',
                     page: 1,
                     limit: 15
                 },
@@ -192,24 +207,35 @@
                     {
                         title: '用户名称',
                         slot: 'nickname',
-                        minWidth: 150
+                        width: 170
                     },
                     {
                         title: '用户头像',
-                        slot: 'avatar'
+                        slot: 'avatar', width: 80
                     },
                     {
                         title: '订单编号',
-                        key: 'order_id'
+                        key: 'order_id', width: 185
                     },
                     {
                         title: '金额',
-                        key: 'price'
+                        width: 90,
+                        render: (h, params) => h('span', formatBusinessMoney(params.row.paid_amount))
                     },
                     {
-                        title: '订单状态',
-                        slot: 'action'
-                    }
+                        title: '退款状态及操作',
+                        slot: 'action', width: 190
+                    },
+                    ...[
+                        ['富友订单号', 'fuyou_order_no'], ['富友支付交易号', 'fuyou_transaction_id'],
+                        ['富友退款流水号', 'channel_refund_id'], ['富友退款追踪号', 'fuyou_refund_trace_no'],
+                        ['商户退款单号', 'refund_no']
+                    ].map(([title, key]) => ({
+                        title, key, width: 205,
+                        // The table stays compact while full payment references remain inspectable on hover.
+                        render: (h, { row }) => h('span', { attrs: { title: row[key] || '—' },
+                            class: 'combination-participants-modal__reference' }, row[key] || '—')
+                    }))
                 ],
                 rows: {}
             }
@@ -230,6 +256,37 @@
             this.getStatistics();
         },
         methods: {
+            // Completion fills only missing seats and leaves real participants' paid orders untouched.
+            completeGroup(row) {
+                this.$Modal.confirm({ title: '立即成团', content: '将自动补齐缺少的虚拟名额并使拼团成功，是否继续？',
+                    onOk: () => combinationCompleteApi(row.id).then(res => {
+                        this.$Message.success(res.data.message); this.getList(); this.getStatistics();
+                    }).catch(error => this.$Message.error(error.msg || '成团失败')) });
+            },
+            // Query/retry states are server-derived; the browser never supplies a refund amount or provider identity.
+            refundParticipant(row, kick = false) {
+                const run = (reason) => {
+                    this.refundBusy = row.order_id_key;
+                    return combinationParticipantRefundApi(this.rows.id, {
+                        order_id: row.order_id_key, reason,
+                        retry: row.refund_action !== 'query', action: kick ? 'kick' : 'refund'
+                    }).then(res => {
+                        this.$Message.info(res.data.message);
+                        this.getList(); this.getStatistics();
+                        this.Info({ ...this.rows, id: res.data.group_id || this.rows.id });
+                    }).catch(error => this.$Message.error(error.msg || '退款处理失败'))
+                      .finally(() => { this.refundBusy = 0; });
+                };
+                if (row.refund_action === 'query') return run(row.refund_reason || '查询拼团退款');
+                let reason = '';
+                this.$Modal.confirm({
+                    title: kick ? '确认退款并踢出团员' : '确认整笔原路退款',
+                    render: h => h('div', [h('p', `订单：${row.order_id}，实际退款：¥${formatBusinessMoney(row.paid_amount)}。退款成功后收回全部未使用权益。`),
+                        h('Input', { props: { type: 'textarea', placeholder: '请输入退款原因', maxlength: 300 },
+                            on: { input: value => { reason = value; } } })]),
+                    onOk: () => { if (!reason.trim()) this.$Message.warning('请填写退款原因'); else return run(reason.trim()); }
+                });
+            },
             // 拼团统计
             getStatistics () {
                 statisticsApi().then(async res => {
@@ -311,4 +368,30 @@
 				height 100%
 			}
 		}    
+</style>
+
+<style lang="stylus">
+// Scope the compact cells to this dialog; wide payment references scroll inside the result table.
+.combination-participants-modal
+    .ivu-modal
+        max-width calc(100vw - 24px)
+    .ivu-modal-body
+        padding 12px
+    .ivu-table-header th
+        height 42px !important
+        white-space nowrap
+    .ivu-table-cell
+        padding 6px 10px !important
+        white-space nowrap
+        overflow hidden
+        text-overflow ellipsis
+        line-height 20px
+    .ivu-table-row td
+        height 48px
+    &__reference
+        display inline-block
+        max-width 100%
+        overflow hidden
+        text-overflow ellipsis
+        vertical-align middle
 </style>

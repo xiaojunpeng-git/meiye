@@ -14,6 +14,7 @@
                     <i-header-breadcrumb v-if="showBreadcrumb && !headerMenu && !isMobile" ref="breadcrumb" />
                     <i-header-search v-if="showSearch && !headerMenu && !isMobile && !showBreadcrumb" />
                     <div class="i-layout-header-right">
+                        <i-header-store-entry v-if="!__isAgentPath()" />
                         <i-header-search v-if="(showSearch && isMobile) || (showSearch && (headerMenu || showBreadcrumb))" />
                         <i-menu-head v-if="headerMenu && isMobile" />
                         <i-header-log v-if="isDesktop && showLog" />
@@ -79,6 +80,7 @@ import iHeaderNotice from './header-notice';
 import iHeaderUser from './header-user';
 import iHeaderI18n from './header-i18n';
 import iHeaderSetting from './header-setting';
+import iHeaderStoreEntry from './header-store-entry';
 import iTabs from './tabs';
 import iCopyright from '@/components/copyright';
 
@@ -90,7 +92,7 @@ import { isMenuPathMatch } from '@/libs/system';
 
 export default {
   name: 'BasicLayout',
-  components: { iMenuHead, iMenuSide, iCopyright, iHeaderLogo, iHeaderCollapse, iHeaderReload, iHeaderBreadcrumb, iHeaderSearch, iHeaderUser, iHeaderI18n, iHeaderLog, iHeaderFullscreen, iHeaderSetting, iHeaderNotice, iTabs },
+  components: { iMenuHead, iMenuSide, iCopyright, iHeaderLogo, iHeaderCollapse, iHeaderReload, iHeaderBreadcrumb, iHeaderSearch, iHeaderUser, iHeaderI18n, iHeaderLog, iHeaderFullscreen, iHeaderSetting, iHeaderStoreEntry, iHeaderNotice, iTabs },
   // provide (){
   //     return {
   //         reload:this.handleReload

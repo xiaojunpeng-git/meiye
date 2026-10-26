@@ -132,6 +132,8 @@
           <a @click="del(row, '删除拼团商品', index)">删除</a>
           <Divider type="vertical" />
           <a @click="viewInfo(row)">统计</a>
+          <Divider type="vertical" />
+          <a @click="exportActivity(row.id)">导出</a>
         </template>
       </Table>
       <div class="acea-row row-right page">
@@ -153,6 +155,7 @@ import {
   combinationListApi,
   combinationSetStatusApi,
   storeCombinationApi,
+  combinationActivityExportApi,
 } from "@/api/marketing";
 import { mapState } from "vuex";
 import { formatDate } from "@/utils/validate";
@@ -271,7 +274,7 @@ export default {
           title: "操作",
           slot: "action",
           fixed: "right",
-          width: 180,
+          width: 230,
         },
       ],
       tableList: [],
@@ -292,6 +295,12 @@ export default {
     this.getList();
   },
   methods: {
+    // One product/activity export includes every group, not the current table page.
+    exportActivity(id) {
+      return combinationActivityExportApi(id).then(({ data }) => {
+        exportExcel(data.header, data.filekey, data.filename, data.export);
+      }).catch(error => this.$Message.error(error.msg || '拼团明细导出失败'));
+    },
     // 数据导出；
     async exports() {
       let [th, filekey, data, fileName] = [[], [], [], ""];

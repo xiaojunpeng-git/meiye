@@ -113,6 +113,7 @@
         </template>
         <template slot-scope="{ row }" slot="coupon_price">
           <span v-if="row.coupon_type == 1">{{ row.coupon_price }}元</span>
+          <span v-if="row.coupon_type == 3">总额度 {{ parseInt(row.coupon_price) }}元 · 剩余 {{ row.remaining_amount }}元</span>
           <span v-if="row.coupon_type == 2"
             >{{ parseFloat(row.coupon_price) / 10 }}折（{{
               row.coupon_price.toString().split('.')[0]

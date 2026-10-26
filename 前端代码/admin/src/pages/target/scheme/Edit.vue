@@ -62,6 +62,7 @@
 
 <script>
 import * as XLSX from 'xlsx';
+import { createTargetTemplate, parseTargetWorkbook } from '@/utils/targetSchemeExcel';
 import OrganizationStoreScopePicker from '@/components/organization/OrganizationStoreScopePicker.vue';
 import { schemeCatalog, schemeProducts, schemeDetail, schemeCreate, schemeUpdate, schemeSaveLines, schemeActivate } from '@/api/target';
 
@@ -206,24 +207,25 @@ export default {
       } catch (error) { this.error = error.msg || error.message || '启用方案失败'; } finally { this.busy = false; }
     },
     downloadTemplate() {
-      const sheet = XLSX.utils.aoa_to_sheet([['月份', '门店ID', '指标代码', '对象类型', '对象ID', '目标值（元或个）'], ['2026-10', '', 'actual_performance', 'store', '0', '10000']]);
-      const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '目标明细');
-      // 辅助页只帮助填写对象 ID，不参与导入；以当前可管理门店为上限，不能导出越权门店目录。
-      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['门店ID', '门店名称'], ...this.catalog.stores.map(store => [store.id, store.name])]), '可选门店');
-      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['指标代码', '指标名称', '单位', '支持对象'], ...this.catalog.metrics.map(metric => [metric.code, metric.name, metric.unit === 'fen' ? '元' : '个/人次', metric.scopes.join(',')])]), '可选指标');
-      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['分类ID', '分类名称'], ...this.catalog.categories.map(category => [category.id, category.cate_name])]), '可选分类');
-      XLSX.writeFile(book, '目标方案导入模板.xlsx');
+      // 模板与页面使用同一权限目录；只改变填写语言，不改变指标代码和保存口径。
+      XLSX.writeFile(createTargetTemplate(XLSX, this.catalog, this.batchMonth, this.batchStores), '目标方案导入模板.xlsx');
     },
     async importExcel(event) {
       const file = event.target.files && event.target.files[0]; event.target.value = ''; if (!file) return;
+      if (this.busy || !this.isDraft) return;
+      this.busy = true; this.error = '';
+      const schemeId = this.selectedId; const previousLines = JSON.stringify(this.lines);
       try {
+        if (file.size > 10 * 1024 * 1024) throw new Error('Excel 文件不能超过10MB');
         const bytes = await file.arrayBuffer(); const book = XLSX.read(bytes, { type: 'array' });
-        const sheet = XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1, raw: false });
-        if (!sheet.length || sheet[0].join('|') !== '月份|门店ID|指标代码|对象类型|对象ID|目标值（元或个）') throw new Error('Excel 表头与模板不一致');
-        if (sheet.length < 2 || sheet.length > 3001) throw new Error('请导入1至3000条目标');
-        this.lines = sheet.slice(1).filter(row => row.some(cell => String(cell || '').trim() !== '')).map(row => ({ localKey: randomKey(), month_key: String(row[0] || ''), store_id: Number(row[1] || 0), metric_code: String(row[2] || ''), scope_type: String(row[3] || 'store'), scope_id: Number(row[4] || 0), displayValue: String(row[5] || ''), productOptions: [] }));
-        this.error = '';
-      } catch (error) { this.error = error.message || 'Excel 读取失败'; }
+        // 导入重新读取当前权限目录；辅助工作表由用户可编辑，不能作为身份或权限依据。
+        const response = await schemeCatalog(); const catalog = response.data;
+        const imported = await parseTargetWorkbook(XLSX, book, catalog, async params => (await schemeProducts(params)).data || []);
+        if (schemeId !== this.selectedId || !this.isDraft || previousLines !== JSON.stringify(this.lines)) throw new Error('导入期间方案或明细已变化，请重新导入');
+        this.catalog = catalog;
+        this.lines = imported.map(row => ({ ...row, localKey: randomKey() }));
+        this.$Message.success(`已导入${imported.length}条目标，请检查后保存草稿`);
+      } catch (error) { this.error = error.message || 'Excel 读取失败'; } finally { this.busy = false; }
     }
   }
 };

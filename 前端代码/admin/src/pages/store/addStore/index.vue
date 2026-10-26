@@ -413,12 +413,13 @@
 			space_num: '',
 			city_delivery_status: 1,
 			city_delivery_type: 0,
-			default_delivery: 1,
+			// 未配置时以到店业务为默认；已有门店的有效配置在详情回显时保留。
+			default_delivery: 2,
 			use_system_money: 1,
 			is_alone: 0,
 			product_change_price_status: 0,
 			product_category_status: 0,
-			delivery_type: [],
+			delivery_type: ['2'],
 			product_id: [],
 			organization_id: 0,
 			organization_name: '',
@@ -677,13 +678,22 @@
 				this.storeAddress = '';
 			},
 			applyStoreInfo(info, id) {
+				// 空配送配置使用到店默认；兼容接口返回数组或逗号字符串，不覆盖已有选择。
+				const deliveryTypes = (Array.isArray(info.delivery_type)
+					? info.delivery_type.map(String)
+					: String(info.delivery_type || '').split(',')).filter(Boolean);
+				const hasDeliveryConfig = deliveryTypes.length > 0;
+				const supportsPickup = !hasDeliveryConfig || deliveryTypes.includes('2');
+				const supportsDelivery = deliveryTypes.includes('1') || deliveryTypes.includes('3');
+				const savedDefault = Number(info.default_delivery);
+				const defaultDelivery = savedDefault === 1 && hasDeliveryConfig && supportsDelivery
+					? 1 : (supportsPickup ? 2 : 1);
 				Object.assign(this.formItem, createDefaultFormItem(), info, {
 					id: Number(id),
 					erp_shop_id: info.erp_shop_id || 0,
 					day_time: info.timeVal || info.day_time || [],
-					delivery_type: Array.isArray(info.delivery_type)
-						? info.delivery_type.map(String)
-						: (info.delivery_type ? String(info.delivery_type).split(',') : []),
+					delivery_type: hasDeliveryConfig ? deliveryTypes : ['2'],
+					default_delivery: defaultDelivery,
 					organization_id: Number(info.organization_id || 0),
 					expected_organization_id: Number(info.organization_id || 0),
 					store_cashier_order_rate: Number(info.store_cashier_order_rate) || 0,
@@ -958,15 +968,16 @@
       onCouponSelfBuiltStatusChange(value) {
         this.formItem.coupon_verify_status = 0;
       },
-      // 配送方式改变
+      // 1快递、2自提、3同城；仅在当前默认方式不再受支持时调整，避免勾选自提又被改回配送。
       onDeliveryTypeChange(value) {
-        if (!value.includes('2')) {
+        if (!value.includes('3')) {
           this.formItem.city_delivery_type = 0;
         }
-        if ((value.includes('1') || value.includes('2')) && !value.includes('3')) {
-          this.formItem.default_delivery = 1;
-        } else if (!value.includes('1') && !value.includes('2') && value.includes('3')) {
+        const supportsDelivery = value.includes('1') || value.includes('3');
+        if (value.includes('2') && (!supportsDelivery || this.formItem.default_delivery !== 1)) {
           this.formItem.default_delivery = 2;
+        } else if (!value.includes('2') && supportsDelivery) {
+          this.formItem.default_delivery = 1;
         }
       },
       // 获取商城同城配送开启状态

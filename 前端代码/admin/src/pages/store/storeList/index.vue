@@ -147,9 +147,7 @@
           <template slot-scope="{ row }" slot="image">
             <img :src="row.image" />
           </template>
-          <template slot-scope="{ row, index }" slot="action">
-            <a @click="gostore(row)">进入门店</a>
-            <Divider type="vertical" />
+          <template slot-scope="{ row }" slot="action">
             <a @click="$refs.memberTransfer.open(row)">转移所属会员</a>
             <Divider type="vertical" />
             <a @click="operation(row)">{{
@@ -186,14 +184,12 @@
 </template>
 
 <script>
-import util from "@/libs/util";
 import Setting from "@/setting";
 import { mapState } from "vuex";
 import OrganizationResourceSelector from '@/components/organization/OrganizationResourceSelector.vue';
 import StoreMemberTransferModal from '@/components/member/StoreMemberTransferModal.vue';
 import {
   storeListApi,
-  storeLogin,
   storeSetShowApi,
   resetApi,
   cascaderList
@@ -350,22 +346,6 @@ export default {
       let nowTimeNum = Math.round(new Date() / 1000);
       let expiresTimeNum = expiresTime - nowTimeNum;
       return parseFloat(parseFloat(parseFloat(expiresTimeNum / 60) / 60) / 24);
-    },
-    // 进入门店
-    gostore(item) {
-      const targetWindow = window.open('', '_blank');
-      if (!targetWindow) {
-        this.$Message.error('请允许浏览器打开门店端');
-        return;
-      }
-      storeLogin(item.id)
-        .then((res) => {
-          util.openStoreBackend(res.data, { pageTitle: item.name, targetWindow });
-        })
-        .catch((err) => {
-          targetWindow.close();
-          this.$Message.error(err.msg || "进入门店失败");
-        });
     },
     delte(row, tit, num) {
       let delfromData = {
