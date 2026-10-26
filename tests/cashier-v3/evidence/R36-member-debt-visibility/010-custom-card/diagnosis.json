@@ -1,0 +1,21 @@
+{
+  "site": "010",
+  "root": "/www/wwwroot/010.cc3798.com",
+  "database": "mohe_010_app",
+  "config": "cashier_custom_card_entry_switch",
+  "databaseDefinitionRows": 0,
+  "rawConfig": null,
+  "runtimeSysConfig": null,
+  "catalogTypes": [
+    "项目",
+    "产品",
+    "卡项"
+  ],
+  "catalogBackendSHA256": "3ca0eff2fb5cfb0febe10968047acb5fd665e33f1400444415da0754624a2e22",
+  "canonicalBackendMatchesLive": true,
+  "cause": "Missing configuration definition; platform form defaults to enabled, catalog casts null to 0 and omits custom card",
+  "proposedRepair": "Insert only the missing platform config definition with value=1 using the canonical idempotent upgrade, preserve any newly existing definition and value; refresh this config key then read catalog again",
+  "canonicalUpgrade": "后端代码/database/upgrades/2026-10-17-收银定制卡入口开关/01-正式升级.sql",
+  "productionWrites": 0,
+  "authorization": "Pending explicit authorization for 010 database repair"
+}

@@ -1,0 +1,11 @@
+{
+  "site": "rh",
+  "commit": "1fc057a983f6f3369fdfb92edf241c2e298b6fad",
+  "sourceTree": "150dfc10c73b8541b34103a72e381ab511af3eb6",
+  "result": "PASS",
+  "rollback": "/www/backups/rh/r36-member-debt-1fc057a9",
+  "existingReportSourcesPreserved": true,
+  "backendAdminAndOtherTerminalsUnchanged": true,
+  "financialWrites": 0,
+  "verifiedAtUTC": "2026-10-26T11:01:43.610168+00:00"
+}

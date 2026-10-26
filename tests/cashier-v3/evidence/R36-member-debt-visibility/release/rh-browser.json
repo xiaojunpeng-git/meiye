@@ -1,0 +1,6 @@
+{
+  "site": "rh",
+  "result": "PASS",
+  "entry": "formal cashier login",
+  "state": "Browser tab: 7, Title: \"新收银台\", URL: \"https://rh.cc3798.com/view_cashier_v3/#/login\".\n0 AXWebArea 新收银台, URL: rh.cc3798.com/view_cashier_v3/#/login\n\t1 container\n\t\t2 heading Description: 你亲手雕琢细腻美好，我留存全部暖心操作, Value: 2\n\t\t3 container\n\t\t\t4 text 欢迎回来\n\t\t\t5 heading 门店端登录, Value: 1\n\t\t\t\t6 text 门店端登录\n\t\t\t7 text 登录账号\n\t\t\t8 text field (settable) 登录账号\n\t\t\t9 text 登录密码\n\t\t\t10 text field (settable) 登录密码\n\t\t\t11 button 登录\n\t\t12 text 厦门魔核方舟科技有限公司提供支持\n\nThe focused UI element is 0 AXWebArea 新收银台, URL: rh.cc3798.com/view_cashier_v3/#/login"
+}

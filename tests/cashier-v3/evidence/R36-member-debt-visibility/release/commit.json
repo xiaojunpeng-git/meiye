@@ -1,0 +1,29 @@
+{
+  "commit": "1fc057a983f6f3369fdfb92edf241c2e298b6fad",
+  "branch": "release/r36-member-debt-visibility-20261026",
+  "tree": "f4ccef8cfe995f9a8e2836c4096b07e59556530c",
+  "variantCommits": {
+    "008": "266033d32f9cdcd1354cde0fbe4725428501540c",
+    "010": "cfbfc252d6f81318b50b41ba22d2540d7707550a"
+  },
+  "paths": [
+    "scripts/r36-010-custom-card-repair.php",
+    "scripts/r36-release-archive.py",
+    "scripts/r36-release-build.cjs",
+    "scripts/r36-release-install.php",
+    "scripts/r36-release-prepare.py",
+    "scripts/r36-release-public.py",
+    "scripts/r36-release.py",
+    "tests/cashier-v3/evidence/R36-member-debt-visibility/fixed-files.json",
+    "tests/cashier-v3/evidence/R36-member-debt-visibility/hidden-debt.png",
+    "tests/cashier-v3/evidence/R36-member-debt-visibility/initial.json",
+    "tests/cashier-v3/evidence/R36-member-debt-visibility/scope.patch",
+    "tests/cashier-v3/evidence/R36-member-debt-visibility/verification.json",
+    "tests/cashier-v3/evidence/R36-member-debt-visibility/验收说明.md",
+    "前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue"
+  ],
+  "sharedHEADAndIndexUntouched": true,
+  "acceptance": "User tested R36 debt visibility and authorized RH deploy, push then 008/010; separately approved 010 one configuration repair",
+  "sourceBoundary": "identical two changed Vue files on all sites; all remaining files use each already accepted baseline"
+}

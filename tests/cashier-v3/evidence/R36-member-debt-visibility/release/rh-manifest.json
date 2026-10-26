@@ -1,0 +1,21 @@
+{
+  "site": "rh",
+  "commit": "1fc057a983f6f3369fdfb92edf241c2e298b6fad",
+  "sourceTree": "150dfc10c73b8541b34103a72e381ab511af3eb6",
+  "baselineTree": "7b800a1c9248735abfac8d2fa9424f8d27eac9af",
+  "targets": {
+    "public/view_cashier_v3/assets/index-2fa48041.css": {
+      "before": null,
+      "after": "2fa480414b9fbdee6c307173b74848e4b131cf820cd4e476b9a17a34b6a442f9"
+    },
+    "public/view_cashier_v3/assets/index-3edb1028.js": {
+      "before": null,
+      "after": "f612e73207cb1dedddb95becda4003f63a8e0adab949f4abfe074859d8835ef4"
+    },
+    "public/view_cashier_v3/index.html": {
+      "before": "5eeafc9750ab0594ee0e5f33fa6d8b044840c2bfb79a0b03a07ef78f6d8234fc",
+      "after": "832722c3d0fe9d56d36ea4a1ba3f0c71e29732c75e1cfb29cc7fbdf4fbae2f5c"
+    }
+  },
+  "scope": "R36 debt visibility only; inherited report functionality unchanged; no backend deployment or database writes"
+}

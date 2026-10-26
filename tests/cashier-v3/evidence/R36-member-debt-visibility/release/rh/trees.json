@@ -1,0 +1,17 @@
+{
+  "canonicalGit": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "head": "416c57e8ce009486ed96a5ed58b7e1e1d1a059b0",
+  "baselineTree": "7b800a1c9248735abfac8d2fa9424f8d27eac9af",
+  "candidateTree": "150dfc10c73b8541b34103a72e381ab511af3eb6",
+  "liveAcceptedSourceTree": "d1adcc61f2640f948e4a1a12f4e7c37e7a4844e4",
+  "paths": [
+    "前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue"
+  ],
+  "candidateFiles": {
+    "前端代码/cashier-v3/src/components/common/MemberSummaryCard.vue": "003f41d1fa849cb5de0e06fe2b5d0d36db475aa337eb06e06c499a3693eecd82",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue": "d46204277cd4ce7d9cbea8d1b778ad74a3627daadb401024942f9bf355af4d0b"
+  },
+  "preserved": "All other source blobs identical to this site accepted baseline; no report differences synchronized",
+  "userAcceptance": "same R36 two-file patch; pre-existing Shell edits excluded"
+}

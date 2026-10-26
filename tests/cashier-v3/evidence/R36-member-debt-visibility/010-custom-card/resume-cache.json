@@ -1,0 +1,17 @@
+{
+  "site": "010",
+  "mode": "resume-cache",
+  "result": "PASS",
+  "insertedId": 835,
+  "effectiveValue": 1,
+  "catalogTypes": [
+    "项目",
+    "产品",
+    "卡项",
+    "定制卡"
+  ],
+  "otherConfigurationsUnchanged": true,
+  "backup": "/www/backups/010/r36-custom-card-entry-20261026",
+  "productionRowsInserted": 1,
+  "productionExistingRowsUpdated": 0
+}
