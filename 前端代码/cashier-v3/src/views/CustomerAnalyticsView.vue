@@ -1,4 +1,5 @@
 <script setup>
+import { UnifiedQueryDateRange } from '@mohe/unified-query-vue3'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Activity from '@lucide/vue/dist/esm/icons/activity.mjs'
@@ -61,6 +62,11 @@ function localDateString(date = new Date()) {
 const today = localDateString()
 const customStart = ref(`${today.slice(0, 4)}-01-01`)
 const customEnd = ref(today)
+// Existing query and export paths still consume these same local-date fields.
+const customPeriod = computed({
+  get: () => ({ min: customStart.value, max: customEnd.value }),
+  set: range => { customStart.value = range.min; customEnd.value = range.max }
+})
 const demoState = ref('normal')
 const loading = ref(false)
 const notice = ref('正在读取客户分析数据…')
@@ -504,7 +510,7 @@ function isError() { return demoState.value === 'error' }
           <div class="query-card__row query-card__row--top">
             <button type="button" class="scope-trigger" @click="scopeOpen = !scopeOpen"><SlidersHorizontal :size="16" />{{ scopeLabel }}<ChevronDown :size="15" :class="{ 'is-rotated': scopeOpen }" /></button>
             <div class="periods" role="tablist"><button v-for="item in [['month','本月'],['year','本年'],['custom','自定义']]" :key="item[0]" type="button" :class="{ 'is-active': period === item[0] }" @click="period = item[0]">{{ item[1] }}</button></div>
-            <label v-if="period === 'custom'" class="date-field"><CalendarDays :size="14" /><input v-model="customStart" type="date" /><span>至</span><input v-model="customEnd" type="date" /></label>
+            <div v-if="period === 'custom'" class="date-field"><UnifiedQueryDateRange v-model="customPeriod" :allow-clear="false" label="客户分析自定义周期" /></div>
             <div class="query-actions"><button type="button" class="button button--primary" :disabled="loading" @click="runQuery()"><Search :size="15" />查询</button><button type="button" class="button" :disabled="loading" @click="runQuery('刷新')"><RefreshCw :size="15" :class="{ 'is-spinning': loading }" />刷新</button></div>
           </div>
           <div class="query-card__row query-card__row--meta"><span>数据范围：{{ scopeLabel }}</span><span>统计周期：{{ currentPeriodLabel }}</span><span class="meta-status"><i></i>{{ notice }}</span></div>

@@ -75,7 +75,11 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  attributionChanges: { type: Array, default: () => [] }
+  attributionChanges: { type: Array, default: () => [] },
+  // 默认兼容既有调用；订单管理关闭来源时只撤下客户来源，不移除原卡和单据追溯。
+  businessSourceEnabled: { type: Boolean, default: true },
+  // Presentation only: historical debt amounts and settlement facts stay intact.
+  debtPaymentEnabled: { type: Boolean, default: true }
 })
 
 const emit = defineEmits(['close', 'void-entitlement-order'])
@@ -92,6 +96,7 @@ const actionPanelRef = ref(null)
 const reopenConfirmationVisible = ref(false)
 
 const sourceOrder = computed(() => (props.order && typeof props.order === 'object' ? props.order : {}))
+const visibleAttributionChanges = computed(() => props.attributionChanges.filter(change => props.businessSourceEnabled || change.field !== 'source'))
 const orderId = computed(() => pickValue(sourceOrder.value, ['id', 'orderId', 'salesOrderId']))
 const orderNo = computed(() => pickValue(sourceOrder.value, ['salesOrderNo', 'orderNo', 'no']))
 const orderRevision = computed(() => pickValue(sourceOrder.value, ['revision', 'version', 'recordVersion']))
@@ -262,7 +267,7 @@ function amountRowsForItem(item) {
     { label: '改价优惠', value: pickValue(item, ['priceChangeDiscountAmount', 'changePriceDiscountAmount', 'modifiedPriceDiscountAmount']) },
     { label: '优惠券', value: pickValue(item, ['couponDiscountAmount', 'couponAmount']), note: pickValue(item, ['couponName', 'couponLabel']) },
     { label: '应付', value: pickValue(item, ['payableAmount', 'receivableAmount', 'amountDue']) },
-    { label: '欠款', value: pickValue(item, ['debtAmount', 'outstandingAmount']) },
+    ...(props.debtPaymentEnabled ? [{ label: '欠款', value: pickValue(item, ['debtAmount', 'outstandingAmount']) }] : []),
     { label: '现金业绩', value: pickValue(item, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) }
   ]
   return rows.filter((row) => hasValue(row.value) || hasValue(row.note))
@@ -285,7 +290,7 @@ const basicInfoRows = computed(() => [
   { label: '真实操作时间', value: pickValue(sourceOrder.value, ['occurredAt', 'operatedAt', 'actualOperationAt']) },
   { label: '支付完成时间', value: pickValue(sourceOrder.value, ['paymentCompletedAt', 'settledAt']) },
   { label: '收银员／操作人', value: pickValue(sourceOrder.value, ['cashierName', 'operatorName', 'operatedBy']) },
-  { label: '客户来源', value: pickValue(sourceOrder.value, ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary']) },
+  ...(props.businessSourceEnabled ? [{ label: '客户来源', value: pickValue(sourceOrder.value, ['source', 'sourceLabel', 'sourceSecondary', 'sourcePrimary']) }] : []),
   { label: '订单备注', value: pickValue(sourceOrder.value, ['orderNote', 'remark', 'note']), wide: true }
 ].filter((row) => hasValue(row.value)))
 
@@ -297,7 +302,7 @@ const amountSummaryRows = computed(() => {
     { label: '优惠券优惠', value: pickValue(summary, ['couponDiscountAmount', 'couponAmount']) },
     { label: '其他优惠', value: pickValue(summary, ['otherDiscountAmount', 'manualDiscountAmount']) },
     { label: '应付金额', value: pickValue(summary, ['payableAmount', 'receivableAmount', 'amountDue']) },
-    { label: '欠款金额', value: pickValue(summary, ['debtAmount', 'outstandingAmount']) },
+    ...(props.debtPaymentEnabled ? [{ label: '欠款金额', value: pickValue(summary, ['debtAmount', 'outstandingAmount']) }] : []),
     { label: '现金业绩', value: pickValue(summary, ['actualReceivedAmount', 'paidAmount', 'receivedAmount']) },
     { label: '余额支付', value: pickValue(summary, ['balancePaymentAmount', 'balancePaidAmount']) }
   ]
@@ -377,6 +382,7 @@ const relatedGroups = computed(() => {
   ]
   return groups.filter((group) => {
     // 后端不应为游客下发补交能力；这里再兜底，避免异常旧投影误露入口。
+    if (group.key === 'debt' && !props.debtPaymentEnabled) return false
     if (group.key === 'debt' && (sourceOrder.value.isGuest === true || Number(sourceOrder.value.memberId || 0) <= 0)) return false
     return (!group.permission || canUseCashierV3Operation(group.permission))
       && (group.records.length || group.actionAliases.some(hasAction))
@@ -929,10 +935,10 @@ async function runAction(action, payload = {}) {
 
         </div>
 
-        <section v-if="attributionChanges.length" class="sales-order-detail-section">
-          <header class="sales-order-detail-section__header"><div><h3>变更记录</h3><span>订单日期、来源及导购归属的更正记录。</span></div></header>
+        <section v-if="visibleAttributionChanges.length" class="sales-order-detail-section">
+          <header class="sales-order-detail-section__header"><div><h3>变更记录</h3><span>{{ businessSourceEnabled ? '订单日期、来源及导购归属的更正记录。' : '订单日期及导购归属的更正记录。' }}</span></div></header>
           <div class="sales-order-detail-operation-list">
-            <article v-for="(change, index) in attributionChanges" :key="`${change.recordId}-${change.field}-${index}`">
+            <article v-for="(change, index) in visibleAttributionChanges" :key="`${change.recordId}-${change.field}-${index}`">
               <div><strong>{{ change.recordNo }} · {{ change.field === 'source' ? '来源' : change.field === 'guide' ? '导购' : change.field === 'guide_round' ? '导购轮次' : '业务日期' }}</strong><span>{{ change.oldValue || '—' }} → {{ change.newValue || '—' }}</span></div>
               <div><span>{{ change.operatorName || change.operatorId }}</span><time>{{ new Date(change.occurredAt * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</time></div>
             </article>

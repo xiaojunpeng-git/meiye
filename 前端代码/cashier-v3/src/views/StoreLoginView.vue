@@ -1,12 +1,13 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { loginStoreV3, persistStoreV3Token } from '@/services/storeV3LoginApi'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { consumePlatformStoreEntry, loginStoreV3, persistStoreV3Token } from '@/services/storeV3LoginApi'
 import { applyCashierV3LoginFeatures } from '@/services/cashierV3Bridge'
 import { onCashierStoreOrAccountChanged } from '@/services/cashierV3SessionLifecycle'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 
 const router = useRouter()
+const route = useRoute()
 const account = ref('')
 const password = ref('')
 const submitting = ref(false)
@@ -71,7 +72,23 @@ async function finishLogin(result) {
   if (!['success', 'succeeded'].includes(String(bootstrapResult?.status || '').toLowerCase())) {
     throw new Error(String(bootstrapResult?.message || '门店工作台初始化失败，请稍后重试。'))
   }
-  await router.replace('/cashier')
+  // 首屏交给路由守卫按后端授权与菜单顺序选择，不能固定进入无权限的收银。
+  await router.replace('/entry')
+}
+
+// 普通密码登录与平台一次性票据登录共用后端选店结果，避免跨端进入时绕过选店。
+async function handleLoginResult(result) {
+  if (result.need_select_store) {
+    storeChoices.value = Array.isArray(result.stores) ? result.stores : []
+    organizationTree.value = Array.isArray(result.organization_tree) ? result.organization_tree : []
+    selectedStoreIds.value = []
+    loginTicket.value = String(result.login_ticket || '')
+    if (!loginTicket.value || !storeChoices.value.length) {
+      throw new Error('当前账号没有可选择的有效门店。')
+    }
+    return
+  }
+  await finishLogin(result)
 }
 
 async function submit() {
@@ -86,23 +103,49 @@ async function submit() {
     // 门店人员唯一任职门店直接登录；组织人员无任职门店时应在登录阶段
     // 从数据权限范围选择门店，不能把两种入口规则混为“全部取消选店”。
     const result = await loginStoreV3({ account: account.value.trim(), pwd: password.value })
-    if (result.need_select_store) {
-      storeChoices.value = Array.isArray(result.stores) ? result.stores : []
-      organizationTree.value = Array.isArray(result.organization_tree) ? result.organization_tree : []
-      selectedStoreIds.value = []
-      loginTicket.value = String(result.login_ticket || '')
-      if (!loginTicket.value || !storeChoices.value.length) {
-        throw new Error('当前账号没有可选择的有效门店。')
-      }
-      return
-    }
-    await finishLogin(result)
+    await handleLoginResult(result)
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '登录未完成，请稍后重试。'
   } finally {
     submitting.value = false
   }
 }
+
+// 只接收本机平台开发入口或正式同源平台的 opener 消息；地址栏不承载身份票据。
+function platformOrigin() {
+  const current = window.location
+  if (['127.0.0.1', 'localhost'].includes(current.hostname) && current.port === '18091') {
+    return `${current.protocol}//${current.hostname}:18081`
+  }
+  return current.origin
+}
+
+async function onPlatformEntryMessage(event) {
+  if (event.source !== window.opener || event.origin !== platformOrigin()
+    || event.data?.type !== 'platform-store-entry-ticket' || submitting.value) return
+  const ticket = String(event.data.ticket || '')
+  if (!/^[a-f0-9]{64}$/.test(ticket)) return
+  window.removeEventListener('message', onPlatformEntryMessage)
+  submitting.value = true
+  error.value = ''
+  try {
+    const result = await consumePlatformStoreEntry(ticket)
+    await handleLoginResult(result)
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '进入门店失败，请从平台重试。'
+  } finally {
+    submitting.value = false
+    // 消费后不再保留跨页签控制关系，失败时也只能由用户重新点击平台入口。
+    window.opener = null
+  }
+}
+
+onMounted(() => {
+  if (route.query.platform_entry !== '1' || !window.opener) return
+  window.addEventListener('message', onPlatformEntryMessage)
+  window.opener.postMessage({ type: 'platform-store-entry-ready' }, platformOrigin())
+})
+onBeforeUnmount(() => window.removeEventListener('message', onPlatformEntryMessage))
 
 function selectStoreFromOrganization(payload) {
   const storeId = Number(payload?.storeIds?.[0] || 0)
