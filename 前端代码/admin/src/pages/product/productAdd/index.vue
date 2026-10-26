@@ -874,7 +874,7 @@
 				@on-change='changePrice'
               ></InputNumber>
             </FormItem>
-			<FormItem label="调价区间：" v-if="formData.product_type == 0 && merchantType !=1">
+			<FormItem label="可售价区间：" v-if="formData.product_type == 0 && merchantType !=1">
 			  <div class="acea-row row-middle">
 				  <InputNumber
 				    v-model="formData.attr.price_range_min"
@@ -1108,7 +1108,7 @@
 				@on-change='changePrice'
               ></InputNumber>
             </FormItem>
-			<FormItem label="调价区间：" v-if="merchantType !=1">
+			<FormItem label="可售价区间：" v-if="merchantType !=1">
 			  <div class="acea-row row-middle">
 				  <InputNumber
 				    v-model="formData.attr.price_range_min"
@@ -1301,7 +1301,7 @@
 				@on-change='changePrice'
 			  ></InputNumber>
 			</FormItem>
-			<FormItem label="调价区间：" v-if="merchantType !=1">
+			<FormItem label="可售价区间：" v-if="merchantType !=1">
 			  <div class="acea-row row-middle">
 				  <InputNumber
 				    v-model="formData.attr.price_range_min"
@@ -2369,21 +2369,21 @@ export default {
         this.$set(item, 'pm', 1);
       });
     },
-	// 单规格-调价区间
+	// 单规格-可售价区间
 	changePrice(e) {
 		if(!this.$route.params.id){
 			this.formData.attr.price_range_min = e
 			this.formData.attr.price_range_max = e
 		}
 	},
-	// 多规格-调价区间
+	// 多规格-可售价区间
 	changeManyPrice(index,e){
 		if(!this.$route.params.id){
 			this.manyFormValidate[index].price_range_min = e;
 			this.manyFormValidate[index].price_range_max = e;
 		}
 	},
-	// 多规格-调价区间-关闭弹窗
+	// 多规格-可售价区间-关闭弹窗
 	closePriceSet(i) {
 	  document.body.click()
 	  this.$refs['popoverRef_' + i][0].doClose(); //关闭的
@@ -2411,11 +2411,11 @@ export default {
 		});
 		this.closePriceSet(i);
 	},
-	// 多规格-调价区间-获取输入的调价价格
+	// 多规格-可售价区间-获取输入的调价价格
 	priceReplace(event) {
 	  this.priceSetNum = this.cleanPrice(event.target.value);
 	},
-	// 多规格-调价区间-价格处理
+	// 多规格-可售价区间-价格处理
 	cleanPrice(value) {
 	  // 移除非数字和非小数点的字符
 	  let cleanedValue = value.replace(/[^\d.]/g, '');
@@ -3566,13 +3566,13 @@ export default {
         );
 		if(this.merchantType != 1){
 			headerList.splice(priceIndex + 1, 0, {
-			  title: '调价-最低价',
+			  title: '可售价区间-最低价',
 			  slot: 'price_range_min',
 			  align: 'center',
 			  minWidth: '150px',
 			});
 			headerList.splice(priceIndex + 2, 0, {
-			  title: '调价-最高价',
+			  title: '可售价区间-最高价',
 			  slot: 'price_range_max',
 			  align: 'center',
 			  minWidth: '150px',
@@ -3600,14 +3600,14 @@ export default {
 		);
 		if(this.merchantType != 1){
 			headerList.splice(priceIndex + 1, 0, {
-			  title: '调价-最低价',
+			  title: '可售价区间-最低价',
 			  tips: '（最小值）',
 			  slot: 'price_range_min',
 			  align: 'center',
 			  minWidth: '150px',
 			});
 			headerList.splice(priceIndex + 2, 0, {
-			  title: '调价-最高价',
+			  title: '可售价区间-最高价',
 			  tips: '（最大值）',
 			  slot: 'price_range_max',
 			  align: 'center',
@@ -3637,7 +3637,7 @@ export default {
 		}
 		if(min>0 && max>0){
 			if(price<min || price>max){
-				this.$Message.warning('售价需在调价区间内');
+				this.$Message.warning('售价需在可售价区间内');
 				return false
 			}
 			return true

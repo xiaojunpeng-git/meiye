@@ -39,6 +39,11 @@ export default {
   },
   component: BasicLayout,
   children: [
+    {
+      path: 'basic-reports/:report?', name: `${pre}basic_reports`,
+      meta: { auth: ['admin-report-basic'], title: '基础报表' },
+      component: () => import('@/pages/report/data/basic_reports')
+    },
     // Saved directory grants must have a real landing route even when all
     // children have moved elsewhere; child permissions remain independent.
     ...[
