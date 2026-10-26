@@ -4334,9 +4334,14 @@ export default {
         }
         // 新增项目才继承项目手工费，后续在卡内可独立调整。
         this.$set(item, 'labor_fee', Number(item.labor_fee || 0));
-        // New card rows preserve the existing unit-price default until explicitly changed.
-        this.$set(item, 'craftsman_default_mode', 'default_unit_price');
-        this.$set(item, 'craftsman_default_unit_amount', 0);
+        // 新卡项目只在选入时复制项目的明确业绩值；无来源继续按默认单价，
+        // 之后的卡内手改独立保存，不被项目设置变化覆盖。
+        const rawCraftsmanAmount = item.craftsman_default_unit_amount;
+        const hasCraftsmanAmount = rawCraftsmanAmount !== null && rawCraftsmanAmount !== undefined
+          && rawCraftsmanAmount !== '' && Number.isInteger(Number(rawCraftsmanAmount))
+          && Number(rawCraftsmanAmount) >= 0;
+        this.$set(item, 'craftsman_default_mode', hasCraftsmanAmount ? 'manual_amount' : 'default_unit_price');
+        this.$set(item, 'craftsman_default_unit_amount', hasCraftsmanAmount ? Number(rawCraftsmanAmount) : 0);
       });
       this.cardData = [...this.cardData, ...newCardData];
       this.combinationPickerGroupNo = 0;
