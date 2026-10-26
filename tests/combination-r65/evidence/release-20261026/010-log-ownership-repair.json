@@ -1,0 +1,8 @@
+{
+  "target": "/www/wwwroot/010.cc3798.com/runtime/log/20261026_error.log",
+  "before": "root:root 644",
+  "after": "www:www 644",
+  "backup": "/www/backups/010.cc3798.com/20261026-r65-pay-return-9c3bd6de/error-log-before",
+  "contentEditedByAgent": false,
+  "databaseWrites": 0
+}

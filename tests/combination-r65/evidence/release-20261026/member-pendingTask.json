@@ -1,0 +1,11 @@
+{
+  "taskId": "confirmation_upload_4bbd4065-8874-49b8-bb32-df2a2fa11596",
+  "tool": "upload",
+  "lastStatus": "pending",
+  "project": "/private/tmp/r65-pay-return/mini-build/008-member",
+  "version": "3.0.65",
+  "customer": "008",
+  "terminal": "member",
+  "appid": "wx85d4bfd0b4b6aafb",
+  "sourceCommit": "9c3bd6debe5586f4368014909ec02188fbbadc70"
+}

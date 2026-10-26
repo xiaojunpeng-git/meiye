@@ -1,0 +1,24 @@
+{
+  "commit": "9c3bd6debe5586f4368014909ec02188fbbadc70",
+  "tree": "35c2e6c6f9f6c2a24a0f99fdd5ca938d214e07f4",
+  "parent": "3014c88ab67b576f77a7976ca71be15648dda20e",
+  "branch": "release/r65-member-payment-return-20261026",
+  "acceptedBusinessTree": "2a85ebbebb32da727f4108c0d36648b600391c45",
+  "files": {
+    "前端代码/uniapp/pages/goods/cashier/index.vue": "0e69c105aba88fb8f7998351a5cb4692483bf21da75089d5b194eb49a77f0bac",
+    "后端代码/mohe/services/wechat/HwcPayService.php": "9570ea4762daeb36e1cbffd9dc555b591dd04495c24d821ff2f8c5136dc12838",
+    "后端代码/route/api.php": "88b124d9d9c608383a2422b8294621bc12476b43538d81c48a4fdf81e33de9a8",
+    "tests/combination-r65/callback-contract.php": "fa5bf53f2613c45cb919273b9ea46ced6ad5abc4454eb606c69587a983b03201",
+    "tests/combination-r65/route-local.mjs": "ca0ca7cbdfe3fb26926be239cb07ab1eb9c620a507c3dfd4d8c0ed48333b6d90",
+    "tests/combination-r65/README.md": "debab7d66fc9e1c8962ab6988b79e44758cdc24cea83dd99b0d1279788db9e0b",
+    "tests/combination-r65/payment-return.mjs": "aba4a77295f629661d62187b56ec84206254bc486b066bbea0c0bb20ca4b54ef",
+    "tests/combination-r65/evidence/mini-build.json": "0fa5ccdd3ad6a872af65920393e8fa12600f41ac81f8a5b2fa2d95222b9d6e90",
+    "tests/combination-r65/evidence/callback.log": "2d18d1acca08fbfe5ceebb6ac7e5d74ea31ee7c52b7df5322c1ea09f761d96a4",
+    "tests/combination-r65/evidence/acceptance.json": "8faaaca64a6d75177eed067245d2a409a2d28bfcaa8ea7ff2cece8be540712ca",
+    "tests/combination-r65/evidence/fixed-version.json": "3a3bc143721c64cda5bebc599878ab566efc5956810b334e8c16f7b814fe3957",
+    "tests/combination-r65/evidence/routes.log": "3f7661a84f56216ba5ee77d74799cdf6093c2f03aa0386b78a59b4ad7d6735a8",
+    "tests/combination-r65/evidence/baseline.json": "570c629b5fd57a8fdde7b61e421751350170faa0241d5dcd044c9f3f156e328f",
+    "tests/combination-r65/evidence/payment-return.log": "87344a76ea6d207939daa1f5d0f619736e2f0aa0f62d8817c6faf2562811ea53",
+    "tests/combination-r65/evidence/fuyou-contract.log": "dde575699f4459dd7c6e8dfc0bfcc0bc4973724d5171706b3d6d128040665a8f"
+  }
+}

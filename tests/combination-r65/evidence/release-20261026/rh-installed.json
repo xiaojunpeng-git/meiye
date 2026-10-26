@@ -1,0 +1,8 @@
+{
+  "site": "rh",
+  "commit": "9c3bd6debe5586f4368014909ec02188fbbadc70",
+  "backup": "/www/backups/rh.cc3798.com/20261026-r65-pay-return-9c3bd6de",
+  "result": "PASS",
+  "output": "BACKUP_VERIFIED\n{\"instance\":\"rh\",\"commit\":\"9c3bd6debe5586f4368014909ec02188fbbadc70\",\"result\":\"PASS\",\"files\":266,\"databaseWrites\":0,\"protectedFrontendsUnchanged\":true}\n{\"instance\":\"rh\",\"commit\":\"9c3bd6debe5586f4368014909ec02188fbbadc70\",\"result\":\"PASS\",\"files\":266,\"databaseWrites\":0,\"protectedFrontendsUnchanged\":true}\n",
+  "time": "2026-10-26T04:59:55.307Z"
+}
