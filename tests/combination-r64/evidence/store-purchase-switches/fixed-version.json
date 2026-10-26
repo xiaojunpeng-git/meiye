@@ -15,8 +15,10 @@
     "productionDatabaseWrites": 0,
     "realPayments": 0
   },
-  "status": "local_self_tests_passed_pending_product_manager_acceptance",
-  "deployed": false,
+  "status": "pm_accepted_committed_pushed_and_verified_three_sites",
+  "deployed": true,
   "frontendChanges": false,
-  "databaseMigration": false
+  "databaseMigration": false,
+  "releaseCommit": "d8cb007223f5b7bb703683146806349b42f6089c",
+  "releaseRecord": "release-20261026/README.md"
 }

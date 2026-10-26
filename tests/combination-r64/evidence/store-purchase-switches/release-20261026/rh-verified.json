@@ -1,0 +1,39 @@
+{
+  "site": "rh",
+  "commit": "d8cb007223f5b7bb703683146806349b42f6089c",
+  "result": "PASS",
+  "backup": "/www/backups/rh.cc3798.com/20261026-r64-store-switch-d8cb0072",
+  "filesVerified": 2,
+  "publicAssets": {
+    "/static/index.e8e070f7.css": "bc1d9a8f8ac34c8281d0c1df18632415a9ad37cd3f7a61d0b1fd3f007a10f272",
+    "/static/js/chunk-vendors.9724b678.js": "ef5e6ac9d10f3f297e991c422b83327ebaf48b579f2801a96c47b8d7fe465afd",
+    "/static/js/index.3ff431d6.js": "49a4c802a10f4899b8bbb5347d94ec5a380843ff6a2a3acc007e29dda3d691be"
+  },
+  "api": {
+    "/api/diy/get_diy/0": {
+      "status": 200,
+      "dataSha256": "790d440c5cde99ccb2abef8091a1a93bf672fdaae87dc77c43446b1ce53ec438",
+      "rows": null
+    },
+    "/api/menu/user": {
+      "status": 200,
+      "dataSha256": "e0659e2f155247ef5a10cffd5ac2f15cf9fc0fb4f8777b0b3572ff0a84d20f39",
+      "rows": null
+    },
+    "/api/store/list?is_select=1&page=1&limit=20": {
+      "status": 200,
+      "dataSha256": "bd74c7a2b53f0705f2007e77e8ac4a601429d8a3fa9eceae97a13216c8418401",
+      "rows": 20
+    },
+    "/api/combination/list?page=1&limit=5": {
+      "status": 200,
+      "dataSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "rows": 0
+    }
+  },
+  "databaseWrites": 0,
+  "configUnchanged": true,
+  "allFrontendsUnchanged": true,
+  "runtimeClasses": 79,
+  "time": "2026-10-26T03:41:23.056Z"
+}

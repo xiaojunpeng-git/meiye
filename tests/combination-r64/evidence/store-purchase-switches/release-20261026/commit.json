@@ -1,0 +1,20 @@
+{
+  "commit": "d8cb007223f5b7bb703683146806349b42f6089c",
+  "tree": "3cfa4c8da95833cefac3799434c6541e5ebcd813",
+  "parent": "697344de247868c07d9dffab30dcb515232de3bd",
+  "branch": "release/r64-member-checkout-20261026",
+  "files": {
+    "\u540e\u7aef\u4ee3\u7801/app/services/order/StoreCartServices.php": "f416ae52c0c14217278f3d6327c810fbd9bfd1b49efdda9ca9e4263a16227b2f",
+    "\u540e\u7aef\u4ee3\u7801/app/services/order/StoreOrderCreateServices.php": "c8f31900b52d6588e3f573240bf7d48b0379d5f617f68d2b5c25ae5d3dda85de",
+    "tests/combination-r64/checkout-local.php": "421aa571b106611a8f4d03b48d8817603fdd67004e8d70a9bb7c110929592c20",
+    "tests/combination-r64/evidence/store-purchase-switches/confirm-responses.json": "9037e19c3bb2392716bb7049b1c7bb362881073bc34850d24666f86d6a904ad4",
+    "tests/combination-r64/evidence/store-purchase-switches/acceptance.json": "b3ccd24fba3303333ed1ce8e7a7a2a8c0f7d9992c84d6897956c58267775e414",
+    "tests/combination-r64/evidence/store-purchase-switches/fixed-version.json": "3c231ea009e8f03c3e293fdd12908a96ca451ca02267a8eedcd2c21f5f74d2d5",
+    "tests/combination-r64/evidence/store-purchase-switches/after-fix.log": "373a8b0df72ba3155e269a691da6550cee38e517f1cb0ba0c8ea89eb497ff9a4",
+    "tests/combination-r64/evidence/store-purchase-switches/README.md": "87aa549ff7fa498af767c4513e47139228b2190983d30955563064ce887976dd",
+    "tests/combination-r64/evidence/store-purchase-switches/default-mode.log": "05815cc2540854ef1a9b501c0b80639624d35db3533aee1890e44ea5f4054426",
+    "tests/combination-r64/evidence/store-purchase-switches/baseline.json": "c5d410f433c88ee4eacb4316b5ba02e9e0f448c55d685f147875e8bd8f7744dc",
+    "tests/combination-r64/evidence/store-purchase-switches/frontend-contract.log": "20a051ad78472262acd56db4eb37306f966bac6621c97d4b761651437ce5ca2c",
+    "tests/combination-r64/evidence/store-purchase-switches/before-fix.log": "6444f54e363b90785968caad6a0adf63406b7f259a7349b7f87e63d8f5b8f4d2"
+  }
+}
