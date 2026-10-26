@@ -32,6 +32,11 @@ defineProps({
     type: Boolean,
     default: false
   },
+  // 欠款展示复用后端功能开关；关闭时连同金额及还款入口一起隐藏。
+  debtPaymentEnabled: {
+    type: Boolean,
+    default: true
+  },
   showInlineSelect: {
     type: Boolean,
     default: false
@@ -100,7 +105,7 @@ function openMemberDebt(member) {
           <div><span>余额：</span><strong>{{ formatPlainAmount(member.accountBalance) }}</strong></div>
           <div><span>权益金额：</span><strong>{{ formatPlainAmount(cardBenefitAmount(member)) }}</strong></div>
           <div class="member-card__metric-total"><span>总余额：</span><strong>{{ formatPlainAmount(totalBalanceAmount(member)) }}</strong></div>
-          <div class="member-card__metric-debt">
+          <div v-if="debtPaymentEnabled" class="member-card__metric-debt">
             <span>总欠款：</span>
             <button
               v-if="hasOutstandingDebt(member)"
