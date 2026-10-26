@@ -1,0 +1,70 @@
+{
+  "前端源码": [
+    "前端代码/admin/src/libs/permissionTreeSelection.js",
+    "前端代码/admin/src/pages/setting/storePermissions/index.vue",
+    "前端代码/admin/src/router/modules/setting.js",
+    "前端代码/cashier-v3/src/components/navigation/StoreTopNavigation.vue",
+    "前端代码/cashier-v3/src/constants/orderRecordTypes.js",
+    "前端代码/cashier-v3/src/constants/storeBusinessReports.js",
+    "前端代码/cashier-v3/src/layouts/CashierShell.vue",
+    "前端代码/cashier-v3/src/router/index.js",
+    "前端代码/cashier-v3/src/services/cashierV3ActionManifest.js",
+    "前端代码/cashier-v3/src/services/cashierV3Bridge.js",
+    "前端代码/cashier-v3/src/styles/base.css",
+    "前端代码/cashier-v3/src/views/OrderCenterView.vue",
+    "前端代码/cashier-v3/src/views/StoreBusinessReportView.vue",
+    "前端代码/cashier-v3/src/views/StoreLoginView.vue",
+    "前端代码/shared/storeNavigationGroups.js"
+  ],
+  "后端源码": [
+    "后端代码/app/controller/admin/v1/system/StorePermissions.php",
+    "后端代码/app/controller/store/fund/StoreFund.php",
+    "后端代码/app/http/middleware/cashier/CashierCheckRoleMiddleware.php",
+    "后端代码/app/services/cashier/v3/dashboard/CashierV3BusinessDashboardPartitionProvider.php",
+    "后端代码/app/services/cashier/v3/manifest/CashierV3C4DashboardModule.php",
+    "后端代码/app/services/cashier/v3/manifest/CashierV3C5MemberOrderModule.php",
+    "后端代码/app/services/cashier/v3/permission/CashierV3FeatureResolver.php",
+    "后端代码/app/services/cashier/v3/permission/CashierV3PermissionPolicyRegistry.php",
+    "后端代码/app/services/cashier/v3/permission/CashierV3StaffFeatureOverrideServices.php",
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php",
+    "后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php",
+    "后端代码/app/services/organization/JobPositionPolicyServices.php",
+    "后端代码/app/services/organization/StorePermissionCatalogServices.php",
+    "后端代码/app/services/query/provider/StaffUnifiedQueryPageRegistrar.php",
+    "后端代码/app/services/system/SystemMenusServices.php",
+    "后端代码/route/admin.php"
+  ],
+  "数据库迁移": [
+    "后端代码/database/upgrades/2026-10-23-门店端独立权限规则/00-升级清单.md",
+    "后端代码/database/upgrades/2026-10-23-门店端独立权限规则/02-正式升级.sql",
+    "后端代码/database/upgrades/2026-10-23-门店端独立权限规则/03-初始化.php"
+  ],
+  "自动化测试": [
+    "tests/store-permission-r28/js/configured-navigation.cjs",
+    "tests/store-permission-r28/js/group-permissions.cjs",
+    "tests/store-permission-r28/js/hierarchy-navigation.cjs",
+    "tests/store-permission-r28/js/local-api.cjs",
+    "tests/store-permission-r28/js/local-browser.cjs",
+    "tests/store-permission-r28/js/navigation-browser.cjs",
+    "tests/store-permission-r28/js/operator-profile.cjs",
+    "tests/store-permission-r28/js/order-navigation.cjs",
+    "tests/store-permission-r28/js/quick-visibility.cjs",
+    "tests/store-permission-r28/php/catalog-mysql.php",
+    "tests/store-permission-r28/php/local-sessions.php",
+    "tests/store-permission-r28/php/operator-profile.php"
+  ],
+  "工程脚本": [
+    "scripts/r28-permissions-010-ddl.php",
+    "scripts/r28-permissions-baseline-proof.py",
+    "scripts/r28-permissions-build.cjs",
+    "scripts/r28-permissions-fixed-browser.cjs",
+    "scripts/r28-permissions-inspect.php",
+    "scripts/r28-permissions-install.php",
+    "scripts/r28-permissions-menu-proof.php",
+    "scripts/r28-permissions-preflight.php",
+    "scripts/r28-permissions-prepare.py",
+    "scripts/r28-permissions-public-browser.cjs",
+    "scripts/r28-permissions-release.py",
+    "scripts/r28-permissions-smoke.php"
+  ]
+}

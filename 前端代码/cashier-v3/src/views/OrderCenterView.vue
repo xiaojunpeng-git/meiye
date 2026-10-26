@@ -2,11 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BusinessRecordDetailOverlay from '@/components/order/BusinessRecordDetailOverlay.vue'
-import ReceiptPrinterSetupOverlay from '@/components/order/ReceiptPrinterSetupOverlay.vue'
 import SalesOrderDetailOverlay from '@/components/order/SalesOrderDetailOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
-import Printer from '@lucide/vue/dist/esm/icons/printer.mjs'
+import { orderRecordTypeLabel } from '@/constants/orderRecordTypes'
 import TablePagination from '@/components/common/TablePagination.vue'
 import UnifiedQueryToolbar from '@/components/query/UnifiedQueryToolbar.vue'
 import { useUnifiedQueryPage } from '@mohe/unified-query-vue3/composable'
@@ -45,7 +44,6 @@ import { nextWholeYuanInputValue } from '@/services/refundWholeYuanInput'
 import { orderAttributionExpectedValue } from '@/services/orderAttributionExpectedValue'
 
 const field = (key, label, type = 'text', extra = {}) => ({ key, label, type, defaultVisible: true, ...extra })
-const isPrinterSetupOpen = ref(false)
 const serviceVoidNotice = ref('')
 const serviceVoidRecord = ref(null)
 const serviceVoidReason = ref('')
@@ -207,7 +205,7 @@ const ORDER_TABS = [
   {
     key: 'sales',
     pageCode: 'order_center_sales',
-    label: '消费订单',
+    label: orderRecordTypeLabel('sales'),
     stateKey: 'salesOrders',
     primaryField: 'sales_order_no',
     searchPlaceholder: '搜索销售订单号、会员姓名、手机号或商品',
@@ -235,7 +233,7 @@ const ORDER_TABS = [
   {
     key: 'recharge',
     pageCode: 'order_center_recharge',
-    label: '充值订单',
+    label: orderRecordTypeLabel('recharge'),
     stateKey: 'rechargeOrders',
     primaryField: 'recharge_order_no',
     searchPlaceholder: '搜索充值订单号、会员姓名或手机号',
@@ -254,7 +252,7 @@ const ORDER_TABS = [
   {
     key: 'refund',
     pageCode: 'order_center_refund',
-    label: '退款记录',
+    label: orderRecordTypeLabel('refund'),
     stateKey: 'refundOrders',
     primaryField: 'refund_order_no',
     searchPlaceholder: '搜索退款单号、来源订单、会员姓名或手机号',
@@ -277,7 +275,7 @@ const ORDER_TABS = [
   {
     key: 'debt',
     pageCode: 'order_center_debt',
-    label: '欠款管理',
+    label: orderRecordTypeLabel('debt'),
     stateKey: 'debtRecords',
     primaryField: 'debt_no',
     searchPlaceholder: '搜索欠款编号、来源订单、会员姓名或手机号',
@@ -295,7 +293,7 @@ const ORDER_TABS = [
   {
     key: 'service',
     pageCode: 'order_center_service',
-    label: '服务记录',
+    label: orderRecordTypeLabel('service'),
     stateKey: 'serviceRecords',
     primaryField: 'service_record_no',
     searchPlaceholder: '搜索服务记录号、会员、项目、权益来源、卡号或手艺人',
@@ -321,7 +319,7 @@ const ORDER_TABS = [
   {
     key: 'supplement',
     pageCode: 'order_center_supplement',
-    label: '补交记录',
+    label: orderRecordTypeLabel('supplement'),
     stateKey: 'supplementOrders',
     primaryField: 'supplement_order_no',
     searchPlaceholder: '搜索补交单号、欠款编号、来源订单或会员',
@@ -339,7 +337,7 @@ const ORDER_TABS = [
   {
     key: 'gift',
     pageCode: 'order_center_gift',
-    label: '赠送记录',
+    label: orderRecordTypeLabel('gift'),
     stateKey: 'giftRecords',
     primaryField: 'gift_record_no',
     searchPlaceholder: '搜索赠送记录号、来源、会员或赠送内容',
@@ -357,7 +355,7 @@ const ORDER_TABS = [
   {
     key: 'card_operation',
     pageCode: 'order_center_card_operation',
-    label: '卡操作记录',
+    label: orderRecordTypeLabel('card_operation'),
     stateKey: 'cardOperationRecords',
     primaryField: 'card_operation_no',
     searchPlaceholder: '搜索操作单号、会员、卡项、项目或操作人',
@@ -393,7 +391,7 @@ const mixedItemCategoryFields = [...mixedFields.values()]
 mixedItemCategoryFields.splice(mixedItemCategoryFields.findIndex((item) => item.key === 'product_category'), 1)
 mixedItemCategoryFields.splice(mixedItemCategoryFields.findIndex((item) => item.key === 'item_name') + 1, 0,
   { ...mixedFields.get('product_category'), label: '分类' })
-ORDER_TABS.unshift({ key: 'all', pageCode: 'order_center_all', label: '全部订单', stateKey: 'allOrders',
+ORDER_TABS.unshift({ key: 'all', pageCode: 'order_center_all', label: orderRecordTypeLabel('all'), stateKey: 'allOrders',
   primaryField: 'order_no', emptyText: '当前条件下暂无订单。', fields: mixedItemCategoryFields })
 
 const FIELD_ALIASES = {
@@ -2590,16 +2588,6 @@ function applyQuerySettings(settings = {}) {
   querySettings.value = settings && typeof settings === 'object' ? { ...settings } : {}
 }
 
-function switchTab(tab) {
-  if (!tab || tab.key === activeTabKey.value) return
-  if (!availableTabs.value.some((available) => available.key === tab.key)) return
-  refundAttributionError.value = ''
-  activeTabKey.value = tab.key
-  genericDetailRecord.value = null
-  closeSalesDetail()
-  queryRecords(defaultOrderCenterDateQuery(), true)
-}
-
 function orderCenterToday() {
   const now = new Date()
   const offset = now.getTimezoneOffset() * 60000
@@ -3803,7 +3791,13 @@ watch(
       queryModelByType.value = { ...queryModelByType.value, sales: {} }
       salesPageCursors.value = {}
     }
-    if (requestedTab !== activeTabKey.value) activeTabKey.value = requestedTab
+    // 顶部分类路由切换沿用原页签的详情清理边界，避免把上一类型的弹窗带入新查询。
+    if (requestedTab !== activeTabKey.value) {
+      refundAttributionError.value = ''
+      genericDetailRecord.value = null
+      closeSalesDetail()
+      activeTabKey.value = requestedTab
+    }
     if (isPlatformReadOnly.value || state.stateContextId) queryRecords(initialOrderCenterQuery(), true)
   }
 )
@@ -3849,26 +3843,9 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="order-center-page" aria-label="订单中心">
-    <header class="order-center-page__head">
-      <nav v-if="!isPlatformReadOnly" class="order-center-tabs" role="tablist" aria-label="订单与业务记录类型">
-        <button
-          v-for="tab in availableTabs"
-          :key="tab.key"
-          type="button"
-          role="tab"
-          class="order-center-tabs__button"
-          :class="{ 'order-center-tabs__button--active': activeTabKey === tab.key }"
-          :aria-selected="activeTabKey === tab.key"
-          @click="switchTab(tab)"
-        >
-          <span>{{ tab.label }}</span>
-        </button>
-      </nav>
-      <span v-if="isPlatformReadOnly" class="order-center-page__readonly-note">平台只读查询；业务操作请前往门店端处理</span>
-      <button v-else type="button" class="order-center-printer-button" @click="isPrinterSetupOpen = true">
-        <Printer :size="17" />
-        打印设置
-      </button>
+    <!-- 门店端不再显示打印设置栏；平台只读提示保留。 -->
+    <header v-if="isPlatformReadOnly" class="order-center-page__head">
+      <span class="order-center-page__readonly-note">平台只读查询；业务操作请前往门店端处理</span>
     </header>
 
     <p v-if="!isPlatformReadOnly && serviceVoidNotice" class="order-center-notice" role="status">{{ serviceVoidNotice }}</p>
@@ -4604,11 +4581,7 @@ onBeforeUnmount(() => {
       @confirm="prepareServiceCraftsmanReason"
     />
 
-    <ReceiptPrinterSetupOverlay
-      v-if="!isPlatformReadOnly && isPrinterSetupOpen"
-      :store-name="state.currentStore?.name || state.currentStore?.storeName || ''"
-      @close="isPrinterSetupOpen = false"
-    />
+
 
     <div v-if="!isPlatformReadOnly && serviceVoidRecord" class="service-void-modal" role="dialog" aria-modal="true" aria-labelledby="service-void-title">
       <div class="service-void-modal__backdrop" @click="closeServiceVoid"></div>
@@ -4879,46 +4852,20 @@ onBeforeUnmount(() => {
 .order-center-page__head {
   display: flex;
   align-items: stretch;
+  justify-content: flex-end;
   min-width: 0;
   border-bottom: 1px solid #dfe5ec;
   background: #fff;
 }
 
-.order-center-page__head .order-center-tabs {
-  flex: 1;
-  border-bottom: 0;
-}
 
-.order-center-printer-button {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-width: 116px;
-  margin: 6px 8px;
-  padding: 0 14px;
-  border: 1px solid #cfd8e3;
-  border-radius: 7px;
-  background: #fff;
-  color: #344054;
-  font-weight: 700;
-  letter-spacing: 0;
-}
 
-.order-center-printer-button:hover { border-color: #84adcf; color: #175cd3; }
 
 /* R37 订单中心视觉皮肤：仅作用本页的颜色与装饰，不改变字段、尺寸布局、滚动定位或业务事件。 */
 .order-center-page { background: #f5f7fa; }
 .order-center-page__head { border: 1px solid #e3e9f2; border-radius: 10px; }
-.order-center-tabs { border-radius: 10px; }
-.order-center-tabs__button { color: #42526b; border-radius: 8px 8px 0 0; }
-.order-center-tabs__button:hover { color: #315bea; background: #f0f5ff; }
-.order-center-tabs__button--active { color: #315bea; background: #e7efff; }
-.order-center-tabs__button--active::after { background: #4568f5; }
 .order-center-page :deep(.unified-query-toolbar) { background: #fff; border-color: #e3e9f2; box-shadow: 0 1px 3px #21355205; }
 .order-center-page :deep(.unified-query-toolbar .button),
-.order-center-printer-button { border-radius: 8px; border-color: #dce4ef; color: #344054; background: #fff; box-shadow: 0 1px 2px #25385806; }
 .order-center-page :deep(.unified-query-toolbar .button--primary) { background: #4568f5; border-color: #4568f5; color: #fff; }
 .order-center-page :deep(.unified-query-toolbar .button--primary:hover) { background: #3555dc; }
 .order-center-page :deep(.unified-query-scope) { border-color: #e0e7f1; background: #f0f3f8; }

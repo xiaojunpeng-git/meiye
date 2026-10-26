@@ -106,7 +106,12 @@ class CashierV3PermissionPolicyRegistry
         // 预约的编辑、删除、开始与结束服务是同一条已进入预约工作台后的
         // 直接业务操作。本期产品明确不设角色、门店归属或功能入口二次拦截；
         // 网关仍会在事务内重建登录态数据范围，并由领域层校验对象、版本和状态。
+        // 不增加预约操作级岗位限制；只有规则管理明确停用整个预约模块时统一拒绝。
         $this->register('policy:reservation_operation', function (CashierV3DataScopeContext $scope, array $payload, string $action) {
+            $trustedMobile = !empty($scope->operatorProfile()['_trusted_mobile_merchant_session']);
+            if (!$trustedMobile && !(new \app\services\organization\StorePermissionCatalogServices())->filterEnabled(['cashier.v3.reservation'])) {
+                throw new CashierV3CommandException(CashierV3ResultCode::PERMISSION_DENIED, '预约功能已停用，请联系管理员。', CashierV3ResultCode::STATUS_FAILED);
+            }
             return;
         });
 
@@ -159,7 +164,7 @@ class CashierV3PermissionPolicyRegistry
             $pageCode = trim((string)($payload['pageCode'] ?? $payload['page_code'] ?? ''));
             $pageFeatures = [
                 'member_list' => 'cashier.v3.member',
-                'staff_list' => 'cashier.v3.management_center',
+                'staff_list' => 'cashier.v3.management.staff',
                 // 订单中心含混合列表共用既有“订单”入口权限；页面字段、门店范围
                 // 与导出执行范围仍由统一查询注册表和当前数据范围强制控制。
                 'order_center_sales' => 'cashier.v3.order_center',

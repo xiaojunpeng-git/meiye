@@ -1,0 +1,10 @@
+page.goto: Timeout 60000ms exceeded.
+Call log:
+[2m  - navigating to "https://rh.cc3798.com/preview-8080/view_cashier_v3/#/reservation", waiting until "domcontentloaded"[22m
+
+    at /Users/xiaojunpeng/Desktop/魔核/美业/美容源码/scripts/r28-permissions-public-browser.cjs:20:18 {
+  log: [
+    '  - navigating to "https://rh.cc3798.com/preview-8080/view_cashier_v3/#/reservation", waiting until "domcontentloaded"'
+  ],
+  name: 'TimeoutError'
+}

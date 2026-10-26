@@ -41,6 +41,8 @@ import EntitlementSelectorOverlay from '@/components/cashier/EntitlementSelector
 import HangOrderOverlay from '@/components/cashier/HangOrderOverlay.vue'
 import PersonnelPerformanceOverlay from '@/components/cashier/PersonnelPerformanceOverlay.vue'
 import CashierCouponSelectorOverlay from '@/components/cashier/CashierCouponSelectorOverlay.vue'
+import { validAllowanceCents } from '@/services/couponAllowance'
+import { ordinaryCardRows, applyOrdinaryCardRows, validateOrdinaryCardSale } from '@/services/ordinaryCardSaleAdjustment'
 import CartLineRightControls from '@/components/cashier/CartLineRightControls.vue'
 import { loadCheckoutBusinessCatalog } from '@/services/cashierBusinessConfigApi'
 import { useRechargeCheckout } from '@/composables/useRechargeCheckout'
@@ -71,8 +73,9 @@ const selectedCardOperationProjectKeys = computed(() => (previewCardOperation.va
   `${entitlementCardHolderId(source)}:${entitlementBenefitPoolId(source)}`
 )))
 const guidedBusinessMode = ref('')
-const isCustomCardConflictOpen = ref(false)
 const pendingCardPurchase = ref(null)
+const ordinaryCardEditRows = ref(null)
+const ordinaryCardEditError = ref('')
 const isConfirmingCardPurchase = ref(false)
 const personnelOverlay = ref(null)
 const isSavingPersonnelAssignment = ref(false)
@@ -2143,8 +2146,9 @@ async function selectCatalogItem(item) {
     return
   }
   if (item.id === 'custom-card-entry' && !(previewCardOperation.value?.mode === 'card-upgrade' && previewCardOperation.value?.awaitingTarget)) {
-    if (hasCartLines.value) isCustomCardConflictOpen.value = true
-    else if (currentCustomerMode.value === 'guest') {
+    // Custom cards append to the same final checkout snapshot. Existing cart
+    // rows must survive entering or cancelling the configuration editor.
+    if (currentCustomerMode.value === 'guest') {
       // 选中会员后必须续接本次定制卡意图，不能退回普通收银目录。
       pendingCustomCardEntry.value = true
       window.dispatchEvent(new CustomEvent('cashier-v3:open-member-selector', {
@@ -2219,6 +2223,8 @@ async function selectCatalogItem(item) {
   }
   if (isRuleCardPurchase(item)) {
     pendingCardPurchase.value = clonePlain(item)
+    ordinaryCardEditRows.value = null
+    ordinaryCardEditError.value = ''
     return
   }
   await appendCatalogItemToDraft(item)
@@ -2492,17 +2498,38 @@ function closePendingCardPurchase() {
   pendingCardPurchase.value = null
 }
 
+// Editing is isolated from the cart until every row passes the original signed floors.
+function editOrdinaryCardPurchase() {
+  ordinaryCardEditRows.value = ordinaryCardRows(pendingCardPurchase.value)
+  ordinaryCardEditError.value = ''
+}
+
+function saveOrdinaryCardPurchase() {
+  try {
+    pendingCardPurchase.value = applyOrdinaryCardRows(pendingCardPurchase.value, ordinaryCardEditRows.value)
+    ordinaryCardEditRows.value = null
+    ordinaryCardEditError.value = ''
+  } catch (error) {
+    ordinaryCardEditError.value = error.message
+  }
+}
+
 async function confirmPendingCardPurchase() {
   const item = pendingCardPurchase.value
   if (!item?.id || isConfirmingCardPurchase.value) return
   isConfirmingCardPurchase.value = true
   try {
+    // 加购前校验当前卡项本身；错误不得拖到确认收款后才暴露。
+    validateOrdinaryCardSale(item.cardPurchaseSnapshot, Math.round(Number(item.price) * 100))
     // 卡项预览确认也要传完整目录项，不能只传 id；新增的项目／产品
     // 加购优化会读取 kind 作为后端轻量路径提示，传 id 会把它丢失并
     // 被服务端当成“无效商品”拒绝。
     const result = await appendCatalogItemToDraft(item)
     if (['success', 'succeeded'].includes(resultStatus(result))) pendingCardPurchase.value = null
     return result
+  } catch (error) {
+    reportEntitlementContractError({ message: String(error.message || '卡项内容不符合规则。') })
+    return { result: { status: 'failed', message: error.message } }
   } finally {
     isConfirmingCardPurchase.value = false
   }
@@ -4069,7 +4096,9 @@ function normalizeCouponSelector(selector = {}, line = {}) {
       ...coupon,
       couponId: String(coupon?.couponId || '')
     }))
-    .filter((coupon) => coupon.couponId)
+    // Upgrade credits use a separate settlement contract, not normal non-cash
+    // coupon tender. Do not offer an allowance that final checkout must reject.
+    .filter((coupon) => coupon.couponId && (Number(coupon.couponType) !== 3 || !line.cardOperationUpgrade))
   const belowMinimumCoupons = (Array.isArray(selector.belowMinimumCoupons) ? selector.belowMinimumCoupons : [])
     .map((coupon) => ({ ...coupon, couponId: String(coupon?.couponId || '') }))
     .filter((coupon) => coupon.couponId)
@@ -4084,6 +4113,7 @@ function normalizeCouponSelector(selector = {}, line = {}) {
       ? '' : String(line.couponId || selector.selectedCouponId || ''),
     selectedCouponIds: Number(line.couponUseMode || 0) === 1 && Array.isArray(line.couponUserIds)
       ? line.couponUserIds.map(String) : [],
+    selectedAmountCents: Number(line.couponDiscountCents ?? line.couponDiscountAmountCents ?? 0),
     selectedCountOtherLines: cartLines.value.reduce((count, candidate) =>
       count + (String(candidate?.id || '') === String(line.id || '') || Number(candidate?.couponUseMode || 0) !== 1
         ? 0 : (Array.isArray(candidate.couponUserIds) ? candidate.couponUserIds.length : 0)), 0),
@@ -4154,6 +4184,7 @@ async function openCartLineCoupon(line, { present = true } = {}) {
           // checkout snapshot.  A delayed summary merge may replace the member
           // object while retaining this identity.
           memberId: String(currentMemberId.value || ''),
+          productId: Number(line.productId || line.sourceId || line.catalogId || 0),
           lineAmountCents,
           couponThresholdCents,
           orderReceivableCents,
@@ -4197,10 +4228,17 @@ async function saveLineCoupon(action, couponSelection = '') {
   isSavingLineCoupon.value = true
   try {
     const couponIds = Array.isArray(couponSelection) ? couponSelection.map(String) : []
-    const couponId = couponIds[0] || String(couponSelection || '')
+    const custom = couponSelection && typeof couponSelection === 'object' && !Array.isArray(couponSelection)
+      ? couponSelection : null
+    const couponId = couponIds[0] || String(custom?.couponId || couponSelection || '')
     const coupon = (couponSelector.value?.coupons || []).find((item) => String(item?.couponId || '') === couponId)
     // The read-only below-minimum list must never enter a local draft command.
     if (couponId && !coupon) return
+    // Never silently substitute the face value for a reusable coupon command.
+    // Remaining allowance is a read hint; checkout locks and revalidates it.
+    if (Number(coupon?.couponType) === 3
+      && !validAllowanceCents(custom?.amountCents, coupon, couponSelector.value?.lineCapacityCents)) return
+    if (custom && Number(coupon?.couponType) !== 3) return
     const chosen = couponIds.map((id) => (couponSelector.value?.coupons || [])
       .find((item) => String(item?.couponId || '') === id))
     if (couponIds.length && (chosen.some((item) => !item || Number(item.useMode) !== 1)
@@ -4220,7 +4258,7 @@ async function saveLineCoupon(action, couponSelection = '') {
             ? `${coupon?.name || '优惠券'} × ${couponIds.length}` : String(coupon?.name || '已选优惠券'),
           discountAmountCents: couponIds.length
             ? chosen.reduce((sum, item) => sum + Number(item.discountAmountCents || 0), 0)
-            : Math.max(0, Number(coupon?.discountAmountCents || 0))
+            : (Number(coupon?.couponType) === 3 ? custom.amountCents : Math.max(0, Number(coupon?.discountAmountCents || 0)))
         }
       : {}
     let result = await mutateCashierDraft(action, line, payload)
@@ -5100,16 +5138,6 @@ async function appendMultiCardUpgradeCustomTarget(operation = {}, payload = {}, 
   return localDraftResult('定制目标卡已加入本次购物车。')
 }
 
-async function continueCustomCard() {
-  // 后端禁止定制卡与普通商品混合结账。必须先通过收银台的唯一清空命令
-  // 提交本地草稿，成功后才能进入创建页，避免只关弹窗造成旧行残留。
-  const cleared = await confirmClearCart()
-  if (!['success', 'succeeded'].includes(resultStatus(cleared))) return cleared
-  isCustomCardConflictOpen.value = false
-  guidedBusinessMode.value = 'custom-card'
-  return cleared
-}
-
 function handleMemberSelectorClosedForEntitlement(event = {}) {
   if (event.detail?.context === 'cashier' && event.detail?.reason !== 'selected') {
     pendingEntitlementSelector.value = false
@@ -5281,6 +5309,7 @@ async function changeLineQuantityWithCoupon(line, delta) {
   const isOrderCoupon = Number(line.couponUseMode || 0) === 1
     && Array.isArray(line.couponUserIds) && line.couponUserIds.length > 0
   const selectedCouponId = isOrderCoupon ? '' : String(line.couponId || '')
+  const selectedAmountCents = Number(line.couponDiscountCents ?? line.couponDiscountAmountCents ?? 0)
   if (selectedCouponId || isOrderCoupon) isRefreshingLineCoupon.value = true
   try {
     const result = await mutateCashierDraft('change-cart-line-quantity', line, { delta })
@@ -5311,11 +5340,14 @@ async function changeLineQuantityWithCoupon(line, delta) {
     const coupon = (selector?.coupons || []).find((item) => String(item.couponId) === selectedCouponId)
     const current = cartLines.value.find((item) => String(item.id) === String(line.id))
     if (scopeKey !== currentCashierDraftScopeKey.value || Number(current?.quantity || 0) !== quantity) return result
-    if (coupon) {
+    // Quantity edits may recompute an ordinary face/percentage, but must never
+    // replace the operator's explicit allowance amount with its full balance.
+    const reusable = Number(coupon?.couponType) === 3
+    if (coupon && (!reusable || validAllowanceCents(selectedAmountCents, coupon, selector.lineCapacityCents))) {
       const applied = await mutateCashierDraft('apply-line-coupon', current, {
         couponId: selectedCouponId,
         couponSummary: String(coupon.name || '已选优惠券'),
-        discountAmountCents: Math.max(0, Number(coupon.discountAmountCents || 0))
+        discountAmountCents: reusable ? selectedAmountCents : Math.max(0, Number(coupon.discountAmountCents || 0))
       })
       if (['success', 'succeeded'].includes(resultStatus(applied))) return result
     }
@@ -5906,6 +5938,18 @@ async function openCheckout() {
   // The checkout wizard is a browser-only projection. The first write for this
   // order is the final submit-checkout carrying the complete snapshot.
   const preview = localCheckoutPreviewSnapshot()
+  // 直接复核将进入结账的明细，不读目录或旧 workspace 替换本次业务值。
+  try {
+    for (const line of preview.lines || []) {
+      if (line.lineRole !== 'sale') continue
+      validateOrdinaryCardSale(line.cardPurchaseSnapshot,
+        localDraftLineTotalAmountCents(line), Number(line.quantity || 1))
+    }
+  } catch (error) {
+    const blocked = { result: { status: 'failed', message: error.message } }
+    reportCheckoutEntryFailure(blocked, error.message)
+    return blocked
+  }
   const entitlementFailure = localCheckoutEntitlementAvailabilityFailure(preview)
   if (entitlementFailure) {
     const blocked = { result: { status: 'failed', ...entitlementFailure } }
@@ -6374,6 +6418,19 @@ async function enqueueCheckoutAction(event = {}) {
           name: '余额支付', amount, quantity: 1, status: 'editing', canEdit: true, canRemove: true
         })
       }
+    } else if (action === 'update-balance-payment') {
+      // Balance is an explicit whole-yuan tender, never an extra cash row.
+      const amount = Number(payload.amount)
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > Number(payment.availableBalance || 0)) {
+        const result = { result: { status: 'failed', message: '余额支付金额必须为正整数且不超过可用余额。' } }
+        // A rejected local amount edit still needs a receipt to release its pending input state.
+        window.dispatchEvent(new CustomEvent('cashier-v3:checkout-draft-mutation-result', {
+          detail: { action, payload, status: 'failed', message: result.result.message }
+        }))
+        event?.resolve?.(result)
+        return result
+      }
+      preview.lines = checkoutLines.map((line) => checkoutLineRole(line) === 'balance_payment' ? { ...line, amount } : line)
     } else if (action === 'remove-balance-payment') {
       preview.lines = checkoutLines.filter((line) => checkoutLineRole(line) !== 'balance_payment')
     } else if (action === 'update-checkout-sales-date') {
@@ -6404,6 +6461,7 @@ async function enqueueCheckoutAction(event = {}) {
           status: 'succeeded', message: '欠款补交成功。',
           completionDescription: `补交单 ${repaid.repaymentNo || ''} 已完成。`,
           requestNo: String(repaid.repaymentNo || ''),
+          ...(Array.isArray(repaid.paymentResultLines) ? { payment: { ...preview.payment, resultLines: clonePlain(repaid.paymentResultLines) } } : {}),
           checkoutRequestId: String(repaid.checkoutRequestId || ''),
           originalIdempotencyKey: String(payload.originalIdempotencyKey || ''),
           canClose: true, canRetry: false
@@ -6614,6 +6672,8 @@ async function requestCheckoutAction({ action, payload }) {
         status: 'succeeded', message: resultMessage(direct, '欠款补交成功。'),
         completionDescription: '本次欠款补交已完成。',
         requestNo: String(repaid.repaymentNo),
+        // Successful rows come from committed collection records, not editing-state selections.
+        ...(Array.isArray(repaid.paymentResultLines) ? { payment: { ...currentCheckoutSnapshot.value.payment, resultLines: clonePlain(repaid.paymentResultLines) } } : {}),
         checkoutRequestId: String(repaid.checkoutRequestId || ''),
         originalIdempotencyKey: commandKey,
         canClose: true, canRetry: false
@@ -7108,7 +7168,12 @@ async function openPreparedCheckout(event = {}) {
       finalChanges: [],
       composition: { code: 'sale_only', lineRoles: ['sale'], hasSale: true,
         hasEntitlement: false, primaryAction: 'collect_payment', primaryActionLabel: '确认还款' },
-      payment: { methods: localCheckoutPaymentMethods(), selectedLines: [] },
+      // Only sales debt may consume existing principal/bonus. Recharge debt
+      // would otherwise create a circular balance credit and stays cash-only.
+      payment: { methods: localCheckoutPaymentMethods(), selectedLines: [],
+        ...(intent.rechargeDebt === true
+          ? { balanceAvailable: false, availableBalance: 0 }
+          : checkoutBalancePreview(member.value, memberId)) },
       sourceEnabled: true, sourceSelectable: false
     }
     checkoutLocalOutcome.value = {}
@@ -8120,7 +8185,7 @@ onBeforeUnmount(() => {
                       :title="cartActionLabel('优惠券', line.couponSummary)"
                       @click="openCartLineCoupon(line)"
                     >
-                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}</span></template>
+                      优惠券<template v-if="cartActionValue(line.couponSummary)">:<span class="cart-line__meta-value">{{ cartActionValue(line.couponSummary) }}<template v-if="line.couponDiscountCents > 0"> · 抵用 {{ formatMoney(line.couponDiscountCents / 100) }}</template></span></template>
                     </button>
                   </div>
                   <div class="cart-line__meta-slot cart-line__meta-slot--craftsmen">
@@ -8536,19 +8601,29 @@ onBeforeUnmount(() => {
       <div
         v-if="pendingCardPurchase"
         class="cashier-card-operation-editor"
+        :class="{ 'cashier-card-operation-editor--ordinary-sale': pendingCardPurchase.ordinaryCardSaleEditable }"
         role="dialog"
         aria-modal="true"
         aria-label="确认卡项内容"
         @click.self="closePendingCardPurchase"
       >
-        <div class="cashier-card-operation-editor__panel cashier-card-purchase-preview">
+        <div class="cashier-card-operation-editor__panel cashier-card-purchase-preview"
+          :class="{ 'cashier-card-purchase-preview--editable': pendingCardPurchase.ordinaryCardSaleEditable }">
           <header>
             <strong>确认卡项内容</strong>
             <span>{{ pendingCardPurchase.name }} · {{ pendingCardPurchase.cardRuleLabel }}</span>
           </header>
           <p>{{ cardPreviewRuleDescription(pendingCardPurchase.cardPreview) }}</p>
           <p>有效期：{{ cardPreviewValidityText(pendingCardPurchase.cardPreview.validity) }}</p>
-          <section class="cashier-card-purchase-preview__components" aria-label="卡内项目">
+          <section v-if="ordinaryCardEditRows" class="ordinary-card-sale-editor" aria-label="修改普通卡项目">
+            <div v-for="row in ordinaryCardEditRows" :key="row.relationId" class="ordinary-card-sale-editor__row">
+              <strong>{{ row.name }}<template v-if="row.specification"> · {{ row.specification }}</template></strong>
+              <label>项目总金额（元）<input v-model="row.amount" type="number" step="1" :min="Math.ceil(row.minimumCents / 100)" max="999999999"></label>
+              <label>次数<input v-model="row.times" type="number" step="1" :min="row.minimumTimes" max="99999999"></label>
+            </div>
+            <p v-if="ordinaryCardEditError" role="alert" class="ordinary-card-sale-editor__error">{{ ordinaryCardEditError }}</p>
+          </section>
+          <section v-else class="cashier-card-purchase-preview__components" aria-label="卡内项目">
             <div v-for="component in pendingCardPurchase.cardPreview.components" :key="`${component.name}-${component.specification}`">
               <span>{{ component.name }}<template v-if="component.specification"> · {{ component.specification }}</template></span>
               <strong v-if="pendingCardPurchase.cardPreview.ruleType === 'time'">单次核销 {{ formatPlainAmount(component.writeoffAmountCents / 100) }}</strong>
@@ -8556,27 +8631,69 @@ onBeforeUnmount(() => {
               <strong v-else-if="pendingCardPurchase.cardPreview.ruleType !== 'choice_count'">{{ component.writeTimes }} 次</strong>
             </div>
           </section>
+          <p v-if="pendingCardPurchase.ordinaryCardSaleEditable">整卡售价：{{ formatMoney(pendingCardPurchase.price) }}</p>
           <footer>
-            <button type="button" class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="closePendingCardPurchase">取消</button>
-            <button type="button" class="button button--primary" :disabled="isConfirmingCardPurchase" @click="confirmPendingCardPurchase">
-              {{ isConfirmingCardPurchase ? '正在加入…' : '确认加入购物车' }}
-            </button>
+            <template v-if="ordinaryCardEditRows">
+              <button class="button button--secondary" @click="ordinaryCardEditRows = null">取消修改</button>
+              <button class="button button--primary" @click="saveOrdinaryCardPurchase">保存修改</button>
+            </template>
+            <template v-else>
+              <button type="button" class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="closePendingCardPurchase">取消</button>
+              <button v-if="pendingCardPurchase.ordinaryCardSaleEditable && pendingCardPurchase.cardPreview.ruleType === 'normal'"
+                class="button button--secondary" :disabled="isConfirmingCardPurchase" @click="editOrdinaryCardPurchase">修改</button>
+              <button type="button" class="button button--primary" :disabled="isConfirmingCardPurchase" @click="confirmPendingCardPurchase">
+                {{ isConfirmingCardPurchase ? '正在加入…' : '确认加入购物车' }}
+              </button>
+            </template>
           </footer>
         </div>
       </div>
     </Teleport>
 
-    <Teleport to="body">
-      <div v-if="isCustomCardConflictOpen" class="cashier-card-operation-editor" role="dialog" aria-label="当前购物车已有内容">
-        <div class="cashier-card-operation-editor__panel">
-          <header><strong>当前购物车已有内容</strong></header>
-          <span>定制卡不能与其他商品同时结账，请先处理当前订单。</span>
-          <footer>
-            <button type="button" class="button button--secondary" @click="isCustomCardConflictOpen = false">取消</button>
-            <button type="button" class="button button--primary" :disabled="isClearingCart" @click="continueCustomCard">清空并继续</button>
-          </footer>
-        </div>
-      </div>
-    </Teleport>
   </section>
 </template>
+
+<style scoped>
+/* Only the newly authorized ordinary-card editor follows the visible viewport. */
+.cashier-card-operation-editor--ordinary-sale {
+  position: fixed;
+  box-sizing: border-box;
+  overflow: auto;
+  z-index: 1000;
+}
+.cashier-card-purchase-preview--editable {
+  box-sizing: border-box;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+}
+.ordinary-card-sale-editor {
+  display: grid;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+.ordinary-card-sale-editor__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e5e9f0;
+}
+.ordinary-card-sale-editor__row > strong {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+.ordinary-card-sale-editor__row label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.ordinary-card-sale-editor__row input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ordinary-card-sale-editor__error { margin: 0; color: #c62828; }
+.cashier-card-purchase-preview--editable footer { flex-wrap: wrap; }
+</style>

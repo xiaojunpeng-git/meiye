@@ -1,0 +1,688 @@
+M docker/nginx/local-cashier.conf
+ M scripts/start-local.sh
+MM tests/cashier-v3-checkout-payment-ui-gateway/js/static-contract.mjs
+ M tests/cashier-v3/evidence/R21-group-salesperson-direct-position-preaccept-2026-10-18.md
+ M tests/cashier-v3/js/cart-line-service-settings-deferred-contract.mjs
+D  tests/cashier-v3/js/old-data-entry-payment-methods.mjs
+ M tests/cashier-v3/js/order-attribution-command-context-contract.mjs
+ M tests/cashier-v3/js/personnel-performance-overlay-contract.mjs
+ M tests/cashier-v3/js/r15-line-coupon-frontend-contract.mjs
+ M tests/cashier-v3/js/r26-refund-page-gateway-contract.mjs
+ M tests/cashier-v3/js/r32-refund-date-contract.mjs
+MM tests/cashier-v3/php/c2-checkout-settlement-contract.php
+ M tests/cashier-v3/php/c2-entitlement-completion-contract.php
+ M tests/cashier-v3/php/card-operation-kernel-contract.php
+ M tests/cashier-v3/php/line-coupon-draft-contract.php
+ M tests/cashier-v3/php/manual-labor-fee-override-contract.php
+ M tests/cashier-v3/php/market-effective-member-day-mysql-integration.php
+ M tests/cashier-v3/php/member-entitlement-whole-yuan-contract.php
+MM tests/cashier-v3/php/old-card-accounting-config-contract.php
+MM tests/cashier-v3/php/old-card-entry-fact-equation-contract.php
+ M tests/cashier-v3/php/order-attribution-service-date-local-smoke.php
+ M tests/cashier-v3/php/order-center-sales-export-field-parity.php
+ M tests/cashier-v3/php/r17-card-actual-sale-final-settlement-mysql.php
+ M tests/cashier-v3/php/r20-refund-card-platform-category-mysql.php
+ M tests/cashier-v3/php/r24-refund-catalog-platform-category-mysql.php
+ M tests/cashier-v3/php/r38-supplement-product-category-mysql.php
+ M tests/cashier-v3/php/r42-refund-product-columns-contract.php
+ M tests/cashier-v3/php/salesperson-performance-sales-order-drilldown-contract.php
+ M tests/member-checkout/round6-benefits-static.cjs
+ M tests/member-checkout/round6-benefits.php
+ M tests/report-phase-four/php/pre-sale-bdegh-contract.php
+ M tests/report-phase-four/php/r22-six-dimension-standalone-refund-local.php
+ M tests/report-phase-seven/php/member-dashboard-contract.php
+ M tests/report-phase-seven/php/r94-member-consumption-readonly.php
+ M tests/report-phase-six/php/d3-salary-current-category-rollback.php
+ M tests/report-product-dashboard/run-static.sh
+ M tests/report-store-item-analysis/php/contract.php
+ M tests/report-store-item-analysis/php/historical-card-repayment-category-readonly.php
+ M 前端代码/admin/src/pages/marketing/storeCouponIssue/create.vue
+ M 前端代码/admin/src/pages/marketing/storeCouponIssue/index.vue
+ M 前端代码/admin/src/pages/marketing/storeCouponUser/index.vue
+ M 前端代码/admin/src/pages/setting/moheAi/index.vue
+ M 前端代码/admin/vue.config.js
+MM 前端代码/cashier-v3/src/components/cashier/CashierCheckoutOverlay.vue
+ M 前端代码/cashier-v3/src/components/cashier/CashierCouponSelectorOverlay.vue
+MM 前端代码/cashier-v3/src/dev/pdV3FixtureMain.js
+ M 前端代码/cashier-v3/src/layouts/CashierShell.vue
+MM 前端代码/cashier-v3/src/services/cashierV3Bridge.js
+MM 前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
+ M 前端代码/cashier-v3/src/views/EmployeeDashboardView.vue
+ M 前端代码/cashier-v3/src/views/StoreBusinessReportView.vue
+ M 前端代码/mobile-vue3/manifest.json
+ M 前端代码/mobile-vue3/pages.json
+ M 前端代码/mobile-vue3/src/merchant/pages/workbench/index.uvue
+ M 后端代码/app/common.php
+ M 后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php
+ M 后端代码/app/controller/admin/v1/report/UnifiedReport.php
+ M 后端代码/app/controller/admin/v1/store/OrderCenter.php
+ M 后端代码/app/controller/admin/v1/target/StoreTarget.php
+ M 后端代码/app/controller/cashier/v3/Report.php
+ M 后端代码/app/dao/activity/coupon/StoreCouponUserDao.php
+ M 后端代码/app/services/activity/coupon/StoreCouponIssueServices.php
+ M 后端代码/app/services/activity/coupon/StoreCouponUserServices.php
+ M 后端代码/app/services/activity/promotions/StorePromotionsServices.php
+ M 后端代码/app/services/cashier/v3/CashierV3CommandGatewayServices.php
+ M 后端代码/app/services/cashier/v3/CashierV3PersonnelIdentity.php
+ M 后端代码/app/services/cashier/v3/card/CashierV3CardComponentPurchaseAmountAuthority.php
+ M 后端代码/app/services/cashier/v3/card/CashierV3CardOperationAuthorityServices.php
+ M 后端代码/app/services/cashier/v3/card/CashierV3CardOperationKernel.php
+ M 后端代码/app/services/cashier/v3/card/CashierV3MultiCardUpgradeSettlementServices.php
+ M 后端代码/app/services/cashier/v3/cashier/CashierV3CashierMemberSummaryServices.php
+ M 后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php
+ M 后端代码/app/services/cashier/v3/cashier/CashierV3CashierPartitionProvider.php
+ M 后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php
+ M 后端代码/app/services/cashier/v3/cashier/CashierV3MemberDebtProjectionServices.php
+ M 后端代码/app/services/cashier/v3/checkout/CashierV3DirectSnapshotEntitlementSettlementServices.php
+ M 后端代码/app/services/cashier/v3/checkout/CashierV3EntitlementCompletionKernel.php
+ M 后端代码/app/services/cashier/v3/checkout/persistence/CashierV3EntitlementCompletionPlanV1.php
+ M 后端代码/app/services/cashier/v3/checkout/persistence/ThinkPhpCashierV3EntitlementCompletionWriter.php
+ M 后端代码/app/services/cashier/v3/checkout/provider/CashierV3MemberBalanceWriterAdapter.php
+MM 后端代码/app/services/cashier/v3/config/CashierV3BusinessConfigServices.php
+ M 后端代码/app/services/cashier/v3/dashboard/CashierV3StoreTargetDashboardReadModel.php
+MM 后端代码/app/services/cashier/v3/fact/CashierV3SaleOnlyFactAssembler.php
+ M 后端代码/app/services/cashier/v3/manifest/CashierV3ActionManifest.php
+ M 后端代码/app/services/cashier/v3/manifest/CashierV3C5MemberOrderModule.php
+ M 后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php
+ M 后端代码/app/services/cashier/v3/order/AbstractCashierV3OrderCenterUnifiedQueryProvider.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3OrderAttributionCorrectionServices.php
+MM 后端代码/app/services/cashier/v3/order/CashierV3OrderCenterRecordQueryServices.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3OrderCenterUnifiedQueryContract.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3OrderLifecycleModule.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3RefundAttributionServices.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3SalesOrderExportRows.php
+MM 后端代码/app/services/cashier/v3/order/CashierV3SalesOrderQueryServices.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3SupplementAttributionServices.php
+ M 后端代码/app/services/cashier/v3/order/CashierV3SupplementSalespersonAdjustmentServices.php
+ M 后端代码/app/services/cashier/v3/order/settlement/CashierV3SalesOrderPlanV1.php
+ M 后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php
+ M 后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCraftsmenSnapshot.php
+ M 后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftAuthorityRebuilder.php
+ M 后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutDraftDiscardServices.php
+MM 后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutProjectionServices.php
+MM 后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutSettlementKernel.php
+ M 后端代码/app/services/cashier/v3/settlement/CashierV3DebtRepaymentServices.php
+ M 后端代码/app/services/member/MemberCommerceBenefitsServices.php
+ M 后端代码/app/services/metric/MetricDictionaryServices.php
+ M 后端代码/app/services/mobile/merchant/MobileAuthRevocationServices.php
+ M 后端代码/app/services/mobile/merchant/MobileMerchantCapabilityCatalog.php
+ M 后端代码/app/services/order/PlatformOrderCenterReadServices.php
+MM 后端代码/app/services/organization/JobPositionPolicyServices.php
+ M 后端代码/app/services/product/product/StoreProductBatchProcessServices.php
+ M 后端代码/app/services/query/metric/MetricDefinitionRegistry.php
+ M 后端代码/app/services/report/CustomerAnalyticsServices.php
+ M 后端代码/app/services/report/GroupManagementDashboardTargetServices.php
+ M 后端代码/app/services/report/StoreReportPaymentSaleAllocationFactServices.php
+ M 后端代码/app/services/report/StoreUnifiedReportPhaseFourServices.php
+ M 后端代码/app/services/report/StoreUnifiedReportPhaseSixServices.php
+ M 后端代码/app/services/report/StoreUnifiedReportPhaseThreeServices.php
+ M 后端代码/app/services/report/StoreUnifiedReportPhaseTwoServices.php
+ M 后端代码/app/services/system/config/SystemConfigServices.php
+ M 后端代码/app/services/target/TargetSchemeServices.php
+ M 后端代码/config/swoole.php
+ M 后端代码/database/upgrades/2026-08-22-收银V3充值赠送冲销审计/03-升级后验证.sql
+ M 后端代码/database/upgrades/2026-08-28-岗位业绩独立核算标记/00-升级清单.md
+ D 后端代码/database/upgrades/2026-08-28-岗位业绩独立核算标记/04-实际执行记录.md
+ D 后端代码/database/upgrades/2026-09-04-瑞昊历史权益欠款关联修复/00-升级说明.md
+ D 后端代码/database/upgrades/2026-09-10-瑞昊历史欠款会员归属补漏/00-升级说明.md
+ M 后端代码/database/upgrades/2026-09-10-瑞昊历史欠款会员归属补漏/01-执行.php
+ D 后端代码/database/upgrades/2026-09-17-瑞昊会员业务全量重导/数据导入方案.md
+ D 后端代码/database/upgrades/2026-09-17-瑞昊历史欠款补交收款事实回填/00-升级说明.md
+ M 后端代码/route/api-mobile.php
+?? scripts/deploy/
+?? scripts/diy-product-types-release-build.cjs
+?? scripts/diy-product-types-release-install.php
+?? scripts/diy-product-types-release-preview.cjs
+?? scripts/diy-product-types-release-probe.mjs
+?? scripts/diy-product-types-release-public.mjs
+?? scripts/diy-product-types-release.mjs
+?? scripts/m011-accounting-config-repair.php
+?? scripts/m011-checkout-result-readonly.php
+?? scripts/m011-error-log-permission.php
+?? scripts/m011-front-build.cjs
+?? scripts/m011-front-release.cjs
+?? scripts/member-center-r8-public-check.cjs
+?? scripts/member-center-rh-release.php
+?? scripts/member-commerce-release-front-baseline.mjs
+?? scripts/member-commerce-release-install.php
+?? scripts/member-commerce-release-isolated-test.mjs
+?? scripts/member-commerce-release-preview.cjs
+?? scripts/member-commerce-release-probe.mjs
+?? scripts/member-commerce-release-probe.php
+?? scripts/member-commerce-release.mjs
+?? scripts/member-round5-release-build.cjs
+?? scripts/member-round5-release.mjs
+?? scripts/r2-category-deploy.py
+?? scripts/r2-category-prepare-release.py
+?? scripts/r2-category-release-probe.php
+?? scripts/r2-partner-hotfix-release.py
+?? scripts/r29-instance-database.php
+?? scripts/r29-release-probe.php
+?? scripts/r37-instance-config.php
+?? scripts/r47-sales-debt-balance-release.mjs
+?? scripts/r47-sales-debt-balance-release.php
+?? scripts/r48-baseline-proof.mjs
+?? scripts/r48-commit-fixed.mjs
+?? scripts/r48-coupon-allowance-probe.mjs
+?? scripts/r48-coupon-release.php
+?? scripts/r48-isolated-tests.mjs
+?? scripts/r48-prepare-candidate.mjs
+?? scripts/r48-release-build.cjs
+?? scripts/r48-release.mjs
+?? scripts/r48-source-provenance.mjs
+?? scripts/r54-entitlement-release.mjs
+?? scripts/r56-refund-release.mjs
+?? scripts/r61-build-release.mjs
+?? scripts/r61-prepare-release.mjs
+?? scripts/r61-release-probe.php
+?? scripts/r61-release.mjs
+?? scripts/r61-shared-count-candidate.mjs
+?? scripts/r62-annual-release-probe.php
+?? scripts/r63-health-candidate-test.mjs
+?? scripts/r63-health-deploy.mjs
+?? scripts/r63-health-probe.mjs
+?? scripts/r63-health-release-probe.php
+?? scripts/r65-marketing-archive-commit.mjs
+?? scripts/r65-marketing-build-release.mjs
+?? scripts/r65-marketing-commit.mjs
+?? scripts/r65-marketing-deploy.mjs
+?? scripts/r65-marketing-final-archive-commit.mjs
+?? scripts/r65-marketing-prepare-release.mjs
+?? scripts/r65-marketing-preview-archive-commit.mjs
+?? scripts/r65-marketing-preview-deploy.mjs
+?? scripts/r65-marketing-probe.mjs
+?? scripts/r65-marketing-release-probe.php
+?? scripts/r66-coupon-admin-deploy.mjs
+?? scripts/r67-008-combination-deploy.mjs
+?? scripts/r67-008-combination-probe.php
+?? scripts/r67-category-statistics-release.mjs
+?? scripts/r68-headquarters-archive-release.mjs
+?? scripts/r68-headquarters-commit-php74.mjs
+?? scripts/r68-headquarters-commit-r38.mjs
+?? scripts/r68-headquarters-commit.mjs
+?? scripts/r68-headquarters-deploy.mjs
+?? scripts/r68-headquarters-drilldown-commit.mjs
+?? scripts/r68-headquarters-drilldown-deploy.mjs
+?? scripts/r68-headquarters-freeze-php74.mjs
+?? scripts/r68-headquarters-freeze-r38.mjs
+?? scripts/r68-headquarters-package-entries.mjs
+?? scripts/r68-headquarters-prepare-release.mjs
+?? scripts/r68-headquarters-rebase-r38.mjs
+?? scripts/r69-beauty-item-deploy.mjs
+?? scripts/r70-deploy.mjs
+?? scripts/r70-isolate-candidate.mjs
+?? scripts/r71-isolate-candidate.mjs
+?? scripts/r72-deploy.mjs
+?? scripts/r72-freeze-release.mjs
+?? scripts/r72-isolate-commit.mjs
+?? scripts/r72-prepare-release.mjs
+?? scripts/r73-commit-release.mjs
+?? scripts/r73-deploy.mjs
+?? scripts/r73-isolate-release.mjs
+?? scripts/r74-deploy.mjs
+?? scripts/r74-isolate-candidate.mjs
+?? scripts/r76-commit-release.mjs
+?? scripts/r76-deploy.mjs
+?? scripts/r76-isolate-release.mjs
+?? scripts/r77-deploy.mjs
+?? scripts/r77-isolate-commit.mjs
+?? scripts/r78-deploy.mjs
+?? scripts/r78-isolate-commit.mjs
+?? scripts/r79-deploy.mjs
+?? scripts/r79-isolate-commit.mjs
+?? scripts/r79-release-probe.php
+?? scripts/r82-isolate-release.mjs
+?? scripts/r83-deploy.mjs
+?? scripts/r83-release-probe.php
+?? scripts/r87-release-probe.php
+?? scripts/r87-release.mjs
+?? scripts/r89-prepare.mjs
+?? scripts/r89-publish.mjs
+?? scripts/r89-release-probe.php
+?? scripts/r89-release.mjs
+?? scripts/r90-deploy-008.mjs
+?? scripts/r90-inspect.mjs
+?? scripts/r90-verify-entrypoints.mjs
+?? scripts/r90-verify-live.mjs
+?? scripts/r91-prepare-release.mjs
+?? scripts/r91-publish.mjs
+?? scripts/r91-release-inspect.mjs
+?? scripts/r91-release-probe.mjs
+?? scripts/r91-release-probe.php
+?? scripts/r92-prepare-release.mjs
+?? scripts/r92-publish.mjs
+?? scripts/r92-release-inspect.mjs
+?? scripts/r92-release-probe.mjs
+?? scripts/r92-release-probe.php
+?? scripts/r93-release-probe-extra.php
+?? scripts/r93-release.mjs
+?? scripts/r94-release-build.cjs
+?? scripts/r94-release-install.php
+?? scripts/r95-008-packet-config.php
+?? scripts/r95-admin-release-build.cjs
+?? scripts/r95-release-inspect.php
+?? scripts/r95-release-install.php
+?? scripts/ruihao-local-sync-export.php
+?? scripts/ruihao-local-sync-import.mjs
+?? scripts/ruihao-local-sync-verify.mjs
+?? tests/admin/
+?? tests/cashier-v3/evidence/R1-current-category-cross-report-local-2026-10-17.md
+?? tests/cashier-v3/evidence/R1-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R12-platform-all-orders-menu-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/R12-platform-all-orders-position-rules-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/R12-platform-order-center-rh-008-release-2026-10-16.md
+?? tests/cashier-v3/evidence/R12-platform-order-center-scope-permission-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/R14-combination-card-entitlement-amount-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/R14-labor-fee-integer-input-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/R14-labor-layout-rh-008-release-2026-10-16.md
+?? tests/cashier-v3/evidence/R14-large-order-rh-008-release-2026-10-18.md
+?? tests/cashier-v3/evidence/R15-member-consumption-economic-activity-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/R15-member-consumption-economic-activity-rh-008-release-2026-10-16.md
+?? tests/cashier-v3/evidence/R15-service-consumption-labor-rh-008-release-2026-10-18.md
+?? tests/cashier-v3/evidence/R19-salesperson-performance-terminal-facts-fixed-version-2026-10-17.md
+?? tests/cashier-v3/evidence/R19-salesperson-performance-terminal-facts-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R2-category-baseline-2026-10-17.json
+?? tests/cashier-v3/evidence/R2-category-fixed-version-2026-10-17.json
+?? tests/cashier-v3/evidence/R2-category-release-candidate-2026-10-17.json
+?? tests/cashier-v3/evidence/R2-category-round-only-2026-10-17.patch
+?? tests/cashier-v3/evidence/R2-category-source-local-2026-10-17.jpg
+?? tests/cashier-v3/evidence/R2-partner-name-hotfix-2026-10-17.json
+?? tests/cashier-v3/evidence/R2-partner-name-hotfix-2026-10-17.patch
+?? tests/cashier-v3/evidence/R2-partner-name-hotfix-rh-008-release-2026-10-17.json
+?? tests/cashier-v3/evidence/R2-rh-008-release-2026-10-17.json
+?? tests/cashier-v3/evidence/R2-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R20-current-category-order-center-fixed-version-2026-10-17.md
+?? tests/cashier-v3/evidence/R20-current-category-order-center-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R22-refund-display-followup-fixed-version-2026-10-18.md
+?? tests/cashier-v3/evidence/R24-reservation-shared-pool-2026-10-21/index-before.sha256
+?? tests/cashier-v3/evidence/R24-reservation-shared-pool-2026-10-21/staged-before.txt
+?? tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/index-before.sha256
+?? tests/cashier-v3/evidence/R25-refund-void-current-bonus-2026-10-22/staged-preservation-before.json
+?? tests/cashier-v3/evidence/R28-category-rh-008-release-2026-10-16.md
+?? tests/cashier-v3/evidence/R28-order-center-item-category-selftest-2026-10-16.md
+?? tests/cashier-v3/evidence/R28-sales-order-category-selftest-2026-10-16.md
+?? tests/cashier-v3/evidence/R28-supplement-project-category-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/R29-balance-project-category-local-2026-10-16.md
+?? tests/cashier-v3/evidence/R29-balance-project-editor-2026-10-16.png
+?? tests/cashier-v3/evidence/R29-balance-refund-ledger-v8-release-2026-10-16.md
+?? tests/cashier-v3/evidence/R29-balance-refund-local-selftest-2026-10-16.md
+?? tests/cashier-v3/evidence/R3-coupon-empty-diagnosis-2026-10-17.json
+?? tests/cashier-v3/evidence/R3-order-coupon-fixed-candidate-2026-10-17.md
+?? tests/cashier-v3/evidence/R3-order-coupon-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R33-other-salesperson-local-2026-10-16.md
+?? tests/cashier-v3/evidence/R34-other-salesperson-rh-008-release-2026-10-16.md
+?? tests/cashier-v3/evidence/R34-unified-refund-other-salesperson-local-2026-10-16.md
+?? tests/cashier-v3/evidence/R35-order-center-export-query-parity-2026-10-16.md
+?? tests/cashier-v3/evidence/R35-order-center-export-repeat-identifiers-local-2026-10-16.md
+?? tests/cashier-v3/evidence/R37-custom-card-entry-switch-local-2026-10-17.md
+?? tests/cashier-v3/evidence/R37-custom-card-switch-admin-local-2026-10-17.png
+?? tests/cashier-v3/evidence/R37-custom-card-upgrade-entry-follow-up-2026-10-17.md
+?? tests/cashier-v3/evidence/R37-debt-cart-entry-switch-follow-up-2026-10-17.md
+?? tests/cashier-v3/evidence/R37-isolated-release-candidate-2026-10-17.md
+?? tests/cashier-v3/evidence/R37-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R38-auto-craftsman-whole-yuan-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R38-reservation-end-service-missing-rows-local-2026-10-17.md
+?? tests/cashier-v3/evidence/R38-reservation-end-service-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R38-salesperson-net-detail-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R4-partner-independent-labor-fixed-2026-10-17.md
+?? tests/cashier-v3/evidence/R4-partner-independent-service-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/R44-old-data-entry-preaccept-2026-10-19.md
+?? tests/cashier-v3/evidence/R45-annual-visit-filter-rh-008-release-2026-10-20.md
+?? tests/cashier-v3/evidence/R46-independent-refund-bonus-rh-008-release-2026-10-21.md
+?? tests/cashier-v3/evidence/R47-commit-receipt-2026-10-21.json
+?? tests/cashier-v3/evidence/R47-live-baseline-2026-10-21.json
+?? tests/cashier-v3/evidence/R47-release-candidate-2026-10-21.json
+?? tests/cashier-v3/evidence/R47-release-candidate-2026-10-21.patch
+?? tests/cashier-v3/evidence/R47-release-preparation-2026-10-21.md
+?? tests/cashier-v3/evidence/R47-sales-debt-balance-2026-10-21.json
+?? tests/cashier-v3/evidence/R47-sales-debt-balance-2026-10-21.patch
+?? tests/cashier-v3/evidence/R47-sales-debt-balance-preaccept-2026-10-21.md
+?? tests/cashier-v3/evidence/R47-sales-debt-balance-rh-008-release-2026-10-21.json
+?? tests/cashier-v3/evidence/R47-sales-debt-balance-rh-008-release-2026-10-21.md
+?? tests/cashier-v3/evidence/R48-amount-610.png
+?? tests/cashier-v3/evidence/R48-before.json
+?? tests/cashier-v3/evidence/R48-builds.json
+?? tests/cashier-v3/evidence/R48-cart-200.png
+?? tests/cashier-v3/evidence/R48-fixed-files.json
+?? tests/cashier-v3/evidence/R48-fixed.patch
+?? tests/cashier-v3/evidence/R48-order-voided.png
+?? tests/cashier-v3/evidence/R48-platform-lint-comparison.json
+?? tests/cashier-v3/evidence/R48-preaccept-2026-10-22.md
+?? tests/cashier-v3/evidence/R48-quantity-keeps-88.png
+?? tests/cashier-v3/evidence/R48-r47-regression.json
+?? tests/cashier-v3/evidence/R48-release/
+?? tests/cashier-v3/evidence/R48-tests.json
+?? tests/cashier-v3/evidence/cart-clear-workspace-local-2026-10-17.md
+?? tests/cashier-v3/evidence/cashier-clear-coupon-entitlement-2026-10-17.md
+?? tests/cashier-v3/evidence/cashier-clear-coupon-entitlement-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/field-acquisition-whole-yuan-rh-008-release-2026-10-18.md
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/008-baseline-comparison.json
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/008-preflight.json
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/008-unmatched-live-vs-baseline.diff
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/live-source-provenance.json
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/release-hold.json
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/rh-baseline-comparison.json
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/rh-preflight.json
+?? tests/cashier-v3/evidence/m010-custom-card-2026-10-22/rh-unmatched-live-vs-baseline.diff
+?? tests/cashier-v3/evidence/m011-008-custom-card-2026-10-22/
+?? tests/cashier-v3/evidence/order-center-service-source-editable-2026-10-16.png
+?? tests/cashier-v3/evidence/order-center-source-dropdown-2026-10-16.patch
+?? tests/cashier-v3/evidence/order-center-source-dropdown-and-service-source-2026-10-16.patch
+?? tests/cashier-v3/evidence/order-center-source-dropdown-and-service-source-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/order-center-source-dropdown-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/order-center-source-filter-2026-10-16.patch
+?? tests/cashier-v3/evidence/order-center-source-filter-fixed-version-2026-10-16.md
+?? tests/cashier-v3/evidence/round-6-custom-card-name-tag-local-2026-10-17.md
+?? tests/cashier-v3/evidence/round-6-custom-card-repay-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/round-6-member-debt-repay-button-local-2026-10-17.md
+?? tests/cashier-v3/evidence/round-7-multi-card-upgrade-row-rh-008-release-2026-10-17.md
+?? tests/cashier-v3/evidence/salesperson-performance-popup-net-local-2026-10-17.md
+?? tests/cashier-v3/js/automatic-craftsman-amounts.mjs
+?? tests/cashier-v3/js/cart-clear-workspace-contract.mjs
+?? tests/cashier-v3/js/cashier-entitlement-footer-total.mjs
+?? tests/cashier-v3/js/m011-payment-result-status.mjs
+?? tests/cashier-v3/js/old-data-entry-payment-methods.mjs
+?? tests/cashier-v3/js/order-center-export-query-parity.mjs
+?? tests/cashier-v3/js/r14-combination-card-entitlement-amount.mjs
+?? tests/cashier-v3/js/r14-labor-fee-integer-input.mjs
+?? tests/cashier-v3/js/r3-order-coupon-cart-contract.mjs
+?? tests/cashier-v3/js/r34-unified-refund-other-salesperson-contract.mjs
+?? tests/cashier-v3/js/r47-sales-debt-balance-contract.mjs
+?? tests/cashier-v3/js/r48-coupon-allowance.mjs
+?? tests/cashier-v3/m011-payment-result-fixture.html
+?? tests/cashier-v3/php/order-attribution-service-source-local-smoke.php
+?? tests/cashier-v3/php/order-center-all-source-filter.php
+?? tests/cashier-v3/php/order-center-export-mixed-field-parity.php
+?? tests/cashier-v3/php/order-center-export-repeat-document-fields.php
+?? tests/cashier-v3/php/partner-summary-result-filter-local-readonly.php
+?? tests/cashier-v3/php/r14-combination-card-entitlement-amount.php
+?? tests/cashier-v3/php/r15-member-consumption-economic-activity-contract.php
+?? tests/cashier-v3/php/r15-member-consumption-economic-activity-local.php
+?? tests/cashier-v3/php/r2-partner-missing-name-readonly.php
+?? tests/cashier-v3/php/r2-partner-share-category-rollback.php
+?? tests/cashier-v3/php/r2-unified-report-category-rollback.php
+?? tests/cashier-v3/php/r20-order-center-cross-store-category-readonly.php
+?? tests/cashier-v3/php/r22-field-acquisition-refund-display-local.php
+?? tests/cashier-v3/php/r28-order-center-item-category-local.php
+?? tests/cashier-v3/php/r28-supplement-project-category-local.php
+?? tests/cashier-v3/php/r29-balance-project-category-local.php
+?? tests/cashier-v3/php/r29-balance-refund-ledger-local.php
+?? tests/cashier-v3/php/r29-balance-refund-rollback.php
+?? tests/cashier-v3/php/r33-other-salesperson-projection.php
+?? tests/cashier-v3/php/r37-custom-card-entry-switch.php
+?? tests/cashier-v3/php/r38-reservation-completion-rows.php
+?? tests/cashier-v3/php/r38-reservation-paid-entitlement-mysql.php
+?? tests/cashier-v3/php/r4-partner-independent-service-readonly.php
+?? tests/cashier-v3/php/r47-sales-debt-balance-local.php
+?? tests/cashier-v3/php/r47-sales-debt-v3-allocation-local.php
+?? tests/cashier-v3/php/r48-coupon-allowance-mysql.php
+?? tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php
+?? tests/cashier-v3/php/r85-entitlement-checkout-source-write-readonly.php
+?? tests/cashier-v3/php/refund-category-allocation-contract.php
+?? tests/cashier-v3/php/refund-current-category-cross-view-mysql.php
+?? tests/customer-008/evidence/2026-10-19-round1-008-live-addon.jpg
+?? tests/customer-008/evidence/2026-10-19-round1-008-live-filter.jpg
+?? tests/customer-008/evidence/2026-10-19-round1-rh-push-008-release.json
+?? tests/customer-008/evidence/2026-10-19-round2-008-staff-editor-live.png
+?? tests/customer-008/evidence/2026-10-19-round2-008-store-style-live.png
+?? tests/customer-008/evidence/2026-10-19-round2-material-library-live.jpg
+?? tests/customer-008/evidence/2026-10-19-round2-material-library-url-008-applied.md
+?? tests/customer-008/evidence/2026-10-19-round2-material-library-url-prefix.jpg
+?? tests/customer-008/evidence/2026-10-19-round2-rh-login-live.png
+?? tests/customer-008/evidence/2026-10-19-round2-rh-member-live.png
+?? tests/customer-008/evidence/2026-10-19-round2-staff-avatar-008-applied.md
+?? tests/customer-008/evidence/2026-10-19-round2-staff-avatar-live.jpg
+?? tests/customer-008/evidence/2026-10-19-round2-store-display-008-applied.md
+?? tests/customer-008/evidence/2026-10-19-round2-store-display-before.png
+?? tests/customer-008/evidence/2026-10-19-round2-store-display-live.png
+?? tests/customer-008/evidence/2026-10-19-round2-store-list-live.png
+?? tests/customer-008/evidence/2026-10-19-round2-store-switch-live.png
+?? tests/customer-008/evidence/2026-10-20-round2-008-links-live.png
+?? tests/customer-008/evidence/2026-10-20-round2-008-member-live.png
+?? tests/customer-008/evidence/2026-10-20-round2-rh-push-008-release.json
+?? tests/diy-menu-spacing/evidence/2026-10-19-menu-outer-margin-desktop.png
+?? tests/diy-menu-spacing/evidence/2026-10-19-menu-outer-margin-local-commit.md
+?? tests/diy-menu-spacing/evidence/2026-10-19-menu-outer-margin-mobile.png
+?? tests/diy-product-types/evidence/commit-receipt.json
+?? tests/diy-product-types/evidence/release/
+?? tests/diy-staff-component/2026-10-19-stacked-375.png
+?? tests/diy-store-list/evidence/2026-10-19-store-name-horizontal-local-commit.md
+?? tests/diy-store-list/evidence/name-hidden-desktop.png
+?? tests/diy-store-list/evidence/style-four-320.png
+?? tests/diy-store-list/evidence/style-four-375.png
+?? tests/diy-store-list/evidence/style-four-desktop.png
+?? tests/diy-store-list/evidence/style-four-proof.png
+?? tests/diy-theme-follow/evidence/2026-10-20-commit-receipt.json
+?? tests/inventory/evidence/R31-rh-008-release-2026-10-16.md
+?? tests/inventory/evidence/R43-organization-descendant-read-rh-008-release-2026-10-18.md
+?? tests/inventory/evidence/R43-platform-organization-store-read-rh-008-release-2026-10-18.md
+?? tests/inventory/evidence/R43-platform-stock-all-stores-local-2026-10-17.md
+?? tests/inventory/evidence/R43-rh-008-release-2026-10-17.md
+?? tests/member-center-save/evidence/008-original-draft.png
+?? tests/member-center-save/evidence/008-personal-center-online.png
+?? tests/member-center-save/evidence/008-save-check.json
+?? tests/member-center-save/evidence/rh-personal-center-online.png
+?? tests/member-center-save/evidence/round8-rh-push-008-release-2026-10-21.md
+?? tests/member-center-save/evidence/round8-rh-push-008-result.json
+?? tests/member-checkout/evidence/button-layout-2026-10-22/
+?? tests/member-checkout/evidence/card-purchase.png
+?? tests/member-checkout/evidence/card-redemption.png
+?? tests/member-checkout/evidence/checkout-320.png
+?? tests/member-checkout/evidence/checkout-375.png
+?? tests/member-checkout/evidence/combined-375.png
+?? tests/member-checkout/evidence/member-orders.png
+?? tests/member-checkout/evidence/project-purchase.png
+?? tests/member-checkout/evidence/project-redemption.png
+?? tests/member-checkout/evidence/release/008-after-probe.json
+?? tests/member-checkout/evidence/release/008-before.json
+?? tests/member-checkout/evidence/release/008-candidate-probe.json
+?? tests/member-checkout/evidence/release/008-checkout-live-frame.png
+?? tests/member-checkout/evidence/release/008-checkout-live.png
+?? tests/member-checkout/evidence/release/008-default-sources-live.png
+?? tests/member-checkout/evidence/release/008-installed.json
+?? tests/member-checkout/evidence/release/008-public-baseline.json
+?? tests/member-checkout/evidence/release/008-verified.json
+?? tests/member-checkout/evidence/release/admin-baseline-parity.json
+?? tests/member-checkout/evidence/release/committed.json
+?? tests/member-checkout/evidence/release/fixed-build-checkout.png
+?? tests/member-checkout/evidence/release/member-baseline-parity.json
+?? tests/member-checkout/evidence/release/payload.json
+?? tests/member-checkout/evidence/release/result.json
+?? tests/member-checkout/evidence/release/rh-after-probe.json
+?? tests/member-checkout/evidence/release/rh-before.json
+?? tests/member-checkout/evidence/release/rh-candidate-probe.json
+?? tests/member-checkout/evidence/release/rh-installed.json
+?? tests/member-checkout/evidence/release/rh-member-live.png
+?? tests/member-checkout/evidence/release/rh-platform-live.png
+?? tests/member-checkout/evidence/release/rh-public-baseline.json
+?? tests/member-checkout/evidence/release/rh-verified.json
+?? tests/member-checkout/evidence/round5-release/
+?? tests/member-checkout/evidence/round6-empty-integral-config-hotfix-fixed-version-2026-10-20.md
+?? tests/member-checkout/evidence/store-card-purchase-success.png
+?? tests/member-checkout/evidence/store-orders.png
+?? tests/member-checkout/evidence/store-pure-redemption-success.png
+?? tests/member-checkout/evidence/store-two-orders.png
+?? tests/member-checkout/evidence/theme-actions-2026-10-22/
+?? tests/member-mini-package/2026-10-20-008-upload-result.json
+?? tests/member-mini-package/2026-10-20-round4-fixed-candidate.json
+?? tests/member-mini-package/2026-10-20-upload-pending.md
+?? tests/member-mini-package/2026-10-21-background-upload.md
+?? tests/member-mini-package/2026-10-21-layout-upload.md
+?? tests/member-mini-package/2026-10-21-recharge-style-upload.md
+?? tests/member-mini-package/2026-10-21-round8-upload.md
+?? tests/member-mini-package/2026-10-22-presentation-upload.md
+?? tests/mobile-auth/evidence/R10A-rh-008-mini-upload-2026-10-17.md
+?? tests/mobile-auth/evidence/R10B-rh-008-release-2026-10-16.md
+?? tests/mobile-auth/evidence/R11A-rh-008-mini-upload-2026-10-17.md
+?? tests/mobile-auth/evidence/R11B-rh-008-mini-upload-2026-10-17.md
+?? tests/mobile-warehouse/evidence/R8J-home-ranking-all-local-2026-10-16.md
+?? tests/mobile-warehouse/evidence/R8K-rh-008-mini-upload-2026-10-16.md
+?? tests/mobile-warehouse/evidence/R8K-rh-008-release-2026-10-16.md
+?? tests/mobile-warehouse/evidence/R9D-rh-008-mini-upload-2026-10-16.md
+?? tests/mohe-ai/evidence/R8C-rh-008-release-2026-10-16.md
+?? tests/mohe-ai/evidence/R8H-rh-008-release-2026-10-16.md
+?? tests/mohe-ai/evidence/R8H-rh-online-answer-2026-10-16.png
+?? tests/mohe-ai/evidence/R9-008-live-2026-10-16.png
+?? tests/mohe-ai/evidence/R9-rh-008-mini-upload-2026-10-16.md
+?? tests/mohe-ai/evidence/R9-rh-008-release-2026-10-16.md
+?? tests/mohe-ai/evidence/R9-rh-live-2026-10-16.png
+?? tests/platform-admin/evidence/R66-coupon-quark-fixed-version-2026-10-16.md
+?? tests/platform-admin/evidence/R67-category-statistics-fixed-version-2026-10-16.md
+?? tests/platform-admin/evidence/R67-category-statistics-rh-008-release-2026-10-16.md
+?? tests/platform-admin/js/
+?? tests/platform-card-rules/evidence/R67-008-combination-platform-candidate-2026-10-16.md
+?? tests/platform-card-rules/js/r67-combination-admin-build-contract.mjs
+?? tests/report-group-dashboard/evidence/R39-group-dashboard-rh-008-release-2026-10-17.md
+?? tests/report-group-dashboard/evidence/r91-2026-10-18/commit-receipt.json
+?? tests/report-group-dashboard/evidence/r92-2026-10-18/commit-receipt.json
+?? tests/report-guest-display/evidence/
+?? tests/report-phase-four/evidence/R13-private-item-category-name-cost-fixed-version-2026-10-16.md
+?? tests/report-phase-four/evidence/R13-private-item-rh-008-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R14-private-efficiency-service-popup-fixed-version-2026-10-16.md
+?? tests/report-phase-four/evidence/R62-annual-member-exact-product-local-2026-10-16.md
+?? tests/report-phase-four/evidence/R63-operations-health-008-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R63-operations-health-rh-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R63-operations-health-source-local-2026-10-16.md
+?? tests/report-phase-four/evidence/R65-marketing-category-name-fixed-version-2026-10-16.md
+?? tests/report-phase-four/evidence/R65-marketing-rh-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R69-beauty-item-display-drill-fixed-version-2026-10-16.md
+?? tests/report-phase-four/evidence/R70-isolated-release-candidate-2026-10-16.md
+?? tests/report-phase-four/evidence/R70-rh-008-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R70-unified-detail-local-2026-10-16.md
+?? tests/report-phase-four/evidence/R71-referral-source-cohort-fixed-version-2026-10-16.md
+?? tests/report-phase-four/evidence/R71-referral-source-cohort-rh-008-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R72-unified-detail-filter-fixed-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R72-unified-detail-filter-local-2026-10-16.md
+?? tests/report-phase-four/evidence/R72-unified-detail-filter-rh-008-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R73-unified-detail-xlsx-local.md
+?? tests/report-phase-four/evidence/R73-unified-detail-xlsx-release-2026-10-16.md
+?? tests/report-phase-four/evidence/R74-post-sale-member-day-local-2026-10-16.md
+?? tests/report-phase-four/evidence/R75-health-three-cash-columns-local-2026-10-16.md
+?? tests/report-phase-four/evidence/R76-beauty-category-actual-local-2026-10-17.md
+?? tests/report-phase-four/evidence/R76-rh-008-release-2026-10-17.md
+?? tests/report-phase-four/evidence/R77-product-actual-local-2026-10-17.md
+?? tests/report-phase-four/evidence/R77-rh-008-release-2026-10-17.md
+?? tests/report-phase-four/evidence/R78-product-headquarters-actual-local-2026-10-17.md
+?? tests/report-phase-four/evidence/R78-rh-008-release-2026-10-17.md
+?? tests/report-phase-four/evidence/R79-named-reports-actual-local-2026-10-17.md
+?? tests/report-phase-four/evidence/R79-rh-008-release-2026-10-17.md
+?? tests/report-phase-four/evidence/R80-imported-repayment-people-local-2026-10-17.md
+?? tests/report-phase-four/evidence/R80-rh-008-release-2026-10-17.md
+?? tests/report-phase-four/evidence/R82-isolated-release-candidate-2026-10-17.md
+?? tests/report-phase-four/evidence/R82-old-card-entry-repayment-people-local-2026-10-17.md
+?? tests/report-phase-four/evidence/R82-rh-008-release-2026-10-17.md
+?? tests/report-phase-four/evidence/R83-report-count-cohort-local-2026-10-17.md
+?? tests/report-phase-four/evidence/R83-rh-008-release-2026-10-17.md
+?? tests/report-phase-four/evidence/R84-beauty-item-isolated-candidate-2026-10-17.md
+?? tests/report-phase-four/evidence/R84-beauty-item-performance-local-2026-10-17.md
+?? tests/report-phase-four/js/r14-private-efficiency-service-popup-contract.mjs
+?? tests/report-phase-four/js/r69-beauty-item-display-drill-contract.mjs
+?? tests/report-phase-four/js/r70-unified-detail-contract.mjs
+?? tests/report-phase-four/js/r72-unified-detail-filter-contract.mjs
+?? tests/report-phase-four/js/r73-unified-detail-xlsx-contract.mjs
+?? tests/report-phase-four/php/r13-private-item-category-name-local.php
+?? tests/report-phase-four/php/r33-six-dimension-efficiency-visits-local.php
+?? tests/report-phase-four/php/r61-item-performance-benchmark.php
+?? tests/report-phase-four/php/r61-item-performance-local.php
+?? tests/report-phase-four/php/r62-annual-member-company-local.php
+?? tests/report-phase-four/php/r62-annual-member-product-name-local.php
+?? tests/report-phase-four/php/r63-operations-health-source-local.php
+?? tests/report-phase-four/php/r65-historical-card-repayment-items-local.php
+?? tests/report-phase-four/php/r65-marketing-category-name-local.php
+?? tests/report-phase-four/php/r71-referral-local-readonly.php
+?? tests/report-phase-four/php/r71-referral-source-cohort-contract.php
+?? tests/report-phase-four/php/r72-cash-detail-chinese-label.php
+?? tests/report-phase-four/php/r72-unified-detail-filter.php
+?? tests/report-phase-four/php/r73-unified-detail-xlsx.php
+?? tests/report-phase-four/php/r74-post-sale-member-day-local.php
+?? tests/report-phase-four/php/r75-marketing-health-net-refund-local.php
+?? tests/report-phase-four/php/r76-beauty-category-actual-local.php
+?? tests/report-phase-four/php/r77-product-actual-local.php
+?? tests/report-phase-four/php/r78-product-headquarters-actual-local.php
+?? tests/report-phase-four/php/r79-expanded-named-actual-local.php
+?? tests/report-phase-four/php/r79-named-report-actual-local.php
+?? tests/report-phase-four/php/r80-imported-repayment-count-local.php
+?? tests/report-phase-four/php/r82-old-card-entry-repayment-count-local.php
+?? tests/report-phase-four/php/r83-report-count-cohort-contract.php
+?? tests/report-phase-four/php/r83-report-count-cohort-local.php
+?? tests/report-phase-four/php/r84-beauty-item-benchmark.php
+?? tests/report-phase-four/php/r84-beauty-item-contract.php
+?? tests/report-phase-seven/evidence/R13-dashboard-full-actual-fixed-version-2026-10-17.md
+?? tests/report-phase-seven/evidence/R13-rh-008-release-2026-10-17.md
+?? tests/report-phase-seven/evidence/R94-rh-008-supplemental-release-2026-10-20.md
+?? tests/report-phase-seven/evidence/r94-release-2026-10-20/
+?? tests/report-phase-seven/php/r13-dashboard-full-actual-parity-local.php
+?? tests/report-phase-six/evidence/HQ-first-order-non-A-fixed-version-2026-10-16.md
+?? tests/report-phase-six/evidence/R14-hq-first-order-rh-008-release-2026-10-16.md
+?? tests/report-phase-six/evidence/R27-featured-card-component-detail-selftest-2026-10-16.md
+?? tests/report-phase-six/evidence/R30-featured-monthly-goals-fixed-version-2026-10-16.md
+?? tests/report-phase-six/evidence/R64-acquisition-exclude-a-local-2026-10-16.md
+?? tests/report-phase-six/evidence/R64-acquisition-exclude-a-release-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-annual-cash-local-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-drilldown-008-release-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-drilldown-hotfix-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-drilldown-rh-release-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-isolated-release-candidate-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-php74-release-candidate-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-r38-release-candidate-2026-10-16.md
+?? tests/report-phase-six/evidence/R68-headquarters-rh-008-release-2026-10-16.md
+?? tests/report-phase-six/evidence/R85-acquisition-checkout-source-local-2026-10-17.md
+?? tests/report-phase-six/evidence/R85-source-data-repair-candidate-2026-10-17.md
+?? tests/report-phase-six/evidence/R85-source-data-repair-rh-release-2026-10-17.md
+?? tests/report-phase-six/evidence/zero-column-visibility-rh-008-release-2026-10-17.md
+?? tests/report-phase-six/js/r68-headquarters-drilldown-contract.mjs
+?? tests/report-phase-six/js/r68-headquarters-year-filter-contract.mjs
+?? tests/report-phase-six/php/acquisition-service-source-contract.php
+?? tests/report-phase-six/php/headquarters-first-order-cohort-contract.php
+?? tests/report-phase-six/php/headquarters-source-contract.php
+?? tests/report-phase-six/php/r27-featured-card-detail-integration.php
+?? tests/report-phase-six/php/r30-featured-monthly-goals-local.php
+?? tests/report-phase-six/php/r64-acquisition-exclude-a-contract.php
+?? tests/report-phase-six/php/r64-acquisition-exclude-a-integration.php
+?? tests/report-phase-six/php/r68-headquarters-all-orders-contract.php
+?? tests/report-phase-six/php/r68-headquarters-cash-reader-contract.php
+?? tests/report-phase-six/php/r79-named-actual-local.php
+?? tests/report-phase-six/php/r85-acquisition-checkout-source-contract.php
+?? tests/report-phase-six/php/r85-acquisition-checkout-source-integration.php
+?? tests/report-phase-six/php/r85-source-backfill-isolated.php
+?? tests/report-product-dashboard/evidence/R36-product-dashboard-filters-and-metrics-local-2026-10-16.md
+?? tests/report-product-dashboard/evidence/R36-product-dashboard-rh-008-release-2026-10-16.md
+?? tests/report-product-dashboard/js/
+?? tests/report-product-dashboard/php/round39-contract.php
+?? tests/report-store-item-analysis/evidence/R15-item-analysis-detail-preaccept-2026-10-18.md
+?? tests/report-store-item-analysis/evidence/R15-item-analysis-detail-rh-008-release-2026-10-18.md
+?? tests/report-store-item-analysis/php/cross-store-entitlement-current-category-readonly.php
+?? tests/target-scheme/evidence/R95-activation-success-files.json
+?? tests/target-scheme/evidence/R95-activation-success-fixed.patch
+?? tests/target-scheme/evidence/R95-active-line-reports-local.jpg
+?? tests/target-scheme/evidence/R95-conflict-preview-local.jpg
+?? tests/target-scheme/evidence/R95-delete-confirmation-local.jpg
+?? tests/target-scheme/evidence/R95-fixed-files.json
+?? tests/target-scheme/evidence/R95-fixed.patch
+?? tests/target-scheme/evidence/R95-release-preparation-2026-10-20.md
+?? tests/target-scheme/evidence/R95-rh-008-release-2026-10-20.md
+?? tests/target-scheme/evidence/R95-target-scheme-fixed-candidate-2026-10-20.md
+?? tests/target-scheme/js/
+?? tests/target-scheme/php/
+?? 前端代码/admin/public/statics/
+?? 前端代码/cashier-v3/src/services/couponAllowance.js
+?? 前端代码/mobile-vue3/src/merchant/api/
+?? 前端代码/mobile-vue3/src/merchant/pages/target-analysis/
+?? 前端代码/mobile-vue3/src/merchant/pages/target-scheme/
+?? 后端代码/app/controller/mobile/merchant/TargetScheme.php
+?? 后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php
+?? 后端代码/database/upgrades/2026-09-17-瑞昊会员业务全量重导/瑞昊数据导入方案.md
+?? 后端代码/database/upgrades/2026-10-03-瑞昊SWXT四店增量导入/
+?? 后端代码/database/upgrades/2026-10-08-瑞昊已删空号会员清理/
+?? 后端代码/database/upgrades/2026-10-08-瑞昊消费欠款补导/
+?? 后端代码/database/upgrades/2026-10-11-瑞昊预约商品SKU去重/
+?? 后端代码/database/upgrades/2026-10-16-平台全部订单菜单/
+?? 后端代码/database/upgrades/2026-10-16-收银V3余额退款/
+?? 后端代码/database/upgrades/2026-10-17-同次结账服务来源全量回填/
+?? 后端代码/database/upgrades/2026-10-17-收银定制卡入口开关/
+?? 后端代码/database/upgrades/2026-10-20-目标方案逐行生效/
+?? 后端代码/database/upgrades/2026-10-21-销售欠款余额补交/
+?? 后端代码/database/upgrades/2026-10-22-多次抵用券/
+?? 改动日志/2026-09-02.md
+?? 改动日志/2026-10-17.md

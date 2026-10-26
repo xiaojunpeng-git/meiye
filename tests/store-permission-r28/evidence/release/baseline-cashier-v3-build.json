@@ -1,0 +1,18 @@
+{
+  "tree": "b3153cf9423a63d24643fe041f787a67e9adb7c4",
+  "variant": "baseline",
+  "terminal": "cashier-v3",
+  "source": "/Users/xiaojunpeng/Desktop/魔核/美业/美容源码",
+  "input": "/private/tmp/mohe-r28-fixed-release/baseline-readonly/前端代码/cashier-v3",
+  "output": "/private/tmp/mohe-r28-fixed-release/baseline-cashier-v3-dist",
+  "node": "v24.19.0",
+  "inputFiles": 1688,
+  "assets": {
+    "assets/exceljs.min-a0d233a6.js": "bf841e1e4ca9e34d3e32c6b9c68c83e94bcbd87fd796eb7c36f5ca98466d0329",
+    "assets/index-b75af7df.css": "b75af7df7ff088e00972681a1540560f669c1bf9fe7a3d935af1d7d433d96fce",
+    "assets/index-e6ccab4b.js": "163491af1572ce3c7107e194722a50d2264840f18f5031a5e70903fe8c438ecc",
+    "assets/login-beauty-quiet-826510a5.png": "826510a52937d8eb077bd71e819484a6605fc38436fb940fbeac3a8ecb7a0e47",
+    "index.html": "855b5d3bb70893d7d4f8aba3c643aeb45fa120ac1a3975745663098a901a3444"
+  },
+  "result": "PASS"
+}

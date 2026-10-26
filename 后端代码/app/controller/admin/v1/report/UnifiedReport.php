@@ -31,6 +31,44 @@ use think\facade\Db;
 /** 平台端复用门店业务部门的统一事实报表，范围由组织权限服务裁剪。 */
 class UnifiedReport extends AuthController
 {
+    /** 新基础报表独立入口；既有报表目录和查询分发不变。 */
+    public function basicCatalog()
+    {
+        if (!$this->hasMenuPermission('admin-report-basic')) return app('json')->fail('当前账号未配置基础报表权限');
+        return app('json')->success(\app\services\report\BasicReportHostServices::catalog());
+    }
+
+    public function basicQuery(Request $request)
+    {
+        if (!$this->hasMenuPermission('admin-report-basic')) return app('json')->fail('当前账号未配置基础报表权限');
+        try {
+            $raw = (string)$request->param('query', '{}');
+            if (strlen($raw) > 50000) throw new \InvalidArgumentException('查询条件过长');
+            $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
+            if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
+            $context = $this->basicContext($request->get());
+            return app('json')->success(\app\services\report\BasicReportHostServices::query($context, $payload));
+        } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
+        catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    public function basicSave(Request $request)
+    {
+        if (!$this->hasMenuPermission('admin-report-basic') || !$this->hasMenuPermission('admin-report-basic-write')) return app('json')->fail('当前账号没有刷单登记编辑权限');
+        try {
+            // 门店范围来自账号权威权限，不使用待保存对象的门店ID扩大范围。
+            $context = $this->basicContext([]);
+            return app('json')->success((new \app\services\report\BasicRegistrationWriteServices())->save($context, $request->post()));
+        } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    private function basicContext(array $input): array
+    {
+        $scope = $this->reportAuthorization();
+        return \app\services\report\BasicReportHostServices::context($this->scopedStoreIds($input),
+            (string)$scope['mode'], (int)$this->adminId, 'platform', $this->hasMenuPermission('admin-report-basic-write'));
+    }
+
     private const STORE_OPERATION_REPORTS = [
         'partner_item_summary', 'partner_item_detail', 'member_consumption_detail',
         'store_item_analysis', 'store_item_analysis_detail', 'store_craftsman_consumption', 'store_craftsman_consumption_detail', 'store_salesperson_performance',

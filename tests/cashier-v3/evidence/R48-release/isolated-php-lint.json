@@ -1,0 +1,57 @@
+{
+  "candidateTree": "0eabd85d6115d0e3d4de25ceb867d2d1b84a32ae",
+  "results": [
+    {
+      "file": "后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/controller/admin/v1/marketing/coupon/StoreCouponIssue.php"
+    },
+    {
+      "file": "后端代码/app/services/activity/coupon/StoreCouponUserServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/activity/coupon/StoreCouponUserServices.php"
+    },
+    {
+      "file": "后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/cashier/v3/cashier/CashierV3CashierWorkspaceServices.php"
+    },
+    {
+      "file": "后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/cashier/v3/cashier/CashierV3CashierModule.php"
+    },
+    {
+      "file": "后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/cashier/v3/settlement/CashierV3CheckoutCouponSettlementServices.php"
+    },
+    {
+      "file": "后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/cashier/v3/order/CashierV3SalesOrderReversalServices.php"
+    },
+    {
+      "file": "后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/cashier/v3/member/CashierV3MemberDetailQueryServices.php"
+    },
+    {
+      "file": "后端代码/app/services/activity/promotions/StorePromotionsServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/activity/promotions/StorePromotionsServices.php"
+    },
+    {
+      "file": "后端代码/app/services/activity/coupon/StoreCouponIssueServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/activity/coupon/StoreCouponIssueServices.php"
+    },
+    {
+      "file": "后端代码/app/dao/activity/coupon/StoreCouponUserDao.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/dao/activity/coupon/StoreCouponUserDao.php"
+    },
+    {
+      "file": "后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/后端代码/app/services/activity/coupon/StoreCouponAllowanceServices.php"
+    },
+    {
+      "file": "tests/cashier-v3/php/r48-coupon-allowance-mysql.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/tests/cashier-v3/php/r48-coupon-allowance-mysql.php"
+    },
+    {
+      "file": "tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php",
+      "output": "No syntax errors detected in /tmp/r48-fixed-0eabd85d6115/tests/cashier-v3/php/r48-coupon-allowance-ui-fixture.php"
+    }
+  ]
+}

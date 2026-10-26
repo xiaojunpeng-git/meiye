@@ -1,0 +1,28 @@
+<template><view class="resource-page"><text v-if="message.length>0" class="resource-message">{{ message }}</text><view v-if="asset!=null"><text class="resource-title">{{ asset.original_name }}</text><text class="resource-note">仅供本次授权业务查阅</text><image v-if="isImage && url.length>0" :src="url" mode="widthFix" class="resource-image" @tap="zoom"></image><video v-else-if="isVideo && url.length>0" :src="url" controls class="resource-video"></video><view v-else-if="url.length>0"><!-- #ifdef WEB --><iframe :src="url" title="证据文档预览" class="resource-pdf"></iframe><!-- #endif --><!-- #ifndef WEB --><button @tap="openDocument">打开证据文档</button><!-- #endif --></view></view></view></template>
+<script setup lang="uts">
+import{growthRequest,growthDownload}from '../../api/mobile-growth-client.uts'
+const asset=ref<any>(null)
+const url=ref('')
+const message=ref('')
+let closed=false
+let downloadTask:any=null
+const isImage=computed(():boolean=>asset.value!=null&&['jpg','jpeg','png','webp'].indexOf(String(asset.value.format))>=0)
+const isVideo=computed(():boolean=>asset.value!=null&&['mp4','webm'].indexOf(String(asset.value.format))>=0)
+// 元数据和二进制分别重新校验同一任务关系，临时预览地址不会成为公开存储地址。
+onLoad((o:any)=>{let id=Number(o['id']||0);let task=Number(o['task_id']||0);growthRequest('assetInfo',{id:id,task_id:task},(r:any)=>{if(!r.ok){message.value=r.message;return};asset.value=r.data;downloadTask=growthDownload(id,task,(v:any)=>{downloadTask=null;if(closed){
+// #ifdef WEB
+if(v.ok&&String(v.url).startsWith('blob:'))URL.revokeObjectURL(String(v.url))
+// #endif
+return};if(!v.ok){message.value=v.message;return};url.value=String(v.url)})})})
+// 离开私有预览即取消下载并释放本页对象地址，延迟响应不得留住已关闭页面资源。
+onUnload(()=>{closed=true;if(downloadTask!=null)downloadTask.abort();
+// #ifdef WEB
+if(url.value.startsWith('blob:'))URL.revokeObjectURL(url.value)
+// #endif
+})
+function zoom():void{uni.previewImage({urls:[url.value]})}
+function openDocument():void{uni.openDocument({filePath:url.value,fileType:'pdf',showMenu:false,fail:()=>{message.value='当前设备暂不支持文档预览。'}})}
+</script>
+<style>
+.resource-page{min-height:100vh;background-color:#f6f7f2;padding:24px 18px;box-sizing:border-box;color:#25483f}.resource-title{display:block;font-size:19px;line-height:28px;font-weight:600}.resource-note{display:block;color:#91a085;font-size:12px;margin:12px 0 22px}.resource-image{width:100%}.resource-video{width:100%;height:240px}.resource-pdf{width:100%;height:75vh;border:0}.resource-message{display:block;font-size:13px;line-height:23px;color:#a2593a;padding:12px;background-color:#fff0e7}
+</style>

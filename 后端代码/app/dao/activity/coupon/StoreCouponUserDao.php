@@ -115,6 +115,11 @@ class StoreCouponUserDao extends BaseDao
     {
         $query = $this->getModel()->where('id', $id)
             ->where('status', 0)->where('is_fail', 0)->where('use_time', 0);
+        // A direct legacy DAO caller must not exhaust an allowance without its
+        // ledger. Only the V3 settlement service writes coupon_type=3 balances.
+        $query->whereNotIn('cid', function ($q) {
+            $q->name('store_coupon_issue')->where('coupon_type', 3)->field('id');
+        });
         if ($uid > 0) {
             $query->where('uid', $uid);
         }

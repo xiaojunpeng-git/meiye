@@ -125,8 +125,9 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $command['adjust-imported-refund-personnel'] = self::FEATURE_ORDER_STAFF_ADJUST;
         $command['update-sales-order-note'] = self::FEATURE_ORDER_CENTER;
         $command['correct-sales-order-attribution'] = self::FEATURE_ORDER_CENTER;
-        // 纯权益消费只有服务事实，允许更正日期但没有来源编辑权限。
+        // 纯权益消费按结账请求或预约完成事件整组更正，日期和来源都不能落到单条展示行。
         $command['correct-service-order-date'] = self::FEATURE_ORDER_CENTER;
+        $command['correct-service-order-attribution'] = self::FEATURE_ORDER_CENTER;
         $command['correct-recharge-order-attribution'] = self::FEATURE_ORDER_CENTER;
         $command['correct-debt-repayment-date'] = self::FEATURE_ORDER_CENTER;
         $command['correct-debt-repayment-source'] = self::FEATURE_ORDER_CENTER;
@@ -180,7 +181,7 @@ class CashierV3C5MemberOrderModule implements CashierV3ActionModule
         $projection['open-card-benefits'] = self::FEATURE_MEMBER;
 
         $projection['query-query-entities'] = self::POLICY_QUERY_ENTITIES;
-        $projection['query-staff'] = self::FEATURE_MANAGEMENT;
+        $projection['query-staff'] = 'cashier.v3.management.staff';
         $projection['open-management-entry'] = self::FEATURE_MANAGEMENT;
 
         return CashierV3ActionManifest::buildModuleActions(self::OWNER, $command, $projection);

@@ -143,6 +143,8 @@ class CashierV3RootDomainAssembler
                 'id' => $storeId,
                 'name' => (string)$store['name'],
             ],
+            // 菜单展示和岗位目录读取同一份配置，客户端只消费名称/排序，不接收可执行路由。
+            'navigationRules' => (new \app\services\organization\StorePermissionCatalogServices())->snapshot()['rules'],
             'featurePermissions' => $features ?: new \stdClass(),
             'operationPermissions' => $operationFeatures ?: new \stdClass(),
             'readOnly' => $dataScope->isReadOnlySession(),
@@ -157,6 +159,7 @@ class CashierV3RootDomainAssembler
                 'name' => $operatorName,
                 'account' => (string)($dataScope->operatorProfile()['account'] ?? ''),
                 'roleName' => (string)($dataScope->operatorProfile()['role_name'] ?? ''),
+                'profile' => $this->operatorDetails($dataScope->operatorProfile()),
             ],
         ];
 
@@ -235,6 +238,29 @@ class CashierV3RootDomainAssembler
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /** 只读取已认证操作员关联员工的本人资料和有效任职；不接受前端指定员工，不影响权限或结账身份。 */
+    protected function operatorDetails(array $profile): array
+    {
+        $employeeId=(int)($profile['employee_id'] ?? 0);
+        $employee=$employeeId>0 ? Db::name('employee')->where('id',$employeeId)->where('is_del',0)->where('status',1)->field('name,phone')->find() : null;
+        $staffId=(int)($profile['id'] ?? $profile['staff_id'] ?? 0);
+        // 组织选店会话的编号不是门店员工编号，必须使用该员工的直属任职，不得碰撞其他员工。
+        if (!empty($profile['_cashier_v3_delegated']) || !empty($profile['_cashier_v3_organization'])
+            || \app\services\cashier\v3\CashierV3PersonnelIdentity::isOrganizationStaffId($staffId)) $staffId=0;
+        $positions=[];
+        if ($employeeId>0) {
+            $jobs=app()->make(\app\services\organization\StaffJobPositionServices::class)->listActiveJobs($staffId,$employeeId);
+            foreach ($jobs as $job) {
+                if ((int)$job['employee_id']!==$employeeId || (int)$job['position_status']!==1) continue;
+                $name=trim((string)$job['position_name']);
+                if ($name!=='') $positions[$name]=true;
+            }
+        }
+        return ['name'=>trim((string)($employee['name'] ?? '')) ?: $this->operatorDisplayName($profile),
+            'phone'=>trim((string)($employee['phone'] ?? $profile['phone'] ?? '')),
+            'positions'=>array_keys($positions)];
     }
 
     /**

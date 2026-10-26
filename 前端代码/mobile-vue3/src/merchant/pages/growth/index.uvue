@@ -1,0 +1,48 @@
+<template>
+  <view class="growth-home">
+    <view class="growth-hero"><text class="growth-kicker">BEAUTY ACADEMY</text><text class="growth-title">每一天，都在成长</text><text class="growth-subtitle">把学到的专业，变成手上的底气。</text><view class="growth-hero-bottom"><text>{{ employeeName }}，今天也加油</text><text @tap="loadTasks">刷新 ↻</text></view></view>
+    <view class="growth-shortcuts"><text @tap="openKnowledge">随手学 · 有问有答 →</text><text @tap="openProfile">我的成长档案 →</text></view>
+    <view class="growth-tabs"><text :class="tab == 'todo' ? 'growth-tab-active' : ''" @tap="switchTab('todo')">我的任务</text><text :class="tab == 'done' ? 'growth-tab-active' : ''" @tap="switchTab('done')">成长记录</text><text v-if="fieldCount>0" :class="tab == 'field' ? 'growth-tab-active' : ''" @tap="switchTab('field')">现场</text><text v-if="reviewCount>0" :class="tab == 'review' ? 'growth-tab-active' : ''" @tap="switchTab('review')">待我处理</text><text :class="tab == 'messages' ? 'growth-tab-active' : ''" @tap="switchTab('messages')">消息</text></view>
+    <view v-if="message.length > 0" class="growth-error"><text>{{ message }}</text><text @tap="loadTasks">重试</text></view>
+    <scroll-view scroll-y class="growth-body"><view v-if="loading" class="growth-empty"><text>正在为你准备学习内容…</text></view>
+      <view v-else-if="tab == 'messages'"><view v-for="item in messages" :key="item.id" class="growth-card" @tap="openMessage(item)"><text class="growth-card-title">{{ Number(item.read_at) == 0 ? '● ' : '' }}{{ item.title }}</text><text class="growth-card-note">{{ item.summary }}</text></view><view v-if="messages.length == 0" class="growth-empty"><text>暂时没有新消息</text></view></view>
+      <view v-else><view v-for="task in tasks" :key="task.id" class="growth-card" @tap="openTask(task)"><view class="growth-card-top"><text class="growth-tag">{{ kindLabel(String(task.kind)) }}</text><text class="growth-state">{{ stateLabel(String(task.state)) }}</text></view><text class="growth-card-title">{{ task.title }}</text><text class="growth-card-note">{{ Number(task.due_at) > 0 ? '截止 ' + time(Number(task.due_at)) : '按自己的节奏学习' }}{{ task.overdue ? ' · 已逾期' : '' }}</text><view class="growth-card-footer"><text>{{ task.state == 'COMPLETED' ? '查看成长记录' : '查看要求，开始行动' }}</text><text>→</text></view></view><view v-if="tasks.length == 0" class="growth-empty"><text class="growth-empty-icon">✦</text><text>{{ tab == 'done' ? '你的成长，从下一次行动开始' : '现在没有待做任务，好好积蓄能量' }}</text></view></view>
+      <view v-if="pages > 1" class="growth-pages"><text @tap="previous">上一页</text><text>{{ page }} / {{ pages }}</text><text @tap="next">下一页</text></view>
+    </scroll-view>
+  </view>
+</template>
+<script setup lang="uts">
+import { growthRequest, growthTaskUrl } from '../../api/mobile-growth-client.uts'
+import { currentMerchantRoot } from '../../../shared/platform/mobile-merchant-session.uts'
+import { merchantActionIsAllowed } from '../../../shared/platform/merchant-tab-permissions.uts'
+const tasks = ref<Array<any>>([])
+const messages = ref<Array<any>>([])
+const message = ref('')
+const loading = ref(false)
+const tab = ref('todo')
+const reviewCount = ref(0)
+const fieldCount = ref(0)
+const page = ref(1)
+const pages = ref(1)
+const employeeName = computed(() : string => { let root : any = currentMerchantRoot(); return root != null && root.employee != null ? String(root.employee.name) : '美容师' })
+onShow(() => { if (!merchantActionIsAllowed('mobile.merchant.growth')) { uni.showToast({ title: '当前岗位未授权成长菜单', icon: 'none' }); return }; loadTasks(); growthRequest('practice', {}, (r : any) => { if (r.ok) reviewCount.value = Number(r.data.pagination.pending.total) }); growthRequest('inspections', {}, (r : any) => { if (r.ok) fieldCount.value = Number(r.data.field_total) }) })
+// 所有状态与结果读取服务端，不在手机端用观看位置推算完成。
+// 只接收当前筛选发出的最新查询，切换页签后旧响应不能覆盖新结果。
+let loadSequence=0
+function loadTasks() : void {let sequence=++loadSequence; loading.value = true; message.value = ''; if (tab.value == 'field') { growthRequest('inspections', {field_page:page.value}, (r : any) => { if(sequence!=loadSequence)return; loading.value = false; if (!r.ok) { message.value = r.message; return }; let rows : Array<any> = []; r.data.inspections.forEach((v : any) => rows.push({ id: 'inspection-'+String(v.id), source_id: v.id, kind: 'inspection', title: v.title, state: v.state, due_at: v.due_at })); r.data.issues.forEach((v : any) => rows.push({ id: 'issue-'+String(v.id), source_id: v.id, kind: 'rectification', title: v.description, state: v.state, due_at: v.due_at })); tasks.value = rows; pages.value = Number(r.data.field_total_pages) }); return }; if (tab.value == 'review') { growthRequest('practice', {pending_page:page.value}, (r : any) => { if(sequence!=loadSequence)return; loading.value = false; if (!r.ok) { message.value = r.message; return }; tasks.value = r.data.pending; pages.value = Number(r.data.pagination.pending.total_pages) }); return }; if (tab.value == 'messages') { growthRequest('messages', {page:page.value}, (r : any) => { if(sequence!=loadSequence)return; loading.value = false; if (!r.ok) { message.value = r.message; return }; messages.value = r.data.rows;pages.value=Number(r.data.total_pages) }); return }; growthRequest('tasks', { page: page.value, state: tab.value == 'done' ? 'COMPLETED' : '', view: tab.value }, (r : any) => { if(sequence!=loadSequence)return; loading.value = false; if (!r.ok) { message.value = r.message; return }; tasks.value = r.data.rows; page.value = Number(r.data.page); pages.value = Number(r.data.total_pages) }) }
+function switchTab(value : string) : void { tab.value = value; page.value = 1; loadTasks() }
+function openKnowledge():void{uni.navigateTo({url:'/src/merchant/pages/growth/knowledge'})}
+function openProfile() : void {uni.navigateTo({url:'/src/merchant/pages/growth/profile'})}
+function openTask(task:any):void{uni.navigateTo({url:growthTaskUrl(task)})}
+// 站内消息只引用原业务，汇总提醒进入当前待办，不以已读修改业务状态。
+function openMessage(item:any):void{growthRequest('readMessage',{id:item.id},(_r:any)=>{});if(item.target_type=='help'){uni.navigateTo({url:'/src/merchant/pages/growth/knowledge?question_id='+String(item.target_id)});return};if(item.target_type=='certificate'){openProfile();return};if(item.target_type=='certificate_review'){uni.showModal({title:'证书待复核',content:String(item.summary)+'。请在平台成长档案核查原证书，证书不会自动续期。',showCancel:false,confirmText:'知道了'});return};if(item.target_type=='pending'){switchTab('review');return};if(item.target_type=='tasks'){switchTab('todo');return};if(Number(item.task_id)>0){growthRequest('task',{id:item.task_id},(r:any)=>{if(r.ok)openTask(r.data);else message.value=r.message});return};switchTab(String(item.title).indexOf('确认')>=0?'review':'todo')}
+function previous() : void { if (page.value > 1) { page.value--; loadTasks() } }
+function next() : void { if (page.value < pages.value) { page.value++; loadTasks() } }
+function kindLabel(value : string) : string { let names : any = { course: '课程学习', exam: '能力检验', practice: '练习', assignment: '实操作业', evaluation: '能力鉴定', coaching: '师傅带教', offline: '线下培训', inspection: '门店巡检', rectification: '整改问题' }; return String(names[value] || '成长任务') }
+function stateLabel(value : string) : string { let names : any = { NOT_STARTED: '未开始', IN_PROGRESS: '进行中', COMPLETED: '已完成', PENDING: '待处理', PAUSED: '已暂停', CANCELLED: '已取消', ASSIGNED: '待执行', OPEN: '待整改', PENDING_REVIEW: '待复查', SUBMITTED: '已提交', REVIEWED: '已复核', CLOSED: '已关闭', RETURNED: '待补交' }; return String(names[value] || value) }
+function time(value : number) : string { return new Date(value * 1000).toLocaleDateString() }
+</script>
+<style>
+.growth-home{display:flex;flex-direction:column;height:100%;min-height:100vh;background-color:#f6f7f2;color:#25483f}.growth-hero{padding:32px 24px 22px;background-color:#1b5b4e;color:#fff}.growth-kicker{display:block;font-size:10px;letter-spacing:3px;color:#c6d9c8}.growth-title{display:block;margin-top:14px;font-size:27px;font-weight:700}.growth-subtitle{display:block;margin-top:10px;font-size:13px;color:#d0dfd3}.growth-hero-bottom{display:flex;flex-direction:row;justify-content:space-between;margin-top:28px;font-size:12px;color:#d0dfd3}.growth-tabs{display:flex;flex-direction:row;padding:20px 22px 13px;gap:14px;flex-wrap:wrap;color:#89978b;font-size:14px}.growth-tab-active{color:#1b5b4e;font-weight:700;border-bottom:2px solid #1b5b4e;padding-bottom:7px}.growth-body{flex:1;min-height:0;padding:0 18px 30px;box-sizing:border-box}.growth-card{display:flex;flex-direction:column;margin:12px 0;padding:19px;background-color:#fff;border-radius:14px;border:1px solid #e7ece2}.growth-card-top,.growth-card-footer{display:flex;flex-direction:row;justify-content:space-between;align-items:center}.growth-tag{background-color:#eef4e9;color:#536a45;border-radius:5px;padding:4px 8px;font-size:10px}.growth-state{font-size:11px;color:#86917e}.growth-card-title{display:block;margin-top:15px;font-size:18px;font-weight:600;line-height:27px}.growth-card-note{display:block;margin-top:9px;font-size:12px;color:#929a8e;line-height:20px}.growth-card-footer{margin-top:20px;padding-top:14px;border-top:1px solid #f0f2eb;font-size:12px;color:#336554}.growth-empty{padding:50px 10px;color:#8b9985;font-size:13px;text-align:center;line-height:24px}.growth-empty-icon{display:block;color:#b7a775;font-size:40px;margin-bottom:20px}.growth-error{margin:10px 18px;padding:12px;background-color:#fff0e7;color:#99553c;font-size:12px}.growth-pages{display:flex;flex-direction:row;justify-content:space-around;padding:20px;color:#39634f;font-size:13px}
+.growth-shortcuts{display:flex;flex-direction:row;justify-content:space-between;padding:18px 22px 0;font-size:12px;color:#4c7755;gap:14px}
+</style>

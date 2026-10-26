@@ -81,12 +81,12 @@ final class CashierV3OrderAttributionCorrectionServices
         $field = (string)($payload['field'] ?? '');
         if (($type === 'sales' && $action !== 'correct-sales-order-attribution')
             || ($type === 'refund' && $action !== 'correct-refund-date')
-            || ($type === 'service' && $action !== 'correct-service-order-date')
+            || ($type === 'service' && $action !== ($field === 'source'
+                ? 'correct-service-order-attribution' : 'correct-service-order-date'))
             || ($type === 'recharge' && $action !== 'correct-recharge-order-attribution')
             || ($type === 'supplement' && $action !== ($field === 'source'
                 ? 'correct-debt-repayment-source' : 'correct-debt-repayment-date'))
-            || !in_array($field, in_array($type, ['service', 'refund'], true)
-                ? ['business_date'] : ['business_date', 'source'], true)) {
+            || !in_array($field, $type === 'refund' ? ['business_date'] : ['business_date', 'source'], true)) {
             throw CashierV3CommandException::invalidContext('该单据不支持此项更正。');
         }
         $key = trim((string)($scope['idempotency_key'] ?? ''));
@@ -129,6 +129,8 @@ final class CashierV3OrderAttributionCorrectionServices
         if ($field === 'source') {
             if ($type === 'supplement') {
                 $this->correctSupplementSource($id, $record, $source, $dataScope);
+            } elseif ($type === 'service') {
+                $this->correctServiceSource($id, $record, $source, $operator, $dataScope, $now);
             } else {
                 $this->correctSource($type, $id, $record, $source, $operator, $dataScope, $operationId, $key, $fingerprint, $now);
             }
@@ -220,16 +222,30 @@ final class CashierV3OrderAttributionCorrectionServices
                 || (string)$receipt['business_date'] !== (string)$request['business_date']) {
                 throw CashierV3CommandException::invalidContext('服务完成凭证与结账请求不一致，暂不能更正。');
             }
-            return array_merge((array)$request, ['service_record_no' => (string)$facts[0]['service_record_no'],
-                'business_event_no' => (string)$receipt['business_event_no']]);
+            // 普通纯权益结账的展示来源以选择表为权威；缺失行保持真正的空来源，
+            // 后续更正可在同一事务创建来源快照，不能回读会员当前来源代填历史。
+            $selectionQuery = Db::name('cashier_v3_checkout_business_source_selection')
+                ->where('checkout_kind', 'sale')->where('checkout_request_id', $id)
+                ->where('tenant_id', $scope->tenantId())->where('store_id', $operator->storeId());
+            $selection = (array)($lock ? $selectionQuery->lock(true)->find() : $selectionQuery->find());
+            return array_merge((array)$request, [
+                'service_record_no' => (string)$facts[0]['service_record_no'],
+                'business_event_no' => (string)$receipt['business_event_no'],
+                'business_source_primary_id' => (int)($selection['primary_source_id'] ?? 0),
+                'business_source_primary_name_snapshot' => (string)($selection['primary_source_name_snapshot'] ?? ''),
+                'business_source_secondary_id' => (int)($selection['secondary_source_id'] ?? 0),
+                'business_source_secondary_name_snapshot' => (string)($selection['secondary_source_name_snapshot'] ?? ''),
+                'business_source_label_snapshot' => (string)($selection['source_label_snapshot'] ?? ''),
+                'source_selection_id' => (int)($selection['id'] ?? 0),
+            ]);
         } elseif ($type === 'recharge') {
             $query = Db::name('user_recharge')->where('id', (int)$id)->where('store_id', $operator->storeId())->where('paid', 1);
         } elseif ($type === 'refund') {
-            // 手工退款（含无原单目录退款）均有调整及支付事实；旧退款走其他冲销链，不允许改写。
+            // 手工退款（含无原单目录与余额退款）均有调整及支付事实；旧退款不允许改写。
             $query = Db::name(CashierV3OrderLifecycleServices::OPERATION_TABLE)
                 ->where('operation_id', $id)->where('tenant_id', $scope->tenantId())
                 ->where('store_id', $operator->storeId())->where('operation_type', 'refund')
-                ->whereIn('source_type', ['card', 'document', 'catalog'])->where('status', 'succeeded');
+                ->whereIn('source_type', ['card', 'document', 'catalog', 'balance'])->where('status', 'succeeded');
         } else {
             $query = Db::name('cashier_v3_debt_repayment')->where('repayment_id', $id)->where('tenant_id', $scope->tenantId())
                 ->where('store_id', $operator->storeId())->whereIn('status', ['succeeded', 'voided']);
@@ -289,7 +305,7 @@ final class CashierV3OrderAttributionCorrectionServices
 
     private function lockRelatedDebts(string $type, string $id, CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, string $field): void
     {
-        if ($field !== 'source' && $type !== 'supplement') return;
+        if (($field !== 'source' && $type !== 'supplement') || $type === 'service') return;
         if ($type === 'supplement') {
             $row = Db::name('cashier_v3_debt_repayment')->where('repayment_id', $id)->where('tenant_id', $scope->tenantId())->find();
             if (!$row) $row = Db::name('cashier_v3_recharge_debt_repayment')->where('repayment_id', $id)->where('tenant_id', $scope->tenantId())->find();
@@ -353,6 +369,55 @@ final class CashierV3OrderAttributionCorrectionServices
             Db::name($table)->where('tenant_id', $tenant)->where('order_id', $id)
                 ->update($this->sourceColumns($source, true));
         }
+    }
+
+    /**
+     * 纯权益来源属于整次完成事件：普通结账更新选择表，预约直通完成只更新事实快照。
+     * 两种路径都同步服务、劳动业绩和服务生命周期事实，金额、权益余额及人员分配保持不变。
+     */
+    private function correctServiceSource(string $id, array $record, array $source,
+        CashierV3OperatorScope $operator, CashierV3DataScopeContext $scope, int $now): void
+    {
+        $tenant = $scope->tenantId();
+        $eventNo = (string)$record['business_event_no'];
+        $factColumns = $this->sourceColumns($source, true);
+        if (strpos($id, 'reservation:') !== 0) {
+            $selection = [
+                'primary_source_id' => (int)$source['primarySourceId'],
+                'primary_source_name_snapshot' => (string)$source['primarySourceNameSnapshot'],
+                'secondary_source_id' => (int)$source['secondarySourceId'],
+                'secondary_source_name_snapshot' => (string)$source['secondarySourceNameSnapshot'],
+                'source_label_snapshot' => (string)$source['displayNameSnapshot'],
+                'updated_by_operator_id' => $operator->operatorId(), 'updated_at' => $now,
+            ];
+            if ((int)($record['source_selection_id'] ?? 0) > 0) {
+                Db::name('cashier_v3_checkout_business_source_selection')
+                    ->where('id', (int)$record['source_selection_id'])
+                    ->update($selection + ['selection_version' => Db::raw('selection_version + 1')]);
+            } else {
+                Db::name('cashier_v3_checkout_business_source_selection')->insert($selection + [
+                    'checkout_kind' => 'sale', 'checkout_request_id' => $id,
+                    'tenant_id' => $tenant, 'store_id' => $operator->storeId(),
+                    'selection_version' => 1, 'reward_amount_cents' => 0,
+                ]);
+            }
+        }
+        foreach (['cashier_v3_entitlement_service_fact', 'cashier_v3_performance_fact'] as $table) {
+            Db::name($table)->where('tenant_id', $tenant)->where('store_id', $operator->storeId())
+                ->where('checkout_request_id', $id)->where('business_event_no', $eventNo)
+                ->update($factColumns);
+        }
+        $lifecycleColumns = [
+            'source_primary_id' => (int)$source['primarySourceId'],
+            'source_primary_name_snapshot' => (string)$source['primarySourceNameSnapshot'],
+            'source_secondary_id' => (int)$source['secondarySourceId'],
+            'source_secondary_name_snapshot' => (string)$source['secondarySourceNameSnapshot'],
+            'source_label_snapshot' => (string)$source['displayNameSnapshot'],
+            'source_attribution_type_snapshot' => (string)$source['attributionTypeSnapshot'],
+        ];
+        Db::name('cashier_v3_customer_lifecycle_fact')->where('tenant_id', $tenant)
+            ->where('store_id', $operator->storeId())->where('natural_key', 'service-visit:' . $id)
+            ->where('event_type', 'service_completed')->update($lifecycleColumns);
     }
 
     /** 原单来源联动所有已成功或已作废补交，冲销链也沿用更正后的来源。 */
@@ -424,22 +489,25 @@ final class CashierV3OrderAttributionCorrectionServices
     {
         $tenant = $scope->tenantId();
         if ($type === 'refund') {
-            // Move only this manual refund's business date, including its negative cash fact
-            // and optional positive member-balance fact. Never rewrite the original sale.
+            // Move only this refund's business date, including its separate wallet
+            // credit or debit fact. Never rewrite the original sale or a void event.
+            $balanceType = (string)($record['source_type'] ?? '') === 'balance'
+                ? 'manual_refund_debit' : 'manual_refund_credit';
             $adjustment = Db::name('cashier_v3_refund_adjustment')->where('tenant_id', $tenant)
                 ->where('operation_id', $id)->where('status', 'effective')->lock(true)->find();
             $payment = Db::name('cashier_v3_payment_fact')->where('tenant_id', $tenant)
                 ->where('order_id', $id)->where('fact_type', 'manual_refund_adjustment')
                 ->where('source_document_type', 'manual_refund')->lock(true)->find();
             $balance = Db::name('cashier_v3_balance_fact')->where('tenant_id', $tenant)
-                ->where('order_id', $id)->where('balance_change_type', 'manual_refund_credit')
+                ->where('order_id', $id)->where('balance_change_type', $balanceType)
                 ->where('source_document_type', 'manual_refund')->lock(true)->find();
             $personnelFacts = Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenant)
                 ->where('order_id', $id)->where('performance_type', 'refund_sales_deduction')
                 ->where('source_document_type', 'manual_refund')->lock(true)->select()->toArray();
             if (!$adjustment || !$payment || (string)$adjustment['business_date'] !== (string)$record['business_date']
                 || (string)$payment['business_date'] !== (string)$record['business_date']
-                || ((int)$adjustment['balance_credit_cents'] > 0) !== (bool)$balance
+                || ((int)($balanceType === 'manual_refund_debit'
+                    ? $adjustment['balance_debit_cents'] : $adjustment['balance_credit_cents']) > 0) !== (bool)$balance
                 || ($balance && (string)$balance['business_date'] !== (string)$record['business_date'])
                 || ((int)($adjustment['salespeople_version'] ?? 0) > 0 && $personnelFacts === [])
                 || count(array_filter($personnelFacts, static fn(array $fact): bool =>
@@ -454,7 +522,7 @@ final class CashierV3OrderAttributionCorrectionServices
                 ->where('order_id', $id)->where('fact_type', 'manual_refund_adjustment')
                 ->where('source_document_type', 'manual_refund')->update(['business_date' => $newDate]);
             Db::name('cashier_v3_balance_fact')->where('tenant_id', $tenant)
-                ->where('order_id', $id)->where('balance_change_type', 'manual_refund_credit')
+                ->where('order_id', $id)->where('balance_change_type', $balanceType)
                 ->where('source_document_type', 'manual_refund')->update(['business_date' => $newDate]);
             // 更正经营日包括人员负向事实及其冲销链；原销售人员事实保持原日不变。
             Db::name('cashier_v3_performance_fact')->where('tenant_id', $tenant)

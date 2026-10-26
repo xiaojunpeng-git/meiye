@@ -71,7 +71,8 @@ async function finishLogin(result) {
   if (!['success', 'succeeded'].includes(String(bootstrapResult?.status || '').toLowerCase())) {
     throw new Error(String(bootstrapResult?.message || '门店工作台初始化失败，请稍后重试。'))
   }
-  await router.replace('/cashier')
+  // 首屏交给路由守卫按后端授权与菜单顺序选择，不能固定进入无权限的收银。
+  await router.replace('/entry')
 }
 
 async function submit() {

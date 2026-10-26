@@ -1,0 +1,133 @@
+{
+  "instance": "rh",
+  "commit": "c3625d2adeb67a01ca95e078517dcf45d503fef3",
+  "backup": "/www/backups/rh.cc3798.com/20261022-r48-c3625d2a",
+  "business": {
+    "result": "PASS",
+    "instance": "rh",
+    "store": 126,
+    "checks": {
+      "market_performance": {
+        "rows": 1,
+        "summary": {
+          "division_name": "合计",
+          "store_name": "-",
+          "channel_17_visits": 276,
+          "channel_17_effective": 20,
+          "channel_17_amount": "368795",
+          "channel_3_walk_in": 0,
+          "channel_3_visits": 1,
+          "channel_3_effective": 0,
+          "channel_3_amount": "99",
+          "channel_11_visits": 3,
+          "channel_11_effective": 0,
+          "channel_11_amount": "0",
+          "channel_5_visits": 0,
+          "channel_5_effective": 0,
+          "channel_5_amount": "0",
+          "channel_4_visits": 2,
+          "channel_4_effective": 2,
+          "channel_4_amount": "3880",
+          "channel_12_visits": 0,
+          "channel_12_effective": 0,
+          "channel_12_amount": "0",
+          "channel_10_visits": 0,
+          "channel_10_effective": 0,
+          "channel_10_amount": "0",
+          "channel_7_visits": 0,
+          "channel_7_effective": 0,
+          "channel_7_amount": "0",
+          "channel_9_visits": 0,
+          "channel_9_effective": 0,
+          "channel_9_amount": "0",
+          "payment_cash": "3000",
+          "payment_unionpay": "0",
+          "payment_wechat": "45566",
+          "payment_alipay": "4000",
+          "payment_dianping_voucher": "0",
+          "payment_douyin_voucher": "0",
+          "payment_partner_collection": "320208",
+          "payment_other_collection": "0",
+          "total_performance": "372774"
+        }
+      },
+      "market_detail": {
+        "rows": 299,
+        "summary": {
+          "business_date": "合计",
+          "store_name_snapshot": "-",
+          "member_name_snapshot": "-",
+          "member_phone": "-",
+          "dimension": "-",
+          "walk_in": 0,
+          "visits": 282,
+          "effective_people": 22,
+          "amount": "372774",
+          "registered_date": "-",
+          "reviewer": "-",
+          "reviewed_at": "-",
+          "creator_name": "-",
+          "created_at": "-"
+        }
+      },
+      "store_refund_ledger": {
+        "rows": 0,
+        "summary": {
+          "store_name": "合计",
+          "customer": "-",
+          "phone": "-",
+          "refund_date": "-",
+          "salesperson": "-",
+          "guide": "-",
+          "sales_manager": "-",
+          "category": "-",
+          "refund_items": "-",
+          "original_sale_date": "-",
+          "refund_amount": "0",
+          "refund_remark": "-"
+        }
+      },
+      "phase_six_salary_summary": {
+        "rows": 9,
+        "summary": {
+          "company_name": "-",
+          "store_name": "-",
+          "employee_name": "-",
+          "position_name": "-",
+          "project_count": "537",
+          "service_visit_count": "287.0",
+          "service_people_count": "177.0",
+          "consumption_amount": "69495",
+          "labor_fee": "430",
+          "salary_presale_cash": "2479",
+          "salary_category_cash_26315": "320208",
+          "salary_category_cash_26332": "33269",
+          "salary_category_cash_26322": "200",
+          "salary_category_cash_26321": "14656"
+        }
+      },
+      "phase_six_salary_detail": {
+        "rows": 572,
+        "summary": {
+          "business_date": "-",
+          "company_name": "-",
+          "store_name": "-",
+          "employee_name": "-",
+          "position_name": "-",
+          "member_name": "-",
+          "document_no": "-",
+          "performance_category": "-",
+          "detail": "-",
+          "project_count": "537",
+          "consumption_amount": "69495",
+          "cash_amount": "370812",
+          "labor_fee": "430",
+          "备注": "-"
+        }
+      }
+    },
+    "couponReader": "PASS"
+  },
+  "result": "PASS",
+  "checkedAt": "2026-10-22T11:39:17.648Z"
+}
