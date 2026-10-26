@@ -10,9 +10,8 @@ import RefreshCw from '@lucide/vue/dist/esm/icons/refresh-cw.mjs'
 import X from '@lucide/vue/dist/esm/icons/x.mjs'
 import OrganizationStoreScopePicker from '@/components/OrganizationStoreScopePicker.vue'
 import TablePagination from '@/components/common/TablePagination.vue'
-import { queryStoreBusinessReportScope } from '@/services/storeBusinessReportApi'
 import { useCashierV3State } from '@/services/cashierV3Bridge'
-import { loadBasicReportCatalog, loadBasicReport, saveBasicRegistration, registrationCsv } from '@/services/basicReportApi'
+import { loadBasicReportCatalog, loadBasicReportScope, loadBasicReport, saveBasicRegistration, registrationCsv } from '@/services/basicReportApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -113,8 +112,14 @@ function applyPeriod(value) {
 }
 function selectScope(value) {
   stores.value = value.storeIds
-  scopeLabel.value = value.label
+  // 010 平台菜单授权的空选择代表全部门店，不能继续显示旧的数据权限文案。
+  scopeLabel.value = !value.storeIds.length && scope.value.authorization_mode === 'all' ? '全部门店' : value.label
   void run({ ...query.value, page: 1 })
+}
+/** 每张表独立取后端门店树；切回全部时与该表的读授权保持一致。 */
+async function refreshScope(code) {
+  scope.value = await loadBasicReportScope(code)
+  if (!stores.value.length) scopeLabel.value = scope.value.authorization_mode === 'all' ? '全部门店' : '当前权限范围'
 }
 function edit(row) {
   saveError.value = ''
@@ -194,13 +199,19 @@ watch(() => Boolean(editor.value || fieldGuide.value), async open => {
     document.querySelector('.basic-report-dialog button')?.focus()
   } else { await nextTick(); returnFocus?.focus() }
 })
-watch(() => route.params.report, () => {
-  requestId++; controller?.abort(); editor.value = null; executedQuery.value = null
+watch(() => route.params.report, async () => {
+  const routeRequest = ++requestId
+  controller?.abort(); editor.value = null; executedQuery.value = null
   // 切换报表立即清掉上一张表的行、合计和编辑资格，不能把旧数据短暂展示在新表名下。
   data.value = { rows: [], pagination: { total: 0, page: 1 }, summaries: {} }
   loading.value = false; error.value = ''
   query.value = { page: 1, limit: 20 }; fields.value = active.value?.queryFields || []
-  if (active.value?.available) void run()
+  if (active.value?.available) {
+    try {
+      if (platform.value) await refreshScope(active.value.code)
+      if (routeRequest === requestId) void run()
+    } catch (e) { if (routeRequest === requestId) error.value = e.message }
+  }
 })
 onMounted(async () => {
   // 只在新报表路由内取消收银桌面画布的最小宽度；离开后恢复，不整改其他页面。
@@ -208,7 +219,7 @@ onMounted(async () => {
   try {
     catalog.value = await loadBasicReportCatalog(platform.value)
     fields.value = active.value?.queryFields || []
-    if (platform.value) scope.value = await queryStoreBusinessReportScope('platform')
+    if (platform.value && active.value) await refreshScope(active.value.code)
     if (route.params.report && !active.value) throw new Error('未配置该基础报表')
     if (active.value?.available) await run()
   } catch (e) { error.value = e.message }
@@ -238,7 +249,7 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
         <template #leading-controls>
           <OrganizationStoreScopePicker v-if="platform" v-model="stores" :tree="scope.tree" :allowed-store-ids="scope.allowed_store_ids" :label="scopeLabel" @change="selectScope" />
           <label v-if="active.time_mode === 'realtime_month'" class="basic-reports__date">月份<input v-model="salaryMonth" type="month" :max="today.slice(0, 7)" aria-label="工资月份"></label>
-          <UnifiedQueryDateRange v-else-if="!['current', 'registration_date'].includes(active.time_mode)" :model-value="{ min: dates.start_date, max: dates.end_date }" :allow-clear="false" label="报表查询周期" @change="applyPeriod" />
+          <span v-else-if="!['current', 'registration_date'].includes(active.time_mode)" class="basic-reports__period"><UnifiedQueryDateRange :model-value="{ min: dates.start_date, max: dates.end_date }" :allow-clear="false" label="报表查询周期" @change="applyPeriod" /></span>
         </template>
         <template #primary-actions>
           <button type="button" class="basic-reports__icon" title="列名取值来源" aria-label="列名取值来源" @click="fieldGuide = true"><BookOpen :size="17" /></button>
@@ -278,6 +289,11 @@ onBeforeUnmount(() => { requestId++; controller?.abort(); document.documentEleme
 
 <style scoped>
 :global(html.basic-reports-document),:global(html.basic-reports-document body),:global(html.basic-reports-document #app){min-width:0}
+/* 21 张基础报表共用同一主筛选行；日期控件固定宽度，窄屏只横向滚动该行。 */
+.basic-reports :deep(.unified-report-query-toolbar__primary){flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;align-items:center}
+.basic-reports :deep(.unified-report-query-toolbar__leading){flex-wrap:nowrap;max-width:none;flex:none}
+.basic-reports :deep(.unified-report-query-toolbar__actions){flex-wrap:nowrap;width:auto;max-width:none;flex:none;margin-left:auto}
+.basic-reports__period{display:block;flex:none;width:326px}
 /* Keep record totals reachable on this report even when the shell hides compact pagination summaries. */
 .basic-reports :deep(.table-pagination){flex:none;flex-wrap:wrap}
 .basic-reports :deep(.table-pagination__summary){display:block;white-space:normal}

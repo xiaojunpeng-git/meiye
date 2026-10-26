@@ -34,19 +34,49 @@ class UnifiedReport extends AuthController
     /** 新基础报表独立入口；既有报表目录和查询分发不变。 */
     public function basicCatalog()
     {
-        if (!$this->hasMenuPermission('admin-report-basic')) return app('json')->fail('当前账号未配置基础报表权限');
-        return app('json')->success(\app\services\report\BasicReportHostServices::catalog());
+        if (!$this->basicMenuAllStores()) {
+            if (!$this->hasMenuPermission('admin-report-basic')) return app('json')->fail('当前账号未配置基础报表权限');
+            return app('json')->success(\app\services\report\BasicReportHostServices::catalog());
+        }
+        // 目录只返回当前账号能从菜单进入的报表，不能以目录接口探测其他叶子报表。
+        $entries = array_values(array_filter(\app\services\report\BasicReportHostServices::catalog(), function (array $entry): bool {
+            return $this->hasMenuPermission('admin-report-' . (string)$entry['code']);
+        }));
+        if (!$entries) return app('json')->fail('当前账号未配置基础报表菜单');
+        return app('json')->success($entries);
+    }
+
+    /** 基础报表单独返回平台菜单所授权的门店树，不改变其他经营报表的组织权限。 */
+    public function basicScope(Request $request, OrganizationScopeService $organizations)
+    {
+        try {
+            $code = (string)$request->get('pageCode', '');
+            \app\services\report\BasicReportCatalogServices::definition($code);
+            if (!$this->canReadBasicReport($code)) return app('json')->fail('当前账号未配置该基础报表菜单');
+            $menuAllStores = $this->basicMenuAllStores();
+            $reportScope = $menuAllStores ? null : $this->reportAuthorization();
+            $allowed = $menuAllStores ? $this->allStoreIds() : $this->allowedStoreIds(0, 0);
+            $mode = $menuAllStores ? 'all' : (string)$reportScope['mode'];
+            return app('json')->success([
+                'tree' => $organizations->buildPickerTree($allowed), 'allowed_store_ids' => $allowed,
+                'authorization_mode' => $mode,
+                'permission_version' => 'basic-report-' . (int)$this->adminId . '-'
+                    . md5(json_encode([$code, $allowed, $mode, $menuAllStores])),
+            ]);
+        } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
     public function basicQuery(Request $request)
     {
-        if (!$this->hasMenuPermission('admin-report-basic')) return app('json')->fail('当前账号未配置基础报表权限');
         try {
             $raw = (string)$request->param('query', '{}');
             if (strlen($raw) > 50000) throw new \InvalidArgumentException('查询条件过长');
             $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
-            $context = $this->basicContext($request->get());
+            $code = (string)($payload['pageCode'] ?? '');
+            \app\services\report\BasicReportCatalogServices::definition($code);
+            if (!$this->canReadBasicReport($code)) return app('json')->fail('当前账号未配置该基础报表菜单');
+            $context = $this->basicReadContext($request->get(), $code);
             return app('json')->success(\app\services\report\BasicReportHostServices::query($context, $payload));
         } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
         catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
@@ -67,6 +97,38 @@ class UnifiedReport extends AuthController
         $scope = $this->reportAuthorization();
         return \app\services\report\BasicReportHostServices::context($this->scopedStoreIds($input),
             (string)$scope['mode'], (int)$this->adminId, 'platform', $this->hasMenuPermission('admin-report-basic-write'));
+    }
+
+    /** 平台查询用菜单权限确定读范围；写入仍走原 basicContext，绝不借此扩大刷单登记编辑范围。 */
+    private function basicReadContext(array $input, string $code): array
+    {
+        if (!$this->basicMenuAllStores()) return $this->basicContext($input);
+        $stores = app()->make(OrganizationScopeService::class)
+            ->resolveScopedStoreIdsFromRequest($this->allStoreIds(), $input);
+        $canWrite = false;
+        // 仅刷单登记的编辑按钮需要旧写权限；其他 20 张表的读取不再触发旧数据权限计算。
+        if ($code === 'basic_brush_registration' && $this->hasMenuPermission('admin-report-basic-write')) {
+            $original = $this->reportAuthorization();
+            $originalStores = array_map('intval', (array)$original['store_ids']);
+            $canWrite = !in_array((string)$original['mode'], ['none', 'self_participant'], true)
+                && count(array_diff($stores, $originalStores)) === 0;
+        }
+        return \app\services\report\BasicReportHostServices::context($stores, 'all',
+            (int)$this->adminId, 'platform', $canWrite);
+    }
+
+    /** 菜单可见是本开关下的唯一基础报表读授权；未知报表仍由目录白名单拒绝。 */
+    private function canReadBasicReport(string $code): bool
+    {
+        return $this->basicMenuAllStores()
+            ? $this->hasMenuPermission('admin-report-' . $code)
+            : $this->hasMenuPermission('admin-report-basic');
+    }
+
+    /** 配置按实例启用；010 之外默认保持原有组织数据权限。 */
+    private function basicMenuAllStores(): bool
+    {
+        return (bool)config('basic_report.platform_menu_all_stores');
     }
 
     private const STORE_OPERATION_REPORTS = [

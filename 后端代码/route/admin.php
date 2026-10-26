@@ -1756,6 +1756,7 @@ Route::group('adminapi', function () {
      */
     Route::group('report', function () {
         Route::get('basic/catalog', 'v1.report.UnifiedReport/basicCatalog')->option(['real_name' => '基础报表目录']);
+        Route::get('basic/scope', 'v1.report.UnifiedReport/basicScope')->option(['real_name' => '基础报表门店范围']);
         Route::get('basic/query', 'v1.report.UnifiedReport/basicQuery')->option(['real_name' => '基础报表统一查询']);
         Route::post('basic/save', 'v1.report.UnifiedReport/basicSave')->option(['real_name' => '保存刷单登记']);
         Route::get('business-catalog', 'v1.report.BusinessReportCatalog/index')->option(['real_name' => '业务报表中心目录']);

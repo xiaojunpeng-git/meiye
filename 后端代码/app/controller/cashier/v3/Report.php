@@ -33,7 +33,7 @@ class Report extends AuthController
             if (strlen($raw) > 50000) throw new \InvalidArgumentException('查询条件过长');
             $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
-            return $this->success('ok', \app\services\report\BasicReportHostServices::query($this->basicContext(), $payload));
+            return $this->success('ok', \app\services\report\BasicReportHostServices::query($this->basicContext(false), $payload));
         } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
         catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
     }
@@ -45,18 +45,24 @@ class Report extends AuthController
             // ForceStoreSessionMiddleware 注入的store_id也须与认证门店一致。
             if (isset($payload['store_id']) && (int)$payload['store_id'] !== (int)$this->storeId) throw new \InvalidArgumentException('不能修改其他门店登记');
             $payload['store_id'] = (int)$this->storeId;
-            return $this->success('ok', (new \app\services\report\BasicRegistrationWriteServices())->save($this->basicContext(), $payload));
+            return $this->success('ok', (new \app\services\report\BasicRegistrationWriteServices())->save($this->basicContext(true), $payload));
         } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
     }
 
-    private function basicContext(): array
+    /** 读取只由认证会话的当前门店限定；人工登记写入继续受既有数据权限约束。 */
+    private function basicContext(bool $writeRequest): array
     {
         $scope = $this->dataScope();
         $stores = $scope->visibleStoreIds();
-        if ($stores !== null && !in_array((int)$this->storeId, array_map('intval', $stores), true)) throw new \InvalidArgumentException('当前账号无权查看本店登记');
+        $canWriteStore = $stores === null || in_array((int)$this->storeId, array_map('intval', $stores), true);
+        if ($writeRequest && !$canWriteStore) throw new \InvalidArgumentException('当前账号无权修改本店登记');
         $info = is_array($this->cashierInfo) ? $this->cashierInfo : [];
-        $context = \app\services\report\BasicReportHostServices::context([(int)$this->storeId], $scope->authorizationMode(),
-            (int)$this->cashierId, 'store', empty($info['_cashier_v3_delegated']), (int)($info['id'] ?? 0));
+        $mode = $scope->authorizationMode();
+        $readMode = !$writeRequest && in_array($mode, ['none', 'self_participant'], true) ? 'stores' : $mode;
+        $canWrite = $canWriteStore && !in_array($mode, ['none', 'self_participant'], true)
+            && empty($info['_cashier_v3_delegated']);
+        $context = \app\services\report\BasicReportHostServices::context([(int)$this->storeId], $readMode,
+            (int)$this->cashierId, 'store', $canWrite, (int)($info['id'] ?? 0));
         // 导出任务必须区分组织会话与传统店员ID，不能用碰巧相等的数字跨身份回源。
         if (!empty($info['_cashier_v3_organization'])) $context['permission_version'] = 'organization:' . $context['permission_version'];
         elseif (!empty($info['_cashier_v3_delegated'])) $context['permission_version'] = 'delegated:' . $context['permission_version'];
