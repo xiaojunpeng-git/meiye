@@ -181,6 +181,10 @@ const member = computed(() => cashier.value.member || null)
 // Source policy controls new-business initialization and visibility only. A
 // local checkout/hang/reservation snapshot remains the owner of its chosen source.
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
+// 只隐藏新操作入口，草稿与历史归属、体验及服务对象标记仍由权威快照保留。
+const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
+const experienceEnabled = computed(() => state.storeDisplayOptions?.experienceEnabled !== false)
+const craftsmanExcludeCountsEnabled = computed(() => state.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false)
 function initialBusinessSource(kind) {
   const currentId = Number(member.value?.memberId || member.value?.id || 0)
   const service = state.cashier?.serviceOrder
@@ -8315,7 +8319,7 @@ onBeforeUnmount(() => {
                       {{ cartActionLabel('欠款', checkoutDebtSummary(line)) }}
                     </button>
                   </div>
-                  <div class="cart-line__meta-slot cart-line__meta-slot--attribution">
+                  <div v-if="salesAttributionEnabled" class="cart-line__meta-slot cart-line__meta-slot--attribution">
                     <button
                       type="button"
                       class="cart-line__meta-action cart-line__meta-action--enabled"
@@ -8349,6 +8353,7 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
                   <div
+                    v-if="isInventoryManagedProductLine(line) || (experienceEnabled && isProjectLine(line) && !cardOperationUpgradeBinding(line))"
                     class="cart-line__meta-slot cart-line__meta-slot--service-object"
                     :class="{ 'cart-line__meta-slot--inventory': isInventoryManagedProductLine(line) }"
                   >
@@ -8385,7 +8390,7 @@ onBeforeUnmount(() => {
                         @click.stop="setCartLineInventoryMode(line, 'presale')"
                       >预售</button>
                       <button
-                        v-if="isProjectLine(line) && !cardOperationUpgradeBinding(line)"
+                        v-if="experienceEnabled && isProjectLine(line) && !cardOperationUpgradeBinding(line)"
                         type="button"
                         class="cart-line__experience"
                         :class="{ 'is-active': cartLineExperienceSelected(line) }"
@@ -8411,6 +8416,7 @@ onBeforeUnmount(() => {
                       @click="setCartLineServiceObject(line, 'friend', true)"
                     >朋友算</button>
                     <button
+                      v-if="craftsmanExcludeCountsEnabled"
                       type="button"
                       :class="{ 'is-active': cartLineServiceChoice(line) === 'excluded' }"
                       @click="setCartLineExcludedFromCustomerCounts(line)"

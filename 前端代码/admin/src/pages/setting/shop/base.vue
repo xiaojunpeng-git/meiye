@@ -1,6 +1,9 @@
 <template>
 <!-- 系统设置 -->
     <div>
+        <from-submit :validate="ruleValidate" :url="url" :title="title" :rules="rules">
+        <template #store-settings>
+        <!-- 这些独立配置保留各自的读取、版本保护和保存接口，仅随门店设置页签展示。 -->
         <section class="deal-people-threshold" aria-label="成交人数门槛">
             <div class="deal-people-threshold__title">成交人数门槛</div>
             <div class="deal-people-threshold__fields">
@@ -43,7 +46,8 @@
             </div>
             <div v-if="commerceLoadFailed" class="deal-people-threshold__error">读取业务来源设置失败，请刷新页面后重试。</div>
         </section>
-        <from-submit :validate="ruleValidate" :url="url" :title="title" :rules="rules"/>
+        </template>
+        </from-submit>
     </div>
 </template>
 

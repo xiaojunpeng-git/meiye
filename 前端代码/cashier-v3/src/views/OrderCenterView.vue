@@ -445,7 +445,23 @@ const state = useCashierV3State()
 // Reuse the root projection of the existing instance switch; missing initial
 // projection is not an instruction to erase a saved route or historical facts.
 const debtPaymentEnabled = computed(() => state.cashier?.debtPaymentEnabled !== false)
-const orderPresentationFields = fields => orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)
+// 归属入口关闭仅影响订单管理展示，既有订单事实和退款归属不清除。
+const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
+const hiddenSalesAttributionKeys = new Set(['sales_manager', 'guide', 'refund_attribution', 'supplement_attribution'])
+// 只处理本页的列与旧查询参数；历史归属及用户保存的列偏好仍完整保留。
+const orderSalesAttributionFields = fields => fields.filter(field => salesAttributionEnabled.value || !hiddenSalesAttributionKeys.has(field?.key))
+function orderSalesAttributionQuery(query) {
+  if (salesAttributionEnabled.value) return query
+  const result = JSON.parse(JSON.stringify(query || {}))
+  const keyOf = item => typeof item === 'string' ? item : item?.field_key || item?.fieldKey || item?.field || item?.key
+  for (const key of ['topFilters', 'topFilterConditions', 'filters', 'quickFilters', 'keywordFilters', 'sorts', 'summaries', 'groups', 'groupBy', 'visibleFields', 'quickFields']) {
+    if (Array.isArray(result[key])) result[key] = result[key].filter(item => !hiddenSalesAttributionKeys.has(keyOf(item)))
+  }
+  if (result.querySettings) result.querySettings = orderSalesAttributionQuery(result.querySettings)
+  if (result.export && Array.isArray(result.export.fields)) result.export.fields = result.export.fields.filter(key => !hiddenSalesAttributionKeys.has(key))
+  return result
+}
+const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value))
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
 const router = useRouter()
@@ -1504,7 +1520,7 @@ function giftVoidRecordId(record) {
 // 固定明细布局只保存字段键，标签复用查询定义，避免表格增加列后设置仍是另一套名称。
 const salesOrderListColumnKeys = ['item_name', 'product_category', 'unit_price', 'quantity', 'craftsman', 'salesperson', 'sales_manager', 'guide', 'line_amount', 'receivable_amount', 'debt_amount', 'coupon_discount_amount', 'actual_received_amount', 'payment_method', 'store', 'order_status']
 const salesOrderListColumns = computed(() => {
-  return salesOrderListColumnKeys.filter(key => debtPaymentEnabled.value || key !== 'debt_amount').map((key) => ORDER_TABS.find((tab) => tab.key === 'sales').fields.find((item) => item.key === key).label)
+  return orderPresentationFields(salesOrderListColumnKeys.map(key => ORDER_TABS.find((tab) => tab.key === 'sales').fields.find((item) => item.key === key))).map((item) => item.label)
 })
 
 function salesOrderItems(record) {
@@ -2783,7 +2799,7 @@ async function queryRecords(query = {}, resetPage = true) {
   // 只统一读取/刷新，不介入作废和人员调整命令。无新筛选的调用复用最后成功快照。
   const explicitQuery = Object.prototype.hasOwnProperty.call(query, 'topFilters')
   const previous = executedQueryByType.value[recordType] || queryModelByType.value[recordType] || {}
-  query = orderDebtQuery(orderBusinessSourceQuery(mergeQueryRefresh(previous, query), businessSourceEnabled.value), debtPaymentEnabled.value)
+  query = orderSalesAttributionQuery(orderDebtQuery(orderBusinessSourceQuery(mergeQueryRefresh(previous, query), businessSourceEnabled.value), debtPaymentEnabled.value))
   if (!explicitQuery && previous.page) resetPage = false
   if (recordType !== 'sales') {
     const currentQuery = queryModelByType.value[recordType] || {}
@@ -4037,8 +4053,8 @@ onBeforeUnmount(() => {
             <td v-if="activeTabKey === 'all'">{{ recordType(record) === 'recharge' ? '—' : (recordFieldValue(record, 'product_category') || '未分类') }}</td>
             <td>—</td><td>—</td><td>—</td>
             <td><button v-if="canEditRecordPersonnel(record)" type="button" class="order-link" title="修改销售人" @click="openRecordPersonnelEditor(record)">{{ displayRecordField(record, 'salesperson') }}</button><span v-else>{{ displayRecordField(record, 'salesperson') }}</span></td>
-            <td><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改销售经理" @click="openRecordRoles(record)">{{ displayRecordField(record, 'sales_manager') }}</button><span v-else>{{ displayRecordField(record, 'sales_manager') }}</span></td>
-            <td><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改导购" @click="openRecordRoles(record)">{{ displayRecordField(record, 'guide') }}</button><span v-else>{{ displayRecordField(record, 'guide') }}</span></td>
+            <td v-if="salesAttributionEnabled"><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改销售经理" @click="openRecordRoles(record)">{{ displayRecordField(record, 'sales_manager') }}</button><span v-else>{{ displayRecordField(record, 'sales_manager') }}</span></td>
+            <td v-if="salesAttributionEnabled"><button v-if="canEditRecordRoles(record)" type="button" class="order-link" title="修改导购" @click="openRecordRoles(record)">{{ displayRecordField(record, 'guide') }}</button><span v-else>{{ displayRecordField(record, 'guide') }}</span></td>
             <td>{{ displayMoneyField(record, `${recordType(record)}_amount`) }}</td>
             <td>—</td><td>—</td><td>—</td>
             <td>{{ recordType(record) === 'recharge' ? displayMoneyField(record, 'actual_received_amount') : '—' }}</td>
@@ -4074,11 +4090,11 @@ onBeforeUnmount(() => {
               <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salespeople')">{{ salespeoplePerformanceText(item.salespeople) }}</button>
               <span v-else>{{ salespeoplePerformanceText(item.salespeople) }}</span>
             </td>
-            <td>
+            <td v-if="salesAttributionEnabled">
               <button v-if="salesOrderActionAvailable(record, 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust')" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'salesManagers')">{{ personnelNames(item, 'salesManagers') }}</button>
               <span v-else>{{ personnelNames(item, 'salesManagers') }}</span>
             </td>
-            <td>
+            <td v-if="salesAttributionEnabled">
               <button v-if="salesOrderActionAvailable(record, record.entitlementOnly ? 'correct-service-order-guide' : 'open-sales-order-personnel-adjustment', 'cashier.v3.order.staff_adjust') && !item.voidedAt" type="button" class="order-link" @click="openSalesOrderPersonnelEditor(record, item, 'guides')">{{ guideRoundText(item.guides) }}</button>
               <span v-else>{{ guideRoundText(item.guides) }}</span>
             </td>
