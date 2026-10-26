@@ -1,0 +1,67 @@
+{
+  "site": "010",
+  "database": "mohe_010_app",
+  "port": 3307,
+  "read_only": true,
+  "menus": [
+    {
+      "id": 1986,
+      "pid": 0,
+      "type": 1,
+      "menu_name": "报表",
+      "menu_path": "/report",
+      "unique_auth": "admin-report",
+      "is_show": 1,
+      "sort": 87,
+      "path": ""
+    },
+    {
+      "id": 2320,
+      "pid": 1986,
+      "type": 1,
+      "menu_name": "基础报表",
+      "menu_path": "/report/basic-reports",
+      "unique_auth": "admin-report-basic",
+      "is_show": 1,
+      "sort": 60,
+      "path": "1986"
+    },
+    {
+      "id": 2321,
+      "pid": 2320,
+      "type": 1,
+      "menu_name": "基础报表目录",
+      "menu_path": "",
+      "unique_auth": "admin-report-basic-catalog",
+      "is_show": 0,
+      "sort": 0,
+      "path": "1986/2320"
+    },
+    {
+      "id": 2322,
+      "pid": 2320,
+      "type": 1,
+      "menu_name": "基础报表查询",
+      "menu_path": "",
+      "unique_auth": "admin-report-basic-query",
+      "is_show": 0,
+      "sort": 1,
+      "path": "1986/2320"
+    },
+    {
+      "id": 2323,
+      "pid": 2320,
+      "type": 1,
+      "menu_name": "编辑刷单登记",
+      "menu_path": "",
+      "unique_auth": "admin-report-basic-write",
+      "is_show": 0,
+      "sort": 2,
+      "path": "1986/2320"
+    }
+  ],
+  "role_count": 30,
+  "basic_granted_role_count": 3,
+  "role_rules_sha256": "99f160a1cbd736d621c055c9394d25a15af71da97c6dc4ed1b88d34e402cd212",
+  "business_writes": false
+}
