@@ -146,7 +146,7 @@ class CashierV3RootStateContract
             'storeName' => (string)($extras['storeName'] ?? ''),
             'currentStore' => $extras['currentStore'] ?? ['id' => null, 'name' => ''],
             'navigationRules' => $extras['navigationRules'] ?? [],
-            'storeDisplayOptions' => $extras['storeDisplayOptions'] ?? ['salesAttributionEnabled' => true, 'experienceEnabled' => true, 'craftsmanExcludeCountsEnabled' => true],
+            'storeDisplayOptions' => $extras['storeDisplayOptions'] ?? ['salesAttributionEnabled' => true, 'experienceEnabled' => true, 'craftsmanExcludeCountsEnabled' => true, 'laborFeeVisible' => true],
             'featurePermissions' => $extras['featurePermissions'] ?? new \stdClass(),
             'operationPermissions' => $extras['operationPermissions'] ?? new \stdClass(),
             'workspace' => $extras['workspace'] ?? [

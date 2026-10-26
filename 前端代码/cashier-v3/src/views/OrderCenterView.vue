@@ -447,6 +447,8 @@ const state = useCashierV3State()
 const debtPaymentEnabled = computed(() => state.cashier?.debtPaymentEnabled !== false)
 // 归属入口关闭仅影响订单管理展示，既有订单事实和退款归属不清除。
 const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
+// 本轮只调整全部订单、消费订单；服务记录及其他入口保留既有展示和业务事实。
+const orderLaborFeeVisible = computed(() => state.storeDisplayOptions?.laborFeeVisible !== false || !['all', 'sales'].includes(activeTabKey.value))
 const hiddenSalesAttributionKeys = new Set(['sales_manager', 'guide', 'refund_attribution', 'supplement_attribution'])
 // 只处理本页的列与旧查询参数；历史归属及用户保存的列偏好仍完整保留。
 const orderSalesAttributionFields = fields => fields.filter(field => salesAttributionEnabled.value || !hiddenSalesAttributionKeys.has(field?.key))
@@ -461,7 +463,10 @@ function orderSalesAttributionQuery(query) {
   if (result.export && Array.isArray(result.export.fields)) result.export.fields = result.export.fields.filter(key => !hiddenSalesAttributionKeys.has(key))
   return result
 }
-const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value))
+const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)).map(item => (
+  item?.key === 'craftsman' && !orderLaborFeeVisible.value
+    ? { ...item, label: '手艺人（类型，业绩，项目数）' } : item
+))
 const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
 const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
 const router = useRouter()
@@ -1555,7 +1560,7 @@ function personnelNames(item, key) {
 function salesItemCraftsmenText(item) {
   // 销售单中的关联服务行与“服务记录”共用同一展示契约，
   // 避免同一服务在两个页签显示不同的业绩、手工费和项目数。
-  if (Array.isArray(item?.craftsmenListAllocations)) return serviceCraftsmenPerformanceText(item)
+  if (Array.isArray(item?.craftsmenListAllocations)) return serviceCraftsmenPerformanceText(item, orderLaborFeeVisible.value)
   return personnelNames(item, 'craftsmen')
 }
 
@@ -4271,6 +4276,7 @@ onBeforeUnmount(() => {
     <PersonnelPerformanceOverlay
       v-if="!isPlatformReadOnly && salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
       :initial-tab="salesPersonnelTarget.uiRole"
+      :show-labor-fee="orderLaborFeeVisible"
       :initial-mode="salesPersonnelTarget.entitlementOnly ? 'simple' : 'full'"
       :simple-only="Boolean(salesPersonnelTarget.entitlementOnly)"
       :show-craftsmen="salesPersonnelTarget.role === 'craftsman'"
@@ -4622,6 +4628,7 @@ onBeforeUnmount(() => {
 
     <PersonnelPerformanceOverlay
       v-if="!isPlatformReadOnly && serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
+      :show-labor-fee="orderLaborFeeVisible"
       initial-tab="craftsmen"
       :show-craftsmen="true"
       :show-salespeople="false"

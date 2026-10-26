@@ -2249,7 +2249,7 @@ WSS;
         $build->url('setting/config/save_basics');
 
         $data = $this->getConfigAllField([
-            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
+            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'site_name', 'site_url', 'site_phone', 'cache_config',
             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
             'wap_login_logo', 'product_video_status','recharge_per',
 //            'store_func_status', 'video_func_status',
@@ -2291,6 +2291,8 @@ WSS;
                 Build::switch('cashier_experience_switch', '体验', (int)($data['cashier_experience_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的体验按钮'),
                 // 只关闭“手艺人不算人数人次”的新选择入口，不追改已确认的服务对象与客数事实。
                 Build::switch('cashier_craftsman_exclude_counts_switch', '手艺人不算人数人次', (int)($data['cashier_craftsman_exclude_counts_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的“手艺人不算人数人次”按钮'),
+                // 两个选项仅命名展示方式；不改变手工费计算、保存或历史金额。缺省沿用可修改。
+                Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('计算法仅隐藏收银、全部订单及消费订单中的手工费输入和显示，保留原有金额和计算口径'),
             ])->option('后台设置', $setting)
                 ->option('移动端设置', [
                     Build::uploadFrame('wap_login_logo', $data['wap_login_logo']['info'], $data['wap_login_logo']['value'])->url('/' . config('admin.admin_prefix') . '/widget.images/index.html')->info($data['wap_login_logo']['desc']),
