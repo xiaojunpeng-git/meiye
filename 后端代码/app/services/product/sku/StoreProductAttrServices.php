@@ -541,7 +541,9 @@ class StoreProductAttrServices extends BaseServices
         /** @var StoreProductServices $storeProductService */
         $storeProductService = app()->make(StoreProductServices::class);
         if (!$productInfo) {
-            $productInfo = $storeProductService->get($productId, ['is_vip']);
+            // Activity stock may only be capped by catalog stock when the underlying
+            // product explicitly participates in inventory and forbids negative stock.
+            $productInfo = $storeProductService->get($productId, ['is_vip', 'product_type', 'is_inventory', 'allow_negative_stock']);
         }
         $vip_price = true;
         if (!$storeProductService->vipIsOpen(!!$productInfo['is_vip'])) $vip_price = false;
@@ -579,9 +581,14 @@ class StoreProductAttrServices extends BaseServices
                 for ($i = 0; $i < $count; $i++) {
                     $activityAttr[$i][] = $attrs[$i];
                 }
-				if ($value['product_stock'] <= 0) {//原商品规格无库存
-					$value['stock'] = 0;
-				}
+				// The activity SKU is the authority for group places. Catalog stock only
+				// caps physical products whose saved inventory policy requires protection;
+				// rights and inventory-disabled/negative-allowed products must not be
+				// turned into sold-out items merely because their catalog stock is zero.
+				$protectCatalogStock = (int)($productInfo['product_type'] ?? 0) === 0
+					&& (int)($productInfo['is_inventory'] ?? 1) === 1
+					&& (int)($productInfo['allow_negative_stock'] ?? 1) !== 1;
+				if ($protectCatalogStock && $value['product_stock'] <= 0) $value['stock'] = 0;
             }
 			$value['small_image'] = get_thumb_water($value['image']);
 			$value['stock'] = $value['is_show'] == 1 ? $value['stock'] : 0;
