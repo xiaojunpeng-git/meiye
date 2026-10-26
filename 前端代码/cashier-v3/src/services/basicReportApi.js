@@ -1,10 +1,11 @@
 import { readStoreV3SessionToken } from './storeV3SessionToken'
 
 /** 两端复用报表接口契约；只传查询和表单，不传身份、权限或数据库配置。 */
-async function request(platform, action, { query, storeIds = [], body, signal } = {}) {
+async function request(platform, action, { query, pageCode, storeIds = [], body, signal } = {}) {
   const base = platform ? '/adminapi/report/basic/' : '/cashierapi/v3/report/basic/'
   const url = new URL(base + action, window.location.origin)
   if (query) url.searchParams.set('query', JSON.stringify(query))
+  if (pageCode) url.searchParams.set('pageCode', pageCode)
   if (platform && storeIds.length) url.searchParams.set('store_ids', storeIds.join(','))
   const cookie = document.cookie.match(/(?:^|;\s*)admin-token=([^;]*)/)
   const token = platform ? (cookie ? decodeURIComponent(cookie[1]) : '') : readStoreV3SessionToken()
@@ -20,6 +21,8 @@ async function request(platform, action, { query, storeIds = [], body, signal } 
 }
 
 export const loadBasicReportCatalog = (platform, signal) => request(platform, 'catalog', { signal })
+/** 平台基础报表的可选门店范围与查询共用菜单授权；门店端始终固定当前登录门店。 */
+export const loadBasicReportScope = (pageCode, signal) => request(true, 'scope', { pageCode, signal })
 export const loadBasicReport = (platform, query, storeIds, signal) => request(platform, 'query', { query, storeIds, signal })
 export const saveBasicRegistration = (platform, body) => request(platform, 'save', { body })
 

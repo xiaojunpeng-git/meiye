@@ -32,7 +32,7 @@ import { bootstrapCashierV3Workbench, hasCashierV3Session } from '@/services/cas
 import { canUseCashierV3Feature, useCashierV3State } from '@/services/cashierV3Bridge'
 
 const routeFeatureCodes = Object.freeze({
-  'cashier-v3-basic-reports': 'cashier.v3.data',
+  'cashier-v3-basic-reports': 'cashier.v3.basic_reports',
   'cashier-v3-cashier': 'cashier.v3.cashier',
   'cashier-v3-writeoff': 'cashier.v3.writeoff',
   'cashier-v3-replacement': 'cashier.v3.writeoff',
@@ -63,8 +63,14 @@ const defaultRouteNames = Object.freeze([
   'cashier-v3-fund', 'cashier-v3-care', 'cashier-v3-order-center',
   'cashier-v3-staff-list', 'cashier-v3-room-settings', 'cashier-v3-business-dashboard',
   'cashier-v3-store-settings',
-  'cashier-v3-store-business-reports', 'cashier-v3-store-target-dashboard', 'cashier-v3-inventory-entry', 'cashier-v3-presale-claim'
+  'cashier-v3-store-business-reports', 'cashier-v3-basic-reports', 'cashier-v3-store-target-dashboard', 'cashier-v3-inventory-entry', 'cashier-v3-presale-claim'
 ])
+
+// 基础报表必须有独立的单表岗位授权；旧“数据”只打开原有经营报表。
+function canUseRouteFeature(routeName) {
+  const code = routeFeatureCodes[routeName]
+  return !!code && canUseCashierV3Feature(code)
+}
 
 export function firstGrantedRouteName() {
   // 登录后的首屏与当前已授权导航排序一致；未知功能码不能注入新路由。
@@ -77,7 +83,7 @@ export function firstGrantedRouteName() {
     return [group?.sort ?? 99999, rules.get(code)?.sort ?? 99999]
   }
   const sorted = [...defaultRouteNames].sort((a, b) => rank(a)[0] - rank(b)[0] || rank(a)[1] - rank(b)[1])
-  return sorted.find((routeName) => canUseCashierV3Feature(routeFeatureCodes[routeName])) || ''
+  return sorted.find(canUseRouteFeature) || ''
 }
 
 const routes = [
@@ -321,10 +327,10 @@ router.beforeEach(async (to) => {
   // 登录响应已经由服务端按任职、入口和岗位规则签发功能码。先使用这份
   // 会话快照决定首屏，避免轻量 bootstrap 尚未返回完整根投影时把新登录
   // 用户错误送回登录页；没有该快照仍须走下方的 fail-closed 初始化路径。
-  if (featureCode && canUseCashierV3Feature(featureCode)) return true
+  if (featureCode && canUseRouteFeature(String(to.name || ''))) return true
 
   await ensureCashierV3RouterBootstrap({ reason: 'route-permission', silent: true })
-  if (featureCode && canUseCashierV3Feature(featureCode)) return true
+  if (featureCode && canUseRouteFeature(String(to.name || ''))) return true
 
   const fallbackRoute = firstGrantedRouteName()
   if (fallbackRoute && fallbackRoute !== to.name) return { name: fallbackRoute }
