@@ -1,0 +1,99 @@
+{
+    "groups": [
+        {
+            "id": "1",
+            "product_id": "7351",
+            "title": "2026秋季拼团 共享健康美丽卡",
+            "product_type": "5",
+            "type": "0",
+            "relation_id": "0",
+            "stock": "100",
+            "quota": "100",
+            "quota_show": "100",
+            "price": "1.00",
+            "is_show": "1",
+            "is_del": "0",
+            "delivery_type": "2",
+            "applicable_type": "1",
+            "applicable_store_id": ""
+        }
+    ],
+    "products": {
+        "7351": [
+            {
+                "id": "7365",
+                "pid": "7351",
+                "product_type": "5",
+                "type": "1",
+                "relation_id": "108",
+                "store_name": "2026秋季拼团 共享健康美丽卡",
+                "is_inventory": "0",
+                "allow_negative_stock": "1",
+                "stock": "0.00",
+                "is_show": "0",
+                "is_del": "0",
+                "is_verify": "1",
+                "delivery_type": "2",
+                "applicable_type": "1",
+                "applicable_store_id": ""
+            },
+            {
+                "id": "7351",
+                "pid": "0",
+                "product_type": "5",
+                "type": "0",
+                "relation_id": "0",
+                "store_name": "2026秋季拼团 共享健康美丽卡",
+                "is_inventory": "0",
+                "allow_negative_stock": "1",
+                "stock": "0.00",
+                "is_show": "0",
+                "is_del": "0",
+                "is_verify": "1",
+                "delivery_type": "2",
+                "applicable_type": "1",
+                "applicable_store_id": ""
+            }
+        ]
+    },
+    "skus": {
+        "1": [
+            {
+                "id": "8137",
+                "product_id": "7351",
+                "type": "0",
+                "unique": "b6eccb46",
+                "suk": "默认",
+                "stock": "0.00",
+                "quota": "0",
+                "price": "399.00"
+            },
+            {
+                "id": "8151",
+                "product_id": "7365",
+                "type": "0",
+                "unique": "81152998",
+                "suk": "默认",
+                "stock": "0.00",
+                "quota": "0",
+                "price": "399.00"
+            },
+            {
+                "id": "12486",
+                "product_id": "1",
+                "type": "3",
+                "unique": "8594b0df",
+                "suk": "默认",
+                "stock": "100.00",
+                "quota": "100",
+                "price": "1.00"
+            }
+        ]
+    },
+    "store": {
+        "id": "108",
+        "is_show": "1",
+        "is_del": "0",
+        "delivery_type": "2"
+    }
+}

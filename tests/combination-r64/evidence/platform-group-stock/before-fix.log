@@ -1,0 +1,5 @@
+PASS no default shipping template fixture
+PASS legacy global switches are disabled
+PASS type 0 confirm succeeds: ok
+FAIL RuntimeException FAIL type 0 selected item remains valid
+R64 CLEANUP COMPLETE

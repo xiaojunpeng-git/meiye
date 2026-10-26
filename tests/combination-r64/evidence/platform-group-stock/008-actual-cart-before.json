@@ -1,0 +1,14 @@
+{
+    "result": "INVALID",
+    "storeId": 108,
+    "activityId": 1,
+    "valid": 0,
+    "invalid": 1,
+    "amount": 0,
+    "reasons": [
+        "此商品在门店中没有库存"
+    ],
+    "sqlTransaction": "READ ONLY",
+    "ordersCreated": 0,
+    "payments": 0
+}

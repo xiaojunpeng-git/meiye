@@ -1079,6 +1079,7 @@ class StoreCartServices extends BaseServices
 				$isCityStoreDeliveryScope = $storeServices->checkCityStoreDeliveryScope($uid, $store_id, $addr);
 			}
 		}
+        $combinationCatalogStockPolicies = [];
         foreach ($cartList as &$item) {
             $item['is_gift'] = 0;
             if (isset($item['cart_type']) && $item['cart_type'] == 3) {//无码商品
@@ -1219,7 +1220,37 @@ class StoreCartServices extends BaseServices
                             // 和前置适用门店校验继续执行，支付/成团也不会因此提前核销。
                             $isGroupStorePurchase = (int)$item['type'] === 3
                                 && (int)($item['activity_id'] ?? 0) > 0 && $store_id > 0;
-                            if (!$isGroupStorePurchase && !$store_self_mention) {
+                            $requiresStoreStock = true;
+                            $catalogStoreMismatch = false;
+                            if ($isGroupStorePurchase) {
+                                // 活动 id 不是底层商品 id；必须读取服务端目录的库存设置，
+                                // 不能用活动限量或客户端字段推断卡项/项目是否有实物库存。
+                                $catalogId = (int)($productInfo['product_id'] ?? $item['product_id']);
+                                if (!array_key_exists($catalogId, $combinationCatalogStockPolicies)) {
+                                    $catalog = $productServices->get($catalogId,
+                                        ['id', 'pid', 'type', 'relation_id', 'product_type', 'is_inventory', 'allow_negative_stock', 'is_del']);
+                                    if (!$catalog || (int)$catalog['is_del'] !== 0) {
+                                        throw new ValidateException('拼团底层商品不存在或已删除');
+                                    }
+                                    $combinationCatalogStockPolicies[$catalogId] = [
+                                        'requiresStock' => self::requiresCombinationCatalogStock($catalog),
+                                        // 活动的 type=0 不能把门店独立根商品变成跨店商品；
+                                        // 门店归属必须独立校验，不能借“库存不足”间接挡住。
+                                        'ownerStore' => (int)$catalog['type'] === 1 && (int)$catalog['pid'] === 0
+                                            ? (int)$catalog['relation_id'] : 0,
+                                    ];
+                                }
+                                // 与加购时的活动库存口径一致：卡项、项目、不管库存或允许负库存
+                                // 的产品不受门店实物 SKU 的零库存约束；独立拼团名额仍在建单事务扣减。
+                                $policy = $combinationCatalogStockPolicies[$catalogId];
+                                $requiresStoreStock = $policy['requiresStock'];
+                                $catalogStoreMismatch = $policy['ownerStore'] > 0 && $policy['ownerStore'] !== $store_id;
+                            }
+                            if ($catalogStoreMismatch) {
+                                $item['is_valid'] = 0;
+                                $item['invalid_desc'] = '此商品不属于该门店';
+                                $invalid[] = $item;
+                            } elseif (!$isGroupStorePurchase && !$store_self_mention) {
                                 $item['is_valid'] = 0;
                                 $item['invalid_desc'] = '平台/门店已关闭核销';
                                 $invalid[] = $item;
@@ -1235,7 +1266,7 @@ class StoreCartServices extends BaseServices
                                 $item['is_valid'] = 0;
                                 $item['invalid_desc'] = '此商品是卡密商品';
                                 $invalid[] = $item;
-                            } elseif ((in_array($productInfo['type'], [0, 2]) || $productInfo['relation_id'] != $store_id) && $store_id > 0 && $condition) {//平台、供应商商品 在门店购买 验证门店库存
+                            } elseif ($requiresStoreStock && (in_array($productInfo['type'], [0, 2]) || $productInfo['relation_id'] != $store_id) && $store_id > 0 && $condition) {//仅应管实物库存的商品继续校验门店库存
                                 $item['is_valid'] = 0;
                                 $item['invalid_desc'] = '此商品在门店中没有库存';
                                 $invalid[] = $item;

@@ -1,0 +1,14 @@
+{
+  "acceptedBy": "product_manager",
+  "acceptedTree": "1ac0b7a17a370d9d13096e9c8b520bda95f1fc51",
+  "patchSha256": "7348326bb410f7e391264fe63641a07adc0474980684c159028e06dcc3dd0d78",
+  "authorizedSequence": [
+    "commit",
+    "deploy-rh-and-verify",
+    "push",
+    "deploy-008-and-verify",
+    "deploy-010-and-verify"
+  ],
+  "databaseMigration": false,
+  "frontendChanges": false
+}

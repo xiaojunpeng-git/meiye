@@ -33,7 +33,7 @@ for(const fixture of quotes){
  await new Promise(resolve=>setImmediate(resolve));
  assert.equal(state.orderErr,false,'Quote hydration threw: '+JSON.stringify(notices));
  assert.equal(state.cartInfo.length,1);assert.equal(state.valid_count,1);
- assert.equal(Number(state.totalPrice),399);assert.equal(state.combinationId,fixture.quote.combination_id);
+ assert.equal(Number(state.totalPrice),fixture.expectedPrice??399);assert.equal(state.combinationId,fixture.quote.combination_id);
  assert.equal(state.contacts,'本地测试');assert.equal(state.contactsTel,'19900000064');
  formVerify.call(state);assert.equal(submitted,1,'A valid quote must pass the production submit validator');
  assert.deepEqual(notices,[]);

@@ -1,0 +1,3 @@
+PASS type 0 actual confirmation page retains item/amount/contact and permits submit
+PASS type 5 actual confirmation page retains item/amount/contact and permits submit
+PASS type 6 actual confirmation page retains item/amount/contact and permits submit
