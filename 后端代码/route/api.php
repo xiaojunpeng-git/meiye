@@ -538,6 +538,7 @@ Route::group('api', function () {
         Route::post('bargain/user/cancel', 'v1.activity.StoreBargain/user_cancel')->name('bargainUserCancel');//砍价取消
         Route::get('bargain/poster_info/:bargainId', 'v1.activity.StoreBargain/posterInfo')->name('posterInfo');//砍价海报详细信息
         //活动---拼团
+        Route::get('combination/member/records', 'v1.activity.StoreCombination/memberRecords')->name('combinationMemberRecords');//当前会员拼团记录
         Route::get('combination/pink/:id', 'v1.activity.StoreCombination/pink')->name('combinationPink');//拼团开团
         Route::post('combination/remove', 'v1.activity.StoreCombination/remove')->name('combinationRemove');//拼团 取消开团
         Route::get('combination/poster_info/:id', 'v1.activity.StoreCombination/posterInfo')->name('pinkPosterInfo');//拼团海报详细获取

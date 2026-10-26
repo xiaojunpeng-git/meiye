@@ -1120,6 +1120,13 @@
 					}
 				},
 				{
+					"path": "user_combination_records/index",
+					"style": {
+						"navigationBarTitleText": "我的拼团",
+						"navigationStyle": "custom"
+					}
+				},
+				{
 					"path": "goods_seckill/index",
 					"style": {
 						"navigationBarTitleText": "限时秒杀",
