@@ -34,6 +34,11 @@ export function listStorePresaleClaims(query = {}) {
   return request('/storeapi/product/inventory/v3/presale-claims', { query })
 }
 
+/** The records endpoint pages completed claim documents, not claimable balances. */
+export function listStorePresaleClaimRecords(query = {}) {
+  return request('/storeapi/product/inventory/v3/presale-claims/records', { query })
+}
+
 export function readStorePresaleClaim(claimableLineId) {
   return request(`/storeapi/product/inventory/v3/presale-claims/${encodeURIComponent(String(claimableLineId || ''))}`)
 }

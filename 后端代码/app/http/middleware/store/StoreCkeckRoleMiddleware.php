@@ -118,6 +118,9 @@ class StoreCkeckRoleMiddleware implements MiddlewareInterface
         if ($method === 'GET' && $path === 'storeapi/product/inventory/v3/presale-claims') {
             return 'cashier.v3.inventory.outbound';
         }
+        if ($method === 'GET' && $path === 'storeapi/product/inventory/v3/presale-claims/records') {
+            return 'cashier.v3.inventory.presale_claim.detail';
+        }
         if ($method === 'GET'
             && preg_match('#^storeapi/product/inventory/v3/presale-claims/[A-Za-z0-9-]+$#D', $path) === 1) {
             return 'cashier.v3.inventory.presale_claim.detail';

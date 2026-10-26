@@ -607,6 +607,7 @@ Route::group('storeapi', function () {
 		Route::get('v3/product-summary/:productId/detail', 'product.inventory.InventoryStoreReadModel/productDetail')->option(['real_name' => '库存商品批次与流水详情']);
 		// 收银预售商品多次领用。领用的库存扣减与作废退库均由服务端事务处理。
 		Route::get('v3/presale-claims', 'product.inventory.PresaleClaim/index')->option(['real_name' => '门店预售领用列表']);
+		Route::get('v3/presale-claims/records', 'product.inventory.PresaleClaim/records')->option(['real_name' => '门店领用出库记录']);
 		Route::get('v3/presale-claims/:id', 'product.inventory.PresaleClaim/detail')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '门店预售领用明细']);
 		Route::post('v3/presale-claims/claim', 'product.inventory.PresaleClaim/claim')->option(['real_name' => '门店预售领用出库']);
 		Route::post('v3/presale-claims/:id/remark', 'product.inventory.PresaleClaim/remark')->pattern(['id' => '[A-Za-z0-9-]+'])->option(['real_name' => '门店预售领用备注修改']);
