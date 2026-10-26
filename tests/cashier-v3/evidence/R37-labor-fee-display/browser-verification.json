@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "configSaveRefreshCalculated": true,
+  "allOrderSummaryHidden": true,
+  "salesSummaryHidden": true,
+  "salesPersonnelInputHidden": true,
+  "cashierPersonnelInputHidden": true,
+  "editableSummaryAndInputRestored": true,
+  "temporaryCartLineRemoved": true,
+  "finalConfig": 0,
+  "viewportReset": true,
+  "businessWrites": "仅本地新增显示配置及临时草稿；未收款或保存人员调整"
+}

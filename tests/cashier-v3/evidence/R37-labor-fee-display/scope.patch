@@ -1,0 +1,209 @@
+--- a/后端代码/app/services/system/config/SystemConfigServices.php
++++ b/后端代码/app/services/system/config/SystemConfigServices.php
+@@ -2249,7 +2249,7 @@
+         $build->url('setting/config/save_basics');
+ 
+         $data = $this->getConfigAllField([
+-            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'site_name', 'site_url', 'site_phone', 'cache_config',
++            'station_open', 'mobile_reservation_switch', 'reservation_schedule_manage', 'cashier_operator_gift_switch', 'cashier_debt_pay_switch', 'cashier_custom_card_entry_switch', 'cashier_ordinary_card_sale_edit_switch', 'cashier_sales_attribution_switch', 'cashier_experience_switch', 'cashier_craftsman_exclude_counts_switch', 'cashier_labor_fee_mode', 'site_name', 'site_url', 'site_phone', 'cache_config',
+             'site_logo', 'site_logo_square', 'login_logo', 'admin_login_slide', 'start_login_logo', 'ico_path',
+             'wap_login_logo', 'product_video_status','recharge_per',
+ //            'store_func_status', 'video_func_status',
+@@ -2291,6 +2291,8 @@
+                 Build::switch('cashier_experience_switch', '体验', (int)($data['cashier_experience_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的体验按钮'),
+                 // 只关闭“手艺人不算人数人次”的新选择入口，不追改已确认的服务对象与客数事实。
+                 Build::switch('cashier_craftsman_exclude_counts_switch', '手艺人不算人数人次', (int)($data['cashier_craftsman_exclude_counts_switch']['value'] ?? 1))->trueValue('开启', 1)->falseValue('关闭', 0)->info('关闭后隐藏收银项目的“手艺人不算人数人次”按钮'),
++                // 两个选项仅命名展示方式；不改变手工费计算、保存或历史金额。缺省沿用可修改。
++                Build::radio('cashier_labor_fee_mode', '手工费算法', (int)($data['cashier_labor_fee_mode']['value'] ?? 0))->options([['value' => 0, 'label' => '可修改'], ['value' => 1, 'label' => '计算法']])->info('计算法仅隐藏收银、全部订单及消费订单中的手工费输入和显示，保留原有金额和计算口径'),
+             ])->option('后台设置', $setting)
+                 ->option('移动端设置', [
+                     Build::uploadFrame('wap_login_logo', $data['wap_login_logo']['info'], $data['wap_login_logo']['value'])->url('/' . config('admin.admin_prefix') . '/widget.images/index.html')->info($data['wap_login_logo']['desc']),
+--- a/后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php
++++ b/后端代码/app/services/cashier/v3/projection/CashierV3RootDomainAssembler.php
+@@ -150,6 +150,8 @@
+                 'salesAttributionEnabled' => (int)sys_config('cashier_sales_attribution_switch', 1) === 1,
+                 'experienceEnabled' => (int)sys_config('cashier_experience_switch', 1) === 1,
+                 'craftsmanExcludeCountsEnabled' => (int)sys_config('cashier_craftsman_exclude_counts_switch', 1) === 1,
++                // 计算法仅是显隐选项名称；缺失定义/null 均保持现有金额与入口。
++                'laborFeeVisible' => (int)sys_config('cashier_labor_fee_mode', 0) !== 1,
+             ],
+             'featurePermissions' => $features ?: new \stdClass(),
+             'operationPermissions' => $operationFeatures ?: new \stdClass(),
+--- a/后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php
++++ b/后端代码/app/services/cashier/v3/projection/CashierV3RootStateContract.php
+@@ -146,7 +146,7 @@
+             'storeName' => (string)($extras['storeName'] ?? ''),
+             'currentStore' => $extras['currentStore'] ?? ['id' => null, 'name' => ''],
+             'navigationRules' => $extras['navigationRules'] ?? [],
+-            'storeDisplayOptions' => $extras['storeDisplayOptions'] ?? ['salesAttributionEnabled' => true, 'experienceEnabled' => true, 'craftsmanExcludeCountsEnabled' => true],
++            'storeDisplayOptions' => $extras['storeDisplayOptions'] ?? ['salesAttributionEnabled' => true, 'experienceEnabled' => true, 'craftsmanExcludeCountsEnabled' => true, 'laborFeeVisible' => true],
+             'featurePermissions' => $extras['featurePermissions'] ?? new \stdClass(),
+             'operationPermissions' => $extras['operationPermissions'] ?? new \stdClass(),
+             'workspace' => $extras['workspace'] ?? [
+--- a/前端代码/cashier-v3/src/services/cashierV3Bridge.js
++++ b/前端代码/cashier-v3/src/services/cashierV3Bridge.js
+@@ -279,7 +279,7 @@
+   },
+   navigationRules: [],
+   // 未升级的实例默认保留现有收银按钮与订单列；明确的 false 才隐藏。
+-  storeDisplayOptions: { salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true },
++  storeDisplayOptions: { salesAttributionEnabled: true, experienceEnabled: true, craftsmanExcludeCountsEnabled: true, laborFeeVisible: true },
+   // Old, unmigrated servers retain their previous source behavior; current
+   // servers explicitly provide false for fixed-source mode, never truthy-fallback.
+   businessSourcePolicy: { enabled: true, inheritPrevious: true, mode: 'previous', configured: false },
+@@ -1949,7 +1949,9 @@
+     storeDisplayOptions: {
+       salesAttributionEnabled: raw.storeDisplayOptions?.salesAttributionEnabled !== false,
+       experienceEnabled: raw.storeDisplayOptions?.experienceEnabled !== false,
+-      craftsmanExcludeCountsEnabled: raw.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false
++      craftsmanExcludeCountsEnabled: raw.storeDisplayOptions?.craftsmanExcludeCountsEnabled !== false,
++      // 缺省兼容可修改；仅后端明确关闭展示时隐藏，金额快照不参与归一化。
++      laborFeeVisible: raw.storeDisplayOptions?.laborFeeVisible !== false
+     },
+     businessSourcePolicy: raw.businessSourcePolicy && typeof raw.businessSourcePolicy.enabled === 'boolean'
+       ? { ...raw.businessSourcePolicy } : { ...base.businessSourcePolicy },
+--- a/前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js
++++ b/前端代码/cashier-v3/src/services/orderCenterPersonnelDisplay.js
+@@ -35,7 +35,8 @@
+   }).filter(Boolean).join('、') || '—'
+ }
+ 
+-export function serviceCraftsmenPerformanceText(record) {
++// 可隐藏手工费这一展示分量；只格式化原事实，不改写输入或人员分配。
++export function serviceCraftsmenPerformanceText(record, showLaborFee = true) {
+   const allocations = record?.craftsmenListAllocations || record?.laborPerformanceAllocations
+   if (!Array.isArray(allocations) || !allocations.length) return record?.craftsmenSummary || '—'
+   return allocations.map((person) => {
+@@ -45,6 +46,9 @@
+     const type = person?.isPointCustomer === true ? '点' : '轮'
+     const projectCount = person?.projectCount === undefined || person?.projectCount === null || person?.projectCount === ''
+       ? '—' : String(person.projectCount)
+-    return `${name}（${type}、${wholeYuan(person?.amount)}、${wholeYuan(person?.laborFeeAmount)}、${projectCount}）`
++    const parts = [type, wholeYuan(person?.amount)]
++    if (showLaborFee) parts.push(wholeYuan(person?.laborFeeAmount))
++    parts.push(projectCount)
++    return `${name}（${parts.join('、')}）`
+   }).filter(Boolean).join('，') || '—'
+ }
+--- a/前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue
++++ b/前端代码/cashier-v3/src/components/cashier/PersonnelPerformanceOverlay.vue
+@@ -4,6 +4,8 @@
+ 
+ const props = defineProps({
+   initialTab: { type: String, default: 'craftsmen' },
++  // 显隐不清空、不重算人员金额；隐藏的手工费仍随原有唯一业务快照提交。
++  showLaborFee: { type: Boolean, default: true },
+   showCraftsmen: { type: Boolean, default: true },
+   showSalespeople: { type: Boolean, default: true },
+   showGuides: { type: Boolean, default: false },
+@@ -1235,8 +1237,8 @@
+           <label v-for="round in guestCustomer ? [] : [1, 2, 3]" :key="round"><input v-model="guideRoundNo" type="radio" :value="String(round)"><span>第{{ round }}轮</span></label>
+         </fieldset>
+         <div class="personnel-full-table-scroll">
+-          <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen' }" role="table" aria-label="完整人员分配">
+-            <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="!historyAdjustment && !activeIsNonPerformance">业绩金额</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
++          <div class="personnel-full-table" :class="{ 'personnel-full-table--craftsmen': activeTab === 'craftsmen' && !activeIsNonPerformance, 'personnel-full-table--history': historyAdjustment && activeTab === 'craftsmen', 'personnel-full-table--without-labor': !showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance }" role="table" aria-label="完整人员分配">
++            <div role="row" class="personnel-full-table__head"><span>员工</span><span>职位</span><span>职级</span><span v-if="!activeIsNonPerformance">服务业绩类型</span><span v-if="!activeIsNonPerformance">{{ activeTab === 'craftsmen' ? '是否点客' : '是否售前' }}</span><span v-if="!activeIsNonPerformance">业绩比例</span><span v-if="!historyAdjustment && !activeIsNonPerformance">业绩金额</span><span v-if="historyAdjustment && activeTab === 'craftsmen'">消耗业绩</span><span v-if="showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance">手工费</span><span v-if="activeTab === 'craftsmen' && !activeIsNonPerformance">项目数</span><span>操作</span></div>
+             <div v-for="item in selectedRecords" :key="item.id" role="row" class="personnel-full-table__row">
+               <strong>{{ item.name }}</strong><span>{{ item.position }}</span><span>{{ item.level }}</span>
+               <span v-if="!activeIsNonPerformance && activeTab === 'craftsmen'">{{ performanceTypeLabel(item) }}</span>
+@@ -1245,7 +1247,7 @@
+               <label v-if="!activeIsNonPerformance" class="personnel-allocation-input"><input v-model.number="item.performance" type="number" min="0" max="100" :step="historyAdjustment ? '0.01' : '1'" inputmode="decimal" aria-label="业绩分配比例" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="markPerformanceTouched(item)"><b>%</b></label>
+               <label v-if="!historyAdjustment && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.performanceAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="业绩金额" :disabled="activeTab === 'craftsmen' && craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncManualPerformanceAmount(item)"><b>元</b></label>
+               <label v-if="historyAdjustment && activeTab === 'craftsmen'" class="personnel-allocation-input personnel-allocation-input--money"><input v-model.trim="item.allocationAmountYuan" type="number" min="0" step="1" inputmode="numeric" aria-label="分配消耗业绩" :title="historyAmountInputHint(item)" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.LABOR" @input="syncHistoryRatioFromAmount(item)"><b>元</b></label>
+-              <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input :value="item.laborFeeYuan" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @beforeinput="blockNonDigitLaborFeeInput" @input="updateWholeYuanLaborFee(item, $event)"><b>元/次</b></label>
++              <label v-if="showLaborFee && activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--labor"><input :value="item.laborFeeYuan" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" aria-label="每人手工费" :disabled="craftsmanType(item) === PERFORMANCE_TYPES.COMMISSION" @beforeinput="blockNonDigitLaborFeeInput" @input="updateWholeYuanLaborFee(item, $event)"><b>元/次</b></label>
+               <label v-if="activeTab === 'craftsmen' && !activeIsNonPerformance" class="personnel-allocation-input personnel-allocation-input--project"><input v-model.trim="item.projectCountText" type="number" min="0" step="any" inputmode="decimal" :aria-label="historyAdjustment ? '工资项目数' : '项目数'" @input="markProjectCountEdited(item)" @blur="normalizeProjectCount(item)"><b>个</b></label>
+               <button type="button" @click="selectRecord(item)">删除</button>
+             </div>
+--- a/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
++++ b/前端代码/cashier-v3/src/views/CashierWorkbenchView.vue
+@@ -8592,6 +8592,7 @@
+       <PersonnelPerformanceOverlay
+         v-if="personnelOverlay"
+         :initial-tab="personnelOverlay.initialTab"
++        :show-labor-fee="state.storeDisplayOptions?.laborFeeVisible !== false"
+         :show-craftsmen="personnelOverlay.showCraftsmen"
+         :show-salespeople="personnelOverlay.showSalespeople"
+         :show-guides="personnelOverlay.showGuides"
+--- a/前端代码/cashier-v3/src/views/OrderCenterView.vue
++++ b/前端代码/cashier-v3/src/views/OrderCenterView.vue
+@@ -447,6 +447,8 @@
+ const debtPaymentEnabled = computed(() => state.cashier?.debtPaymentEnabled !== false)
+ // 归属入口关闭仅影响订单管理展示，既有订单事实和退款归属不清除。
+ const salesAttributionEnabled = computed(() => state.storeDisplayOptions?.salesAttributionEnabled !== false)
++// 本轮只调整全部订单、消费订单；服务记录及其他入口保留既有展示和业务事实。
++const orderLaborFeeVisible = computed(() => state.storeDisplayOptions?.laborFeeVisible !== false || !['all', 'sales'].includes(activeTabKey.value))
+ const hiddenSalesAttributionKeys = new Set(['sales_manager', 'guide', 'refund_attribution', 'supplement_attribution'])
+ // 只处理本页的列与旧查询参数；历史归属及用户保存的列偏好仍完整保留。
+ const orderSalesAttributionFields = fields => fields.filter(field => salesAttributionEnabled.value || !hiddenSalesAttributionKeys.has(field?.key))
+@@ -461,7 +463,10 @@
+   if (result.export && Array.isArray(result.export.fields)) result.export.fields = result.export.fields.filter(key => !hiddenSalesAttributionKeys.has(key))
+   return result
+ }
+-const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value))
++const orderPresentationFields = fields => orderSalesAttributionFields(orderDebtFields(orderBusinessSourceFields(fields, businessSourceEnabled.value), debtPaymentEnabled.value)).map(item => (
++  item?.key === 'craftsman' && !orderLaborFeeVisible.value
++    ? { ...item, label: '手艺人（类型，业绩，项目数）' } : item
++))
+ const businessSourceEnabled = computed(() => state.businessSourcePolicy?.enabled !== false)
+ const visibleAttributionChanges = computed(() => attributionChanges.value.filter(change => businessSourceEnabled.value || change.field !== 'source'))
+ const router = useRouter()
+@@ -1555,7 +1560,7 @@
+ function salesItemCraftsmenText(item) {
+   // 销售单中的关联服务行与“服务记录”共用同一展示契约，
+   // 避免同一服务在两个页签显示不同的业绩、手工费和项目数。
+-  if (Array.isArray(item?.craftsmenListAllocations)) return serviceCraftsmenPerformanceText(item)
++  if (Array.isArray(item?.craftsmenListAllocations)) return serviceCraftsmenPerformanceText(item, orderLaborFeeVisible.value)
+   return personnelNames(item, 'craftsmen')
+ }
+ 
+@@ -4271,6 +4276,7 @@
+     <PersonnelPerformanceOverlay
+       v-if="!isPlatformReadOnly && salesPersonnelEditorOpen && salesPersonnelEntry && salesPersonnelTarget"
+       :initial-tab="salesPersonnelTarget.uiRole"
++      :show-labor-fee="orderLaborFeeVisible"
+       :initial-mode="salesPersonnelTarget.entitlementOnly ? 'simple' : 'full'"
+       :simple-only="Boolean(salesPersonnelTarget.entitlementOnly)"
+       :show-craftsmen="salesPersonnelTarget.role === 'craftsman'"
+@@ -4622,6 +4628,7 @@
+ 
+     <PersonnelPerformanceOverlay
+       v-if="!isPlatformReadOnly && serviceCraftsmanEditorOpen && serviceCraftsmanEntry"
++      :show-labor-fee="orderLaborFeeVisible"
+       initial-tab="craftsmen"
+       :show-craftsmen="true"
+       :show-salespeople="false"
+--- a/前端代码/cashier-v3/src/styles/base.css
++++ b/前端代码/cashier-v3/src/styles/base.css
+@@ -4950,6 +4950,19 @@
+ .personnel-full-table--history .personnel-full-table__head,
+ .personnel-full-table--history .personnel-full-table__row {
+   grid-template-columns: 1.15fr .8fr .65fr 1fr .75fr .8fr 1fr .85fr .75fr .55fr;
++}
++
++/* 计算法隐藏一列时同步收紧网格，保证项目数和操作仍与表头对齐。 */
++.personnel-full-table--craftsmen.personnel-full-table--without-labor {
++  min-width: 994px;
++}
++.personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__head,
++.personnel-full-table--craftsmen.personnel-full-table--without-labor .personnel-full-table__row {
++  grid-template-columns: minmax(112px, 1.1fr) 92px 70px 132px 84px 102px 118px 102px 64px;
++}
++.personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__head,
++.personnel-full-table--history.personnel-full-table--without-labor .personnel-full-table__row {
++  grid-template-columns: 1.15fr .8fr .65fr 1fr .75fr .8fr 1fr .75fr .55fr;
+ }
+ 
+ .personnel-full-table__head > *,
+--- a/后端代码/app/validate/admin/setting/SystemConfigValidate.php
++++ b/后端代码/app/validate/admin/setting/SystemConfigValidate.php
+@@ -32,6 +32,8 @@
+      * @var array
+      */
+     protected $rule = [
++        // 手工费算法仅接受两个显示选项，不允许非法值改变展示边界。
++        'cashier_labor_fee_mode' => 'integer|in:0,1',
+         'site_url' => 'url',
+         'store_brokerage_ratio' => 'float|egt:0|elt:100|regex:float_two',
+         'store_brokerage_two' => 'float|egt:0|elt:100|regex:float_two',

@@ -1,0 +1,19 @@
+{
+    "result": "PASS",
+    "config": {
+        "id": 841,
+        "value": "0"
+    },
+    "formValue": 0,
+    "options": [
+        {
+            "value": 0,
+            "label": "可修改"
+        },
+        {
+            "value": 1,
+            "label": "计算法"
+        }
+    ],
+    "enumValidation": "PASS"
+}
