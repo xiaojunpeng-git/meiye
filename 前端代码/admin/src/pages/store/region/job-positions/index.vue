@@ -6,7 +6,7 @@
         <h1>岗位策略</h1>
         <p class="subtitle">统一配置员工岗位可使用的功能，人员绑定岗位后自动获得对应权限。</p>
       </div>
-      <button class="button primary" type="button" :disabled="!canWrite || loading" @click="openCreate">新建岗位</button>
+      <button class="button primary" type="button" :disabled="!canSaveJobPosition || loading" @click="openCreate">新建岗位</button>
     </header>
 
     <section class="job-position-page__card">
@@ -80,7 +80,14 @@ export default {
     };
   },
   computed: {
-    canWrite() { return !!(this.writeStatus && this.writeStatus.can_write); }
+    canWrite() { return !!(this.writeStatus && this.writeStatus.can_write); },
+    canSaveJobPosition() {
+      // 岗位保存由专属功能权限控制；组织通用 can_write 仍只授予超管，不能拿它禁用已授权岗位账号。
+      if (!(this.writeStatus && this.writeStatus.write_enabled)) return false;
+      if (this.canWrite) return true;
+      const info = (this.$store.state.admin.user && this.$store.state.admin.user.info) || {};
+      return Array.isArray(info.access) && info.access.includes('admin-store-region-job_positions');
+    }
   },
   created() {
     this.loadWriteStatus().finally(() => this.loadList());
@@ -114,7 +121,10 @@ export default {
       if (Number(row.use_mobile) === 1) parts.push('手机');
       return parts.length ? parts.join(' / ') : '—';
     },
-    openCreate() { if (!this.canWrite) return this.showToast(this.writeStatus.reason_text || READONLY_TIP); this.selectedId = 0; this.formOpen = true; },
+    openCreate() {
+      if (!this.canSaveJobPosition) return this.showToast(this.writeStatus.write_enabled ? '当前账号无权保存岗位' : (this.writeStatus.reason_text || READONLY_TIP));
+      this.selectedId = 0; this.formOpen = true;
+    },
     openEdit(row) { this.selectedId = Number(row.id) || 0; this.formOpen = true; },
     writeHeaders(action, payload) {
       const bound = resolveOrgWriteToken({ token: this.pendingToken, fingerprint: this.pendingFingerprint }, action, payload, requestToken);
