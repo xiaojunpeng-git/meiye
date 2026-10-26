@@ -1,0 +1,33 @@
+PASS Existing controller and real SQL return first 20 of 25 pending records
+PASS Second page keeps complete authorized count
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Original member scope, debt amount and missing-order repayment guard preserved
+PASS Controller clamps negative page and excessive limit
+PASS Member without debt receives genuine empty success
+PASS Existing debt summary remains unchanged
+PASS Permanent local store_debt unchanged
+PASS Permanent local store_debt_item unchanged
+MEMBER_DEBT_BACKEND_PASS
