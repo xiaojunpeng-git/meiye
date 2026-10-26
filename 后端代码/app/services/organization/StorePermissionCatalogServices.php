@@ -66,7 +66,7 @@ final class StorePermissionCatalogServices
         return $groups;
     }
 
-    /** 菜单子入口只维护展示，不能写入岗位授权；业务能力及路由身份仍由白名单约束。 */
+    /** 菜单身份由源码登记；仅显式标记 grantable 的业务入口可投影为岗位权限。 */
     public static function navigationItems(): array
     {
         $items=[];
@@ -92,7 +92,7 @@ final class StorePermissionCatalogServices
         $items[-29020]=['id'=>-29020,'title'=>'员工薪资汇总月报表','navigation_key'=>'report.phase_six_salary_summary','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>190];
         $items[-29021]=['id'=>-29021,'title'=>'员工薪资明细月报表','navigation_key'=>'report.phase_six_salary_detail','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>200];
         $items[-29022]=['id'=>-29022,'title'=>'六维数据分析表','navigation_key'=>'report.six_dimension_analysis','owner_feature'=>'cashier.v3.data','parent_id'=>301200,'sort'=>210];
-        // 展示分组继续不保存负编号；岗位勾选它时级联到正编号 301202。
+        // 展示分组继续不保存负编号；岗位勾选它时级联到当前可授权的单表叶子。
         $items[-29023]=['id'=>-29023,'title'=>'基础报表','navigation_key'=>'','owner_feature'=>'cashier.v3.data','parent_id'=>-2804,'sort'=>30];
         $basicIds = self::basicReportNavigationIds();
         foreach (\app\services\report\BasicReportCatalogServices::entries() as $index => $entry) {
@@ -100,7 +100,9 @@ final class StorePermissionCatalogServices
             if (!isset($basicIds[$entry['code']])) throw new \LogicException('基础报表缺少稳定菜单编号：' . $entry['code']);
             $id = $basicIds[$entry['code']];
             $items[$id] = ['id'=>$id,'title'=>$entry['name'],'navigation_key'=>'report.'.$entry['code'],
-                'owner_feature'=>'cashier.v3.data','parent_id'=>-29023,'sort'=>$index*10];
+                'owner_feature'=>'cashier.v3.basic_reports','parent_id'=>-29023,'sort'=>$index*10,
+                'grantable'=>true,'feature_code'=>self::basicReportFeatureCode($entry['code']),
+                'business_parent_id'=>301202];
         }
         $items[-30001]=['id'=>-30001,'title'=>'全部订单','navigation_key'=>'order.all','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>0];
         $items[-30002]=['id'=>-30002,'title'=>'消费订单','navigation_key'=>'order.sales','owner_feature'=>'cashier.v3.order_center','parent_id'=>301006,'sort'=>10];
@@ -145,6 +147,54 @@ final class StorePermissionCatalogServices
             'basic_customer_entitlements' => -33020,
             'basic_unconsumed_as_of_detail' => -33021,
         ];
+    }
+
+    /**
+     * 所有可授权菜单项统一投影为岗位正编号，岗位编辑器不维护第二份功能清单。
+     * 只有源码登记了独立能力及业务祖先的规则才可授权；新增项不自动授给旧岗位。
+     */
+    public static function grantableNavigationDefinitions(): array
+    {
+        $grants = []; $codes = []; $existing = self::definitions();
+        foreach (self::navigationItems() as $navigationId => $item) {
+            if (empty($item['grantable'])) continue;
+            $code = trim((string)($item['feature_code'] ?? ''));
+            $parent = (int)($item['business_parent_id'] ?? 0);
+            $id = -$navigationId;
+            if ($id <= 0 || $code === '' || ($parent && !isset($existing[$parent]))
+                || isset($existing[$id]) || isset($grants[$id]) || isset($codes[$code])) {
+                throw new \LogicException('菜单岗位权限登记无效：' . $navigationId);
+            }
+            $codes[$code] = true;
+            $grants[$id] = ['id'=>$id, 'navigation_id'=>$navigationId,
+                'feature_code'=>$code, 'business_parent_id'=>$parent];
+        }
+        return $grants;
+    }
+
+    /** 基础报表迁移只读取已登记单表叶子，不触及其他功能的岗位授权。 */
+    public static function basicReportGrantDefinitions(): array
+    {
+        $reports = array_fill_keys(array_column(\app\services\report\BasicReportCatalogServices::entries(), 'code'), true);
+        $grants = []; $navigation = self::navigationItems();
+        foreach (self::grantableNavigationDefinitions() as $id => $grant) {
+            $item = $navigation[$grant['navigation_id']];
+            $key = (string)($item['navigation_key'] ?? '');
+            $code = strpos($key, 'report.basic_') === 0 ? substr($key, strlen('report.')) : '';
+            if ($code === '' || !isset($reports[$code])) continue;
+            $grants[$id] = $grant + ['report_code'=>$code];
+        }
+        if (count($grants) !== count($reports)
+            || count(array_unique(array_column($grants, 'report_code'))) !== count($reports)) {
+            throw new \LogicException('基础报表岗位权限目录不完整');
+        }
+        return $grants;
+    }
+
+    /** 报表路由、查询、导出及异步回源共用单表能力码。 */
+    public static function basicReportFeatureCode(string $code): string
+    {
+        return 'cashier.v3.basic_report.' . $code;
     }
 
     /** 显式补齐导航子入口，不改岗位及业务事实；再次执行只补缺项，不覆盖已配置层级。 */
@@ -301,6 +351,43 @@ final class StorePermissionCatalogServices
         });
     }
 
+    /**
+     * 一次性把旧总入口/旧数据授权展开为当前 21 个显式叶子，保证切换逐表校验时不回退。
+     * 只处理原本实际可用的授权；审计标记阻止重跑时把管理员后来撤销的叶子补回。
+     */
+    public function migrateBasicReportLeafGrants(): int
+    {
+        return Db::transaction(function (): int {
+            $catalog = Db::name(self::TABLE)->where('id', 1)->lock(true)->find();
+            if (!$catalog) throw new \RuntimeException('门店端权限目录尚未初始化');
+            $action = 'MIGRATE_BASIC_REPORT_LEAF_GRANTS';
+            if (Db::name('store_v3_permission_audit')->where('action', $action)->count()) return 0;
+            $grants = self::basicReportGrantDefinitions();
+            $ids = array_keys($grants); sort($ids, SORT_NUMERIC);
+            $changes = [];
+            $roles = Db::name('job_position_channel_rule')->where('channel', 'store_v3')->lock(true)->select()->toArray();
+            foreach ($roles as $role) {
+                $before = trim((string)$role['rules']);
+                $oldIds = array_values(array_unique(array_filter(array_map('intval', explode(',', $before)), static function ($id) { return $id > 0; })));
+                $effective = $this->filterEnabled(self::explicitFeatures($oldIds));
+                if (!in_array('cashier.v3.basic_reports', $effective, true)
+                    && !in_array('cashier.v3.data', $effective, true)) continue;
+                $newIds = array_values(array_unique(array_merge($oldIds, $ids))); sort($newIds, SORT_NUMERIC);
+                $after = implode(',', $newIds);
+                if ($after === $before) continue;
+                Db::name('job_position_channel_rule')->where('id', (int)$role['id'])->update([
+                    'rules'=>$after, 'version'=>(int)$role['version']+1, 'update_time'=>time(),
+                ]);
+                $changes[] = ['id'=>(int)$role['id'], 'before'=>$before, 'after'=>$after];
+            }
+            Db::name('store_v3_permission_audit')->insert(['operator_id'=>0, 'action'=>$action,
+                'before_json'=>json_encode(array_map(static function ($row) { return ['id'=>$row['id'],'rules'=>$row['before']]; }, $changes), JSON_UNESCAPED_UNICODE),
+                'after_json'=>json_encode(array_map(static function ($row) { return ['id'=>$row['id'],'rules'=>$row['after']]; }, $changes), JSON_UNESCAPED_UNICODE),
+                'created_at'=>time()]);
+            return count($changes);
+        });
+    }
+
     /** 显式、幂等的元数据升级；不改岗位授权，只为旧目录建立可配置的顶部大类。 */
     public function initializeNavigationGroups(): void
     {
@@ -439,11 +526,25 @@ final class StorePermissionCatalogServices
     public function menuTree(): array
     {
         $snapshot = $this->snapshot();
-        $build = static function ($parent) use (&$build, $snapshot): array {
-            $nodes = array_values(array_filter($snapshot['rules'], static function ($r) use ($parent) { return empty($r['navigation_key']) && (int)$r['parent_id'] === $parent; }));
+        $grants = array_column(self::grantableNavigationDefinitions(), null, 'navigation_id');
+        $build = static function ($parent) use (&$build, $snapshot, $grants): array {
+            $nodes = array_values(array_filter($snapshot['rules'], static function ($r) use ($parent, $grants) {
+                $id = (int)$r['id'];
+                // 旧总权限保留用于迁移与入口兼容，岗位树只展示可分别保存的报表叶子。
+                return $id !== 301202 && (int)$r['parent_id'] === $parent
+                    && (empty($r['navigation_key']) || isset($grants[$id]));
+            }));
             usort($nodes, static function ($a,$b) { return [$a['sort'],$a['id']] <=> [$b['sort'],$b['id']]; });
-            return array_map(static function ($r) use (&$build) {
-                $r['children'] = $build((int)$r['id']);
+            return array_map(static function ($r) use (&$build, $grants) {
+                $navigationId = (int)$r['id'];
+                if (isset($grants[$navigationId])) {
+                    $r['id'] = $grants[$navigationId]['id'];
+                    $r['feature_code'] = $grants[$navigationId]['feature_code'];
+                    $r['grantable'] = true;
+                    $r['children'] = [];
+                } else {
+                    $r['children'] = $build($navigationId);
+                }
                 // 停用不删除岗位勾选，显示提示；实际授权由服务端裁剪，重新启用可恢复原授权。
                 $r['title'] .= (int)$r['enabled'] === 1 ? '' : '（已停用）';
                 return $r;
@@ -455,9 +556,18 @@ final class StorePermissionCatalogServices
     /** 把显式岗位编号转换为能力，并仅补齐源码业务祖先；禁止父权限自动勾回被取消的子功能。 */
     public static function explicitFeatures(array $ids): array
     {
-        $defs = self::definitions(); $set = [];
+        $defs = self::definitions(); $navigationGrants = self::grantableNavigationDefinitions(); $set = [];
         foreach ($ids as $id) {
             $id = (int)$id;
+            if (isset($navigationGrants[$id])) {
+                $set[$navigationGrants[$id]['feature_code']] = true;
+                $id = $navigationGrants[$id]['business_parent_id'];
+                while (isset($defs[$id])) {
+                    $set[$defs[$id]['feature_code']] = true;
+                    $id = $defs[$id]['parent_id'];
+                }
+                continue;
+            }
             while (isset($defs[$id])) {
                 $set[$defs[$id]['feature_code']] = true;
                 $id = $defs[$id]['parent_id'];
@@ -486,6 +596,19 @@ final class StorePermissionCatalogServices
                 $seen[$displayId]=true; $displayId=(int)$rows[$displayId]['parent_id'];
             }
             if ($enabled) $allowed[$def['feature_code']] = true;
+        }
+        // 单表能力由真实权限规则菜单行启停及其配置祖先裁剪；用户重排菜单不会扩权。
+        // 旧总入口可用只负责打开容器，不代替任何一张表的独立授权。
+        foreach (self::grantableNavigationDefinitions() as $grant) {
+            $parent = $grant['business_parent_id'];
+            if ($parent && !isset($allowed[$definitions[$parent]['feature_code']])) continue;
+            $navigationId = $grant['navigation_id']; $seen = []; $enabled = true;
+            while ($navigationId) {
+                if (isset($seen[$navigationId]) || empty($rows[$navigationId]['enabled'])) { $enabled = false; break; }
+                $seen[$navigationId] = true;
+                $navigationId = (int)$rows[$navigationId]['parent_id'];
+            }
+            if ($enabled) $allowed[$grant['feature_code']] = true;
         }
         // writeoff 是现有收银内部入口，没有独立导航；保持原能力但仍受收银模块启停约束。
         if (isset($allowed['cashier.v3.cashier'])) $allowed['cashier.v3.writeoff'] = true;

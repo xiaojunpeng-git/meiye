@@ -58,7 +58,10 @@ try {
     foreach ($codes as $index => $code) {
         $node = $defaults[-33001-$index];
         navigation51check($node['navigation_key'] === 'report.basic_'.$code && $node['title'] === $entries['basic_'.$code]['name'], 'Stable code identity and catalog title: '.$code);
-        navigation51check($node['owner_feature'] === 'cashier.v3.data' && $node['parent_id'] === -29023 && $node['grantable'] === false, 'Navigation does not grant a business capability: '.$code);
+        // 新岗位树直接读取已登记的报表菜单规则；R51 稳定导航身份和配置仍保留。
+        navigation51check($node['owner_feature'] === 'cashier.v3.basic_reports' && $node['parent_id'] === -29023
+            && $node['grantable'] === true && $node['feature_code'] === Catalog::basicReportFeatureCode('basic_'.$code),
+            'Navigation supplies a stable per-report grant: '.$code);
     }
     navigation51check(!isset(Catalog::navigationGroups()[-29023]), 'Basic reports never becomes a top-level group');
 

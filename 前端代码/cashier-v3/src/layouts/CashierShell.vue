@@ -375,9 +375,9 @@ const topNavigationEntries = computed(() => [
   ...configuredNavigation(managementFeatureDefinitions).filter(item => canUseFeature(item.featureCode)),
   ...(canUseFeature('cashier.v3.data') ? [{ key: 'reports', label: '全部报表', featureCode: 'cashier.v3.data', to: { name: 'cashier-v3-store-business-reports' } }] : []),
   // 基础报表独立授权；旧“数据”岗位继续可用，且不因新勾选获得其他数据报表。
-  ...(canUseFeature('cashier.v3.basic_reports') || canUseFeature('cashier.v3.data')
+  ...(canUseFeature('cashier.v3.basic_reports')
     ? [{ key: 'basic-reports', navigationKey: 'report.basic', label: '基础报表',
-      featureCode: canUseFeature('cashier.v3.basic_reports') ? 'cashier.v3.basic_reports' : 'cashier.v3.data',
+      featureCode: 'cashier.v3.basic_reports',
       to: { name: 'cashier-v3-basic-reports' } }] : []),
   ...visibleInventoryFeatureItems.value.map(entry => ({ ...entry, key: 'inventory-' + entry.key, inventory: entry }))
 ])

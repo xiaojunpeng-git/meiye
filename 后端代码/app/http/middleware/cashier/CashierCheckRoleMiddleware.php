@@ -62,10 +62,8 @@ class CashierCheckRoleMiddleware implements MiddlewareInterface
                 throw new AuthException(ApiErrorCode::ERR_AUTH);
             }
             $requiredFeature = $this->directOperationFeature($path, $method);
-            // 已有“数据”岗位保留基础报表访问；新分组独立授权只开放 basic 路径。
-            $legacyBasicGrant = $requiredFeature === 'cashier.v3.basic_reports'
-                && in_array('cashier.v3.data', $features, true);
-            if ($requiredFeature !== '' && !in_array($requiredFeature, $features, true) && !$legacyBasicGrant) {
+            // 基础报表容器只在至少拥有一张单表权限时可达，逐表查询在控制器再校验。
+            if ($requiredFeature !== '' && !in_array($requiredFeature, $features, true)) {
                 throw new AuthException('当前账号没有该功能的操作权限，请联系管理员。', 403);
             }
             return $next($request);

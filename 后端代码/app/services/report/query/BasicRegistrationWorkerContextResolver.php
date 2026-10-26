@@ -24,9 +24,8 @@ class BasicRegistrationWorkerContextResolver extends MemberUnifiedQueryWorkerCon
             $profile = $this->currentOperatorProfile($task, $operator, $store);
             $resolver = app()->make(CashierV3FeatureResolver::class);
             $features = !empty($profile['_cashier_v3_delegated']) ? $resolver->resolveVisibleFeatures($profile) : $resolver->resolveGrantedFeatures($profile);
-            // 导出任务重新核实基础报表独立授权，同时兼容原“数据”岗位授权。
-            if (!in_array('cashier.v3.basic_reports', $features, true)
-                && !in_array('cashier.v3.data', $features, true)) throw $this->permissionRevoked();
+            // 队列回源按任务原始 page_code 重新核实当前单表权限，撤权后不可继续导出。
+            if (!BasicReportHostServices::canReadStoreReport($this->pageCode(), $features)) throw $this->permissionRevoked();
             $dispatcher = CashierV3Bootstrap::dispatcher();
             $operatorScope = $dispatcher->scopeResolver()->operatorScope($store, $operator);
             $scope = $dispatcher->dataScopeFactory()->build($store, $operator, $profile, '0', $operatorScope->organizationId());

@@ -66,11 +66,10 @@ const defaultRouteNames = Object.freeze([
   'cashier-v3-store-business-reports', 'cashier-v3-basic-reports', 'cashier-v3-store-target-dashboard', 'cashier-v3-inventory-entry', 'cashier-v3-presale-claim'
 ])
 
-// 原“数据”权限仍可进入已存在的基础报表；新授权不会打开其他数据报表。
+// 基础报表必须有独立的单表岗位授权；旧“数据”只打开原有经营报表。
 function canUseRouteFeature(routeName) {
   const code = routeFeatureCodes[routeName]
-  return !!code && (canUseCashierV3Feature(code) ||
-    (routeName === 'cashier-v3-basic-reports' && canUseCashierV3Feature('cashier.v3.data')))
+  return !!code && canUseCashierV3Feature(code)
 }
 
 export function firstGrantedRouteName() {

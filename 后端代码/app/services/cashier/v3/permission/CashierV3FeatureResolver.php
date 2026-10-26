@@ -163,6 +163,8 @@ class CashierV3FeatureResolver
                 foreach ($nodes as $node) {
                     $code = trim((string)($node['feature_code'] ?? ''));
                     if ($code !== '') $visible[$code] = true;
+                    // 组织选店只读会话从逐表叶子得到容器入口，不能依赖已隐藏的旧总权限节点。
+                    if (strpos($code, 'cashier.v3.basic_report.basic_') === 0) $visible['cashier.v3.basic_reports'] = true;
                     $walk((array)($node['children'] ?? []));
                 }
             };

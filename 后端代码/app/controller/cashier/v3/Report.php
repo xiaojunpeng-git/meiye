@@ -23,7 +23,8 @@ class Report extends AuthController
     /** 复用门店数据功能鉴权；新报表固定本次登录门店，不接受浏览器跨店参数。 */
     public function basicCatalog()
     {
-        return $this->success('ok', \app\services\report\BasicReportHostServices::catalog());
+        // 目录只返回岗位逐表授权的入口；仅拥有旧容器权限不能枚举其他报表。
+        return $this->success('ok', \app\services\report\BasicReportHostServices::storeCatalogForFeatures($this->basicReportFeatures()));
     }
 
     public function basicQuery(Request $request)
@@ -33,6 +34,9 @@ class Report extends AuthController
             if (strlen($raw) > 50000) throw new \InvalidArgumentException('查询条件过长');
             $payload = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($payload)) throw new \InvalidArgumentException('查询格式不正确');
+            $code = (string)($payload['pageCode'] ?? '');
+            \app\services\report\BasicReportCatalogServices::definition($code);
+            $this->assertBasicReportFeature($code);
             return $this->success('ok', \app\services\report\BasicReportHostServices::query($this->basicContext(false), $payload));
         } catch (\InvalidArgumentException | \JsonException $e) { return app('json')->fail($e->getMessage()); }
         catch (\app\services\query\UnifiedQueryException $e) { return app('json')->fail($e->getMessage()); }
@@ -42,11 +46,29 @@ class Report extends AuthController
     {
         try {
             $payload = $request->post();
+            // 写入只属于刷单登记；逐表查询权限不能顺带开放其他登记写入口。
+            $this->assertBasicReportFeature(\app\services\report\query\BasicRegistrationQueryProvider::PAGE_CODE);
             // ForceStoreSessionMiddleware 注入的store_id也须与认证门店一致。
             if (isset($payload['store_id']) && (int)$payload['store_id'] !== (int)$this->storeId) throw new \InvalidArgumentException('不能修改其他门店登记');
             $payload['store_id'] = (int)$this->storeId;
             return $this->success('ok', (new \app\services\report\BasicRegistrationWriteServices())->save($this->basicContext(true), $payload));
         } catch (\InvalidArgumentException $e) { return app('json')->fail($e->getMessage()); }
+    }
+
+    /** 当前岗位/受委托会话每次从服务端重新解析，浏览器不能指定可查询报表。 */
+    private function basicReportFeatures(): array
+    {
+        $profile = is_array($this->cashierInfo) ? $this->cashierInfo : [];
+        $resolver = app()->make(\app\services\cashier\v3\permission\CashierV3FeatureResolver::class);
+        return !empty($profile['_cashier_v3_delegated'])
+            ? $resolver->resolveVisibleFeatures($profile) : $resolver->resolveGrantedFeatures($profile);
+    }
+
+    private function assertBasicReportFeature(string $code): void
+    {
+        if (!\app\services\report\BasicReportHostServices::canReadStoreReport($code, $this->basicReportFeatures())) {
+            throw new \mohe\exceptions\AuthException('当前岗位未授权该基础报表，请联系管理员。', 403);
+        }
     }
 
     /** 读取只由认证会话的当前门店限定；人工登记写入继续受既有数据权限约束。 */

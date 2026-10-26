@@ -802,7 +802,11 @@ class JobPositionPolicyServices extends BaseServices
                 $walk((array)($node['children'] ?? []));
             }
         };
-        if (!$legacy) return array_column(StorePermissionCatalogServices::definitions(), 'feature_code', 'id');
+        if (!$legacy) {
+            // 岗位树中的单表节点由权限规则登记的菜单派生，不为每张新报表手改岗位白名单。
+            return array_column(StorePermissionCatalogServices::definitions(), 'feature_code', 'id')
+                + array_column(StorePermissionCatalogServices::grantableNavigationDefinitions(), 'feature_code', 'id');
+        }
         $walk(self::STORE_V3_MENU_TREE);
         return $map;
     }

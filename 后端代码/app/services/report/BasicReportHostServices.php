@@ -40,6 +40,20 @@ final class BasicReportHostServices
         }, BasicReportCatalogServices::entries());
     }
 
+    /** 门店岗位逐表权限只裁剪已登记目录，不让总入口或客户端 pageCode 推导额外授权。 */
+    public static function storeCatalogForFeatures(array $features): array
+    {
+        return array_values(array_filter(self::catalog(), static function (array $entry) use ($features): bool {
+            return self::canReadStoreReport((string)$entry['code'], $features);
+        }));
+    }
+
+    public static function canReadStoreReport(string $code, array $features): bool
+    {
+        BasicReportCatalogServices::definition($code);
+        return in_array(\app\services\organization\StorePermissionCatalogServices::basicReportFeatureCode($code), $features, true);
+    }
+
     public static function query(array $context, array $payload): array
     {
         $code = (string)($payload['pageCode'] ?? BasicRegistrationQueryProvider::PAGE_CODE);
