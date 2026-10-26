@@ -1,0 +1,298 @@
+diff --git a/前端代码/admin/src/pages/store/region/workspace/index.vue b/前端代码/admin/src/pages/store/region/workspace/index.vue
+index c27f4640..44321287 100644
+--- a/前端代码/admin/src/pages/store/region/workspace/index.vue
++++ b/前端代码/admin/src/pages/store/region/workspace/index.vue
+@@ -96,12 +96,12 @@
+                 <button v-auth="['admin-store-add_store']" class="button secondary" type="button" :disabled="!selectedOrgId" @click="goCreateStore"><svg-icon name="plus" />新建门店</button>
+                 <button v-auth="['setting-staff-index']" class="button secondary" type="button" :disabled="!selectedOrgId && !rootOrgs.length" @click="openCreateStaff()"><svg-icon name="plus" />新建人员</button>
+                 <button class="button primary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openCreateOrgModal()"><svg-icon name="plus" />新增组织</button>
+-                <button class="button secondary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openEditOrgModal"><svg-icon name="edit" />编辑组织</button>
++                <button class="button secondary" :class="{ 'is-readonly-disabled': !canEditOrganization(selectedOrgId) || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canEditOrganization(selectedOrgId) || writeSubmitting).toString()" @click="openEditOrgModal"><svg-icon name="edit" />编辑组织</button>
+                 <button class="button secondary" type="button" title="停用后下级组织与所属门店将继承停用；不会批量改写下级自身状态" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" @click="openOpsConfirm('org', selectedOrg.id, 0, selectedOrg.name)">停用组织</button>
+                 <button class="button secondary" type="button" title="恢复上级后，原本单独停用的下级组织和门店仍保持停用" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" @click="openOpsConfirm('org', selectedOrg.id, 1, selectedOrg.name)">恢复组织</button>
+                 <button class="icon-button bordered" title="更多操作" type="button" @click="toggleHeroMenu"><svg-icon name="more" /></button>
+                 <div class="popover-menu" :class="{ open: heroMenuOpen }">
+-                  <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onHeroMenu('edit')">编辑组织</button>
++                  <button type="button" :class="{ 'is-readonly-disabled': !canEditOrganization(selectedOrgId) || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canEditOrganization(selectedOrgId) || writeSubmitting).toString()" @click="onHeroMenu('edit')">编辑组织</button>
+                   <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onHeroMenu('add')">新增下级组织</button>
+                   <button type="button" class="danger-text" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onHeroMenu('delete')">删除组织</button>
+                 </div>
+@@ -438,7 +438,7 @@
+     </div>
+ 
+     <div v-if="treeMenu.open" class="tree-context-menu" :style="{ top: `${treeMenu.y}px`, left: `${treeMenu.x}px` }" @click.stop>
+-      <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onTreeMenu('edit')">编辑组织</button>
++      <button type="button" :class="{ 'is-readonly-disabled': !canEditOrganization(treeMenu.node && treeMenu.node.id) || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canEditOrganization(treeMenu.node && treeMenu.node.id) || writeSubmitting).toString()" @click="onTreeMenu('edit')">编辑组织</button>
+       <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onTreeMenu('add')">新增下级组织</button>
+       <button type="button" class="danger-text" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onTreeMenu('delete')">删除组织</button>
+     </div>
+@@ -1427,6 +1427,9 @@ export default {
+       writeStatus: {
+         write_enabled: false,
+         can_write: false,
++        can_edit_organization: false,
++        editable_organization_ids: [],
++        organization_edit_reason: '',
+         reason_code: 'WRITE_DISABLED',
+         reason_text: READONLY_TIP,
+         source_mode: '',
+@@ -1722,7 +1725,7 @@ export default {
+       if (isRoot) return [{ id: 0, name: '最高级组织' }];
+       const excluded = new Set([orgId, ...this.collectDescendantIds(orgId)]);
+       return this.orgs
+-        .filter((o) => !excluded.has(Number(o.id)))
++        .filter((o) => !excluded.has(Number(o.id)) && (Number(o.id) === Number(modal.pid) || this.canEditOrganization(o.id)))
+         .map((o) => ({ id: Number(o.id), name: o.name }));
+     },
+     orgFormParentDisabled() {
+@@ -2491,9 +2494,15 @@ export default {
+       };
+       this.loadStatisticDimensions(0);
+     },
++    // 仅展示后端已核定的编辑功能与组织范围，不借 can_write 放开其他写操作。
++    canEditOrganization(orgId) {
++      const status = this.writeStatus || {};
++      if (!status.can_edit_organization || Number(orgId) <= 0) return false;
++      return status.editable_organization_ids === null || (status.editable_organization_ids || []).some((id) => Number(id) === Number(orgId));
++    },
+     openEditOrgModal() {
+-      if (!this.canWrite) {
+-        this.blockWrite();
++      if (!this.canEditOrganization(this.selectedOrgId)) {
++        this.showToast(this.writeStatus.organization_edit_reason || '超出当前账号的组织管理范围');
+         return;
+       }
+       if (this.writeSubmitting) return;
+@@ -2516,8 +2525,9 @@ export default {
+       this.orgFormModal.open = false;
+     },
+     submitOrgForm() {
+-      if (!this.canWrite || this.writeSubmitting) return;
+       const modal = this.orgFormModal;
++      // 编辑与入口复用后端功能能力；新增仍遵循原有写门禁。
++      if (this.writeSubmitting || (modal.mode === 'edit' ? !this.canEditOrganization(modal.orgId) : !this.canWrite)) return;
+       const name = String(modal.name || '').trim();
+       if (!name) {
+         this.showToast('请输入组织名称');
+@@ -2646,6 +2656,9 @@ export default {
+           this.writeStatus = {
+             write_enabled: !!data.write_enabled,
+             can_write: !!data.can_write,
++            can_edit_organization: !!data.can_edit_organization,
++            editable_organization_ids: data.editable_organization_ids === null ? null : (Array.isArray(data.editable_organization_ids) ? data.editable_organization_ids : []),
++            organization_edit_reason: data.organization_edit_reason || '',
+             reason_code: data.reason_code || 'WRITE_DISABLED',
+             reason_text: data.reason_text || READONLY_TIP,
+             source_mode: data.source_mode || '',
+@@ -2656,6 +2669,9 @@ export default {
+           this.writeStatus = {
+             write_enabled: false,
+             can_write: false,
++            can_edit_organization: false,
++            editable_organization_ids: [],
++            organization_edit_reason: '',
+             reason_code: 'WRITE_DISABLED',
+             reason_text: READONLY_TIP,
+             source_mode: '',
+diff --git a/后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php b/后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php
+index 880b39cd..0441080c 100644
+--- a/后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php
++++ b/后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php
+@@ -393,7 +393,7 @@ class OrganizationWorkspaceWriteGate
+     }
+ 
+     /**
+-     * @return array{write_enabled:bool,can_write:bool,reason_code:string,reason_text:string,source_mode:string,is_super_admin:bool}
++     * @return array 原超管写状态与独立组织编辑能力；编辑能力不改变其他操作的 can_write。
+      */
+     public function getWriteStatus(array $adminInfo): array
+     {
+@@ -416,6 +416,6 @@ class OrganizationWorkspaceWriteGate
+             'reason_text' => $reasonText,
+             'source_mode' => (string)$gate['source_mode'],
+             'is_super_admin' => (bool)$super['ok'],
+-        ];
++        ] + app()->make(OrganizationEditAccessServices::class)->status($adminInfo);
+     }
+ }
+diff --git a/后端代码/app/services/organization/OrganizationWorkspaceWriteServices.php b/后端代码/app/services/organization/OrganizationWorkspaceWriteServices.php
+index fbc6f473..3410b98d 100644
+--- a/后端代码/app/services/organization/OrganizationWorkspaceWriteServices.php
++++ b/后端代码/app/services/organization/OrganizationWorkspaceWriteServices.php
+@@ -5,7 +5,7 @@ use think\facade\Db;
+ 
+ /**
+  * O4 组织工作台 HTTP 写编排（唯一门禁入口）
+- * 顺序：写门禁 → 超管 → request token → 结构锁 → 事务 → 幂等 → 业务 → 审计
++ * 顺序：写门禁 → 操作授权（组织编辑按功能，其余保留超管）→ request token → 结构锁 → 事务 → 幂等 → 业务 → 审计
+  */
+ class OrganizationWorkspaceWriteServices
+ {
+@@ -528,9 +528,13 @@ class OrganizationWorkspaceWriteServices
+         callable $business
+     ): array {
+         $this->gate->assertCanWrite();
+-        $super = $this->gate->assertSuperAdmin($adminInfo);
+-        if (!$super['ok']) {
+-            throw new \Exception($super['reason_text'] !== '' ? $super['reason_text'] : '无权限执行该操作');
++        // 仅已存在组织的编辑使用编辑功能权限；其他写动作继续保留原有门禁。
++        $editOrgId = $action === 'org_save' && preg_match('/^org:([1-9][0-9]*)$/', $scopeKey, $match) ? (int)$match[1] : 0;
++        if ($editOrgId > 0) {
++            app()->make(OrganizationEditAccessServices::class)->assertCanEdit($editOrgId, (int)$payload['pid'], $adminInfo);
++        } else {
++            $super = $this->gate->assertSuperAdmin($adminInfo);
++            if (!$super['ok']) throw new \Exception($super['reason_text'] !== '' ? $super['reason_text'] : '无权限执行该操作');
+         }
+ 
+         $token = $this->resolveRequestToken($requestCtx);
+@@ -554,10 +558,15 @@ class OrganizationWorkspaceWriteServices
+             $requestHash,
+             $requestId,
+             $operatorIp,
+-            $business
++            $business,
++            $editOrgId,
++            $payload,
++            $adminInfo
+         ) {
+             Db::startTrans();
+             try {
++                // 结构锁内再次复核权限与父组织，禁止等待锁期间撤权后继续保存或回放。
++                if ($editOrgId > 0) app()->make(OrganizationEditAccessServices::class)->assertCanEdit($editOrgId, (int)$payload['pid'], $adminInfo);
+                 if (!$this->idempotencyTableReady()) {
+                     throw new \Exception('组织写幂等表未就绪，请先执行数据库升级');
+                 }
+diff --git a/后端代码/app/services/organization/OrganizationEditAccessServices.php b/后端代码/app/services/organization/OrganizationEditAccessServices.php
+new file mode 100644
+index 00000000..6bdff3b3
+--- /dev/null
++++ b/后端代码/app/services/organization/OrganizationEditAccessServices.php
+@@ -0,0 +1,65 @@
++<?php
++namespace app\services\organization;
++
++use app\services\system\SystemMenusServices;
++use think\facade\Db;
++
++/** 组织编辑的功能授权与数据范围交集；不授予新增、删除、授权人员等其他写能力。 */
++class OrganizationEditAccessServices
++{
++    public const AUTH_EDIT = 'admin-store-region_edit';
++
++    /**
++     * 仅信任数据库中的有效平台身份和已有编辑功能权限，页面与保存共用本状态。
++     * scope 为 null 表示超管不限；空数组必须拒绝，不能回退为全部组织。
++     */
++    public function status(array $adminInfo): array
++    {
++        $deny = ['can_edit_organization' => false, 'editable_organization_ids' => [],
++            'organization_edit_reason' => '当前账号没有组织编辑权限'];
++        $id = (int)($adminInfo['id'] ?? 0);
++        $admin = $id > 0 ? Db::name('system_admin')->where('id', $id)->where('is_del', 0)->find() : null;
++        if (!$admin || (int)$admin['status'] !== 1 || (int)$admin['admin_type'] === 3) return $deny;
++        $gate = app()->make(OrganizationWorkspaceWriteGate::class)->evaluateWriteGate();
++        if (!$gate['ok']) return array_replace($deny, ['organization_edit_reason' => $gate['reason_text']]);
++        $level = (int)$admin['level'];
++        if ($level === 0) return ['can_edit_organization' => true, 'editable_organization_ids' => null, 'organization_edit_reason' => ''];
++        $roles = array_values(array_filter(array_map('intval', explode(',', (string)$admin['roles']))));
++        if (!$roles) return $deny;
++        [, $auth] = app()->make(SystemMenusServices::class)->getMenusList($roles, $level, 1, (int)$admin['admin_type']);
++        if (!in_array(self::AUTH_EDIT, (array)$auth, true)) return $deny;
++        $scope = app()->make(EmployeeDataScopeServices::class)->resolveOperatorManageableOrgIds($admin);
++        if ($scope === null) return $deny; // 普通账号不能借身份或范围缺失获得无限编辑权限。
++        $allowed = array_fill_keys(array_map('intval', $scope), true);
++        $parents = Db::name('organization')->where('is_del', 0)->column('pid', 'id');
++        // 兼容旧范围可能附带祖先导航节点：只有整个下级子树均可管时才能编辑该节点。
++        // 调整父组织会影响全部下级门店，不能利用一个可见祖先移动范围外的组织。
++        foreach ($parents as $orgId => $pid) {
++            if (isset($allowed[(int)$orgId])) continue;
++            $seen = [];
++            while ((int)$pid > 0 && !isset($seen[(int)$pid])) {
++                $seen[(int)$pid] = true;
++                unset($allowed[(int)$pid]);
++                $pid = $parents[(int)$pid] ?? 0;
++            }
++        }
++        $ids = array_values(array_intersect(array_map('intval', array_keys($parents)), array_keys($allowed)));
++        return ['can_edit_organization' => count($ids) > 0, 'editable_organization_ids' => $ids,
++            'organization_edit_reason' => $ids ? '' : '超出当前账号的组织管理范围'];
++    }
++
++    /** 保存时实时复核目标及变更后的父组织；原父组织在范围外时仍可原位编辑授权子树。 */
++    public function assertCanEdit(int $orgId, int $newParentId, array $adminInfo): void
++    {
++        $status = $this->status($adminInfo);
++        if (!$status['can_edit_organization']) throw new \Exception($status['organization_edit_reason']);
++        $org = $orgId > 0 ? Db::name('organization')->where('id', $orgId)->where('is_del', 0)->find() : null;
++        if (!$org) throw new \Exception('组织不存在或已删除');
++        $ids = $status['editable_organization_ids'];
++        if ($ids === null) return;
++        if (!in_array($orgId, $ids, true)) throw new \Exception('超出当前账号的组织管理范围');
++        if ((int)$org['pid'] !== $newParentId && ($newParentId <= 0 || !in_array($newParentId, $ids, true))) {
++            throw new \Exception('上级组织超出当前账号的组织管理范围');
++        }
++    }
++}
+diff --git a/tests/organization-store-v3/php/r35-organization-edit-local.php b/tests/organization-store-v3/php/r35-organization-edit-local.php
+new file mode 100644
+index 00000000..85f4b0b9
+--- /dev/null
++++ b/tests/organization-store-v3/php/r35-organization-edit-local.php
+@@ -0,0 +1,57 @@
++<?php
++/** R35 本地事务回归：真实功能授权、组织保存/审计/幂等和拒绝越界；合成数据全部回滚。 */
++require '/var/www/html/vendor/autoload.php';
++(new think\App('/var/www/html/'))->initialize();
++set_exception_handler(static function(Throwable $e):void{file_put_contents('php://stderr',$e->getMessage().PHP_EOL);exit(1);});
++use think\facade\Db;
++use app\services\organization\OrganizationWorkspaceWriteServices;
++use app\services\organization\OrganizationWorkspaceWriteGate;
++use app\services\organization\OrganizationEditAccessServices;
++if(getenv('R35_LOCAL_TEST')!=='1'||config('database.connections.mysql.hostname')!=='mysql'||config('database.connections.mysql.database')!=='ruihao')throw new RuntimeException('LOCAL_ONLY');
++function r35ok(bool $v,string $label):void{if(!$v)throw new RuntimeException($label);echo 'PASS ',$label,PHP_EOL;}
++function r35reject(callable $fn,string $message):void{try{$fn();}catch(Throwable $e){r35ok(strpos($e->getMessage(),$message)!==false,$message);return;}throw new RuntimeException('Expected denial: '.$message);}
++function r35ctx():array{return ['header_token'=>'35000000-0000-4000-8000-'.bin2hex(random_bytes(6))];}
++$tag='r35-'.bin2hex(random_bytes(5));$svc=app()->make(OrganizationWorkspaceWriteServices::class);$access=app()->make(OrganizationEditAccessServices::class);$gate=app()->make(OrganizationWorkspaceWriteGate::class);
++Db::startTrans();
++try{
++ $menu=(int)Db::name('system_menus')->where('unique_auth',OrganizationEditAccessServices::AUTH_EDIT)->where('is_del',0)->value('id');r35ok($menu>0,'使用现有编辑组织功能权限');
++ $role=(int)Db::name('system_role')->insertGetId(['role_name'=>$tag,'rules'=>(string)$menu,'status'=>1]);
++ $employee=(int)Db::name('employee')->insertGetId(['name'=>$tag,'is_del'=>0]);
++ $id=(int)Db::name('system_admin')->insertGetId(['account'=>$tag,'real_name'=>$tag,'pwd'=>'','level'=>1,'admin_type'=>0,'status'=>1,'is_del'=>0,'roles'=>(string)$role,'employee_id'=>$employee]);
++ $admin=['id'=>$id,'level'=>1,'admin_type'=>0,'account'=>$tag];
++ $root=(int)Db::name('organization')->where('is_del',0)->where('pid',0)->value('id');r35ok($root>0,'存在本地组织根');
++ $org=(int)Db::name('organization')->insertGetId(['pid'=>$root,'name'=>$tag,'sort'=>0,'is_del'=>0]);
++ $child=(int)Db::name('organization')->insertGetId(['pid'=>$org,'name'=>$tag.'-child','sort'=>0,'is_del'=>0]);
++ $outside=(int)Db::name('organization')->insertGetId(['pid'=>$root,'name'=>$tag.'-outside','sort'=>0,'is_del'=>0]);
++ $scope=(int)Db::name('employee_data_scope')->insertGetId(['employee_id'=>$employee,'source_type'=>'hq','source_store_id'=>0,'scope_mode'=>'org','org_ids'=>json_encode([$org]),'store_ids'=>'[]','status'=>1,'is_del'=>0]);
++ $status=$gate->getWriteStatus($admin);r35ok(!$status['can_write']&&$status['can_edit_organization']&&in_array($org,$status['editable_organization_ids'],true),'普通编辑功能可用且不开放其他超管写操作');
++ $data=['pid'=>$root,'name'=>$tag.'-edited','sort'=>7];$ctx=r35ctx();
++ $first=$svc->saveOrganization($org,$data,$admin,$ctx);r35ok(!$first['replay']&&(int)$first['data']['id']===$org,'已授权普通账号真实保存成功');
++ $row=Db::name('organization')->where('id',$org)->find();r35ok($row['name']===$data['name']&&(int)$row['sort']===7&&(int)$row['pid']===$root,'数据库刷新读回名称排序与原父组织');
++ $audit=Db::name('organization_change_log')->where('request_token',$ctx['header_token'])->find();r35ok($audit&&(int)$audit['operator_id']===$id&&json_decode($audit['after_data'],true)['name']===$data['name'],'组织审计记录实际操作人及修改后值');
++ $failed=r35ctx();$fault=$data;$fault['name']=$tag.'-must-rollback';OrganizationWorkspaceWriteServices::armCliAuditFaultOnce();
++ r35reject(static function()use($svc,$org,$fault,$admin,$failed){$svc->saveOrganization($org,$fault,$admin,$failed);},'组织审计故障注入');
++ r35ok(Db::name('organization')->where('id',$org)->value('name')===$data['name']&&!Db::name('organization_write_idempotency')->where('request_token',$failed['header_token'])->count(),'审计失败时组织和幂等结果同时回滚');
++ $replay=$svc->saveOrganization($org,$data,$admin,$ctx);r35ok($replay['replay']&&$replay['data']===$first['data'],'重复请求只回放一次结果');
++ r35reject(static function()use($svc,$org,$admin,$ctx,$data){$data['sort']=8;$svc->saveOrganization($org,$data,$admin,$ctx);},'IDEMPOTENCY_TOKEN_CONFLICT');
++ r35reject(static function()use($svc,$org,$admin,$data){$svc->saveOrganization($org,$data,$admin,[]);},'缺少请求令牌');
++ r35reject(static function()use($svc,$outside,$root,$admin,$tag){$svc->saveOrganization($outside,['pid'=>$root,'name'=>$tag],$admin,r35ctx());},'组织管理范围');
++ r35reject(static function()use($svc,$org,$outside,$admin,$data){$data['pid']=$outside;$svc->saveOrganization($org,$data,$admin,r35ctx());},'上级组织超出');
++ r35reject(static function()use($svc,$org,$admin,$data){$data['pid']=0;$svc->saveOrganization($org,$data,$admin,r35ctx());},'上级组织超出');
++ r35reject(static function()use($svc,$root,$admin,$tag){$svc->saveOrganization(0,['pid'=>$root,'name'=>$tag],$admin,r35ctx());},'无权限');
++ r35reject(static function()use($svc,$org,$admin){$svc->deleteOrganization($org,$admin,r35ctx());},'无权限');
++ // 缩小范围后，即便重用此前成功请求令牌也不能回放越权结果。
++ Db::name('employee_data_scope')->where('id',$scope)->update(['org_ids'=>json_encode([$child])]);
++ r35reject(static function()use($svc,$org,$data,$admin,$ctx){$svc->saveOrganization($org,$data,$admin,$ctx);},'组织管理范围');
++ Db::name('employee_data_scope')->where('id',$scope)->update(['org_ids'=>json_encode([$org])]);
++ Db::name('system_role')->where('id',$role)->update(['rules'=>'']);
++ r35reject(static function()use($svc,$org,$data,$admin){$svc->saveOrganization($org,$data,$admin,r35ctx());},'没有组织编辑权限');
++ Db::name('system_role')->where('id',$role)->update(['rules'=>(string)$menu,'status'=>0]);r35ok(!$access->status($admin)['can_edit_organization'],'停用角色不能编辑');
++ Db::name('system_role')->where('id',$role)->update(['status'=>1]);
++ Db::name('system_admin')->where('id',$id)->update(['status'=>0]);r35ok(!$access->status($admin)['can_edit_organization'],'停用账号拒绝编辑');
++ Db::name('system_admin')->where('id',$id)->update(['status'=>1,'admin_type'=>3]);r35ok(!$access->status($admin)['can_edit_organization'],'代理账号不能冒充平台编辑身份');
++ r35ok(!$access->status(['id'=>0,'level'=>0])['can_edit_organization'],'无效身份不能用前端超管字段放行');
++ $super=Db::name('system_admin')->where('level',0)->where('admin_type','<>',3)->where('status',1)->where('is_del',0)->find();r35ok($super&&$access->status($super)['editable_organization_ids']===null,'总部超管原能力保留');
++ $flag=Db::name('system_config')->where('menu_name',OrganizationWorkspaceWriteGate::CFG_WRITE_ENABLED)->where('is_store',0);$flag->update(['value'=>'0']);r35ok(!$access->status($super)['can_edit_organization'],'关闭组织写开关仍拒绝编辑');
++}finally{Db::rollback();}
++r35ok(!Db::name('system_admin')->where('account',$tag)->count()&&!Db::name('organization')->whereLike('name',$tag.'%')->count(),'所有合成身份组织与保存结果回滚');

@@ -1,0 +1,17 @@
+{
+  "round": 35,
+  "head": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "files": {
+    "前端代码/admin/src/pages/store/region/workspace/index.vue": "fbcf3ff5f2f2e35fcef7584e625494490ad1228135e0b5f0a81e9407d7aaa981",
+    "后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php": "859479c355b477d0f097d29b169880380258bd463ec60743e43f424fe12e869c",
+    "后端代码/app/services/organization/OrganizationWorkspaceWriteServices.php": "78b33f7eadd3d86863e7017e7e831a5a5a0dc3680ea2b32646018fc9d0a37ca5",
+    "后端代码/app/services/organization/OrganizationEditAccessServices.php": "f43967ae62a2bb83553aaefb81881b5ab3ba7abd7760149edc5828550836c832",
+    "tests/organization-store-v3/php/r35-organization-edit-local.php": "5e90a3fc5d7f7c3352183fba777532623434fc82cc2035b51e1b49452d4dc617"
+  },
+  "patchSHA256": "e8e29cb75c3b344b04a348244a37178ab1a5c0f35bf2e94f51d6d2f8f6622302",
+  "tests": "backend-test.log: 25 PASS; Vue2 compile and parser PASS; statistic dimension regression 10 PASS; PHP lint PASS",
+  "browser": "current 4796 account: top button and tree menu enable editing; actual edit dialog opens for 财务内控中心; no actual organization profile saved through browser",
+  "acceptance": "development and self-test complete; awaiting product manager acceptance",
+  "commitPushDeploy": "not performed",
+  "online": "not applicable; no remote connections"
+}

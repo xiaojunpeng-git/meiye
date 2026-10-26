@@ -1,0 +1,21 @@
+{
+  "head": "4b4bf53280c952b1368a633458374ea1da4ebb7b",
+  "files": {
+    "前端代码/admin/src/pages/store/region/workspace/index.vue": {
+      "sha256": "ad2300b7255478cd09ee8ec81eb027d55f2e0cd36e0348dc8e70c2f72e0c71d8",
+      "blob": "c27f46405513f0facea054fb394f2cc5b086d269",
+      "status": ""
+    },
+    "后端代码/app/services/organization/OrganizationWorkspaceWriteGate.php": {
+      "sha256": "de0d56b86598cad7416726665fe0b053e02c97b91f88dccd4683d69c79387524",
+      "blob": "880b39cdfc3e45cc21cec56ba3498844ffce7c74",
+      "status": ""
+    },
+    "后端代码/app/services/organization/OrganizationWorkspaceWriteServices.php": {
+      "sha256": "fbc8f02325871805728a98fe17a878de1e7ad2a95ec4477f31946cf0a2a12e4e",
+      "blob": "fbc6f4734957f4d87d08ee9e47a4d9ebfd94e97e",
+      "status": ""
+    }
+  },
+  "remote": "not applicable; local only"
+}

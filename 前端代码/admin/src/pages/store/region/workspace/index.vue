@@ -96,12 +96,12 @@
                 <button v-auth="['admin-store-add_store']" class="button secondary" type="button" :disabled="!selectedOrgId" @click="goCreateStore"><svg-icon name="plus" />新建门店</button>
                 <button v-auth="['setting-staff-index']" class="button secondary" type="button" :disabled="!selectedOrgId && !rootOrgs.length" @click="openCreateStaff()"><svg-icon name="plus" />新建人员</button>
                 <button class="button primary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openCreateOrgModal()"><svg-icon name="plus" />新增组织</button>
-                <button class="button secondary" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="openEditOrgModal"><svg-icon name="edit" />编辑组织</button>
+                <button class="button secondary" :class="{ 'is-readonly-disabled': !canEditOrganization(selectedOrgId) || writeSubmitting }" type="button" :disabled="writeSubmitting" :aria-disabled="(!canEditOrganization(selectedOrgId) || writeSubmitting).toString()" @click="openEditOrgModal"><svg-icon name="edit" />编辑组织</button>
                 <button class="button secondary" type="button" title="停用后下级组织与所属门店将继承停用；不会批量改写下级自身状态" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" @click="openOpsConfirm('org', selectedOrg.id, 0, selectedOrg.name)">停用组织</button>
                 <button class="button secondary" type="button" title="恢复上级后，原本单独停用的下级组织和门店仍保持停用" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" @click="openOpsConfirm('org', selectedOrg.id, 1, selectedOrg.name)">恢复组织</button>
                 <button class="icon-button bordered" title="更多操作" type="button" @click="toggleHeroMenu"><svg-icon name="more" /></button>
                 <div class="popover-menu" :class="{ open: heroMenuOpen }">
-                  <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onHeroMenu('edit')">编辑组织</button>
+                  <button type="button" :class="{ 'is-readonly-disabled': !canEditOrganization(selectedOrgId) || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canEditOrganization(selectedOrgId) || writeSubmitting).toString()" @click="onHeroMenu('edit')">编辑组织</button>
                   <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onHeroMenu('add')">新增下级组织</button>
                   <button type="button" class="danger-text" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onHeroMenu('delete')">删除组织</button>
                 </div>
@@ -438,7 +438,7 @@
     </div>
 
     <div v-if="treeMenu.open" class="tree-context-menu" :style="{ top: `${treeMenu.y}px`, left: `${treeMenu.x}px` }" @click.stop>
-      <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onTreeMenu('edit')">编辑组织</button>
+      <button type="button" :class="{ 'is-readonly-disabled': !canEditOrganization(treeMenu.node && treeMenu.node.id) || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canEditOrganization(treeMenu.node && treeMenu.node.id) || writeSubmitting).toString()" @click="onTreeMenu('edit')">编辑组织</button>
       <button type="button" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onTreeMenu('add')">新增下级组织</button>
       <button type="button" class="danger-text" :class="{ 'is-readonly-disabled': !canWrite || writeSubmitting }" :disabled="writeSubmitting" :aria-disabled="(!canWrite || writeSubmitting).toString()" @click="onTreeMenu('delete')">删除组织</button>
     </div>
@@ -1427,6 +1427,9 @@ export default {
       writeStatus: {
         write_enabled: false,
         can_write: false,
+        can_edit_organization: false,
+        editable_organization_ids: [],
+        organization_edit_reason: '',
         reason_code: 'WRITE_DISABLED',
         reason_text: READONLY_TIP,
         source_mode: '',
@@ -1722,7 +1725,7 @@ export default {
       if (isRoot) return [{ id: 0, name: '最高级组织' }];
       const excluded = new Set([orgId, ...this.collectDescendantIds(orgId)]);
       return this.orgs
-        .filter((o) => !excluded.has(Number(o.id)))
+        .filter((o) => !excluded.has(Number(o.id)) && (Number(o.id) === Number(modal.pid) || this.canEditOrganization(o.id)))
         .map((o) => ({ id: Number(o.id), name: o.name }));
     },
     orgFormParentDisabled() {
@@ -2491,9 +2494,15 @@ export default {
       };
       this.loadStatisticDimensions(0);
     },
+    // 仅展示后端已核定的编辑功能与组织范围，不借 can_write 放开其他写操作。
+    canEditOrganization(orgId) {
+      const status = this.writeStatus || {};
+      if (!status.can_edit_organization || Number(orgId) <= 0) return false;
+      return status.editable_organization_ids === null || (status.editable_organization_ids || []).some((id) => Number(id) === Number(orgId));
+    },
     openEditOrgModal() {
-      if (!this.canWrite) {
-        this.blockWrite();
+      if (!this.canEditOrganization(this.selectedOrgId)) {
+        this.showToast(this.writeStatus.organization_edit_reason || '超出当前账号的组织管理范围');
         return;
       }
       if (this.writeSubmitting) return;
@@ -2516,8 +2525,9 @@ export default {
       this.orgFormModal.open = false;
     },
     submitOrgForm() {
-      if (!this.canWrite || this.writeSubmitting) return;
       const modal = this.orgFormModal;
+      // 编辑与入口复用后端功能能力；新增仍遵循原有写门禁。
+      if (this.writeSubmitting || (modal.mode === 'edit' ? !this.canEditOrganization(modal.orgId) : !this.canWrite)) return;
       const name = String(modal.name || '').trim();
       if (!name) {
         this.showToast('请输入组织名称');
@@ -2646,6 +2656,9 @@ export default {
           this.writeStatus = {
             write_enabled: !!data.write_enabled,
             can_write: !!data.can_write,
+            can_edit_organization: !!data.can_edit_organization,
+            editable_organization_ids: data.editable_organization_ids === null ? null : (Array.isArray(data.editable_organization_ids) ? data.editable_organization_ids : []),
+            organization_edit_reason: data.organization_edit_reason || '',
             reason_code: data.reason_code || 'WRITE_DISABLED',
             reason_text: data.reason_text || READONLY_TIP,
             source_mode: data.source_mode || '',
@@ -2656,6 +2669,9 @@ export default {
           this.writeStatus = {
             write_enabled: false,
             can_write: false,
+            can_edit_organization: false,
+            editable_organization_ids: [],
+            organization_edit_reason: '',
             reason_code: 'WRITE_DISABLED',
             reason_text: READONLY_TIP,
             source_mode: '',

@@ -5,7 +5,7 @@ use think\facade\Db;
 
 /**
  * O4 组织工作台 HTTP 写编排（唯一门禁入口）
- * 顺序：写门禁 → 超管 → request token → 结构锁 → 事务 → 幂等 → 业务 → 审计
+ * 顺序：写门禁 → 操作授权（组织编辑按功能，其余保留超管）→ request token → 结构锁 → 事务 → 幂等 → 业务 → 审计
  */
 class OrganizationWorkspaceWriteServices
 {
@@ -528,9 +528,13 @@ class OrganizationWorkspaceWriteServices
         callable $business
     ): array {
         $this->gate->assertCanWrite();
-        $super = $this->gate->assertSuperAdmin($adminInfo);
-        if (!$super['ok']) {
-            throw new \Exception($super['reason_text'] !== '' ? $super['reason_text'] : '无权限执行该操作');
+        // 仅已存在组织的编辑使用编辑功能权限；其他写动作继续保留原有门禁。
+        $editOrgId = $action === 'org_save' && preg_match('/^org:([1-9][0-9]*)$/', $scopeKey, $match) ? (int)$match[1] : 0;
+        if ($editOrgId > 0) {
+            app()->make(OrganizationEditAccessServices::class)->assertCanEdit($editOrgId, (int)$payload['pid'], $adminInfo);
+        } else {
+            $super = $this->gate->assertSuperAdmin($adminInfo);
+            if (!$super['ok']) throw new \Exception($super['reason_text'] !== '' ? $super['reason_text'] : '无权限执行该操作');
         }
 
         $token = $this->resolveRequestToken($requestCtx);
@@ -554,10 +558,15 @@ class OrganizationWorkspaceWriteServices
             $requestHash,
             $requestId,
             $operatorIp,
-            $business
+            $business,
+            $editOrgId,
+            $payload,
+            $adminInfo
         ) {
             Db::startTrans();
             try {
+                // 结构锁内再次复核权限与父组织，禁止等待锁期间撤权后继续保存或回放。
+                if ($editOrgId > 0) app()->make(OrganizationEditAccessServices::class)->assertCanEdit($editOrgId, (int)$payload['pid'], $adminInfo);
                 if (!$this->idempotencyTableReady()) {
                     throw new \Exception('组织写幂等表未就绪，请先执行数据库升级');
                 }

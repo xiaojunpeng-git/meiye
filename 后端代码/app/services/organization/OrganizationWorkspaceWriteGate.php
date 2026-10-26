@@ -393,7 +393,7 @@ class OrganizationWorkspaceWriteGate
     }
 
     /**
-     * @return array{write_enabled:bool,can_write:bool,reason_code:string,reason_text:string,source_mode:string,is_super_admin:bool}
+     * @return array 原超管写状态与独立组织编辑能力；编辑能力不改变其他操作的 can_write。
      */
     public function getWriteStatus(array $adminInfo): array
     {
@@ -416,6 +416,6 @@ class OrganizationWorkspaceWriteGate
             'reason_text' => $reasonText,
             'source_mode' => (string)$gate['source_mode'],
             'is_super_admin' => (bool)$super['ok'],
-        ];
+        ] + app()->make(OrganizationEditAccessServices::class)->status($adminInfo);
     }
 }
